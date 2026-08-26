@@ -5,7 +5,7 @@
 验证：对应分类所要求的单测、产品恢复测试、ADR、`bun run check:core-boundary` 与 `bun run check:runtime-packages`。
 
 实现前先按 production owner 分类，并把代码放入 `agent-kernel`、`runtime-host`、`runtime-spi`、
-`builtin-runtime`、`runtime-contract` 或 `apps/kite` 的唯一正确边界；已删除的 `src/core/` 不能重新成为落点。
+`builtin-runtime`、`runtime-contract` 或 `apps/kite-cli` 的唯一正确边界；已删除的 `src/core/` 不能重新成为落点。
 
 | Category | Meaning | Minimum evidence |
 |---|---|---|

@@ -33,43 +33,43 @@ const TIMEOUT = 60000;
 
 /** 真实日志中的 32 个被读取路径 → fixture 文件（按响应分组） */
 const RESP2_FILES = [
-  'apps/kite/src/tui/index.tsx',
-  'apps/kite/src/tui/types.ts',
-  'apps/kite/src/tui/constants.ts',
-  'apps/kite/src/tui/theme.ts',
-  'apps/kite/src/tui/initialState.ts',
-  'apps/kite/src/tui/provider.ts',
+  'apps/kite-cli/src/tui/index.tsx',
+  'apps/kite-cli/src/tui/types.ts',
+  'apps/kite-cli/src/tui/constants.ts',
+  'apps/kite-cli/src/tui/theme.ts',
+  'apps/kite-cli/src/tui/initialState.ts',
+  'apps/kite-cli/src/tui/provider.ts',
 ];
 const RESP3_FILES = [
-  'apps/kite/src/tui/App.tsx',
-  'apps/kite/src/tui/reducers/index.ts',
-  'apps/kite/src/tui/reducers/actions.ts',
-  'apps/kite/src/runtime/session/runtime-session.ts',
-  'apps/kite/src/bootstrap/runtime/runtime-agent-input.ts',
+  'apps/kite-cli/src/tui/App.tsx',
+  'apps/kite-cli/src/tui/reducers/index.ts',
+  'apps/kite-cli/src/tui/reducers/actions.ts',
+  'apps/kite-cli/src/runtime/session/runtime-session.ts',
+  'apps/kite-cli/src/bootstrap/runtime/runtime-agent-input.ts',
 ];
 const RESP4_FILES = [
-  'apps/kite/src/tui/OutputArea.tsx',
-  'apps/kite/src/tui/Header.tsx',
-  'apps/kite/src/tui/Footer.tsx',
-  'apps/kite/src/tui/StatusBar.tsx',
-  'apps/kite/src/tui/run-status.ts',
-  'apps/kite/src/tui/replay-blocks.ts',
+  'apps/kite-cli/src/tui/OutputArea.tsx',
+  'apps/kite-cli/src/tui/Header.tsx',
+  'apps/kite-cli/src/tui/Footer.tsx',
+  'apps/kite-cli/src/tui/StatusBar.tsx',
+  'apps/kite-cli/src/tui/run-status.ts',
+  'apps/kite-cli/src/tui/replay-blocks.ts',
 ];
 const RESP5_FILES = [
-  'apps/kite/src/tui/reducers/agentReducer.ts',
-  'apps/kite/src/tui/reducers/handleEvent.ts',
-  'apps/kite/src/tui/reducers/uiReducer.ts',
-  'apps/kite/src/tui/reducers/sessionReducer.ts',
-  'apps/kite/src/tui/reducers/consolidateTools.ts',
-  'apps/kite/src/tui/interaction-mode.ts',
+  'apps/kite-cli/src/tui/reducers/agentReducer.ts',
+  'apps/kite-cli/src/tui/reducers/handleEvent.ts',
+  'apps/kite-cli/src/tui/reducers/uiReducer.ts',
+  'apps/kite-cli/src/tui/reducers/sessionReducer.ts',
+  'apps/kite-cli/src/tui/reducers/consolidateTools.ts',
+  'apps/kite-cli/src/tui/interaction-mode.ts',
 ];
 const RESP6_FILES = [
-  'apps/kite/src/tui/components/BlockRenderer.tsx',
-  'apps/kite/src/tui/components/ToolCardBlock.tsx',
-  'apps/kite/src/tui/components/MarkdownBlock.tsx',
-  'apps/kite/src/tui/components/InputLine.tsx',
-  'apps/kite/src/tui/hooks/useGlobalKeys.ts',
-  'apps/kite/src/tui/StatsLine.ts',
+  'apps/kite-cli/src/tui/components/BlockRenderer.tsx',
+  'apps/kite-cli/src/tui/components/ToolCardBlock.tsx',
+  'apps/kite-cli/src/tui/components/MarkdownBlock.tsx',
+  'apps/kite-cli/src/tui/components/InputLine.tsx',
+  'apps/kite-cli/src/tui/hooks/useGlobalKeys.ts',
+  'apps/kite-cli/src/tui/StatsLine.ts',
 ];
 
 let toolSeq = 0;
@@ -88,7 +88,7 @@ function expectedFixtureToolResults(calls: readonly FixtureToolCall[]) {
       toolCallId: call.id,
       contentIncludes: [
         call.name === 'search_files'
-          ? 'apps/kite/src/tui'
+          ? 'apps/kite-cli/src/tui'
           : path === 'package.json'
             ? 'tui-header-merge-fixture'
             : `fixture: ${path}`,
@@ -207,7 +207,8 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
           message: {
             reasoning_content:
               "I've now read a comprehensive set of files. Time to synthesize the full analysis.",
-            content: '── TUI 模块全面解析 ──\n\nANALYSIS_DONE: TUI 模块位于 apps/kite/src/tui/。',
+            content:
+              '── TUI 模块全面解析 ──\n\nANALYSIS_DONE: TUI 模块位于 apps/kite-cli/src/tui/。',
           },
           delay: 10,
         },
@@ -262,10 +263,10 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
               {
                 id: 'w2',
                 name: 'write_file',
-                args: { path: 'notes.md', content: 'entry: apps/kite/src/tui/index.tsx\n' },
+                args: { path: 'notes.md', content: 'entry: apps/kite-cli/src/tui/index.tsx\n' },
               },
-              { id: 'w3', name: 'read_file', args: { path: 'apps/kite/src/tui/theme.ts' } },
-              { id: 'w4', name: 'read_file', args: { path: 'apps/kite/src/tui/StatsLine.ts' } },
+              { id: 'w3', name: 'read_file', args: { path: 'apps/kite-cli/src/tui/theme.ts' } },
+              { id: 'w4', name: 'read_file', args: { path: 'apps/kite-cli/src/tui/StatsLine.ts' } },
             ],
           },
         },
@@ -275,8 +276,8 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
             toolResults: [
               { toolCallId: 'w1', contentIncludes: ['tui-header-merge-fixture'] },
               { toolCallId: 'w2', contentIncludes: ['Wrote 1 lines to notes.md'] },
-              { toolCallId: 'w3', contentIncludes: ['apps/kite/src/tui/theme.ts'] },
-              { toolCallId: 'w4', contentIncludes: ['apps/kite/src/tui/StatsLine.ts'] },
+              { toolCallId: 'w3', contentIncludes: ['apps/kite-cli/src/tui/theme.ts'] },
+              { toolCallId: 'w4', contentIncludes: ['apps/kite-cli/src/tui/StatsLine.ts'] },
             ],
           },
           message: { content: 'CARRY_DONE: boundary crossed, reading resumed.' },
@@ -298,7 +299,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       expect(clean.match(/read 1 file/g) ?? []).toHaveLength(1);
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'notes.md')).toBe(true);
-      expect(screenContains(output, 'entry: apps/kite')).toBe(false);
+      expect(screenContains(output, 'entry: apps/kite-cli')).toBe(false);
       expect(/read 1 file[\s\S]*Create[\s\S]*read 2 files/.test(clean)).toBe(true);
 
       console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));

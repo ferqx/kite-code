@@ -4,7 +4,7 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite/test/runtime/` 与 `tests/integration/`
+验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite-cli/test/runtime/` 与 `tests/integration/`
 Model/compaction/provider suites，以及 `bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0114、ADR-0115、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。

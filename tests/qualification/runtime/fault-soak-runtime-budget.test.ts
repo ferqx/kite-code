@@ -5,7 +5,7 @@ import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
 import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
 import { committedResourceUsage } from '@kite-ai/runtime-host/kernel-adapter';
-import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
+import type { AuthorizedExecutionControl } from '#kite-cli/bootstrap/runtime/RuntimeSessionCoordinator';
 import { readOsProcessStartIdentity } from '../../../scripts/runtime/process-start-identity';
 import { openStateStoreForTest } from '../../../scripts/support/runtime-storage';
 import { createMockModel } from '../../helpers/mock-model';

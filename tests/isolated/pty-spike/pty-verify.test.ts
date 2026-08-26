@@ -4,7 +4,7 @@
  * Tests whether the pinned Bun runtime can create a real PTY and launch a subprocess with
  * Bun.spawn({ terminal }) for TUI E2E testing. This is the newer API (not the
  * older `pty: true` option which failed in prior investigation — see
- * apps/kite/docs/tui-system-testing.md).
+ * apps/kite-cli/docs/tui-system-testing.md).
  *
  * Run: bun test tests/isolated/pty-spike/pty-verify.test.ts
  */

@@ -113,7 +113,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 `SET_SESSIONS` 在 `LOAD_SESSION_PENDING` 期间不得提前改变 TUI 的 `activeSessionId`。只有 `LOAD_SESSION` 才能在同一
 reducer transition 中把当前可见 turns 保存到 outgoing snapshot、加载目标 replay turns 并推进 `sessionKey`。否则旧会话
 内容会被错绑到目标 snapshot，用户按“会话 A → 会话 B → 会话 A”切回时得到空白投影。该不变量由
-`apps/kite/test/tui-reducer.test.ts` 的 historical load 链路和 `session-format-compatibility` PTY 连续切回场景共同验证。
+`apps/kite-cli/test/tui-reducer.test.ts` 的 historical load 链路和 `session-format-compatibility` PTY 连续切回场景共同验证。
 跨进程 target 注册后先保持 dormant，直到 `resume_session` recovery 与第二次 persisted load 完成才切换前台；因此
 Runtime restart 写入的 `capability.execution_unknown`、`tool.failed|cancelled`、`model.invocation_interrupted` 与
 `turn.aborted` 必须进入本次 replay，而不是等下一条 prompt 或下一次 `/resume` 才可见。崩溃遗留的运行中 Tool/Subagent/
@@ -123,12 +123,12 @@ Runtime restart 写入的 `capability.execution_unknown`、`tool.failed|cancelle
 direct switch 都先使旧 token 失效；旧 load 的 success、failure 或 rollback 只有 token 仍 current 时才能注册 Runtime、切换
 active identity、提交 replay/context 或改变 TUI。`loadingSessionId` 只是展示状态，不能充当异步取消权威。每次 reducer 合并
 Session 列表后，`sessions[].active` 必须从唯一 `activeSessionId` 派生，pending target 不得提前形成第二 active authority。
-延迟 load、registered switch、stale rejection 与重复 target token 由 `apps/kite/test/session-navigation.test.ts` 验证。
+延迟 load、registered switch、stale rejection 与重复 target token 由 `apps/kite-cli/test/session-navigation.test.ts` 验证。
 历史 target 仅完成 admission、尚无 Host operation/effect lease 时，打开失败的 `removeRuntime` 属于资源回滚，不得伪造
 `close_session` cancellation 或推进 durable revision；已有 active operation 或显式删除仍走 canonical cancel/close，并且只写
 一次取消。readiness、close 或 coordinator release 失败不能让 target 留在 Runtime/client/readiness/authority map：cleanup 必须
 best-effort 执行所有释放步骤、保留首个错误供上层作为 secondary diagnostic，并允许随后重新 register exact session。
-对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite/test/isolated/session-manager.test.ts`。
+对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite-cli/test/isolated/session-manager.test.ts`。
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 
@@ -251,7 +251,7 @@ wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite-ai/runtime-spi` 定义 JSON-safe
 Subagent/Provider/continuation contract，`@kite-ai/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
 continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriver`。App composition root 只构造一个
-Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
+Builtin Driver/composition，`apps/kite-cli/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
 仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一
 `BuiltinModelEffectCoordinator` 时立即 fail closed，
 不得现场 `createChatModel()`、重建 Driver/composition 或 fallback。pending registration、single-use start/resume、

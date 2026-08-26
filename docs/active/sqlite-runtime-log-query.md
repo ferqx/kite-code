@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime Store event/session 数据、日志查询 Contract、`RuntimeLogQueryPort`、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。
 
-验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
+验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite-cli/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
 
 相关：ADR-0129、ADR-0142、ADR-0143、[`Kite Runtime Server V1`](../space/plans/2026-08-26-kite-runtime-server-v1.md)。
 

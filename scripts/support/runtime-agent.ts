@@ -11,12 +11,15 @@ import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite-ai/agent-kernel';
 import { createChatModel, type SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
-import type { StateRuntimeStorage } from '#app/bootstrap/runtime/state-runtime';
-import { executeRuntimeTurn, type RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
-import type { AuthorizedExecutionControl } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
-import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import type { RuntimeActionProvider } from '#kite-cli/bootstrap/runtime/state-runner';
+import type { StateRuntimeStorage } from '#kite-cli/bootstrap/runtime/state-runtime';
+import {
+  executeRuntimeTurn,
+  type RuntimeTurnInput,
+} from '#kite-cli/bootstrap/runtime/turn-coordinator';
+import type { AuthorizedExecutionControl } from '../../apps/kite-cli/src/bootstrap/runtime/RuntimeSessionCoordinator';
+import type { RuntimeExecutorDependencies } from '../../apps/kite-cli/src/bootstrap/runtime/runtime-effect-dependencies';
+import type { RuntimeEffectExecutor } from '../../apps/kite-cli/src/bootstrap/runtime/state-runtime';
 import { restoreStateHostSessionHarness, type StateHostSessionHarness } from './runtime-host-state';
 import type { TestRuntimeStore } from './runtime-storage';
 

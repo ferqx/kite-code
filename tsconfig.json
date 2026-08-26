@@ -23,10 +23,9 @@
     "allowUnreachableCode": false,
 
     "paths": {
-      "@kite-ai/kite/cli": ["./apps/kite/src/cli/executable.ts"],
-      "@kite-ai/kite/tui": ["./apps/kite/src/tui/executable.tsx"],
-      "@/app/sandbox/*": ["./apps/kite/src/sandbox/*"],
-      "@/app/*": ["./apps/kite/src/*"],
+      "@kite-ai/kite-cli/cli": ["./apps/kite-cli/src/cli/executable.ts"],
+      "@kite-ai/kite-cli/tui": ["./apps/kite-cli/src/tui/executable.tsx"],
+      "#kite-cli/*": ["./apps/kite-cli/src/*"],
       "@/*": ["./src/*"],
       "#agent-kernel": ["./packages/agent-kernel/src/index.ts"],
       "#builtin-runtime": ["./packages/builtin-runtime/src/index.ts"],
@@ -38,7 +37,6 @@
       "#runtime-spi": ["./packages/runtime-spi/src/index.ts"],
       "#runtime-host": ["./packages/runtime-host/src/index.ts"],
       "#runtime-host/*": ["./packages/runtime-host/src/*"],
-      "#app/*": ["./apps/kite/src/*"],
       "#runtime-support/*": ["./scripts/support/*"]
     },
 

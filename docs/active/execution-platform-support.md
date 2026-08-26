@@ -5,11 +5,11 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
-tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite/test/isolated/sandbox/execution-boundary.test.ts
-apps/kite/test/sandbox/network-boundary.test.ts apps/kite/test/sandbox/network-boundary-concurrency.test.ts
-apps/kite/test/git-broker.test.ts apps/kite/test/runtime/git-tool-controller.test.ts
-apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-cli/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
+tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite-cli/test/isolated/sandbox/execution-boundary.test.ts
+apps/kite-cli/test/sandbox/network-boundary.test.ts apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts
+apps/kite-cli/test/git-broker.test.ts apps/kite-cli/test/runtime/git-tool-controller.test.ts
+apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -314,7 +314,7 @@ descendant exit 与入口组合证据，不能由本机静态/单元测试升级
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
 
 Darwin 的 native negative conformance 还会在
-`apps/kite/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
+`apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
 session descendant；即使 supervisor 的 PGID 被终止，测试也必须得到
 `cleanupConfirmed=false`，并回收该 fixture。系统 `launchd.plist(5)` 的
 `AbandonProcessGroup=false` 只承诺终止与 job 相同的 process group，`sandbox(7)` 只描述新进程继承
@@ -324,7 +324,7 @@ sandbox restriction；二者都不是 detached/session descendant 的 owner/desc
 Seatbelt 继续 blocked/fail closed。
 `.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
 `packages/builtin-runtime/src/sandbox/**`、`packages/runtime-host/src/**`、
-`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite/src/sandbox/**` 与平台 probe
+`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite-cli/src/sandbox/**` 与平台 probe
 脚本和 `tests/execution/**`；macOS required job 只运行 Seatbelt profile、Provider fail-closed contract 与
 POSIX supervisor detached/session negative/conformance，不再把旧 direct Seatbelt executor 的成功执行当作
 资格 oracle；Linux 运行对应 native bubblewrap candidate，三平台共同运行 `sandbox-execution-provider`

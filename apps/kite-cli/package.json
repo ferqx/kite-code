@@ -1,0 +1,41 @@
+{
+  "name": "@kite-ai/kite-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "imports": {
+    "#kite-cli/*": "./src/*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli/executable.ts",
+    "./tui": "./src/tui/executable.tsx"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external react-devtools-core",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
+  },
+  "dependencies": {
+    "@kite-ai/builtin-runtime": "workspace:*",
+    "@kite-ai/runtime-client": "workspace:*",
+    "@kite-ai/runtime-contract": "workspace:*",
+    "@kite-ai/runtime-host": "workspace:*",
+    "@kite-ai/runtime-protocol": "workspace:*",
+    "@kite-ai/runtime-server": "workspace:*",
+    "@kite-ai/runtime-spi": "workspace:*",
+    "@kite-ai/runtime-storage-sqlite": "workspace:*",
+    "@inkjs/ui": "^2.0.0",
+    "chalk": "^5.6.2",
+    "ink": "^7.1.1",
+    "ink-scroll-list": "^0.4.1",
+    "ink-syntax-highlight": "^2.0.2",
+    "ink-text-input": "^6.0.0",
+    "ink-virtual-list": "^0.2.3",
+    "jsonc-parser": "^3.3.1",
+    "react": "^19.2.6",
+    "string-width": "^8.2.0",
+    "zod": "^4.3.6"
+  }
+}

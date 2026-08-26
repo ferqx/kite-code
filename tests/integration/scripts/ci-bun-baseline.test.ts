@@ -45,9 +45,9 @@ describe('CI Bun baseline', () => {
   test('keeps execution-boundary triggers and commands on current test owners', () => {
     const workflow = readFileSync(join(workflowRoot, 'execution-boundary-conformance.yml'), 'utf8');
     const currentPaths = [
-      'apps/kite/test/policies/protected-path.test.ts',
-      'apps/kite/test/sandbox/network-boundary.test.ts',
-      'apps/kite/test/sandbox/network-boundary-concurrency.test.ts',
+      'apps/kite-cli/test/policies/protected-path.test.ts',
+      'apps/kite-cli/test/sandbox/network-boundary.test.ts',
+      'apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts',
       'tests/qualification/sandbox/process-tree-limit.test.ts',
       'tests/isolated/workspace/worktree-controller.test.ts',
       'tests/integration/builtin-runtime/mcp-transport-boundary.test.ts',

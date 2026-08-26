@@ -5,10 +5,10 @@ import App, {
   createInitialState,
   eventReducer,
   shouldDisablePromptInput,
-} from '@/app/tui/App';
-import InputLine from '@/app/tui/components/InputLine';
-import { TuiUserInputProvider } from '@/app/tui/provider';
-import type { TuiState } from '@/app/tui/types';
+} from '#kite-cli/tui/App';
+import InputLine from '#kite-cli/tui/components/InputLine';
+import { TuiUserInputProvider } from '#kite-cli/tui/provider';
+import type { TuiState } from '#kite-cli/tui/types';
 
 type CompactionSource = 'manual' | 'automatic';
 

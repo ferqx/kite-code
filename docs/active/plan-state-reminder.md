@@ -4,7 +4,7 @@
 
 读取时机：修改模型消息顺序、Runtime context、Plan/Mode/Authorization 提醒、上下文压缩或 prompt cache 布局时。
 
-验证：`bun test tests/integration/builtin-runtime/context.test.ts tests/integration/builtin-runtime/runtime-context.test.ts tests/integration/runtime/plan-transcript.test.ts apps/kite/test/runtime/context-compaction-auto.test.ts apps/kite/test/runtime/context-compaction-manual.test.ts apps/kite/test/model.test.ts`、`bun run typecheck`。
+验证：`bun test tests/integration/builtin-runtime/context.test.ts tests/integration/builtin-runtime/runtime-context.test.ts tests/integration/runtime/plan-transcript.test.ts apps/kite-cli/test/runtime/context-compaction-auto.test.ts apps/kite-cli/test/runtime/context-compaction-manual.test.ts apps/kite-cli/test/model.test.ts`、`bun run typecheck`。
 
 相关：ADR-0021、ADR-0022、ADR-0024、ADR-0137、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 

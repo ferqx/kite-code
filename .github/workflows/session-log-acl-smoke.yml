@@ -3,8 +3,8 @@ name: Session Log ACL Smoke
 on:
   pull_request:
     paths:
-      - "apps/kite/src/session-logger/**"
-      - "apps/kite/src/config/paths.ts"
+      - "apps/kite-cli/src/session-logger/**"
+      - "apps/kite-cli/src/config/paths.ts"
       - "scripts/release/session-log-acl-smoke.ts"
       - ".github/workflows/session-log-acl-smoke.yml"
   workflow_dispatch:

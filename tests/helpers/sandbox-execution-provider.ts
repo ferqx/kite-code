@@ -10,7 +10,7 @@ import {
   type SandboxExecutionGrantVerifier,
   sandboxCleanupDigest,
   sandboxPreparedPlanDigest,
-} from '#app/sandbox/runtime-execution';
+} from '#kite-cli/sandbox/runtime-execution';
 
 type FakeCleanupResult = SandboxExecutionProviderResult<{ readonly disposed: true }>;
 type FakePreparedCleanup = (

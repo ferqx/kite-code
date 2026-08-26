@@ -18,7 +18,7 @@ afterEach(() => {
 describe('ordinary open-source candidate archive', () => {
   test('resolves every workspace export without entering node_modules symlinks', () => {
     const packageRoots = [
-      'apps/kite',
+      'apps/kite-cli',
       'packages/agent-kernel',
       'packages/builtin-runtime',
       'packages/runtime-client',

@@ -8,13 +8,13 @@ on:
       - "packages/builtin-runtime/src/planning/runtime-module.ts"
       - "packages/runtime-host/src/process/**"
       - "packages/runtime-spi/src/sandbox-execution-provider.ts"
-      - "apps/kite/src/sandbox/**"
-      - "apps/kite/src/config/execution-boundary.ts"
-      - "apps/kite/src/config/execution-qualification.ts"
-      - "apps/kite/src/config/release-profile.ts"
-      - "apps/kite/src/config/index.ts"
-      - "apps/kite/src/cli/index.ts"
-      - "apps/kite/src/adapters/tui/**"
+      - "apps/kite-cli/src/sandbox/**"
+      - "apps/kite-cli/src/config/execution-boundary.ts"
+      - "apps/kite-cli/src/config/execution-qualification.ts"
+      - "apps/kite-cli/src/config/release-profile.ts"
+      - "apps/kite-cli/src/config/index.ts"
+      - "apps/kite-cli/src/cli/index.ts"
+      - "apps/kite-cli/src/adapters/tui/**"
       - "scripts/release/entrypoints/cli.ts"
       - "scripts/release/entrypoints/tui.ts"
       - "scripts/release/oss-candidate.ts"
@@ -24,15 +24,15 @@ on:
       - "native/windows-sandbox-runner/**"
       - "vendor/isksh/**"
       - "release/platform-capabilities/**"
-      - "apps/kite/test/isolated/sandbox.test.ts"
+      - "apps/kite-cli/test/isolated/sandbox.test.ts"
       - "tests/qualification/sandbox-executor.test.ts"
       - "tests/qualification/sandbox-bwrap-executor.test.ts"
       - "packages/builtin-runtime/test/sandbox/platform-backends.test.ts"
       - "tests/qualification/sandbox/**"
-      - "apps/kite/test/sandbox/**"
-      - "apps/kite/test/isolated/sandbox/**"
-      - "apps/kite/test/execution/**"
-      - "apps/kite/test/isolated/execution/**"
+      - "apps/kite-cli/test/sandbox/**"
+      - "apps/kite-cli/test/isolated/sandbox/**"
+      - "apps/kite-cli/test/execution/**"
+      - "apps/kite-cli/test/isolated/execution/**"
       - "tests/integration/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
 
@@ -84,22 +84,22 @@ jobs:
           bun test --max-concurrency=1
           packages/builtin-runtime/test/sandbox/platform-backends.test.ts
           tests/qualification/sandbox/cgroup-pids.test.ts
-          apps/kite/test/sandbox/app-sandbox-composition.test.ts
+          apps/kite-cli/test/sandbox/app-sandbox-composition.test.ts
           tests/qualification/sandbox/process-tree-limit.test.ts
           tests/qualification/sandbox/platform-capability-probe.test.ts
           tests/qualification/sandbox/platform-capability-verifier.test.ts
-          apps/kite/test/isolated/sandbox/execution-boundary.test.ts
+          apps/kite-cli/test/isolated/sandbox/execution-boundary.test.ts
           tests/qualification/sandbox/windows-restricted-token.test.ts
-          apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts
+          apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts
       - if: runner.os == 'macOS'
         name: macOS Seatbelt profile and fail-closed contracts
-        run: bun test apps/kite/test/isolated/sandbox.test.ts
+        run: bun test apps/kite-cli/test/isolated/sandbox.test.ts
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: POSIX supervisor native negative and conformance
-        run: bun test --parallel=1 --max-concurrency=1 apps/kite/test/isolated/execution/posix-supervisor.test.ts
+        run: bun test --parallel=1 --max-concurrency=1 apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
-        run: bun test apps/kite/test/isolated/sandbox.test.ts tests/qualification/sandbox-bwrap-executor.test.ts
+        run: bun test apps/kite-cli/test/isolated/sandbox.test.ts tests/qualification/sandbox-bwrap-executor.test.ts
       - if: runner.os == 'Windows'
         name: Build Windows sandbox runner
         run: bun run scripts/release/build-windows-runner.ts

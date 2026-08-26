@@ -34,6 +34,11 @@ carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime
 同一生产文件仍只能命中一个 source owner，新增 transport、receipt 或 workspace 时必须同步代表路径矩阵，
 不得靠重叠规则让任意一份无关 authority 满足检查。
 
+当前 terminal App workspace 的规范路径是 `apps/kite-cli`，workspace-local source alias 是
+`#kite-cli/*`；旧 `apps/kite`、`@kite-ai/kite`、`#app/*` 与 `@/app/*` 只可作为历史记录或明确的负向
+fixture。后续新增 Service 或 package 时，只有在 source 与 owner README 实际存在的同一改动中才加入 V2
+规则，不以无效 future path 或空 workspace 预占 documentation owner。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

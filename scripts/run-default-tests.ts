@@ -20,7 +20,7 @@ const workspaces = [
   'packages/runtime-host',
   'packages/runtime-storage-sqlite',
   'packages/builtin-runtime',
-  'apps/kite',
+  'apps/kite-cli',
 ] as const;
 
 const concurrency = testParallelism();
@@ -28,7 +28,10 @@ const workspaceJobs: TestJob[] = [];
 const isolatedFiles: string[] = [];
 for (const workspace of workspaces) {
   const partition = partitionTestFiles(collectTestFiles(resolve(root, workspace, 'test')));
-  const shards = shardTestFiles(partition.parallel, workspace === 'apps/kite' ? concurrency : 1);
+  const shards = shardTestFiles(
+    partition.parallel,
+    workspace === 'apps/kite-cli' ? concurrency : 1,
+  );
   for (const [index, files] of shards.entries()) {
     workspaceJobs.push({
       label: workspace + (shards.length > 1 ? `:shard-${index + 1}/${shards.length}` : ''),

@@ -6,13 +6,13 @@
 已审批网络 token、Shell runtime policy、Windows filesystem/network boundary、Platform Capability
 Probe，或 Windows Full/fallback UI 状态时。
 
-验证：`bun test apps/kite/test/tool-definitions.test.ts apps/kite/test/tool-runner.test.ts
+验证：`bun test apps/kite-cli/test/tool-definitions.test.ts apps/kite-cli/test/tool-runner.test.ts
 packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts
 tests/qualification/sandbox/windows-network-setup.test.ts tests/qualification/sandbox/platform-capability-probe.test.ts
 tests/qualification/sandbox/platform-capability-verifier.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
-apps/kite/test/sandbox/app-sandbox-composition.test.ts apps/kite/test/isolated/sandbox/execution-boundary.test.ts
-apps/kite/test/git-broker.test.ts apps/kite/test/runtime/git-tool-controller.test.ts
-apps/kite/test/tui-exit-coordinator.test.ts apps/kite/test/isolated/session-manager.test.ts apps/kite/test/tui-reducer.test.ts`、
+apps/kite-cli/test/sandbox/app-sandbox-composition.test.ts apps/kite-cli/test/isolated/sandbox/execution-boundary.test.ts
+apps/kite-cli/test/git-broker.test.ts apps/kite-cli/test/runtime/git-tool-controller.test.ts
+apps/kite-cli/test/tui-exit-coordinator.test.ts apps/kite-cli/test/isolated/session-manager.test.ts apps/kite-cli/test/tui-reducer.test.ts`、
 `bun run typecheck`、`bun run check:docs`。native runner
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为
@@ -84,7 +84,7 @@ backend。该移除不降低 production 能力，因为实验路径从未取得 
 RM-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
 protected-path/network/resource 语义位于 `packages/builtin-runtime/src/sandbox/`，通用异步进程创建、POSIX
 supervisor、output drain 与 process-tree cleanup 位于 `packages/runtime-host/src/`，唯一 App composition 位于
-`apps/kite/src/sandbox/`。已删除的 `src/core/sandbox/**` 和 protocol/Core 旧路径不得恢复为兼容导出或
+`apps/kite-cli/src/sandbox/`。已删除的 `src/core/sandbox/**` 和 protocol/Core 旧路径不得恢复为兼容导出或
 durable lifecycle adapter，也不得重新加入 `Bun.spawn`、第二个 runner handler 或 post-dispatch replay。
 
 正常本地路径无需 UAC，TUI 不检查联网身份。foreground CLI 保留 `bun run agent sandbox status` 与

@@ -81,10 +81,15 @@ function resolveImport(file: string, specifier: string, sourceRoot: string): str
   if (specifier.startsWith('@/tests/')) {
     return resolve(dirname(sourceRoot), 'tests', specifier.slice('@/tests/'.length));
   }
+  if (specifier.startsWith('#kite-cli/')) {
+    const appSourceRoot = resolve(dirname(sourceRoot), 'apps/kite-cli/src');
+    const target = resolve(appSourceRoot, specifier.slice('#kite-cli/'.length));
+    return isWithin(target, appSourceRoot) && resolveSourceModule(target) ? target : null;
+  }
   if (specifier.startsWith('@/app/sandbox/')) {
     const relocated = resolve(
       dirname(sourceRoot),
-      'apps/kite/src/sandbox',
+      'apps/kite-cli/src/sandbox',
       specifier.slice('@/app/sandbox/'.length),
     );
     if (resolveSourceModule(relocated)) return relocated;
@@ -237,7 +242,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
   );
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite/src/bootstrap/runtime/subagent',
+    'apps/kite-cli/src/bootstrap/runtime/subagent',
   );
   const taskTool = resolve(relocatedSubagentRoot, 'task-tool');
   const concreteProviderModules = [
@@ -270,7 +275,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
 function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite/src/bootstrap/runtime/subagent',
+    'apps/kite-cli/src/bootstrap/runtime/subagent',
   );
   const toolAdapter = normalizedModulePath(resolve(relocatedSubagentRoot, 'tool-adapter'));
   const taskTool = normalizedModulePath(resolve(relocatedSubagentRoot, 'task-tool'));
@@ -406,7 +411,7 @@ function forbiddenSandboxProviderAuthority(sourceRoot: string): Violation[] {
 }
 
 function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
-  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite/src/sandbox');
+  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite-cli/src/sandbox');
   const appSandboxRoot = existsSync(relocatedAppSandbox)
     ? relocatedAppSandbox
     : resolve(sourceRoot, 'app/sandbox');
@@ -759,7 +764,7 @@ const controllersRoot = join(coreRoot, 'controllers');
 const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
 const packagesRoot = join(root, 'packages');
-const appSourceRoot = join(root, 'apps', 'kite', 'src');
+const appSourceRoot = join(root, 'apps', 'kite-cli', 'src');
 const packageSourceRoots = existsSync(packagesRoot)
   ? readdirSync(packagesRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())

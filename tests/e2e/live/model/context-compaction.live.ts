@@ -9,7 +9,7 @@ import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { AgentConfig } from '#app/config';
+import type { AgentConfig } from '#kite-cli/config';
 
 const LIVE_TIMEOUT_MS = Number(process.env.KITE_LIVE_MODEL_TIMEOUT_MS ?? 90_000);
 const required = (name: string): string => {

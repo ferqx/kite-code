@@ -1,4 +1,4 @@
-import { runTui } from '@kite-ai/kite/tui';
+import { runTui } from '@kite-ai/kite-cli/tui';
 import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,

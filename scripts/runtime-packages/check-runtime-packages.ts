@@ -12,7 +12,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/runtime-host', 'packages/runtime-host'],
   ['@kite-ai/runtime-storage-sqlite', 'packages/runtime-storage-sqlite'],
   ['@kite-ai/builtin-runtime', 'packages/builtin-runtime'],
-  ['@kite-ai/kite', 'apps/kite'],
+  ['@kite-ai/kite-cli', 'apps/kite-cli'],
 ] as const);
 
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
@@ -31,7 +31,7 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   ],
   '@kite-ai/runtime-storage-sqlite': ['@kite-ai/runtime-host'],
   '@kite-ai/builtin-runtime': ['@kite-ai/runtime-contract', '@kite-ai/runtime-spi'],
-  '@kite-ai/kite': [
+  '@kite-ai/kite-cli': [
     '@kite-ai/builtin-runtime',
     '@kite-ai/runtime-client',
     '@kite-ai/runtime-contract',
@@ -357,11 +357,11 @@ function validateRootPackageEntry(
   manifest: PackageJson,
   violations: RuntimePackageViolation[],
 ): void {
-  if (manifest.module !== 'apps/kite/src/index.ts') {
+  if (manifest.module !== 'apps/kite-cli/src/index.ts') {
     addViolation(
       violations,
       'ROOT_PACKAGE_MODULE_INVALID',
-      'root module must be exactly apps/kite/src/index.ts',
+      'root module must be exactly apps/kite-cli/src/index.ts',
       'package.json',
     );
   }
@@ -376,13 +376,13 @@ function validateRootPackageEntry(
     );
   }
 
-  const appEntryPath = join(root, 'apps/kite/src/index.ts');
+  const appEntryPath = join(root, 'apps/kite-cli/src/index.ts');
   if (!isRegularFile(appEntryPath)) {
     addViolation(
       violations,
       'APP_PUBLIC_ENTRY_INVALID',
-      'the App public entry apps/kite/src/index.ts must exist',
-      'apps/kite/src/index.ts',
+      'the App public entry apps/kite-cli/src/index.ts must exist',
+      'apps/kite-cli/src/index.ts',
     );
     return;
   }
@@ -429,7 +429,7 @@ function validateRootPackageEntry(
       violations,
       'APP_PUBLIC_ENTRY_INVALID',
       'App public entry may only export createKiteRuntimeBoundary, runCli, and runTui from their exact App modules',
-      'apps/kite/src/index.ts',
+      'apps/kite-cli/src/index.ts',
     );
   }
 }
@@ -523,8 +523,50 @@ function validateImports(
       continue;
     }
 
+    if (edge.specifier.startsWith('#kite-cli/')) {
+      const app = byName.get('@kite-ai/kite-cli');
+      if (!app || edge.owner.name !== app.name) {
+        addViolation(
+          violations,
+          'FORBIDDEN_ROOT_ALIAS_IMPORT',
+          `${edge.owner.name} may not import CLI source alias ${edge.specifier}`,
+          sourcePath,
+        );
+        continue;
+      }
+      const target = resolveKiteCliAliasSourceFile(root, edge.specifier);
+      if (!target) {
+        addViolation(
+          violations,
+          'IMPORT_TARGET_MISSING',
+          `cannot resolve CLI source alias ${edge.specifier}`,
+          sourcePath,
+        );
+      } else if (!isInside(join(app.absolutePath, 'src'), target)) {
+        addViolation(
+          violations,
+          'CROSS_PACKAGE_ALIAS_IMPORT',
+          `CLI source alias escapes ${app.name} source boundary: ${edge.specifier}`,
+          sourcePath,
+        );
+      } else {
+        edge.targetFile = target;
+      }
+      continue;
+    }
+
+    if (edge.specifier.startsWith('#app/') || edge.specifier.startsWith('@/app/')) {
+      addViolation(
+        violations,
+        'RETIRED_APP_ALIAS_IMPORT',
+        `retired App source alias is forbidden: ${edge.specifier}`,
+        sourcePath,
+      );
+      continue;
+    }
+
     if (edge.specifier.startsWith('@/')) {
-      if (edge.owner.name !== '@kite-ai/kite') {
+      if (edge.owner.name !== '@kite-ai/kite-cli') {
         addViolation(
           violations,
           'FORBIDDEN_ROOT_ALIAS_IMPORT',
@@ -533,7 +575,7 @@ function validateImports(
         );
         continue;
       }
-      const target = resolveRootAliasSourceFile(root, edge.specifier);
+      const target = resolveSourceFile(join(root, 'src'), edge.specifier.slice(2));
       if (!target) {
         addViolation(
           violations,
@@ -633,7 +675,7 @@ function validateExternalDependency(
       `${path}/package.json`,
     );
   }
-  if (isUiPackage(dependency) && owner !== '@kite-ai/kite') {
+  if (isUiPackage(dependency) && owner !== '@kite-ai/kite-cli') {
     addViolation(
       violations,
       'FORBIDDEN_UI_IMPORT',
@@ -975,9 +1017,9 @@ function validateClientBoundary(
   imports: ImportEdge[],
   violations: RuntimePackageViolation[],
 ): void {
-  const app = packages.find((entry) => entry.name === '@kite-ai/kite');
+  const app = packages.find((entry) => entry.name === '@kite-ai/kite-cli');
   if (!app) return;
-  const clientPrefix = /apps\/kite\/src\/(cli|tui)\//;
+  const clientPrefix = /apps\/kite-cli\/src\/(cli|tui)\//;
   const forbiddenRootRuntime = [
     '@/core/runtime/actions',
     '@/core/runtime/agent',
@@ -1020,8 +1062,8 @@ function validateClientBoundary(
     }
     if (
       edge.specifier === '../bootstrap' &&
-      sourcePath !== 'apps/kite/src/cli/executable.ts' &&
-      sourcePath !== 'apps/kite/src/tui/executable.tsx'
+      sourcePath !== 'apps/kite-cli/src/cli/executable.ts' &&
+      sourcePath !== 'apps/kite-cli/src/tui/executable.tsx'
     ) {
       addViolation(
         violations,
@@ -1052,14 +1094,14 @@ function validateClientBoundary(
 
   const executionModule = join(
     root,
-    'apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
+    'apps/kite-cli/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
   );
   if (!isRegularFile(executionModule)) {
     addViolation(
       violations,
       'RUNTIME_EXECUTION_MODULE_MISSING',
       'RM-16 requires the unique App Runtime execution module',
-      'apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
+      'apps/kite-cli/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
     );
   }
 
@@ -1149,7 +1191,7 @@ function validateCompositionRoot(
   imports: ImportEdge[],
   violations: RuntimePackageViolation[],
 ): string[] {
-  const app = packages.find((entry) => entry.name === '@kite-ai/kite');
+  const app = packages.find((entry) => entry.name === '@kite-ai/kite-cli');
   if (!app) return [];
   const concretePackages = new Set([
     '@kite-ai/runtime-host',
@@ -1167,7 +1209,7 @@ function validateCompositionRoot(
     .filter(([, names]) => [...concretePackages].every((name) => names.has(name)))
     .map(([path]) => normalizedRelative(root, path))
     .sort();
-  const expectedRoot = 'apps/kite/src/bootstrap.ts';
+  const expectedRoot = 'apps/kite-cli/src/bootstrap.ts';
   if (roots.length === 0) {
     addViolation(violations, 'COMPOSITION_ROOT_MISSING', `expected ${expectedRoot}`);
   } else if (roots.length > 1) {
@@ -1176,7 +1218,7 @@ function validateCompositionRoot(
     addViolation(violations, 'COMPOSITION_ROOT_BYPASS', `composition is in ${roots[0]}`);
   }
   const bootstrapImports = importsByFile.get(join(root, expectedRoot)) ?? new Set<string>();
-  for (const required of ALLOWED_DIRECT_DEPENDENCIES['@kite-ai/kite'] ?? []) {
+  for (const required of ALLOWED_DIRECT_DEPENDENCIES['@kite-ai/kite-cli'] ?? []) {
     if (!bootstrapImports.has(required)) {
       addViolation(
         violations,
@@ -1342,15 +1384,9 @@ function resolveSourceFile(fromDirectory: string, specifier: string): string | u
   return candidates.find(isRegularFile);
 }
 
-function resolveRootAliasSourceFile(root: string, specifier: string): string | undefined {
-  if (specifier.startsWith('@/app/sandbox/')) {
-    const relocated = resolveSourceFile(
-      join(root, 'apps/kite/src/sandbox'),
-      specifier.slice('@/app/sandbox/'.length),
-    );
-    if (relocated) return relocated;
-  }
-  return resolveSourceFile(join(root, 'src'), specifier.slice(2));
+function resolveKiteCliAliasSourceFile(root: string, specifier: string): string | undefined {
+  if (!specifier.startsWith('#kite-cli/')) return undefined;
+  return resolveSourceFile(join(root, 'apps/kite-cli/src'), specifier.slice('#kite-cli/'.length));
 }
 
 function collectFiles(directory: string, pattern: RegExp): string[] {

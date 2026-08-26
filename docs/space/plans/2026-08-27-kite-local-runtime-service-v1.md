@@ -932,7 +932,17 @@ History、App Control 与 Workspace admission 无未决 transport；文档检查
 
 回滚：撤回 ADR 接受和三份非权威 baseline 后保持 draft；零代码、零入口。
 
-### KLSV1-01：机械重命名 `apps/kite` 为 `apps/kite-cli`
+### KLSV1-01：机械重命名 `apps/kite` 为 `apps/kite-cli`（已完成）
+
+完成证据：455 个 tracked App 文件已整体移动到 `apps/kite-cli`，package identity 为
+`@kite-ai/kite-cli`，workspace-local alias 只保留 `#kite-cli/*`；`./cli`/`./tui` exports、`kite`/`kite-tui`
+binary、InProcess composition、Store 与 candidate payload 保持不变。Root manifest/tsconfig/bun.lock、runtime/core/
+pre-release/test-ownership/compaction Gate、default/owned runner、root helper/fixture、release resolver、workflow filter、
+current docs 与 documentation map 已同步。非历史旧 path/package/alias 只剩显式 retired-alias rejection/negative fixture。
+`check:runtime-packages`、`check:pre-release-architecture`、`check:core-boundary`、`check:test-ownership`、
+`check:compaction-legacy`、typecheck、10-workspace build、App owner runner（154 parallel + 32 isolated）、stdio/WebSocket/
+transport（18 + 24 + 3 tests）、release subset、docs impact/docs 全部通过。按本 Task Gate 未重复完整 PTY、native
+candidate 或 release smoke。
 
 交付：
 

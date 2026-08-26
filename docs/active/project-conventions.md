@@ -36,7 +36,7 @@
 
 ## 模型与 Provider
 
-- **模型服务不是 DeepSeek-only**：修改 `apps/kite/src/config`、`packages/builtin-runtime/src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
+- **模型服务不是 DeepSeek-only**：修改 `apps/kite-cli/src/config`、`packages/builtin-runtime/src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
 - 当前版本没有 evaluation 或真实 Provider 测试入口。后续重新引入时必须先建立新的计划、数据边界与显式发现规则。
 
 ## 测试纪律
@@ -100,9 +100,9 @@ git merge -X theirs origin/<branch> --no-edit
 
 - **Client contract 类型**定义在 `packages/runtime-contract/`；私有 capability/provider 编译边界定义在 `packages/runtime-spi/`。
 - **Runtime State/Event 与纯决策**定义在 `packages/agent-kernel/`；具体 Tool/Model/Skill/MCP/Sandbox 语义定义在 `packages/builtin-runtime/`。
-- **通用 lifecycle/lease/dispatch 机制**定义在 `packages/runtime-host/`；具体配置、平台和 UI 组合只定义在 `apps/kite/`。
+- **通用 lifecycle/lease/dispatch 机制**定义在 `packages/runtime-host/`；具体配置、平台和 UI 组合只定义在 `apps/kite-cli/`。
 - package 依赖必须满足 `runtime-contract → ∅`、`agent-kernel → ∅`、`runtime-spi → runtime-contract`、`runtime-host → agent-kernel/runtime-contract/runtime-spi`、`builtin-runtime → runtime-contract/runtime-spi`；App 可以组合全部目标 package，不允许反向依赖。
-- Runtime packages 禁止导入 `apps/kite/src/tui/` 的任何符号，禁止做展示层文本格式化（截断+省略号+展示文案）。
+- Runtime packages 禁止导入 `apps/kite-cli/src/tui/` 的任何符号，禁止做展示层文本格式化（截断+省略号+展示文案）。
 - 详细的 workspace 与 authority 边界见 `six-concept-runtime-architecture.md` 和各 workspace README。
 - 同层模块之间的类型引用用正常 `import`，不用内联 `import()`（除接口字段定义中的紧凑写法外）。
 

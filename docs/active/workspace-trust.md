@@ -1,14 +1,14 @@
 # Workspace 信任门禁 / Workspace Trust Gate
 
 状态：active
-读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite/src/cli/index.ts`）、workspace 信任存储、`apps/kite/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
-验证：`bun test apps/kite/test/workspace-trust.test.ts apps/kite/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
+读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite-cli/src/cli/index.ts`）、workspace 信任存储、`apps/kite-cli/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
+验证：`bun test apps/kite-cli/test/workspace-trust.test.ts apps/kite-cli/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
 
 ## 概述
 
 TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 与 parent-owned `server --stdio` 在加载项目配置或创建 Runtime 前执行同一门禁，共享同一用户级信任存储。
 
-`apps/kite/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
+`apps/kite-cli/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
 修改这些 action 接线不得把会话存储、RuntimeStore 或工具初始化上移到信任分支之前。
 
@@ -17,9 +17,9 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 1. 读取 `workspaceTrustPath()` 存储，`workspaceKey = canonicalWorkspaceKey(workspace)`（canonical realpath 的 sha256，与 MCP 项目批准复用同一摘要函数）命中记录 → 放行。
 2. 未命中（`unknown`）、记录损坏（`corrupt`）或存储不可用（`unavailable`）→ 提示确认（TUI 显示界面 / CLI 拒绝运行）。损坏与不可用按 fail-closed 处理：要求用户重新确认，而不是静默放行。
 
-**安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
+**安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite-cli/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
 
-## 确认界面（`apps/kite/src/tui/components/WorkspaceTrustGate.tsx`）
+## 确认界面（`apps/kite-cli/src/tui/components/WorkspaceTrustGate.tsx`）
 
 - 展示目录绝对路径与信任后果说明（加载项目配置/skills/MCP、agent 可执行 shell 与修改文件）。
 - 选项为“信任此工作区并继续”与“退出 Kite Code”（实际文字随当前 TUI locale 本地化）；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
@@ -27,7 +27,7 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - 选择信任 → 显示当前 locale 的保存提示后调用 `trustWorkspace()` 写入记录并挂载主界面；写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可重试或退出。
 - 选择拒绝或按 Esc → 进程退出，不写入任何状态。
 
-## CLI 入口（`apps/kite/src/cli/index.ts`）
+## CLI 入口（`apps/kite-cli/src/cli/index.ts`）
 
 `run` 命令在加载配置与创建 Runtime 之前执行同一 `shouldPromptWorkspaceTrust` 判定：
 
@@ -70,7 +70,7 @@ TUI 把该内部诊断直接投影为对话内容。
 
 - `spawnTui()` 默认为启动目录预写一条 `source: 'test'` 的信任记录（存入临时 home 的信任存储），现有 PTY 场景走与生产一致的"已信任目录"快速路径，不受门禁阻塞。不使用 env 旁路（见上文安全不变量）。
 - 验证门禁本身时使用 `createTestWorkspace({ enforceWorkspaceTrust: true })` 跳过预写，参考 `tests/tui-system/scenarios/workspace-trust.test.ts`：门禁渲染与阻断、信任持久化并启动、已信任目录重启跳过、拒绝后干净退出且无持久化；场景同时在 workspace 放置伪造 `.env`，验证 Bun dotenv 注入不能绕过门禁。
-- CLI 门禁由 `apps/kite/test/isolated/cli-workspace-trust.test.ts` 覆盖：真实 spawn CLI 入口，验证拒绝路径（无 stdout 泄漏、无持久化）、`--trust-workspace` 记录 `source: 'config'`、`.env` 伪造旁路被拒、已信任目录免旗标放行。
+- CLI 门禁由 `apps/kite-cli/test/isolated/cli-workspace-trust.test.ts` 覆盖：真实 spawn CLI 入口，验证拒绝路径（无 stdout 泄漏、无持久化）、`--trust-workspace` 记录 `source: 'config'`、`.env` 伪造旁路被拒、已信任目录免旗标放行。
 
 ## 边界与现状
 

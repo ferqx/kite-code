@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `McpConnectionManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
 验证：`bun test packages/builtin-runtime/test packages/runtime-host/test tests/mcp tests/tui-system`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0010、ADR-0011、ADR-0013、ADR-0014、ADR-0015、ADR-0016、ADR-0017、ADR-0018、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`packages/builtin-runtime/src/mcp/supervisor.ts`、`packages/builtin-runtime/src/mcp/control-types.ts`、`apps/kite/src/tui/mcp/`。
+相关：ADR-0010、ADR-0011、ADR-0013、ADR-0014、ADR-0015、ADR-0016、ADR-0017、ADR-0018、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`packages/builtin-runtime/src/mcp/supervisor.ts`、`packages/builtin-runtime/src/mcp/control-types.ts`、`apps/kite-cli/src/tui/mcp/`。
 
 ## 权威与依赖
 

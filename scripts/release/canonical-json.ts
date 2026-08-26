@@ -1,1 +1,1 @@
-export * from '../../apps/kite/src/release/canonical-json';
+export * from '../../apps/kite-cli/src/release/canonical-json';

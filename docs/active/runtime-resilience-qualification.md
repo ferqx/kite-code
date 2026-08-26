@@ -4,9 +4,9 @@
 
 读取时机：修改 Runtime 持久化/恢复、persistent command receipt、Protocol/Server/Client carrier/reconnect、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/isolated/runtime-command-restart.test.ts apps/kite/test/isolated/runtime-server-multi-client.test.ts apps/kite/test/isolated/runtime-stdio-carrier.test.ts apps/kite/test/isolated/runtime-transport-conformance.test.ts apps/kite/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite/test/model-invocation-gateway.test.ts apps/kite/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts apps/kite/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite/test/subagent-artifacts.test.ts apps/kite/test/subagent-provider.test.ts apps/kite/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-cli/test/isolated/runtime-command-restart.test.ts apps/kite-cli/test/isolated/runtime-server-multi-client.test.ts apps/kite-cli/test/isolated/runtime-stdio-carrier.test.ts apps/kite-cli/test/isolated/runtime-transport-conformance.test.ts apps/kite-cli/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-cli/test/model-invocation-gateway.test.ts apps/kite-cli/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts apps/kite-cli/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-cli/test/subagent-artifacts.test.ts apps/kite-cli/test/subagent-provider.test.ts apps/kite-cli/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-cli/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
 
 ## 两级运行契约
 
@@ -112,7 +112,7 @@ control base，Linux Full 也用只读空 tmpfs 覆盖整个 control base，因�
 identity 都不可见。首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
 `cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
-`apps/kite/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
+`apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
 `descendantContainmentProven=false` 传给 reconciliation，保留 pending cleanup authority。Apple
 `launchd.plist(5)` 仅定义同 process group 的 kill 行为，不能替代 detached/session descendant 的
 kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative
@@ -220,7 +220,7 @@ State 26 的旧 Project ID 只有在 source session row 与 decoded State identi
 `project_<digest>` identity；named snapshot 必须通过同一映射。相对路径、已删除 Workspace、digest drift、row/state
 mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 source 继续 byte-for-byte 不变，无法证明 identity 的失败只
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于
-`apps/kite/test/state-store-project-identity-compatibility.test.ts`。
+`apps/kite-cli/test/state-store-project-identity-compatibility.test.ts`。
 
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault

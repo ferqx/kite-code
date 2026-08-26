@@ -3,17 +3,17 @@ import {
   type AgentConfig,
   EMBEDDED_RELEASE_PROFILES_,
   SUPPORTED_PRODUCTION_EXECUTION_TARGETS_,
-} from '#app/config';
-import { parseArgs } from '../../apps/kite/src/cli/index';
+} from '#kite-cli/config';
+import { parseArgs } from '../../apps/kite-cli/src/cli/index';
 import {
   createReleaseControlledAgentConfig,
   type ReleaseComposition,
   resolveReleaseComposition,
-} from '../../apps/kite/src/release/composition-root';
+} from '../../apps/kite-cli/src/release/composition-root';
 import {
   formatReleaseStatus,
   projectReleaseStatus,
-} from '../../apps/kite/src/release/status-projection';
+} from '../../apps/kite-cli/src/release/status-projection';
 
 function config(releaseProfile = false): AgentConfig {
   return {

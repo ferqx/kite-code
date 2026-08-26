@@ -5,13 +5,13 @@
 读取时机：修改 `ExecutionBoundary`、production composition root、sandbox capability
 projection、release-controlled execution policy 或对应 feature flag 时。
 
-验证：`bun test apps/kite/test/isolated/sandbox/execution-boundary.test.ts apps/kite/test/sandbox/network-boundary.test.ts
-apps/kite/test/sandbox/network-boundary-concurrency.test.ts apps/kite/test/isolated/runtime/tool-controller.test.ts
-apps/kite/test/config/features.test.ts apps/kite/test/sandbox/status-projection.test.ts
+验证：`bun test apps/kite-cli/test/isolated/sandbox/execution-boundary.test.ts apps/kite-cli/test/sandbox/network-boundary.test.ts
+apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts apps/kite-cli/test/isolated/runtime/tool-controller.test.ts
+apps/kite-cli/test/config/features.test.ts apps/kite-cli/test/sandbox/status-projection.test.ts
 tests/isolated/workspace/worktree-controller.test.ts tests/integration/builtin-runtime/mcp-transport-boundary.test.ts
-packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts apps/kite/test/git-broker.test.ts
-apps/kite/test/runtime/git-tool-controller.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts
-apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
+packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts apps/kite-cli/test/git-broker.test.ts
+apps/kite-cli/test/runtime/git-tool-controller.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts
+apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -25,8 +25,8 @@ apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
 
 RM-13 后 `packages/builtin-runtime/src/sandbox/types.ts` 是 `ExecutionBoundary`、逐维 backend capability strength、
 qualification registry 和只读工具 effect contract 的类型来源。
-`apps/kite/src/config/execution-boundary.ts` 是 App 配置的严格解析、canonical digest、单调收紧和技术能力评估实现。
-`apps/kite/src/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
+`apps/kite-cli/src/config/execution-boundary.ts` 是 App 配置的严格解析、canonical digest、单调收紧和技术能力评估实现。
+`apps/kite-cli/src/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
 qualification registry，并校验 revision 和 digest；调用方不能提供 registry 路径、批准 digest
 或 production qualification。同一 OS/Bun/backend/network admission key 只能有一个
 qualification，resolver 也只接受恰好一个匹配。Digest canonicalizer 显式重建每一层字段，
@@ -210,7 +210,7 @@ PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProv
 Provider contract 的物理 owner 是 `packages/runtime-spi/src/sandbox-execution-provider.ts`；
 `packages/builtin-runtime/src/sandbox/` 拥有 backend、protected-path、network、grant 与 Local Provider
 领域语义，`packages/runtime-host/src/` 拥有唯一异步进程创建 primitive、POSIX supervisor、进程树终止和
-有界 output drain，`apps/kite/src/sandbox/` 是唯一 native/host-shell availability composition root。已删除的
+有界 output drain，`apps/kite-cli/src/sandbox/` 是唯一 native/host-shell availability composition root。已删除的
 `src/protocol/sandbox-execution-provider.ts`、`src/core/sandbox/**` 与
 `src/core/execution/sandbox-execution/*` 不得恢复为兼容 owner、实现或 spawn 路径。
 
@@ -278,7 +278,7 @@ Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证
 Runtime schema v26 或 `kite-runtime-modularization-v1-2026-08-19` format epoch。
 
 Darwin 的 supervisor negative conformance 由
-`apps/kite/test/isolated/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
+`apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
 `cleanupConfirmed` 必须保持 `false`。恢复同样传递 `descendantContainmentProven=false`，所以只终止已绑定
 supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的 `AbandonProcessGroup=false`
 只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的
@@ -361,7 +361,7 @@ raw artifact 同时保留 `hardCountMechanism`；旧 V1 artifact 缺失时按 `n
 
 ## App-owned writer placement and status
 
-`apps/kite/src/workspace/worktree-controller.ts` 是唯一拥有 Git/worktree authority 的 typed App
+`apps/kite-cli/src/workspace/worktree-controller.ts` 是唯一拥有 Git/worktree authority 的 typed App
 controller。共享 checkout 默认只读；只有用户在场且显式选择的 foreground TUI writer 可使用当前
 checkout。D-09 继续排除 foreground Headless CLI writer；后台、定时、无人值守、并发和委派 writer
 只有在 controller 开启时才可进入 identity-bound worktree，创建失败不得回退共享 checkout。
@@ -371,7 +371,7 @@ cleanup 只移除 identity 验证通过且 clean 的 controller-owned worktree�
 lock 或 identity drift 都保留现场供人工恢复。它不 push、merge 或删除 branch，并关闭 checkout
 hooks。
 
-`apps/kite/src/release/execution-status.ts` 只投影已经通过 App config 与 Builtin/Host production admission 的有效状态：实际
+`apps/kite-cli/src/release/execution-status.ts` 只投影已经通过 App config 与 Builtin/Host production admission 的有效状态：实际
 sandbox backend/availability/fallback、filesystem scope、network mode 与 host 数量、protected-path
 policy、controller worktree 状态以及 capability 的 typed disabled reasons。它不暴露 Workspace
 路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。

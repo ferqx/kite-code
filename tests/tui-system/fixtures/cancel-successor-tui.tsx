@@ -1,10 +1,10 @@
-import { runTui } from '@kite-ai/kite/tui';
-import type { AppShellExecutor } from '@/app/sandbox/composition';
+import { runTui } from '@kite-ai/kite-cli/tui';
+import type { AppShellExecutor } from '#kite-cli/sandbox/composition';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   type AppPreparedShellExecutionPort,
   projectAppHostShellResult,
-} from '@/app/sandbox/prepared-tool-pipeline';
+} from '#kite-cli/sandbox/prepared-tool-pipeline';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 let invocation = 0;

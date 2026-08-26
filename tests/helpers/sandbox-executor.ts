@@ -26,7 +26,7 @@ import type {
 import {
   SandboxExecutionGrantAuthority,
   sandboxPreparationDigest,
-} from '#app/sandbox/runtime-execution';
+} from '#kite-cli/sandbox/runtime-execution';
 import { shellTool } from './shell-executor';
 
 export type TestSandboxLifecycleTransition =

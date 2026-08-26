@@ -4,23 +4,23 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "apps/kite/src/config/execution-boundary.ts"
-      - "apps/kite/src/config/execution-qualification.ts"
-      - "apps/kite/src/config/release-*.ts"
+      - "apps/kite-cli/src/config/execution-boundary.ts"
+      - "apps/kite-cli/src/config/execution-qualification.ts"
+      - "apps/kite-cli/src/config/release-*.ts"
       - "packages/builtin-runtime/src/sandbox/**"
       - "packages/builtin-runtime/src/planning/runtime-module.ts"
       - "packages/runtime-host/src/process/**"
       - "packages/runtime-spi/src/sandbox-execution-provider.ts"
-      - "apps/kite/src/sandbox/**"
+      - "apps/kite-cli/src/sandbox/**"
       - "packages/builtin-runtime/src/mcp/**"
-      - "apps/kite/src/release/**"
-      - "apps/kite/src/workspace/**"
+      - "apps/kite-cli/src/release/**"
+      - "apps/kite-cli/src/workspace/**"
       - "scripts/release/**"
       - "release/platform-capabilities/**"
       - "tests/release/**"
-      - "apps/kite/test/policies/protected-path.test.ts"
-      - "apps/kite/test/sandbox/network-boundary.test.ts"
-      - "apps/kite/test/sandbox/network-boundary-concurrency.test.ts"
+      - "apps/kite-cli/test/policies/protected-path.test.ts"
+      - "apps/kite-cli/test/sandbox/network-boundary.test.ts"
+      - "apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts"
       - "tests/qualification/sandbox/**"
       - "tests/isolated/workspace/worktree-controller.test.ts"
       - "tests/integration/builtin-runtime/mcp-transport-boundary.test.ts"
@@ -48,11 +48,11 @@ jobs:
       - name: Boundary and adversarial contracts
         run: >-
           bun test
-          apps/kite/test/policies/protected-path.test.ts
-          apps/kite/test/sandbox/network-boundary.test.ts
-          apps/kite/test/sandbox/network-boundary-concurrency.test.ts
+          apps/kite-cli/test/policies/protected-path.test.ts
+          apps/kite-cli/test/sandbox/network-boundary.test.ts
+          apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts
           tests/qualification/sandbox/process-tree-limit.test.ts
-          apps/kite/test/isolated/sandbox/execution-boundary.test.ts
+          apps/kite-cli/test/isolated/sandbox/execution-boundary.test.ts
           tests/isolated/workspace/worktree-controller.test.ts
           tests/integration/builtin-runtime/mcp-transport-boundary.test.ts
           packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts

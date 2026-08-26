@@ -96,9 +96,9 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
  * node_modules links.
  */
 export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>> = Object.freeze({
-  '@kite-ai/kite': 'apps/kite/src/index.ts',
-  '@kite-ai/kite/cli': 'apps/kite/src/cli/executable.ts',
-  '@kite-ai/kite/tui': 'apps/kite/src/tui/executable.tsx',
+  '@kite-ai/kite-cli': 'apps/kite-cli/src/index.ts',
+  '@kite-ai/kite-cli/cli': 'apps/kite-cli/src/cli/executable.ts',
+  '@kite-ai/kite-cli/tui': 'apps/kite-cli/src/tui/executable.tsx',
   '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
   '@kite-ai/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
   '@kite-ai/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
@@ -381,7 +381,7 @@ export async function compileOssReleaseExecutable(
               }[args.path] ?? undefined;
             if (exact) return { path: resolve(repositoryRoot, exact) };
             const prefix = [
-              ['#app/', 'apps/kite/src/'],
+              ['#kite-cli/', 'apps/kite-cli/src/'],
               ['#builtin-runtime/sandbox/', 'packages/builtin-runtime/src/sandbox/'],
               ['#runtime-host/', 'packages/runtime-host/src/'],
               ['@/', 'src/'],

@@ -489,7 +489,9 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
     expect(source).not.toContain('#runtime-host');
     expect(source).not.toContain('@kite-ai/agent-kernel');
     expect(source).not.toContain('#agent-kernel');
+    expect(source).not.toContain('#kite-cli/');
     expect(source).not.toContain('#app/');
+    expect(source).not.toContain('@/app/');
     expect(source).not.toContain('src/core/');
     expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('.snapshot(');

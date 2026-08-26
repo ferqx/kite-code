@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readdirSync } from 'node:fs';
 import { cleanup, render } from 'ink-testing-library';
-import InputLine from '@/app/tui/components/InputLine';
-import { terminalFocusStore } from '@/app/tui/hooks/terminal-focus-store';
+import InputLine from '#kite-cli/tui/components/InputLine';
+import { terminalFocusStore } from '#kite-cli/tui/hooks/terminal-focus-store';
 import { readOsProcessStartIdentity } from '../../../scripts/runtime/process-start-identity';
 
 const telemetryFile = process.env.KITE_FAULT_SOAK_TELEMETRY_FILE;

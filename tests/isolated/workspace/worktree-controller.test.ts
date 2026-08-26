@@ -13,12 +13,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChangeHandoff } from '@/app/workspace/change-handoff';
+import { createChangeHandoff } from '#kite-cli/workspace/change-handoff';
 import {
   resolveWriterWorkspaceAdmission,
   WorktreeController,
   WorktreeControllerError,
-} from '@/app/workspace/worktree-controller';
+} from '#kite-cli/workspace/worktree-controller';
 
 const roots: string[] = [];
 

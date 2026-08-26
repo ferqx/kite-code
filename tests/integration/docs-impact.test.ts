@@ -160,7 +160,7 @@ describe('documentation impact gate V2', () => {
 
   it('keeps representative feature paths on one precise owner rule', () => {
     expect(triggeredRepositoryRules('packages/agent-kernel/test/agent-kernel.test.ts')).toEqual([]);
-    expect(triggeredRepositoryRules('apps/kite/test/tui-layout.test.tsx')).toEqual([]);
+    expect(triggeredRepositoryRules('apps/kite-cli/test/tui-layout.test.tsx')).toEqual([]);
     expect(triggeredRepositoryRules('packages/agent-kernel/src/reducer.ts')).toEqual([
       'agent-kernel',
     ]);
@@ -185,19 +185,19 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/runtime-host/src/host/command-receipt.ts')).toEqual([
       'runtime-host-command-receipts',
     ]);
-    expect(triggeredRepositoryRules('apps/kite/src/carrier/runtime-server-stdio.ts')).toEqual([
+    expect(triggeredRepositoryRules('apps/kite-cli/src/carrier/runtime-server-stdio.ts')).toEqual([
       'kite-runtime-carriers',
     ]);
     expect(
-      triggeredRepositoryRules('apps/kite/src/runtime-client/presentation-history.ts'),
+      triggeredRepositoryRules('apps/kite-cli/src/runtime-client/presentation-history.ts'),
     ).toEqual(['kite-runtime-history']);
-    expect(triggeredRepositoryRules('apps/kite/src/tui/i18n/messages.ts')).toEqual([
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/i18n/messages.ts')).toEqual([
       'tui-localization',
     ]);
-    expect(triggeredRepositoryRules('apps/kite/src/tui/render/useStaticContent.tsx')).toEqual([
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/render/useStaticContent.tsx')).toEqual([
       'tui-rendering',
     ]);
-    expect(triggeredRepositoryRules('apps/kite/src/tui/reducers/handleEvent.ts')).toEqual([
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/reducers/handleEvent.ts')).toEqual([
       'tui-rendering',
     ]);
     expect(
@@ -223,7 +223,7 @@ describe('documentation impact gate V2', () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => join(repositoryRoot, 'packages', entry.name, 'src'));
     const sourceFiles = [
-      join(repositoryRoot, 'apps', 'kite', 'src'),
+      join(repositoryRoot, 'apps', 'kite-cli', 'src'),
       ...packageSourceRoots,
     ].flatMap(collectFiles);
     const ownership = sourceFiles.map((file) => {

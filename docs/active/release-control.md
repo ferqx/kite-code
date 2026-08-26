@@ -59,7 +59,7 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
 Standalone resolver 必须覆盖十个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
-不得穿过 `apps/kite/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
+不得穿过 `apps/kite-cli/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
 源码通过 Bun 运行时继续使用 `@napi-rs/keyring` 的系统凭据库。由于 Bun standalone 不能在三平台上

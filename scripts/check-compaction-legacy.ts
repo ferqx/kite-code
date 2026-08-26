@@ -5,7 +5,7 @@ const repoRoot = join(import.meta.dir, '..');
 const roots = [
   'packages/builtin-runtime/src/model',
   'packages/agent-kernel/src/context-normalization.ts',
-  'apps/kite/src/bootstrap/runtime/context-compaction-effect.ts',
+  'apps/kite-cli/src/bootstrap/runtime/context-compaction-effect.ts',
 ];
 const forbidden = [
   'StructuredContextSummary',

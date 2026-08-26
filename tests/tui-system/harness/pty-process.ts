@@ -2,7 +2,7 @@
  * PTY Process Harness — spawn and control a TUI subprocess with real PTY.
  *
  * Uses Bun.spawn({ terminal }) (verified working in Phase 0) to create
- * a TTY-connected child process running `bun run apps/kite/src/tui/executable.tsx`.
+ * a TTY-connected child process running `bun run apps/kite-cli/src/tui/executable.tsx`.
  *
  * Output is collected via the terminal's `data` callback. Keystrokes are
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
@@ -10,7 +10,7 @@
 
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trustWorkspace } from '#app/config/workspace-trust';
+import { trustWorkspace } from '#kite-cli/config/workspace-trust';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -335,7 +335,7 @@ export function resolveTuiLaunchPaths(
     entryPath:
       opts.executablePath ??
       opts.entryPath ??
-      join(projectRoot, 'apps/kite/src/tui/executable.tsx'),
+      join(projectRoot, 'apps/kite-cli/src/tui/executable.tsx'),
   };
 }
 

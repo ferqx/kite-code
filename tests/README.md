@@ -10,7 +10,7 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 ## 目录归属
 
 - `packages/<owner>/test/`：单 package 行为与 contract。
-- `apps/kite/test/`：App、CLI、TUI、配置、Session 和 composition。
+- `apps/kite-cli/test/`：App、CLI、TUI、配置、Session 和 composition。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
 - `tests/qualification/`：fault、soak、native 与安全 qualification。
 - `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试。
@@ -64,7 +64,7 @@ KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 
 这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
 replay 与 Store 5 source-only import；完整 durable history 另由 SQLite log-query、
-`apps/kite/test/runtime-history-client.test.ts` 和 Session persistence/format PTY journeys 验证全量分页、已选
+`apps/kite-cli/test/runtime-history-client.test.ts` 和 Session persistence/format PTY journeys 验证全量分页、已选
 compatibility import、ephemeral→durable transcript 与 live/replay reducer 等价。Session/TUI owner tests 还固定
 验证 reasoning delta/completed 都走无 revision 的 Server presentation route，以及 tool-bearing durable terminal
 先于累计 text delta 时连续探索工具仍聚合为同一 Thought；模型展示 `requestId` 贯穿
@@ -72,7 +72,7 @@ Kernel/Contract/Protocol/history mapper，正文先于 reasoning 或 terminal �
 Thinking 与工具聚合仍各自只有一个 block owner。TUI harness 还以逐帧
 `reasoning prefix → content → reasoning suffix → terminal` 验证正文首帧关闭纯 reasoning 活动态，后到 reasoning 只
 补充隐藏 Thought metadata；live 与重启 `/resume` 都不得泄漏后缀、恢复活动圆点或重复回答。会创建真实
-child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite/test/isolated/`，由默认
+child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite-cli/test/isolated/`，由默认
 runner 逐文件、逐进程串行执行，不能为了提速改成共享进程。
 
 Runtime Server/Client owner tests 还必须固定 reconnect generation 立即失效 Session readiness、cursor 超过

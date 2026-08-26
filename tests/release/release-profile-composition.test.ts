@@ -8,7 +8,7 @@ import {
   type ReleaseProfile,
   ReleaseProfileEscalationError,
   type ReleaseProfileRestrictionLayer,
-} from '#app/config';
+} from '#kite-cli/config';
 
 function broadProfile(): ReleaseProfile {
   const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_['limited-production']);

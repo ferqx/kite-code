@@ -1,4 +1,4 @@
-import { runCli } from '@kite-ai/kite/cli';
+import { runCli } from '@kite-ai/kite-cli/cli';
 import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,

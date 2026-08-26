@@ -3,9 +3,9 @@
 状态：active
 读取时机：修改 capability profile/admission/status、Verification completion、MCP write recovery/route
 或 Skill readonly/effectful 分类与 conformance 时。
-验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts apps/kite/test/capabilities/status-projection.test.ts
+验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts apps/kite-cli/test/capabilities/status-projection.test.ts
 tests/verification tests/mcp/write-*.test.ts tests/integration/skills/effect-classification.test.ts
-apps/kite/test/skills/workflow-contract.test.ts`、`bun run typecheck`。
+apps/kite-cli/test/skills/workflow-contract.test.ts`、`bun run typecheck`。
 相关：ADR-0008、ADR-0051、ADR-0064、ADR-0068、ADR-0069、D-10、Phase 5。
 
 当前只要求 Verification、MCP write、Skills readonly/effectful 的本地 profile、status、conformance、

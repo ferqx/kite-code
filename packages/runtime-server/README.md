@@ -22,7 +22,7 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
 ## 允许依赖
 
 仅依赖 `@kite-ai/runtime-contract` 与 `@kite-ai/runtime-protocol`。carrier I/O、Workspace/local-auth admission 与
-Server/Host composition 由 `apps/kite` 拥有。
+Server/Host composition 由 `apps/kite-cli` 拥有。
 
 ## 公开入口
 
