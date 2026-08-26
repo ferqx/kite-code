@@ -86,6 +86,11 @@ function resolveImport(file: string, specifier: string, sourceRoot: string): str
     const target = resolve(appSourceRoot, specifier.slice('#kite-cli/'.length));
     return isWithin(target, appSourceRoot) && resolveSourceModule(target) ? target : null;
   }
+  if (specifier.startsWith('#kite-service/')) {
+    const serviceSourceRoot = resolve(dirname(sourceRoot), 'apps/kite-service/src');
+    const target = resolve(serviceSourceRoot, specifier.slice('#kite-service/'.length));
+    return isWithin(target, serviceSourceRoot) && resolveSourceModule(target) ? target : null;
+  }
   if (specifier.startsWith('@/app/sandbox/')) {
     const relocated = resolve(
       dirname(sourceRoot),
@@ -765,19 +770,32 @@ const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
 const packagesRoot = join(root, 'packages');
 const appSourceRoot = join(root, 'apps', 'kite-cli', 'src');
+const serviceSourceRoot = join(root, 'apps', 'kite-service', 'src');
 const packageSourceRoots = existsSync(packagesRoot)
   ? readdirSync(packagesRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => join(packagesRoot, entry.name, 'src'))
       .filter(existsSync)
   : [];
-const productionSourceRoots = [sourceRoot, appSourceRoot, ...packageSourceRoots, scriptsRoot];
+const productionSourceRoots = [
+  sourceRoot,
+  appSourceRoot,
+  serviceSourceRoot,
+  ...packageSourceRoots,
+  scriptsRoot,
+].filter(existsSync);
 const checkerFile = resolve(root, 'scripts/check-core-boundary.ts');
 const violations = [
-  ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
+  ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [
+    appRoot,
+    appSourceRoot,
+    serviceSourceRoot,
+  ]),
   ...forbiddenImports('protocol must not import core or app', protocolRoot, sourceRoot, [
     coreRoot,
     appRoot,
+    appSourceRoot,
+    serviceSourceRoot,
   ]),
   ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),

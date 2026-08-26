@@ -36,4 +36,8 @@ checkpoint、delete 或 Artifact read。当前 loopback WebSocket 仅为 develop
 HTTP/SSE/Web UI 或 production entrypoint。任何 bootstrap bearer、cookie、token、Workspace/Store path 或事件正文
 均不得写入 carrier 诊断或任何日志、Session Logger、Runtime Store 或 observability。
 
+KLSV1-04 的private Service Native carrier已经实现三个exact History HTTP route，但handler只消费注入的
+`RuntimeHistoryClient` safe result；当前tests使用fake client。SQLite reader与raw event/history projector仍由
+`apps/kite-cli` concrete composition拥有，直到KLSV1-06 relocation；本阶段没有第二reader/writer或raw DTO复制。
+
 普通 Store 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。

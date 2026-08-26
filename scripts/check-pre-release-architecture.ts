@@ -9,6 +9,7 @@ const packageSources = readdirSync(join(root, 'packages'))
   .filter(existsSync);
 const productionRoots = [
   join(root, 'apps/kite-cli/src'),
+  join(root, 'apps/kite-service/src'),
   ...packageSources,
   join(root, 'native'),
 ].filter(existsSync);
@@ -162,6 +163,23 @@ function inspectSource(path: string): void {
     ) {
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push(`${relativePath}:${position.line + 1}: App Runtime imports TUI`);
+    }
+    if (
+      relativePath.startsWith('apps/kite-service/src/') &&
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      (node.moduleSpecifier.text === 'react' ||
+        node.moduleSpecifier.text.startsWith('react/') ||
+        node.moduleSpecifier.text === 'ink' ||
+        node.moduleSpecifier.text.startsWith('ink-') ||
+        node.moduleSpecifier.text === '@kite-ai/kite-cli' ||
+        node.moduleSpecifier.text.startsWith('@kite-ai/kite-cli/') ||
+        node.moduleSpecifier.text.startsWith('#kite-cli/'))
+    ) {
+      const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      violations.push(
+        `${relativePath}:${position.line + 1}: Runtime Service imports CLI or UI authority`,
+      );
     }
     if (
       ts.isImportDeclaration(node) &&

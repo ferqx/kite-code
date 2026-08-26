@@ -15,6 +15,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/runtime-storage-sqlite', 'packages/runtime-storage-sqlite'],
   ['@kite-ai/builtin-runtime', 'packages/builtin-runtime'],
   ['@kite-ai/kite-cli', 'apps/kite-cli'],
+  ['@kite-ai/kite-service', 'apps/kite-service'],
 ] as const);
 
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
@@ -50,6 +51,14 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-server',
     '@kite-ai/runtime-spi',
     '@kite-ai/runtime-storage-sqlite',
+  ],
+  '@kite-ai/kite-service': [
+    '@kite-ai/kite-app-contract',
+    '@kite-ai/kite-local-runtime',
+    '@kite-ai/runtime-client',
+    '@kite-ai/runtime-contract',
+    '@kite-ai/runtime-protocol',
+    '@kite-ai/runtime-server',
   ],
 });
 
@@ -566,6 +575,38 @@ function validateImports(
           violations,
           'CROSS_PACKAGE_ALIAS_IMPORT',
           `CLI source alias escapes ${app.name} source boundary: ${edge.specifier}`,
+          sourcePath,
+        );
+      } else {
+        edge.targetFile = target;
+      }
+      continue;
+    }
+
+    if (edge.specifier.startsWith('#kite-service/')) {
+      const service = byName.get('@kite-ai/kite-service');
+      if (!service || edge.owner.name !== service.name) {
+        addViolation(
+          violations,
+          'FORBIDDEN_ROOT_ALIAS_IMPORT',
+          `${edge.owner.name} may not import Service source alias ${edge.specifier}`,
+          sourcePath,
+        );
+        continue;
+      }
+      const target = resolveKiteServiceAliasSourceFile(root, edge.specifier);
+      if (!target) {
+        addViolation(
+          violations,
+          'IMPORT_TARGET_MISSING',
+          `cannot resolve Service source alias ${edge.specifier}`,
+          sourcePath,
+        );
+      } else if (!isInside(join(service.absolutePath, 'src'), target)) {
+        addViolation(
+          violations,
+          'CROSS_PACKAGE_ALIAS_IMPORT',
+          `Service source alias escapes ${service.name} source boundary: ${edge.specifier}`,
           sourcePath,
         );
       } else {
@@ -1094,6 +1135,28 @@ function validateClientBoundary(
     }
   }
 
+  const service = packages.find((entry) => entry.name === '@kite-ai/kite-service');
+  if (service) {
+    for (const edge of imports.filter((candidate) => candidate.owner.name === service.name)) {
+      if (
+        edge.specifier === 'react' ||
+        edge.specifier.startsWith('react/') ||
+        edge.specifier === 'ink' ||
+        edge.specifier.startsWith('ink-') ||
+        edge.specifier === '@kite-ai/kite-cli' ||
+        edge.specifier.startsWith('@kite-ai/kite-cli/') ||
+        edge.specifier.startsWith('#kite-cli/')
+      ) {
+        addViolation(
+          violations,
+          'SERVICE_UI_OR_CLI_IMPORT',
+          `Runtime Service may not import ${edge.specifier}`,
+          normalizedRelative(root, edge.source),
+        );
+      }
+    }
+  }
+
   for (const legacySource of [
     'src/app/cli',
     'src/app/tui',
@@ -1417,6 +1480,14 @@ function resolveSourceFile(fromDirectory: string, specifier: string): string | u
 function resolveKiteCliAliasSourceFile(root: string, specifier: string): string | undefined {
   if (!specifier.startsWith('#kite-cli/')) return undefined;
   return resolveSourceFile(join(root, 'apps/kite-cli/src'), specifier.slice('#kite-cli/'.length));
+}
+
+function resolveKiteServiceAliasSourceFile(root: string, specifier: string): string | undefined {
+  if (!specifier.startsWith('#kite-service/')) return undefined;
+  return resolveSourceFile(
+    join(root, 'apps/kite-service/src'),
+    specifier.slice('#kite-service/'.length),
+  );
 }
 
 function collectFiles(directory: string, pattern: RegExp): string[] {

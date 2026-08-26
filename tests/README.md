@@ -11,6 +11,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 - `packages/<owner>/test/`：单 package 行为与 contract。
 - `apps/kite-cli/test/`：App、CLI、TUI、配置、Session 和 composition。
+- `apps/kite-service/test/`：private Service shell、carrier、state composition 与 App-private manager；真实socket、
+  process/state/cwd场景留在owner-local `test/isolated/`。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
 - `tests/qualification/`：fault、soak、native 与安全 qualification。
 - `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试。
@@ -53,9 +55,10 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
-默认 workspace runner 当前覆盖十二个 workspace。`packages/kite-app-contract/test/` 验证 browser-safe、no-secret、
+默认 workspace runner 当前覆盖十三个 workspace。`packages/kite-app-contract/test/` 验证 browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/` 验证 Native descriptor/token/lock/lifecycle/credential codec
-与无 I/O state layout。两者当前都不是 Service process、listener、reconnect 或平台 qualification evidence。
+与Native filesystem state。`apps/kite-service/test/`另以injected fake application覆盖private loopback listener、
+shell、manager与isolated home；它不是default Store、connector/reconnect或三平台qualification evidence。
 
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 

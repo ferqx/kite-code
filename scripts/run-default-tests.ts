@@ -23,6 +23,7 @@ const workspaces = [
   'packages/runtime-storage-sqlite',
   'packages/builtin-runtime',
   'apps/kite-cli',
+  'apps/kite-service',
 ] as const;
 
 const concurrency = testParallelism();

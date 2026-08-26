@@ -113,6 +113,12 @@ export function decodeLocalRuntimeServiceDescriptor(value: unknown): LocalRuntim
   return parseStrict(localRuntimeServiceDescriptorSchema, value);
 }
 
+export function encodeLocalRuntimeServiceDescriptor(
+  value: LocalRuntimeServiceDescriptor,
+): LocalRuntimeServiceDescriptor {
+  return decodeLocalRuntimeServiceDescriptor(value);
+}
+
 export function safeDecodeLocalRuntimeServiceDescriptor(
   value: unknown,
 ):
@@ -127,6 +133,12 @@ export function safeDecodeLocalRuntimeServiceDescriptor(
 
 export function decodeLocalServiceLockIdentity(value: unknown): LocalServiceLockIdentity {
   return parseStrict(localServiceLockIdentitySchema, value);
+}
+
+export function encodeLocalServiceLockIdentity(
+  value: LocalServiceLockIdentity,
+): LocalServiceLockIdentity {
+  return decodeLocalServiceLockIdentity(value);
 }
 
 export function safeDecodeLocalServiceLockIdentity(
@@ -146,7 +158,7 @@ export function decodeLocalRuntimeToken(value: unknown): LocalRuntimeToken {
   return parseStrict(localRuntimeTokenSchema, value);
 }
 
-export function encodeLocalRuntimeToken(value: string): string {
+export function encodeLocalRuntimeToken(value: string): LocalRuntimeToken {
   return decodeLocalRuntimeToken(value);
 }
 

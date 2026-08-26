@@ -33,11 +33,11 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server 与 Local Service client contract：十二个 workspace、一个当前 composition
+## Runtime Server 与 Local Service client contract：十三个 workspace、一个当前 concrete composition
 
-Runtime package Gate 当前检查十二个 workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、
+Runtime package Gate 当前检查十三个 workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、
 `runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
-`runtime-storage-sqlite`、`builtin-runtime` 与 `apps/kite-cli`。它们不是可互换 Runtime；依赖和 authority 必须
+`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli` 与 private `apps/kite-service`。它们不是可互换 Runtime；依赖和 authority 必须
 保持下列层级：
 
 ```text
@@ -53,6 +53,7 @@ runtime-host ──────────────────────�
 runtime-storage-sqlite ───────────────────────────────────→ runtime-host
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
 apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
+apps/kite-service ─────────────────────────────────────────→ app-contract + local-runtime + client + server + protocol + contract
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
@@ -60,8 +61,8 @@ apps/kite-cli ──────────────────────
 `@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
 I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native
-出口：当前只冻结 descriptor/token/lock/lifecycle/raw credential codec、state-layout 和 connector interfaces，不实现
-listener、spawn、filesystem mutation、Store 或 Runtime composition。它不得依赖 Host、Server、Builtin、SQLite、UI 或
+出口：`./service`已经实现Native filesystem state/lock primitive，`./client`冻结descriptor/lifecycle/raw credential
+codec与connector interface；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
 任一 App source。
 
 KLSV1-03 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
@@ -78,7 +79,10 @@ Service-owned interaction broker持有durable generation/revision waiter；conne
 execution/release和Native first-run credential已经由exact client use case取代TUI direct repository/supervisor access；
 config、actual Skill、MCP runtime provider、shell/sandbox与observability仍按canonical Workspace在app-local owner组合。
 raw Runtime event/history projector与concrete bootstrap仍在`apps/kite-cli`内部，KLSV1-06才按relocation manifest迁移；
-本阶段没有`apps/kite-service` process、listener、公开SDK或默认双Host/Store。
+KLSV1-04新增private `apps/kite-service` shell、真实Native loopback carrier policy、state composition与App-private
+manager。Runtime Application、History与App Control仍通过required fake/in-process ports注入；普通入口尚未启动该
+process，唯一concrete Host/Store/bootstrap仍在`apps/kite-cli`。因此这不是第二composition root，不改变default Store
+owner，不公开`kite service *`，也没有KLSV1-05 connector、KLSV1-06 raw History relocation或默认双Host/Store。
 
 ## Runtime Kernel
 
@@ -204,7 +208,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
 - `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；
-- `check:runtime-packages`：十个 workspace、依赖图、exports、deep import、cycle 与唯一 composition authority；
+- `check:runtime-packages`：十三个 workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
 

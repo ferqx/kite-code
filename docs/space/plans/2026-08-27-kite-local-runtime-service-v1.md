@@ -1038,7 +1038,21 @@ Gate：Runtime Application/App Control 无 Ink/React/TUI reducer；CLI/TUI clien
 
 回滚：整体恢复原 InProcess composition；没有 listener/Store migration。
 
-### KLSV1-04：`apps/kite-service` shell 与 Native Service infrastructure
+### KLSV1-04：`apps/kite-service` shell 与 Native Service infrastructure（已完成）
+
+完成证据：新增private `@kite-ai/kite-service`，以required ports组合bounded lifecycle shell、真实
+`127.0.0.1:0` Native carrier、Native state/descriptor/token/目录锁、neutral env、internal executable与App-private
+manager；另有detached child fd3 readiness与conservative PID probe adapter。carrier固定access/control分离、30秒
+hash-only one-shot ticket、per-connection admission、History与10个exact App/Native use case、control stop及bounded
+frame/queue/heartbeat；manager串行ensure/status/stop/restart，descriptor/instance lock/PID/Protocol/client-contract/token/
+build identity exact，alive/uncertain spawn=0且dead-only stale cleanup，不kill、不从stdout读取readiness。
+
+Service owner suite为23 parallel tests加5个isolated文件（carrier 10、manager 27、Native adapter 2、Native process 1、
+infrastructure 2），`kite-local-runtime`为15 pass/1 Windows skip；13-workspace typecheck/build、runtime package graph
+（13 packages / 32 edges /唯一concrete composition `apps/kite-cli/src/bootstrap.ts`）、core/pre-release/test-ownership、
+docs-impact/docs均通过。当前Runtime/History/App Control仍由fake/in-process ports注入，默认Host/Store/raw History
+projector仍在CLI；没有public `kite service *`、KLSV1-05 connector、KLSV1-06 cutover、Web/Desktop/OS Service或
+三平台/release evidence。Windows state因缺verified ACL/reparse checker明确`unsupported`，留待KLSV1-07。
 
 交付：
 

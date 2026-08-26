@@ -41,10 +41,10 @@ function expectViolation(root: string, code: string): void {
 }
 
 describe('runtime workspace package gate', () => {
-  test('accepts the authoritative eleven-package and App graph', () => {
+  test('accepts the authoritative package and two-App graph', () => {
     const analysis = analyzeRuntimePackages(process.cwd());
     expect(analysis.violations).toEqual([]);
-    expect(analysis.packages).toHaveLength(12);
+    expect(analysis.packages).toHaveLength(13);
     expect(analysis.compositionRoots).toEqual(['apps/kite-cli/src/bootstrap.ts']);
   });
 
@@ -190,6 +190,18 @@ describe('runtime workspace package gate', () => {
       (value) => `import '@/core/runtime/store';\n${value}`,
     );
     expectViolation(root, 'CLIENT_RUNTIME_AUTHORITY_IMPORT');
+  });
+
+  test('rejects CLI, React, and Ink imports from the Runtime Service', () => {
+    for (const specifier of ['@kite-ai/kite-cli', '#kite-cli/bootstrap', 'react', 'ink']) {
+      const root = createFixture();
+      updateText(
+        root,
+        'apps/kite-service/src/index.ts',
+        (value) => `import '${specifier}';\n${value}`,
+      );
+      expectViolation(root, 'SERVICE_UI_OR_CLI_IMPORT');
+    }
   });
 
   test('rejects a Client import of the legacy implementation', () => {

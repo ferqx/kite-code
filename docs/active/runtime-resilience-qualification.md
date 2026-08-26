@@ -16,11 +16,13 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 
-Local Service client substrate 当前只固定 resilience contract：descriptor/lock/token/lifecycle/credential payload 必须 exact，
-Local connection 不携带 control token，reconnect 不自动重放 Runtime 或 App Control mutation，response 丢失收敛为
-`outcome_unknown → exact state query → explicit decision`。`kite-local-runtime` 尚未实现 filesystem、listener、spawn、
-ensure/stop state machine 或真实 reconnect，因此本段不构成 concurrent ensure、stale recovery、busy stop 或平台 process
-evidence；这些证据必须随 Service implementation 在 KLSV1-04/05/07 增加，不能用 codec unit test代替。
+Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
+重放。KLSV1-04已实现Native POSIX filesystem primitive、private loopback carrier、required-port shell与App-private
+ensure/status/stop/restart manager；focused tests覆盖20-way ensure、dead-only stale/orphan lock、descriptor publication
+window、busy/unknown stop、late start/gate settlement、ticket TTL/replay、wrong Host/Origin/token与frame/queue limits。
+这些测试使用isolated home与injected fake Runtime/History/App Control application，只证明本地infrastructure seam；它们
+不构成KLSV1-05真实connector/reconnect、KLSV1-06 default Store cutover或KLSV1-07 Windows/三平台process evidence。
+Windows state primitive当前明确`unsupported`，不能用POSIX unit test替代。
 
 KLSV1-03新增的本地InProcess evidence覆盖：一个真实Host/SQLite Store上的双connection/双Workspace与同Workspace
 多Session、重启后从persisted identity hydration、跨Workspace create/resume/query/subscribe/fork拒绝；context create/

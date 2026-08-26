@@ -188,6 +188,15 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-cli/src/carrier/runtime-server-stdio.ts')).toEqual([
       'kite-runtime-carriers',
     ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/shell.ts')).toEqual([
+      'kite-service-application',
+    ]);
+    expect(
+      triggeredRepositoryRules('apps/kite-service/src/carrier/native-loopback-carrier.ts'),
+    ).toEqual(['kite-service-carrier']);
+    expect(triggeredRepositoryRules('apps/kite-service/src/manager/manager.ts')).toEqual([
+      'kite-service-manager',
+    ]);
     expect(
       triggeredRepositoryRules('apps/kite-cli/src/runtime-client/presentation-history.ts'),
     ).toEqual(['kite-runtime-history']);
@@ -224,6 +233,7 @@ describe('documentation impact gate V2', () => {
       .map((entry) => join(repositoryRoot, 'packages', entry.name, 'src'));
     const sourceFiles = [
       join(repositoryRoot, 'apps', 'kite-cli', 'src'),
+      join(repositoryRoot, 'apps', 'kite-service', 'src'),
       ...packageSourceRoots,
     ].flatMap(collectFiles);
     const ownership = sourceFiles.map((file) => {

@@ -43,6 +43,10 @@ Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-cont
 `kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
 
+KLSV1-04 的private `apps/kite-service` production source使用三条互斥owner：application/shell与package manifest、
+`src/carrier/**`、`src/manager/**`。不得再添加覆盖整个Service source的generic通配规则；Native filesystem primitive
+仍由`kite-local-runtime-service-state`独占。代表路径测试固定验证每个生产文件只命中一个owner。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

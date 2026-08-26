@@ -58,6 +58,7 @@
         "@inkjs/ui": "^2.0.0",
         "@kite-ai/builtin-runtime": "workspace:*",
         "@kite-ai/kite-app-contract": "workspace:*",
+        "@kite-ai/kite-local-runtime": "workspace:*",
         "@kite-ai/runtime-client": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-host": "workspace:*",
@@ -76,6 +77,10 @@
         "string-width": "^8.2.0",
         "zod": "^4.3.6",
       },
+    },
+    "apps/kite-service": {
+      "name": "@kite-ai/kite-service",
+      "version": "0.0.0",
     },
     "packages/agent-kernel": {
       "name": "@kite-ai/agent-kernel",
@@ -239,6 +244,8 @@
     "@kite-ai/kite-cli": ["@kite-ai/kite-cli@workspace:apps/kite-cli"],
 
     "@kite-ai/kite-local-runtime": ["@kite-ai/kite-local-runtime@workspace:packages/kite-local-runtime"],
+
+    "@kite-ai/kite-service": ["@kite-ai/kite-service@workspace:apps/kite-service"],
 
     "@kite-ai/runtime-client": ["@kite-ai/runtime-client@workspace:packages/runtime-client"],
 

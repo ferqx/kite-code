@@ -26,6 +26,7 @@
       "@kite-ai/kite-cli/cli": ["./apps/kite-cli/src/cli/executable.ts"],
       "@kite-ai/kite-cli/tui": ["./apps/kite-cli/src/tui/executable.tsx"],
       "#kite-cli/*": ["./apps/kite-cli/src/*"],
+      "#kite-service/*": ["./apps/kite-service/src/*"],
       "@/*": ["./src/*"],
       "#agent-kernel": ["./packages/agent-kernel/src/index.ts"],
       "#builtin-runtime": ["./packages/builtin-runtime/src/index.ts"],

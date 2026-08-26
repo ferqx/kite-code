@@ -6,13 +6,15 @@
 Service descriptor、token、lock、lifecycle 与 native credential 的 exact codec，并为 CLI/native consumer
 提供窄的 Runtime、History 和 App Control connection contract。
 
-本阶段只交付 contract 与 state-layout primitive；不创建 listener、WebSocket/HTTP server、child process、OS
-service、Store、SQLite 或第二个 Runtime composition。
+`./service` 还提供受约束的 Native filesystem primitive；listener、WebSocket/HTTP server、child process与
+lifecycle manager仍由`apps/kite-service`拥有。本包不创建OS service、Store、SQLite或第二个Runtime composition。
 
 ## 拥有职责
 
-- `./service`：严格校验不含 secret/path/session 的 Service descriptor、lock identity、token material 与
-  lifecycle state；构造 canonical `userKiteCodeDir()/runtime-service/v1` state layout 接口。
+- `./service`：严格校验不含 secret/path/session 的Service descriptor、lock identity、token material与lifecycle
+  state；构造固定`userKiteCodeDir()/runtime-service/v1` layout；以no-follow、owner-only、bounded read、sibling
+  temp+fsync+atomic rename实现descriptor/token发布；以原子目录实现instance/lifecycle lock，并提供exact identity
+  cleanup和由App确认stale后调用的atomic quarantine primitive。
 - `./client`：定义 `LocalKiteConnection`、manager、Runtime/History/App Control transport interfaces，以及
   Native-only lifecycle 和 raw credential request/result codec。
 - 固定 client contract revision、Protocol V1 identity 与 loopback endpoint shape；拒绝未知字段、非 loopback
@@ -20,7 +22,8 @@ service、Store、SQLite 或第二个 Runtime composition。
 
 ## 不拥有职责
 
-- 不监听端口、不 spawn/管理进程、不实现 lifecycle state machine，不读取或删除 state files。
+- 不监听端口、不spawn/管理进程、不实现lifecycle/stale/PID state machine；只在App提供exact owner identity时读取、
+  发布或删除固定state entry，不自行判断健康、stale或kill进程。
 - 不依赖 Runtime Host、Runtime Server、Builtin Runtime、SQLite、React、Ink 或任何 `apps/*`。
 - 不把 control token 放进 `LocalKiteConnection`，不自动重试/重放 Runtime 或 App Control mutation；response
   丢失必须由调用方按 `outcome_unknown → exact state query → explicit decision` 处理。
@@ -45,6 +48,9 @@ service、Store、SQLite 或第二个 Runtime composition。
 - `access.token` 与 `control.token` 是不同的 restart-scoped material；connection contract 只能使用 access
   admission，stop/restart 由独立 manager 负责。
 - state layout 固定在 validated home 下的 `runtime-service/v1/`，不以请求 Workspace 或 cwd 推导 Service identity。
+- POSIX primitive验证owner UID与`0700`/`0600`边界、拒绝symlink/hardlink/type drift。当前Windows实现因尚无
+  verified current-user ACL/reparse checker而显式返回`unsupported`，不得把跳过ACL验证解释为成功；该平台资格
+  必须在KLSV1-07前补齐并由真实Windows evidence证明。
 
 ## 测试
 

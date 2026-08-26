@@ -1,5 +1,6 @@
 export * from './codecs';
 export * from './paths';
+export * from './state';
 
 export const KITE_LOCAL_RUNTIME_SERVICE_BOUNDARY_ = Object.freeze({
   nativeOnly: true,

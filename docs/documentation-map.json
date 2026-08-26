@@ -88,6 +88,53 @@
       ]
     },
     {
+      "id": "kite-service-application",
+      "sources": [
+        "apps/kite-service/package.json",
+        "apps/kite-service/src/index.ts",
+        "apps/kite-service/src/environment.ts",
+        "apps/kite-service/src/executable.ts",
+        "apps/kite-service/src/native-infrastructure.ts",
+        "apps/kite-service/src/ports.ts",
+        "apps/kite-service/src/readiness.ts",
+        "apps/kite-service/src/shell.ts",
+        "apps/kite-service/src/signals.ts"
+      ],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/service-state.md",
+        "apps/kite-service/docs/service-resilience.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-service-carrier",
+      "sources": ["apps/kite-service/src/carrier/**"],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/runtime-server-carrier.md",
+        "apps/kite-service/docs/service-auth.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/sqlite-runtime-log-query.md"
+      ]
+    },
+    {
+      "id": "kite-service-manager",
+      "sources": ["apps/kite-service/src/manager/**"],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/service-state.md",
+        "apps/kite-service/docs/service-resilience.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
       "id": "agent-kernel",
       "sources": ["packages/agent-kernel/src/**", "packages/agent-kernel/package.json"],
       "excludeSources": [

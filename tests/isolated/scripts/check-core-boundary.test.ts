@@ -173,6 +173,8 @@ describe('check-core-boundary', () => {
     const result = fixture({
       'apps/kite-cli/src/invalid.ts':
         "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
+      'apps/kite-service/src/invalid.ts':
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
       'packages/runtime-spi/src/invalid.ts':
         "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
       'scripts/invalid.ts':
@@ -181,7 +183,7 @@ describe('check-core-boundary', () => {
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();
     expect(stderr.match(/production source must not import test helper providers/g)?.length).toBe(
-      3,
+      4,
     );
   });
 
@@ -189,6 +191,7 @@ describe('check-core-boundary', () => {
     const result = fixture({
       'src/core/invalid.ts': 'export const invokeGovernedTool = true;\n',
       'apps/kite-cli/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
+      'apps/kite-service/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
       'packages/runtime-spi/src/invalid.ts': 'export const containsBrokeredGitInvocation = true;\n',
       'scripts/invalid.ts': 'export const invokeGovernedTool = true;\n',
     });
@@ -197,7 +200,7 @@ describe('check-core-boundary', () => {
       result.stderr
         .toString()
         .match(/retired Core Tool Runner symbols must not exist in production source/g)?.length,
-    ).toBe(4);
+    ).toBe(5);
   });
 
   test('rejects LocalFilesystemProvider imports of policy, Runtime authority, and App modules', () => {

@@ -38,8 +38,9 @@ operation gate统一Runtime与App Control mutation，quiesce阻止新admission�
 只有`apps/kite-cli/src/bootstrap.ts`组合Host、Server、Client、Store、carrier与local auth。TUI与foreground CLI仍只有
 `RuntimeClient → RuntimeServer → RuntimeAccess`一条production path；InProcess不是bypass。完整history独立走
 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite
-readonly reader`。当前没有独立Service、第二Host/Store或default dual owner；raw history projector仍留在CLI
-app-internal owner直到KLSV1-06。
+readonly reader`。KLSV1-04已有private Service shell、Native state/auth/carrier与App-private process manager，
+但Runtime Application/History/App Control仍由required fake/in-process ports注入；唯一concrete Host/Store仍在CLI。
+因此当前没有default Service owner、第二Host/Store或dual owner；raw history projector仍留在CLI直到KLSV1-06。
 
 本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
@@ -49,13 +50,14 @@ State、Store handle 和 settlement callback 仍禁止。该本地内容不进�
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
-Local Service 的预备 contract 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
+Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
 instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
 Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
-restart-scoped material，connection interface不取得 control token。当前只有 codec/state-layout/interface，没有 listener、
-file owner、process manager 或第二 Runtime composition；这些预备类型不能被解释为健康证明、Host fencing 或 persisted
-Project authority。
+restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`已拥有POSIX no-follow/
+owner-only filesystem primitive；`apps/kite-service`已拥有private loopback carrier、required-port shell与dead-only stale
+manager。descriptor、instance lock、initialize instance/Protocol/client-contract/PID必须exact；alive/uncertain不清理、
+不spawn且绝不kill。它们仍不能被解释为default Host fencing、Store correctness或persisted Project authority。
 
 ## Authority sequence
 

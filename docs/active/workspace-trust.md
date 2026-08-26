@@ -17,6 +17,10 @@ Workspace identity并执行revision CAS。conflict或lost response后只query一
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
 修改这些 action 接线不得把会话存储、RuntimeStore 或工具初始化上移到信任分支之前。
 
+KLSV1-04 的private Service carrier已经提供injected Workspace Trust query/decision与connect admission route；carrier
+对带Workspace的App request重新解析并比较完整identity，connect body本身不提升authority。当前真实trust store owner
+仍在`apps/kite-cli` app-local composition，Service tests只注入fake port；KLSV1-06前不得宣称owner已迁移。
+
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. 读取 `workspaceTrustPath()` 存储，`workspaceKey = canonicalWorkspaceKey(workspace)`（canonical realpath 的 sha256，与 MCP 项目批准复用同一摘要函数）命中记录 → 放行。

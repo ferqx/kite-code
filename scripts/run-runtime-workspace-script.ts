@@ -14,6 +14,7 @@ const WORKSPACES = [
   'packages/runtime-storage-sqlite',
   'packages/builtin-runtime',
   'apps/kite-cli',
+  'apps/kite-service',
 ] as const;
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);
