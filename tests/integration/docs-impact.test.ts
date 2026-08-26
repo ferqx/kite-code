@@ -197,6 +197,15 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-service/src/manager/manager.ts')).toEqual([
       'kite-service-manager',
     ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/process-harness/harness.ts')).toEqual([
+      'kite-service-process-harness',
+    ]);
+    expect(
+      triggeredRepositoryRules('packages/kite-local-runtime/src/client/native-connector.ts'),
+    ).toEqual(['kite-local-runtime-connector']);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/service-mode/adapter.ts')).toEqual([
+      'kite-service-mode-adapter',
+    ]);
     expect(
       triggeredRepositoryRules('apps/kite-cli/src/runtime-client/presentation-history.ts'),
     ).toEqual(['kite-runtime-history']);

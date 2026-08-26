@@ -48,6 +48,11 @@ foreground CLI；stdio 只作为 Desktop/test 父进程拥有的 reference child
 qualification checks；KRSV1-07/09 的三平台 PR 结果返回前，必须标记为 pending，不能把 workflow 定义或本地测试
 写成三平台通过或 production support evidence。
 
+KLSV1-05 Native connector/process harness只提供本机opt-in integration evidence：loopback WebSocket/HTTP、detached
+child、fd readiness与neutral environment均使用隔离home，普通TUI/CLI尚未切换，release manifest也未包含companion。
+当前Windows Service state因缺verified ACL/reparse checker明确`unsupported`；macOS本地结果不能推导Linux/Windows
+process support，更不能改变下方effectful execution空支持集。
+
 ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
 TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
 名称级 read/write deny；依赖该 native deny 的既有 qualification 模型不再可满足，当前三平台

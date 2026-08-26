@@ -18,7 +18,7 @@ process manager；它尚未拥有默认 Store 的 concrete Runtime Application�
 
 - KLSV1-04 不构造 Runtime Host、SQLite Store、Builtin Runtime、raw History projector、Workspace Trust repository、MCP Supervisor 或真实默认 Runtime backend；这些 surface 当前都通过 required fake/in-process ports 注入。
 - 不导入 `apps/kite-cli`、Ink、React、TUI reducer或 CLI parser，不复制 CLI backend，也不提供 fallback。
-- 不公开 `kite service *` 命令，不实现 KLSV1-05 connector/reconnect、KLSV1-06 default Store cutover、Web/Desktop、OS Service、public SDK、force stop或自动 updater。
+- 不公开 `kite service *` 命令，不拥有 KLSV1-05 connector、KLSV1-06 default Store cutover、Web/Desktop、OS Service、public SDK、force stop或自动 updater。
 
 ## 允许依赖
 
@@ -44,10 +44,14 @@ package 根入口只服务仓库内部 composition/test，导出 shell/ports、c
 - [Service state 与锁](docs/service-state.md)
 - [Service auth boundary](docs/service-auth.md)
 - [Service lifecycle 与恢复](docs/service-resilience.md)
+- [KLSV1-05 process harness](docs/process-harness.md)
 
 ## 测试
 
-`bun run --cwd apps/kite-service test`。当前测试使用injected fake Runtime/History/App Control application和隔离 Kite home；它证明KLSV1-04 infrastructure，不证明真实default Store composition、connector、三平台或release smoke。
+`bun run --cwd apps/kite-service test`。KLSV1-04 owner tests使用injected fake Runtime/History/App Control
+application和隔离Kite home验证shell/carrier/state/manager；KLSV1-05 process harness另以真实detached child、Native
+state/listener和外部connector验证Runtime/History/App Control transport。该evidence仍不证明真实default Store
+composition、进程重启后的fake Session持久恢复、三平台或release smoke。
 
 ## 文档影响
 

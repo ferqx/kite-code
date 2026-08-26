@@ -40,4 +40,10 @@ KLSV1-04 的private Service Native carrier已经实现三个exact History HTTP r
 `RuntimeHistoryClient` safe result；当前tests使用fake client。SQLite reader与raw event/history projector仍由
 `apps/kite-cli` concrete composition拥有，直到KLSV1-06 relocation；本阶段没有第二reader/writer或raw DTO复制。
 
+KLSV1-05的Native connector通过上述三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/
+transcript shape；transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。真实
+detached child integration证明同一fake process内client断开后第二client仍可读取已推进Session及完整History，但fake
+application只保存在进程内存，因此这不是Service重启后的SQLite恢复证据。SQLite reader、raw projector与唯一writer仍在
+`apps/kite-cli`，直到KLSV1-06 clean relocation。
+
 普通 Store 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。

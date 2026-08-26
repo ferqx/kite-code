@@ -1081,7 +1081,19 @@ closed；并发 ensure、crash publish windows、stale/PID race、stop/restart�
 
 回滚：删除未公开 Service workspace 与两个未 cutover package consumer；当前 InProcess production 不变。
 
-### KLSV1-05：Native Connector 与 Service transport integration
+### KLSV1-05：Native Connector 与 Service transport integration（已完成）
+
+完成证据（2026-08-27）：`kite-local-runtime/client`已组合exact descriptor/access discovery、one-shot ticket、
+Runtime WebSocket、三个History route、exact App Control与Native credential；HTTP响应绑定Service instance/identity
+generation，reconnect后旧instance迟到响应拒绝，History transcript复用closed `RuntimeClientEvent` validator。CLI新增
+opt-in typed connection view，client close不发Session cancel或Host dispose，close fault保持可观察且不重复不确定清理。
+未公开process harness以真实detached child、Native state/listener、Runtime/History/App Control socket验证restart identity、
+generation reset、完整History与client disconnect后Session继续可读；credential lost response单元与真实carrier证据均无
+自动重放。定向结果为connector 6 pass/27 expects、CLI adapter 4 pass/20 expects、process harness 5 pass/37 expects；
+完整`kite-local-runtime`为21 pass/1 Windows skip，Service owner suite为70 pass。stage前docs-impact/docs、13 workspace
+typecheck、runtime package 13 workspaces/32 edges、core/pre-release/test ownership与Biome均通过，唯一composition root仍是
+`apps/kite-cli/src/bootstrap.ts`。本Task没有default Service owner、真实Host/Store relocation、process-restart fake Session
+持久恢复、PTY release journey或三平台qualification；这些分别留给KLSV1-06/07。
 
 交付：
 

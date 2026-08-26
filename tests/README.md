@@ -58,7 +58,12 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 默认 workspace runner 当前覆盖十三个 workspace。`packages/kite-app-contract/test/` 验证 browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/` 验证 Native descriptor/token/lock/lifecycle/credential codec
 与Native filesystem state。`apps/kite-service/test/`另以injected fake application覆盖private loopback listener、
-shell、manager与isolated home；它不是default Store、connector/reconnect或三平台qualification evidence。
+shell、manager与isolated home；它不是default Store或三平台qualification evidence。
+
+KLSV1-05在`packages/kite-local-runtime/test/client-connector.test.ts`验证Native Runtime/History/App Control connector，
+`apps/kite-cli/test/service-mode/`验证opt-in presentation adapter，`apps/kite-service/test/isolated/process-harness/`
+使用isolated home与fake application运行真实detached child。它们不进入默认production bootstrap，也不代替三平台/
+release qualification。
 
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 

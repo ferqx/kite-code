@@ -42,6 +42,14 @@ readonly reader`。KLSV1-04已有private Service shell、Native state/auth/carri
 但Runtime Application/History/App Control仍由required fake/in-process ports注入；唯一concrete Host/Store仍在CLI。
 因此当前没有default Service owner、第二Host/Store或dual owner；raw history projector仍留在CLI直到KLSV1-06。
 
+KLSV1-05的Native connector只读取exact descriptor与access token，先取得Workspace-bound one-shot ticket，再组合
+Runtime WebSocket、三个History HTTP route与exact App Control/credential client；connection从不取得control token。
+每个HTTP请求绑定发起时的Service instance与connector identity generation，旧instance迟到响应在reconnect后拒绝；
+Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History transcript逐条复用closed
+`RuntimeClientEvent` validator，unknown或带额外字段的event不能跨Native边界。client close只释放本connection、
+subscription与snapshot state，不取消Session/Turn或dispose Host；当前adapter仍仅opt-in，default owner保持CLI
+InProcess composition。
+
 本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
 cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/authority material 仍过滤，raw RuntimeEvent、

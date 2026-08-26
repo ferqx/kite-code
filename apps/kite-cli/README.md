@@ -22,6 +22,9 @@
 - Workspace Trust、Provider/model、MCP、Skill、execution/release 与 first-run credential 已经通过 exact App Control
   或 Native credential client 进入 TUI。Config repository、MCP Supervisor、actual Skill manifest、Sandbox/Shell、
   observability 与 checkpoint composition 留在 app-local owner，不跨 TUI client seam。
+- `src/service-mode/`提供KLSV1-05 opt-in typed connection view，只暴露Native connection的Runtime/History/App Control/
+  credential/service status/snapshot generation并委托reconnect/close；它不读descriptor/token file、不启动Service、不发送cancel或
+  Host dispose，也不在connector失败时回退InProcess。普通production bootstrap仍未切换。
 
 ## 不拥有职责
 
@@ -32,8 +35,8 @@
 ## 允许依赖
 
 允许依赖 browser-safe App Contract、Native local-runtime contract、Runtime Client/Contract/Protocol/Server、SPI、
-Host、Builtin Runtime 与 SQLite adapter；不得直接依赖 `@kite-ai/agent-kernel`。当前 production 仍为 InProcess，
-Native package 尚未启动或连接独立 Service。
+Host、Builtin Runtime 与 SQLite adapter；不得直接依赖 `@kite-ai/agent-kernel`。当前 production 仍为 InProcess；
+Native connector与Service-mode adapter只由KLSV1-05 opt-in/process harness使用。
 
 ## 公开入口
 
@@ -56,6 +59,7 @@ Native package 尚未启动或连接独立 Service。
 - [TUI 系统测试](docs/tui-system-testing.md)
 - [Runtime Server carriers](docs/runtime-server-carrier.md)
 - [Runtime Application 与 App Control](docs/runtime-application.md)
+- [Opt-in Service mode](docs/service-mode.md)
 
 ## 测试
 

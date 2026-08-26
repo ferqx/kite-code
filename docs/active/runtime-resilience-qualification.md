@@ -21,16 +21,22 @@ Local Service contract要求descriptor/lock/token/lifecycle/credential exact，c
 ensure/status/stop/restart manager；focused tests覆盖20-way ensure、dead-only stale/orphan lock、descriptor publication
 window、busy/unknown stop、late start/gate settlement、ticket TTL/replay、wrong Host/Origin/token与frame/queue limits。
 这些测试使用isolated home与injected fake Runtime/History/App Control application，只证明本地infrastructure seam；它们
-不构成KLSV1-05真实connector/reconnect、KLSV1-06 default Store cutover或KLSV1-07 Windows/三平台process evidence。
+不构成KLSV1-06 default Store cutover或KLSV1-07 Windows/三平台process evidence。
 Windows state primitive当前明确`unsupported`，不能用POSIX unit test替代。
+
+KLSV1-05本地evidence新增Native connector与真实detached fake-application child：instance mismatch拒绝；restart后
+descriptor/access与index generation重建；旧Session readiness/ephemeral stream清空；replacement可用更低current
+revision重新ready；Runtime/完整History/App Control走真实socket；credential lost response不重放；client close后第二个
+client仍可读取已推进Session。CLI opt-in adapter失败原样返回，不silent fallback。这仍不是默认production owner、真实
+Host/Store process、PTY release journey或三平台qualification。
 
 KLSV1-03新增的本地InProcess evidence覆盖：一个真实Host/SQLite Store上的双connection/双Workspace与同Workspace
 多Session、重启后从persisted identity hydration、跨Workspace create/resume/query/subscribe/fork拒绝；context create/
 bind/close并发与完整identity race；settled interaction stale identity；operation gate quiesce/active barrier；App Control
 CAS、lost response与`outcome_unknown → query once → explicit decision`无重放；Server carrier/subscription close抛错时仍
 释放accounting；broker-backed interaction在展示client断开后由另一client继续settle。上述只证明当前本机
-app-local substrate，不是production Service process/reconnect或三平台release evidence，不能替代KLSV1-04/05/07的
-真实listener、process和hosted matrix。
+app-local substrate；KLSV1-04/05已另有本地listener、detached process与reconnect focused evidence，但这些结果仍不能
+替代KLSV1-07 formal hosted、三平台与release qualification matrix。
 
 本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
 

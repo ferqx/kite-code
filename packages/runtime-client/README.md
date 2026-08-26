@@ -35,8 +35,9 @@
 
 ## 公开入口
 
-只导出 package 根入口；具体 stdio/development carrier 仍由当前 App 拥有，后续 Native connector 由独立
-`kite-local-runtime/client` 组合本接口。Runtime Client 本身保持 transport-neutral。
+只导出 package 根入口；具体 stdio/development carrier 仍由当前 App 拥有，Native connector 已由独立
+`kite-local-runtime/client` 组合本接口。Runtime Client 本身保持 transport-neutral，并重新导出closed
+`assertRuntimeClientEvent` validator供Native History复用唯一client-safe event边界。
 
 ## 测试
 

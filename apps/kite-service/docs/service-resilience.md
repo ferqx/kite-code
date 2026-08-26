@@ -10,6 +10,9 @@ manager在process serial queue与cross-process lifecycle lock下执行。20 conc
 
 alive/uncertain PID、malformed state、identity drift、unknown stop outcome均fail closed且不spawn/cleanup/retry。restart只在Service已安全清除descriptor/token/instance lock后执行一次ensure；dead PID才允许stale cleanup。
 
-owner tests覆盖shell startup/stop/signal/fault、真实loopback安全矩阵、Native state、20-way ensure、orphan lock、descriptor publication window、dead/alive/uncertain、timeout、busy/unknown stop、restart与resolver。它们是本地isolated/fake evidence；没有真实default Host/Store、connector/reconnect、relocation、release smoke或三平台qualification。
+owner tests覆盖shell startup/stop/signal/fault、真实loopback安全矩阵、Native state、20-way ensure、orphan lock、descriptor publication window、dead/alive/uncertain、timeout、busy/unknown stop、restart与resolver。它们是本地isolated/fake evidence；没有真实default Host/Store、relocation、release smoke或三平台qualification。
+
+KLSV1-05另以未公开process harness启动真实detached child，并通过Native connector覆盖Runtime/History/App Control、
+restart identity、lost response no-replay与client close后Session继续。application仍是fake port，不改变default Store owner。
 
 验证：`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。

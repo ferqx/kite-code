@@ -15,8 +15,9 @@ lifecycle manager仍由`apps/kite-service`拥有。本包不创建OS service、S
   state；构造固定`userKiteCodeDir()/runtime-service/v1` layout；以no-follow、owner-only、bounded read、sibling
   temp+fsync+atomic rename实现descriptor/token发布；以原子目录实现instance/lifecycle lock，并提供exact identity
   cleanup和由App确认stale后调用的atomic quarantine primitive。
-- `./client`：定义 `LocalKiteConnection`、manager、Runtime/History/App Control transport interfaces，以及
-  Native-only lifecycle 和 raw credential request/result codec。
+- `./client`：实现strict descriptor/access discovery、one-shot ticket Runtime WebSocket、三个History HTTP route、
+  exact App Control/Native credential HTTP client与`LocalKiteConnection`；显式reconnect复用`RuntimeClient`的
+  generation reset/resubscribe，绝不自动重放mutation。manager/lifecycle control token仍留在App-private owner。
 - 固定 client contract revision、Protocol V1 identity 与 loopback endpoint shape；拒绝未知字段、非 loopback
   endpoint、secret-bearing descriptor 和不安全 JSON shape。
 
@@ -47,6 +48,8 @@ lifecycle manager仍由`apps/kite-service`拥有。本包不创建OS service、S
   path、credential 和 Session 字段 fail closed。
 - `access.token` 与 `control.token` 是不同的 restart-scoped material；connection contract 只能使用 access
   admission，stop/restart 由独立 manager 负责。
+- Runtime initialize 的instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation的Session
+  readiness/ephemeral stream，再以authoritative index reset接受replacement Service的当前revision。
 - state layout 固定在 validated home 下的 `runtime-service/v1/`，不以请求 Workspace 或 cwd 推导 Service identity。
 - POSIX primitive验证owner UID与`0700`/`0600`边界、拒绝symlink/hardlink/type drift。当前Windows实现因尚无
   verified current-user ACL/reparse checker而显式返回`unsupported`，不得把跳过ACL验证解释为成功；该平台资格

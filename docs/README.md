@@ -47,6 +47,10 @@ KLSV1-04 的private `apps/kite-service` production source使用三条互斥owner
 `src/carrier/**`、`src/manager/**`。不得再添加覆盖整个Service source的generic通配规则；Native filesystem primitive
 仍由`kite-local-runtime-service-state`独占。代表路径测试固定验证每个生产文件只命中一个owner。
 
+KLSV1-05又把Native connector、CLI opt-in Service-mode adapter与Service process harness分别放入独立source owner；
+它们从原generic package/App规则排除。process harness是未公开fake-application fixture，不能用其source满足真实
+composition或release authority。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

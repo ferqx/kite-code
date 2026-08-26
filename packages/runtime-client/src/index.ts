@@ -7,6 +7,8 @@ import type {
 } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 
+export { assertRuntimeClientEvent } from '@kite-ai/runtime-contract';
+
 export * from './client';
 export * from './store';
 

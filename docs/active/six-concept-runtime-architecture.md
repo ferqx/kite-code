@@ -62,7 +62,7 @@ apps/kite-service ────────────────────�
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
 I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native
 出口：`./service`已经实现Native filesystem state/lock primitive，`./client`冻结descriptor/lifecycle/raw credential
-codec与connector interface；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
+codec并实现Native connector；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
 任一 App source。
 
 KLSV1-03 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
@@ -82,7 +82,13 @@ raw Runtime event/history projector与concrete bootstrap仍在`apps/kite-cli`内
 KLSV1-04新增private `apps/kite-service` shell、真实Native loopback carrier policy、state composition与App-private
 manager。Runtime Application、History与App Control仍通过required fake/in-process ports注入；普通入口尚未启动该
 process，唯一concrete Host/Store/bootstrap仍在`apps/kite-cli`。因此这不是第二composition root，不改变default Store
-owner，不公开`kite service *`，也没有KLSV1-05 connector、KLSV1-06 raw History relocation或默认双Host/Store。
+owner，不公开`kite service *`，也没有KLSV1-06 raw History relocation或默认双Host/Store。
+
+KLSV1-05已实现`kite-local-runtime/client` Native connector、CLI opt-in typed Service-mode adapter与未公开真实child
+process harness。connector只读取descriptor/access token，通过one-shot ticket组合Runtime WebSocket、History与exact
+App Control，并复用`RuntimeClient` generation reset/resubscribe；CLI adapter不缓存第二份state，close不取消Session或
+dispose Host。process child仍注入fake application且使用isolated home，普通production bootstrap继续InProcess；因此
+唯一concrete composition root仍是`apps/kite-cli/src/bootstrap.ts`，没有app-to-app production import或silent fallback。
 
 ## Runtime Kernel
 

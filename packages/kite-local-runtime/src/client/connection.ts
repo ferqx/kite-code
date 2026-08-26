@@ -19,7 +19,12 @@ import type {
   NativeProviderCredentialResult,
 } from './codecs';
 
-export type LocalKiteConnectionStatus = 'connecting' | 'active' | 'reconnecting' | 'closed';
+export type LocalKiteConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'active'
+  | 'reconnecting'
+  | 'closed';
 
 /**
  * Native connection resources only. Control credentials and process handles deliberately do not
@@ -29,9 +34,14 @@ export interface LocalKiteConnection extends AsyncDisposable {
   readonly runtime: RuntimeClient;
   readonly history: RuntimeHistoryClient;
   readonly app: KiteAppControlClient;
+  /** Native-only provider credential route; it never returns the submitted secret. */
+  readonly credential: NativeProviderCredentialClient;
   readonly service: LocalRuntimeServiceDescriptor;
   readonly status: LocalKiteConnectionStatus;
   readonly generation: number;
+  /** The RuntimeClient snapshot is the only observable connection/index seam. */
+  readonly snapshotStore: RuntimeClient['snapshotStore'];
+  subscribe(listener: () => void): () => void;
   reconnect(): Promise<void>;
   close(reason?: string): Promise<void>;
 }
