@@ -26,6 +26,12 @@ import {
 } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
+const BOUNDED_SANDBOX_DIAGNOSTICS = ['sandbox-exec', 'bwrap', 'bubblewrap'] as const;
+type BoundedSandboxDiagnostic = (typeof BOUNDED_SANDBOX_DIAGNOSTICS)[number];
+type PlanningShellResult =
+  | { kind: 'workspace' }
+  | { kind: 'sandbox_exec_denied'; diagnostic: BoundedSandboxDiagnostic }
+  | { kind: 'sandbox_unavailable' };
 
 describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   const journey = createTuiSystemJourney();
@@ -33,7 +39,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
-  let planningShellResult: 'workspace' | 'sandbox_exec_denied' | 'sandbox_unavailable' | undefined;
+  let planningShellResult: PlanningShellResult | undefined;
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -113,7 +119,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           );
           const content = String(result?.content ?? '');
           if (content.includes(workspace.workspace)) {
-            planningShellResult = 'workspace';
+            planningShellResult = { kind: 'workspace' };
             return {
               expectedRequest: {
                 toolResults: [
@@ -130,14 +136,17 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
               message: { content: 'Validated commands inside the planning read-only baseline.' },
             };
           }
-          if (content.includes('sandbox-exec') && content.includes('Operation not permitted')) {
-            planningShellResult = 'sandbox_exec_denied';
+          const diagnostic = BOUNDED_SANDBOX_DIAGNOSTICS.find((candidate) =>
+            content.includes(candidate),
+          );
+          if (diagnostic && !content.includes(workspace.workspace)) {
+            planningShellResult = { kind: 'sandbox_exec_denied', diagnostic };
             return {
               expectedRequest: {
                 toolResults: [
                   {
                     toolCallId: 'call_plan_baseline_shell',
-                    contentIncludes: ['sandbox-exec', 'Operation not permitted'],
+                    contentIncludes: [diagnostic],
                     contentExcludes: [workspace.workspace],
                   },
                 ],
@@ -150,7 +159,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
             };
           }
           if (content.includes('This capability requires an available workspace sandbox.')) {
-            planningShellResult = 'sandbox_unavailable';
+            planningShellResult = { kind: 'sandbox_unavailable' };
             return {
               expectedRequest: {
                 toolResults: [
@@ -260,6 +269,8 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         15_000,
         25,
       );
+      const shellResult = planningShellResult;
+      if (!shellResult) throw new Error('Planning shell result was lost after readiness.');
 
       // The mock records the actual Tool outcome before responding. Stop this
       // policy probe at that boundary: it must neither wait for nor authorize
@@ -271,18 +282,20 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
       const output = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
-      if (planningShellResult === 'workspace') {
+      if (shellResult.kind === 'workspace') {
         expect(screenContains(output, 'Bash')).toBe(true);
         expect(
           screenContains(output, 'This capability requires an available workspace sandbox.'),
         ).toBe(false);
       } else {
         // The result contract above proves no host-shell fallback produced the
-        // workspace path. Local presentation now retains the bounded concrete
-        // sandbox diagnostic so the user can diagnose the failure directly.
+        // workspace path. The TUI must retain the same bounded backend
+        // diagnostic on every supported platform, without pinning the
+        // platform-specific errno wording.
         expect(screenContains(output, 'Sandbox execution was blocked.')).toBe(false);
-        expect(screenContains(output, 'Operation not permitted')).toBe(true);
-        expect(screenContains(output, 'sandbox-exec')).toBe(true);
+        if (shellResult.kind === 'sandbox_exec_denied') {
+          expect(screenContains(output, shellResult.diagnostic)).toBe(true);
+        }
         let persistedEvents: PersistedTurnEvent[] | undefined;
         await waitForCondition(
           () => {
@@ -294,7 +307,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                   event.type === 'tool.failed' ||
                   event.type === 'tool.rejected') &&
                 event.toolCallId === 'call_plan_baseline_shell' &&
-                (planningShellResult === 'sandbox_exec_denied' ||
+                (shellResult.kind === 'sandbox_exec_denied' ||
                   (typeof event.failure === 'object' &&
                     event.failure !== null &&
                     'kind' in event.failure &&
@@ -308,7 +321,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           20_000,
         );
         if (!persistedEvents) throw new Error('Persisted planning denial observation was lost.');
-        if (planningShellResult === 'sandbox_unavailable') {
+        if (shellResult.kind === 'sandbox_unavailable') {
           expect(
             persistedEvents.some(
               (event) =>

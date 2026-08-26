@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInitialAgentState } from '@kite-ai/agent-kernel';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
@@ -301,7 +302,7 @@ describe('Kite Runtime History Client adapter', () => {
   });
 
   test('forwards receipt-bearing deletion input through the App storage owner proxy', () => {
-    const directory = mkdtempSync(join('/private/tmp', 'kite-history-delete-'));
+    const directory = mkdtempSync(join(realpathSync(tmpdir()), 'kite-history-delete-'));
     const checkpointPath = join(directory, 'runtime.sqlite');
     const owner = createKiteRuntimeStorageOwner(checkpointPath);
     const receipt = createRuntimeStoredCommandReceipt(
