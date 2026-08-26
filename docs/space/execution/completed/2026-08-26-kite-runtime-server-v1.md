@@ -77,6 +77,22 @@ pure-summary settlement guard 时，真实 PTY 稳定复现回答后 `● Thinki
 34 pass / 0 fail / 430 assertions；TUI layout/reducer 为 295 pass / 0 fail，TUI harness 为 121 pass / 0 fail，
 全部 40 个隔离 PTY scenario files 通过。临时 Store 审计副本已删除，原 Store 未修改。
 
+后续真实 `curl -s --max-time 20 'https://wttr.in/?format=3&lang=zh'` 审批又暴露 development sandbox
+scope 回归：prepared consumer 把用户对 exact invocation 批准的 `network=allow_all` 错误映射成 production
+`network.allowlist` evidence；当前 backend 如实报告该 production 能力为 `unsupported`，于是批准后的命令仍在
+dispatch 前返回 `invalid_grant`。`d4bb0c17` 恢复 ADR-0082/ADR-0101 已接受的边界：POSIX 的受限
+filesystem/network-off scope 继续要求 `enforced` evidence，批准后的 development `allow_all` 则按该次 sealed grant
+执行，不能伪装或反推 production qualification。Windows 仍要求 approved network 与同次
+`filesystem=allow_all` 配对；exact command/grant/identity、expiry、durable lifecycle、backend digest、read-only
+冲突与独立 hard deny 均保持 fail closed，production support set/allowlist 仍为空且未扩大。
+
+回归覆盖同一条 weather command 在批准前零 dispatch、`approve_once` 后恰好一次 `networkMode=allow_all`
+dispatch；Provider/consumer matrix 同时验证 seatbelt、bubblewrap、Windows lower-assurance scope、evidence drift、
+read-only/full 冲突与零 replay。macOS 原生 Seatbelt smoke 为 32 pass，证明默认网络仍阻断而批准网络可到达本地
+HTTP endpoint；[Platform run 32985188902](https://github.com/ferqx/kite-code/actions/runs/32985188902) 的 macOS 15、
+Ubuntu 24.04、Windows 2025 全部通过。Windows 首轮只暴露测试把受控 `PATH` shell 前导误当 argv drift；
+`970c5e28` 将断言收紧为 payload 必须以 exact approved command 结尾，产品代码未再改变。
+
 ## 4. 本地最终验证
 
 | Gate | 结果 |
@@ -87,6 +103,7 @@ pure-summary settlement guard 时，真实 PTY 稳定复现回答后 `● Thinki
 | `bun run test:runtime:transport` | 3 pass / 852 assertions；InProcess、真实 stdio 与 development WebSocket 同矩阵 |
 | stdio / development WebSocket | 18 / 24 tests 全部通过 |
 | Runtime fault / soak | fault contract 35 pass / 1 platform-conditional skip；CI profile 7/7 cases |
+| approved sandbox scope | exact weather approval、prepared consumer/provider matrix 与 macOS native smoke 32 pass；Platform run 32985188902 三平台通过 |
 | docs/static | docs-impact(all/staged)、docs、core boundary、package/test ownership、pre-release architecture、compaction 与 diff/format Gate 通过 |
 | release | release tests 161 pass；本地 candidate build/verify/smoke 通过 |
 
