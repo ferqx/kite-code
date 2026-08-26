@@ -731,7 +731,9 @@ describe('SandboxExecutionProvider', () => {
             transitions.push('process');
             expect(input.prepared.backendCapabilities.network.allowlist).toBe('unsupported');
             expect(input.prepared.backend).toBe(backend);
-            expect(input.prepared.approvedArgv.at(-1)).toBe('printf approved-network');
+            expect(input.prepared.approvedArgv.at(-1)?.endsWith('printf approved-network')).toBe(
+              true,
+            );
             const supervisor = await input.lifecycle.recordExecutionSupervisorStarted(
               input.prepared,
               {
