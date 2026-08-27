@@ -206,9 +206,6 @@ export default function WorkspaceTrustGate({
             ))}
           </Box>
         ) : null}
-        <Box marginTop={1}>
-          <Text color={t.dim}>Trust status: {trustStatus}</Text>
-        </Box>
         {isError && errorMessage ? (
           <Box marginTop={1} flexDirection="column">
             <Text color={t.error}>{translate('trust.saveFailed')}</Text>

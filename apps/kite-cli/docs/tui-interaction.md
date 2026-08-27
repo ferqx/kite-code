@@ -27,7 +27,7 @@
   canonical Workspace及Service发现的exact external-read scope均被用户确认后才打开Runtime connection。TUI逐项显示
   safe snapshot中的canonical只读roots并把scope digest绑定到decision，不按命令名自行推断。scope/revision conflict会刷新
   snapshot并回到普通授权选项，用户再次确认即可继续；decline或真实unavailable时不发送Runtime initialize，
-  不以cwd或wire path绕过，也不回退embedded。
+  不以cwd或wire path绕过，也不回退embedded。Trust status枚举只用于内部路由，不作为用户可见状态行。
 - TUI exit、first-run、Workspace Trust与config error统一调用一个idempotent exit coordinator。退出只关闭client
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。

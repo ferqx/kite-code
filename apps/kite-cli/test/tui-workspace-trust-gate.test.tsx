@@ -106,7 +106,8 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
       />,
     );
 
-    await waitForFrameText(view.lastFrame, 'Trust status: unknown');
+    await waitForFrameText(view.lastFrame, '/canonical/primary/.git');
+    expect(view.lastFrame()).not.toContain('Trust status:');
     expect(view.lastFrame()).toContain('/canonical/primary/.git');
     expect(fixture.queryRequests).toEqual([
       { schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_, workspace: WORKSPACE },
@@ -167,7 +168,7 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
         }}
       />,
     );
-    await waitForFrameText(view.lastFrame, 'Trust status: unknown');
+    await waitForFrameText(view.lastFrame, '/canonical/primary/.git');
     view.stdin.write('\x1b[A');
     await waitForFrameText(view.lastFrame, '› Trust this workspace and continue');
     view.stdin.write('\r');
@@ -203,8 +204,9 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
     const view = render(
       <WorkspaceTrustGate workspace={WORKSPACE} appControl={fixture.client} onTrusted={() => {}} />,
     );
-    await waitForFrameText(view.lastFrame, `Trust status: ${status}`);
+    await waitForFrameText(view.lastFrame, 'Workspace trust needs attention');
     expect(view.lastFrame()).toContain('Workspace trust needs attention');
+    expect(view.lastFrame()).not.toContain('Trust status:');
     view.unmount();
   });
 

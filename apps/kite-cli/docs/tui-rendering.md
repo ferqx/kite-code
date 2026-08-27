@@ -31,7 +31,9 @@
   Trust snapshot含external-read scope时，Gate在Runtime连接前逐项显示canonical只读root，不能由TUI自行解析`.git`；
   mutation使用observed revision与scope digest匹配当前snapshot；scope/revision conflict会刷新snapshot并立即回到可授权
   状态，用户再次确认即可继续，不进入错误死路。只有真实unavailable才显示故障；只有trusted结果才允许
-  Native Runtime connect。ModelSelector identity固定为 `provider + name`，不读取raw config/API key。MCP endpoint只
+  Native Runtime connect。`trusted/unknown/corrupt/unavailable`是内部控制状态，不以`Trust status: ...`原始枚举渲染；
+  普通授权页只显示工作区、external roots与选择，真实故障只显示本地化错误。ModelSelector identity固定为
+  `provider + name`，不读取raw config/API key。MCP endpoint只
   显示origin，command只显示executable，TUI不从Service Supervisor或Repository补全被省略字段。
 - 动态MCP execution card固定显示closed `mcp:dynamic_tool` lifecycle label；raw
   `mcp__server__tool_hash`不能进入card或scrollback，具体工具名只由独立safe summary拥有。
