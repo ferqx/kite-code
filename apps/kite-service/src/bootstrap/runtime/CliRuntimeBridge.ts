@@ -615,6 +615,9 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     if (plan.rejectionCode) {
       return { kind: 'terminal', receipt: this.#rejected(command, plan.rejectionCode) };
     }
+    if (plan.events.length > 0 && !coordinator.commitCompactionCommandEvents) {
+      return { kind: 'terminal', receipt: this.#rejected(command, 'session_unavailable') };
+    }
     return {
       kind: 'accepted',
       decision: {
@@ -623,7 +626,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           let publishResult: ((notification: RuntimeNotification) => void) | undefined;
           const committed =
             plan.events.length > 0
-              ? coordinator.session.commitCommandBatch(plan.events, evidence)
+              ? coordinator.commitCompactionCommandEvents!(plan.events, evidence)
               : { receipt: coordinator.session.commitCommandSnapshot(evidence), events: [] };
           const receipt = receiptFromStored(committed.receipt);
           return {

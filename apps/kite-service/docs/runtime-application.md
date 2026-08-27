@@ -48,6 +48,8 @@ effect、active work与Turn continuation；合法response与receipt原子提交�
 single-use prepared execution重新调度。旧broker waiter只服务仍存活进程，disconnect或process death不使持久approval
 变成不可执行UI，也不能造成重复grant或重复Tool dispatch。每个durable event notification使用该event revision的真实
 post-event State投影完整queue；无法取得exact State时返回unavailable/不发布，绝不制造权威空queue。
+该规则同样覆盖manual compaction：command intent与effect terminal都通过Coordinator记录各自post-event State后才发布；
+不得直接写Session再让Bridge用batch最终State投影早期revision，否则activation必须fail closed且不能调度compaction。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation

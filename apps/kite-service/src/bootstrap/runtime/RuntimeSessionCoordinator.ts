@@ -22,7 +22,10 @@ import {
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { RuntimeCommandCommitEvidence } from '@kite-ai/runtime-host/storage';
+import type {
+  RuntimeCommandCommitEvidence,
+  RuntimeStoredCommandReceipt,
+} from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
 import type {
   InstalledKiteRuntimeComposition,
@@ -183,6 +186,14 @@ export interface RuntimeSessionCoordinator {
   commitInteractionCommand?(
     input: RuntimeInteractionCommandCommitInput,
   ): CommittedInteractionCommand;
+  /** Commits the inspected manual-compaction intent and retains each exact post-event State. */
+  commitCompactionCommandEvents?(
+    events: readonly RuntimeEvent[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): Readonly<{
+    receipt: RuntimeStoredCommandReceipt;
+    events: readonly RuntimeEvent[];
+  }>;
   executeTurn(
     input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
@@ -631,6 +642,20 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     return result;
   }
 
+  commitCompactionCommandEvents(
+    events: readonly RuntimeEvent[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): Readonly<{
+    receipt: RuntimeStoredCommandReceipt;
+    events: readonly RuntimeEvent[];
+  }> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitCommandBatch(events, evidence);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
   async *executeTurn(
     input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
@@ -751,6 +776,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         requiredEffectLease?: RuntimeEffectLeaseExpectation,
       ): Promise<boolean> => {
         if (terminalPersisted && events.some(isTerminalForThisCompaction)) return false;
+        const before = this.session.getState();
         const applied = this.session.applyEffectResult(
           lease,
           events,
@@ -763,6 +789,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
             : undefined,
         );
         if (applied) {
+          this.#recordLastAppliedEventRevisions(before);
           const appliedEvents = [...this.session.getLastAppliedEvents()];
           persistedDuringExecution.push(...appliedEvents);
           if (appliedEvents.some(isTerminalForThisCompaction)) terminalPersisted = true;
@@ -774,8 +801,12 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         getState: () => this.session.getState(),
         persistEvent: async (event) => {
           if (terminalPersisted && isTerminalForThisCompaction(event)) return false;
+          const before = this.session.getState();
           const applied = this.session.applyEffectEvent(lease, event);
-          if (applied && isTerminalForThisCompaction(event)) terminalPersisted = true;
+          if (applied) {
+            this.#recordLastAppliedEventRevisions(before);
+            if (isTerminalForThisCompaction(event)) terminalPersisted = true;
+          }
           return applied;
         },
         persistEvents,
@@ -784,7 +815,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       if (terminalPersisted && events.some(isTerminalForThisCompaction)) {
         return persistedDuringExecution;
       }
+      const before = this.session.getState();
       if (!this.session.applyEffectResult(lease, events)) return persistedDuringExecution;
+      this.#recordLastAppliedEventRevisions(before);
       const appliedEvents = [...this.session.getLastAppliedEvents()];
       return [...persistedDuringExecution, ...appliedEvents];
     } finally {
