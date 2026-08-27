@@ -14,8 +14,9 @@ directory fsync与strict readback。symlink、hardlink、type、owner、permissi
 Windows调用fixed system PowerShell，以current-user SID建立protected DACL，只保留该SID的FullControl；目录与文件在创建
 后收紧权限，所有敏感读取、替换、锁操作与cleanup重新验证owner、DACL、non-inherited rules与non-reparse identity。
 composition接管explicit home时先验证non-link与current owner，再把home本身收紧为owner-only；任一既有state entry的
-ACL/reparse drift仍fail closed，不自动修复descriptor、token或lock。每次verifier使用fixed executable、minimal OS runtime
-environment与30秒单次上限；timeout同样按permission failure处理，不放宽访问。
+ACL/reparse drift仍fail closed，不自动修复descriptor、token或lock。每次verifier使用fixed executable、pure .NET
+filesystem/ACL API、minimal OS runtime environment与30秒单次上限，不依赖PowerShell cmdlet module auto-load；timeout同样
+按permission failure处理，不放宽访问。
 
 child持有`instance.lock`，manager以`lifecycle.lock`串行ensure/status/stop/restart。lock、PID与descriptor都不是单独健康
 证明；manager还必须验证`/readyz`和authenticated process-owned instance handshake。alive/uncertain owner一律保留state且

@@ -56,8 +56,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 - state identity来自explicit validated home，不从request Workspace/cwd推导。POSIX验证owner UID与`0700`/`0600`并拒绝
   symlink/hardlink/type drift；Windows通过fixed system PowerShell校验current-user SID、protected owner-only DACL与
   non-reparse file/directory。explicit home先验证non-link/current owner再收紧权限；state创建时收紧ACL，后续每次敏感
-  读取、替换与清理都重新验证，既有state ACL/reparse drift fail closed。verifier使用minimal OS runtime environment与
-  30秒单次上限，timeout不授权访问。
+  读取、替换与清理都重新验证，既有state ACL/reparse drift fail closed。verifier使用pure .NET filesystem/ACL API、
+  minimal OS runtime environment与30秒单次上限，不依赖cmdlet module auto-load；timeout不授权访问。
 
 ## 测试与 evidence
 

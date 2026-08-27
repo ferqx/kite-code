@@ -221,8 +221,11 @@ test.skipIf(process.platform !== 'win32')(
 function grantWindowsWorldRead(path: string): void {
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
   const script = `
-$path = $env:KITE_WINDOWS_STATE_TEST_PATH | ConvertFrom-Json
-$acl = Get-Acl -LiteralPath $path
+$path = [Text.Encoding]::Unicode.GetString(
+  [Convert]::FromBase64String($env:KITE_WINDOWS_STATE_TEST_PATH_B64)
+)
+$item = [IO.FileInfo]::new($path)
+$acl = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::All)
 $world = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
 $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
   $world,
@@ -230,7 +233,7 @@ $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
   [System.Security.AccessControl.AccessControlType]::Allow
 )
 [void]$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
+$item.SetAccessControl($acl)
 `;
   const result = spawnSync(
     join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
@@ -246,7 +249,7 @@ Set-Acl -LiteralPath $path -AclObject $acl
       timeout: 10_000,
       env: {
         ...process.env,
-        KITE_WINDOWS_STATE_TEST_PATH: JSON.stringify(path),
+        KITE_WINDOWS_STATE_TEST_PATH_B64: Buffer.from(path, 'utf16le').toString('base64'),
       },
     },
   );

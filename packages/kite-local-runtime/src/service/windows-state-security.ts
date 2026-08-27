@@ -4,22 +4,29 @@ import { join } from 'node:path';
 const WINDOWS_STATE_SECURITY_TIMEOUT_MS = 30_000;
 
 const WINDOWS_STATE_SECURITY_SCRIPT = `
-$path = $env:KITE_WINDOWS_STATE_PATH | ConvertFrom-Json
+$path = [Text.Encoding]::Unicode.GetString(
+  [Convert]::FromBase64String($env:KITE_WINDOWS_STATE_PATH_B64)
+)
 $kind = $env:KITE_WINDOWS_STATE_KIND
 $action = $env:KITE_WINDOWS_STATE_ACTION
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 
 function Read-KiteStateItem {
-  $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 41 }
-  if ($kind -eq 'directory' -and -not $item.PSIsContainer) { exit 42 }
-  if ($kind -eq 'file' -and $item.PSIsContainer) { exit 42 }
-  return $item
+  $attributes = [IO.File]::GetAttributes($path)
+  if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 41 }
+  if ($kind -eq 'directory') {
+    if (-not [IO.Directory]::Exists($path) -or [IO.File]::Exists($path)) { exit 42 }
+    return [IO.DirectoryInfo]::new($path)
+  }
+  if (-not [IO.File]::Exists($path) -or [IO.Directory]::Exists($path)) { exit 42 }
+  return [IO.FileInfo]::new($path)
 }
 
 $item = Read-KiteStateItem
 if ($action -eq 'secure') {
-  $existingAcl = Get-Acl -LiteralPath $path -ErrorAction Stop
+  $existingAcl = $item.GetAccessControl(
+    [System.Security.AccessControl.AccessControlSections]::All
+  )
   $existingOwner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
   if ($existingOwner.Value -ne $identity.Value) { exit 44 }
   if ($kind -eq 'directory') {
@@ -41,15 +48,19 @@ if ($action -eq 'secure') {
     [System.Security.AccessControl.AccessControlType]::Allow
   )
   [void]$acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $path -AclObject $acl -ErrorAction Stop
+  $item.SetAccessControl($acl)
 }
 
 $item = Read-KiteStateItem
-$acl = Get-Acl -LiteralPath $path -ErrorAction Stop
+$acl = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::All)
 if (-not $acl.AreAccessRulesProtected) { exit 43 }
 $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
 if ($owner.Value -ne $identity.Value) { exit 44 }
-$rules = @($acl.Access)
+$rules = $acl.GetAccessRules(
+  $true,
+  $true,
+  [System.Security.Principal.SecurityIdentifier]
+)
 if ($rules.Count -eq 0) { exit 45 }
 foreach ($rule in $rules) {
   $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
@@ -98,7 +109,7 @@ function runWindowsStateSecurity(
         PSModulePath: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
         KITE_WINDOWS_STATE_ACTION: action,
         KITE_WINDOWS_STATE_KIND: kind,
-        KITE_WINDOWS_STATE_PATH: JSON.stringify(path),
+        KITE_WINDOWS_STATE_PATH_B64: Buffer.from(path, 'utf16le').toString('base64'),
       },
     },
   );
