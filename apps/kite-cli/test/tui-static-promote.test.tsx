@@ -101,9 +101,9 @@ function SplitHarness({ blocks, running }: { blocks: OutputBlock[]; running: boo
 }
 
 describe('isBlockSettledInRun', () => {
-  test('finished non-exploration tool card stays in the live turn', () => {
+  test('finished non-exploration tool card is settled', () => {
     const blocks = [toolBlock(1, 'done') as OutputBlock, textBlock(2, 'answer')];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
   });
 
   test('running tool card is NOT settled', () => {
@@ -121,19 +121,19 @@ describe('isBlockSettledInRun', () => {
     expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
   });
 
-  test('finished text followed by non-text stays in the live turn', () => {
+  test('finished text followed by non-text is settled', () => {
     const blocks = [textBlock(1, 'done'), toolBlock(2, 'done') as OutputBlock];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
   });
 
-  test('finished text followed by another text stays in the live turn', () => {
+  test('finished text followed by another text is settled as an append-only prefix', () => {
     const blocks = [textBlock(1, 'a'), textBlock(2, 'b')];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
   });
 
-  test('finished text as the latest block stays dynamic until a successor arrives', () => {
+  test('finished text as last block is settled while an unfinished tail stays outside state', () => {
     const blocks = [textBlock(1, 'a'), textBlock(2, 'b')];
-    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(false);
+    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(true);
   });
 
   test('keeps only mutable text in the dynamic suffix of a long streamed answer', () => {
@@ -151,10 +151,8 @@ describe('isBlockSettledInRun', () => {
       split += 1;
     }
 
-    expect(blocks.slice(0, split)).toHaveLength(1);
-    expect(blocks.slice(split).map((block) => block.id)).toEqual(
-      Array.from({ length: 101 }, (_, index) => index + 2),
-    );
+    expect(blocks.slice(0, split)).toHaveLength(101);
+    expect(blocks.slice(split).map((block) => block.id)).toEqual([102]);
   });
 
   test('a newly submitted user block stays dynamic until a following block arrives', () => {
@@ -185,7 +183,7 @@ describe('isBlockSettledInRun', () => {
     while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
       split += 1;
     }
-    expect(split).toBe(0);
+    expect(split).toBe(blocks.length);
   });
 
   test('holds an early concurrent child out of Static until every sibling settles', () => {
@@ -199,9 +197,9 @@ describe('isBlockSettledInRun', () => {
     const settled = blocks.map((block) =>
       block.kind === 'subagent' ? { ...block, status: 'done' as const } : block,
     );
-    expect(isBlockSettledInRun(settled[0]!, settled, 0)).toBe(false);
-    expect(isBlockSettledInRun(settled[1]!, settled, 1)).toBe(false);
-    expect(isBlockSettledInRun(settled[2]!, settled, 2)).toBe(false);
+    expect(isBlockSettledInRun(settled[0]!, settled, 0)).toBe(true);
+    expect(isBlockSettledInRun(settled[1]!, settled, 1)).toBe(true);
+    expect(isBlockSettledInRun(settled[2]!, settled, 2)).toBe(true);
   });
 
   test('resolved approval is settled and cannot pin later answer text', () => {
@@ -231,7 +229,7 @@ describe('isBlockSettledInRun', () => {
     while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
       split += 1;
     }
-    expect(split).toBe(0);
+    expect(split).toBe(blocks.length);
   });
 
   test('active tool_summary is NOT settled', () => {
@@ -264,8 +262,8 @@ describe('isBlockSettledInRun', () => {
       },
       textBlock(2, 'complete answer'),
     ];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
-    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(true);
   });
 });
 
@@ -302,7 +300,7 @@ describe('promotion does not duplicate output', () => {
     expect(view.lastFrame()).toContain('static:1;dynamic:2');
   });
 
-  test('keeps the real dynamic sibling group single while it settles in the same mount', () => {
+  test('promotes the real dynamic sibling group to one Static item in the same mount', () => {
     const early: OutputBlock[] = [
       subagentBlock(1, 'done', 'batch-1'),
       subagentBlock(2, 'running', 'batch-1'),

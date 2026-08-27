@@ -38,6 +38,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       return {
         ...state,
         currentModelRequestId: event.requestId,
+        currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
         currentModelReasoningSegmentId: undefined,
         currentModelReasoningText: undefined,
@@ -199,6 +200,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         running: false,
         exited: true,
         currentModelRequestId: undefined,
+        currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
         currentModelReasoningRequestId: undefined,
       };
@@ -231,6 +233,202 @@ function appendFinalOnce(state: TuiState, summary: string): TuiState {
 }
 
 type ModelTextBlock = Extract<OutputBlock, { kind: 'text' }>;
+
+const TABLE_PIPE_ = /[|│]/u;
+
+function isTableSeparatorLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length > 0 && TABLE_PIPE_.test(trimmed) && /^[\s\-:|─━┼╿]+$/u.test(trimmed);
+}
+
+function isTableRowLike(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.length > 0 &&
+    TABLE_PIPE_.test(trimmed) &&
+    (/^[|│]/u.test(trimmed) || /[|│]$/u.test(trimmed) || isTableSeparatorLine(trimmed))
+  );
+}
+
+/**
+ * ADR-0045/0046 streaming commit boundary. Ordinary text stays hidden until
+ * a complete paragraph/list item is proven. Recognized code/table shells may
+ * stay as the one mutable structural component, but only complete child rows
+ * enter that component.
+ */
+function splitStreamingMarkdown(content: string): {
+  committed: string;
+  live?: { kind: 'code' | 'table'; content: string };
+} {
+  let inFence = false;
+  let boundary = -1;
+  let lineStart = 0;
+  let previousListItemStart = -1;
+  let listItemIndent = -1;
+
+  while (lineStart < content.length) {
+    const newlineIndex = content.indexOf('\n', lineStart);
+    const lineEnd = newlineIndex < 0 ? content.length : newlineIndex;
+    const line = content.slice(lineStart, lineEnd);
+    if (/^\s*```/u.test(line)) inFence = !inFence;
+
+    if (!inFence) {
+      const listMatch = line.match(/^(\s*)(?:[-+*]|\d+[.)])\s+\S/u);
+      if (listMatch) {
+        const indent = listMatch[1]!.length;
+        if (previousListItemStart < 0 || indent < listItemIndent) {
+          previousListItemStart = lineStart;
+          listItemIndent = indent;
+        } else if (indent === listItemIndent) {
+          boundary = lineStart;
+          previousListItemStart = lineStart;
+        }
+      } else if (line.trim().length === 0) {
+        previousListItemStart = -1;
+        listItemIndent = -1;
+        if (lineEnd + 1 < content.length) boundary = lineEnd + 1;
+      } else if (/^\S/u.test(line) && previousListItemStart >= 0) {
+        boundary = lineStart;
+        previousListItemStart = -1;
+        listItemIndent = -1;
+      }
+    }
+    if (newlineIndex < 0) break;
+    lineStart = lineEnd + 1;
+  }
+
+  if (boundary > 0) return { committed: content.slice(0, boundary) };
+
+  const lines = content.split('\n');
+  if (/^\s*```/u.test(lines[0] ?? '')) {
+    const closingIndex = lines.findIndex((line, index) => index > 0 && /^\s*```\s*$/u.test(line));
+    if (closingIndex >= 0) {
+      return { committed: lines.slice(0, closingIndex + 1).join('\n') };
+    }
+    const completeEnd = content.lastIndexOf('\n') + 1;
+    if (completeEnd > 0) {
+      return {
+        committed: '',
+        live: { kind: 'code', content: content.slice(0, completeEnd) },
+      };
+    }
+  }
+
+  const completeEnd = content.lastIndexOf('\n') + 1;
+  const completeLines =
+    completeEnd > 0 ? content.slice(0, completeEnd).split('\n').slice(0, -1) : [];
+  if (
+    completeLines.length >= 2 &&
+    isTableRowLike(completeLines[0] ?? '') &&
+    isTableSeparatorLine(completeLines[1] ?? '')
+  ) {
+    return {
+      committed: '',
+      live: { kind: 'table', content: content.slice(0, completeEnd) },
+    };
+  }
+
+  return { committed: '' };
+}
+
+function modelTextBlocks(state: TuiState, requestId: string): ModelTextBlock[] {
+  return (state.turns.at(-1)?.blocks ?? []).filter(
+    (block): block is ModelTextBlock => block.kind === 'text' && block.modelRequestId === requestId,
+  );
+}
+
+function renderedModelTextSource(state: TuiState, requestId: string): string {
+  return modelTextBlocks(state, requestId)
+    .filter((block) => block.streamingSource === undefined)
+    .map((block) => block.content)
+    .join('');
+}
+
+function removeStreamingModelComponent(state: TuiState, requestId: string): TuiState {
+  const turn = state.turns.at(-1);
+  if (!turn) return state;
+  const blocks = turn.blocks.filter(
+    (block) =>
+      block.kind !== 'text' ||
+      block.modelRequestId !== requestId ||
+      block.streamingComponent === undefined,
+  );
+  if (blocks.length === turn.blocks.length) return state;
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks };
+  return { ...state, turns };
+}
+
+function showStreamingModelComponent(
+  state: TuiState,
+  requestId: string,
+  source: string,
+  live: { kind: 'code' | 'table'; content: string },
+): TuiState {
+  const pending = modelTextBlocks(state, requestId).find(
+    (block) => block.streamingComponent !== undefined,
+  );
+  if (pending) {
+    if (pending.content === live.content && pending.streamingSource === source) return state;
+    return replaceBlockById(state, pending.id, {
+      ...pending,
+      content: live.content,
+      streaming: true,
+      streamingComponent: live.kind,
+      streamingSource: source,
+    });
+  }
+  return appendBlock(state, {
+    id: state.nextBlockId,
+    kind: 'text',
+    content: live.content,
+    streaming: true,
+    streamingComponent: live.kind,
+    streamingSource: source,
+    modelRequestId: requestId,
+  });
+}
+
+function prepareThoughtForCommittedText(
+  state: TuiState,
+  requestId: string,
+): {
+  state: TuiState;
+  responsePending?: true;
+  thoughtContent?: string;
+  thoughtElapsedMs?: number;
+} {
+  const summary = findSummaryById(state, state.currentThoughtSummaryId);
+  if (!summary) {
+    return {
+      state,
+      ...(state.currentModelReasoningRequestId === undefined ? { responsePending: true } : {}),
+    };
+  }
+  if (summary.tools.length > 0) {
+    return {
+      state: {
+        ...replaceBlockById(state, summary.id, settledSummary(summary)),
+        currentThoughtSummaryId: undefined,
+      },
+    };
+  }
+  const timelineThought = [...(summary.timeline ?? [])]
+    .reverse()
+    .find((entry) => entry.kind === 'thinking')?.text;
+  return {
+    state: {
+      ...removeBlockById(state, summary.id),
+      currentThoughtSummaryId: undefined,
+    },
+    thoughtElapsedMs: summary.modelMs ?? summary.totalElapsedMs,
+    ...(state.currentModelReasoningRequestId === requestId && state.currentModelReasoningText
+      ? { thoughtContent: state.currentModelReasoningText }
+      : timelineThought
+        ? { thoughtContent: timelineThought }
+        : {}),
+  };
+}
 
 function findModelAnswerText(state: TuiState, requestId: string): ModelTextBlock | undefined {
   const blocks = state.turns.at(-1)?.blocks;
@@ -321,6 +519,75 @@ function mergeCumulativeText(previous: string | undefined, next: string): string
   return `${previous}${next}`;
 }
 
+function removeModelTextBlocks(state: TuiState, requestId: string): TuiState {
+  const turns = state.turns.map((turn) => ({
+    blocks: turn.blocks.filter(
+      (block) => block.kind !== 'text' || block.modelRequestId !== requestId,
+    ),
+  }));
+  return { ...state, turns };
+}
+
+function reconcileStreamedModelText(
+  state: TuiState,
+  event: Extract<RuntimeClientEvent, { type: 'model.responded' }>,
+): TuiState {
+  let next = removeStreamingModelComponent(state, event.requestId);
+  const rendered = modelTextBlocks(next, event.requestId).map((block) => block.content);
+  const summary = event.summary;
+  if (summary === undefined || !/\S/u.test(summary)) return next;
+  const joined = rendered.join('');
+  if (joined === summary || rendered.join('\n') === summary) return next;
+
+  if (summary.startsWith(joined)) {
+    const remainder = summary.slice(joined.length);
+    if (remainder.length === 0) return next;
+    return appendBlock(next, {
+      id: next.nextBlockId,
+      kind: 'text',
+      content: remainder,
+      streaming: false,
+      modelRequestId: event.requestId,
+    });
+  }
+
+  // The model gateway normally prefix-fences retries. If a terminal response
+  // still diverges, replace the mutable projection before it can be frozen;
+  // never splice a new suffix onto a mismatched Markdown document.
+  next = removeModelTextBlocks(next, event.requestId);
+  return appendBlock(next, {
+    id: next.nextBlockId,
+    kind: 'text',
+    content: summary,
+    streaming: false,
+    modelRequestId: event.requestId,
+  });
+}
+
+function annotateFirstModelText(
+  state: TuiState,
+  event: Extract<RuntimeClientEvent, { type: 'model.responded' }>,
+  input: { thoughtContent?: string; thoughtElapsedMs?: number },
+): TuiState {
+  const first = modelTextBlocks(state, event.requestId)[0];
+  if (!first) return state;
+  return replaceBlockById(state, first.id, {
+    ...first,
+    streaming: false,
+    responsePending: undefined,
+    modelRequestId: event.requestId,
+    ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
+    ...(input.thoughtElapsedMs === undefined
+      ? first.thoughtElapsedMs === undefined &&
+        first.thoughtContent !== undefined &&
+        event.durationMs !== undefined
+        ? { thoughtElapsedMs: event.durationMs }
+        : {}
+      : { thoughtElapsedMs: input.thoughtElapsedMs }),
+    ...(input.thoughtContent === undefined ? {} : { thoughtContent: input.thoughtContent }),
+  });
+}
+
 function projectReasoningActivity(
   state: TuiState,
   event: Extract<RuntimeClientEvent, { type: 'reasoning.activity' }>,
@@ -390,40 +657,57 @@ function projectModelTextDelta(
   state: TuiState,
   event: Extract<RuntimeClientEvent, { type: 'model.text_delta' }>,
 ): TuiState {
-  const { text } = event;
-  if (!/\S/u.test(text)) return state;
-  const ownedAnswer = findModelAnswerText(state, event.requestId);
-  if (ownedAnswer) {
-    if (!ownedAnswer.streaming) return state;
-    const next = replaceBlockById(state, ownedAnswer.id, {
-      ...ownedAnswer,
-      content: mergeCumulativeText(ownedAnswer.content, text),
-    });
-    return { ...next, thoughtPhaseStatus: 'awaiting_terminal' };
+  if (
+    state.currentModelRequestId !== undefined &&
+    state.currentModelRequestId !== event.requestId &&
+    modelTextBlocks(state, event.requestId).length === 0
+  ) {
+    return state;
   }
-  const last = state.turns.at(-1)?.blocks.at(-1);
-  // Ephemeral delivery may cross a durable terminal at the Client pump. A
-  // cumulative delta identical to the already-finalized tail is the same
-  // model fact, not a second assistant paragraph.
-  if (last?.kind === 'text' && !last.streaming && last.content === text) return state;
-  // ADR-0036: streamed assistant text is a sibling block after Thought. It
-  // never becomes a caption, including when durable model.responded has
-  // already declared tools. Completed reasoning owns the `└─` activity
-  // window; a following exploration tool may replace that window, but normal
-  // assistant text remains on the message timeline.
-  const next = handleEventAction(awaitSafeThoughtTerminal(state), {
-    type: 'text',
-    data: { text, streamingDelta: true },
-  });
-  const answer = next.turns.at(-1)?.blocks.at(-1);
-  if (answer?.kind !== 'text') return next;
-  return {
-    ...replaceBlockById(next, answer.id, {
-      ...answer,
-      modelRequestId: event.requestId,
-    }),
-    thoughtPhaseStatus: 'awaiting_terminal',
+
+  const streamed = {
+    ...awaitSafeThoughtTerminal(state),
+    currentModelTextStreamed: true as const,
   };
+  const renderedSource = renderedModelTextSource(streamed, event.requestId);
+  if (!event.text.startsWith(renderedSource)) {
+    // Retry visibility is prefix-fenced by the model gateway. A stale or
+    // divergent ephemeral packet cannot rewrite already committed output;
+    // the durable terminal remains the authoritative reconciliation point.
+    return streamed;
+  }
+  const unpublishedSource = event.text.slice(renderedSource.length);
+  if (unpublishedSource.length === 0) return streamed;
+  const { committed, live } = splitStreamingMarkdown(unpublishedSource);
+
+  if (!committed) {
+    if (!live) return streamed;
+    return {
+      ...showStreamingModelComponent(
+        awaitSafeThoughtTerminal(streamed),
+        event.requestId,
+        unpublishedSource,
+        live,
+      ),
+      thoughtPhaseStatus: 'awaiting_terminal',
+    };
+  }
+
+  const withoutLive = removeStreamingModelComponent(streamed, event.requestId);
+  const prepared = prepareThoughtForCommittedText(withoutLive, event.requestId);
+  const next = appendBlock(prepared.state, {
+    id: prepared.state.nextBlockId,
+    kind: 'text',
+    content: committed,
+    streaming: false,
+    modelRequestId: event.requestId,
+    ...(prepared.responsePending === true ? { responsePending: true } : {}),
+    ...(prepared.thoughtElapsedMs === undefined
+      ? {}
+      : { thoughtElapsedMs: prepared.thoughtElapsedMs }),
+    ...(prepared.thoughtContent === undefined ? {} : { thoughtContent: prepared.thoughtContent }),
+  });
+  return { ...next, thoughtPhaseStatus: 'awaiting_terminal' };
 }
 
 function settledSummary(
@@ -495,6 +779,7 @@ function clearCompletedModelState(state: TuiState, requestId: string): TuiState 
   return {
     ...state,
     thoughtPhaseStatus: undefined,
+    currentModelTextStreamed: undefined,
     ...(ownsCurrentRequest ? { currentModelRequestId: undefined } : {}),
     ...(state.toolBearingModelRequestId === requestId
       ? { toolBearingModelRequestId: undefined }
@@ -526,6 +811,56 @@ function projectModelResponded(
     return state;
   }
   let next = addSafeThoughtDuration(state, event.durationMs);
+  if (state.currentModelTextStreamed === true) {
+    next = reconcileStreamedModelText(next, event);
+    const current = findSummaryById(next, next.currentThoughtSummaryId);
+
+    if (event.toolCallCount > 0) {
+      const settled = settleCurrentThought(next);
+      return {
+        ...settled,
+        currentModelRequestId: undefined,
+        currentModelTextStreamed: undefined,
+        toolBearingModelRequestId: event.requestId,
+        thoughtPhaseStatus: 'running',
+      };
+    }
+
+    let completed = next;
+    if (current?.tools.length === 0) {
+      completed = {
+        ...removeBlockById(completed, current.id),
+        currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
+      };
+      completed = annotateFirstModelText(completed, event, {
+        thoughtElapsedMs: current.modelMs ?? current.totalElapsedMs,
+        ...(state.currentModelReasoningRequestId === event.requestId &&
+        state.currentModelReasoningText
+          ? { thoughtContent: state.currentModelReasoningText }
+          : {}),
+      });
+    } else {
+      completed = settleCurrentThought(completed);
+      completed = annotateFirstModelText(
+        completed,
+        event,
+        current?.tools.length
+          ? {}
+          : {
+              ...(state.currentModelReasoningRequestId === event.requestId &&
+              state.currentModelReasoningText
+                ? { thoughtContent: state.currentModelReasoningText }
+                : {}),
+              ...(state.currentModelReasoningRequestId === event.requestId &&
+              event.durationMs !== undefined
+                ? { thoughtElapsedMs: event.durationMs }
+                : {}),
+            },
+      );
+    }
+    return clearCompletedModelState(completed, event.requestId);
+  }
   const streamedAnswer = existingAnswer ?? findModelAnswerText(next, event.requestId);
   if (streamedAnswer && event.toolCallCount === 0) {
     const current = findSummaryById(next, next.currentThoughtSummaryId);
@@ -611,6 +946,7 @@ function settleUserCancelledTerminal(state: TuiState): TuiState {
     running: false,
     exited: false,
     currentModelRequestId: undefined,
+    currentModelTextStreamed: undefined,
     toolBearingModelRequestId: undefined,
     currentModelReasoningSegmentId: undefined,
     currentModelReasoningStreamed: false,
@@ -621,7 +957,13 @@ function settleUserCancelledTerminal(state: TuiState): TuiState {
 
 function settleTerminal(state: TuiState, summary: string | undefined, finalRun: boolean): TuiState {
   const current = findSummaryById(state, state.currentThoughtSummaryId);
-  const terminalRequestId = current?.modelRequestId ?? state.currentModelRequestId;
+  const lastModelTextRequestId = [...(state.turns.at(-1)?.blocks ?? [])]
+    .reverse()
+    .find((block) => block.kind === 'text' && block.modelRequestId !== undefined);
+  const terminalRequestId =
+    current?.modelRequestId ??
+    state.currentModelRequestId ??
+    (lastModelTextRequestId?.kind === 'text' ? lastModelTextRequestId.modelRequestId : undefined);
   const pendingCaption = current?.pendingCaption;
   const sameCumulativeAnswer =
     pendingCaption !== undefined &&
@@ -633,7 +975,13 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
         sameCumulativeAnswer ? mergeCumulativeText(pendingCaption, summary!) : pendingCaption,
       )
     : settleCurrentThought(state);
-  let next = summary === undefined ? settled : appendFinalOnce(settled, summary);
+  const ownedText = terminalRequestId ? modelTextBlocks(settled, terminalRequestId) : [];
+  const alreadyRendered =
+    summary !== undefined &&
+    ownedText.length > 0 &&
+    (ownedText.map((block) => block.content).join('') === summary ||
+      ownedText.map((block) => block.content).join('\n') === summary);
+  let next = summary === undefined || alreadyRendered ? settled : appendFinalOnce(settled, summary);
   const answer = next.turns.at(-1)?.blocks.at(-1);
   if (answer?.kind === 'text' && terminalRequestId !== undefined) {
     next = replaceBlockById(next, answer.id, {
@@ -647,6 +995,7 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
         running: false,
         exited: true,
         currentModelRequestId: undefined,
+        currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
       }
     : next;

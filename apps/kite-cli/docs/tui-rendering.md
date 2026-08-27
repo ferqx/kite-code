@@ -69,7 +69,8 @@
   sibling，不能因到达顺序被吸收进 Thought caption。
 - TUI reducer只消费canonical framed client events，不按InProcess、Native Service或carrier分支渲染。Service在投影前
   以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
-  durable边界与Turn结束前先flush。数据源切换不得改变文本的既有 Markdown 完整块/行提交语义，也不得把同一阶段的
+  durable边界与Turn结束前先flush。数据源切换不得改变文本的既有 Markdown 提交语义：普通文本按完整段落、
+  列表按完整 item、已识别代码/表格组件按完整内部行推进；不得把普通文本拆成逐行消息块，也不得把同一阶段的
   Thinking移到独立dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
   terminal或interaction事件；整轮完成后的单次flush不能替代这个事件间屏障。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
@@ -79,7 +80,8 @@
   两者不得同时显示 `Thinking`。
 - 非流式兼容路径的多个 caption 继续按既有 Markdown 渲染与间距规则显示；流式 `model.text_delta` 不进入该路径。
   settled Thinking 摘要（无论是否包含工具）与独立回答保持正常消息块间距；文本内部仍使用既有 Markdown
-  完整组件与逐行提交逻辑，不由 Thought 聚合器重新分段。
+  段落/组件提交器，不由 Thought 聚合器重新分段。已提交的段落、item 或完整结构组件是 append-only 前缀，
+  立即进入 Static；只有尚未闭合的代码/表格结构组件留在 dynamic。
 
 ## 软换行与光标
 

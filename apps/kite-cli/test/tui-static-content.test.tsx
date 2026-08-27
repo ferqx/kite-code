@@ -65,14 +65,14 @@ describe('useStaticContent session remount promotion', () => {
     expect(frame).toContain('dynamic=0');
   });
 
-  test('running session keeps the live tail dynamic after remount', async () => {
+  test('running session promotes completed blocks inside the live tail after remount', async () => {
     const turns = [makeTurn([1, 2], 'text'), makeTurn([3, 4], 'text')];
     const { lastFrame } = render(
       React.createElement(Harness, { turns, running: true, sessionKey: 9 }),
     );
     const frame = lastFrame();
-    expect(frame).toContain('static=2');
-    expect(frame).toContain('dynamic=2');
+    expect(frame).toContain('static=4');
+    expect(frame).toContain('dynamic=0');
   });
 
   test('running session keeps only the mutable live component dynamic after remount', async () => {
@@ -83,9 +83,9 @@ describe('useStaticContent session remount promotion', () => {
       React.createElement(Harness, { turns, running: true, sessionKey: 10 }),
     );
     const frame = lastFrame();
-    expect(frame).toContain('static=2');
-    expect(frame).toContain('dynamic=2');
-    expect(frame).toContain('dynamicIds=3,4');
+    expect(frame).toContain('static=3');
+    expect(frame).toContain('dynamic=1');
+    expect(frame).toContain('dynamicIds=4');
   });
 
   test('changes the Static identity when the presentation language changes', () => {

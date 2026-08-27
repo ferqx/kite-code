@@ -52,10 +52,24 @@ describe('closed RuntimeClientEvent reducer', () => {
     });
     state = eventReducer(state, {
       type: 'RUNTIME_EVENT',
+      event: { type: 'model.requested', requestId: 'request-safe-facts' },
+    });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
       event: {
         type: 'model.text_delta',
         requestId: 'request-safe-facts',
         text: 'I will inspect the contract.',
+      },
+    });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'model.responded',
+        requestId: 'request-safe-facts',
+        messageId: 'message-safe-facts',
+        toolCallCount: 1,
+        summary: 'I will inspect the contract.',
       },
     });
     state = eventReducer(state, {
@@ -588,19 +602,14 @@ describe('closed RuntimeClientEvent reducer', () => {
       dispatch(event);
     }
 
-    // The first visible answer closes its content-free Thought immediately
-    // and remains a sibling text block. Streaming text is never a caption.
+    // The first delta closes the visible Thought immediately, but the
+    // incomplete paragraph remains hidden until another component boundary
+    // or the terminal response proves it complete.
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
       expect.objectContaining({
         kind: 'tool_summary',
         active: false,
         responsePending: true,
-        modelRequestId: requestId,
-      }),
-      expect.objectContaining({
-        kind: 'text',
-        content: answer,
-        streaming: true,
         modelRequestId: requestId,
       }),
     ]);
@@ -633,12 +642,6 @@ describe('closed RuntimeClientEvent reducer', () => {
         kind: 'tool_summary',
         active: false,
         responsePending: true,
-        modelRequestId: requestId,
-      }),
-      expect.objectContaining({
-        kind: 'text',
-        content: answer,
-        streaming: true,
         modelRequestId: requestId,
       }),
     ]);
@@ -677,6 +680,141 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(
       blocks.filter((block) => block.kind === 'text' && block.content === answer),
     ).toHaveLength(1);
+  });
+
+  test('commits cumulative model text as immutable paragraph components', () => {
+    const requestId = 'request-component-commit';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    };
+
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({ type: 'model.text_delta', requestId, text: 'First paragraph' });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(0);
+
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: 'First paragraph\n\nS',
+    });
+    let textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks).toEqual([
+      expect.objectContaining({
+        content: 'First paragraph\n\n',
+        streaming: false,
+        modelRequestId: requestId,
+      }),
+    ]);
+    const committedFirst = textBlocks[0];
+
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: 'First paragraph\n\nSecond paragraph\n\nT',
+    });
+    textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks).toHaveLength(2);
+    expect(textBlocks[0]).toBe(committedFirst);
+    expect(textBlocks.map((block) => block.content)).toEqual([
+      'First paragraph\n\n',
+      'Second paragraph\n\n',
+    ]);
+
+    dispatch({
+      type: 'model.responded',
+      requestId,
+      messageId: 'message-component-commit',
+      toolCallCount: 0,
+      summary: 'First paragraph\n\nSecond paragraph\n\nTail.',
+    });
+    textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks.map((block) => block.content)).toEqual([
+      'First paragraph\n\n',
+      'Second paragraph\n\n',
+      'Tail.',
+    ]);
+    expect(textBlocks.every((block) => block.streaming !== true)).toBe(true);
+  });
+
+  test('keeps one mutable structural component and commits it only when closed', () => {
+    const requestId = 'request-structural-commit';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    };
+
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: '```ts\nconst complete = true;\nconst unfinished',
+    });
+    let textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks).toEqual([
+      expect.objectContaining({
+        content: '```ts\nconst complete = true;\n',
+        streaming: true,
+        streamingComponent: 'code',
+        streamingSource: '```ts\nconst complete = true;\nconst unfinished',
+      }),
+    ]);
+
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: '```ts\nconst complete = true;\nconst unfinished = false;\n```',
+    });
+    textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks).toEqual([
+      expect.objectContaining({
+        content: '```ts\nconst complete = true;\nconst unfinished = false;\n```',
+        streaming: false,
+      }),
+    ]);
+    expect(textBlocks[0]?.streamingComponent).toBeUndefined();
+    expect(textBlocks[0]?.streamingSource).toBeUndefined();
+  });
+
+  test('commits streaming lists one complete item at a time', () => {
+    const requestId = 'request-list-items';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    };
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({ type: 'model.text_delta', requestId, text: '- first item\n- second' });
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: '- first item\n- second item\n- third',
+    });
+    dispatch({
+      type: 'model.responded',
+      requestId,
+      messageId: 'message-list-items',
+      toolCallCount: 0,
+      summary: '- first item\n- second item\n- third item',
+    });
+
+    const textBlocks = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(textBlocks.map((block) => block.content)).toEqual([
+      '- first item\n',
+      '- second item\n',
+      '- third item',
+    ]);
   });
 
   test('keeps streamed narration outside Thought when its terminal declares tools', () => {

@@ -27,6 +27,7 @@
 // stable refs, so references are constant between genuine state transitions.
 
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
+import { isExplorationTool } from '../reducers/consolidateTools';
 import type { OutputBlock, Turn } from '../types';
 
 export { changePrefix } from '../components/BlockRenderer';
@@ -42,17 +43,74 @@ const HEADER_SENTINEL = { __header: true } as const;
  * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
  * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
  *
- * 当前 turn 中只有 user prompt 在出现后续 block 后可以进入 Static；它从创建起
- * 就不可变，且输入 PTY 回归证明交接不会重复。其他 block 都曾在 dynamic tree
- * 中经历流式或 lifecycle 更新，迁入 append-only Static 会在真实终端 scrollback
- * 再打印一次。它们等下一 turn 使整个旧 turn 成为 history 后再统一冻结。
+ * - user：永不修改；但作为当前 turn 唯一 block 时暂留 dynamic，避免提交长消息时
+ *   立即触发 Static/dynamic 交接清屏。首个后续 block 到达后再提升。
+ * - text：只有活动结构组件或待终态调和的块不稳定。Runtime delta 路径把完整
+ *   Markdown 段落/组件追加为新的 immutable text block；已经提交的相邻 text 是
+ *   append-only 前缀，必须立即冻结。
+ * - tool_card：只有终态稳定；探索工具仍可能被聚合为 tool_summary，必须留在动态树。
+ * - 其余生命周期块只在其 exact terminal 条件满足后冻结。
  */
 export function isBlockSettledInRun(
   block: OutputBlock,
   _blocks: OutputBlock[],
   _index: number,
 ): boolean {
-  return block.kind === 'user' && _index < _blocks.length - 1;
+  switch (block.kind) {
+    case 'user':
+      return _index < _blocks.length - 1;
+    case 'text':
+      return (
+        !block.streaming &&
+        !block.responsePending &&
+        block.streamingSource === undefined &&
+        block.streamingComponent === undefined
+      );
+    case 'tool_card':
+      return (
+        (block.status === 'done' ||
+          block.status === 'error' ||
+          block.status === 'cancelled' ||
+          block.status === 'timeout' ||
+          block.status === 'exhausted') &&
+        !isExplorationTool(block)
+      );
+    case 'tool_summary':
+      return (
+        !block.active &&
+        !block.responsePending &&
+        block.tools.every(
+          (tool) =>
+            tool.status === 'done' ||
+            tool.status === 'error' ||
+            tool.status === 'cancelled' ||
+            tool.status === 'timeout' ||
+            tool.status === 'exhausted',
+        )
+      );
+    case 'reason':
+    case 'file_change':
+      return true;
+    case 'subagent': {
+      const terminal = (candidate: Extract<OutputBlock, { kind: 'subagent' }>) =>
+        candidate.status === 'done' ||
+        candidate.status === 'error' ||
+        candidate.status === 'cancelled';
+      if (!terminal(block)) return false;
+      if (block.concurrencyGroupId === undefined) return true;
+      return _blocks.every(
+        (candidate) =>
+          candidate.kind !== 'subagent' ||
+          candidate.concurrencyGroupId !== block.concurrencyGroupId ||
+          terminal(candidate),
+      );
+    }
+    case 'approval':
+    case 'question':
+      return block.resolved !== undefined;
+    default:
+      return false;
+  }
 }
 
 /**

@@ -348,8 +348,12 @@ export interface TuiState {
   thoughtPhaseStatus?: 'running' | 'awaiting_terminal';
   /** Current model invocation, used to scope streamed terminal reconciliation. */
   currentModelRequestId?: string;
-  /** Most recently settled tool-bearing invocation. Its delayed cumulative
-   *  narration still belongs to the active exploration summary. */
+  /** The current invocation emitted cumulative text deltas. The visible tree
+   *  may still be empty while an incomplete paragraph remains buffered. */
+  currentModelTextStreamed?: boolean;
+  /** Most recently settled tool-bearing invocation. Delayed cumulative text
+   *  remains correlated to its sibling response components without becoming
+   *  a Thought caption. */
   toolBearingModelRequestId?: string;
   /** Whether the current model invocation has emitted at least one reasoning delta. */
   currentModelReasoningStreamed?: boolean;
