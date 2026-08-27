@@ -48,7 +48,8 @@
 - 一个文件内按具名 step 串行执行，不跨文件共享 Session 或进程 authority。
 - 断言以可见 VT buffer、canonical Runtime/TUI projection 和持久副作用证据为准，不依赖固定 sleep。
 - Thought journey 必须覆盖 durable terminal 与 ephemeral delta 的允许乱序、reasoning completion 的 Server
-  presentation route、连续探索工具聚合、caption 紧凑行距，以及 viewport 与原生 scrollback 都不重复；
+  presentation route、reasoning delta 完成前不可见、completed 后以 `└─` 原子显示、后续 read/search 活动覆盖
+  reasoning，以及流式文本始终作为独立 sibling block；viewport 与原生 scrollback 都不得重复；
   mock Provider 可用 `stream_frame_order: 'content_first'` 构造正文先于 reasoning 的真实 SSE 乱序，
   或用 `stream_frame_sequence` 与 `stream_frame_delays` 精确构造
   `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning

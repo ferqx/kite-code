@@ -128,7 +128,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   });
 
   test(
-    'real-session replay keeps one Thought aggregation with confirmed captions',
+    'real-session replay keeps streamed narration outside Thought activity',
     async () => {
       toolSeq = 0;
       const response1Calls = [
@@ -224,12 +224,23 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const clean = stripAnsi(output);
 
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, 'read 30 files')).toBe(true);
+      expect(screenContains(output, 'read 30 files')).toBe(false);
+      expect(screenContains(output, 'read 6 files')).toBe(true);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
-      expect(tui.scrollback().match(/Thinking /g) ?? []).toHaveLength(1);
+      expect(tui.scrollback().match(/Thinking /g)?.length ?? 0).toBeGreaterThan(1);
       expect(screenContains(output, 'Let me continue reading')).toBe(false);
       expect(screenContains(output, 'Let me read the core files systematically.')).toBe(true);
+      expect(screenContains(output, '继续读取其余关键文件：')).toBe(true);
+      expect(screenContains(output, '现在让我看完剩下的关键组件和 hooks：')).toBe(true);
       expect(screenContains(output, 'StatsLine.ts')).toBe(false);
+
+      const lines = clean.split('\n').map((line) => line.trim());
+      const firstNarration = lines.indexOf('Let me read the core files systematically.');
+      const secondNarration = lines.indexOf('继续读取其余关键文件：');
+      const thirdNarration = lines.indexOf('现在让我看完剩下的关键组件和 hooks：');
+      expect(firstNarration).toBeGreaterThan(-1);
+      expect(secondNarration).toBeGreaterThan(firstNarration);
+      expect(thirdNarration).toBeGreaterThan(secondNarration);
 
       // ── 2. 最终回答作为独立文本块 ──
       expect(screenContains(output, '── TUI 模块全面解析 ──')).toBe(true);

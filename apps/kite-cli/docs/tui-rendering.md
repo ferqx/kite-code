@@ -55,30 +55,31 @@
   结算该 tool started 后新建的 exploration summary。若 durable final text 先于 completed reasoning 到达，
   且文本紧邻该 exploration summary，reasoning 仍回填同一 summary。live 与同一 Session 的 `/resume` replay
   都必须把 `searched N ...` 与后续 `Thinking` 组装为一个题头，不能要求创建新会话规避乱序。
-- reasoning segment、旁白 caption、探索工具与模型调用跨多个 request 仍进入一个阶段块。streaming delta
-  只缓存，completed reasoning 才更新活动窗口；第一条文本使块进入 `awaiting_terminal`，terminal 声明后续
-  工具时重新激活并由 started 确认 caption，否则文本脱离为最终回答。同一 request 出现
+- reasoning segment、非流式旁白 caption、探索工具与模型调用跨多个 request 仍可进入一个阶段块。reasoning
+  streaming delta 只缓存，completed reasoning 才把完整内容一次性放入 `└─` 活动窗口；后续 read/search 等
+  工具活动在同一窗口覆盖 reasoning，下一段 completed reasoning 又可覆盖工具活动。第一条流式文本使块进入
+  `awaiting_terminal`，并始终作为 Thought 后的独立 sibling 文本块；terminal 即使声明后续工具，也不得把该文本
+  回收成 caption。后续 started 工具在文本之后建立新的探索活动块。同一 request 出现
   `reasoning prefix → visible text → reasoning suffix` 时，prefix 只可在正文前的活动窗口显示；正文首帧必须
   关闭纯 reasoning summary，后到的 reasoning 只能补充回答的隐藏 Thought metadata，不能把答案留作 caption、
   重新显示原始 reasoning 或恢复活动圆点。live 与 history replay 共用该状态机。
 - reasoning delta/completed 都是无 State revision 的 ephemeral presentation fact，Server composition 必须按原序
   交给 client sink，不能把 completed 误送 durable revision sink。durable `model.responded(toolCallCount>0)` 可以
-  先于同一回复的累计 text delta 抵达；该迟到 narration 仍属于当前活跃阶段，不得关闭 Thought、重复 caption
-  或迫使后续探索工具另建 summary。
+  先于同一回复的累计 text delta 抵达；TUI 仍按 request identity 去重，但迟到的流式 narration 必须保持普通文本
+  sibling，不能因到达顺序被吸收进 Thought caption。
 - TUI reducer只消费canonical framed client events，不按InProcess、Native Service或carrier分支渲染。Service在投影前
   以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
-  durable边界与Turn结束前先flush。数据源切换不得把累计packet拆成多个回答block，也不得把同一阶段的Thinking移到
-  独立dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
+  durable边界与Turn结束前先flush。数据源切换不得改变文本的既有 Markdown 完整块/行提交语义，也不得把同一阶段的
+  Thinking移到独立dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
   terminal或interaction事件；整轮完成后的单次flush不能替代这个事件间屏障。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
-- 同一阶段内的多个 caption 按事件顺序作为稳定Markdown sibling逐项渲染；新增pending caption只更新尾项，不能把
-  全部caption先拼成一个会整体重绘的paragraph节点。Thinking题头与首个caption直接相邻、无额外空行，caption之间
-  同样紧凑；单条caption自身的Markdown段落间距仍保留。settled Thinking摘要（无论是否包含工具）与真正独立的最终
-  回答之间固定保留一行，不得把caption视觉上拆成第二个Thought/回答区域。
+- 非流式兼容路径的多个 caption 继续按既有 Markdown 渲染与间距规则显示；流式 `model.text_delta` 不进入该路径。
+  settled Thinking 摘要（无论是否包含工具）与独立回答保持正常消息块间距；文本内部仍使用既有 Markdown
+  完整组件与逐行提交逻辑，不由 Thought 聚合器重新分段。
 
 ## 软换行与光标
 

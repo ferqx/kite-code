@@ -588,15 +588,19 @@ describe('closed RuntimeClientEvent reducer', () => {
       dispatch(event);
     }
 
-    // The first visible answer closes its content-free Thought immediately.
-    // The pending caption remains correlated until model.responded tells us
-    // whether it is a final answer or tool-bearing narration.
+    // The first visible answer closes its content-free Thought immediately
+    // and remains a sibling text block. Streaming text is never a caption.
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
       expect.objectContaining({
         kind: 'tool_summary',
         active: false,
         responsePending: true,
-        pendingCaption: answer,
+        modelRequestId: requestId,
+      }),
+      expect.objectContaining({
+        kind: 'text',
+        content: answer,
+        streaming: true,
         modelRequestId: requestId,
       }),
     ]);
@@ -629,7 +633,12 @@ describe('closed RuntimeClientEvent reducer', () => {
         kind: 'tool_summary',
         active: false,
         responsePending: true,
-        pendingCaption: answer,
+        modelRequestId: requestId,
+      }),
+      expect.objectContaining({
+        kind: 'text',
+        content: answer,
+        streaming: true,
         modelRequestId: requestId,
       }),
     ]);
@@ -670,7 +679,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ).toHaveLength(1);
   });
 
-  test('reactivates a pending caption when its terminal declares tools', () => {
+  test('keeps streamed narration outside Thought when its terminal declares tools', () => {
     const requestId = 'request-content-before-tool-terminal';
     const caption = 'Checking the matching files now.';
     let state = createInitialState();
@@ -710,15 +719,22 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks).toEqual([
       expect.objectContaining({
         kind: 'tool_summary',
-        active: true,
+        active: false,
         responsePending: false,
         modelRequestId: requestId,
-        captions: [caption],
-        pendingCaption: undefined,
+        tools: [],
+      }),
+      expect.objectContaining({
+        kind: 'text',
+        content: caption,
+        modelRequestId: requestId,
+      }),
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: true,
         summaryLine: 'searched 1 file pattern',
       }),
     ]);
-    expect(blocks.some((block) => block.kind === 'text')).toBe(false);
   });
 
   test('keeps standalone tools hidden until started, then closes the active Thought before its named card', () => {
@@ -940,7 +956,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
-  test('keeps one phase through reasoning, reads, narration, and a final answer', () => {
+  test('keeps streamed narration between the completed Thought and later exploration', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
       eventReducer(state, { type: 'RUNTIME_EVENT', event });
     let state = dispatch(createInitialState(), {
@@ -950,7 +966,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       segmentId: 'reasoning-1',
       text: 'Inspecting',
     });
-    let summary = state.turns
+    const summary = state.turns
       .flatMap((turn) => turn.blocks)
       .find((block) => block.kind === 'tool_summary');
     expect(summary?.kind === 'tool_summary' ? summary.latestActivity : undefined).toBeUndefined();
@@ -984,12 +1000,21 @@ describe('closed RuntimeClientEvent reducer', () => {
       toolCallCount: 1,
       summary: 'I found the first part; checking one more file.',
     });
-    summary = state.turns
-      .flatMap((turn) => turn.blocks)
-      .find((block) => block.kind === 'tool_summary');
-    expect(summary).toEqual(
-      expect.objectContaining({ active: true, pendingCaption: expect.any(String) }),
-    );
+    let blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: false,
+        responsePending: false,
+        tools: [expect.objectContaining({ callId: 'read-1' })],
+      }),
+      expect.objectContaining({
+        kind: 'text',
+        content: 'I found the first part; checking one more file.',
+        streaming: false,
+        modelRequestId: 'request-1',
+      }),
+    ]);
 
     state = dispatch(state, {
       type: 'tool.queued',
@@ -1023,23 +1048,40 @@ describe('closed RuntimeClientEvent reducer', () => {
       summary: 'Final answer.',
     });
 
-    summary = state.turns
-      .flatMap((turn) => turn.blocks)
-      .find((block) => block.kind === 'tool_summary');
-    expect(summary).toEqual(
+    blocks = state.turns.flatMap((turn) => turn.blocks);
+    const summaries = blocks.filter(
+      (
+        block,
+      ): block is Extract<
+        (typeof state.turns)[number]['blocks'][number],
+        { kind: 'tool_summary' }
+      > => block.kind === 'tool_summary',
+    );
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toEqual(
       expect.objectContaining({
         active: false,
-        modelMs: 104,
-        captions: ['I found the first part; checking one more file.'],
-        tools: expect.arrayContaining([
-          expect.objectContaining({ callId: 'read-1', args: { path: 'src/one.ts' } }),
-          expect.objectContaining({ callId: 'read-2', args: { path: 'src/two.ts' } }),
-        ]),
+        modelMs: 73,
+        tools: [expect.objectContaining({ callId: 'read-1', args: { path: 'src/one.ts' } })],
       }),
     );
-    expect(state.turns.flatMap((turn) => turn.blocks)).toContainEqual(
+    expect(summaries[1]).toEqual(
+      expect.objectContaining({
+        active: false,
+        modelMs: 31,
+        tools: [expect.objectContaining({ callId: 'read-2', args: { path: 'src/two.ts' } })],
+      }),
+    );
+    expect(blocks).toContainEqual(
       expect.objectContaining({ kind: 'text', content: 'Final answer.' }),
     );
+    expect(
+      blocks.filter(
+        (block) =>
+          block.kind === 'text' &&
+          block.content === 'I found the first part; checking one more file.',
+      ),
+    ).toHaveLength(1);
     expect(state.currentThoughtSummaryId).toBeUndefined();
   });
 
@@ -1313,7 +1355,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     assertProjection(reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks));
   });
 
-  test('keeps late narration and following searches in the tool-bearing Thought', () => {
+  test('keeps late narration as text before the following tool-bearing summary', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
       eventReducer(state, { type: 'RUNTIME_EVENT', event });
     const caption = 'I found the first result; checking the remaining files.';
@@ -1372,18 +1414,28 @@ describe('closed RuntimeClientEvent reducer', () => {
           { kind: 'tool_summary' }
         > => block.kind === 'tool_summary',
       );
-    expect(summaries).toHaveLength(1);
+    expect(summaries).toHaveLength(2);
     expect(summaries[0]).toEqual(
       expect.objectContaining({
-        active: true,
+        active: false,
         hasThinking: true,
         modelMs: 14_000,
-        summaryLine: 'searched 2 file patterns',
-        captions: [caption],
-        pendingCaption: undefined,
+        tools: [],
       }),
     );
-    expect(summaries[0]!.tools).toHaveLength(2);
+    expect(summaries[1]).toEqual(
+      expect.objectContaining({
+        active: true,
+        hasThought: false,
+        summaryLine: 'searched 2 file patterns',
+      }),
+    );
+    expect(summaries[1]!.tools).toHaveLength(2);
+    expect(
+      state.turns
+        .flatMap((turn) => turn.blocks)
+        .filter((block) => block.kind === 'text' && block.content === caption),
+    ).toHaveLength(1);
   });
 
   test('settles an active Thought at an approval boundary and falls back from a missing terminal queue', () => {

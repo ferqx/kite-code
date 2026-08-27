@@ -406,72 +406,11 @@ function projectModelTextDelta(
   // cumulative delta identical to the already-finalized tail is the same
   // model fact, not a second assistant paragraph.
   if (last?.kind === 'text' && !last.streaming && last.content === text) return state;
-  const summary = findSummaryById(state, state.currentThoughtSummaryId);
-  if (
-    summary?.responsePending &&
-    state.thoughtPhaseStatus === 'awaiting_terminal' &&
-    summary.modelRequestId === event.requestId
-  ) {
-    return replaceBlockById(state, summary.id, {
-      ...summary,
-      pendingCaption: mergeCumulativeText(summary.pendingCaption, text),
-    });
-  }
-  if (summary?.active && state.thoughtPhaseStatus !== 'awaiting_terminal') {
-    // Durable delivery can overtake the ephemeral stream: a tool-bearing
-    // model.responded clears currentModelRequestId and deliberately keeps the
-    // exploration phase running before its cumulative text_delta arrives.
-    // That late narration still belongs to the live phase; closing it here
-    // would split the following searches into a second summary and render
-    // `searched N ...` separately from `Thinking Xs`.
-    if (
-      summary.modelRequestId === event.requestId ||
-      state.toolBearingModelRequestId === event.requestId
-    ) {
-      // A content-free Thought created by reasoning must end as soon as its
-      // own response text becomes visible. Retaining it as a caption leaves
-      // the summary active, so a later reasoning completion reopens the
-      // activity window below the answer. A durable response that
-      // already declared tools is tool-bearing even before tool.started
-      // materializes its first entry, and must retain its narration here.
-      if (summary.tools.length === 0 && state.toolBearingModelRequestId !== event.requestId) {
-        return {
-          ...replaceBlockById(state, summary.id, {
-            ...summary,
-            active: false,
-            responsePending: true,
-            pendingCaption: mergeCumulativeText(summary.pendingCaption, text),
-          }),
-          thoughtPhaseStatus: 'awaiting_terminal',
-        };
-      }
-      const captions = summary.captions ?? [];
-      const lastCaption = captions.at(-1);
-      const repeatsConfirmedCaption =
-        lastCaption !== undefined && (lastCaption.startsWith(text) || text.startsWith(lastCaption));
-      return replaceBlockById(state, summary.id, {
-        ...summary,
-        ...(repeatsConfirmedCaption
-          ? {
-              captions: [...captions.slice(0, -1), mergeCumulativeText(lastCaption, text)],
-            }
-          : { pendingCaption: mergeCumulativeText(summary.pendingCaption, text) }),
-      });
-    }
-    // Identity makes delayed packets deterministic: once another invocation
-    // is current, an older cumulative delta cannot close its Thought or start
-    // a second assistant paragraph.
-    if (state.currentModelRequestId !== event.requestId) return state;
-    return {
-      ...replaceBlockById(state, summary.id, {
-        ...summary,
-        active: false,
-        responsePending: true,
-        pendingCaption: mergeCumulativeText(summary.pendingCaption, text),
-      }),
-      thoughtPhaseStatus: 'awaiting_terminal',
-    };
-  }
+  // ADR-0036: streamed assistant text is a sibling block after Thought. It
+  // never becomes a caption, including when durable model.responded has
+  // already declared tools. Completed reasoning owns the `└─` activity
+  // window; a following exploration tool may replace that window, but normal
+  // assistant text remains on the message timeline.
   const next = handleEventAction(awaitSafeThoughtTerminal(state), {
     type: 'text',
     data: { text, streamingDelta: true },
@@ -599,6 +538,45 @@ function projectModelResponded(
     }
     return clearCompletedModelState(annotateModelAnswer(next, event), event.requestId);
   }
+  if (event.toolCallCount > 0) {
+    const hasNarration = event.summary !== undefined && /\S/u.test(event.summary);
+    if (streamedAnswer || hasNarration) {
+      next = settleCurrentThought(next);
+      if (streamedAnswer) {
+        next = replaceBlockById(next, streamedAnswer.id, {
+          ...streamedAnswer,
+          ...(hasNarration ? { content: event.summary! } : {}),
+          streaming: false,
+          modelRequestId: event.requestId,
+          ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
+        });
+      } else {
+        next = appendBlock(next, {
+          id: next.nextBlockId,
+          kind: 'text',
+          content: event.summary!,
+          streaming: false,
+          modelRequestId: event.requestId,
+          ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
+        });
+      }
+    }
+    const current = findSummaryById(next, next.currentThoughtSummaryId);
+    const resumed = current
+      ? replaceBlockById(next, current.id, {
+          ...current,
+          modelRequestId: event.requestId,
+          active: true,
+          responsePending: false,
+        })
+      : next;
+    return {
+      ...resumed,
+      currentModelRequestId: undefined,
+      toolBearingModelRequestId: event.requestId,
+      thoughtPhaseStatus: 'running',
+    };
+  }
   const summary = findSummaryById(next, next.currentThoughtSummaryId);
   if (
     summary &&
@@ -611,25 +589,6 @@ function projectModelResponded(
       modelRequestId: event.requestId,
       pendingCaption: mergeCumulativeText(summary.pendingCaption, event.summary),
     });
-  }
-  // A response that declared tools is narration, not the final answer. Keep
-  // the phase live so the first actual exploration start can confirm it.
-  if (event.toolCallCount > 0) {
-    const awaiting = findSummaryById(next, next.currentThoughtSummaryId);
-    const resumed = awaiting
-      ? replaceBlockById(next, awaiting.id, {
-          ...awaiting,
-          modelRequestId: event.requestId,
-          active: true,
-          responsePending: false,
-        })
-      : next;
-    return {
-      ...resumed,
-      currentModelRequestId: undefined,
-      toolBearingModelRequestId: event.requestId,
-      thoughtPhaseStatus: 'running',
-    };
   }
   const current = findSummaryById(next, next.currentThoughtSummaryId);
   const finalText = current?.pendingCaption ?? event.summary;

@@ -3152,7 +3152,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 标题行 = 累加时长 + 合并统计；旁白逐项紧跟标题，随后位于步骤树之上
+    // 标题行 = 累加时长 + 合并统计；旁白与标题之间保留一行，随后位于步骤树之上
     expect(frame).toContain('Thinking 13s · read 2 files');
     expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
     expect(frame).toContain('继续检查运行时边界。');
@@ -3160,7 +3160,8 @@ describe('BlockRenderer', () => {
     const compactLines = frame.split('\n').map((line) => line.trim());
     const headerLine = compactLines.findIndex((line) => line.includes('Thinking 13s'));
     const firstCaptionLine = compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。');
-    expect(firstCaptionLine).toBe(headerLine + 1);
+    expect(firstCaptionLine).toBe(headerLine + 2);
+    expect(compactLines[headerLine + 1]).toBe('');
     expect(compactLines.indexOf('继续检查运行时边界。')).toBe(firstCaptionLine + 1);
     expect(compactLines.indexOf('Now the remaining pieces.')).toBe(
       compactLines.indexOf('继续检查运行时边界。') + 1,
@@ -3224,7 +3225,7 @@ describe('BlockRenderer', () => {
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Thinking 1s');
-    expect(frame).toContain('checking current Thought boundaries');
+    expect(frame).toContain('└─ checking current Thought boundaries');
     expect(frame).not.toContain('├─ Read');
   });
 
