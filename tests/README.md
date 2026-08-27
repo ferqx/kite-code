@@ -40,8 +40,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 2. 并行运行 root integration；
 3. 逐文件、逐进程串行运行 owner-local 与 root isolated tests。
 
-并发上限是 `max(1, min(4, availableParallelism()))`。每个子进程使用独立临时
-`HOME`、`KITE_CODE_HOME` 和 Windows `USERPROFILE`，结束后清理。
+并发上限是 `max(1, min(4, availableParallelism()))`。每个子进程使用独立临时`HOME`，Windows `USERPROFILE`
+与其相同，`KITE_CODE_HOME`固定为该home下的exact `.kite-code` root；结束后连同root一起清理。
 
 默认测试排除真实 PTY、fault/soak、native sandbox、spike 和 live Provider；这些使用已有显式命令。
 
