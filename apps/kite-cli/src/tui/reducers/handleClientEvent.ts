@@ -1472,6 +1472,15 @@ function finishSafeClientTool(
       result?.totalLines,
     );
   }
+  if (
+    event.type === 'tool.rejected' &&
+    findBlock(state, (block) => block.kind === 'tool_card' && block.callId === toolId) === undefined
+  ) {
+    // A gap may omit the queued metadata for a call that never started. The
+    // approval/interaction notice is still visible; inventing an anonymous
+    // execution card would falsely imply dispatch.
+    return state;
+  }
   const shouldSettleCurrentThought =
     presentation === 'standalone' && !standaloneStartedBeforeCurrentThought(state, toolId);
   return updateSafeTool(

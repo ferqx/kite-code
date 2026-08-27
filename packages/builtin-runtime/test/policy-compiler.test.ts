@@ -276,6 +276,26 @@ describe('Builtin operation policy compiler', () => {
     }
   });
 
+  test('treats only exact current-branch inspection as read-only Git', () => {
+    const inspection =
+      'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
+    expect(isReadOnlyShellCommand(inspection)).toBe(true);
+    expect(compile('shell_execute', { command: inspection })).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      effectiveEffects: { filesystem: 'read' },
+    });
+    for (const command of [
+      'git branch -a',
+      'git branch feature/new',
+      'git branch -d old',
+      'git branch --show-current feature/new',
+      'git branch --show-current && git branch feature/new',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(false);
+    }
+  });
+
   test('keeps Git inside the baseline without a subcommand allowlist and reviews known expansion', () => {
     for (const command of [
       'git status --short',

@@ -57,7 +57,8 @@
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
   `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
-  乱序仍按 call ID 更新同一个 summary。
+  乱序仍按 call ID 更新同一个 summary。subscription gap缺少queued metadata时，未started的`tool.rejected`保持
+  不可见并只保留interaction rejection notice；不得凭terminal创建匿名`Tool`执行卡。
 - 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
   统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued arguments 明确 `intent=inspect` 且命令通过
   只读 grammar 时才归 exploration；终态缺 queued fact 时不猜测。

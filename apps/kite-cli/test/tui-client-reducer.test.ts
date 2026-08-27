@@ -961,6 +961,16 @@ describe('closed RuntimeClientEvent reducer', () => {
     });
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
     expect(state.pendingToolCalls).toEqual({});
+
+    const gapState = eventReducer(createInitialState(), {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'tool.rejected',
+        toolId: 'write-rejected-after-gap',
+        summary: 'Tool execution rejected.',
+      },
+    });
+    expect(gapState.turns.flatMap((turn) => turn.blocks)).toEqual([]);
   });
 
   test('projects a user-cancelled turn identically for live delivery and replay', () => {

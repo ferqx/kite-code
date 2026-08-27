@@ -1354,6 +1354,10 @@ function isReadOnlyGit(tokens: string[]): boolean {
   if (subcommand === 'status') return isReadOnlyGitStatus(tokens.slice(2));
   if (subcommand === 'log') return isReadOnlyGitLog(tokens.slice(2));
   if (subcommand === 'diff') return isReadOnlyGitDiff(tokens.slice(2));
+  if (subcommand === 'branch') {
+    const arguments_ = tokens.slice(2).map(stripShellQuotes);
+    return arguments_.length === 1 && arguments_[0] === '--show-current';
+  }
   return false;
 }
 
@@ -1469,8 +1473,12 @@ export function isDestructiveShellCommand(command: string): boolean {
 }
 
 export function isVcsMutationShellCommand(command: string): boolean {
+  const withoutCurrentBranchInspection = command.replace(
+    /\bgit\s+branch\s+--show-current(?=\s*(?:$|&&|\|\||[;|]))/gu,
+    'git status',
+  );
   return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    command,
+    withoutCurrentBranchInspection,
   );
 }
 

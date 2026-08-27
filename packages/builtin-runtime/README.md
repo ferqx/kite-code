@@ -36,6 +36,7 @@
   独立的Workspace scope discovery只canonicalize Git实际读取的外部`gitDir/commondir`，不授予权限。App必须先经
   Workspace Trust确认exact external-read scope，Sandbox才可向Seatbelt/bubblewrap投影对应只读root；该规则不依赖命令名。
 - Planning中的可证明只读Shell组合（包括`git status/log/diff`、只读pipe、`head/tail/echo`和`2>/dev/null`丢弃输出）
+  （其中branch identity仅接受零操作数`git branch --show-current`）
   保持read-only baseline直接执行；受限Workspace inventory `for`循环仅允许relative literal/glob iterator、唯一loop
   variable展开，以及逐段通过同一只读grammar的body/trailing pipeline。`/dev/null`重定向不是Workspace mutation，不能
   触发用户审批或写风险文案；动态iterator、外部路径、写入、命令替换或未验证suffix仍不能取得read-only分类。

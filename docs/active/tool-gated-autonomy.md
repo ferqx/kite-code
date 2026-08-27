@@ -220,7 +220,8 @@ Shell 的 read-only classifier 不是 Policy 授权来源，也不能让命令�
 `read_only + sideEffect=false`。Workspace inventory的受限`for` shape只允许relative literal/glob iterator、单一
 loop variable与逐段复用现有只读grammar的body/suffix；它解决同一Policy allow fact被generic Shell
 `minimumApproval`重复升级为人工审批的问题，不是通用Shell parser或新的授权来源。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
-模式不得进入该 grammar；例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
+模式不得进入该 grammar；Git branch只额外接受零操作数`git branch --show-current`，列举、创建、删除、重命名或
+附加操作数仍是非只读。例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
 file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
 substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
 走只读 fast path；未加引号的 brace expansion 也必须拒绝，避免它在静态检查后合成危险 option。`file`

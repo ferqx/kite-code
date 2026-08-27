@@ -5196,9 +5196,11 @@ describe('executeTestRuntimeTools', () => {
     }
   });
 
-  test('Building Accept executes a bounded read-only inventory loop without approval', async () => {
-    const command =
+  test('Building Accept executes bounded read-only inventory and Git inspection without approval', async () => {
+    const inventoryCommand =
       'for d in packages/* apps/*; do echo "=== $d ==="; ls "$d"; done 2>/dev/null | head -120';
+    const gitInspectionCommand =
+      'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell',
@@ -5229,20 +5231,29 @@ describe('executeTestRuntimeTools', () => {
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
     });
-    state.tools.calls.sh = {
-      toolCallId: 'sh',
+    state.tools.calls.inventory = {
+      toolCallId: 'inventory',
       modelMessageId: 'model',
       ordinal: 0,
       name: 'shell_execute',
-      args: { command },
+      args: { command: inventoryCommand },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue = [...state.tools.queue, 'sh'];
+    state.tools.calls.gitInspection = {
+      toolCallId: 'gitInspection',
+      modelMessageId: 'model',
+      ordinal: 1,
+      name: 'shell_execute',
+      args: { command: gitInspectionCommand },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'inventory', 'gitInspection'];
 
     const events = await executeTestRuntimeTools({
       state,
-      toolCallIds: ['sh'],
+      toolCallIds: ['inventory', 'gitInspection'],
       sandboxAvailable: true,
       shellExecutor: async ({ command }) => ({
         ok: true,
@@ -5254,7 +5265,7 @@ describe('executeTestRuntimeTools', () => {
     });
 
     expect(events.some((e) => e.type === 'approval.requested')).toBe(false);
-    expect(events.some((e) => e.type === 'tool.finished')).toBe(true);
+    expect(events.filter((e) => e.type === 'tool.finished')).toHaveLength(2);
   });
 
   test('Full interaction mode skips approval for later shell calls', async () => {
