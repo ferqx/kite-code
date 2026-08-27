@@ -1445,12 +1445,19 @@ describe('ApprovalBlock', () => {
     );
 
     view.stdin.write('\r');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
     expect(resolved).toEqual([]);
 
     view.stdin.write('\r');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(resolved).toEqual(['approve']);
     expect(attempts).toBe(2);
   });
