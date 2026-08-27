@@ -1223,7 +1223,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.currentThoughtSummaryId).toBeUndefined();
   });
 
-  test('upgrades post-Bash searches in place when later reasoning arrives', () => {
+  test('settles post-Bash searches before a later model request owns reasoning', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
       eventReducer(state, { type: 'RUNTIME_EVENT', event });
     let state = createInitialState();
@@ -1324,8 +1324,6 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(summaries[0]).toEqual(
       expect.objectContaining({
         active: false,
-        hasThinking: true,
-        modelMs: 10_000,
         summaryLine: 'searched 2 file patterns',
         tools: expect.arrayContaining([
           expect.objectContaining({ callId: 'search-1' }),
@@ -1333,12 +1331,18 @@ describe('closed RuntimeClientEvent reducer', () => {
         ]),
       }),
     );
+    expect(summaries[0]?.hasThinking).not.toBe(true);
     expect(blocks).toContainEqual(
-      expect.objectContaining({ kind: 'text', content: 'Project overview.' }),
+      expect.objectContaining({
+        kind: 'text',
+        content: 'Project overview.',
+        thoughtElapsedMs: 10_000,
+        thoughtContent: 'Summarizing the project.',
+      }),
     );
   });
 
-  test('replays late final reasoning into the preceding post-Bash search Thought', () => {
+  test('keeps late final reasoning with its answer instead of the preceding search step', () => {
     const events = [
       {
         type: 'user.message',
@@ -1436,19 +1440,21 @@ describe('closed RuntimeClientEvent reducer', () => {
       expect(summaries).toHaveLength(1);
       expect(summaries[0]).toEqual(
         expect.objectContaining({
-          hasThinking: true,
-          modelMs: 14_000,
-          totalElapsedMs: 14_000,
           summaryLine: 'searched 2 file patterns',
-          modelRequestId: 'post-bash-resume-final',
         }),
       );
-      expect(summaries[0]?.timeline).toContainEqual(
+      expect(summaries[0]?.hasThinking).not.toBe(true);
+      expect(summaries[0]?.timeline ?? []).not.toContainEqual(
         expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
       );
-      expect(
-        blocks.filter((block) => block.kind === 'text' && block.thoughtElapsedMs !== undefined),
-      ).toHaveLength(0);
+      expect(blocks).toContainEqual(
+        expect.objectContaining({
+          kind: 'text',
+          content: 'POST_BASH_RESUME_DONE',
+          thoughtElapsedMs: 14_000,
+          thoughtContent: 'Synthesizing the search results.',
+        }),
+      );
     };
 
     const bashTerminalIndex = events.findIndex(
@@ -1479,7 +1485,8 @@ describe('closed RuntimeClientEvent reducer', () => {
     assertProjection(replay.blocks);
 
     // Durable terminal delivery may still overtake completed reasoning during
-    // replay. It must enrich the preceding tool summary, not the final text.
+    // replay. It must enrich the answer owned by that request, never the prior
+    // request's tool summary.
     const reasoningIndex = events.findIndex((event) => event.type === 'reasoning.activity');
     const modelRespondedIndex = events.findIndex(
       (event) => event.type === 'model.responded' && event.requestId === 'post-bash-resume-final',

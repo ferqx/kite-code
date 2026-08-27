@@ -66,9 +66,11 @@
   只有用户主动折叠后才隐藏正文。
 - standalone tool 在 started 时结算它之前的 Thought；其 terminal 只能更新自身 card，不能因为完成较晚而
   结算该 tool started 后新建的 exploration summary。若 durable final text 先于 completed reasoning 到达，
-  且文本紧邻该 exploration summary，reasoning 仍回填同一 summary。live 与同一 Session 的 `/resume` replay
-  都必须把 `searched N ...` 与后续 `Thinking` 组装为一个题头，不能要求创建新会话规避乱序。
-- reasoning segment、非流式旁白 caption、探索工具与模型调用跨多个 request 仍可进入一个阶段块。reasoning
+  只有该summary与文本携带同一`requestId`时reasoning才可回填；相邻但属于下一model request的search summary
+  不能被升级成下一步Thinking。live 与同一 Session 的 `/resume` replay使用相同identity判断。
+- `model.requested(requestId)`是明确的presentation step边界：先settle前一request留下的Thought/tool summary，再接受
+  新request的reasoning、旁白与回答；不得因为相邻或同一Turn把多个request合并。一个request内部的reasoning
+  segment、非流式旁白 caption与探索工具仍可进入一个阶段块。reasoning
   streaming delta 只缓存，completed reasoning 才把完整内容一次性放入 `└─` 活动窗口；后续 read/search 等
   工具活动在同一窗口覆盖 reasoning，下一段 completed reasoning 又可覆盖工具活动。第一条流式文本使块进入
   `awaiting_terminal`，并始终作为 Thought 后的独立 sibling 文本块；terminal 即使声明后续工具，也不得把该文本

@@ -34,9 +34,15 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         messageId: event.messageId,
       });
     }
-    case 'model.requested':
+    case 'model.requested': {
+      // A model request is the explicit presentation-step boundary. Never let
+      // its reasoning mutate a tool summary left active by the preceding
+      // request; Server replay/reconnect can widen the delivery interval, but
+      // it cannot change request ownership.
+      const next =
+        state.currentModelRequestId === event.requestId ? state : settleCurrentThought(state);
       return {
-        ...state,
+        ...next,
         currentModelRequestId: event.requestId,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
@@ -45,6 +51,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         currentModelReasoningRequestId: undefined,
         running: true,
       };
+    }
     case 'reasoning.activity':
       return projectReasoningActivity(state, event);
     case 'model.text_delta':
@@ -612,7 +619,7 @@ function projectReasoningActivity(
     // an exploration summary, that reasoning owns the same visual phase—not
     // a second, text-attached Thinking header.
     const preceding = precedingToolSummary(cached, answer.id);
-    if (preceding) {
+    if (preceding?.modelRequestId === event.requestId) {
       const durationMs = answer.modelDurationMs;
       return replaceBlockById(cached, preceding.id, {
         ...preceding,
