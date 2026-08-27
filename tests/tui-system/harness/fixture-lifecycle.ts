@@ -64,6 +64,16 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
+      // `service_busy` is a definite rejection before drain commit, not an unknown mutation
+      // outcome. A killed TUI deliberately does not cancel its resident Session/Turn, so the
+      // test owner may wait for that bounded work to settle and issue a fresh ordinary stop.
+      // Never apply this retry to `outcome_unknown`.
+      for (let attempt = 0; stopped.outcome === 'service_busy' && attempt < 50; attempt += 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        stopped = await managed.lifecycle.stop({
+          clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+        });
+      }
       if (stopped.outcome !== 'applied') {
         if (stopped.outcome === 'outcome_unknown') {
           for (let attempt = 0; attempt < 50; attempt += 1) {

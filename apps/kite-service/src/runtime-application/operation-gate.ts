@@ -69,8 +69,7 @@ export class RuntimeOperationGate {
     // This assignment is the linearization point: no mutation can be admitted after it.
     this.#phase = 'quiescing';
     const observedActive = this.#active > 0;
-    this.#quiescePromise = (async () => {
-      await this.#waitForIdle();
+    this.#quiescePromise = Promise.resolve().then(() => {
       const lease: RuntimeOperationQuiesceLease = {
         activeOperations: observedActive,
         resume: () => {
@@ -102,7 +101,7 @@ export class RuntimeOperationGate {
       };
       this.#lease = lease;
       return lease;
-    })();
+    });
     return this.#quiescePromise;
   }
 

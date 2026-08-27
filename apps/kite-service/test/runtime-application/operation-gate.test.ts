@@ -5,7 +5,7 @@ import {
 } from '../../src/runtime-application/operation-gate';
 
 describe('RuntimeOperationGate', () => {
-  test('quiesces mutation admission before waiting for the active operation', async () => {
+  test('quiesces admission and reports active work without waiting for it', async () => {
     let release!: () => void;
     const active = new Promise<void>((resolve) => {
       release = resolve;
@@ -20,11 +20,18 @@ describe('RuntimeOperationGate', () => {
       RuntimeOperationGateError,
     );
 
-    release();
-    await running;
     const lease = await quiescing;
     expect(lease.activeOperations).toBe(true);
-    await lease.commitDrain();
+    let committed = false;
+    const commit = lease.commitDrain().then(() => {
+      committed = true;
+    });
+    await Promise.resolve();
+    expect(committed).toBe(false);
+
+    release();
+    await running;
+    await commit;
     expect(gate.phase).toBe('draining');
     await expect(gate.runMutation(() => undefined)).rejects.toMatchObject({
       code: 'operation_gate_draining',

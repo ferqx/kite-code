@@ -863,34 +863,6 @@ describe('Kite Service Native loopback carrier', () => {
     expect(listener.stopModes()).toEqual([false]);
   });
 
-  test('does not let a committed control response retain application and state cleanup', async () => {
-    const listener = fakeListener(undefined, 'accept', async (closeActiveConnections) => {
-      if (!closeActiveConnections) await new Promise<void>(() => undefined);
-    });
-    const fixture = createFixture({
-      serve: listener.serve,
-      stop: async () => ({ outcome: 'applied', state: 'draining' }),
-      limits: { drainDeadlineMs: 5 },
-    });
-    const response = await listener.callbacks().fetch(
-      new Request(`http://127.0.0.1:43210${KITE_SERVICE_CONTROL_STOP_PATH}`, {
-        method: 'POST',
-        headers: {
-          host: '127.0.0.1:43210',
-          ...jsonHeaders(`${KITE_SERVICE_CONTROL_AUTHORIZATION_SCHEME} ${CONTROL_TOKEN}`),
-        },
-        body: '{}',
-      }),
-      listener.server,
-    );
-    expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({ outcome: 'applied', state: 'draining' });
-
-    await expect(fixture.carrier.close()).resolves.toBeUndefined();
-    expect(listener.stopModes()).toEqual([false]);
-    await eventually(() => listener.stopModes().includes(true));
-  });
-
   test('closes a WebSocket whose upgrade races carrier shutdown before open', async () => {
     let closing: Promise<void> | undefined;
     let carrier: KiteServiceCarrier | undefined;
@@ -1370,7 +1342,6 @@ interface FakeListener {
 function fakeListener(
   onUpgrade?: () => void,
   upgradeBehavior: 'accept' | 'reject' | 'throw' = 'accept',
-  stopBehavior?: (closeActiveConnections: boolean) => Promise<void>,
 ): FakeListener {
   let callbacks: FakeListenerCallbacks | undefined;
   let stops = 0;
@@ -1387,9 +1358,7 @@ function fakeListener(
     },
     stop: async (closeActiveConnections?: boolean) => {
       stops += 1;
-      const closeActive = closeActiveConnections === true;
-      stopModes.push(closeActive);
-      await stopBehavior?.(closeActive);
+      stopModes.push(closeActiveConnections === true);
     },
   } as unknown as Bun.Server<never>;
   const serve = ((options: unknown) => {

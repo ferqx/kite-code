@@ -38,6 +38,8 @@
 - fault-soak nonce下，注入取消可以合法留下未消费的预配置model response；cleanup只放宽该项，仍拒绝额外请求与未闭合
   tool continuation。普通PTY与release smoke继续要求response queue全部消费。
 - manager stop返回`outcome_unknown`时cleanup不重放stop，只在有界窗口query status；仅`applied + absent`可继续删除fixture。
+- `service_busy`表示operation gate在commit前明确拒绝stop；cleanup可等待resident Session/Turn有界结束后发起新的
+  ordinary stop。该重试不得用于`outcome_unknown`，也不得把TUI disconnect解释成Session cancel。
 
 ## Journey 规则
 

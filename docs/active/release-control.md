@@ -129,10 +129,10 @@ smoke结束时会删除其独占临时根；Windows只对刚退出native executa
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；
-仍为ready/uncertain时保持临时root并使smoke失败。
-Service carrier在control commit后启动有界active-response drain；它不以keep-alive listener promise阻塞application/state
-清理，deadline耗尽才force close，同时terminal timer保持进程完成该finalizer。不能把`setTimeout(0)`或一次event-loop
-yield当作wire flush证据。即使该窗口存在，调用方仍按上述unknown-outcome规则处理
+仍为ready/uncertain时保持临时root并使smoke失败。`service_busy`是commit前的明确拒绝；TUI test owner可在resident
+Session/Turn有界结束后重发一个新的ordinary stop，但该路径不得与`outcome_unknown`共用重试逻辑。
+Service carrier在control handler返回ack后使用有界active-response drain关闭listener，deadline耗尽才force close；不能把
+`setTimeout(0)`或一次event-loop yield当作wire flush证据。即使该窗口存在，调用方仍按上述unknown-outcome规则处理
 真正丢失的响应，不能由transport实现推导mutation一定未执行。
 固定MCP wrapper fixture的stderr会被持续drain，但失败报告最多保留240个清洗后的可打印字符；该诊断不得包含
 任意用户MCP配置、credential或模型正文。

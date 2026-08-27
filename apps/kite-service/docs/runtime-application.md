@@ -36,6 +36,9 @@ owner，browser-safe App Contract不携带secret。
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
+operation gate的quiesce线性化关闭新mutation admission后立即返回lease与`activeOperations`观察值；普通stop据此
+立即resume并返回`service_busy`，不会先等待active mutation而退化成manager timeout。只有commit drain与signal owner
+shutdown会等待idle后进入draining。
 动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一投影为
 `mcp:dynamic_tool`，具体工具名只从独立有界safe summary展示。
 
