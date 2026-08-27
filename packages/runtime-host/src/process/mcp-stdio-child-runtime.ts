@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import {
   canonicalControlFrameJson,
   isRuntimeControlFrame,
@@ -269,9 +270,13 @@ async function writeFinalRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<
   const controlFrame = createRuntimeControlFrame(frame);
   const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
   try {
-    const written = await Bun.write(Bun.stdout, bytes);
-    if (written !== bytes.byteLength) {
-      throw new Error('MCP stdio terminal frame did not reach the Host pipe.');
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const written = writeSync(process.stdout.fd, bytes, offset, bytes.byteLength - offset);
+      if (!Number.isSafeInteger(written) || written <= 0) {
+        throw new Error('MCP stdio terminal frame did not reach the Host pipe.');
+      }
+      offset += written;
     }
   } finally {
     bytes.fill(0);
