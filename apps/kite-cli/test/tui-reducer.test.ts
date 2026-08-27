@@ -86,6 +86,60 @@ describe('TUI RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('reconciles an approval directly from an authoritative Runtime snapshot', () => {
+    const state = eventReducer(
+      { ...createInitialState(), running: true },
+      {
+        type: 'RECONCILE_RUNTIME_PROJECTION',
+        active: true,
+        interaction: {
+          kind: 'approval',
+          interactionId: 'snapshot-approval-1',
+          sessionRevision: 12,
+          generation: 4,
+          grants: ['approve_once'],
+          command: 'ls packages',
+        },
+      },
+    );
+
+    expect(state.running).toBe(true);
+    expect(state.interrupt).toEqual({
+      kind: 'approval',
+      interactionId: 'snapshot-approval-1',
+      toolCallId: 'snapshot-approval-1',
+    });
+    expect(state.pendingApprovals?.get('snapshot-approval-1')).toEqual(
+      expect.objectContaining({
+        generation: 4,
+        clientInteraction: expect.objectContaining({ command: 'ls packages' }),
+      }),
+    );
+  });
+
+  test('settles presentation activity from an idle snapshot without inventing cancellation', () => {
+    let state = apply(
+      { ...createInitialState(), running: true },
+      {
+        type: 'model.requested',
+        requestId: 'snapshot-request-1',
+      },
+    );
+    state = eventReducer(state, {
+      type: 'RECONCILE_RUNTIME_PROJECTION',
+      active: false,
+    });
+
+    expect(state.running).toBe(false);
+    expect(state.exited).toBe(false);
+    expect(state.interrupt).toBeNull();
+    expect(blocks(state)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining('Cancel') }),
+      ]),
+    );
+  });
+
   test('uses only closed approval fields and does not duplicate model terminal text', () => {
     let state = apply(createInitialState(), {
       type: 'model.responded',

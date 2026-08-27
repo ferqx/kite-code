@@ -12,6 +12,7 @@ import type {
 } from '@kite-ai/runtime-client';
 import { RuntimeClient } from '@kite-ai/runtime-client';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import type { SessionPresentationAction } from '../../src/adapters/tui/session-adapter';
 import { createNativeTuiRuntimeClient } from '../../src/service-mode';
 
 test('Native TUI facade uses Runtime commands/events and close only tears down the client connection', async () => {
@@ -124,6 +125,81 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   expect(remote.commands).not.toContain('cancel_turn');
 });
 
+test('Native TUI facade restores an approval from a snapshot without waiting for another event', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.requestApprovalSnapshotOnNextTurn();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+  const actions: SessionPresentationAction[] = [];
+  const run = session.runTask('confirm snapshot tool', {
+    dispatch: (action) => actions.push(action),
+  });
+
+  await Bun.sleep(5);
+  expect(actions).toContainEqual({
+    type: 'RECONCILE_RUNTIME_PROJECTION',
+    active: true,
+    interaction: expect.objectContaining({
+      kind: 'approval',
+      interactionId: 'approval-native-receipt',
+      command: 'echo approved',
+    }),
+  });
+  await facade.submitUserAction({
+    type: 'approve',
+    interactionId: 'approval-native-receipt',
+    generation: 0,
+    grant: 'approve_once',
+  });
+  await run;
+  await facade.dispose();
+});
+
+test('Native TUI facade completes an active run from an idle snapshot after a subscription gap', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.finishNextTurnWithSnapshot();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const actions: SessionPresentationAction[] = [];
+
+  await facade.getRuntime(sessionId)!.runTask('finish from snapshot', {
+    dispatch: (action) => actions.push(action),
+  });
+
+  expect(actions).toContainEqual({
+    type: 'RECONCILE_RUNTIME_PROJECTION',
+    active: false,
+  });
+  await facade.dispose();
+});
+
+test('Native TUI facade ignores an idle snapshot older than the accepted turn receipt', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.finishNextTurnAfterStaleSnapshot();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const actions: SessionPresentationAction[] = [];
+
+  await facade.getRuntime(sessionId)!.runTask('ignore stale snapshot', {
+    dispatch: (action) => actions.push(action),
+  });
+
+  expect(actions).not.toContainEqual({
+    type: 'RECONCILE_RUNTIME_PROJECTION',
+    active: false,
+  });
+  expect(
+    actions.some(
+      (action) => action.type === 'RUNTIME_EVENT' && action.event.type === 'run.terminal',
+    ),
+  ).toBe(true);
+  await facade.dispose();
+});
+
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
   readonly interactionExpectedRevisions: number[] = [];
@@ -133,10 +209,25 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #sessionId = '';
   #nextSubscription = 0;
   #approvalOnNextTurn = false;
+  #approvalSnapshotOnNextTurn = false;
+  #terminalSnapshotOnNextTurn = false;
+  #staleSnapshotOnNextTurn = false;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
     this.#approvalOnNextTurn = true;
+  }
+
+  requestApprovalSnapshotOnNextTurn(): void {
+    this.#approvalSnapshotOnNextTurn = true;
+  }
+
+  finishNextTurnWithSnapshot(): void {
+    this.#terminalSnapshotOnNextTurn = true;
+  }
+
+  finishNextTurnAfterStaleSnapshot(): void {
+    this.#staleSnapshotOnNextTurn = true;
   }
 
   #emitApproval(sessionId: string): void {
@@ -334,6 +425,65 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           this.#emitApproval(command.sessionId);
           return;
         }
+        if (this.#approvalSnapshotOnNextTurn) {
+          this.#approvalSnapshotOnNextTurn = false;
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 4,
+              session: projection(command.sessionId, 4, 'waiting', {
+                kind: 'approval',
+                interactionId: 'approval-native-receipt',
+                sessionRevision: 4,
+                generation: 0,
+                grants: ['approve_once'],
+                command: 'echo approved',
+                title: 'shell_execute',
+                summary: 'Approve a shell command',
+              }),
+            }),
+          );
+          return;
+        }
+        if (this.#terminalSnapshotOnNextTurn) {
+          this.#terminalSnapshotOnNextTurn = false;
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 3,
+              session: idleProjection(command.sessionId, 3),
+            }),
+          );
+          return;
+        }
+        if (this.#staleSnapshotOnNextTurn) {
+          this.#staleSnapshotOnNextTurn = false;
+          const subscriptionId = this.#subscriptionBySession.get(command.sessionId)!;
+          this.push(
+            subscriptionUpdate(subscriptionId, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 1,
+              session: idleProjection(command.sessionId, 1),
+            }),
+          );
+          this.push(
+            subscriptionUpdate(subscriptionId, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 3,
+              session: idleProjection(command.sessionId, 3),
+              event: { type: 'run.terminal', runId: 'run-after-stale', status: 'completed' },
+            }),
+          );
+          return;
+        }
         this.push(
           subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
             type: 'notification',
@@ -512,7 +662,12 @@ function initializeResult(instanceId: string): object {
   };
 }
 
-function projection(sessionId: string, revision: number, status: 'running' | 'completed') {
+function projection(
+  sessionId: string,
+  revision: number,
+  status: 'running' | 'waiting' | 'completed',
+  interaction?: import('@kite-ai/runtime-contract').RuntimeClientInteraction,
+) {
   return {
     schema: 'kite.runtime-projection.v1',
     sessionId,
@@ -524,9 +679,60 @@ function projection(sessionId: string, revision: number, status: 'running' | 'co
       workId: 'work-1',
       phase: 'building',
       status,
-      activeTurn: { turnId: 'turn-1', status },
+      activeTurn: {
+        turnId: 'turn-1',
+        status,
+        ...(interaction === undefined ? {} : { interaction }),
+      },
     },
   };
+}
+
+function idleProjection(sessionId: string, revision: number) {
+  return {
+    schema: 'kite.runtime-projection.v1',
+    sessionId,
+    revision,
+    lifecycle: 'open',
+    model: { provider: 'fixture-provider', name: 'fixture-model' },
+    sessionCommandGrantCount: 0,
+  };
+}
+
+function facadeFor(remote: FakeRuntimeConnection) {
+  const runtime = new RuntimeClient({
+    transport: transport(remote),
+    clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
+    history: history(),
+  });
+  const connection: LocalKiteConnection = {
+    runtime,
+    history: history(),
+    app: {} as KiteAppControlClient,
+    credential: {
+      writeProviderCredential: async () => {
+        throw new Error('not used');
+      },
+    },
+    service: descriptor(),
+    get status() {
+      return runtime.snapshotStore.getSnapshot().status === 'closed' ? 'closed' : 'active';
+    },
+    get generation() {
+      return runtime.connectionGeneration;
+    },
+    snapshotStore: runtime.snapshotStore,
+    subscribe: (listener) => runtime.snapshotStore.subscribe(listener),
+    prepareAppControl: async () => undefined,
+    connect: async () => undefined,
+    reconnect: () => runtime.reconnect(),
+    close: async () => runtime.close('tui-test-close'),
+    [Symbol.asyncDispose]: async () => runtime.close('tui-test-dispose'),
+  };
+  return createNativeTuiRuntimeClient({
+    connection,
+    workspace: '/tmp/tui-client-workspace',
+  });
 }
 
 function subscriptionUpdate(subscriptionId: string, generation: number, message: object): object {

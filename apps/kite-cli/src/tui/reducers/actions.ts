@@ -4,12 +4,18 @@
 import type {
   ContextCompactionProgressPhase,
   ContextStatusSnapshot,
+  RuntimeClientInteraction,
 } from '@kite-ai/runtime-contract';
 import type { RuntimeCheckpointEntry, RuntimePresentationEvent } from '../runtime-presentation';
 import type { InterruptState, OutputBlock, RewindScope, TuiState } from '../types';
 
 export type Action =
   | { type: 'RUNTIME_EVENT'; event: RuntimePresentationEvent }
+  | {
+      type: 'RECONCILE_RUNTIME_PROJECTION';
+      active: boolean;
+      interaction?: RuntimeClientInteraction;
+    }
   | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }

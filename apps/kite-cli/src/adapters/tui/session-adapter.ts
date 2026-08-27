@@ -5,6 +5,7 @@ import type {
   ContextStatusSnapshot,
   RuntimeCheckpointProjection,
   RuntimeClientEvent,
+  RuntimeClientInteraction,
   RuntimeCommandReceipt,
   RuntimeRewindPreviewProjection,
   RuntimeSessionProjection,
@@ -16,6 +17,17 @@ import type { RuntimePresentationEvent } from '#kite-cli/tui/runtime-presentatio
 /** Presentation-only action emitted by the Native Runtime client adapter. */
 export type SessionPresentationAction =
   | { readonly type: 'RUNTIME_EVENT'; readonly event: RuntimeClientEvent }
+  | {
+      /**
+       * Authoritative activity reconciliation for a Runtime snapshot. A
+       * snapshot is not a synthetic lifecycle event: it may restore the
+       * currently active interaction or prove that no work remains after a
+       * subscription gap.
+       */
+      readonly type: 'RECONCILE_RUNTIME_PROJECTION';
+      readonly active: boolean;
+      readonly interaction?: RuntimeClientInteraction;
+    }
   | { readonly type: 'LOCAL_TEXT'; readonly text: string; readonly isError?: boolean }
   | { readonly type: 'SET_EXITED' }
   | {

@@ -50,6 +50,10 @@
   sequence、generation或interaction ID不显示；这些字段仍完整保留在client state与settlement校验中。
 - Live 与 replay 都从同一 client-safe event identity 构造 block；本地提交态不能与 durable
   `user.message` 各自追加一份相同消息。
+- Server subscription 的event-free snapshot/gap reset必须进入同一个presentation reducer做显式reconciliation：
+  `activeWork.activeTurn.interaction`恢复当前交互表面，缺少active work则只结束本地running projection。snapshot不是
+  synthetic Runtime event，不能伪造approved/rejected/cancelled/completed事实；Client缓存更新本身也不能让React继续
+  保留旧“执行中”。低于本地command receipt revision的迟到snapshot不得结束当前run。
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
   `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal

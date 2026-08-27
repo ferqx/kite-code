@@ -12,7 +12,9 @@
   两个不同轮次的相同文本仍保留两条。`USER_MESSAGE` 只用于不会进入 Runtime 的本地 slash echo。
 - 历史 Session 的完整 durable replay 只通过 `RuntimeClient.history` 的 App-injected `RuntimeHistoryClient`
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
-  不是完整 history source。
+  不是完整 history source。event-free snapshot仍是当前activity/interaction的权威projection：Native adapter把它作为
+  显式reconciliation action交给同一reducer，而不是在Client或React component中猜测终态。它只恢复当前closed
+  interaction或停止已经不存在的active work，不制造approval settlement或用户取消事件。
 - TUI 不直接 import 或持有 Runtime Host、SQLite/Store、Kernel、Builtin executor、RuntimeLogQueryPort 或 transport/server concrete type；它不自建 mailbox、receipt、recovery 或 SQLite fallback。
 - TUI 的 Native client surface 是显式 `TuiRuntimeClientFacade` / `TuiSessionFacade` method 与字段清单；不得从
   Service `SessionManager` 推导类型，也不得使用 Proxy、Reflect fallback、动态 member cache 或 set trap 让

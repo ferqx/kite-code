@@ -193,6 +193,25 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
+    case 'RECONCILE_RUNTIME_PROJECTION': {
+      if (action.active) {
+        return state.running ? state : { ...state, running: true, exited: false };
+      }
+      if (!state.running && state.interrupt == null) return state;
+      const settled = finalizeLastTurnStreaming(settleActiveThought(state));
+      return {
+        ...settled,
+        running: false,
+        exited: false,
+        interrupt: null,
+        activeApprovalId: null,
+        pendingApprovals: new Map(),
+        toolStartTimes: undefined,
+        pendingToolCalls: {},
+        currentRunReasonId: undefined,
+        status: { ...settled.status, currentNode: null, plan: null, retryState: null },
+      };
+    }
     case 'SET_COMPACTION_PROGRESS':
       return {
         ...state,

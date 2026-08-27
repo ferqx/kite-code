@@ -75,6 +75,7 @@ interface NativeSessionRecord {
   rejectReady: (error: unknown) => void;
   runPromise: Promise<void> | undefined;
   runIdlePromise: Promise<void> | undefined;
+  runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
   resolveRun: (() => void) | undefined;
   rejectRun: ((error: unknown) => void) | undefined;
@@ -281,6 +282,7 @@ class NativeTuiRuntimeClient {
       rejectReady,
       runPromise: undefined,
       runIdlePromise: undefined,
+      runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
       resolveRun: undefined,
       rejectRun: undefined,
@@ -378,18 +380,32 @@ class NativeTuiRuntimeClient {
     notification: RuntimeAccessNotification,
   ): Promise<void> {
     let event: RuntimeClientEvent | undefined;
+    let reconcileSnapshot = false;
     if (isRuntimeNotification(notification)) {
       if (notification.durability === 'ephemeral') {
         event = notification.event;
       } else {
-        record.projection = notification.projection.session;
+        const projection = notification.projection.session;
+        const authoritative =
+          projection.revision >=
+          Math.max(record.revision, record.runProjectionRevisionFloor ?? record.revision);
+        if (projection.revision >= (record.projection?.revision ?? 0)) {
+          record.projection = projection;
+        }
         record.revision = Math.max(record.revision, notification.revision);
-        record.agentLoopActive = isActiveWork(notification.projection.session.activeWork);
+        if (authoritative) {
+          record.agentLoopActive = isActiveWork(projection.activeWork);
+          // The wire contract intentionally flattens both Host snapshots and
+          // event-free durable projections to the same closed notification
+          // shape. Reconcile either one when there is no client event below.
+          reconcileSnapshot = true;
+        }
         event = notification.projection.event;
       }
     }
     if (!event) {
       this.#syncSnapshot(record);
+      if (reconcileSnapshot) this.#reconcileRuntimeProjection(record);
       this.#snapshotCallback?.(record.threadId);
       return;
     }
@@ -421,6 +437,29 @@ class NativeTuiRuntimeClient {
     }
     this.#syncSnapshot(record);
     this.#snapshotCallback?.(record.threadId);
+  }
+
+  #reconcileRuntimeProjection(record: NativeSessionRecord): void {
+    const work = record.projection?.activeWork;
+    const active = isActiveWork(work);
+    const interaction = active ? work.activeTurn?.interaction : undefined;
+    if (interaction) {
+      record.interactions.set(interaction.interactionId, interaction);
+      record.pendingInterrupt = true;
+    } else if (!active) {
+      record.interactions.clear();
+      record.pendingInterrupt = false;
+      record.resolveRun?.();
+      record.resolveRun = undefined;
+      record.rejectRun = undefined;
+    }
+    if (record.foreground && record.dispatch) {
+      record.dispatch({
+        type: 'RECONCILE_RUNTIME_PROJECTION',
+        active,
+        ...(interaction === undefined ? {} : { interaction }),
+      });
+    }
   }
 
   #applyEventFacts(record: NativeSessionRecord, event: RuntimeClientEvent): void {
@@ -610,18 +649,29 @@ class NativeTuiRuntimeClient {
     });
     record.runPromise = completion;
     try {
+      const expectedRevision = this.#revision(record);
+      // Fence an event-free projection before sending the command. RuntimeClient
+      // can receive the next subscription message before this async continuation
+      // observes the accepted receipt.
+      record.runProjectionRevisionFloor = expectedRevision + 1;
       const receipt = await this.#runtime.command({
         schema: RUNTIME_COMMAND_SCHEMA_,
         commandId: this.#nextCommandId(record.threadId, 'turn'),
         type: 'start_turn',
         sessionId: record.threadId,
-        expectedRevision: this.#revision(record),
+        expectedRevision,
         input: task,
         ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
         ...(initialSkills === undefined ? {} : { initialSkills }),
       });
       this.#assertApplied(receipt);
       this.#recordRevision(record, receipt);
+      record.runProjectionRevisionFloor =
+        receipt.status === 'applied'
+          ? receipt.revision
+          : receipt.status === 'idempotent_replay'
+            ? receipt.originalRevision
+            : expectedRevision + 1;
       this.#syncSnapshot(record);
       await withDeadline(completion, RUN_WAIT_DEADLINE_MS, 'Runtime turn');
       await this.#flushPresentation?.();
@@ -632,6 +682,7 @@ class NativeTuiRuntimeClient {
       record.resolveRun = undefined;
       record.rejectRun = undefined;
       record.runPromise = undefined;
+      record.runProjectionRevisionFloor = undefined;
       record.agentLoopActive = false;
       record.reserved = false;
       this.#snapshotCallback?.(record.threadId);

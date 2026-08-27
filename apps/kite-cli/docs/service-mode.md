@@ -18,6 +18,11 @@ snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI C
 Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后必须
 等待注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。这个
 client屏障与Service 50ms framing共同保持旧InProcess可见顺序，不在adapter内按数据源添加渲染分支。
+Server的initial snapshot、reconnect reset与revision gap snapshot在wire上都是event-free durable projection。adapter必须
+把权威`activeWork`及其closed interaction显式交给presentation reducer：waiting snapshot恢复当前Footer，idle snapshot
+结束本地run promise与“执行中”。它不得把snapshot解释成approval settlement、用户取消或成功terminal，也不得让低于
+已接受command receipt revision的迟到snapshot结束新run。这样event、history replay与snapshot recovery仍只有一个TUI
+presentation state machine，Runtime Client cache不是第二套UI lifecycle authority。
 
 Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉
 transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。

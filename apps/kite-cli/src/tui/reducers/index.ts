@@ -67,6 +67,15 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
   if (action.type === 'RUNTIME_EVENT') {
     return handleClientEventAction(state, action.event);
   }
+  if (action.type === 'RECONCILE_RUNTIME_PROJECTION') {
+    const reconciled = action.interaction
+      ? handleClientEventAction(state, {
+          type: 'interaction.available',
+          interaction: action.interaction,
+        })
+      : state;
+    return agentReducer(reconciled, action) ?? reconciled;
+  }
   if (action.type === 'LOCAL_TEXT') {
     return handleEventAction(state, {
       type: 'text',
