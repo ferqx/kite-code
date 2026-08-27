@@ -111,6 +111,9 @@ MCP stdio wrapper的ready、JSON-RPC与terminal frame都必须等待stdout write
 frame未刷入专用pipe前wrapper不得退出。Host只接受实际收到并验证的terminal evidence，process exit或已写入用户态buffer
 不能替代该证明。wrapper runtime返回的completion Promise只在terminal已写入或fail-closed child cleanup收敛后完成；
 Service standalone internal entry必须await该Promise，不能在安装event listener后提前结束主入口。
+Bun standalone的argv prefix可随平台变化；Service同时对显式command args与完整`process.argv`应用同一个
+final-marker/competing-internal-mode validator，随后只把规范化的单一MCP marker交给wrapper runtime。Windows单路径
+executable argv不能因`slice(2)`为空而落入普通Service命令解析或静默退出。
 
 ## SQLite Store 与 Artifact
 

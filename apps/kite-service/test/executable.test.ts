@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { KiteServiceRuntimeComposition } from '../src/composition';
 import {
   createKiteServiceExecutable,
+  isKiteServiceMcpStdioInvocation,
   resolveKiteServiceMainEnvironment,
   runKiteService,
   runKiteServiceMain,
@@ -50,6 +51,20 @@ function createPorts(): {
 }
 
 describe('Kite Service internal executable adapter', () => {
+  test('recognizes the final private MCP marker in source and Windows standalone argv layouts', () => {
+    const marker = '--kite-internal-mcp-stdio-v1';
+    expect(isKiteServiceMcpStdioInvocation([marker], ['bun', 'service.ts', marker])).toBe(true);
+    expect(isKiteServiceMcpStdioInvocation([], ['C:\\install\\kite-service.exe', marker])).toBe(
+      true,
+    );
+    expect(
+      isKiteServiceMcpStdioInvocation(
+        [],
+        ['C:\\install\\kite-service.exe', '--kite-internal-posix-supervisor-v1', marker],
+      ),
+    ).toBe(false);
+  });
+
   test('uses injected application and signal source without constructing a backend', async () => {
     const ports = createPorts();
     const calls: string[] = [];

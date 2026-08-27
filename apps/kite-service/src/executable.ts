@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
 import {
   isMcpStdioWrapperInvocation,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
   runMcpStdioChildRuntime,
   runPosixSupervisorChild,
 } from '@kite-ai/runtime-host';
@@ -95,8 +96,8 @@ export async function runKiteServiceMain(
   args: readonly string[] = process.argv.slice(2),
   dependencies: KiteServiceMainDependencies = {},
 ): Promise<void> {
-  if (isMcpStdioWrapperInvocation(args)) {
-    await runMcpStdioChildRuntime(args);
+  if (isKiteServiceMcpStdioInvocation(args)) {
+    await runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
     return;
   }
   const posixSupervisorMarker = '--kite-internal-posix-supervisor-v1';
@@ -150,6 +151,14 @@ export async function runKiteServiceMain(
     await infrastructure[Symbol.asyncDispose]();
     await composition[Symbol.asyncDispose]();
   }
+}
+
+/** Bun standalone uses a platform-specific argv prefix; private markers are validated at either seam. */
+export function isKiteServiceMcpStdioInvocation(
+  args: readonly string[],
+  processArguments: readonly string[] = process.argv,
+): boolean {
+  return isMcpStdioWrapperInvocation(args) || isMcpStdioWrapperInvocation(processArguments);
 }
 
 function requiredEnvironmentValue(
