@@ -40,6 +40,8 @@
 - manager stop返回`outcome_unknown`时cleanup不重放stop，只在有界窗口query status；仅`applied + absent`可继续删除fixture。
 - `service_busy`表示operation gate在commit前明确拒绝stop；cleanup可等待resident Session/Turn有界结束后发起新的
   ordinary stop。该重试不得用于`outcome_unknown`，也不得把TUI disconnect解释成Session cancel。
+- cleanup失败诊断只附最后一次manager status的safe outcome/state/diagnostic；不得打印descriptor、PID、home/path、token
+  或HTTP body。
 
 ## Journey 规则
 

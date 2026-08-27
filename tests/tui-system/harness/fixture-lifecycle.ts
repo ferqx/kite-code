@@ -74,6 +74,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
+      let lastObservedStatus: Awaited<ReturnType<typeof managed.lifecycle.status>> | undefined;
       if (stopped.outcome !== 'applied') {
         if (stopped.outcome === 'outcome_unknown') {
           for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -81,6 +82,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
             const observed = await managed.lifecycle.status({
               clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
             });
+            lastObservedStatus = observed;
             if (observed.outcome === 'applied' && observed.state === 'absent') {
               stopped = observed;
               break;
@@ -88,8 +90,11 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
           }
         }
         if (stopped.outcome !== 'applied') {
+          const observed = lastObservedStatus
+            ? `; observed=${lastObservedStatus.outcome}/${lastObservedStatus.state}/${lastObservedStatus.diagnostic ?? 'none'}`
+            : '';
           throw new Error(
-            `Managed TUI test Service did not stop cleanly: ${stopped.outcome}/${stopped.diagnostic ?? stopped.state}`,
+            `Managed TUI test Service did not stop cleanly: ${stopped.outcome}/${stopped.diagnostic ?? stopped.state}${observed}`,
           );
         }
       }
