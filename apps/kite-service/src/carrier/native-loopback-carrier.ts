@@ -172,6 +172,7 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
   const tickets = new TicketAuthority(random, now);
   const sessions = new Set<ServiceSocketSession>();
   let closed = false;
+  let committedControlStop = false;
   let closing: Promise<void> | undefined;
   let bunServer: Bun.Server<SocketData> | undefined;
 
@@ -258,7 +259,12 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         );
       }
       if (url.pathname === KITE_SERVICE_CONTROL_STOP_PATH) {
-        return afterDispatchCloseBarrier(handleControlStop(request, options, limits), () => closed);
+        return afterDispatchCloseBarrier(
+          handleControlStop(request, options, limits, () => {
+            committedControlStop = true;
+          }),
+          () => closed,
+        );
       }
       emitDiagnostic(options.onDiagnostic, 'route_rejected');
       return fixedResponse(request.method === 'OPTIONS' ? 405 : 404, 'not_found');
@@ -329,8 +335,13 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
             failures.push(...closeAllSockets());
             sessions.clear();
             try {
-              if (bunServer)
-                await stopListenerAfterActiveResponses(bunServer, limits.drainDeadlineMs);
+              if (bunServer) {
+                if (committedControlStop) {
+                  beginListenerDrainAfterCommittedControlStop(bunServer, limits.drainDeadlineMs);
+                } else {
+                  await stopListenerAfterActiveResponses(bunServer, limits.drainDeadlineMs);
+                }
+              }
             } catch (error) {
               failures.push(error);
             }
@@ -354,6 +365,28 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 }
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
+
+function beginListenerDrainAfterCommittedControlStop(
+  server: Bun.Server<SocketData>,
+  deadlineMs: number,
+): void {
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled) return;
+    void Promise.resolve(server.stop(true)).catch(() => undefined);
+  }, deadlineMs);
+  void Promise.resolve(server.stop(false)).then(
+    () => {
+      settled = true;
+      clearTimeout(timer);
+    },
+    () => {
+      settled = true;
+      clearTimeout(timer);
+      void Promise.resolve(server.stop(true)).catch(() => undefined);
+    },
+  );
+}
 
 async function stopListenerAfterActiveResponses(
   server: Bun.Server<SocketData>,
@@ -907,6 +940,7 @@ function handleControlStop(
   request: Request,
   options: KiteServiceCarrierOptions,
   limits: NormalizedLimits,
+  onCommitted: () => void,
 ): Response | Promise<Response> {
   if (
     request.method !== 'POST' ||
@@ -932,6 +966,7 @@ function handleControlStop(
     if (!options.application.control) return fixedResponse(503, 'unavailable');
     try {
       const result = await options.application.control.stop();
+      if (result.outcome === 'applied' && result.state === 'draining') onCommitted();
       return jsonResponse(200, result, limits.maxHttpBodyBytes);
     } catch {
       return fixedResponse(503, 'temporarily_unavailable');

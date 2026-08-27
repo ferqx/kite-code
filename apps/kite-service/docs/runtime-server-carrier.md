@@ -37,7 +37,9 @@ queue、buffered amount、heartbeat与drain都有hard ceiling；binary/oversized
 fail closed，diagnostic不携带body、token、path或secret。
 
 carrier close先停止接受新业务并关闭Runtime socket，再以`stop(false)`给已进入HTTP handler的响应一个有界
-`drainDeadlineMs`刷出窗口；窗口耗尽才以`stop(true)`强制关闭listener。该顺序保证control stop的
+`drainDeadlineMs`刷出窗口；窗口耗尽才以`stop(true)`强制关闭listener。control stop已经commit时，listener drain
+作为terminal transport finalizer继续运行，不阻塞application dispose与state清理；进程由同一有界timer保持到
+graceful/force close。该顺序保证control stop的
 `applied + draining`响应可先交付调用方，同时仍让transport owner在deadline内完成退出；它不延长Session/Turn
 lifecycle，也不授权调用方在响应丢失时重放stop。
 
