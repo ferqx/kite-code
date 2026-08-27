@@ -31,6 +31,7 @@ const smokeRoot = mkdtempSync(join(tmpdir(), 'kite-code-release-smoke-'));
 const prefix = join(smokeRoot, 'install');
 const variantPath = join(smokeRoot, 'variant.tar.gz');
 
+let smokeFailure: unknown;
 try {
   await installOssCandidate({ archivePath: verified.archivePath, prefix });
   await runInstalledSmokes(prefix, verified.manifest.target.os === 'win32');
@@ -68,9 +69,28 @@ try {
       ],
     }),
   );
+} catch (error) {
+  smokeFailure = error;
 } finally {
-  if (existsSync(smokeRoot)) rmSync(smokeRoot, { recursive: true, force: true });
+  try {
+    if (existsSync(smokeRoot)) {
+      // Windows can retain a just-exited native executable briefly. Keep the
+      // cleanup bounded, but do not let that transient lock hide the actual
+      // smoke failure that caused this path to run.
+      rmSync(smokeRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: process.platform === 'win32' ? 50 : 0,
+        retryDelay: 100,
+      });
+    }
+  } catch (cleanupError) {
+    smokeFailure = smokeFailure
+      ? new AggregateError([smokeFailure, cleanupError], 'Release smoke and cleanup both failed')
+      : cleanupError;
+  }
 }
+if (smokeFailure) throw smokeFailure;
 
 async function runInstalledSmokes(prefix: string, windows: boolean): Promise<void> {
   const suffix = windows ? '.exe' : '';
