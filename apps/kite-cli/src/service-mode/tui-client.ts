@@ -488,29 +488,8 @@ class NativeTuiRuntimeClient {
     const resolveRun = record.resolveRun;
     const rejectRun = record.rejectRun;
     try {
-      const deadline = Date.now() + RUN_WAIT_DEADLINE_MS;
-      while (!this.#closed && Date.now() < deadline) {
-        const result = await this.#runtime.query({
-          schema: RUNTIME_QUERY_SCHEMA_,
-          type: 'get_session_projection',
-          sessionId: record.threadId,
-        });
-        if (
-          result.status === 'ok' &&
-          result.queryType === 'get_session_projection' &&
-          result.session
-        ) {
-          record.projection = result.session;
-          record.revision = result.session.revision;
-          if (!isActiveWork(result.session.activeWork)) {
-            record.agentLoopActive = false;
-            if (record.resolveRun === resolveRun) resolveRun?.();
-            return;
-          }
-        }
-        await Bun.sleep(25);
-      }
-      throw new Error('Runtime execution did not reach its cleanup barrier.');
+      await this.#waitForRemoteIdle(record);
+      if (record.resolveRun === resolveRun) resolveRun?.();
     } catch (error) {
       if (record.rejectRun === rejectRun) rejectRun?.(error);
     }
@@ -649,21 +628,40 @@ class NativeTuiRuntimeClient {
     });
     record.runPromise = completion;
     try {
-      const expectedRevision = this.#revision(record);
-      // Fence an event-free projection before sending the command. RuntimeClient
-      // can receive the next subscription message before this async continuation
-      // observes the accepted receipt.
-      record.runProjectionRevisionFloor = expectedRevision + 1;
-      const receipt = await this.#runtime.command({
-        schema: RUNTIME_COMMAND_SCHEMA_,
-        commandId: this.#nextCommandId(record.threadId, 'turn'),
-        type: 'start_turn',
-        sessionId: record.threadId,
-        expectedRevision,
-        input: task,
-        ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
-        ...(initialSkills === undefined ? {} : { initialSkills }),
-      });
+      const commandId = this.#nextCommandId(record.threadId, 'turn');
+      let expectedRevision = this.#revision(record);
+      let receipt: RuntimeCommandReceipt | undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        // Fence an event-free projection before sending the command. RuntimeClient
+        // can receive the next subscription message before this async continuation
+        // observes the accepted receipt.
+        record.runProjectionRevisionFloor = expectedRevision + 1;
+        receipt = await this.#runtime.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId,
+          type: 'start_turn',
+          sessionId: record.threadId,
+          expectedRevision,
+          input: task,
+          ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
+          ...(initialSkills === undefined ? {} : { initialSkills }),
+        });
+        if (
+          receipt.status === 'conflict' &&
+          receipt.code === 'revision_conflict' &&
+          receipt.currentRevision !== undefined &&
+          attempt < 2
+        ) {
+          // The rejected receipt proves that no turn was started. Reuse the
+          // exact command identity at the Service-provided CAS revision so a
+          // terminal-projection race cannot discard a queued user prompt.
+          expectedRevision = receipt.currentRevision;
+          record.revision = Math.max(record.revision, receipt.currentRevision);
+          continue;
+        }
+        break;
+      }
+      if (!receipt) throw new Error('Runtime turn did not return a command receipt.');
       this.#assertApplied(receipt);
       this.#recordRevision(record, receipt);
       record.runProjectionRevisionFloor =
@@ -691,7 +689,44 @@ class NativeTuiRuntimeClient {
 
   async #waitForRunCompletion(record: NativeSessionRecord): Promise<void> {
     await this.#waitForSessionReady(record.threadId);
-    await record.runPromise;
+    if (record.runPromise) {
+      await record.runPromise;
+      return;
+    }
+    if (record.agentLoopActive) await this.#waitForRemoteIdle(record);
+  }
+
+  async #waitForRemoteIdle(record: NativeSessionRecord): Promise<void> {
+    const deadline = Date.now() + RUN_WAIT_DEADLINE_MS;
+    while (!this.#closed && Date.now() < deadline) {
+      const result = await this.#runtime.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_session_projection',
+        sessionId: record.threadId,
+      });
+      if (
+        result.status === 'ok' &&
+        result.queryType === 'get_session_projection' &&
+        result.session
+      ) {
+        const minimumRevision = Math.max(
+          record.revision,
+          record.runProjectionRevisionFloor ?? record.revision,
+        );
+        if (result.session.revision < minimumRevision) {
+          await Bun.sleep(25);
+          continue;
+        }
+        if (result.session.revision >= (record.projection?.revision ?? 0)) {
+          record.projection = result.session;
+        }
+        record.revision = Math.max(record.revision, result.session.revision);
+        record.agentLoopActive = isActiveWork(result.session.activeWork);
+        if (!record.agentLoopActive) return;
+      }
+      await Bun.sleep(25);
+    }
+    throw new Error('Runtime execution did not reach its cleanup barrier.');
   }
 
   async #setInteractionMode(

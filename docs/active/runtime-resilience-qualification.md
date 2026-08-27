@@ -15,6 +15,8 @@
 Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
+TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
+远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
 失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live

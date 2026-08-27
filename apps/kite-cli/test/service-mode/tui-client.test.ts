@@ -238,9 +238,52 @@ test('Native TUI facade ignores an idle snapshot older than the accepted turn re
   await facade.dispose();
 });
 
+test('Native TUI facade waits for a restored active turn before admitting the next message', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+  expect(session.agentLoopActive).toBe(true);
+
+  let idle = false;
+  const waiting = session.waitForRunCompletion().then(() => {
+    idle = true;
+  });
+  await Bun.sleep(10);
+  expect(idle).toBe(false);
+
+  remote.releaseRestoredTurn();
+  await waiting;
+  expect(session.agentLoopActive).toBe(false);
+  expect(session.tryReservePrompt()).toBe(true);
+  await session.runTask('queued after restored turn', { dispatch: () => {} });
+  expect(remote.commands).toContain('start_turn');
+  await facade.dispose();
+});
+
+test('Native TUI facade retries a queued turn after an exact revision conflict', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.conflictNextStartTurnAt(7);
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.getRuntime(sessionId)!.runTask('queued after terminal projection', {
+    dispatch: () => {},
+  });
+
+  expect(remote.startTurnExpectedRevisions).toEqual([1, 7]);
+  expect(remote.startTurnCommandIds[0]).toBe(remote.startTurnCommandIds[1]);
+  await facade.dispose();
+});
+
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
   readonly interactionExpectedRevisions: number[] = [];
+  readonly startTurnExpectedRevisions: number[] = [];
+  readonly startTurnCommandIds: string[] = [];
   closeCalls = 0;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
@@ -251,6 +294,9 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #replacementApprovalSnapshotOnNextTurn = false;
   #terminalSnapshotOnNextTurn = false;
   #staleSnapshotOnNextTurn = false;
+  #restoreActiveTurn = false;
+  #restoredTurnReleased = false;
+  #nextStartTurnConflictRevision: number | undefined;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -271,6 +317,18 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   finishNextTurnAfterStaleSnapshot(): void {
     this.#staleSnapshotOnNextTurn = true;
+  }
+
+  restoreActiveTurnOnSubscribe(): void {
+    this.#restoreActiveTurn = true;
+  }
+
+  releaseRestoredTurn(): void {
+    this.#restoredTurnReleased = true;
+  }
+
+  conflictNextStartTurnAt(currentRevision: number): void {
+    this.#nextStartTurnConflictRevision = currentRevision;
   }
 
   #emitApproval(sessionId: string): void {
@@ -318,7 +376,9 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             durability: 'durable',
             sessionId,
             revision: 1,
-            session: projection(sessionId, 1, 'completed'),
+            session: this.#restoreActiveTurn
+              ? projection(sessionId, 1, 'running')
+              : projection(sessionId, 1, 'completed'),
           }),
         );
         this.push(subscriptionUpdate(subscriptionId, 1, { type: 'ready', scope: 'session' }));
@@ -326,6 +386,24 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       }
       if (message.method === 'runtime/unsubscribe') {
         this.push(result(message.id, { unsubscribed: true }));
+        return;
+      }
+      if (message.method === 'runtime/query') {
+        const query = message.params.query;
+        if (query.type === 'get_session_projection') {
+          const session =
+            this.#restoreActiveTurn && !this.#restoredTurnReleased
+              ? projection(query.sessionId, 1, 'running')
+              : idleProjection(query.sessionId, 2);
+          this.push(
+            result(message.id, {
+              status: 'ok',
+              queryType: query.type,
+              revision: session.revision,
+              session,
+            }),
+          );
+        }
         return;
       }
       if (message.method !== 'runtime/command') return;
@@ -455,12 +533,29 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         return;
       }
       if (command.type === 'start_turn') {
+        this.startTurnExpectedRevisions.push(command.expectedRevision);
+        this.startTurnCommandIds.push(command.commandId);
+        if (this.#nextStartTurnConflictRevision !== undefined) {
+          const currentRevision = this.#nextStartTurnConflictRevision;
+          this.#nextStartTurnConflictRevision = undefined;
+          this.push(
+            result(message.id, {
+              status: 'conflict',
+              commandId: command.commandId,
+              code: 'revision_conflict',
+              currentRevision,
+            }),
+          );
+          return;
+        }
+        const acceptedRevision = command.expectedRevision + 1;
+        const terminalRevision = acceptedRevision + 1;
         this.push(
           result(message.id, {
             status: 'applied',
             commandId: command.commandId,
             sessionId: command.sessionId,
-            revision: 2,
+            revision: acceptedRevision,
           }),
         );
         if (this.#approvalOnNextTurn) {
@@ -570,8 +665,8 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             type: 'notification',
             durability: 'durable',
             sessionId: command.sessionId,
-            revision: 2,
-            session: projection(command.sessionId, 2, 'running'),
+            revision: acceptedRevision,
+            session: projection(command.sessionId, acceptedRevision, 'running'),
             event: { type: 'model.requested', requestId: 'request-1' },
           }),
         );
@@ -640,8 +735,8 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             type: 'notification',
             durability: 'durable',
             sessionId: command.sessionId,
-            revision: 3,
-            session: projection(command.sessionId, 3, 'completed'),
+            revision: terminalRevision,
+            session: projection(command.sessionId, terminalRevision, 'completed'),
             event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
           }),
         );

@@ -439,6 +439,7 @@ function TuiApp({
       }>,
     ) => Promise<void>
   >(async () => {});
+  const promptSubmissionTailRef = React.useRef<Promise<void>>(Promise.resolve());
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [sessionGrantCount, setSessionGrantCount] = React.useState(0);
   const [providerModelSnapshot, setProviderModelSnapshot] = React.useState<ProviderModelSnapshot>();
@@ -1294,8 +1295,9 @@ function TuiApp({
       });
   }, [dispatchSessionLoad, sessionManager]);
 
-  const runTask = React.useCallback(
+  const runTaskNow = React.useCallback(
     async (
+      submittedThreadId: string,
       task: string,
       requestedPhase?: AgentPhase,
       initialSkillActivations?: Array<{
@@ -1303,7 +1305,10 @@ function TuiApp({
         input: Record<string, unknown>;
       }>,
     ) => {
-      let threadId = threadIdRef.current;
+      // A prompt queued behind an active turn belongs to the Session that was
+      // foreground when the user pressed Enter. Do not retarget it if the user
+      // switches Sessions while the preceding turn is still completing.
+      let threadId = submittedThreadId;
       let rt = sessionManager.getRuntime(threadId);
       if (!rt) return;
 
@@ -1339,22 +1344,27 @@ function TuiApp({
       // submitted in that narrow window behind the Host-owned idle barrier;
       // otherwise tryReservePrompt() would silently discard an ordinary
       // consecutive turn (and must not be made permissive with a local abort).
-      if (!stateRef.current.running) await rt.waitForRunCompletion();
+      await rt.waitForRunCompletion();
 
       // Recover first so the reservation belongs to the continuation runtime,
       // not the immutable source session left by an interrupted interaction.
-      if (!rt.tryReservePrompt()) return;
+      if (!rt.tryReservePrompt()) {
+        throw new Error('The Runtime session did not admit the queued prompt.');
+      }
       const runGeneration = ++runGenerationRef.current;
+      const startsForeground = threadIdRef.current === threadId;
 
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
-      rt.thinkingLevel = thinkingLevelRef.current;
-      rt.conversationHistory = [...conversationHistoryRef.current];
+      if (startsForeground) {
+        rt.thinkingLevel = thinkingLevelRef.current;
+        rt.conversationHistory = [...conversationHistoryRef.current];
+      }
 
       // Establish the new active turn before inserting the prompt. This keeps
       // the durable prompt out of the idle/static transition window between a
       // cancelled predecessor and its successor; otherwise Ink can commit the
       // combined old+new turn to <Static> before the successor tool starts.
-      dispatch({ type: 'SET_RUNNING' });
+      if (startsForeground) dispatch({ type: 'SET_RUNNING' });
       // Do not optimistically append a prompt here. The bridge allocates the
       // durable command and message identities, and the RuntimeClient's
       // `user.message` projection is the only canonical rendering input.
@@ -1418,6 +1428,24 @@ function TuiApp({
     },
     [dispatch, sessionManager],
   );
+  const runTask = React.useCallback(
+    (
+      task: string,
+      requestedPhase?: AgentPhase,
+      initialSkillActivations?: Array<{
+        skillId: string;
+        input: Record<string, unknown>;
+      }>,
+    ): Promise<void> => {
+      const submittedThreadId = threadIdRef.current;
+      const scheduled = promptSubmissionTailRef.current.then(() =>
+        runTaskNow(submittedThreadId, task, requestedPhase, initialSkillActivations),
+      );
+      promptSubmissionTailRef.current = scheduled.catch(() => undefined);
+      return scheduled;
+    },
+    [runTaskNow],
+  );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
   // Ref to avoid Ink 7 stale closure: useInput in InputLine may fire with
@@ -1436,9 +1464,21 @@ function TuiApp({
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.
-      runTask(value, stateRef.current.status.phase);
+      if (stateRef.current.running) {
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: '  ⎿  Message queued; it will be sent after the current turn finishes.',
+        });
+      }
+      void runTask(value, stateRef.current.status.phase).catch((error) => {
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  Message was not sent: ${toErrorMessage(error)}`,
+          isError: true,
+        });
+      });
     },
-    [runTask],
+    [dispatchSessionLoad, runTask],
   );
 
   React.useEffect(() => {

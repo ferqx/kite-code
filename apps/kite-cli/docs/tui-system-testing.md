@@ -55,6 +55,9 @@
   `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
   原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
+- 普通消息输入必须覆盖当前 Turn 运行期间的连续 Enter：第二条消息先显示本地排队回执，再以提交时的 Session identity
+  等待 Service 权威 idle projection；遇到明确 `revision_conflict` 只使用同一 commandId 与 Service 返回的 current revision
+  有界重试，最终两条模型请求和渲染各一次，不得清空后静默丢失或因切换 Session 改投目标。
 - Workspace Trust journey必须覆盖App Control prepare/query/decision先于Runtime connect；decline不得打开Runtime，
   trusted restart才可跳过prompt。PTY exit必须证明只关闭terminal connection，不能据此停止Service owner。
 

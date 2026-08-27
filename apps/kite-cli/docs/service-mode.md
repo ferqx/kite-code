@@ -24,6 +24,11 @@ Server的initial snapshot、reconnect reset与revision gap snapshot在wire上都
 已接受command receipt revision的迟到snapshot结束新run。这样event、history replay与snapshot recovery仍只有一个TUI
 presentation state machine，Runtime Client cache不是第二套UI lifecycle authority。
 
+普通消息提交使用per-TUI FIFO，不在当前Turn仍active时调用`tryReservePrompt()`后静默丢弃。每条消息先等待本Session
+Host idle，再取得唯一prompt reservation并发送`start_turn`；连续输入按提交顺序逐条执行。重连/恢复时即使本地没有
+`runPromise`，只要authoritative projection仍是queued/running/waiting，client就轮询exact Session projection直到远端
+cleanup barrier idle后才放行下一条消息。等待或command失败必须返回TUI可见的“未发送”错误，不能只清空输入框。
+
 Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉
 transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。
 React owner切换时action sink按实例释放，旧effect cleanup不能清除新Runtime client binding。

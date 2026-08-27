@@ -13,6 +13,9 @@
 - 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
   reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
   两个不同轮次的相同文本仍保留两条。`USER_MESSAGE` 只用于不会进入 Runtime 的本地 slash echo。
+- 输入框在当前Turn运行时提交的普通消息进入本TUI的FIFO，等待authoritative远端run/cleanup idle后再取得prompt
+  reservation并发送；不得在`tryReservePrompt()`失败时静默清空。恢复中的active projection即使没有本地run Promise也必须
+  等待Service projection变为idle。排队会显示明确提示，最终command失败显示可重试的“未发送”错误。
 - 历史 Session 的完整 durable replay 只通过 `RuntimeClient.history` 的 App-injected `RuntimeHistoryClient`
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
   不是完整 history source。event-free snapshot仍是当前activity/interaction的权威projection：Service投影同revision

@@ -72,6 +72,46 @@ describe('TUI PTY System — Input & Message', () => {
     TIMEOUT,
   );
 
+  test(
+    'queues a second message while the current turn is running',
+    async () => {
+      server.setResponses([
+        { message: { content: 'First turn completed.' }, delay: 800 },
+        { message: { content: 'Queued turn completed.' }, delay: 50 },
+      ]);
+
+      await submitUserMessage(tui, server, 'First message', { timeout: 15000 });
+
+      const secondRequestBaseline = server.getRequestCount();
+      await typeText(tui, 'Second queued message');
+      const secondSubmission = submitCurrentInput(tui, {
+        acceptWhen: () => server.getRequestCount() > secondRequestBaseline,
+        requireAcceptWhen: true,
+        semanticReceiptTimeoutMs: 15000,
+      });
+
+      await waitForText(
+        () => tui.viewport(),
+        'Message queued; it will be sent after the current turn finishes.',
+        5000,
+      );
+      await secondSubmission;
+      await waitForRequestMessage(server, 'Second queued message', 15000, {
+        since: secondRequestBaseline,
+        tui,
+      });
+      await waitForText(() => tui.viewport(), 'Queued turn completed.', 15000);
+
+      const output = stripAnsi(tui.viewport());
+      expect(output.split('First message').length - 1).toBe(1);
+      expect(output.split('Second queued message').length - 1).toBe(1);
+      expect(output.indexOf('First turn completed.')).toBeLessThan(
+        output.indexOf('Queued turn completed.'),
+      );
+    },
+    TIMEOUT,
+  );
+
   // ── Multiline Input ──────────────────────────────────────
 
   test(
