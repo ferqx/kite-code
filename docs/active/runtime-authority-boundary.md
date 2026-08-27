@@ -110,7 +110,8 @@ ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前
 MCP stdio wrapper的ready、JSON-RPC与terminal frame都必须等待stdout write completion后再推进生命周期；尤其最终terminal
 frame未刷入专用pipe前wrapper不得退出。Host只接受实际收到并验证的terminal evidence，process exit或已写入用户态buffer
 不能替代该证明。wrapper runtime返回的completion Promise只在terminal已写入或fail-closed child cleanup收敛后完成；
-Service standalone internal entry必须await该Promise，不能在安装event listener后提前结束主入口。
+Service standalone internal entry与executable module root都必须await该Promise，不能以fire-and-forget `.catch()`在安装
+event listener后提前结束模块求值或主入口。
 terminal写入后wrapper还必须显式结束stdout并等待stream close callback；普通write callback在Windows standalone上
 不足以证明最后一个pipe frame已对Host可见。最终terminal control frame因此使用Bun standalone原生stdout write
 Promise并校验返回的exact byte count，随后才结束stream；ready与普通JSON-RPC仍走异步背压路径。

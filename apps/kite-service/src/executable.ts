@@ -199,7 +199,7 @@ function createProcessReadinessPort(instanceId: string, fd: number): KiteService
 }
 
 if (import.meta.main) {
-  runKiteServiceMain().catch((error: unknown) => {
+  await runKiteServiceMain().catch((error: unknown) => {
     process.stderr.write(
       `[kite-service] ${error instanceof Error ? error.message : 'service failed'}\n`,
     );
