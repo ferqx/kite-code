@@ -19,6 +19,9 @@ function Read-KiteStateItem {
 
 $item = Read-KiteStateItem
 if ($action -eq 'secure') {
+  $existingAcl = Get-Acl -LiteralPath $path -ErrorAction Stop
+  $existingOwner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
+  if ($existingOwner.Value -ne $identity.Value) { exit 44 }
   if ($kind -eq 'directory') {
     $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $inheritance =

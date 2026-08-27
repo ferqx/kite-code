@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createManagedLocalServiceClientComposition } from '../../scripts/release/local-service-client';
@@ -35,6 +43,7 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
   const systemHome = join(root, 'os-home');
   const explicitHome = join(root, 'explicit-kite-home');
   mkdirSync(systemHome);
+  mkdirSync(explicitHome, { mode: 0o755 });
   try {
     createManagedLocalServiceClientComposition({
       argv: ['bun', 'kite', '--kite-home', explicitHome],
@@ -43,6 +52,7 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
     });
     expect(existsSync(explicitHome)).toBe(true);
     expect(existsSync(join(explicitHome, '.kite-code'))).toBe(false);
+    if (process.platform !== 'win32') expect(lstatSync(explicitHome).mode & 0o777).toBe(0o700);
 
     expect(() =>
       createManagedLocalServiceClientComposition({

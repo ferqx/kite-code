@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  chmodSync,
   closeSync,
   constants,
   fchmodSync,
@@ -237,9 +238,44 @@ function lstatIfPresent(path: string): PortableFileStat | undefined {
   }
 }
 
-function ensureDirectoryAtPath(path: string, label: string, ownerOnly: boolean): void {
+function secureExistingOwnerDirectory(path: string, stat: PortableFileStat, label: string): void {
+  if (process.platform === 'win32') {
+    try {
+      secureWindowsStatePath(path, 'directory');
+      return;
+    } catch (error) {
+      fail('permission', `${label} could not be secured for the Windows owner.`, error);
+    }
+  }
+  const uid = currentUid();
+  if (uid !== undefined && stat.uid !== undefined && stat.uid !== uid) {
+    fail('permission', `${label} has a different owner.`);
+  }
+  try {
+    chmodSync(path, POSIX_DIRECTORY_MODE);
+  } catch (error) {
+    fail('permission', `${label} could not be secured for the current owner.`, error);
+  }
+}
+
+function ensureDirectoryAtPath(
+  path: string,
+  label: string,
+  ownerOnly: boolean,
+  secureExisting = false,
+): void {
   const existing = lstatIfPresent(path);
   if (existing) {
+    assertDirectoryStat(existing, label, false, path);
+    if (ownerOnly && secureExisting) {
+      secureExistingOwnerDirectory(path, existing, label);
+      const secured = lstatIfPresent(path);
+      if (!secured || !sameIdentity(existing, secured)) {
+        fail('corrupt', `${label} changed while its owner access was secured.`);
+      }
+      assertDirectoryStat(secured, label, true, path);
+      return;
+    }
     assertDirectoryStat(existing, label, ownerOnly, path);
     return;
   }
@@ -303,7 +339,8 @@ export function ensureLocalRuntimeServiceHome(identity: KiteHomeIdentity): KiteH
   let current = homePath.anchor;
   for (let index = 0; index < homePath.segments.length; index += 1) {
     current = join(current, homePath.segments[index]!);
-    ensureDirectoryAtPath(current, 'Kite home', index === homePath.segments.length - 1);
+    const isHome = index === homePath.segments.length - 1;
+    ensureDirectoryAtPath(current, 'Kite home', isHome, isHome);
   }
   let canonical: string;
   try {

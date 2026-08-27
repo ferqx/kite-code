@@ -55,7 +55,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。
 - state identity来自explicit validated home，不从request Workspace/cwd推导。POSIX验证owner UID与`0700`/`0600`并拒绝
   symlink/hardlink/type drift；Windows通过fixed system PowerShell校验current-user SID、protected owner-only DACL与
-  non-reparse file/directory。创建时收紧ACL，后续每次敏感读取、替换与清理都重新验证；ACL/reparse drift fail closed。
+  non-reparse file/directory。explicit home先验证non-link/current owner再收紧权限；state创建时收紧ACL，后续每次敏感
+  读取、替换与清理都重新验证，既有state ACL/reparse drift fail closed。
 
 ## 测试与 evidence
 

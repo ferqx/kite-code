@@ -104,6 +104,8 @@ matrix 或 approved registry。
 upgrade、rollback与uninstall在替换或删除binary前必须调用当前candidate的普通`kite service stop`并确认
 `service status --json`为`applied + absent`，随后取得同一Native lifecycle fence。`service_busy`、identity uncertain、
 state残留或任何stop/status失败都保持active candidate与managed tree不变；installer不force kill、不手工清state。
+managed client接管显式或OS-derived Kite home时先拒绝symlink/non-owner identity，再仅把home目录本身收紧为owner-only；
+既有descriptor/token/lock权限漂移仍fail closed，不借cleanup或install自动修复。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、TUI version/managed-Service startup、
 installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uninstall。任一步非零都使smoke失败；该本机
