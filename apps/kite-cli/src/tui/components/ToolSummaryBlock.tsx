@@ -291,17 +291,27 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // Confirmed narrations (captions) accumulate chronologically; the pending
   // caption (awaiting tool confirmation / detachment) trails them live.
   // Hook 必须置于所有早退之前（rules-of-hooks）。
-  const captionContent = useMemo(() => {
-    const parts = [
-      ...(block.captions ?? []),
-      ...(block.pendingCaption ? [block.pendingCaption] : []),
-    ]
-      .map((part) => part.replace(/^(?:\r?\n)+/u, '').replace(/(?:\r?\n)+$/u, ''))
-      .filter((part) => /\S/u.test(part));
-    // Distinct model narrations are compact sibling lines. A caption's own
-    // internal Markdown paragraph breaks remain untouched.
-    return parts.length > 0 ? parts.join('\n') : '';
-  }, [block.captions, block.pendingCaption]);
+  const captionParts = useMemo(
+    () =>
+      [...(block.captions ?? []), ...(block.pendingCaption ? [block.pendingCaption] : [])]
+        .map((part) => part.replace(/^(?:\r?\n)+/u, '').replace(/(?:\r?\n)+$/u, ''))
+        .filter((part) => /\S/u.test(part)),
+    [block.captions, block.pendingCaption],
+  );
+
+  const captions =
+    captionParts.length === 0 ? null : (
+      <Box flexDirection="column" paddingLeft={2}>
+        {captionParts.map((part, index) => (
+          <MarkdownBlock
+            key={`caption:${index}`}
+            content={part}
+            streaming={false}
+            maxWidth={col - 2}
+          />
+        ))}
+      </Box>
+    );
 
   // ── settle 后只保留 Thought 摘要，不展示 reasoning 正文 ──
   // 聚合摘要的圆点只表示“阶段正在进行”，因此 Thought 与非 Thought
@@ -322,11 +332,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
           {/* 两个空格列位 = 圆点列宽（"● "），避免 settle 时标题横向跳动 */}
           <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
         </Box>
-        {captionContent !== '' && (
-          <Box marginTop={1} paddingLeft={2}>
-            <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
-          </Box>
-        )}
+        {captions}
       </Box>
     );
   }
@@ -340,11 +346,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
         {isRunning ? <BlinkDot active /> : <Text>{'  '}</Text>}
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
-      {captionContent !== '' && (
-        <Box marginTop={1} paddingLeft={2}>
-          <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
-        </Box>
-      )}
+      {captions}
       {!showsThinking && hasSkipped && (
         <Box paddingLeft={3}>
           <Text color={dt.dim}>└─ ... 以上 {skipped} 步已折叠</Text>

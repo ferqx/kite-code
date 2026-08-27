@@ -67,17 +67,18 @@
   或迫使后续探索工具另建 summary。
 - TUI reducer只消费canonical framed client events，不按InProcess、Native Service或carrier分支渲染。Service在投影前
   以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
-  durable边界与Turn结束前先flush。数据源切换不得把累计文本拆成逐行block，也不得把同一阶段的Thinking移到独立
-  dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
+  durable边界与Turn结束前先flush。数据源切换不得把累计packet拆成多个回答block，也不得把同一阶段的Thinking移到
+  独立dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
   terminal或interaction事件；整轮完成后的单次flush不能替代这个事件间屏障。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
-- 同一阶段内的多个 caption 按事件顺序逐行紧凑排列；Thinking 题头与首个 caption 之间固定保留一行，
-  settled Thinking 摘要（无论是否包含工具）与最终回答之间也固定保留一行。不得把该视觉分段扩成第二个
-  Thought/回答 block；单条 caption/回答自身的 Markdown 段落间距保持不变。
+- 同一阶段内的多个 caption 按事件顺序作为稳定Markdown sibling逐项渲染；新增pending caption只更新尾项，不能把
+  全部caption先拼成一个会整体重绘的paragraph节点。Thinking题头与首个caption直接相邻、无额外空行，caption之间
+  同样紧凑；单条caption自身的Markdown段落间距仍保留。settled Thinking摘要（无论是否包含工具）与真正独立的最终
+  回答之间固定保留一行，不得把caption视觉上拆成第二个Thought/回答区域。
 
 ## 软换行与光标
 

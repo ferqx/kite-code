@@ -140,8 +140,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const lines = clean.split('\n').map((line) => line.trim());
       const headerIndex = lines.findIndex((line) => line.startsWith('Thinking '));
       const firstCaptionIndex = lines.indexOf('先查看项目入口和核心配置。');
-      expect(firstCaptionIndex).toBe(headerIndex + 2);
-      expect(lines[firstCaptionIndex - 1]).toBe('');
+      expect(firstCaptionIndex).toBe(headerIndex + 1);
       expect(lines.indexOf('继续搜索源码和文档目录。')).toBe(firstCaptionIndex + 1);
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
@@ -647,9 +646,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       );
       expect(firstThinking).toBeGreaterThan(-1);
       captions.slice(0, -1).forEach((caption, index) => {
-        expect(lines[firstThinking + index + 2]).toBe(caption);
+        expect(lines[firstThinking + index + 1]).toBe(caption);
       });
-      expect(lines[firstThinking + 1]).toBe('');
 
       // The fifth narration trails the settled first Thought as final text;
       // it receives the same single-row block gap, not a duplicated caption
