@@ -143,7 +143,7 @@ describe('resolveTuiLaunchPaths', () => {
 
     expect(resolveTuiLaunchPaths({ workspace }, '/project')).toEqual({
       cwd: '/tmp/kite-code-workspace',
-      entryPath: join('/project', 'apps/kite-cli/src/tui/executable.tsx'),
+      entryPath: join('/project', 'scripts/release/entrypoints/tui.ts'),
     });
   });
 

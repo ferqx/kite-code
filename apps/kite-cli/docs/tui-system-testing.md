@@ -8,6 +8,8 @@
 - `bun run test:tui:system` 按文件启动隔离 PTY scenario；CI 使用 `KITE_TUI_SYSTEM_SHARD=index/count` 分片。
 - `bun run test:tui:smoke:native` 只运行显式 native sandbox smoke。
 - 默认 `bun run test` 不执行真实 PTY scenario、native smoke、spike 或 live Provider。
+- source PTY child从repo-owned `scripts/release/entrypoints/tui.ts`进入同一managed Service composition，不再直入
+  `apps/kite-cli/src/tui/executable.tsx`绕过release/default manager wiring；installed smoke仍使用standalone executable。
 
 ## Runtime client boundary
 
