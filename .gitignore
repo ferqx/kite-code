@@ -15,8 +15,8 @@ coverage
 
 # logs
 logs
-!apps/kite-cli/src/logs/
-!apps/kite-cli/src/logs/**
+!apps/kite-service/src/logs/
+!apps/kite-service/src/logs/**
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 

@@ -355,6 +355,8 @@ PS-02 的 protocol、Pipeline、allocating lifecycle、Host-owned spawn、recove
 的 artifact upload；任一 required step、source identity、canonical digest 或 artifact 缺失都使 job
 失败。Linux cgroup descendant cleanup 与 full-chain 仍是显式 opt-in candidate-only diagnostic，不能
 冒充该 evidence。
+Runtime backend relocation后，POSIX supervisor与sandbox execution provider的required conformance路径固定在
+`apps/kite-service/test/isolated/execution/`；workflow与contract test必须拒绝已删除的CLI backend test路径。
 Cross-platform exclusion contracts 在每个 runner 内固定 `max-concurrency=1` 并有 10 分钟硬上限；尤其
 Windows 不得让多个 Bun sandbox/process lifecycle fixture 并行持有 native handle，测试完成后进程不收敛
 也必须以 timeout 失败，不能无限占用 matrix 或跳过后续 Cargo/native E2E。

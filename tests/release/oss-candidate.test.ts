@@ -10,6 +10,12 @@ import {
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
+const MACOS_FIXTURE_TARGET = {
+  id: 'macos-arm64',
+  os: 'darwin',
+  arch: 'arm64',
+  executableSuffix: '',
+} as const;
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -101,7 +107,7 @@ describe('ordinary open-source candidate archive', () => {
 });
 
 async function createFixture(version: string) {
-  const fixture = await createOssCandidateFixture(version);
+  const fixture = await createOssCandidateFixture(version, MACOS_FIXTURE_TARGET);
   const { root } = fixture;
   roots.push(root);
   return fixture;

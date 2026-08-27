@@ -216,7 +216,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
-- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；
+- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
 - `check:runtime-packages`：十三个 workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。

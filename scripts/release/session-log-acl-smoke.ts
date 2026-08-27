@@ -54,7 +54,9 @@ export interface SessionLogAclSmokeEvidence {
 }
 
 export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidence> {
-  const root = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
+  const container = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
+  const root = join(container, 'kite-code');
+  mkdirSync(root, { mode: 0o700 });
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = root;
   try {
@@ -146,18 +148,21 @@ export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenc
   } finally {
     if (previousHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
-    rmSync(root, { recursive: true, force: true });
+    rmSync(container, { recursive: true, force: true });
   }
 }
 
 async function verifyLinkRejection(root: string): Promise<void> {
   await verifyFileAndDirectoryLinkRejection(root);
   const secondHome = join(root, 'linked-home');
-  const kite = join(secondHome, '.kite-code');
   const outside = join(root, 'outside');
-  mkdirSync(kite, { recursive: true });
+  mkdirSync(secondHome);
   mkdirSync(outside);
-  symlinkSync(outside, join(kite, 'sessions'), process.platform === 'win32' ? 'junction' : 'dir');
+  symlinkSync(
+    outside,
+    join(secondHome, 'sessions'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = secondHome;
   try {
@@ -170,7 +175,7 @@ async function verifyLinkRejection(root: string): Promise<void> {
     } catch {
       rejected = true;
     }
-    if (!rejected || !lstatSync(join(kite, 'sessions')).isSymbolicLink()) {
+    if (!rejected || !lstatSync(join(secondHome, 'sessions')).isSymbolicLink()) {
       throw new Error('Session-log writer did not reject the linked/reparse-point root.');
     }
     if (existsSync(join(outside, 'native-smoke'))) {

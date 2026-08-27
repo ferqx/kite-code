@@ -229,6 +229,9 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 `.kite-code` root。直接执行 session writer 定向测试时，
 测试文件自身也必须创建并清理临时 `KITE_CODE_HOME`，不得依赖 runner 包装层，避免开发者的真实
 `~/.kite-code/sessions` 被测试 session 污染。
+原生ACL smoke也把`KITE_CODE_HOME`当作exact code root：该root必须位于测试创建、当前用户拥有的private
+container内；link/reparse negative必须直接替换`<codeRoot>/sessions`，不得继续攻击旧的
+`<home>/.kite-code/sessions`路径后误报已验证。
 
 单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。

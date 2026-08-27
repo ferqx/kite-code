@@ -205,6 +205,12 @@ describe('platform capability probe admission', () => {
     const macosRequiredStep = requiredSteps.slice(macosStepStart, posixStepStart);
     expect(macosRequiredStep).toContain('apps/kite-cli/test/isolated/sandbox.test.ts');
     expect(macosRequiredStep).not.toContain('tests/qualification/sandbox-executor.test.ts');
+    expect(requiredSteps.slice(posixStepStart)).toContain(
+      'apps/kite-service/test/isolated/execution/posix-supervisor.test.ts',
+    );
+    expect(requiredSteps).not.toContain(
+      'apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts',
+    );
 
     const windowsFailClosedStep = requiredSteps.indexOf(
       'name: Windows restricted-token native fail-closed conformance',

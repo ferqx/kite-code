@@ -17,6 +17,10 @@ import {
   rollbackOssCandidate as rollbackCandidate,
   uninstallOssCandidate as uninstallCandidate,
 } from '../../scripts/release/install-oss-candidate';
+import {
+  currentOssReleaseTarget,
+  type OssReleaseTarget,
+} from '../../scripts/release/oss-candidate';
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
@@ -133,7 +137,7 @@ describe('managed candidate install lifecycle', () => {
   });
 
   test('leaves the active candidate unchanged when ordinary Service stop is busy', async () => {
-    const target = { id: 'macos-arm64', os: 'darwin', arch: 'arm64' } as const;
+    const target = currentOssReleaseTarget();
     const first = await createOssCandidateFixture('0.1.0', target, 'service_busy');
     const second = await createOssCandidateFixture('0.1.1');
     roots.push(first.root, second.root);
@@ -151,11 +155,7 @@ describe('managed candidate install lifecycle', () => {
 
   test('refuses to replace a managed install with a different platform target', async () => {
     const first = await createOssCandidateFixture('0.1.0');
-    const otherTarget = await createOssCandidateFixture('0.1.1', {
-      id: 'linux-x64',
-      os: 'linux',
-      arch: 'x64',
-    });
+    const otherTarget = await createOssCandidateFixture('0.1.1', nonNativeTarget());
     roots.push(first.root, otherTarget.root);
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-target-safety-'));
     roots.push(parent);
@@ -185,3 +185,10 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 });
+
+function nonNativeTarget(): OssReleaseTarget {
+  const current = currentOssReleaseTarget();
+  return current.id === 'macos-arm64'
+    ? { id: 'linux-x64', os: 'linux', arch: 'x64', executableSuffix: '' }
+    : { id: 'macos-arm64', os: 'darwin', arch: 'arm64', executableSuffix: '' };
+}

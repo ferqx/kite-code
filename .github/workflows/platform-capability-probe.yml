@@ -31,8 +31,8 @@ on:
       - "tests/qualification/sandbox/**"
       - "apps/kite-service/test/sandbox/**"
       - "apps/kite-service/test/isolated/sandbox/**"
-      - "apps/kite-cli/test/execution/**"
-      - "apps/kite-cli/test/isolated/execution/**"
+      - "apps/kite-service/test/execution/**"
+      - "apps/kite-service/test/isolated/execution/**"
       - "tests/integration/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
 
@@ -90,13 +90,13 @@ jobs:
           tests/qualification/sandbox/platform-capability-verifier.test.ts
           apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
           tests/qualification/sandbox/windows-restricted-token.test.ts
-          apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts
+          apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts
       - if: runner.os == 'macOS'
         name: macOS Seatbelt profile and fail-closed contracts
         run: bun test apps/kite-cli/test/isolated/sandbox.test.ts
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: POSIX supervisor native negative and conformance
-        run: bun test --parallel=1 --max-concurrency=1 apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts
+        run: bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/execution/posix-supervisor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
         run: bun test apps/kite-cli/test/isolated/sandbox.test.ts tests/qualification/sandbox-bwrap-executor.test.ts

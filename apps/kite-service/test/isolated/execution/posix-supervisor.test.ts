@@ -61,6 +61,9 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         supervisorExecutablePath: executable,
       });
       expect(result.cleanupConfirmed).toBe(true);
+      if (result.outcome.exitCode !== 0) {
+        throw new Error(`Compiled Service supervisor failed: ${JSON.stringify(result.outcome)}`);
+      }
       expect(result.outcome.exitCode).toBe(0);
       expect(result.outcome.stderr).toBe('');
       expect(result.outcome.stdout).toBe('packaged-ok');

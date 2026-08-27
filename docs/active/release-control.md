@@ -63,6 +63,9 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 构建器只接受与当前 host OS/architecture 完全一致的 native target，不 cross-compile，也不下载另一平台的
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
+installer contract fixture同样默认使用当前runner的native target与executable suffix；Windows需要执行lifecycle
+stub时由该runner原生编译测试executable。跨target拒绝测试必须显式构造另一target，不能让固定macOS fixture在
+Linux/Windows抢先触发target gate并掩盖待测安装不变量。
 Standalone resolver 必须覆盖十三个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
 不得穿过 `apps/kite-cli/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。

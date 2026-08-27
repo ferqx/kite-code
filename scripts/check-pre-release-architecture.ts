@@ -317,6 +317,7 @@ const requiredDomainFiles = [
   'apps/kite-service/src/runtime/session/planning-mode-service.ts',
   'apps/kite-service/src/runtime/session/context-compaction-service.ts',
   'apps/kite-service/src/runtime/session/session-projection.ts',
+  'apps/kite-service/src/logs/runtime-log-presentation.ts',
   'apps/kite-cli/src/adapters/tui/session-adapter.ts',
   'apps/kite-service/src/runtime/tool-execution/router.ts',
   'apps/kite-service/src/runtime/tool-execution/builtin-executor.ts',
@@ -344,6 +345,15 @@ const requiredDomainFiles = [
 ];
 for (const path of requiredDomainFiles) {
   if (!existsSync(join(root, path))) violations.push(`${path}: required domain module is missing`);
+}
+
+for (const path of ['apps/kite-service/src/logs/runtime-log-presentation.ts']) {
+  const ignored = Bun.spawnSync(['git', 'check-ignore', '--quiet', path], {
+    cwd: root,
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  if (ignored.exitCode === 0) violations.push(`${path}: required domain module is ignored`);
 }
 
 if (violations.length > 0) {
