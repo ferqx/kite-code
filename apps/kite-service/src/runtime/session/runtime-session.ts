@@ -44,6 +44,7 @@ import {
   type SessionUserInputProvider,
   shouldProjectRunExited,
 } from '#kite-service/runtime/session/contracts';
+import { RuntimePresentationFrame } from '#kite-service/runtime-client/presentation-frame';
 import { projectStateRuntimeEventForPresentation } from '#kite-service/runtime-client/presentation-history';
 import {
   type AppShellExecutor,
@@ -136,52 +137,6 @@ export {
   fullModeUnavailableReason,
   resolveInteractionModeTarget,
 } from '#kite-service/runtime/session/contracts';
-
-const PRESENTATION_FRAME_MS = 50;
-const MAX_BUFFERED_TOOL_PROGRESS_CHARS = 16 * 1024;
-const TOOL_PROGRESS_TRUNCATED_MARKER = '… progress truncated … ';
-
-type ToolProgressEvent = Extract<RuntimeEvent, { type: 'tool.progress' }> & {
-  lineCount?: number;
-};
-
-function toolProgressKey(event: ToolProgressEvent): string {
-  return `${event.toolCallId}\0${event.stream}`;
-}
-
-function boundToolProgressChunk(chunk: string): string {
-  if (chunk.length <= MAX_BUFFERED_TOOL_PROGRESS_CHARS) return chunk;
-  const available = Math.max(
-    1,
-    MAX_BUFFERED_TOOL_PROGRESS_CHARS - TOOL_PROGRESS_TRUNCATED_MARKER.length,
-  );
-  let tail = chunk.slice(-available);
-  const firstBoundary = tail.indexOf('\n');
-  if (firstBoundary >= 0) tail = tail.slice(firstBoundary + 1);
-  return `${TOOL_PROGRESS_TRUNCATED_MARKER}${tail}`;
-}
-
-function normalizeToolProgress(event: ToolProgressEvent): ToolProgressEvent {
-  return {
-    ...event,
-    chunk: boundToolProgressChunk(event.chunk),
-    lineCount: event.lineCount ?? event.chunk.split('\n').length,
-  };
-}
-
-function mergeToolProgress(
-  previous: ToolProgressEvent,
-  next: ToolProgressEvent,
-): ToolProgressEvent {
-  const combined = `${previous.chunk}\n${next.chunk}`;
-  return {
-    ...next,
-    chunk: boundToolProgressChunk(combined),
-    lineCount:
-      (previous.lineCount ?? previous.chunk.split('\n').length) +
-      (next.lineCount ?? next.chunk.split('\n').length),
-  };
-}
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -362,17 +317,7 @@ export class SessionRuntime {
   private _cancellationRequested = false;
   /** Prevents multiple prompts from being optimistically accepted for one cancelled run. */
   private _successorPromptReserved = false;
-  private _deltaBuffer: {
-    dispatch: ((action: SessionPresentationAction) => void) | null;
-    text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
-    reasoning?: Extract<RuntimeEvent, { type: 'model.reasoning_delta' }>;
-    timer: ReturnType<typeof setTimeout> | null;
-  } = { dispatch: null, timer: null };
-  private _toolProgressBuffer: {
-    dispatch: ((action: SessionPresentationAction) => void) | null;
-    events: Map<string, ToolProgressEvent>;
-    timer: ReturnType<typeof setTimeout> | null;
-  } = { dispatch: null, events: new Map(), timer: null };
+  private readonly _presentationFrame = new RuntimePresentationFrame();
 
   constructor(
     threadId: string,
@@ -556,8 +501,7 @@ export class SessionRuntime {
   }
 
   clearBuffer(): void {
-    this._clearModelDeltas();
-    this._clearToolProgress();
+    this._presentationFrame.clear();
     this.eventBuffer = [];
     this._durableStateEventBuffer = [];
     this.conversationHistory = [];
@@ -936,29 +880,15 @@ export class SessionRuntime {
       this.interactionMode = event.mode;
       this._runtimeSessionCoordinator?.get(this.threadId)?.updateInteractionMode(event.mode);
     }
-    if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
-      this._flushToolProgress();
-      this._bufferModelDelta(event, dispatch);
-      return;
-    }
-    if (event.type === 'model.reasoning_completed') {
-      // Completion is ephemeral just like its cumulative delta. Flush that
-      // delta first, then send the lifecycle boundary through the same
-      // presentation dispatch. Sending it to the durable State sink would
-      // make the server wait for a revision that an ephemeral event never
-      // consumes, so live Server clients would never receive completion.
-      this._flushModelDeltas();
+    const presentationSink = (presentationEvent: RuntimeEvent): void => {
       if (this._foreground) {
-        const projected = projectStateRuntimeEventForPresentation(event);
+        const projected = projectStateRuntimeEventForPresentation(presentationEvent);
         if (projected) dispatch({ type: 'RUNTIME_EVENT', event: projected });
       } else {
-        this._pushToBuffer(event);
+        this._pushToBuffer(presentationEvent);
       }
-      return;
-    }
-    if (event.type === 'tool.progress') {
-      this._flushModelDeltas();
-      this._bufferToolProgress(event, dispatch);
+    };
+    if (this._presentationFrame.push(event, presentationSink)) {
       return;
     }
     this._flushBufferedPresentation();
@@ -985,83 +915,8 @@ export class SessionRuntime {
     }
   }
 
-  private _bufferModelDelta(
-    event: Extract<RuntimeEvent, { type: 'model.text_delta' | 'model.reasoning_delta' }>,
-    dispatch: (action: SessionPresentationAction) => void,
-  ): void {
-    this._deltaBuffer.dispatch = dispatch;
-    if (event.type === 'model.text_delta') this._deltaBuffer.text = event;
-    else this._deltaBuffer.reasoning = event;
-    if (this._deltaBuffer.timer) return;
-    this._deltaBuffer.timer = setTimeout(() => this._flushModelDeltas(), PRESENTATION_FRAME_MS);
-  }
-
-  private _flushModelDeltas(): void {
-    const buffered = this._deltaBuffer;
-    if (buffered.timer) clearTimeout(buffered.timer);
-    this._deltaBuffer = { dispatch: null, timer: null };
-    for (const event of [buffered.reasoning, buffered.text]) {
-      if (!event) continue;
-      if (this._foreground && buffered.dispatch) {
-        const projected = projectStateRuntimeEventForPresentation(event);
-        if (projected) buffered.dispatch({ type: 'RUNTIME_EVENT', event: projected });
-      } else {
-        this._pushToBuffer(event);
-      }
-    }
-  }
-
-  private _clearModelDeltas(): void {
-    if (this._deltaBuffer.timer) clearTimeout(this._deltaBuffer.timer);
-    this._deltaBuffer = { dispatch: null, timer: null };
-  }
-
-  private _bufferToolProgress(
-    event: ToolProgressEvent,
-    dispatch: (action: SessionPresentationAction) => void,
-  ): void {
-    const buffered = this._toolProgressBuffer;
-    buffered.dispatch = dispatch;
-    const key = toolProgressKey(event);
-    const previous = buffered.events.get(key);
-    buffered.events.set(
-      key,
-      previous ? mergeToolProgress(previous, event) : normalizeToolProgress(event),
-    );
-    if (buffered.timer) return;
-    buffered.timer = setTimeout(() => this._flushToolProgress(), PRESENTATION_FRAME_MS);
-  }
-
-  private _flushToolProgress(): void {
-    const buffered = this._toolProgressBuffer;
-    if (buffered.timer) clearTimeout(buffered.timer);
-    this._toolProgressBuffer = {
-      dispatch: null,
-      events: new Map(),
-      timer: null,
-    };
-    for (const event of buffered.events.values()) {
-      if (this._foreground && buffered.dispatch) {
-        const projected = projectStateRuntimeEventForPresentation(event);
-        if (projected) buffered.dispatch({ type: 'RUNTIME_EVENT', event: projected });
-      } else {
-        this._pushToBuffer(event);
-      }
-    }
-  }
-
-  private _clearToolProgress(): void {
-    if (this._toolProgressBuffer.timer) clearTimeout(this._toolProgressBuffer.timer);
-    this._toolProgressBuffer = {
-      dispatch: null,
-      events: new Map(),
-      timer: null,
-    };
-  }
-
   private _flushBufferedPresentation(): void {
-    this._flushModelDeltas();
-    this._flushToolProgress();
+    this._presentationFrame.flush();
   }
 
   private _flushDurableStateEventBuffer(): void {

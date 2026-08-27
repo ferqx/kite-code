@@ -47,6 +47,7 @@ import {
   projectRuntimeClientInteraction,
   type RuntimeInteractionEffect,
 } from '../../runtime-client/interaction-projector';
+import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import { assertPrecommittedRewind } from './command-rewind-decision';
@@ -840,6 +841,24 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     if (!publish) throw new Error('Runtime CLI command activation is unavailable.');
     let status: NonNullable<RuntimeSessionProjection['activeWork']>['status'] = 'completed';
     let publishedRevision = this.#revision;
+    let sequence = 0;
+    const presentation = new RuntimePresentationFrame();
+    const publishPresentation = (event: RuntimeEvent): void => {
+      const notification = projectRuntimeEphemeralNotification(event, {
+        sessionId: this.#input.sessionId,
+        workId: this.#activeWork?.workId ?? command.commandId,
+        turnId: this.#activeWork?.activeTurn?.turnId ?? command.commandId,
+        actorId: 'runtime-agent',
+        attemptId: command.commandId,
+        streamId: command.commandId,
+        sequence: sequence + 1,
+      });
+      if (!notification) {
+        throw new Error('Runtime presentation frame emitted a non-ephemeral event.');
+      }
+      sequence += 1;
+      publish(notification);
+    };
     try {
       const generator = coordinator.executeTurn(
         {
@@ -874,22 +893,9 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         },
         this.#createClientActionProvider(publish),
       );
-      let sequence = 0;
       for await (const event of generator) {
-        const ephemeral = projectRuntimeEphemeralNotification(event, {
-          sessionId: this.#input.sessionId,
-          workId: this.#activeWork?.workId ?? command.commandId,
-          turnId: this.#activeWork?.activeTurn?.turnId ?? command.commandId,
-          actorId: 'runtime-agent',
-          attemptId: command.commandId,
-          streamId: command.commandId,
-          sequence: sequence + 1,
-        });
-        if (ephemeral) {
-          sequence += 1;
-          publish(ephemeral);
-          continue;
-        }
+        if (presentation.push(event, publishPresentation)) continue;
+        presentation.flush();
         const eventRevision = coordinator.revisionForEvent?.(event);
         if (eventRevision === undefined || eventRevision <= publishedRevision) {
           throw new Error('Runtime event revision was unavailable or out of order.');
@@ -934,6 +940,11 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     } catch {
       status = signal.aborted ? 'cancelled' : 'failed';
     } finally {
+      try {
+        presentation.flush();
+      } catch {
+        status = signal.aborted ? 'cancelled' : 'failed';
+      }
       this.#running = false;
       this.#activePublish = undefined;
       this.#revision = coordinator.getState().revision;

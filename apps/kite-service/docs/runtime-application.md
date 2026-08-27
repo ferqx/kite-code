@@ -37,6 +37,12 @@ History由Service-owned exhaustive raw-event projector与SQLite log query生成c
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
 
+Live presentation在进入closed `RuntimeClientEvent` projector前统一经过Service-owned 50ms presentation frame。累计
+reasoning/text在一帧内只投影最新值并固定按reasoning→text顺序发布，tool progress按`toolCallId + stream`有界合并；
+durable事件、reasoning completion与Turn终结前必须先flush。relocated `SessionRuntime` seam与concrete
+`CliRuntimeBridge`复用同一实现，因此InProcess/Service或不同carrier只能改变传输，不能改变TUI看到的事件粒度、顺序或
+聚合语义。
+
 ## Clean-cutover non-goals
 
 没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、Web/Desktop/public SDK、

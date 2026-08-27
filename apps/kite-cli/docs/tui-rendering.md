@@ -63,6 +63,10 @@
   交给 client sink，不能把 completed 误送 durable revision sink。durable `model.responded(toolCallCount>0)` 可以
   先于同一回复的累计 text delta 抵达；该迟到 narration 仍属于当前活跃阶段，不得关闭 Thought、重复 caption
   或迫使后续探索工具另建 summary。
+- TUI reducer只消费canonical framed client events，不按InProcess、Native Service或carrier分支渲染。Service在投影前
+  以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
+  durable边界与Turn结束前先flush。数据源切换不得把累计文本拆成逐行block，也不得把同一阶段的Thinking移到独立
+  dynamic区域。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
