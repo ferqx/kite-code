@@ -88,7 +88,15 @@ export function runMcpStdioChildRuntime(
     failed = true;
     if (error) {
       try {
-        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        const diagnostic = Buffer.from(
+          `${error instanceof Error ? error.message : String(error)}\n`,
+          'utf8',
+        );
+        try {
+          writeSync(process.stderr.fd, diagnostic);
+        } finally {
+          diagnostic.fill(0);
+        }
       } catch {
         // The parent may already have closed stderr.
       }

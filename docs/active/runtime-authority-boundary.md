@@ -114,6 +114,7 @@ Service standalone internal entry与executable module root都必须await该Promi
 event listener后提前结束模块求值或主入口。
 Windows上的Bun 1.4 standalone在child退出后不能只依赖pending stream/completion Promise维持事件循环；wrapper必须
 在整个child与pipe drain生命周期持有一个referenced keepalive，并仅在terminal evidence或fail-closed cleanup真正结算后释放。
+fail-closed诊断只写入有界stderr，且必须同步提交后再允许wrapper结束，避免Windows standalone丢失唯一故障证据。
 terminal写入后wrapper还必须显式结束stdout并等待stream close callback；普通write callback在Windows standalone上
 不足以证明最后一个pipe frame已对Host可见。最终terminal control frame因此直接对专用stdout fd执行有界同步
 写入并校验每次正向byte progress，随后才结束stream；ready与普通JSON-RPC仍走异步背压路径。

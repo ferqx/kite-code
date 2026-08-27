@@ -155,6 +155,10 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   await handle.closeInput().catch(() => undefined);
   try {
     await handle.terminal;
+  } catch (error) {
+    failure ??= error;
+  }
+  try {
     const cleanup = await handle.cleanup();
     if (!cleanup.confirmedExited || !cleanup.terminalReceived || cleanup.unconfirmedProcessCount) {
       failure ??= new Error('Installed MCP stdio wrapper cleanup was not confirmed.');
