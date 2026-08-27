@@ -13,6 +13,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   authenticated control plane；caller确认Workspace trusted后才显式`connect()`。
 - `./manager`：单一ensure/status/stop/restart state machine、native process/spawn/PID probe、cross-process lifecycle lock、
   neutral environment与explicit executable resolver composition。manager拥有control token；普通connection不取得它。
+- source mode在POSIX直接执行repo-owned shebang entry；Windows没有shebang executable语义，因此固定由当前Bun runtime
+  执行同一个`service.ts` entry。installed mode在三平台始终直接执行resolved companion binary，不经PATH fallback。
 - manager probe先 `GET /readyz`做liveness precheck，再以access token `POST /_kite/instance`、exact `{}` body读取
   process-owned strict identity；绝不从磁盘descriptor合成healthy response。
 - `./service`：strict descriptor/lock/token codec与fixed `runtime-service/v1` filesystem layout；提供no-follow、owner-only、

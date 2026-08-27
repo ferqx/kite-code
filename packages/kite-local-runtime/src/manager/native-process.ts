@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { resolveNativeServiceSpawnCommand } from './native-spawn-command';
 import type {
   KiteServiceManagerChild,
   KiteServiceManagerProcessPort,
@@ -60,7 +61,8 @@ export function createKiteServiceManagerNativeSpawnPort(): KiteServiceManagerSpa
     async spawn(
       input: Parameters<KiteServiceManagerSpawnPort['spawn']>[0],
     ): Promise<KiteServiceManagerChild> {
-      const child = spawn(input.executable.path, [...input.args], {
+      const invocation = resolveNativeServiceSpawnCommand(input.executable, input.args);
+      const child = spawn(invocation.command, [...invocation.args], {
         cwd: input.cwd,
         env: { ...input.env, KITE_SERVICE_READINESS_FD: String(READINESS_FD) },
         detached: input.detached,

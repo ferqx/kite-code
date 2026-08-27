@@ -82,6 +82,9 @@ release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭�
 候选 executable 由 `scripts/release/entrypoints/` 的无 guard 薄入口显式调用 CLI `main()` 或 TUI
 `runTui()`；不能依赖 compiled runtime 对 `import.meta.main` 的平台相关判定。源码入口仍保留自身 guard，
 避免被测试或其他模块导入时自动启动。
+source manager在POSIX直接执行带shebang的Service entry；Windows source-mode必须以当前Bun executable为command、
+Service TypeScript entry为首个argument。Windows不得尝试把`.ts`当作native executable；installed candidate仍直接执行
+resolved `kite-service.exe`，不能回退PATH或source entry。
 
 `bun run release:verify` 在执行任何 binary 前解析 archive，拒绝未知/缺失/重复路径、绝对路径、父目录
 跳转、link、schema 漂移、target 不匹配和任一 checksum 不一致。只有 verifier 通过后 smoke 才可以
