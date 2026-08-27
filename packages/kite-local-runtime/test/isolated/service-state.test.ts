@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+// This owner suite mutates process state and launches child probes; keep it isolated.
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,

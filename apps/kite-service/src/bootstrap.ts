@@ -88,6 +88,7 @@ import {
   type RuntimeOperationGate,
 } from './runtime-application';
 import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
+import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
@@ -1003,13 +1004,43 @@ export function createKiteMultiWorkspaceRuntimeServer(
             const snapshot = owner.loadCurrentSnapshot(threadId);
             if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
             const model = owner.getCurrentSessionModelRoute(threadId);
+            const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
+              sessionRevision: snapshot.revision,
+            });
+            const activeInteraction =
+              interactionQueue.activeInteractionId === undefined
+                ? undefined
+                : interactionQueue.interactions.find(
+                    (interaction) =>
+                      interaction.interactionId === interactionQueue.activeInteractionId,
+                  );
+            const activeTask = snapshot.activeTaskId
+              ? snapshot.tasks[snapshot.activeTaskId]
+              : undefined;
             return Object.freeze({
               schema: RUNTIME_PROJECTION_SCHEMA_,
               sessionId: threadId,
               revision: snapshot.revision,
               workspace: snapshot.session.workspace,
               lifecycle: 'open' as const,
-              interactionQueue: { revision: snapshot.revision, interactions: [] },
+              interactionQueue,
+              ...(activeInteraction === undefined
+                ? {}
+                : {
+                    activeWork: {
+                      workId: activeTask?.taskId ?? snapshot.turn.turnId,
+                      phase:
+                        activeTask?.planning.kind === 'executing'
+                          ? ('building' as const)
+                          : ('planning' as const),
+                      status: 'waiting' as const,
+                      activeTurn: {
+                        turnId: snapshot.turn.turnId,
+                        status: 'waiting' as const,
+                        interaction: activeInteraction,
+                      },
+                    },
+                  }),
               ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
             });
           });

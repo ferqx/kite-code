@@ -53,6 +53,70 @@ test('same command receipt is replayed and a slow outer client cannot block term
   }
 }, 30_000);
 
+test('two outer clients settle one real approval while the Store-only index preserves its queue', async () => {
+  const fixture = createFixture(
+    'approval-revision-advance-session',
+    [
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'network-inspection',
+              name: 'shell_execute',
+              args: { command: 'bun test' },
+            },
+          ],
+        },
+      },
+      { message: { content: 'Network inspection completed.' } },
+    ],
+    'accept_edits',
+    'seatbelt',
+  );
+  try {
+    await createSession(fixture.first, fixture.sessionId);
+    const stream = await fixture.first.subscribeReady({
+      spec: { scope: 'session', sessionId: fixture.sessionId },
+    });
+    const iterator = stream[Symbol.asyncIterator]();
+    await next(iterator);
+    await fixture.first.command(
+      start('approval-revision-start', fixture.sessionId, 0, 'Inspect the network endpoint.'),
+    );
+    const original = await approvalInteraction(fixture.first, fixture.sessionId);
+
+    const index = await fixture.first.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'list_sessions',
+    });
+    const indexed =
+      index.status === 'ok'
+        ? index.sessions?.find((session) => session.sessionId === fixture.sessionId)
+        : undefined;
+    expect(indexed?.interactionQueue).toEqual(
+      expect.objectContaining({
+        revision: original.sessionRevision,
+        activeInteractionId: original.interactionId,
+        interactions: [original],
+      }),
+    );
+
+    const response = respondApproval('approval-revision-response', fixture.sessionId, original);
+    const results = await Promise.all([
+      fixture.first.command(response),
+      fixture.second.command(response),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual(['applied', 'idempotent_replay']);
+    const settlementEvents = await durableEventsUntil(iterator, fixture.sessionId, (events) =>
+      events.includes('approval.granted'),
+    );
+    expect(settlementEvents.filter((event) => event === 'approval.granted')).toHaveLength(1);
+    await iterator.return?.();
+  } finally {
+    await fixture.dispose();
+  }
+}, 30_000);
+
 test('two outer clients settle one real CLI ask_user interaction only once', async () => {
   const fixture = createFixture(
     'interaction-race-session',
@@ -199,6 +263,7 @@ function createFixture(
   sessionId: string,
   responses: Parameters<ReturnType<typeof createMockModelServer>['setResponses']>[0],
   interactionMode: 'accept_edits' | 'full' = 'accept_edits',
+  sandboxBackend: 'none' | 'seatbelt' = 'none',
 ) {
   const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-multi-client-'));
   const previousHome = process.env.KITE_CODE_HOME;
@@ -226,7 +291,7 @@ function createFixture(
       stderr: '',
     }),
     interactionMode,
-    sandboxBackend: 'none',
+    sandboxBackend,
     skillOptions: skillOptions(workspace),
     initialSkillActivations: [],
   });
@@ -315,6 +380,22 @@ function respond(
   };
 }
 
+function respondApproval(
+  commandId: string,
+  sessionId: string,
+  interaction: Extract<RuntimeClientInteraction, { kind: 'approval' }>,
+) {
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId,
+    type: 'respond_interaction' as const,
+    sessionId,
+    expectedRevision: interaction.sessionRevision,
+    interaction,
+    response: { kind: 'approval' as const, decision: 'approve_once' as const },
+  };
+}
+
 async function inputInteraction(
   iterator: AsyncIterator<RuntimeAccessNotification>,
   client: RuntimeClient,
@@ -348,6 +429,44 @@ async function inputInteraction(
   });
   throw new Error(
     `CLI ask_user interaction was not projected; seen=${seen.join(',')}; query=${JSON.stringify(projection)}`,
+  );
+}
+
+async function approvalInteraction(
+  client: RuntimeClient,
+  sessionId: string,
+  interactionId?: string,
+  minimumRevision = 0,
+): Promise<Extract<RuntimeClientInteraction, { kind: 'approval' }>> {
+  let lastProjection: unknown;
+  for (let index = 0; index < 300; index += 1) {
+    const projection = await client.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId,
+    });
+    lastProjection = projection;
+    const activeId =
+      projection.status === 'ok'
+        ? projection.session?.interactionQueue.activeInteractionId
+        : undefined;
+    const active =
+      projection.status === 'ok'
+        ? projection.session?.interactionQueue.interactions.find(
+            (interaction) => interaction.interactionId === activeId,
+          )
+        : undefined;
+    if (
+      active?.kind === 'approval' &&
+      active.sessionRevision >= minimumRevision &&
+      (interactionId === undefined || active.interactionId === interactionId)
+    ) {
+      return active;
+    }
+    await Bun.sleep(10);
+  }
+  throw new Error(
+    `CLI approval interaction was not projected before the deadline: ${JSON.stringify(lastProjection)}`,
   );
 }
 
@@ -396,6 +515,31 @@ async function terminalProjection(
   throw new Error(
     `Runtime subscription did not publish a terminal projection; seen=${seen.join(',')}; query=${JSON.stringify(projection)}`,
   );
+}
+
+async function durableEventsUntil(
+  iterator: AsyncIterator<RuntimeAccessNotification>,
+  sessionId: string,
+  done: (events: readonly string[]) => boolean,
+): Promise<string[]> {
+  const events: string[] = [];
+  for (let index = 0; index < 50; index += 1) {
+    let notification: RuntimeAccessNotification;
+    try {
+      notification = await next(iterator);
+    } catch {
+      break;
+    }
+    if (
+      'durability' in notification &&
+      notification.durability === 'durable' &&
+      notification.sessionId === sessionId
+    ) {
+      if (notification.projection.event) events.push(notification.projection.event.type);
+      if (done(events)) return events;
+    }
+  }
+  throw new Error(`Expected durable Runtime event was not observed: ${events.join(',')}`);
 }
 
 async function next(

@@ -149,6 +149,14 @@ describe('Runtime client interaction projector', () => {
         response: { kind: 'approval', decision: 'approve_once' },
       }),
     ).toBeNull();
+    expect(
+      mapRuntimeInteractionResponseToUserAction({
+        state: approval,
+        effect,
+        interaction: { ...interaction, command: 'printf altered' },
+        response: { kind: 'approval', decision: 'approve_once' },
+      }),
+    ).toBeNull();
 
     const input = state({
       interactions: {
@@ -172,6 +180,14 @@ describe('Runtime client interaction projector', () => {
         response: { kind: 'text', value: 'answer' },
       }),
     ).toEqual({ type: 'input', interactionId: 'input-1', text: 'answer' });
+    expect(
+      mapRuntimeInteractionResponseToUserAction({
+        state: input,
+        effect: inputEffect,
+        interaction: { ...inputInteraction, question: 'Altered question' },
+        response: { kind: 'text', value: 'answer' },
+      }),
+    ).toBeNull();
     expect(
       mapRuntimeInteractionResponseToUserAction({
         state: approval,

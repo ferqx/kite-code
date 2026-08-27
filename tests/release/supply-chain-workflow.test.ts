@@ -73,7 +73,7 @@ describe('ordinary open-source release candidate workflow', () => {
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
-      'bun test packages/kite-local-runtime/test/service-state.test.ts',
+      'bun test packages/kite-local-runtime/test/isolated/service-state.test.ts',
       'bun run release:build',
     ];
     let previousIndex = -1;

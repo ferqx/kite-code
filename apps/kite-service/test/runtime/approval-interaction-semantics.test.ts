@@ -8,6 +8,7 @@ import {
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
+import { commitInteractionCommand } from '#kite-service/bootstrap/runtime/command-interaction-decision';
 import { projectRuntimeSessionLiveMode } from '#kite-service/bootstrap/runtime/RuntimeSessionCoordinator';
 import {
   approvalRejectionSettlementEvents,
@@ -21,6 +22,10 @@ import {
   runStateRuntimeLoop,
 } from '#kite-service/bootstrap/runtime/state-runner';
 import { loadAgentConfig, saveInteractionMode } from '#kite-service/config/index';
+import {
+  mapRuntimeInteractionResponseToUserAction,
+  projectRuntimeClientInteractionQueue,
+} from '#kite-service/runtime-client/interaction-projector';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function initialState(): RuntimeState {
@@ -343,6 +348,126 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     expect(processEventCalls).toBe(0);
     expect(providerCalls).toBe(1);
     expect(executorCalls).toBe(0);
+  });
+
+  test('a refreshed approval commits against the current revision after a neutral State advance', async () => {
+    let state = reduceRuntimeState(addTool(initialState(), 'shell-a'), {
+      type: 'approval.requested',
+      interactionId: 'approval-a',
+      toolCallId: 'shell-a',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: approval(),
+    });
+    const originalRevision = state.revision;
+    let lastAppliedEvents: RuntimeEvent[] = [];
+    let committedExpectedRevision: number | undefined;
+    let commitCount = 0;
+    const session = {
+      sessionId: state.session.threadId,
+      getState: () => state,
+      commitCommandBatch: (
+        events: readonly RuntimeEvent[],
+        evidence: { readonly commandId: string },
+      ) => {
+        commitCount += 1;
+        for (const event of events) state = reduceRuntimeState(state, event);
+        state = { ...state, revision: state.revision + events.length };
+        lastAppliedEvents = [...events];
+        return {
+          receipt: {
+            scopeSessionId: state.session.threadId,
+            commandId: evidence.commandId,
+            requestDigest: 'c'.repeat(64),
+            targetSessionId: state.session.threadId,
+            originalReceiptJson: '{}',
+            committedRevision: state.revision,
+            committedAt: 1_700_000_000_000,
+          },
+          events,
+        };
+      },
+    } as unknown as Parameters<typeof commitInteractionCommand>[0];
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: (event) => {
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', eventId: `event-${state.revision}` };
+      },
+      processEventBatch: (events) => {
+        for (const event of events) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [...events];
+        return lastAppliedEvents;
+      },
+      getLastAppliedEvents: () => lastAppliedEvents,
+      selectPendingEffects: () =>
+        state.interactions.kind === 'awaiting_tool_approval'
+          ? [{ type: 'request_tool_approval', interactionId: 'approval-a', toolCallId: 'shell-a' }]
+          : [{ type: 'stop' }],
+      acquireRunner: () => 'approval-current-revision-runner',
+      releaseRunner: () => undefined,
+      beginEffect: () => {
+        throw new Error('No executor effect should start in the interaction commit fixture.');
+      },
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: () => {
+        throw new Error('The production command path must return a precommitted action.');
+      },
+      getSandboxAvailable: () => true,
+      commitInteractionCommand: (input) => {
+        committedExpectedRevision = input.expectedRevision;
+        return commitInteractionCommand(session, input);
+      },
+    };
+
+    const emitted: RuntimeEvent[] = [];
+    for await (const event of runStateRuntimeLoop(kernel, async () => [], {
+      requestAction: async (effect, _actionState, commandCommit) => {
+        state = reduceRuntimeState(state, {
+          type: 'skill.catalog_refreshed',
+          catalogRevision: 'catalog-after-approval',
+        });
+        state = { ...state, revision: state.revision + 1 };
+        const queue = projectRuntimeClientInteractionQueue(state, {
+          sessionRevision: state.revision,
+        });
+        const refreshed = queue.interactions.find(
+          (interaction) =>
+            interaction.kind === 'approval' && interaction.interactionId === 'approval-a',
+        );
+        expect(refreshed?.sessionRevision).toBe(state.revision);
+        expect(refreshed?.sessionRevision).toBeGreaterThan(originalRevision);
+        if (refreshed?.kind !== 'approval') {
+          throw new Error('Refreshed approval projection is unavailable.');
+        }
+        const action = mapRuntimeInteractionResponseToUserAction({
+          state,
+          effect,
+          interaction: refreshed,
+          response: { kind: 'approval', decision: 'approve_once' },
+          expectedStateRevision: refreshed.sessionRevision,
+        });
+        if (!action) throw new Error('Refreshed approval response was rejected.');
+        return commandCommit.commit(action, {
+          scopeSessionId: state.session.threadId,
+          commandId: 'approval-current-revision-command',
+          requestDigest: 'c'.repeat(64),
+          targetSessionId: state.session.threadId,
+          committedAt: 1_700_000_000_000,
+        }).descriptor;
+      },
+    })) {
+      emitted.push(event);
+    }
+
+    expect(committedExpectedRevision).toBe(originalRevision + 1);
+    expect(commitCount).toBe(1);
+    expect(emitted.filter((event) => event.type === 'approval.granted')).toHaveLength(1);
+    expect(state.pendingApprovals.get('approval-a')?.status).toBe('authorized_queued');
   });
 
   test('an old approval rejection cannot abort the next turn of the same Task', async () => {

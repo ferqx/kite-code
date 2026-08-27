@@ -522,7 +522,7 @@ export function mapRuntimeInteractionResponseToUserAction(input: {
   readonly effect: RuntimeInteractionEffect;
   readonly interaction: RuntimeClientInteraction;
   readonly response: RuntimeInteractionResponse;
-  /** Private State revision captured when the interaction was projected. */
+  /** Current Host command CAS revision; interaction identity is re-projected at this revision. */
   readonly expectedStateRevision?: number;
 }): RuntimeUserAction | null {
   const expectedStateRevision = input.expectedStateRevision ?? input.interaction.sessionRevision;
@@ -667,10 +667,22 @@ function validInteraction(value: RuntimeClientInteraction): RuntimeClientInterac
 }
 
 function sameIdentity(left: RuntimeClientInteraction, right: RuntimeClientInteraction): boolean {
+  return (
+    left.sessionRevision === right.sessionRevision &&
+    sameRuntimeClientInteractionIdentity(left, right)
+  );
+}
+
+/** Stable interaction identity; the public Session CAS revision is intentionally excluded. */
+export function sameRuntimeClientInteractionIdentity(
+  left: RuntimeClientInteraction,
+  right: RuntimeClientInteraction,
+): boolean {
   if (
     left.kind !== right.kind ||
     left.interactionId !== right.interactionId ||
-    left.sessionRevision !== right.sessionRevision
+    left.title !== right.title ||
+    left.summary !== right.summary
   ) {
     return false;
   }
@@ -679,10 +691,16 @@ function sameIdentity(left: RuntimeClientInteraction, right: RuntimeClientIntera
       return (
         right.kind === 'approval' &&
         left.generation === right.generation &&
-        sameStrings(left.grants, right.grants)
+        sameStrings(left.grants, right.grants) &&
+        left.command === right.command
       );
     case 'input':
-      return right.kind === 'input';
+      return (
+        right.kind === 'input' &&
+        left.question === right.question &&
+        left.allowFreeText === right.allowFreeText &&
+        sameInputOptions(left.options, right.options)
+      );
     case 'plan_review':
       return (
         right.kind === 'plan_review' &&
@@ -704,6 +722,22 @@ function sameIdentity(left: RuntimeClientInteraction, right: RuntimeClientIntera
         left.verification.revision === right.verification.revision
       );
   }
+}
+
+function sameInputOptions(
+  left: Extract<RuntimeClientInteraction, { kind: 'input' }>['options'],
+  right: Extract<RuntimeClientInteraction, { kind: 'input' }>['options'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.length === right.length &&
+    left.every(
+      (option, index) =>
+        option.id === right[index]?.id &&
+        option.label === right[index]?.label &&
+        option.description === right[index]?.description,
+    )
+  );
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {

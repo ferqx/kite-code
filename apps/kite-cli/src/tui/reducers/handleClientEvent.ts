@@ -236,12 +236,16 @@ export function reconcileClientInteractionQueue(
   state: TuiState,
   queue: RuntimeInteractionQueueProjection,
 ): TuiState {
+  const previousInterrupt = state.interrupt;
   const previousApprovals = state.pendingApprovals ?? new Map();
   const pendingApprovals = new Map<string, TuiPendingApproval>();
   for (const [sequence, interaction] of queue.interactions.entries()) {
     if (interaction.kind !== 'approval') continue;
     const previous = previousApprovals.get(interaction.interactionId);
-    const sameIdentity = previous?.generation === interaction.generation;
+    const sameIdentity =
+      previous?.generation === interaction.generation &&
+      interactionProjectionIdentity(previous.clientInteraction) ===
+        interactionProjectionIdentity(interaction);
     pendingApprovals.set(interaction.interactionId, {
       interactionId: interaction.interactionId,
       toolCallId: previous?.toolCallId ?? interaction.interactionId,
@@ -278,6 +282,12 @@ export function reconcileClientInteractionQueue(
         toolCallId: pending.toolCallId,
       },
     };
+  }
+  if (
+    previousInterrupt?.interactionId === active.interactionId &&
+    previousInterrupt.projectionIdentity === interactionProjectionIdentity(active)
+  ) {
+    return { ...next, interrupt: previousInterrupt };
   }
   next = projectInteraction(next, active);
   return next;
@@ -1383,7 +1393,7 @@ function materializeSafeClientTool(
     };
   }
 
-  const detachedFromActiveThought = active?.active === true && modelRequestId === undefined;
+  const detachedFromActiveThought = active?.active === true && !activeOwnsRequest;
   const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
     id: withoutPending.nextBlockId,
     kind: 'tool_summary',
@@ -1612,7 +1622,7 @@ function projectInteraction(state: TuiState, interaction: RuntimeClientInteracti
     case 'approval':
       return projectApproval(state, interaction, state.nextBlockId);
     case 'input': {
-      return projectQuestionInteraction(state, interaction.interactionId, {
+      return projectQuestionInteraction(state, interaction, {
         question: interaction.question,
         options: (interaction.options ?? []).map((option) => ({
           id: option.id,
@@ -1640,6 +1650,7 @@ function projectInteraction(state: TuiState, interaction: RuntimeClientInteracti
           interrupt: {
             kind: 'plan_review',
             interactionId: interaction.interactionId,
+            projectionIdentity: interactionProjectionIdentity(interaction),
             planId: interaction.plan.planId,
             version: interaction.plan.version,
             structuralDigest: interaction.plan.structuralDigest,
@@ -1652,7 +1663,7 @@ function projectInteraction(state: TuiState, interaction: RuntimeClientInteracti
       const admission = interaction.title === 'Provider admission required';
       return projectQuestionInteraction(
         state,
-        interaction.interactionId,
+        interaction,
         admission
           ? {
               question: `Required MCP provider '${providerId}' requires a decision.`,
@@ -1700,7 +1711,7 @@ function projectInteraction(state: TuiState, interaction: RuntimeClientInteracti
       );
     }
     case 'verification':
-      return projectQuestionInteraction(state, interaction.interactionId, {
+      return projectQuestionInteraction(state, interaction, {
         question: interaction.title ?? 'Verification requires attention.',
         options: [
           { id: 'replan', label: 'Replan', description: 'Return to planning.' },
@@ -1719,17 +1730,32 @@ function projectInteraction(state: TuiState, interaction: RuntimeClientInteracti
 
 function projectQuestionInteraction(
   state: TuiState,
-  interactionId: string,
+  interaction: Exclude<RuntimeClientInteraction, { kind: 'approval' | 'plan_review' }>,
   question: Extract<OutputBlock, { kind: 'question' }>['question'],
 ): TuiState {
-  if (state.interrupt?.kind === 'input' && state.interrupt.interactionId === interactionId) {
+  const projectionIdentity = interactionProjectionIdentity(interaction);
+  if (
+    state.interrupt?.kind === 'input' &&
+    state.interrupt.interactionId === interaction.interactionId &&
+    state.interrupt.projectionIdentity === projectionIdentity
+  ) {
     return state;
   }
   const block: OutputBlock = { id: state.nextBlockId, kind: 'question', question };
   return {
     ...appendBlock(state, block),
-    interrupt: { kind: 'input', blockId: block.id, interactionId },
+    interrupt: {
+      kind: 'input',
+      blockId: block.id,
+      interactionId: interaction.interactionId,
+      projectionIdentity,
+    },
   };
+}
+
+function interactionProjectionIdentity(interaction: RuntimeClientInteraction): string {
+  const { sessionRevision: _sessionRevision, ...stable } = interaction;
+  return JSON.stringify(stable);
 }
 
 function projectApproval(

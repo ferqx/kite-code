@@ -21,7 +21,10 @@ identity，且不得把失败提交加入永久local dedupe。Protocol qualifica
 notification与response command两向codec中一致；History可见而live subscription丢失同一interaction属于hard failure。
 gap/reset snapshot还必须携带完整、同revision的interaction queue替换集：无interaction的active snapshot清旧focus，
 新queue删除旧entry并保留仍pending的并发sibling，idle snapshot清除残留Map。相同notification经JSON/WebSocket与
-InProcess logical-message必须得到同一Client state；共享对象引用不能被误判为cycle或静默关闭subscription。
+InProcess logical-message必须得到同一Client state；共享对象引用不能被误判为cycle或静默关闭subscription。Service
+启动/index hydration从纯持久State生成该完整queue，不得提交伪空替换集。pending interaction的公开`sessionRevision`
+随当前CAS前进，稳定kind-specific identity不变；结算必须在当前State revision原子commit，旧generation/digest或被修改的
+input/command字段仍拒绝。双Client相同response只有一个applied，另一个只可idempotent replay。
 
 Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
 重放。当前唯一production composition位于`apps/kite-service`：它在同一process拥有真实Host、State 27 / Store 6、Builtin、
@@ -47,8 +50,8 @@ owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Wi
 的远端结果，不能用POSIX或本机测试替代。
 
 当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
-36/106、CI-profile soak 7/7 cases、Service owner 1364 parallel tests / 6787 expects加34个isolated files、CLI owner
-756 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
+36/106、CI-profile soak 7/7 cases、Service owner 1365 parallel tests / 6795 expects加34个isolated files、CLI owner
+757 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
 qualification结论，CI-profile soak按设计`qualificationMetricsSupported=false`。
 

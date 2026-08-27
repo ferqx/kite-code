@@ -25,7 +25,9 @@ workspaceDigest`。第二阶段，carrier仅为trusted identity签发one-shot ti
 create command中的wire Workspace不可信，由connection admission替换。resume/query/subscribe/fork读取唯一Store中的
 persisted Session identity并与connection Workspace交叉校验；lazy `workspaceTemplateFor`只在Trust/admission后解析
 Service-owned config、model route、MCP、Skill、Sandbox/Shell与checkpoint inputs。process-wide session list仍来自唯一
-Store，不建立第二reader/writer authority。
+Store，不建立第二reader/writer authority。该Store-only list/startup hydration已持有完整Runtime State snapshot，因此直接
+投影同revision的完整interaction queue与唯一focus；它不得用空queue占位，也不得为了恢复pending interaction启动
+Workspace context、MCP或Skill扫描。
 
 ## App Control、History 与 mutation
 
@@ -35,6 +37,10 @@ owner，browser-safe App Contract不携带secret。Trust query另投影Workspace
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
 Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
 grant subject与Host内部payload仍不进入client interaction。
+公开interaction的`sessionRevision`是本次projection的当前Host CAS；`interactionId`及kind-specific
+generation/plan digest/provider revision/verification revision/input和有界command组成稳定身份。无关State event推进revision
+时，Service可在相同稳定身份上重新投影当前CAS；`respond_interaction`只在提交瞬间重新投影、完整比对并将decision与
+receipt原子提交，不能继续使用waiter创建时的旧revision，也不能放宽稳定身份字段。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation

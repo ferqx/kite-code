@@ -28,5 +28,5 @@ window，不能直接spawn。
 applied stop进入draining后仍由Service保留state；carrier/application全部关闭成功后才clear。remove/quarantine携带刚读取
 的exact descriptor/token/lock identity，并发replacement改变inode/nonce时必须拒绝。
 
-验证：`bun test packages/kite-local-runtime/test/service-state.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/native-infrastructure.test.ts`；
+验证：`bun test packages/kite-local-runtime/test/isolated/service-state.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/native-infrastructure.test.ts`；
 release candidate workflow在`windows-2025`单独运行state owner test，证明ACL drift负向路径后才继续candidate smoke。

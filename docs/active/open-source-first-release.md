@@ -4,7 +4,7 @@
 
 读取时机：修改发布脚本、安装器、候选版本 workflow、生产路线图、Task 状态或首发能力边界时。
 
-验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
+验证：`bun test packages/kite-local-runtime/test/isolated/service-state.test.ts tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
 
 相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status.json`、`.github/workflows/release-candidate.yml`。
 
@@ -63,6 +63,7 @@ marker时拒绝覆盖、回滚或删除。
 首发预构建架构为 macOS arm64、Linux x64 与 Windows x64；其他架构可以从源码运行 Bun，但没有首发
 预构建候选包。候选 workflow 不签名、不发布 Release、不上传 secret。它在三个 GitHub-hosted runner 上构建并运行
 同一 smoke；Windows runner还会在构建前执行Service state current-user ACL/non-reparse owner test及ACL drift负向断言，
+该process-global/child-process owner suite固定置于`packages/kite-local-runtime/test/isolated/`并由workflow串行运行，
 随后上传候选 artifact 供维护者检查。正式公开 Release 与 npm publish 不属于该 workflow。
 
 ## 能力边界

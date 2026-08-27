@@ -8,7 +8,7 @@ export interface RuntimeEvidenceSummary {
 
 export interface RuntimeInteractionBase {
   readonly interactionId: string;
-  /** The committed Session revision that must fence settlement. */
+  /** Current Session CAS revision that must fence settlement of this projection. */
   readonly sessionRevision: number;
   readonly title?: string;
   readonly summary?: string;

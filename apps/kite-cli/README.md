@@ -67,8 +67,8 @@ managed connector/lifecycle；installed candidate 从相邻的 `bin/kite-service
 ## 测试
 
 `bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
-Service Host/Store owner tests位于 `apps/kite-service/test`。当前CLI owner为661 parallel + 76 sandbox + 1
-conformance，共738 tests；完整TUI system另通过40个isolated PTY scenario files。
+Service Host/Store owner tests位于 `apps/kite-service/test`。当前CLI owner为680 parallel + 76 sandbox + 1
+conformance，共757 tests；完整TUI system另通过40个isolated PTY scenario files。
 
 ## 文档影响
 

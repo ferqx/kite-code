@@ -171,6 +171,60 @@ describe('TUI RuntimeClientEvent reducer', () => {
     expect(state.interrupt).toBeNull();
   });
 
+  test('reuses non-approval presentation blocks for repeated authoritative snapshots', () => {
+    const interactions = [
+      {
+        kind: 'input' as const,
+        interactionId: 'snapshot-input',
+        sessionRevision: 12,
+        question: 'Continue?',
+        allowFreeText: true,
+        options: [{ id: 'yes', label: 'Yes' }],
+      },
+      {
+        kind: 'plan_review' as const,
+        interactionId: 'snapshot-plan',
+        sessionRevision: 12,
+        plan: { planId: 'plan-1', version: 1, structuralDigest: 'sha256:plan-1' },
+        title: 'Review this plan',
+        summary: 'One safe review.',
+      },
+      {
+        kind: 'provider_action' as const,
+        interactionId: 'snapshot-provider',
+        sessionRevision: 12,
+        provider: { providerId: 'provider-1' },
+        action: 'login' as const,
+      },
+      {
+        kind: 'verification' as const,
+        interactionId: 'snapshot-verification',
+        sessionRevision: 12,
+        verification: { verificationId: 'verification-1', revision: '1' },
+      },
+    ];
+
+    for (const interaction of interactions) {
+      let state = createInitialState();
+      const action = {
+        type: 'RECONCILE_RUNTIME_PROJECTION' as const,
+        active: true,
+        interactionQueue: {
+          revision: 12,
+          activeInteractionId: interaction.interactionId,
+          interactions: [interaction],
+        },
+      };
+      state = eventReducer(state, action);
+      const firstInterrupt = state.interrupt;
+      const firstBlocks = blocks(state);
+      state = eventReducer(state, action);
+
+      expect(state.interrupt).toEqual(firstInterrupt);
+      expect(blocks(state)).toEqual(firstBlocks);
+    }
+  });
+
   test('settles presentation activity from an idle snapshot without inventing cancellation', () => {
     let state = apply(
       { ...createInitialState(), running: true },

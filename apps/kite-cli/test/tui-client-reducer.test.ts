@@ -1471,6 +1471,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         .filter((block) => block.modelRequestId === undefined)
         .flatMap((block) => block.tools.map((tool) => tool.callId)),
     ).toEqual(['identity-missing', 'identity-mismatch']);
+    expect(summaries.filter((block) => block.active)).toHaveLength(1);
   });
 
   test('keeps late final reasoning with its answer instead of the preceding search step', () => {

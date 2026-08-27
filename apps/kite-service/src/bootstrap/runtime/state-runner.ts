@@ -851,15 +851,16 @@ export async function* runStateRuntimeLoop(
               if (!kernel.getSandboxAvailable) {
                 throw new Error('Runtime interaction command sandbox fact is unavailable.');
               }
+              const commitState = kernel.getState();
               return kernel.commitInteractionCommand({
                 action: candidate,
-                sessionId: actionState.session.threadId,
+                sessionId: commitState.session.threadId,
                 interactionId: effect.interactionId,
-                expectedRevision: actionState.revision,
+                expectedRevision: commitState.revision,
                 effectType: effect.type,
                 reservationReconciliationEvents:
                   effect.type === 'request_provider_action'
-                    ? reconciliationEventsForReservations(actionState, reservationIds)
+                    ? reconciliationEventsForReservations(commitState, reservationIds)
                     : [],
                 sandboxAvailable: kernel.getSandboxAvailable(),
                 evidence,

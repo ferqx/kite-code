@@ -168,7 +168,9 @@ Approval的bounded command、revision、generation与grant集合必须由Runtime
 Session projection另外携带与Session同revision的完整有序interaction queue和唯一active identity；Service从durable
 State投影该替换集，Protocol验证queue/entry revision、identity唯一性和active membership，Native Client/TUI收到
 event-free snapshot时替换旧Map/queue而不是union。JSON/WebSocket与InProcess logical-message mapper必须生成相同closed
-值，不能因共享对象引用产生不同的decode结果。
+值，不能因共享对象引用产生不同的decode结果。Service启动时的Store-only session index也从纯State投影完整queue，
+不得用空占位覆盖pending交互。interaction的`sessionRevision`表示当前settlement CAS；稳定身份由interactionId与
+kind-specific generation/plan/provider/verification/input/command字段承担，无关State revision前进后在提交瞬间受控rebase。
 TUI只有在respond command receipt accepted后才移除当前approval焦点；提交错误保持原interaction可见并由用户显式重试，
 不得吞错或在receipt前制造granted事实。
 

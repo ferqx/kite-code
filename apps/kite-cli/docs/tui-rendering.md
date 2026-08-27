@@ -56,6 +56,9 @@
   删除queue中已不存在的旧项；idle snapshot即使本地`running=false/interrupt=null`也必须清空残留pending approvals。
   snapshot不是synthetic Runtime event，不能伪造approved/rejected/cancelled/completed事实；低于本地command receipt
   revision的迟到snapshot不得结束当前run。
+- 对相同active interaction identity重复收到snapshot时，input、plan review、provider action与verification复用已存在的
+  Footer/block，不追加第二个question或notice；只有active identity切换才重新物化presentation。queue revision可前进，
+  但这不会把同一稳定interaction误判为新的UI组件。
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
   `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
@@ -71,6 +74,8 @@
   结算该 tool started 后新建的 exploration summary。若 durable final text 先于 completed reasoning 到达，
   只有该summary与文本携带同一`requestId`时reasoning才可回填；相邻但属于下一model request的search summary
   不能被升级成下一步Thinking。live 与同一 Session 的 `/resume` replay使用相同identity判断。
+- 工具的model/presentation identity缺失或与当前Thought不匹配时只形成detached neutral summary；不得同时留下两个
+  `active` tool summary。任一时刻只有current Thought可为active，旧/mismatched组不能成为失去owner的dynamic block。
 - `model.requested(requestId)`是明确的presentation step边界：先settle前一request留下的Thought/tool summary，再接受
   新request的reasoning、旁白与回答；不得因为相邻或同一Turn把多个request合并。一个request内部的reasoning
   segment、非流式旁白 caption与探索工具仍可进入一个阶段块。reasoning

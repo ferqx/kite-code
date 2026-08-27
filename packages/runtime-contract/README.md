@@ -47,7 +47,9 @@
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
   不携带 callback、Store handle 或历史 interaction settlement authority。
 - `RuntimeSessionProjection.interactionQueue` 是同 revision 的完整、有序替换集；`activeInteractionId` 必须属于该集，
-  每个interaction的`sessionRevision`必须等于queue/session revision，identity重复、缺失或漂移全部fail closed。
+  每个interaction的`sessionRevision`是当前 settlement CAS，必须等于queue/session revision；稳定交互身份由
+  `interactionId`与kind-specific generation/plan/provider/verification/input/command字段共同组成。Session revision
+  前进时Service以相同稳定身份重新投影当前CAS，identity重复、缺失、内容漂移或activeWork/queue不一致全部fail closed。
 - Live notification 与 History transcript 必须通过同一个 exact `RuntimeClientEvent` validator；closed DTO
   新增可选字段时，类型、validator 与 wire codec 必须同步，不能让实时订阅可见而恢复/回放拒绝同一事件。
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。

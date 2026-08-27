@@ -48,6 +48,7 @@ import {
   projectRuntimeClientInteraction,
   projectRuntimeClientInteractionQueue,
   type RuntimeInteractionEffect,
+  sameRuntimeClientInteractionIdentity,
 } from '../../runtime-client/interaction-projector';
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
@@ -98,7 +99,6 @@ export type CliRuntimeInteractionResolution =
 interface PendingCliInteraction {
   readonly effect: RuntimeInteractionEffect;
   readonly interaction: RuntimeClientInteraction;
-  readonly stateRevision: number;
   readonly commandCommit: RuntimeInteractionCommandCommitPort;
   readonly brokerIdentity: RuntimeInteractionIdentity;
 }
@@ -274,7 +274,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         effect: pending.effect,
         interaction: command.interaction,
         response: command.response,
-        expectedStateRevision: pending.stateRevision,
+        expectedStateRevision: command.expectedRevision,
       });
       if (!action) return terminal(this.#rejected(command, 'interaction_mismatch'));
       return {
@@ -1057,7 +1057,6 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         this.#pendingInteraction = {
           effect,
           interaction,
-          stateRevision: state.revision,
           commandCommit,
           brokerIdentity,
         };
@@ -1330,44 +1329,7 @@ function sameInteractionIdentity(
   expected: RuntimeClientInteraction,
   actual: RuntimeClientInteraction,
 ): boolean {
-  if (
-    expected.kind !== actual.kind ||
-    expected.interactionId !== actual.interactionId ||
-    expected.sessionRevision !== actual.sessionRevision
-  ) {
-    return false;
-  }
-  switch (expected.kind) {
-    case 'approval':
-      return (
-        actual.kind === 'approval' &&
-        expected.generation === actual.generation &&
-        expected.grants.length === actual.grants.length &&
-        expected.grants.every((grant, index) => grant === actual.grants[index])
-      );
-    case 'input':
-      return actual.kind === 'input';
-    case 'plan_review':
-      return (
-        actual.kind === 'plan_review' &&
-        expected.plan.planId === actual.plan.planId &&
-        expected.plan.version === actual.plan.version &&
-        expected.plan.structuralDigest === actual.plan.structuralDigest
-      );
-    case 'provider_action':
-      return (
-        actual.kind === 'provider_action' &&
-        expected.action === actual.action &&
-        expected.provider.providerId === actual.provider.providerId &&
-        expected.provider.directoryRevision === actual.provider.directoryRevision
-      );
-    case 'verification':
-      return (
-        actual.kind === 'verification' &&
-        expected.verification.verificationId === actual.verification.verificationId &&
-        expected.verification.revision === actual.verification.revision
-      );
-  }
+  return sameRuntimeClientInteractionIdentity(expected, actual);
 }
 
 function interactionBrokerIdentity(

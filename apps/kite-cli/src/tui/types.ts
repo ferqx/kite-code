@@ -395,6 +395,7 @@ export type InterruptState =
       kind: 'approval';
       /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
       interactionId?: string;
+      projectionIdentity?: string;
       /** Runtime tool call that owns the approval interaction. */
       toolCallId?: string;
       /** Active Footer payload; absent only in legacy restored UI snapshots. */
@@ -402,11 +403,20 @@ export type InterruptState =
       /** Compatibility pointer for sessions created before approvals moved off-screen. */
       blockId?: number;
     }
-  | { kind: 'input'; blockId: number; interactionId?: string; toolCallId?: string }
+  | {
+      kind: 'input';
+      blockId: number;
+      interactionId?: string;
+      /** Exact client-safe identity excluding the current Session CAS revision. */
+      projectionIdentity?: string;
+      toolCallId?: string;
+    }
   | {
       kind: 'plan_review';
       /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
       interactionId?: string;
+      /** Exact client-safe identity excluding the current Session CAS revision. */
+      projectionIdentity?: string;
       /** Tool call that owns the plan review, when available from Runtime replay. */
       toolCallId?: string;
       planId?: string;
