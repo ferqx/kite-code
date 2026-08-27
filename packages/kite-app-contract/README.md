@@ -15,7 +15,8 @@
 - authoritative execution/release status；
 - 每个当前 route 独立的 strict JSON codec。
 
-所有 request/response 和嵌套对象都拒绝未知字段、缺失字段、错误类型和越界值。mutation
+所有 request/response 和嵌套对象都拒绝未知字段、缺失的必需字段、错误类型和越界值。明确声明的向后兼容可选字段
+在decode时投影为当前安全默认值。mutation
 response 可以表达 `outcome_unknown`；client 必须先查询当前状态，再由用户决定是否重试，contract
 本身不定义自动重放。
 
@@ -39,8 +40,9 @@ safe metadata；actual Skill body/path、raw Provider config/API key、MCP comma
 raw diagnostic message不进入 contract。Native Provider credential write及其取消 signal只存在于
 `kite-local-runtime/client`。
 
-当前根contract revision为`kite-app-contract-v2`；Workspace Trust query response与decision request/response因新增
-external-read scope绑定使用各自`v2` exact schema，query request仍为无副作用的`v1` path input。
+当前根contract revision保持`kite-app-contract-v1`。Workspace Trust external-read scope是同一v1 route的向后兼容
+可选扩展：当前Service始终发送scope，decoder对缺少scope的旧响应投影empty scope；它不会联动Local Runtime handshake、
+manager lifecycle或整个App Contract不兼容。scope/revision不匹配由query刷新后重新授权收敛。
 
 ## 公开入口
 

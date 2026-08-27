@@ -11,7 +11,8 @@ no-secret App Control，`TuiBootstrap`通过discovery client查询safe trust sna
 只有authoritative Service返回trusted完整identity后，Client才请求Workspace-bound one-shot ticket、执行Runtime
 initialize并挂载FirstRunFlow或`TuiApp`。未通过门禁时不会创建会话、连接MCP、扫描skill或发起模型调用。TUI只负责
 prompt/Exit UX，不直接读取或写入trust store；Service App Control owner重新canonicalize路径、校验完整Workspace
-identity并执行CAS。conflict或lost response后只query一次，不自动重放decision。CLI`run/resume`使用同一顺序，
+identity并匹配当前revision/scope。conflict或lost response后只query一次，不自动重放decision；若最新snapshot仍可决定，
+TUI立即回到普通授权状态，用户再次确认即可继续，不把scope drift显示成保存失败。CLI`run/resume`使用同一顺序，
 `--trust-workspace`只是显式decision，不绕过Service owner。
 
 Workspace Trust同时拥有Workspace关联的external-read scope授权。Service在query时canonicalize所有位于Workspace外、
@@ -35,7 +36,7 @@ fallback writer，只保存语言、theme等UI-local preference。
 
 1. canonicalize Workspace并解析关联external-read roots，形成`externalReadScopeDigest`。
 2. 读取`workspaceTrustPath()`；`workspaceKey = canonicalWorkspaceKey(workspace)`命中且记录的scope digest与当前完全一致 → 放行。旧记录只在当前external roots为空时兼容。
-3. 未命中、scope drift（`unknown`）、记录损坏（`corrupt`）或存储不可用（`unavailable`）→ 提示确认。损坏与不可用按fail-closed处理；真实external scope走用户确认而不是伪装成命令或repository错误。
+3. 未命中或scope drift统一返回`unknown`并显示当前scope供重新授权；授权时snapshot又变化则刷新后再次显示，不进入不可恢复错误。只有记录损坏（`corrupt`）或存储不可用（`unavailable`）才显示真实故障。
 
 **安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite-service/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
 

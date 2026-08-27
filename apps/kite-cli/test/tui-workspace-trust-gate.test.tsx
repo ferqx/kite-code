@@ -23,6 +23,10 @@ const EXTERNAL_READ_SCOPE = {
   roots: ['/canonical/primary/.git'],
   digest: `sha256:${'b'.repeat(64)}` as const,
 };
+const UPDATED_EXTERNAL_READ_SCOPE = {
+  roots: ['/canonical/primary/.git', '/canonical/secondary/.git'],
+  digest: `sha256:${'c'.repeat(64)}` as const,
+};
 
 function queryResponse(
   status: WorkspaceTrustQueryResponse['status'],
@@ -132,7 +136,7 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
     const fixture = clientFixture({
       queries: [
         queryResponse('unknown', 'trust-revision-1'),
-        queryResponse('unknown', 'trust-revision-2'),
+        queryResponse('unknown', 'trust-revision-2', true, UPDATED_EXTERNAL_READ_SCOPE),
       ],
       decisions: [
         {
@@ -141,7 +145,15 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
           status: 'unknown',
           outcome: 'conflict',
           revision: 'trust-revision-2',
-          externalReadScope: EXTERNAL_READ_SCOPE,
+          externalReadScope: UPDATED_EXTERNAL_READ_SCOPE,
+        },
+        {
+          schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
+          workspace: CANONICAL_WORKSPACE,
+          status: 'trusted',
+          outcome: 'recorded',
+          revision: 'trust-revision-3',
+          externalReadScope: UPDATED_EXTERNAL_READ_SCOPE,
         },
       ],
     });
@@ -168,6 +180,16 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
       workspace: WORKSPACE,
     });
     expect(trusted).toBe(0);
+
+    await waitForFrameText(view.lastFrame, '/canonical/secondary/.git');
+    expect(view.lastFrame()).not.toContain('Unable to save workspace trust');
+    view.stdin.write('\r');
+    await eventually(() => fixture.decisionRequests.length === 2);
+    expect(fixture.decisionRequests[1]).toMatchObject({
+      expectedRevision: 'trust-revision-2',
+      externalReadScopeDigest: UPDATED_EXTERNAL_READ_SCOPE.digest,
+    });
+    expect(trusted).toBe(1);
     view.unmount();
   });
 

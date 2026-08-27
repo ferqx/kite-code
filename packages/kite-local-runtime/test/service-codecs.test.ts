@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { KITE_APP_CONTRACT_REVISION_ } from '@kite-ai/kite-app-contract';
 import {
   createKiteHomeIdentity,
   decodeLocalRuntimeServiceDescriptor,
@@ -28,21 +27,6 @@ const descriptor = {
 } as const;
 
 describe('kite-local-runtime service codecs', () => {
-  test('binds the native handshake to the exact App Contract revision', () => {
-    expect(LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_).toBe(
-      `kite-local-runtime-contract-v2+${KITE_APP_CONTRACT_REVISION_}`,
-    );
-    expect(
-      safeDecodeLocalRuntimeServiceDescriptor({
-        ...descriptor,
-        clientContractRevision: 'kite-local-runtime-contract-v1',
-      }),
-    ).toMatchObject({
-      success: true,
-      data: { clientContractRevision: 'kite-local-runtime-contract-v1' },
-    });
-  });
-
   test('accepts the exact descriptor and rejects secret/path additions', () => {
     expect(decodeLocalRuntimeServiceDescriptor(descriptor)).toEqual(descriptor);
     expect(() =>

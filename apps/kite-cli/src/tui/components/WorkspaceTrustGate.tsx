@@ -110,7 +110,7 @@ export default function WorkspaceTrustGate({
       }
       const refreshed = await queryTrust(version);
       if (version !== requestVersion.current) return;
-      if (refreshed?.status !== 'trusted') {
+      if (refreshed?.status !== 'trusted' && !refreshed?.canDecide) {
         setGateState('error');
         setErrorMessage(translate('trust.saveFailed'));
       }
@@ -119,7 +119,7 @@ export default function WorkspaceTrustGate({
       // authoritative state once, then leave the explicit decision to the user.
       const refreshed = await queryTrust(version);
       if (version !== requestVersion.current) return;
-      if (refreshed?.status !== 'trusted') {
+      if (refreshed?.status !== 'trusted' && !refreshed?.canDecide) {
         setGateState('error');
         setErrorMessage(translate('trust.saveFailed'));
       }

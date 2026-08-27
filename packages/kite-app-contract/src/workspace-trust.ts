@@ -17,11 +17,16 @@ import {
 export const WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_ =
   'kite.app.workspace-trust.query-request.v1' as const;
 export const WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_ =
-  'kite.app.workspace-trust.query-response.v2' as const;
+  'kite.app.workspace-trust.query-response.v1' as const;
 export const WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_ =
-  'kite.app.workspace-trust.decision-request.v2' as const;
+  'kite.app.workspace-trust.decision-request.v1' as const;
 export const WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_ =
-  'kite.app.workspace-trust.decision-response.v2' as const;
+  'kite.app.workspace-trust.decision-response.v1' as const;
+
+const EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE: WorkspaceExternalReadScope = Object.freeze({
+  roots: Object.freeze([]),
+  digest: 'sha256:091d69962ffd218c877f4a68f168523d50da8287b50964f5c7345ed62c0a643a',
+});
 
 export interface KiteWorkspaceIdentity {
   readonly canonicalPath: string;
@@ -168,10 +173,12 @@ function decodeWorkspaceTrustQueryResponse(input: unknown): WorkspaceTrustQueryR
       required(value, 'canDecide', 'WorkspaceTrustQueryResponse'),
       'WorkspaceTrustQueryResponse.canDecide',
     ),
-    externalReadScope: decodeWorkspaceExternalReadScope(
-      required(value, 'externalReadScope', 'WorkspaceTrustQueryResponse'),
-      'WorkspaceTrustQueryResponse.externalReadScope',
-    ),
+    externalReadScope: Object.hasOwn(value, 'externalReadScope')
+      ? decodeWorkspaceExternalReadScope(
+          value.externalReadScope,
+          'WorkspaceTrustQueryResponse.externalReadScope',
+        )
+      : EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE,
   };
 }
 
@@ -220,10 +227,12 @@ function decodeWorkspaceTrustDecisionRequest(input: unknown): WorkspaceTrustDeci
       'WorkspaceTrustDecisionRequest.decision',
       ['trust', 'decline'] as const,
     ),
-    externalReadScopeDigest: sha256Digest(
-      required(value, 'externalReadScopeDigest', 'WorkspaceTrustDecisionRequest'),
-      'WorkspaceTrustDecisionRequest.externalReadScopeDigest',
-    ),
+    externalReadScopeDigest: Object.hasOwn(value, 'externalReadScopeDigest')
+      ? sha256Digest(
+          value.externalReadScopeDigest,
+          'WorkspaceTrustDecisionRequest.externalReadScopeDigest',
+        )
+      : EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE.digest,
   };
 }
 
@@ -265,10 +274,12 @@ function decodeWorkspaceTrustDecisionResponse(input: unknown): WorkspaceTrustDec
       'WorkspaceTrustDecisionResponse.revision',
       256,
     ),
-    externalReadScope: decodeWorkspaceExternalReadScope(
-      required(value, 'externalReadScope', 'WorkspaceTrustDecisionResponse'),
-      'WorkspaceTrustDecisionResponse.externalReadScope',
-    ),
+    externalReadScope: Object.hasOwn(value, 'externalReadScope')
+      ? decodeWorkspaceExternalReadScope(
+          value.externalReadScope,
+          'WorkspaceTrustDecisionResponse.externalReadScope',
+        )
+      : EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE,
   };
 }
 

@@ -201,7 +201,7 @@ const releaseStatus: ReleaseStatusSnapshot = {
 
 describe('Kite App Contract', () => {
   test('publishes one fixed revision and exact route schemas', () => {
-    expect(KITE_APP_CONTRACT_REVISION_).toBe('kite-app-contract-v2');
+    expect(KITE_APP_CONTRACT_REVISION_).toBe('kite-app-contract-v1');
     expect(workspaceTrustQueryRequestCodec.schema).toBe(WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_);
     expect(workspaceTrustQueryResponseCodec.schema).toBe(WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_);
     expect(providerModelSnapshotRequestCodec.schema).toBe(PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_);
@@ -353,6 +353,40 @@ describe('Kite App Contract', () => {
     expect(
       releaseStatusResponseCodec.decode(releaseStatusResponseCodec.encode(releaseStatus)),
     ).toEqual(releaseStatus);
+  });
+
+  test('decodes legacy Workspace Trust v1 payloads as an empty external scope', () => {
+    const emptyScope = {
+      roots: [],
+      digest: 'sha256:091d69962ffd218c877f4a68f168523d50da8287b50964f5c7345ed62c0a643a',
+    };
+    expect(
+      workspaceTrustQueryResponseCodec.decode({
+        schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
+        workspace,
+        status: 'unknown',
+        revision,
+        canDecide: true,
+      }),
+    ).toMatchObject({ externalReadScope: emptyScope });
+    expect(
+      workspaceTrustDecisionRequestCodec.decode({
+        schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+        workspace,
+        observedStatus: 'unknown',
+        expectedRevision: revision,
+        decision: 'trust',
+      }),
+    ).toMatchObject({ externalReadScopeDigest: emptyScope.digest });
+    expect(
+      workspaceTrustDecisionResponseCodec.decode({
+        schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
+        workspace,
+        status: 'trusted',
+        outcome: 'recorded',
+        revision,
+      }),
+    ).toMatchObject({ externalReadScope: emptyScope });
   });
 
   test('rejects unknown fields at every route boundary', () => {

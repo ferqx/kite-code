@@ -29,7 +29,8 @@
 
 - Workspace Trust Gate、Provider/model selector、MCP Overlay与Skill status只渲染Service App Control safe projection。
   Trust snapshot含external-read scope时，Gate在Runtime连接前逐项显示canonical只读root，不能由TUI自行解析`.git`；
-  mutation使用observed revision与scope digest CAS并原样显示unavailable/conflict后的显式重试路径；只有trusted结果才允许
+  mutation使用observed revision与scope digest匹配当前snapshot；scope/revision conflict会刷新snapshot并立即回到可授权
+  状态，用户再次确认即可继续，不进入错误死路。只有真实unavailable才显示故障；只有trusted结果才允许
   Native Runtime connect。ModelSelector identity固定为 `provider + name`，不读取raw config/API key。MCP endpoint只
   显示origin，command只显示executable，TUI不从Service Supervisor或Repository补全被省略字段。
 - 动态MCP execution card固定显示closed `mcp:dynamic_tool` lifecycle label；raw
