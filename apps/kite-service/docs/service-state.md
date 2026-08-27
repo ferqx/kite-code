@@ -16,7 +16,8 @@ Windows调用fixed system PowerShell，以current-user SID建立protected DACL�
 composition接管explicit home时先验证non-link与current owner，再把home本身收紧为owner-only；任一既有state entry的
 ACL/reparse drift仍fail closed，不自动修复descriptor、token或lock。每次verifier使用fixed executable、pure .NET
 filesystem/ACL API、minimal OS runtime environment与30秒单次上限，不依赖PowerShell cmdlet module auto-load；timeout同样
-按permission failure处理，不放宽访问。
+按permission failure处理，不放宽访问。primitive只允许刚由当前操作exclusive创建且inode已记录的entry初始化owner SID；
+既有home/state路径不使用该权限，owner不匹配直接拒绝。
 
 child持有`instance.lock`，manager以`lifecycle.lock`串行ensure/status/stop/restart。lock、PID与descriptor都不是单独健康
 证明；manager还必须验证`/readyz`和authenticated process-owned instance handshake。alive/uncertain owner一律保留state且

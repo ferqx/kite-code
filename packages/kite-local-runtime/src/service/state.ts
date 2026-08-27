@@ -33,7 +33,11 @@ import {
   type LocalRuntimeServiceStatePaths,
   resolveLocalRuntimeServiceStatePaths,
 } from './paths';
-import { secureWindowsStatePath, verifyWindowsStatePath } from './windows-state-security';
+import {
+  secureWindowsStatePath,
+  verifyWindowsStatePath,
+  windowsStateSecurityDiagnostic,
+} from './windows-state-security';
 
 /** Native state files are deliberately small; a corrupt/oversized file fails closed. */
 export const LOCAL_RUNTIME_SERVICE_STATE_LIMITS = Object.freeze({
@@ -129,6 +133,11 @@ function fail(code: LocalRuntimeServiceStateErrorCode, message: string, cause?: 
   throw stateError(code, message, cause);
 }
 
+function windowsSecurityMessage(message: string, error: unknown): string {
+  const diagnostic = windowsStateSecurityDiagnostic(error);
+  return diagnostic === undefined ? message : `${message} (${diagnostic})`;
+}
+
 function assertAbsolutePath(path: string, label: string): string {
   if (
     typeof path !== 'string' ||
@@ -182,7 +191,11 @@ function assertOwnerOnly(
       verifyWindowsStatePath(path, kind);
       return;
     } catch (error) {
-      fail('permission', `${label} does not have a verified Windows owner ACL.`, error);
+      fail(
+        'permission',
+        windowsSecurityMessage(`${label} does not have a verified Windows owner ACL.`, error),
+        error,
+      );
     }
   }
   if ((stat.mode & POSIX_OWNER_MASK) !== 0) {
@@ -244,7 +257,11 @@ function secureExistingOwnerDirectory(path: string, stat: PortableFileStat, labe
       secureWindowsStatePath(path, 'directory');
       return;
     } catch (error) {
-      fail('permission', `${label} could not be secured for the Windows owner.`, error);
+      fail(
+        'permission',
+        windowsSecurityMessage(`${label} could not be secured for the Windows owner.`, error),
+        error,
+      );
     }
   }
   const uid = currentUid();
@@ -290,10 +307,20 @@ function ensureDirectoryAtPath(
   if (!created) fail('io', `${label} disappeared during creation.`);
   if (process.platform === 'win32' && ownerOnly) {
     try {
-      secureWindowsStatePath(path, 'directory');
+      secureWindowsStatePath(path, 'directory', { allowOwnerInitialization: true });
     } catch (error) {
-      fail('permission', `${label} could not be secured for the Windows owner.`, error);
+      fail(
+        'permission',
+        windowsSecurityMessage(`${label} could not be secured for the Windows owner.`, error),
+        error,
+      );
     }
+    const secured = lstatIfPresent(path);
+    if (!secured || !sameIdentity(created, secured)) {
+      fail('corrupt', `${label} changed while its owner access was initialized.`);
+    }
+    assertDirectoryStat(secured, label, true, path);
+    return;
   }
   assertDirectoryStat(created, label, ownerOnly, path);
 }
@@ -581,7 +608,7 @@ function publishBytes(target: string, bytes: Buffer, label: string, maxBytes: nu
     descriptor = undefined;
     if (process.platform === 'win32') {
       try {
-        secureWindowsStatePath(temporary, 'file');
+        secureWindowsStatePath(temporary, 'file', { allowOwnerInitialization: true });
       } catch (error) {
         fail(
           'permission',
@@ -761,7 +788,7 @@ function publishLockIdentity(
     descriptor = undefined;
     if (process.platform === 'win32') {
       try {
-        secureWindowsStatePath(path, 'file');
+        secureWindowsStatePath(path, 'file', { allowOwnerInitialization: true });
       } catch (error) {
         fail(
           'permission',
@@ -1019,7 +1046,7 @@ export function tryAcquireLocalRuntimeServiceLock(
     created = true;
     if (process.platform === 'win32') {
       try {
-        secureWindowsStatePath(path, 'directory');
+        secureWindowsStatePath(path, 'directory', { allowOwnerInitialization: true });
       } catch (error) {
         fail('permission', `${kind} lock could not be secured for the Windows owner.`, error);
       }

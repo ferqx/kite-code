@@ -28,7 +28,10 @@ if ($action -eq 'secure') {
     [System.Security.AccessControl.AccessControlSections]::All
   )
   $existingOwner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-  if ($existingOwner.Value -ne $identity.Value) { exit 44 }
+  if (
+    $existingOwner.Value -ne $identity.Value -and
+    $env:KITE_WINDOWS_STATE_ALLOW_OWNER_INITIALIZATION -ne '1'
+  ) { exit 44 }
   if ($kind -eq 'directory') {
     $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $inheritance =
@@ -76,8 +79,26 @@ foreach ($rule in $rules) {
 
 export type WindowsStatePathKind = 'directory' | 'file';
 
-export function secureWindowsStatePath(path: string, kind: WindowsStatePathKind): void {
-  runWindowsStateSecurity('secure', path, kind);
+export class WindowsStateSecurityError extends Error {
+  readonly diagnostic: string;
+
+  constructor(diagnostic: string) {
+    super(`Windows state security failed: ${diagnostic}.`);
+    this.name = 'WindowsStateSecurityError';
+    this.diagnostic = diagnostic;
+  }
+}
+
+export function windowsStateSecurityDiagnostic(error: unknown): string | undefined {
+  return error instanceof WindowsStateSecurityError ? error.diagnostic : undefined;
+}
+
+export function secureWindowsStatePath(
+  path: string,
+  kind: WindowsStatePathKind,
+  options: { readonly allowOwnerInitialization?: boolean } = {},
+): void {
+  runWindowsStateSecurity('secure', path, kind, options.allowOwnerInitialization === true);
 }
 
 export function verifyWindowsStatePath(path: string, kind: WindowsStatePathKind): void {
@@ -88,6 +109,7 @@ function runWindowsStateSecurity(
   action: 'secure' | 'verify',
   path: string,
   kind: WindowsStatePathKind,
+  allowOwnerInitialization = false,
 ): void {
   if (process.platform !== 'win32') return;
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
@@ -108,13 +130,21 @@ function runWindowsStateSecurity(
         SYSTEMROOT: systemRoot,
         PSModulePath: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
         KITE_WINDOWS_STATE_ACTION: action,
+        KITE_WINDOWS_STATE_ALLOW_OWNER_INITIALIZATION: allowOwnerInitialization ? '1' : '0',
         KITE_WINDOWS_STATE_KIND: kind,
         KITE_WINDOWS_STATE_PATH_B64: Buffer.from(path, 'utf16le').toString('base64'),
       },
     },
   );
   if (result.status !== 0) {
-    throw new Error(`Windows state ${action} failed with status ${result.status ?? 'unknown'}.`);
+    const timedOut =
+      result.error !== undefined &&
+      typeof result.error === 'object' &&
+      'code' in result.error &&
+      result.error.code === 'ETIMEDOUT';
+    throw new WindowsStateSecurityError(
+      timedOut ? `${action}_timeout` : `${action}_status_${result.status ?? 'unknown'}`,
+    );
   }
 }
 

@@ -148,4 +148,5 @@ fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility
 path filter 与执行命令共同指向 `tests/qualification/mcp-keyring-platform-smoke.test.ts`。同一测试还验证
 execution-boundary workflow 的触发路径与 adversarial command 全部使用迁移后的 `apps/kite-service/test/**` current
 owner，并显式拒绝旧 `apps/kite-cli/test/**` 路径。stateful TUI overlay journey在发送确认键前等待对应action footer，
-避免把标题已渲染误作输入层已ready；mutation次数与最终disk/Session断言不放宽。
+避免把标题已渲染误作输入层已ready；mutation次数与最终disk/Session断言不放宽。fixture lifecycle owner test使用真实
+explicit Kite home/state absent组合，先验证manager stop fence，再验证其余server/workspace cleanup与聚合错误顺序。

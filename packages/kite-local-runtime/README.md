@@ -57,7 +57,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   symlink/hardlink/type drift；Windows通过fixed system PowerShell校验current-user SID、protected owner-only DACL与
   non-reparse file/directory。explicit home先验证non-link/current owner再收紧权限；state创建时收紧ACL，后续每次敏感
   读取、替换与清理都重新验证，既有state ACL/reparse drift fail closed。verifier使用pure .NET filesystem/ACL API、
-  minimal OS runtime environment与30秒单次上限，不依赖cmdlet module auto-load；timeout不授权访问。
+  minimal OS runtime environment与30秒单次上限，不依赖cmdlet module auto-load；timeout不授权访问。只有当前操作刚
+  exclusive创建并记录inode的entry可初始化owner SID，既有路径owner不匹配时拒绝。
 
 ## 测试与 evidence
 
