@@ -64,6 +64,7 @@ export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenc
     const writer = new SessionLogWriter('native-smoke', 'session', 'events', undefined, undefined, {
       policy: SMOKE_POLICY,
       heartbeatIntervalMs: 0,
+      maintenanceDeadlineMs: 5_000,
     });
     writer.write({
       schemaVersion: 1,
