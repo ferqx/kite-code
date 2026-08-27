@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
-const WINDOWS_STATE_SECURITY_TIMEOUT_MS = 10_000;
+const WINDOWS_STATE_SECURITY_TIMEOUT_MS = 30_000;
 
 const WINDOWS_STATE_SECURITY_SCRIPT = `
 $path = $env:KITE_WINDOWS_STATE_PATH | ConvertFrom-Json
@@ -82,6 +82,7 @@ function runWindowsStateSecurity(
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
   const executable = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const encoded = Buffer.from(WINDOWS_STATE_SECURITY_SCRIPT, 'utf16le').toString('base64');
+  const runtimeEnvironment = windowsPowerShellRuntimeEnvironment();
   const result = spawnSync(
     executable,
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
@@ -91,6 +92,7 @@ function runWindowsStateSecurity(
       timeout: WINDOWS_STATE_SECURITY_TIMEOUT_MS,
       killSignal: 'SIGKILL',
       env: {
+        ...runtimeEnvironment,
         SystemRoot: systemRoot,
         SYSTEMROOT: systemRoot,
         PSModulePath: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
@@ -103,4 +105,23 @@ function runWindowsStateSecurity(
   if (result.status !== 0) {
     throw new Error(`Windows state ${action} failed with status ${result.status ?? 'unknown'}.`);
   }
+}
+
+function windowsPowerShellRuntimeEnvironment(): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of [
+    'APPDATA',
+    'COMSPEC',
+    'LOCALAPPDATA',
+    'PATHEXT',
+    'PROGRAMDATA',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'WINDIR',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
 }
