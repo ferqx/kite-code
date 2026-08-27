@@ -1156,11 +1156,56 @@ function isReadOnlyRipgrep(tokens: string[]): boolean {
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed || /[\r\n]/.test(trimmed) || hasUnsafeOutputRedirect(trimmed)) return false;
+  if (isReadOnlyWorkspaceForLoop(trimmed)) return true;
   if (/[$`]/.test(trimmed) || /[<>]\(/.test(trimmed)) return false;
   if (hasUnquotedBraceExpansion(trimmed)) return false;
   const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
   if (stripped.includes('&')) return false;
   return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
+}
+
+/**
+ * Recognize the narrow loop shape emitted for workspace inventory. This is
+ * intentionally not a general shell parser: the iterator is restricted to
+ * relative literal/glob paths, the loop variable is the only expansion, and
+ * both the body and any trailing pipeline must independently satisfy the
+ * existing read-only grammar after substitution.
+ */
+function isReadOnlyWorkspaceForLoop(command: string): boolean {
+  const match =
+    /^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;]+)\s*;\s*do\s+(.+?)\s*;\s*done(.*)$/u.exec(
+      command,
+    );
+  if (!match) return false;
+  const variable = match[1]!;
+  const iterator = match[2]!.trim();
+  const body = match[3]!.trim();
+  const suffix = match[4]!.trim();
+  if (/\b(?:case|for|if|until|while)\b/u.test(body)) return false;
+
+  const iteratorTokens = iterator.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/gu) ?? [];
+  if (
+    iteratorTokens.length === 0 ||
+    !iteratorTokens.every((token) => {
+      const value = stripShellQuotes(token);
+      return (
+        value.length > 0 &&
+        !value.startsWith('/') &&
+        !/^[A-Za-z]:[\\/]/u.test(value) &&
+        !value.startsWith('~') &&
+        !value.split(/[\\/]/u).includes('..') &&
+        /^[A-Za-z0-9_./*?[\]-]+$/u.test(value)
+      );
+    })
+  ) {
+    return false;
+  }
+
+  const variableReference = new RegExp(`\\$\\{${variable}\\}|\\$${variable}\\b`, 'gu');
+  const substitutedBody = body.replace(variableReference, '__kite_workspace_loop_item__');
+  if (/[$`]/u.test(substitutedBody) || !isReadOnlyShellCommand(substitutedBody)) return false;
+  if (!suffix) return true;
+  return isReadOnlyShellCommand(`echo __kite_workspace_loop_complete__ ${suffix}`);
 }
 
 function hasUnquotedBraceExpansion(command: string): boolean {

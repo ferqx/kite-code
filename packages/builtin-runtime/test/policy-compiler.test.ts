@@ -6,6 +6,7 @@ import {
   compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
+  isReadOnlyShellCommand,
 } from '@kite-ai/builtin-runtime';
 import {
   type CapabilityPolicyCompilation,
@@ -250,6 +251,29 @@ describe('Builtin operation policy compiler', () => {
       requiresApproval: false,
       sandboxScope: { kind: 'baseline', filesystem: 'read_only', network: 'disabled' },
     });
+  });
+
+  test('proves only bounded workspace inventory loops read-only', () => {
+    const inventory =
+      'for d in packages/* apps/*; do echo "=== $d ==="; ls "$d"; done 2>/dev/null | head -120';
+    expect(isReadOnlyShellCommand(inventory)).toBe(true);
+    expect(compile('shell_execute', { command: inventory })).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      effectiveEffects: { filesystem: 'read' },
+    });
+
+    for (const command of [
+      'for d in packages/*; do rm -rf "$d"; done',
+      'for d in /tmp/*; do cat "$d"; done',
+      'for d in ../*; do cat "$d"; done',
+      'for d in $TARGETS; do cat "$d"; done',
+      'for d in packages/*; do echo "$d" > inventory.txt; done',
+      'for d in packages/*; do cat "$d"; done | tee inventory.txt',
+      'for d in packages/*; do "$d"; done',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(false);
+    }
   });
 
   test('keeps Git inside the baseline without a subcommand allowlist and reviews known expansion', () => {

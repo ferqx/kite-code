@@ -5196,7 +5196,9 @@ describe('executeTestRuntimeTools', () => {
     }
   });
 
-  test('Building Accept executes a read-only Shell baseline without approval', async () => {
+  test('Building Accept executes a bounded read-only inventory loop without approval', async () => {
+    const command =
+      'for d in packages/* apps/*; do echo "=== $d ==="; ls "$d"; done 2>/dev/null | head -120';
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell',
@@ -5232,7 +5234,7 @@ describe('executeTestRuntimeTools', () => {
       modelMessageId: 'model',
       ordinal: 0,
       name: 'shell_execute',
-      args: { command: 'pwd' },
+      args: { command },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
