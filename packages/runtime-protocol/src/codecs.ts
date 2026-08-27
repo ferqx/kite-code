@@ -27,6 +27,7 @@ const rpcId = z
   .refine((value) => !/\p{Cc}/u.test(value));
 const safeRevision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const shortText = z.string().max(8_192).refine(noForbiddenControls);
+const approvalCommand = z.string().max(16_384).refine(noForbiddenControls);
 const runtimeToolDisplayName = z.enum(RUNTIME_TOOL_DISPLAY_NAMES_);
 const runtimeToolPresentation = z.enum(RUNTIME_TOOL_PRESENTATIONS_);
 const displayLabel = z.string().min(1).max(512).refine(noForbiddenControls);
@@ -90,6 +91,7 @@ const interaction = z.discriminatedUnion('kind', [
         .array(z.enum(['approve_once', 'same_command']))
         .min(1)
         .max(2),
+      command: approvalCommand.optional(),
     })
     .strict(),
   z

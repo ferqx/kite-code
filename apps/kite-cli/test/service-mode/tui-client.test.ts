@@ -79,6 +79,24 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   expect(events.indexOf('reasoning.activity')).toBeLessThan(events.indexOf('presentation.flush'));
   expect(events.indexOf('presentation.flush')).toBeLessThan(events.indexOf('model.text_delta'));
 
+  remote.requestApprovalOnNextTurn();
+  const approvalRun = session!.runTask('confirm tool', {
+    dispatch: (action) => {
+      if (action.type === 'RUNTIME_EVENT') events.push(action.event.type);
+    },
+  });
+  await Bun.sleep(5);
+  expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+  expect(events).toContain('interaction.available');
+  await facade.submitUserAction({
+    type: 'approve',
+    interactionId: 'approval-native-receipt',
+    generation: 0,
+    grant: 'approve_once',
+  });
+  await approvalRun;
+  expect(remote.commands).toContain('respond_interaction');
+
   session!.setLocalReplayRecovery(true);
   const continued = await facade.forkRecoveredSessionForContinuation(sessionId);
   expect(continued?.threadId).toBe('service-created-fork-session');
@@ -112,7 +130,37 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
   #sessionId = '';
   #nextSubscription = 0;
+  #approvalOnNextTurn = false;
   readonly #subscriptionBySession = new Map<string, string>();
+
+  requestApprovalOnNextTurn(): void {
+    this.#approvalOnNextTurn = true;
+  }
+
+  #emitApproval(sessionId: string): void {
+    this.push(
+      subscriptionUpdate(this.#subscriptionBySession.get(sessionId)!, 1, {
+        type: 'notification',
+        durability: 'durable',
+        sessionId,
+        revision: 4,
+        session: projection(sessionId, 4, 'running'),
+        event: {
+          type: 'interaction.available',
+          interaction: {
+            kind: 'approval',
+            interactionId: 'approval-native-receipt',
+            sessionRevision: 4,
+            generation: 0,
+            grants: ['approve_once'],
+            command: 'echo approved',
+            title: 'shell_execute',
+            summary: 'Approve a shell command',
+          },
+        },
+      }),
+    );
+  }
 
   async send(message: RuntimeProtocolMessage): Promise<void> {
     if ('method' in message) {
@@ -222,6 +270,42 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         );
         return;
       }
+      if (command.type === 'respond_interaction') {
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: command.expectedRevision + 1,
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: command.sessionId,
+            revision: command.expectedRevision + 1,
+            session: projection(command.sessionId, command.expectedRevision + 1, 'running'),
+            event: {
+              type: 'approval.granted',
+              interactionId: command.interaction.interactionId,
+              generation:
+                command.interaction.kind === 'approval' ? command.interaction.generation : 0,
+            },
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: command.sessionId,
+            revision: command.expectedRevision + 2,
+            session: projection(command.sessionId, command.expectedRevision + 2, 'completed'),
+            event: { type: 'run.terminal', runId: 'run-approval', status: 'completed' },
+          }),
+        );
+        return;
+      }
       if (command.type === 'start_turn') {
         this.push(
           result(message.id, {
@@ -231,6 +315,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             revision: 2,
           }),
         );
+        if (this.#approvalOnNextTurn) {
+          this.#approvalOnNextTurn = false;
+          this.#emitApproval(command.sessionId);
+          return;
+        }
         this.push(
           subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
             type: 'notification',

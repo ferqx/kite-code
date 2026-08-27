@@ -160,6 +160,11 @@ route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数�
 
 TUI 与 foreground CLI 都只通过Native `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path进行 command/query/subscribe；one-shot ticket、initialize、admission、subscription ordering和Server routing均不可绕过。TUI通过`apps/kite-cli/src/adapters/tui/session-adapter.ts`获取typed client surface，二者均不接触Kernel state、Host execution control、Builtin executor或SQLite handle。完整旧Session history不从notification replay、trace、JSONL或Server history补偿，而是走`RuntimeClient.history → RuntimeHistoryClient → Service exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与live使用同一TUI reducer。
 
+Approval的bounded command、revision、generation与grant集合必须由Runtime Contract、Protocol notification/session projection和
+`respond_interaction` command使用同一个closed shape；任一wire codec遗漏字段都必须fail test，不能静默丢弃live interaction。
+TUI只有在respond command receipt accepted后才移除当前approval焦点；提交错误保持原interaction可见并由用户显式重试，
+不得吞错或在receipt前制造granted事实。
+
 每个新建或恢复 Session 先持有自己的 bootstrap readiness promise，后续 turn、compaction、reset、mode、cancel、rewind 与 close 必须等待 exact `create_session` / `resume_session` applied receipt，再读取 committed revision 并提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
 Ctrl+C通过Native TUI client提交durable`cancel_turn`；若notification在读取revision与Host admission之间前移
 committed revision，Client使用conflict回执中的最新revision和新command ID有界重试。terminal App不持有Service

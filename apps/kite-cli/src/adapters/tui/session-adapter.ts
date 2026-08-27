@@ -194,7 +194,7 @@ export interface TuiSessionRunDependencies {
 
 /** Closed client facade used by TUI code; no SessionManager passthrough. */
 export interface TuiRuntimeClientFacade {
-  submitUserAction(action: TuiSubmittedInteractionAction): void;
+  submitUserAction(action: TuiSubmittedInteractionAction): Promise<void>;
   createSession(workspace: string): string;
   registerSession(sessionId: string, workspace: string): TuiSessionFacade;
   hasRuntime(sessionId: string): boolean;

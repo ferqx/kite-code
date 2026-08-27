@@ -30,7 +30,10 @@ export default function ApprovalBlock({
   const t = useTheme();
   const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionFailed, setSubmissionFailed] = useState(false);
   const selectedIndexRef = useRef(0);
+  const submittingRef = useRef(false);
   const rawInputBuffer = useRef('');
   const approvalLabel =
     approval.command ?? approval.title ?? approval.summary ?? translate('approval.genericTool');
@@ -55,7 +58,7 @@ export default function ApprovalBlock({
           : translate('approval.denyToolDescription'),
   }));
 
-  function resolve(opt: Option) {
+  async function resolve(opt: Option) {
     // Approval actions are accepted only with the focused durable identity
     // pair. Legacy/off-screen cards without that pair cannot grant anything.
     if (
@@ -65,26 +68,37 @@ export default function ApprovalBlock({
     ) {
       return;
     }
-    if (opt.action === 'approve') {
-      const grant = opt.grant ?? 'approve_once';
-      // Queue the local acknowledgement before resolving Runtime's pending
-      // approval promise. Otherwise the durable continuation can clear the
-      // interrupt before React applies RESOLVE_INTERRUPT, leaving the child
-      // card visually suspended until a later progress event arrives.
-      onResolved('approve', grant);
-      provider.submitAction({
-        type: 'approve',
-        grant,
-        interactionId: queueEntry.interactionId,
-        generation,
-      });
-    } else {
-      onResolved('denied');
-      provider.submitAction({
-        type: 'reject',
-        interactionId: queueEntry.interactionId,
-        generation,
-      });
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmissionFailed(false);
+    try {
+      if (opt.action === 'approve') {
+        const grant = opt.grant ?? 'approve_once';
+        const accepted = await provider.submitActionAsync({
+          type: 'approve',
+          grant,
+          interactionId: queueEntry.interactionId,
+          generation,
+        });
+        if (!accepted) throw new Error('Approval submission was not accepted.');
+        // The optimistic projection is safe only after Runtime accepts the
+        // respond_interaction command receipt.
+        onResolved('approve', grant);
+      } else {
+        const accepted = await provider.submitActionAsync({
+          type: 'reject',
+          interactionId: queueEntry.interactionId,
+          generation,
+        });
+        if (!accepted) throw new Error('Approval rejection was not accepted.');
+        onResolved('denied');
+      }
+    } catch {
+      setSubmissionFailed(true);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -114,7 +128,7 @@ export default function ApprovalBlock({
     }
     if (key.return) {
       const opt = options[selectedIndexRef.current];
-      if (opt) resolve(opt);
+      if (opt) void resolve(opt);
       return;
     }
   });
@@ -168,6 +182,13 @@ export default function ApprovalBlock({
           selectionBackground={false}
         />
       </Box>
+      {(submitting || submissionFailed) && (
+        <Box marginTop={1} marginLeft={1}>
+          <Text color={submissionFailed ? t.error : t.dim}>
+            {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+          </Text>
+        </Box>
+      )}
     </OverlayFrame>
   );
 }

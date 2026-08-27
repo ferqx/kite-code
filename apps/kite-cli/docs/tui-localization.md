@@ -21,7 +21,8 @@
 - 可见错误只使用已脱敏的 bounded projection，不把 Provider 原文、credential、Artifact locator 或内部 identity 拼入译文。
 - Approval 的 queue sequence、generation 与 interaction ID 是内部 durable identity，不注册可见翻译 key。普通user
   route不显示“人工审批”标签；Auto route仍翻译为“自动审查”。面板翻译匹配请求数量与用户动作，原始command不翻译，
-  settlement仍使用未展示的exact identity。
+  settlement仍使用未展示的exact identity。确认提交中与receipt未接受的可重试错误使用中英文catalog key，不显示
+  transport错误、protocol payload或内部identity。
 - 推荐标记、动作动词和快捷键说明由 catalog 统一生成，页面不得维护第二份同义字符串。
 
 ## 布局

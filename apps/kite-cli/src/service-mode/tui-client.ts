@@ -660,70 +660,73 @@ class NativeTuiRuntimeClient {
     this.#recordRevision(record, receipt);
   }
 
-  #submitUserAction(action: TuiSubmittedInteractionAction): void {
-    const record = this.#sessions.get(this.#activeId);
-    if (!record) return;
+  async #submitUserAction(action: TuiSubmittedInteractionAction): Promise<void> {
+    const matchingRecords = [...this.#sessions.values()].filter((candidate) =>
+      candidate.interactions.has(action.interactionId),
+    );
+    if (matchingRecords.length > 1) {
+      throw new Error('The Runtime interaction is ambiguous across sessions.');
+    }
+    const record = matchingRecords[0] ?? this.#sessions.get(this.#activeId);
+    if (!record) throw new Error('The active Runtime session is unavailable.');
     const pendingInteraction = record.interactions.get(action.interactionId);
     if (!pendingInteraction) {
-      if (action.type === 'cancel') void this.#cancelRuntime(record).catch(() => undefined);
-      return;
+      if (action.type === 'cancel') {
+        await this.#cancelRuntime(record);
+        return;
+      }
+      throw new Error('The Runtime interaction is no longer pending.');
     }
     const commandId = this.#nextCommandId(record.threadId, 'interaction');
-    void this.#waitForSessionReady(record.threadId)
-      .then(async () => {
-        let interaction = pendingInteraction;
-        let expectedRevision = interaction.sessionRevision;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          const command = interactionCommandForAction(
-            record.threadId,
-            commandId,
-            expectedRevision,
-            interaction,
-            action,
-          );
-          if (!command) return;
-          const receipt = await this.#runtime.command(command);
-          if (
-            receipt.status === 'conflict' &&
-            receipt.code === 'revision_conflict' &&
-            receipt.currentRevision !== undefined &&
-            attempt < 2
-          ) {
-            const refreshed = await this.#waitForInteractionRefresh(
-              record,
-              action.interactionId,
-              interaction.sessionRevision,
-            );
-            if (!refreshed) return;
-            interaction = refreshed;
-            expectedRevision = refreshed.sessionRevision;
-            record.revision = Math.max(record.revision, receipt.currentRevision);
-            continue;
-          }
-          if (
-            receipt.status === 'rejected' &&
-            receipt.code === 'interaction_mismatch' &&
-            attempt < 2
-          ) {
-            // Provider recovery persists `provider.action_started` before the Host publishes the
-            // final pending interaction identity. A fast user can answer the preceding durable
-            // notice first. This rejection proves no mutation was applied; wait only for the
-            // exact newer interaction projection and retry the same command id once it arrives.
-            const refreshed = await this.#waitForInteractionRefresh(
-              record,
-              action.interactionId,
-              interaction.sessionRevision,
-            );
-            if (!refreshed) return;
-            interaction = refreshed;
-            expectedRevision = refreshed.sessionRevision;
-            continue;
-          }
-          this.#assertApplied(receipt);
-          return;
-        }
-      })
-      .catch(() => undefined);
+    await this.#waitForSessionReady(record.threadId);
+    let interaction = pendingInteraction;
+    let expectedRevision = interaction.sessionRevision;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const command = interactionCommandForAction(
+        record.threadId,
+        commandId,
+        expectedRevision,
+        interaction,
+        action,
+      );
+      if (!command) throw new Error('The Runtime interaction response does not match its request.');
+      const receipt = await this.#runtime.command(command);
+      if (
+        receipt.status === 'conflict' &&
+        receipt.code === 'revision_conflict' &&
+        receipt.currentRevision !== undefined &&
+        attempt < 2
+      ) {
+        const refreshed = await this.#waitForInteractionRefresh(
+          record,
+          action.interactionId,
+          interaction.sessionRevision,
+        );
+        if (!refreshed) throw new Error('The Runtime interaction revision could not be refreshed.');
+        interaction = refreshed;
+        expectedRevision = refreshed.sessionRevision;
+        record.revision = Math.max(record.revision, receipt.currentRevision);
+        continue;
+      }
+      if (receipt.status === 'rejected' && receipt.code === 'interaction_mismatch' && attempt < 2) {
+        // Provider recovery persists `provider.action_started` before the Host publishes the
+        // final pending interaction identity. A fast user can answer the preceding durable
+        // notice first. This rejection proves no mutation was applied; wait only for the
+        // exact newer interaction projection and retry the same command id once it arrives.
+        const refreshed = await this.#waitForInteractionRefresh(
+          record,
+          action.interactionId,
+          interaction.sessionRevision,
+        );
+        if (!refreshed) throw new Error('The Runtime interaction identity could not be refreshed.');
+        interaction = refreshed;
+        expectedRevision = refreshed.sessionRevision;
+        continue;
+      }
+      this.#assertApplied(receipt);
+      return;
+    }
+    throw new Error('The Runtime interaction could not be accepted.');
   }
 
   async #waitForInteractionRefresh(

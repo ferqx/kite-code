@@ -515,24 +515,24 @@ function TuiApp({
   }, []);
 
   const sessionManager = React.useMemo(() => {
-    const mgr = createSessionManager({
+    return createSessionManager({
       workspace,
       flushPresentation: waitUntilRenderFlush,
     });
-    provider.setActionSink((action) => mgr.submitUserAction(action));
-    mgr.setSnapshotCallback((threadId: string) => {
+  }, [waitUntilRenderFlush, createSessionManager, workspace]);
+  React.useEffect(() => {
+    const releaseActionSink = provider.setActionSink((action) =>
+      sessionManager.submitUserAction(action),
+    );
+    sessionManager.setSnapshotCallback((threadId: string) => {
       dispatch({ type: 'SESSION_INTERRUPT_PENDING', threadId });
     });
-    _sessionManagerForExit = mgr;
-    return mgr;
-  }, [provider, dispatch, waitUntilRenderFlush, createSessionManager, workspace]);
-  React.useEffect(
-    () => () => {
-      provider.setActionSink(null);
+    _sessionManagerForExit = sessionManager;
+    return () => {
+      releaseActionSink();
       if (_sessionManagerForExit === sessionManager) _sessionManagerForExit = null;
-    },
-    [provider, sessionManager],
-  );
+    };
+  }, [dispatch, provider, sessionManager]);
   React.useEffect(() => {
     if (!state.showPermissionSelector) return;
     const sessionId = state.activeSessionId || threadIdRef.current;

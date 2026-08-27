@@ -27,24 +27,35 @@ export type TuiAction =
 export type TuiInterruptPayload = RuntimeClientInteraction;
 
 type PendingResolve = (action: SessionUserAction) => void;
+type ActionSink = (action: SessionUserAction) => void | Promise<void>;
 
 export class TuiUserInputProvider {
   private pendingResolve: PendingResolve | null = null;
   private pendingInterrupt: TuiInterruptPayload | null = null;
-  private actionSink: ((action: SessionUserAction) => void) | null = null;
+  private actionSink: ActionSink | null = null;
   private readonly submittedActionKeys = new Set<string>();
+  private readonly submittingActionKeys = new Set<string>();
 
   /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
   getPendingInterrupt(): TuiInterruptPayload | null {
     return this.pendingInterrupt;
   }
 
-  setActionSink(sink: ((action: SessionUserAction) => void) | null): void {
+  setActionSink(sink: ActionSink | null): () => void {
     this.actionSink = sink;
+    return () => {
+      // An older React effect cleanup must not clear a newer Runtime owner.
+      if (this.actionSink === sink) this.actionSink = null;
+    };
   }
 
   /** 由 UI 调用，提交用户操作 / Called by UI to submit user action */
   submitAction(action: TuiAction): void {
+    void this.submitActionAsync(action).catch(() => undefined);
+  }
+
+  /** Submit and wait until the Runtime has accepted the interaction command. */
+  async submitActionAsync(action: TuiAction): Promise<boolean> {
     const pending = this.pendingInterrupt;
 
     const approvalAction = action.type === 'approve' || action.type === 'reject';
@@ -56,28 +67,38 @@ export class TuiUserInputProvider {
       (action.interactionId !== pending.interactionId ||
         action.generation !== (pending.kind === 'approval' ? pending.generation : undefined))
     ) {
-      return;
+      return false;
     }
 
     const normalized = pending
       ? this.normalizeAction(action, pending)
       : this.normalizeExactAction(action);
-    if (!normalized) return;
+    if (!normalized) return false;
     const key =
       normalized.type === 'approve' || normalized.type === 'reject'
         ? `${normalized.interactionId}:${normalized.generation}`
         : normalized.interactionId;
-    if (this.submittedActionKeys.has(key)) return;
+    if (this.submittedActionKeys.has(key) || this.submittingActionKeys.has(key)) return false;
+    const resolve = this.pendingResolve;
+    const sink = this.actionSink;
+    if (!resolve && !sink) return false;
+    this.submittingActionKeys.add(key);
+    try {
+      await sink?.(normalized);
+    } finally {
+      this.submittingActionKeys.delete(key);
+    }
     this.submittedActionKeys.add(key);
     if (this.submittedActionKeys.size > 4096) {
       const oldest = this.submittedActionKeys.values().next().value;
       if (oldest) this.submittedActionKeys.delete(oldest);
     }
-    const resolve = this.pendingResolve;
-    this.pendingResolve = null;
-    this.pendingInterrupt = null;
+    if (this.pendingResolve === resolve) {
+      this.pendingResolve = null;
+      this.pendingInterrupt = null;
+    }
     resolve?.(normalized);
-    this.actionSink?.(normalized);
+    return true;
   }
 
   async requestAction(payload: TuiInterruptPayload): Promise<SessionUserAction> {

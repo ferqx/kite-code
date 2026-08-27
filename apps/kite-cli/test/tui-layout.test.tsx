@@ -398,7 +398,9 @@ function fakeQuestion(overrides: Partial<UserInputPayload> = {}): UserInputPaylo
 }
 
 function fakeProvider(): TuiUserInputProvider {
-  return new TuiUserInputProvider();
+  const provider = new TuiUserInputProvider();
+  provider.setActionSink(() => undefined);
+  return provider;
 }
 
 const onResolved = () => {};
@@ -1398,7 +1400,9 @@ describe('ApprovalBlock', () => {
     const approval = fakeClientApproval({ interactionId: 'approval-keyed', generation: 9 });
     const provider = fakeProvider();
     const received: unknown[] = [];
-    provider.setActionSink((action) => received.push(action));
+    provider.setActionSink((action) => {
+      received.push(action);
+    });
     const { stdin } = render(
       <ApprovalBlock
         approval={approval}
@@ -1420,6 +1424,35 @@ describe('ApprovalBlock', () => {
       generation: 9,
       grant: 'same_command',
     });
+  });
+
+  test('keeps a failed confirmation visible and retries the same choice', async () => {
+    const resolved: string[] = [];
+    const approval = fakeClientApproval({ interactionId: 'approval-retry', generation: 4 });
+    const provider = fakeProvider();
+    let attempts = 0;
+    provider.setActionSink(() => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('connection unavailable');
+    });
+    const view = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={provider}
+        onResolved={(action) => resolved.push(action)}
+        queueEntry={fakeClientPendingApproval(approval)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(resolved).toEqual([]);
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(resolved).toEqual(['approve']);
+    expect(attempts).toBe(2);
   });
 });
 

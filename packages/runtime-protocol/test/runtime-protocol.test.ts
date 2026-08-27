@@ -182,6 +182,7 @@ describe('Runtime Protocol', () => {
         sessionRevision: 7,
         generation: 2,
         grants: ['approve_once'],
+        command: 'git status --short --branch',
       },
       response: { kind: 'approval', decision: 'approve_once' },
     };
@@ -193,6 +194,19 @@ describe('Runtime Protocol', () => {
         params: { command },
       }).success,
     ).toBeTrue();
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
+        id: 'rpc-approval-command-too-long',
+        method: 'runtime/command',
+        params: {
+          command: {
+            ...command,
+            interaction: { ...command.interaction, command: 'x'.repeat(16_385) },
+          },
+        },
+      }).success,
+    ).toBeFalse();
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
@@ -344,6 +358,21 @@ describe('Runtime Protocol', () => {
       },
       summary: 'Completed.',
     });
+    const approvalQueued = {
+      type: 'approval.queued' as const,
+      interaction: {
+        kind: 'approval' as const,
+        interactionId: 'approval-1',
+        sessionRevision: 8,
+        generation: 0,
+        grants: ['approve_once'] as ('approve_once' | 'same_command')[],
+        command: 'git status --short --branch',
+        title: 'shell_execute',
+        summary: 'Approve a shell command',
+      },
+      queueSequence: 0,
+    };
+    expect(mapRuntimeClientEventToProtocol(approvalQueued)).toEqual(approvalQueued);
     expect(
       RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
         type: 'tool.queued',
@@ -662,7 +691,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'b941e047:f4d30d5f';
+    const expectedDigest = 'f9c2662b:d27f08a3';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

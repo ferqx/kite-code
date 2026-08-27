@@ -134,6 +134,7 @@ export function generateRuntimeProtocolTypeScript(): string {
     '  readonly summary?: string;',
     '  readonly generation: RuntimeProtocolRevision;',
     "  readonly grants: readonly ('approve_once' | 'same_command')[];",
+    '  readonly command?: string;',
     '};',
     'export type RuntimeProtocolInputInteraction = {',
     "  readonly kind: 'input';",

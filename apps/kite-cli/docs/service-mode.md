@@ -19,4 +19,8 @@ Native subscription按canonical Server顺序串行消费notification。前台`re
 等待注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。这个
 client屏障与Service 50ms framing共同保持旧InProcess可见顺序，不在adapter内按数据源添加渲染分支。
 
+Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉
+transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。
+React owner切换时action sink按实例释放，旧effect cleanup不能清除新Runtime client binding。
+
 验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。

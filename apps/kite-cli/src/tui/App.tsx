@@ -321,9 +321,9 @@ export default function App({
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
-      // Runtime remains the durable source of truth, but an accepted approval
-      // has already been submitted synchronously by ApprovalBlock. Project that
-      // acknowledgement immediately so a suspended child does not keep saying
+      // Runtime remains the durable source of truth. ApprovalBlock invokes this
+      // callback only after respond_interaction has an accepted receipt. Project
+      // that acknowledgement immediately so a suspended child does not keep saying
       // "Awaiting your approval" until the continuation emits its next event.
       // Rejections stay durable-event-driven because approval.rejected owns the
       // terminal projection for the interrupted turn.

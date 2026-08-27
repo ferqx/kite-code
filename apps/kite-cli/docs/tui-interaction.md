@@ -57,7 +57,9 @@
 - Approval Overlay 只绑定 durable queue 当前 `activeApprovalId`；后台 pending record 不抢占 Footer 或键盘。
 - Enter/Esc 携带 exact `interactionId` 与 generation；Enter 提交当前 grant，Esc 只拒绝当前焦点，迟到 action 为 no-op。
 - Ctrl+C 取消整轮 queued/awaiting/authorized/running siblings，不能退化为 focused reject。
-- 只有 canonical granted、batch-released、rejected 或对应交互终态能关闭界面；TUI 不本地伪造 acknowledgement。
+- approval在`respond_interaction`获得applied/idempotent receipt前保持可见；accepted receipt可把当前焦点标记为
+  approving，canonical granted/batch-released/rejected仍拥有durable结果。transport/protocol/identity失败不得被吞掉，
+  UI显示可重试错误且不伪造已授权事实。
 - `ask_user` 单题把问题放入标题，多题使用 `n / total` meta；自定义输入留在原列表，已完成回答不得在恢复时重开。
 - Plan review、MCP recovery/admission 与其他交互同样只由 canonical terminal event 清除。
 - Plan approval 由单个 `plan.approved.executionMode` 同时固定本次 Task 执行模式与 Session/TUI 镜像；不得

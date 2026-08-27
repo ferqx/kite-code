@@ -181,4 +181,45 @@ describe('TuiUserInputProvider', () => {
       generation: 2,
     });
   });
+
+  test('an older action-sink cleanup cannot disconnect the current Runtime owner', async () => {
+    const provider = new TuiUserInputProvider();
+    const received: string[] = [];
+    const releaseOld = provider.setActionSink(() => {
+      received.push('old');
+    });
+    provider.setActionSink(() => {
+      received.push('current');
+    });
+
+    releaseOld();
+    await expect(
+      provider.submitActionAsync({
+        type: 'approve',
+        interactionId: 'approval-current-owner',
+        generation: 0,
+        grant: 'approve_once',
+      }),
+    ).resolves.toBe(true);
+    expect(received).toEqual(['current']);
+  });
+
+  test('a failed Runtime confirmation remains retryable until a receipt is accepted', async () => {
+    const provider = new TuiUserInputProvider();
+    let attempts = 0;
+    provider.setActionSink(() => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('transport unavailable');
+    });
+    const action = {
+      type: 'approve' as const,
+      interactionId: 'approval-retry',
+      generation: 0,
+      grant: 'approve_once' as const,
+    };
+
+    await expect(provider.submitActionAsync(action)).rejects.toThrow('transport unavailable');
+    await expect(provider.submitActionAsync(action)).resolves.toBe(true);
+    expect(attempts).toBe(2);
+  });
 });
