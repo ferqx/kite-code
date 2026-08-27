@@ -623,10 +623,11 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'toolId', 'presentation', 'arguments', 'summary'],
-            ['toolName', 'displayLabel'],
+            ['presentationGroupId', 'toolName', 'displayLabel'],
           ),
         ) &&
         isIdentifier(value.toolId) &&
+        (!Object.hasOwn(value, 'presentationGroupId') || isIdentifier(value.presentationGroupId)) &&
         isBoundedString(value.summary) &&
         isRuntimeToolPresentation(value.presentation) &&
         isRecord(value.arguments) &&

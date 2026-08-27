@@ -217,6 +217,18 @@ describe('Native Local Runtime connector', () => {
     await expect(connection.history.loadSession('session-1')).rejects.toMatchObject({
       code: 'invalid_response',
     });
+    historyEvent = {
+      type: 'tool.queued',
+      toolId: 'tool-1',
+      presentationGroupId: 'model-message-1',
+      toolName: 'read_file',
+      presentation: 'exploration',
+      arguments: { path: 'README.md' },
+      summary: 'Queued.',
+    };
+    await expect(connection.history.loadSession('session-1')).resolves.toMatchObject({
+      events: [historyEvent],
+    });
   });
 
   test('rejects a delayed HTTP response from a replaced Service identity', async () => {

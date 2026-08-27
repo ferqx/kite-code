@@ -283,21 +283,21 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 多阶段思考跨模型调用合并为一个阶段块（ADR-0030 / 规则 24）
+  // Test 2 — 每个模型请求拥有独立的思考/工具组件边界
   //
   // 消息结构：
   //   Response 1: reasoning + read_file(CLAUDE.md)
   //   Response 2: reasoning + read_file(package.json)  ← 新一轮模型调用
   //   Response 3: content 文本输出（阶段结束）
   //
-  // 预期 TUI 现象（ADR-0030）：
-  //   - 两轮合并为单个 "Thinking Xs · read 2 files" 阶段块
-  //     （模型调用是 kernel 实现细节，不是用户感知的思考边界）
-  //   - 两个工具步骤同块可见
+  // 预期 TUI 现象：
+  //   - 每个 model.requested(requestId) 结算前一个组件
+  //   - 两轮分别显示 "Thinking Xs · read 1 file"
+  //   - 不依赖相邻事件顺序把不同 request 的工具聚合到同一块
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'multi-phase reasoning merges into one phase block across model calls (ADR-0030)',
+    'successive model requests keep separate reasoning and tool components',
     async () => {
       server.setResponses([
         // Phase 1
@@ -335,10 +335,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // The adjacent terminal reads merge by closed category. Their local
-      // paths/reasoning were available while active and fold at settlement.
-      expect(screenContains(output, 'read 2 files')).toBe(true);
-      expect(screenContains(output, 'Thinking ')).toBe(true);
+      expect(screenContains(output, 'read 2 files')).toBe(false);
+      expect(clean.match(/Thinking \d+s · read 1 file/gu)?.length ?? 0).toBe(2);
       expect(screenContains(output, 'Phase 1:')).toBe(false);
       expect(screenContains(output, 'Phase 2:')).toBe(false);
 
@@ -431,7 +429,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'post-Bash searches and later reasoning settle as one upgraded phase',
+    'post-Bash searches and later reasoning keep request-scoped components',
     async () => {
       server.setResponses([
         {
@@ -486,9 +484,16 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       expect(screenContains(output, 'Bash')).toBe(true);
-      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
+      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(false);
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      const bash = clean.indexOf('● Bash Ran:');
+      const searchSummary = clean.indexOf('searched 2 file patterns');
+      const laterThinking = clean.lastIndexOf('Thinking ');
+      const finalText = clean.indexOf('POST_BASH_DONE:');
+      expect(searchSummary).toBeGreaterThan(bash);
+      expect(laterThinking).toBeGreaterThan(searchSummary);
+      expect(finalText).toBeGreaterThan(laterThinking);
       expect(tui.scrollback()).not.toContain('● Find');
 
       await waitForCondition(
@@ -544,8 +549,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .split('\n')
         .filter((line) => line.includes('searched 2 file patterns'));
       expect(searchLines).toHaveLength(1);
-      expect(searchLines[0]).toMatch(/Thinking \d+s.*searched 2 file patterns/u);
+      expect(searchLines[0]?.trim()).toBe('searched 2 file patterns');
       expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
+      expect(replay.indexOf('Thinking ')).toBeGreaterThan(
+        replay.indexOf('searched 2 file patterns'),
+      );
     },
     TIMEOUT,
   );
@@ -669,12 +677,19 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
       expect(bash).toBeGreaterThan(lastNarration);
+      const postBashSearch = lines.findIndex(
+        (line, index) => index > bash && line === 'searched 2 file patterns',
+      );
+      expect(postBashSearch).toBeGreaterThan(bash);
       const secondThinking = lines.findIndex(
-        (line, index) =>
-          index > bash && line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
+        (line, index) => index > postBashSearch && line.startsWith('Thinking '),
       );
       expect(secondThinking).toBeGreaterThan(bash);
-      expect(lines).not.toContain('searched 2 file patterns');
+      expect(
+        lines.some(
+          (line) => line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
+        ),
+      ).toBe(false);
       expect(
         lines.indexOf('PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。'),
       ).toBeGreaterThan(secondThinking);

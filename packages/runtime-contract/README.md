@@ -46,6 +46,8 @@
   execution mode；Client 不从 raw Plan/Kernel event 推断审核已完成。
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
   不携带 callback、Store handle 或历史 interaction settlement authority。
+- Live notification 与 History transcript 必须通过同一个 exact `RuntimeClientEvent` validator；closed DTO
+  新增可选字段时，类型、validator 与 wire codec 必须同步，不能让实时订阅可见而恢复/回放拒绝同一事件。
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。
 - 新写入的tool queue projection用`presentationGroupId`与`model.responded.messageId`精确配对；该字段只参与
   Presentation grouping，不是execution、authorization或settlement identity。旧History没有该可选字段时仍可回放。

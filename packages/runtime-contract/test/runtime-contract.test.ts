@@ -323,12 +323,23 @@ describe('runtime contract package boundary', () => {
       isRuntimeClientEvent({
         type: 'tool.queued',
         toolId: 'tool-1',
+        presentationGroupId: 'model-message-1',
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
         summary: 'Queued.',
       }),
     ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.queued',
+        toolId: 'tool-1',
+        presentationGroupId: '',
+        presentation: 'exploration',
+        arguments: {},
+        summary: 'Queued.',
+      }),
+    ).toBe(false);
     expect(
       isRuntimeClientEvent({
         type: 'tool.queued',
