@@ -122,6 +122,7 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
     args: [resolve('tests/fixtures/mcp-governance-server.ts')],
     cwd: resolve('.'),
   });
+  const stderrDiagnostic = collectBoundedStreamDiagnostic(handle.stderr);
   const reader = handle.stdout.getReader();
   let failure: unknown;
   try {
@@ -161,7 +162,11 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   } catch (error) {
     failure ??= error;
   }
-  if (failure) throw failure;
+  const stderr = await stderrDiagnostic.catch(() => 'diagnostic_unavailable');
+  if (failure) {
+    if (!stderr) throw failure;
+    throw new Error(`Installed MCP stdio wrapper failed: ${stderr}`, { cause: failure });
+  }
 }
 
 async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {
@@ -211,4 +216,23 @@ function boundedStartupDiagnostic(value: Uint8Array): string {
     .decode(value)
     .slice(0, 240)
     .replace(/[^\x20-\x7e\r\n\t]/g, '?');
+}
+
+async function collectBoundedStreamDiagnostic(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let diagnostic = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (diagnostic.length < 240) {
+        diagnostic += decoder.decode(value, { stream: true }).slice(0, 240 - diagnostic.length);
+      }
+    }
+    if (diagnostic.length < 240) diagnostic += decoder.decode().slice(0, 240 - diagnostic.length);
+  } finally {
+    reader.releaseLock();
+  }
+  return diagnostic.replace(/[^\x20-\x7e\r\n\t]/g, '?');
 }
