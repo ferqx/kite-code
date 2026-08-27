@@ -420,6 +420,35 @@ describe('Kite Local Runtime lifecycle manager', () => {
   });
 
   test.each([
+    'descriptor',
+    'descriptorless',
+  ] as const)('status clears a positively dead %s owner and reports canonical absence', async (stateKind) => {
+    const current = descriptor();
+    const harness = createHarness(stateKind === 'descriptor' ? current : undefined);
+    if (stateKind === 'descriptor') {
+      harness.handshake = { outcome: 'unavailable', diagnostic: 'identity_uncertain' };
+    } else {
+      harness.state.instanceLock = instanceLockFor({
+        instanceId: current.instanceId,
+        pid: current.pid,
+      });
+    }
+    harness.processStatus = 'dead';
+
+    const result = await manager(harness).status({ requestId: `status-dead-${stateKind}` });
+
+    expect(result).toMatchObject({
+      operation: 'status',
+      outcome: 'applied',
+      state: 'absent',
+      diagnostic: 'not_running',
+    });
+    expect(harness.state.clearStaleCount).toBe(1);
+    expect(harness.counts.spawn).toBe(0);
+    expect(harness.counts.controlStop).toBe(0);
+  });
+
+  test.each([
     'alive',
     'uncertain',
   ] as const)('does not clear or replace a descriptor when its process is %s', async (processStatus) => {

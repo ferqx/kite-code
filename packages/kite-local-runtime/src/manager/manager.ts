@@ -877,7 +877,19 @@ export function createKiteServiceManager(options: KiteServiceManagerOptions): Ki
       runtime.protocolVersion,
       runtime.clientContractRevision,
     );
-    if (decoded.descriptor) return probeExisting(requestId, 'status', decoded.descriptor);
+    if (decoded.descriptor) {
+      const existing = await probeExisting(requestId, 'status', decoded.descriptor);
+      if (
+        existing.outcome === 'unavailable' &&
+        existing.state === 'absent' &&
+        existing.diagnostic === 'not_running'
+      ) {
+        return (await clearDeadState())
+          ? result(requestId, 'status', 'applied', 'absent', undefined, 'not_running')
+          : result(requestId, 'status', 'unavailable', 'absent', undefined, 'identity_uncertain');
+      }
+      return existing;
+    }
     if (rawDescriptor !== undefined) {
       const diagnostic = decoded.diagnostic ?? 'identity_uncertain';
       return result(
@@ -894,7 +906,9 @@ export function createKiteServiceManager(options: KiteServiceManagerOptions): Ki
       return result(requestId, 'status', 'applied', 'absent', undefined, 'not_running');
     }
     if (instance.status === 'dead') {
-      return result(requestId, 'status', 'unavailable', 'absent', undefined, 'not_running');
+      return (await clearDeadState())
+        ? result(requestId, 'status', 'applied', 'absent', undefined, 'not_running')
+        : result(requestId, 'status', 'unavailable', 'absent', undefined, 'identity_uncertain');
     }
     return result(requestId, 'status', 'unavailable', 'starting', undefined, 'identity_uncertain');
   };

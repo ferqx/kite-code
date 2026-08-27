@@ -26,6 +26,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   这些production owner只在`apps/kite-service`。
 - manager只在PID明确dead且exact identity仍匹配时cleanup；alive/uncertain、malformed state、handshake mismatch与unknown stop
   outcome均fail closed，不kill、不spawn replacement、不回显descriptor identity。
+- status对完整absent返回`applied + absent + not_running`；若只剩descriptor/instance-lock stale evidence，必须先由process
+  probe确认PID dead并完成exact stale cleanup，才能返回同一canonical absence。alive/uncertain不清理且不伪造absence。
 - 不依赖 Runtime Host/Server/Builtin/SQLite、React、Ink或任何`apps/*`。
 - 不自动retry/replay Runtime或App Control mutation；response丢失必须按
   `outcome_unknown → exact state query → explicit decision`处理。

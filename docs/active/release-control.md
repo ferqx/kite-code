@@ -131,6 +131,8 @@ TUI/release fixture的显式Kite home必须在写config前由production `ensureL
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；
 仍为ready/uncertain时保持临时root并使smoke失败。`service_busy`是commit前的明确拒绝；TUI test owner可在resident
 Session/Turn有界结束后重发一个新的ordinary stop，但该路径不得与`outcome_unknown`共用重试逻辑。
+manager status遇到descriptor或instance-lock残留时仅在process probe明确dead后执行exact stale cleanup，并返回
+`applied + absent + not_running`；alive/uncertain或cleanup fault仍不可作为unknown stop的完成证据。
 Service carrier在control handler返回ack后使用有界active-response drain关闭listener，deadline耗尽才force close；不能把
 `setTimeout(0)`或一次event-loop yield当作wire flush证据。即使该窗口存在，调用方仍按上述unknown-outcome规则处理
 真正丢失的响应，不能由transport实现推导mutation一定未执行。
