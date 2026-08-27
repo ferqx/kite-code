@@ -48,6 +48,9 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 关键不变量
 
 - default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
+- Service-owned Shell composition 对普通repository继续只授权canonical Workspace；若Workspace是Git注册的linked
+  worktree，则仅把通过标准namespace、commondir与reciprocal backlink验证的primary `.git`作为只读runtime root
+  传入native sandbox，不授权primary working tree，也不把generic Shell升级为Git transaction owner。
 - Runtime Application、state与transport基础设施都必须ready后才发布descriptor；没有noop listener/state或伪ready。
 - descriptor发布身份必须由manager通过`GET /readyz`后authenticated exact `POST /_kite/instance`重新证明，不能回显或
   信任磁盘descriptor。instance/Protocol/client-contract/server/build任一缺失或不匹配都fail closed；expected build

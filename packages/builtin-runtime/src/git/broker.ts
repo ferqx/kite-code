@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type {
   GitBrokerFailureCode,
   GitBrokerResult,
@@ -352,6 +352,45 @@ function readGitDirectory(
   }
   assertMetadataTree(gitDir, commonDir);
   return { gitDir, commonDir };
+}
+
+/**
+ * Resolve the external metadata roots of a Git-registered linked worktree.
+ *
+ * A Workspace gitfile is untrusted input.  It earns a read-only sandbox grant
+ * only when the target is a standard `<primary>/.git/worktrees/<id>` entry,
+ * its `commondir` resolves to that primary `.git` directory, and its `gitdir`
+ * backlink resolves to this Workspace's own marker.  A normal repository
+ * needs no extra root because its `.git` directory is already inside the
+ * admitted Workspace.  Invalid or unrelated gitfiles grant nothing.
+ */
+export function resolveRegisteredGitMetadataReadOnlyRoots(
+  workspaceInput: string,
+): readonly string[] {
+  try {
+    const workspace = realpathSync.native(resolve(workspaceInput));
+    const marker = join(workspace, '.git');
+    const markerStat = lstatSync(marker);
+    if (markerStat.isDirectory() && !markerStat.isSymbolicLink()) return Object.freeze([]);
+    if (!markerStat.isFile() || markerStat.isSymbolicLink()) return Object.freeze([]);
+
+    const match = /^gitdir:\s*(.+)\s*$/i.exec(readFileSync(marker, 'utf8'));
+    if (!match?.[1]) return Object.freeze([]);
+    const gitDir = realpathSync.native(resolve(workspace, match[1]));
+    const commonDirFile = join(gitDir, 'commondir');
+    assertRegularMetadataFile(commonDirFile, false);
+    const commonDir = realpathSync.native(
+      resolve(gitDir, readFileSync(commonDirFile, 'utf8').trim()),
+    );
+    if (basename(commonDir) !== '.git') return Object.freeze([]);
+
+    const authorizedRepositoryRoot = realpathSync.native(dirname(commonDir));
+    const validated = readGitDirectory(workspace, authorizedRepositoryRoot);
+    if (validated.gitDir !== gitDir || validated.commonDir !== commonDir) return Object.freeze([]);
+    return Object.freeze([commonDir]);
+  } catch {
+    return Object.freeze([]);
+  }
 }
 
 function hasHostileGitConfig(content: string): boolean {

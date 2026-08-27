@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +16,7 @@ import {
   type GitProcessAdapter,
   type GitProcessRequest,
   qualifyBrokeredGitNativeDeny,
+  resolveRegisteredGitMetadataReadOnlyRoots,
 } from '@kite-ai/builtin-runtime/git';
 import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
@@ -327,6 +336,9 @@ describe('ACORE-GIT hardened broker', () => {
     rmSync(linked, { recursive: true, force: true });
     try {
       git(primary, 'worktree', 'add', '--quiet', '-b', 'linked-test', linked);
+      expect(resolveRegisteredGitMetadataReadOnlyRoots(linked)).toEqual([
+        realpathSync.native(join(primary, '.git')),
+      ]);
       const broker = createGitBroker({
         workspace: linked,
         authorizedRepositoryRoot: primary,

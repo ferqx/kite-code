@@ -259,6 +259,10 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
     ].join(' ');
     const wrappedCommand = `${preamble} ${command}`;
     const shell = policyProvenReadOnly ? '/bin/sh' : preparation.argv[0]!;
+    const runtimeReadOnlyRoots = [
+      ...discoverRuntimeReadOnlyRoots(),
+      ...(this.#options.runtimeReadOnlyRoots ?? []),
+    ];
     let argv: string[];
     if (this.#options.backend === 'seatbelt') {
       const profile = generateSandboxProfile(workspace, {
@@ -269,7 +273,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
             : (this.#options.filesystemScope ?? 'workspace_write'),
         sandboxRuntimeDir: runtimeRoots.dataRoot,
         sandboxControlBase: dirname(runtimeRoots.controlRoot),
-        runtimeReadOnlyRoots: this.#options.runtimeReadOnlyRoots ?? discoverRuntimeReadOnlyRoots(),
+        runtimeReadOnlyRoots,
         gitAccess:
           this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
             ? 'deny'
@@ -284,6 +288,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
         network: preparation.networkMode,
         sandboxRuntimeDir: runtimeRoots.dataRoot,
         sandboxControlBase: dirname(runtimeRoots.controlRoot),
+        runtimeReadOnlyRoots,
         filesystemScope:
           preparation.filesystemMode === 'allow_all'
             ? 'full_access'

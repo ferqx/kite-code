@@ -5,6 +5,10 @@ export type {
   GitProcessRequest,
   GitProcessResult,
 } from './broker';
-export { createGitBroker, isGitRevision } from './broker';
+export {
+  createGitBroker,
+  isGitRevision,
+  resolveRegisteredGitMetadataReadOnlyRoots,
+} from './broker';
 export type { BrokeredGitQualificationDecision } from './qualification';
 export { qualifyBrokeredGitNativeDeny } from './qualification';

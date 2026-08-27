@@ -17,6 +17,7 @@ export function generateBwrapArgs(
     network?: 'disabled' | 'allow_all';
     sandboxRuntimeDir?: string;
     sandboxControlBase?: string;
+    runtimeReadOnlyRoots?: readonly string[];
     filesystemScope?: FilesystemScope;
   },
 ): string[] {
@@ -50,6 +51,11 @@ export function generateBwrapArgs(
     // Workspace bind follows the selected native filesystem ceiling.
     const workspaceBind = options?.filesystemScope === 'read_only' ? '--ro-bind' : '--bind';
     args.push(workspaceBind, workspaceRoot, workspaceRoot);
+
+    for (const root of canonicalReadOnlyRoots(options?.runtimeReadOnlyRoots ?? [])) {
+      if (root === workspaceRoot || root.startsWith(`${workspaceRoot}/`)) continue;
+      args.push('--ro-bind', root, root);
+    }
   }
   // 沙箱运行时目录：读写绑定（存放 TMPDIR、bun cache 等）
   const runtimeDir = options?.sandboxRuntimeDir;
@@ -83,4 +89,8 @@ function dirExists(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function canonicalReadOnlyRoots(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter(dirExists).map((path) => realpathSync.native(resolve(path))))];
 }

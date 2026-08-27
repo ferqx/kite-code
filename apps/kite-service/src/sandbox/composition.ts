@@ -1,3 +1,4 @@
+import { resolveRegisteredGitMetadataReadOnlyRoots } from '@kite-ai/builtin-runtime/git';
 import type {
   BuiltinPreparedShellExecutionInput,
   ExecutionBoundary,
@@ -357,6 +358,7 @@ export function composeAppSandboxExecutor(input: {
       createGovernedLocalSandboxExecutor({
         backend,
         canonicalWorkspace: workspace,
+        runtimeReadOnlyRoots: resolveRegisteredGitMetadataReadOnlyRoots(workspace),
         brokeredGitFeatureRevision: surface?.brokeredGitFeatureRevision ?? undefined,
         executionBoundaryDigest: boundary
           ? computeExecutionBoundaryDigest(boundary)
