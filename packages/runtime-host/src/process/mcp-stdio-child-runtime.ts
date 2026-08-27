@@ -226,6 +226,7 @@ export function runMcpStdioChildRuntime(
         cleanup: 'confirmed',
       } satisfies TerminalPayload,
     });
+    await endWritable(process.stdout);
     try {
       process.stdin.destroy();
     } catch {
@@ -372,6 +373,16 @@ async function writeWritable(target: NodeJS.WritableStream, data: Uint8Array): P
         if (error) reject(error);
         else resolve();
       });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function endWritable(target: NodeJS.WritableStream): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    try {
+      target.end(resolve);
     } catch (error) {
       reject(error);
     }
