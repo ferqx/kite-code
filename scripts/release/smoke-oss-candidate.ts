@@ -151,7 +151,9 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   } catch (error) {
     failure = error;
   }
-  reader.releaseLock();
+  const remainingOutput = drainRemainingMcpOutput(reader).catch((error: unknown) => {
+    failure ??= error;
+  });
   await handle.closeInput().catch(() => undefined);
   try {
     await handle.terminal;
@@ -166,6 +168,8 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   } catch (error) {
     failure ??= error;
   }
+  await remainingOutput;
+  reader.releaseLock();
   const stderr = await stderrDiagnostic.catch(() => 'diagnostic_unavailable');
   if (failure) {
     const wrapperExitCode = await handle.exited.catch(() => null);
@@ -178,6 +182,15 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
     throw new Error(`Installed MCP stdio wrapper failed (${exitDiagnostic}): ${stderr}`, {
       cause: failure,
     });
+  }
+}
+
+async function drainRemainingMcpOutput(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  while (true) {
+    const next = await reader.read();
+    if (next.done) return;
   }
 }
 
