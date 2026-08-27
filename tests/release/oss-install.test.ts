@@ -10,7 +10,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, parse, resolve } from 'node:path';
-import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+} from '@kite-ai/kite-local-runtime/service';
 import {
   installOssCandidate as installCandidate,
   readInstallStatus,
@@ -29,8 +32,7 @@ setDefaultTimeout(60_000);
 
 function serviceHome(prefix: string) {
   const root = join(realpathSync(dirname(resolve(prefix))), 'service-home');
-  mkdirSync(root, { recursive: true, mode: 0o700 });
-  return createKiteHomeIdentity(root, 'explicit_argument');
+  return ensureLocalRuntimeServiceHome(createKiteHomeIdentity(root, 'explicit_argument'));
 }
 
 function installOssCandidate(input: { archivePath: string; prefix: string }) {
