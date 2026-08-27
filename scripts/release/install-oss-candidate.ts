@@ -18,6 +18,7 @@ import { userInfo } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import {
   createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
   ensureLocalRuntimeServiceStateRoot,
   type KiteHomeIdentity,
   LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
@@ -465,8 +466,7 @@ function acquireInstallerServiceFence(
   if (!identity) {
     const systemHome = realpathSync.native(userInfo().homedir);
     const codeRoot = join(systemHome, '.kite-code');
-    mkdirSync(codeRoot, { recursive: true, mode: 0o700 });
-    identity = createKiteHomeIdentity(realpathSync.native(codeRoot), 'os_user_home');
+    identity = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(codeRoot, 'os_user_home'));
   }
   const paths = ensureLocalRuntimeServiceStateRoot(identity);
   const lock = tryAcquireLocalRuntimeServiceLock(paths, 'lifecycle', {

@@ -106,6 +106,8 @@ upgrade、rollback与uninstall在替换或删除binary前必须调用当前candi
 state残留或任何stop/status失败都保持active candidate与managed tree不变；installer不force kill、不手工清state。
 managed client接管显式或OS-derived Kite home时先拒绝symlink/non-owner identity，再仅把home目录本身收紧为owner-only；
 既有descriptor/token/lock权限漂移仍fail closed，不借cleanup或install自动修复。
+installer默认OS-derived code root同样直接交给Service home owner primitive创建/验证，不先用平台默认`mkdir`产生不同
+owner/ACL再补救；Windows管理员token的default owner不能替代current-user SID。
 installer contract tests的临时Service home也必须由同一state owner primitive创建，不能用普通Windows `mkdir`默认owner
 替代current-user SID/protected DACL身份后再伪造lifecycle fence通过。
 
