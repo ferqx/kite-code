@@ -55,6 +55,9 @@
 - 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
   统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued arguments 明确 `intent=inspect` 且命令通过
   只读 grammar 时才归 exploration；终态缺 queued fact 时不猜测。
+- standalone Shell运行时持续tail-follow最近5行`tool.progress`；成功终态有stdout/stderr时默认显示Service投影的
+  有界完整结果并保留`exit: 0`尾行。短命令即使started/progress/finished落在一个Ink frame内也不能只剩exit状态；
+  只有用户主动折叠后才隐藏正文。
 - standalone tool 在 started 时结算它之前的 Thought；其 terminal 只能更新自身 card，不能因为完成较晚而
   结算该 tool started 后新建的 exploration summary。若 durable final text 先于 completed reasoning 到达，
   且文本紧邻该 exploration summary，reasoning 仍回填同一 summary。live 与同一 Session 的 `/resume` replay

@@ -2659,6 +2659,29 @@ describe('BlockRenderer', () => {
     expect(frame.match(/└─/g)).toHaveLength(1);
   });
 
+  test('keeps successful shell output visible after the running progress settles', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'ls packages apps' },
+      status: 'done',
+      summary: 'agent-kernel\nbuiltin-runtime\nkite-cli\nkite-service',
+      liveOutput: 'kite-cli\nkite-service',
+    };
+    const frame =
+      render(
+        <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('agent-kernel');
+    expect(frame).toContain('builtin-runtime');
+    expect(frame).toContain('kite-cli');
+    expect(frame).toContain('kite-service');
+    expect(frame).toContain('exit: 0');
+  });
+
   test('renders all structured answers for a completed five-question ask_user card', () => {
     const block: OutputBlock = {
       id: 1,

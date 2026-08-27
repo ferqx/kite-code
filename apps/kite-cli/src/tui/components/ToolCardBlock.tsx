@@ -661,18 +661,19 @@ export default function ToolCardBlock({
   const askQuestionCount = isAskUser ? askQuestions(block.args).length : 0;
   const isMultiQuestionAsk = askQuestionCount > 1;
   const detail = block.detail ?? (isAskUser ? askQuestionText(block.args) : undefined);
-  const isExpanded =
-    block.expanded ??
-    (block.status === 'error' ||
-      block.status === 'cancelled' ||
-      block.status === 'timeout' ||
-      block.status === 'exhausted');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const shellOutput =
     block.status === 'cancelled' && block.summary === 'Cancelled'
       ? block.liveOutput
       : block.summary;
   const hasShellOutput = shellOutput ? shellOutput.trimEnd().length > 0 : false;
+  const isExpanded =
+    block.expanded ??
+    (block.status === 'error' ||
+      block.status === 'cancelled' ||
+      block.status === 'timeout' ||
+      block.status === 'exhausted' ||
+      ((isShell || isWebFetch) && hasShellOutput));
   const approvalCancelled =
     block.status === 'cancelled' &&
     /^Tool approval (?:rejected|cancelled) by user\.$/.test(block.summary ?? '');
