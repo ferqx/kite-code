@@ -363,6 +363,7 @@ function fakeClientApproval(
     sessionRevision: 1,
     generation: 1,
     grants: ['approve_once', 'same_command'],
+    command: 'npm test',
     summary: 'Runtime requests your decision.',
     ...overrides,
   };
@@ -1339,17 +1340,21 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders only the safe approval title and summary', () => {
+  test('renders the original approval command without a manual-approval label', () => {
     const approval = fakeClientApproval({
       title: 'Approval required',
       summary: 'Runtime requests confirmation.',
+      command: 'git status --short --branch',
     });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('── General tool · Tool approval');
-    expect(frame).toContain('Runtime requests confirmation.');
+    expect(frame).toContain('git status --short --branch');
+    expect(frame).not.toContain('Runtime requests confirmation.');
+    expect(frame).not.toContain('User approval');
+    expect(frame).not.toContain('人工审批');
     expect(frame).not.toContain('/tmp');
     expect(frame).not.toContain('shell_execute');
   });
@@ -5579,12 +5584,12 @@ describe('App', () => {
     const provider = fakeProvider();
     const firstApproval = fakeClientApproval({
       interactionId: 'approval-first',
-      summary: 'First decision.',
+      command: 'First decision.',
     });
     const firstPending = fakeClientPendingApproval(firstApproval);
     const secondApproval = fakeClientApproval({
       interactionId: 'approval-second',
-      summary: 'Second decision.',
+      command: 'Second decision.',
     });
     const secondPending = fakeClientPendingApproval(secondApproval);
     const firstState = fakeState({

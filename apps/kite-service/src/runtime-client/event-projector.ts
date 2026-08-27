@@ -6,7 +6,7 @@ import {
 } from '@kite-ai/runtime-contract';
 import { runtimeHostStateAssertCurrentRuntimeEvent } from '@kite-ai/runtime-host';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
-import { projectRuntimeClientText } from './safe-text';
+import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
 
 export interface RuntimeClientEventProjectionContext {
   readonly sessionRevision: number;
@@ -124,6 +124,7 @@ export function projectRuntimeClientEvent(
         sessionRevision: context.sessionRevision,
         generation: event.queueGeneration ?? 0,
         grants: event.approval.grantOptions,
+        command: projectRuntimeClientCommand(event.approval.command),
         title: projectRuntimeClientText(event.approval.tool, 8_192),
         summary: projectRuntimeClientText(event.approval.summary, 8_192),
       };

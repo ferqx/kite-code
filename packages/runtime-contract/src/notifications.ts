@@ -455,6 +455,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
       'summary',
       'generation',
       'grants',
+      'command',
       'question',
       'allowFreeText',
       'options',
@@ -476,9 +477,10 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           presentKeys(
             value,
             ['kind', 'interactionId', 'sessionRevision', 'generation', 'grants'],
-            ['title', 'summary'],
+            ['title', 'summary', 'command'],
           ),
         ) &&
+        (!Object.hasOwn(value, 'command') || isBoundedUserText(value.command)) &&
         isNonNegativeSafeInteger(value.generation) &&
         Array.isArray(value.grants) &&
         value.grants.length > 0 &&

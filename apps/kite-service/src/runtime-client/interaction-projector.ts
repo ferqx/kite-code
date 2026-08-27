@@ -5,7 +5,7 @@ import {
 } from '@kite-ai/runtime-contract';
 import type { RuntimeUserAction } from '#kite-service/bootstrap/runtime/state-actions';
 import type { RuntimeEffect, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
-import { projectRuntimeClientText } from './safe-text';
+import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
 
 export type RuntimeInteractionEffect = Extract<RuntimeEffect, { type: `request_${string}` }>;
 
@@ -86,6 +86,7 @@ export function projectRuntimeClientInteraction(
         sessionRevision: revision,
         generation: pending.generation,
         grants,
+        command: projectRuntimeClientCommand(pending.approval.command),
         title: projectRuntimeClientText(pending.approval.tool, 256),
         summary: projectRuntimeClientText(pending.approval.summary, 1_024),
       });

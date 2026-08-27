@@ -56,8 +56,11 @@ generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust 
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
 cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/authority material 仍过滤，raw RuntimeEvent、
 State、Store handle 和 settlement callback 仍禁止。该本地内容不进入 metric、diagnostic 或远程 reporter，
-也不把 development WebSocket 提升为 production Web。Service-owned presentation frame在closed projector前统一合并
-累计reasoning/text与tool progress，并在durable边界前flush；legacy Session seam与concrete Service bridge共享该实现，
+也不把 development WebSocket 提升为 production Web。审批interaction同样保留用户正在决定的有界command；
+TUI必须以command为主内容，不能用策略summary替换，也不展示
+冗余的user-route“人工审批”标签。cwd、grant subject、binding digest与Host内部payload继续留在边界内。
+Service-owned presentation frame在closed projector前统一合并累计reasoning/text与tool progress，并在durable边界前flush；
+legacy Session seam与concrete Service bridge共享该实现，
 因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。interaction/cancel/close/shutdown等旁路durable
 publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
 后续client event，不能让terminal先结算后再补一个独立Thought。

@@ -37,7 +37,8 @@
 - `delete_session` 是 Host-owned mutation：按 scoped command identity 删除 Session durable facts并保留
   receipt；Client/TUI 不能直接调用 Store delete。重放同一 digest 返回原 receipt，不同 digest fail closed。
 - `respond_interaction` 必须携带匹配的 client-safe interaction identity：Session revision，及按 kind
-  所需的 approval generation/grants、Plan identity、provider directory revision 或 verification revision。
+  所需的 approval generation/grants、Plan identity、provider directory revision 或 verification revision。Approval
+  interaction可选携带有界原始command供用户作知情决定；它不携带cwd、grant subject或binding digest。
 - `RuntimeSubscriptionSpec` 是唯一可序列化 selector；`AbortSignal` 只属于 local
   `RuntimeSubscription`，不得进入 wire。
 - `plan.approved` 是审核 settlement 的封闭 client event，携带 interaction identity、Session revision 与

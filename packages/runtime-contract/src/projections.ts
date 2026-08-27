@@ -19,6 +19,8 @@ export interface RuntimeApprovalInteraction extends RuntimeInteractionBase {
   /** State 27 queue generation; a response for another generation is invalid. */
   readonly generation: number;
   readonly grants: readonly ('approve_once' | 'same_command')[];
+  /** Bounded original command shown for an informed approval decision. */
+  readonly command?: string;
 }
 
 export interface RuntimeInputInteraction extends RuntimeInteractionBase {
@@ -60,9 +62,10 @@ export interface RuntimeVerificationInteraction extends RuntimeInteractionBase {
 }
 
 /**
- * Closed, client-safe interaction vocabulary. It deliberately excludes cwd,
- * raw command/provider payloads, grant subjects, binding digests, and child
- * identities. Host settlement must compare this identity against State 27.
+ * Closed, client-safe interaction vocabulary. Approval carries the bounded
+ * command the user is deciding on, but still excludes cwd, provider payloads,
+ * grant subjects, binding digests, and child identities. Host settlement must
+ * compare this identity against State 27.
  */
 export type RuntimeClientInteraction =
   | RuntimeApprovalInteraction

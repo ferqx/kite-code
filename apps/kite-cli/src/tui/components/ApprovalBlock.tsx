@@ -32,7 +32,8 @@ export default function ApprovalBlock({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
   const rawInputBuffer = useRef('');
-  const approvalLabel = approval.summary ?? approval.title ?? translate('approval.genericTool');
+  const approvalLabel =
+    approval.command ?? approval.title ?? approval.summary ?? translate('approval.genericTool');
   const route = queueEntry?.route ?? 'user';
   const generation = approval.generation;
   const visibleOptions: Option[] = [
@@ -143,21 +144,23 @@ export default function ApprovalBlock({
       >
         <Text wrap="truncate-end">{approvalLabel}</Text>
       </Box>
-      <Box marginTop={1} marginLeft={1} flexDirection="column">
-        <Text color={t.dim}>
-          {route === 'auto' ? translate('approval.routeAuto') : translate('approval.routeUser')}
-        </Text>
-        {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
-          <Text color={t.dim}>
-            {queueEntry.grant === 'same_command'
-              ? translate('approval.batchReleased', { count: queueEntry.matchCount })
-              : translate('approval.matchCount', { count: queueEntry.matchCount })}
-          </Text>
-        )}
-        {queueEntry?.status === 'authorized_queued' && (
-          <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
-        )}
-      </Box>
+      {(route === 'auto' ||
+        (queueEntry?.matchCount != null && queueEntry.matchCount > 1) ||
+        queueEntry?.status === 'authorized_queued') && (
+        <Box marginTop={1} marginLeft={1} flexDirection="column">
+          {route === 'auto' && <Text color={t.dim}>{translate('approval.routeAuto')}</Text>}
+          {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
+            <Text color={t.dim}>
+              {queueEntry.grant === 'same_command'
+                ? translate('approval.batchReleased', { count: queueEntry.matchCount })
+                : translate('approval.matchCount', { count: queueEntry.matchCount })}
+            </Text>
+          )}
+          {queueEntry?.status === 'authorized_queued' && (
+            <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
+          )}
+        </Box>
+      )}
       <Box marginTop={1}>
         <OverlayChoiceList
           options={choiceOptions}

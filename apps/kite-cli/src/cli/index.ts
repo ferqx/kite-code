@@ -317,8 +317,9 @@ async function promptForRuntimeInteraction(
 ): Promise<RuntimeInteractionResponse> {
   switch (interaction.kind) {
     case 'approval': {
-      console.error(`\n[APPROVAL REQUIRED] ${interaction.title ?? 'Runtime operation'}`);
-      if (interaction.summary) console.error(interaction.summary);
+      console.error(
+        `\n[APPROVAL REQUIRED] ${interaction.command ?? interaction.title ?? 'Runtime operation'}`,
+      );
       console.error(
         interaction.grants.includes('same_command')
           ? 'Type y/yes to approve once, s/same to approve matching commands, or n to reject:'

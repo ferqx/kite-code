@@ -33,3 +33,27 @@ export function projectRuntimeClientText(
   if (trailing >= 0xd800 && trailing <= 0xdbff) end -= 1;
   return `${text.slice(0, end)}…`;
 }
+
+/** Approval commands must remain recognizable; only control characters and length are bounded. */
+export function projectRuntimeClientCommand(value: string, maximum = 16_384): string {
+  let text = '';
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) continue;
+    if (
+      codePoint <= 0x08 ||
+      codePoint === 0x0b ||
+      codePoint === 0x0c ||
+      (codePoint >= 0x0e && codePoint <= 0x1f) ||
+      (codePoint >= 0x7f && codePoint <= 0x9f)
+    ) {
+      continue;
+    }
+    text += character;
+  }
+  if (text.length <= maximum) return text;
+  let end = Math.max(0, maximum - 1);
+  const trailing = text.charCodeAt(end - 1);
+  if (trailing >= 0xd800 && trailing <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}…`;
+}

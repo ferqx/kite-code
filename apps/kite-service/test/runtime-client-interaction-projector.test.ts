@@ -38,6 +38,7 @@ describe('Runtime client interaction projector', () => {
       sessionRevision: 9,
       generation: 4,
       grants: ['approve_once'],
+      command: 'git status --short',
       summary: '[redacted]',
     });
 
@@ -337,6 +338,7 @@ function pendingApproval(generation: number) {
     bindingDigest: 'binding',
     approval: {
       tool: 'shell',
+      command: 'git status --short',
       summary: 'authorization: Bearer secret',
       grantOptions: ['approve_once'],
     },

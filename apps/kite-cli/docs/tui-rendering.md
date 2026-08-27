@@ -38,14 +38,14 @@
 - 动态MCP execution card固定显示closed `mcp:dynamic_tool` lifecycle label；raw
   `mcp__server__tool_hash`不能进入card或scrollback，具体工具名只由独立safe summary拥有。
 
-- Approval overlay 只消费封闭的 `RuntimeClientInteraction`：可显示有界 `title`/`summary` 和允许的
-  `approve_once | same_command`，不得重新读取 raw command、cwd、sandbox scope、grant subject、provider body
-  或 Host 内部 payload 来补展示。
+- Approval overlay 只消费封闭的 `RuntimeClientInteraction`：Shell审批必须优先显示Service投影的有界原始`command`，
+  策略`summary`不得替代命令；同时显示允许的`approve_once | same_command`。不得从TUI本地重新读取cwd、sandbox
+  scope、grant subject、provider body或Host内部payload来补展示。
 - 决定必须同时匹配可见 queue entry 的 `interactionId` 与 generation；旧卡片、重连前 generation 或缺少
   durable identity 的卡片不能授权。TUI 的选项过滤只影响展示，最终 settlement 仍由 Host 对 State 27
   revision/generation/interaction identity fail closed。
-- 审批面板只显示“人工审批/自动审查”等用户语义与必要的匹配请求数量，不显示 queue sequence、generation
-  或 interaction ID；这些字段仍完整保留在 client state 与 settlement 校验中，隐藏诊断文案不等于删除 authority。
+- user route不显示多余的“人工审批”标签；Auto route仍可显示“自动审查”。必要的匹配请求数量可见，但queue
+  sequence、generation或interaction ID不显示；这些字段仍完整保留在client state与settlement校验中。
 - Live 与 replay 都从同一 client-safe event identity 构造 block；本地提交态不能与 durable
   `user.message` 各自追加一份相同消息。
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；

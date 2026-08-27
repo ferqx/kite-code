@@ -124,11 +124,13 @@ describe('runtime contract package boundary', () => {
       sessionRevision: 7,
       generation: 3,
       grants: ['approve_once', 'same_command'] as const,
+      command: 'git status --short',
       title: 'Allow tool',
     };
     expect(isRuntimeClientInteraction(interaction)).toBe(true);
     expect(() => assertRuntimeClientInteraction(interaction)).not.toThrow();
     expect(isRuntimeClientInteraction({ ...interaction, cwd: '/private/workspace' })).toBe(false);
+    expect(isRuntimeClientInteraction({ ...interaction, command: 42 })).toBe(false);
     expect(
       isRuntimeClientInteraction({ ...interaction, grants: ['approve_once', 'full_access'] }),
     ).toBe(false);

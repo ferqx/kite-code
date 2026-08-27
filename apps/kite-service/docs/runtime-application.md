@@ -33,6 +33,8 @@ Store，不建立第二reader/writer authority。
 Provider/model、MCP、Skill、execution/release与Native credential均有exact route/codec；secret只进入Native credential
 owner，browser-safe App Contract不携带secret。Trust query另投影Workspace关联的exact external-read roots与digest；
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
+Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
+grant subject与Host内部payload仍不进入client interaction。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
