@@ -697,14 +697,12 @@ class NativeTuiRuntimeClient {
         receipt.currentRevision !== undefined &&
         attempt < 2
       ) {
-        const refreshed = await this.#waitForInteractionRefresh(
-          record,
-          action.interactionId,
-          interaction.sessionRevision,
-        );
-        if (!refreshed) throw new Error('The Runtime interaction revision could not be refreshed.');
-        interaction = refreshed;
-        expectedRevision = refreshed.sessionRevision;
+        // The interaction identity remains fenced by its original
+        // sessionRevision/generation. Unrelated durable events may advance the
+        // Host CAS without republishing that interaction, so retry the same
+        // command id at the proven current revision instead of waiting forever
+        // for an interaction refresh that is not part of the contract.
+        expectedRevision = receipt.currentRevision;
         record.revision = Math.max(record.revision, receipt.currentRevision);
         continue;
       }

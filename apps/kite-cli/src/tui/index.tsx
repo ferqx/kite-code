@@ -504,12 +504,19 @@ function TuiApp({
 
   const provider = React.useMemo(() => {
     const p = new TuiUserInputProvider();
-    const submitAction = p.submitAction.bind(p);
-    p.submitAction = (action) => {
+    const submitActionAsync = p.submitActionAsync.bind(p);
+    p.submitActionAsync = async (action) => {
       // Every UI action, including Esc/Ctrl+C cancellation, is submitted to
       // Runtime before the durable terminal event clears the footer.
       interruptClearedByResolutionRef.current = true;
-      submitAction(action);
+      try {
+        const submitted = await submitActionAsync(action);
+        if (!submitted) interruptClearedByResolutionRef.current = false;
+        return submitted;
+      } catch (error) {
+        interruptClearedByResolutionRef.current = false;
+        throw error;
+      }
     };
     return p;
   }, []);

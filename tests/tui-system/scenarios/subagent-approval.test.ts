@@ -134,15 +134,16 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Verify approval dialog content
       expect(screenContains(beforeApprove, '工具授权')).toBe(true);
-      expect(screenContains(beforeApprove, '人工审批')).toBe(true);
+      expect(screenContains(beforeApprove, '人工审批')).toBe(false);
       expect(screenContains(beforeApprove, '人工审批队列')).toBe(false);
       expect(screenContains(beforeApprove, '代次')).toBe(false);
-      // Local presentation retains the concrete file target while approval
-      // authority remains bound to the closed interaction identity.
+      // The approval surface shows the bounded original command, including
+      // its concrete target, while authority remains bound to the closed
+      // interaction identity rather than reconstructed from this text.
       expect(externalFile.startsWith(workspace.workspace)).toBe(false);
-      expect(screenContains(beforeApprove, 'Approve write_file')).toBe(true);
+      expect(screenContains(beforeApprove, 'write_file')).toBe(true);
       expect(screenContains(beforeApprove, 'external-subagent-write')).toBe(true);
-      expect(screenContains(beforeApprove, externalFile)).toBe(false);
+      expect(screenContains(beforeApprove, externalFile)).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 
       // Approve the tool (default "允许一次" at index 0, press Enter)

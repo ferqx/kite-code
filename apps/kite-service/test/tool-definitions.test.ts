@@ -603,7 +603,7 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('awk \'BEGIN { system("rm hello.txt") }\'')).toBe(false);
     expect(isReadOnlyShellCommand('git branch new-branch')).toBe(false);
     expect(isReadOnlyShellCommand('git branch -d old-branch')).toBe(false);
-    expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(false);
+    expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(true);
     expect(isReadOnlyShellCommand('git log -p -1')).toBe(false);
     expect(isReadOnlyShellCommand('git show HEAD')).toBe(false);
     expect(isReadOnlyShellCommand('git ls-files')).toBe(false);

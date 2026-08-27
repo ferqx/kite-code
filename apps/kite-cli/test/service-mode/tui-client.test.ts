@@ -96,6 +96,7 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   });
   await approvalRun;
   expect(remote.commands).toContain('respond_interaction');
+  expect(remote.interactionExpectedRevisions).toEqual([4, 5]);
 
   session!.setLocalReplayRecovery(true);
   const continued = await facade.forkRecoveredSessionForContinuation(sessionId);
@@ -125,6 +126,7 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
 
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
+  readonly interactionExpectedRevisions: number[] = [];
   closeCalls = 0;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
@@ -271,6 +273,18 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         return;
       }
       if (command.type === 'respond_interaction') {
+        this.interactionExpectedRevisions.push(command.expectedRevision);
+        if (this.interactionExpectedRevisions.length === 1) {
+          this.push(
+            result(message.id, {
+              status: 'conflict',
+              commandId: command.commandId,
+              code: 'revision_conflict',
+              currentRevision: 5,
+            }),
+          );
+          return;
+        }
         this.push(
           result(message.id, {
             status: 'applied',

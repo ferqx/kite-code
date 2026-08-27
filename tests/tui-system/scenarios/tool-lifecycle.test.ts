@@ -420,7 +420,10 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
       // Rejecting approval aborts the current turn without executing the tool
       // or asking the model for a continuation.
-      expect(screenContains(afterRejection, '工具授权')).toBe(false);
+      // The receipt-aware UI intentionally keeps the approval visible while
+      // respond_interaction is in flight. Only the settled current viewport
+      // must have left the approval surface; transient frames may contain it.
+      expect(screenContains(tui.viewport(), '工具授权')).toBe(false);
       expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
         false,
       );
@@ -429,7 +432,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(afterRejection, '● Write')).toBe(false);
       expect(screenContains(afterRejection, 'Tool execution rejected.')).toBe(false);
       expect(screenContains(afterRejection, 'Approval rejected.')).toBe(true);
-      expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(false);
+      expect(screenContains(tui.viewport(), 'tool-lifecycle-rejected.txt')).toBe(false);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 

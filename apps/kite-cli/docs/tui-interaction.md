@@ -60,6 +60,8 @@
 - approval在`respond_interaction`获得applied/idempotent receipt前保持可见；accepted receipt可把当前焦点标记为
   approving，canonical granted/batch-released/rejected仍拥有durable结果。transport/protocol/identity失败不得被吞掉，
   UI显示可重试错误且不伪造已授权事实。
+- 确认提交期间的durable settlement是同一用户动作的完成，interrupt-clear effect不得将其误判为
+  外部清理并再发cancel；否则已授权工具可能执行后又把所属Subagent/Turn取消。
 - `ask_user` 单题把问题放入标题，多题使用 `n / total` meta；自定义输入留在原列表，已完成回答不得在恢复时重开。
 - Plan review、MCP recovery/admission 与其他交互同样只由 canonical terminal event 清除。
 - Plan approval 由单个 `plan.approved.executionMode` 同时固定本次 Task 执行模式与 Session/TUI 镜像；不得
