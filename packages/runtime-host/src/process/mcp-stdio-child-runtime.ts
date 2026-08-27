@@ -59,6 +59,10 @@ export function runMcpStdioChildRuntime(
     return Promise.resolve();
   }
 
+  // Bun 1.4 on Windows can end a standalone executable while its only remaining work is an
+  // awaited stream Promise. Keep one referenced handle until terminal evidence or fail-closed
+  // cleanup has actually settled; the child process alone is not sufficient after it exits.
+  const lifecycleKeepAlive = setInterval(() => undefined, 1_000);
   let resolveCompletion!: () => void;
   const completion = new Promise<void>((resolve) => {
     resolveCompletion = resolve;
@@ -67,6 +71,7 @@ export function runMcpStdioChildRuntime(
   const complete = (): void => {
     if (completed) return;
     completed = true;
+    clearInterval(lifecycleKeepAlive);
     resolveCompletion();
   };
   let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
