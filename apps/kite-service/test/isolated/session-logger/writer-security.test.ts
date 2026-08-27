@@ -35,8 +35,10 @@ const roots: string[] = [];
 const originalHome = process.env.KITE_CODE_HOME;
 
 function isolateHome(): string {
-  const root = mkdtempSync(join(tmpdir(), 'openpx-writer-security-'));
-  roots.push(root);
+  const container = mkdtempSync(join(tmpdir(), 'openpx-writer-security-'));
+  roots.push(container);
+  const root = join(container, 'code-root');
+  mkdirSync(root, { mode: 0o700 });
   process.env.KITE_CODE_HOME = root;
   return root;
 }
