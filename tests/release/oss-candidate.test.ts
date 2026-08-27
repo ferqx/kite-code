@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
   STANDALONE_WORKSPACE_ENTRYPOINTS_,
@@ -22,6 +22,12 @@ afterEach(() => {
 });
 
 describe('ordinary open-source candidate archive', () => {
+  test('keeps the source Service entrypoint directly executable by the manager', () => {
+    const entrypoint = 'scripts/release/entrypoints/service.ts';
+    expect(readFileSync(entrypoint, 'utf8')).toStartWith('#!/usr/bin/env bun\n');
+    if (process.platform !== 'win32') expect(lstatSync(entrypoint).mode & 0o111).not.toBe(0);
+  });
+
   test('resolves every workspace export without entering node_modules symlinks', () => {
     const packageRoots = [
       'apps/kite-cli',

@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { runKiteServiceMain } from '../../../apps/kite-service/src/executable';
 
 await runKiteServiceMain().catch((error: unknown) => {

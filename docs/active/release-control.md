@@ -122,7 +122,8 @@ installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uni
 smoke不替代KLSV1-07三平台companion lifecycle qualification。
 CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service entrypoint无条件await
 `runKiteServiceMain()`，source manager也解析同一入口。不得依赖compiled standalone中的`import.meta.main`判断启动，
-因为其平台差异会让Windows companion在未发布ready/terminal时以0退出。
+因为其平台差异会让Windows companion在未发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
+POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。
 smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。
 固定MCP wrapper fixture的stderr会被持续drain，但失败报告最多保留240个清洗后的可打印字符；该诊断不得包含
