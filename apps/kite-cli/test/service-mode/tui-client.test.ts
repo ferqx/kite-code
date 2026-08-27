@@ -4,6 +4,7 @@ import type {
   LocalKiteConnection,
   LocalRuntimeServiceDescriptor,
 } from '@kite-ai/kite-local-runtime/client';
+import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeClientConnection,
   RuntimeClientTransport,
@@ -372,7 +373,7 @@ function descriptor(): LocalRuntimeServiceDescriptor {
       websocketUrl: 'ws://127.0.0.1:43123/rpc',
     },
     protocolVersion: 1,
-    clientContractRevision: 'kite-local-runtime-contract-v1',
+    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
     serverVersion: 'test',
     buildId: 'test',
   };

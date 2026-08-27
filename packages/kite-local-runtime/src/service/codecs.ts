@@ -1,3 +1,4 @@
+import { KITE_APP_CONTRACT_REVISION_ } from '@kite-ai/kite-app-contract';
 import {
   assertProtocolJsonValue,
   RUNTIME_PROTOCOL_SCHEMA,
@@ -8,7 +9,16 @@ import { z } from 'zod';
 export const LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_ = 'kite.local-runtime-service.v1' as const;
 export const LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_ = 'kite.local-service-lock.v1' as const;
 export const LOCAL_RUNTIME_SERVICE_TOKEN_SCHEMA_ = 'kite.local-runtime-token.v1' as const;
-export const LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ = 'kite-local-runtime-contract-v1' as const;
+/**
+ * Exact native client/Service compatibility identity.
+ *
+ * App Control is carried over the same authenticated local connection, so its
+ * browser-safe wire revision is part of this handshake identity.  Binding the
+ * two revisions here prevents an older resident Service from being accepted
+ * after an App Contract schema change.
+ */
+export const LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ =
+  `kite-local-runtime-contract-v2+${KITE_APP_CONTRACT_REVISION_}` as const;
 
 const MAX_IDENTITY_LENGTH = 512;
 const MAX_URL_LENGTH = 512;

@@ -19,8 +19,10 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   process-owned strict identity；绝不从磁盘descriptor合成healthy response。
 - `./service`：strict descriptor/lock/token codec与fixed `runtime-service/v1` filesystem layout；提供no-follow、owner-only、
   bounded read、sibling temp+fsync+atomic rename、instance/lifecycle lock及exact stale quarantine/cleanup primitive。
-- 固定client contract revision、Protocol V1 identity与loopback endpoint shape；拒绝unknown field、non-loopback endpoint、
-  secret-bearing descriptor与unsafe JSON。
+- 固定client contract revision、Protocol V1 identity与loopback endpoint shape；Native revision显式组合当前
+  `kite-app-contract` revision，因为App Control与Runtime共用同一Local Service compatibility handshake。任一App
+  Control exact DTO变更都会改变握手identity，使旧驻留Service在Trust/App route解码前fail closed；同时拒绝unknown
+  field、non-loopback endpoint、secret-bearing descriptor与unsafe JSON。
 
 ## 不拥有职责
 

@@ -21,6 +21,10 @@ malformed以及instance/server/build identity mismatch均fail closed `identity_u
 被拒绝，expected build drift返回`incompatible + build_mismatch`。以上结果都不授权cleanup alive/uncertain state、
 spawn replacement或把caller descriptor回显成握手成功。
 
+client-contract identity包含当前browser-safe `kite-app-contract` revision。Workspace Trust或其他App Control exact DTO
+升级时，旧驻留Service必须在instance handshake/descriptor discovery阶段返回`client_contract_incompatible`，不得先建立
+connection后把旧响应降级成Trust `unavailable`或尝试兼容解码。
+
 Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime WebSocket前使用access token，但只有
 Service返回trusted canonical identity后connect route才签发ticket。request path/cwd/clientInfo不产生Trust authority。
 

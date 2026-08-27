@@ -4,6 +4,7 @@ import type {
   LocalKiteConnection,
   LocalKiteConnectionStatus,
 } from '@kite-ai/kite-local-runtime/client';
+import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
 import type { LocalRuntimeServiceDescriptor } from '@kite-ai/kite-local-runtime/service';
 import type {
   RuntimeClientConnection,
@@ -226,7 +227,7 @@ function createFixture(): {
       websocketUrl: 'ws://127.0.0.1:43123/rpc',
     },
     protocolVersion: 1,
-    clientContractRevision: 'kite-local-runtime-contract-v1',
+    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
     serverVersion: 'test-service',
     buildId: 'test-build',
   };

@@ -8,6 +8,7 @@ import {
   clearLocalRuntimeServiceState,
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceStateRoot,
+  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
   LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
   publishLocalRuntimeServiceDescriptor,
@@ -64,7 +65,7 @@ describe('Native Kite Service manager composition', () => {
           websocketUrl: 'ws://127.0.0.1:43123/rpc',
         },
         protocolVersion: 1,
-        clientContractRevision: 'kite-local-runtime-contract-v1',
+        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         serverVersion: 'service-native-probe',
         buildId: 'build-native-probe',
       } as const;
@@ -82,7 +83,7 @@ describe('Native Kite Service manager composition', () => {
         schema: 'kite.local-runtime.instance-handshake.v1',
         instanceId,
         protocolVersion: 1,
-        clientContractRevision: 'kite-local-runtime-contract-v1',
+        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         serverVersion: 'service-native-probe',
         buildId: 'build-native-probe',
       } as const;
@@ -172,7 +173,7 @@ describe('Native Kite Service manager composition', () => {
           websocketUrl: 'ws://127.0.0.1:43124/rpc',
         },
         protocolVersion: 1,
-        clientContractRevision: 'kite-local-runtime-contract-v1',
+        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         serverVersion: 'service-native-probe',
         buildId: 'build-native-probe',
       } as const;
