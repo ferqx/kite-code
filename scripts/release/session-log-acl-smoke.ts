@@ -16,7 +16,6 @@ import {
 } from 'node:fs';
 import { version as osVersion, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite-ai/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,
@@ -26,6 +25,8 @@ import {
 import type { SessionLoggingPolicy } from '#kite-service/config/session-logging-policy';
 import { SESSION_LOG_LEASE_FILE } from '../../apps/kite-service/src/session-logger/active-session-lease';
 import { SessionLogWriter } from '../../apps/kite-service/src/session-logger/writer';
+
+const WINDOWS_SESSION_LOG_ACL_EVIDENCE_TIMEOUT_MS = 30_000;
 
 const SMOKE_POLICY: SessionLoggingPolicy = {
   version: 1,
@@ -290,7 +291,7 @@ foreach ($path in $paths) {
     {
       encoding: 'utf8',
       windowsHide: true,
-      timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+      timeout: WINDOWS_SESSION_LOG_ACL_EVIDENCE_TIMEOUT_MS,
       killSignal: 'SIGKILL',
       env: {
         ...process.env,

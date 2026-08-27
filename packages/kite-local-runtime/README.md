@@ -56,7 +56,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 - state identity来自explicit validated home，不从request Workspace/cwd推导。POSIX验证owner UID与`0700`/`0600`并拒绝
   symlink/hardlink/type drift；Windows通过进程内Win32 API校验current-user SID、protected owner-only DACL与
   non-reparse file/directory。explicit home先验证non-link/current owner再收紧权限；state创建时收紧ACL，后续每次敏感
-  读取、替换与清理都重新验证，既有state ACL/reparse drift fail closed。current SID由fixed system `whoami.exe`有界解析
+  读取、替换与清理都重新验证owner、DACL protected control与exact single ACE，既有state ACL/reparse drift fail closed。
+  current SID由fixed system `whoami.exe`有界解析
   一次并缓存，ACL apply/verify不启动child process；resolver timeout不授权访问。只有当前操作刚exclusive创建并记录
   inode的entry可初始化owner SID，既有路径owner不匹配时拒绝。
 

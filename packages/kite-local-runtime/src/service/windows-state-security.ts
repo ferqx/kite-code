@@ -159,7 +159,7 @@ function verifyWindowsOwnerOnlyAcl(path: string, kind: WindowsStatePathKind, sid
     ) {
       fail('acl_information_unavailable');
     }
-    const aceCount = new DataView(information.buffer).getUint32(4, true);
+    const aceCount = new DataView(information.buffer).getUint32(0, true);
     if (aceCount !== 1) fail('acl_rule_count');
     const aceOut = pointerOut();
     if (!api.GetAce(dacl, 0, ptr(aceOut))) fail('acl_rule_unavailable');
