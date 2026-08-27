@@ -161,6 +161,30 @@ describe('TuiMcpController', () => {
     expect(controller.getSnapshot().message).toContain('outcome_unknown');
   });
 
+  test('preserves a mutation result across the next background snapshot refresh', async () => {
+    const server = makeServer({ revision: 'server-revision' });
+    const snapshot = makeSnapshot([server]);
+    let reads = 0;
+    let observePoll!: () => void;
+    const polled = new Promise<void>((resolve) => {
+      observePoll = resolve;
+    });
+    const client = createClient(snapshot);
+    client.getMcpSnapshot = async () => {
+      reads += 1;
+      if (reads === 2) observePoll();
+      return snapshot;
+    };
+    const controller = new TuiMcpController(client, workspace);
+    await controller.start();
+
+    expect(await controller.retry(server.key)).toBe(true);
+    await polled;
+    expect(controller.getSnapshot().message).toBe('Retried MCP server github.');
+
+    await controller.stop();
+  });
+
   test('rejects mutations for a server that is no longer in the snapshot', async () => {
     const client = createClient();
     const controller = new TuiMcpController(client, workspace);

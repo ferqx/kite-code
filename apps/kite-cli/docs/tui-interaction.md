@@ -21,6 +21,8 @@
   browser-safe codec；first-run raw credential只通过Native credential client。TUI不持有Config Repository、
   credential writer、MCP Supervisor、actual Skill manifest、Host或Store；这些 owner与raw Runtime/history projector
   已 clean-relocate 到 `apps/kite-service`。
+- MCP mutation的applied/rejected/outcome-unknown提示由controller在消费单次response后写入；后续250ms safe snapshot
+  轮询只更新control projection，不得清除尚在展示的mutation结果或据此重放mutation。
 - Workspace Trust 是两阶段Runtime admission。启动先 `prepareAppControl()` 并显示Service query/decision结果；只有
   canonical Workspace为trusted后才打开Runtime connection。decline/conflict/unavailable时不发送Runtime initialize，
   不以cwd或wire path绕过，也不回退embedded。

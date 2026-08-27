@@ -348,8 +348,16 @@ function normalizeExitCode(value: number): number {
 }
 
 async function writeWritable(target: NodeJS.WritableStream, data: Uint8Array): Promise<void> {
-  if (target.write(data)) return;
-  await new Promise<void>((resolve) => target.once('drain', resolve));
+  await new Promise<void>((resolve, reject) => {
+    try {
+      target.write(data, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 if (import.meta.main) {

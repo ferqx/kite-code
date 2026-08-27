@@ -231,7 +231,10 @@ export class TuiMcpController implements McpController {
     if (!sameWorkspace(checked.workspace, this.workspace)) {
       throw new Error('MCP App Control response belongs to a different Workspace.');
     }
-    this.snapshot = Object.freeze({ control: checked });
+    this.snapshot =
+      this.snapshot.message === undefined
+        ? Object.freeze({ control: checked })
+        : Object.freeze({ control: checked, message: this.snapshot.message });
     this.emit();
   }
 
