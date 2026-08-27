@@ -195,16 +195,14 @@ describe('runtime workspace package gate', () => {
   });
 
   test('rejects CLI, React, and Ink imports from the Runtime Service', () => {
+    const root = createFixture();
+    const indexPath = join(root, 'apps/kite-service/src/index.ts');
+    const original = readFileSync(indexPath, 'utf8');
     for (const specifier of ['@kite-ai/kite-cli', '#kite-cli/bootstrap', 'react', 'ink']) {
-      const root = createFixture();
-      updateText(
-        root,
-        'apps/kite-service/src/index.ts',
-        (value) => `import '${specifier}';\n${value}`,
-      );
+      writeFileSync(indexPath, `import '${specifier}';\n${original}`);
       expectViolation(root, 'SERVICE_UI_OR_CLI_IMPORT');
     }
-  });
+  }, 10_000);
 
   test('rejects a Client import of the legacy implementation', () => {
     const root = createFixture();

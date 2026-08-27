@@ -49,9 +49,10 @@ companion，installer也定义ordinary stop/lifecycle fence的fail-closed cutove
 资源资格，单平台结果也不能推断三平台passed。这些事实仍不能改变下方effectful execution空支持集。
 
 KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 companion process/release matrix尚未取得，必须标记pending，不能把
-workflow定义、本地测试或单平台artifact写成三平台通过。当前Windows Service state因缺verified current-user ACL/
-reparse checker明确`unsupported`；本机POSIX结果不能推导Windows process support。Service可被打包也不表示Shell、
-writer、Skill child或local stdio MCP获得production execution admission。
+workflow定义、本地测试或单平台artifact写成三平台通过。Windows Service state现实现current-user SID、protected
+owner-only DACL与non-reparse verifier，并把ACL drift负向测试接入Windows candidate job；远端当前实现head通过前仍不能
+推导Windows process support。Service可被打包也不表示Shell、writer、Skill child或local stdio MCP获得production
+execution admission。
 
 ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
 TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的

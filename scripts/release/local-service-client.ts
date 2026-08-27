@@ -25,6 +25,7 @@ import {
 } from '@kite-ai/kite-local-runtime/manager';
 import {
   createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
   resolveLocalRuntimeServiceStatePaths,
 } from '@kite-ai/kite-local-runtime/service';
 
@@ -70,10 +71,11 @@ export function createManagedLocalServiceClientComposition(
   const sourceEnvironment = options.environment ?? process.env;
   const systemHome = realpathSync(options.systemHome ?? userInfo().homedir);
   const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
-  const codeRoot = ensureOwnerDirectory(explicitHome ?? join(systemHome, '.kite-code'));
-  const home = createKiteHomeIdentity(
-    codeRoot,
-    explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
+  const home = ensureLocalRuntimeServiceHome(
+    createKiteHomeIdentity(
+      explicitHome ?? join(systemHome, '.kite-code'),
+      explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
+    ),
   );
   const statePaths = resolveLocalRuntimeServiceStatePaths(home);
   const executableMode = options.executableMode ?? 'source';
@@ -168,23 +170,6 @@ function explicitEnvironmentSource(
     result[key] = source[key];
   }
   return Object.freeze(result);
-}
-
-function ensureOwnerDirectory(path: string): string {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (lstatSync(path).isSymbolicLink()) {
-    throw new Error('Managed Kite home may not be a symbolic link.');
-  }
-  const canonical = realpathSync(path);
-  const stat = lstatSync(canonical);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error('Managed Kite home is not a real directory.');
-  }
-  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
-    throw new Error('Managed Kite home is not owned by the current user.');
-  }
-  chmodSync(canonical, 0o700);
-  return canonical;
 }
 
 function ensureNeutralDirectory(path: string): void {

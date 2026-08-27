@@ -54,8 +54,9 @@ preflight与active launcher验证都把companion作为required file。source mod
   drift返回`incompatible + build_mismatch`，任一结果都不授权清理alive/uncertain state或spawn replacement。
 - access/control token独立且restart-scoped；ticket为32-byte base64url、hash-only、30秒TTL、一次性、instance与
   Workspace bound。credential、token、raw Provider body与diagnostic secret不跨client seam。
-- Windows filesystem state在缺current-user ACL/reparse verifier时仍明确`unsupported`；本地POSIX/focused tests与
-  candidate layout不构成KLSV1-07三平台或全部PTY通过。
+- Windows filesystem state通过current-user SID、protected owner-only DACL与non-reparse verifier保护；ACL drift
+  fail closed。hosted Windows lifecycle/release job通过前，本地POSIX/focused tests与candidate layout仍不构成
+  KLSV1-07三平台或全部PTY通过。
 
 ## 本地文档
 

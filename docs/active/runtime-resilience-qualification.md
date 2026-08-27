@@ -34,9 +34,10 @@ TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rew
 Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
 conversation rewind使用Service返回的target Session加载safe History，file outcome只含bounded path/error/conflict投影，
 不从source、checkpoint或显示文本推断target，也不重放mutation。完整TUI PTY、本地fault/CI-profile soak与本机
-release smoke已经执行并通过；这些仍不能推导formal资源资格或三平台通过。KLSV1-07的Windows state ACL/reparse实现、macOS/Ubuntu/Windows process/
-release matrix及正式hosted qualification仍pending。Windows state primitive当前明确`unsupported`，不能用POSIX或本机
-测试替代。
+release smoke已经执行并通过；这些仍不能推导formal资源资格或三平台通过。KLSV1-07的macOS/Ubuntu/Windows process/
+release matrix及正式hosted qualification仍pending。Windows state primitive现以current-user SID、protected
+owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Windows candidate job，但必须等待当前实现head
+的远端结果，不能用POSIX或本机测试替代。
 
 当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
 36/106、CI-profile soak 7/7 cases、Service owner 1358 parallel tests / 6765 expects加34个isolated files、CLI owner

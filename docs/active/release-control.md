@@ -118,7 +118,9 @@ smoke不替代KLSV1-07三平台companion lifecycle qualification。
 
 `.github/workflows/release-candidate.yml` 在 pull request、`main` push 和手动触发时运行
 `macos-15`、`ubuntu-24.04`、`windows-2025` 矩阵。每个 job 安装正式基线 Bun `1.4.0`，执行定向 release
-tests、native build/verify/smoke 和 TUI startup scenario，然后上传候选 artifact。
+tests、native build/verify/smoke 和 TUI startup scenario，然后上传候选 artifact。Windows job在release tests与
+candidate build前额外运行Service state owner test，验证current-user SID、protected owner-only DACL、non-reparse
+identity以及ACL drift fail-closed；该单项或单平台通过都不能替代完整三平台matrix。
 Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canonical path identity，并在
 写出 evidence artifact 前以同一 identity repair persistent ACL ledger；8.3 alias 不能分裂采集与清理。
 

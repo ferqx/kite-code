@@ -61,8 +61,9 @@ Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只�
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
 instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
 Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
-restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX no-follow/
-owner-only filesystem primitive；`apps/kite-service`拥有production loopback carrier、required-port shell与唯一default
+restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX
+no-follow/owner-only primitive，以及Windows current-user SID、protected owner-only DACL、non-reparse verifier；两者都在
+敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有production loopback carrier、required-port shell与唯一default
 Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用的dead-only stale manager。manager先用
 `GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/

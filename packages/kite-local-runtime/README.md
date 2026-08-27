@@ -54,13 +54,15 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。
 - state identity来自explicit validated home，不从request Workspace/cwd推导。POSIX验证owner UID与`0700`/`0600`并拒绝
-  symlink/hardlink/type drift；Windows因尚无verified current-user ACL/reparse checker明确`unsupported`。
+  symlink/hardlink/type drift；Windows通过fixed system PowerShell校验current-user SID、protected owner-only DACL与
+  non-reparse file/directory。创建时收紧ACL，后续每次敏感读取、替换与清理都重新验证；ACL/reparse drift fail closed。
 
 ## 测试与 evidence
 
 `bun run --cwd packages/kite-local-runtime test`。当前focused manager suite
 `bun test packages/kite-local-runtime/test/manager`为37 pass / 135 expects；package typecheck、Biome与diff-check也已通过。
-这些是本地evidence，不是KLSV1-07真实Windows、三平台process/release或全部PTY qualification。
+这些是本地evidence；Windows ACL负向测试由hosted Windows release candidate job执行，只有对应远端run成功后才能登记
+Windows与三平台process/release evidence。
 
 ## 文档影响
 

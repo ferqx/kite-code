@@ -1052,7 +1052,8 @@ infrastructure 2），`kite-local-runtime`为15 pass/1 Windows skip；13-workspa
 （13 packages / 32 edges /唯一concrete composition `apps/kite-cli/src/bootstrap.ts`）、core/pre-release/test-ownership、
 docs-impact/docs均通过。当前Runtime/History/App Control仍由fake/in-process ports注入，默认Host/Store/raw History
 projector仍在CLI；没有public `kite service *`、KLSV1-05 connector、KLSV1-06 cutover、Web/Desktop/OS Service或
-三平台/release evidence。Windows state因缺verified ACL/reparse checker明确`unsupported`，留待KLSV1-07。
+三平台/release evidence。该Task结束时Windows state因缺verified ACL/reparse checker明确`unsupported`；KLSV1-07现已
+加入current-user SID/protected DACL/non-reparse verifier与hosted Windows负向Gate，最终结论以当前实现head远端matrix为准。
 
 交付：
 

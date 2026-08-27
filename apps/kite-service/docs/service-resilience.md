@@ -22,8 +22,9 @@ restart只在Service正常清除descriptor/token/instance lock后执行一次ens
 从不kill未知或alive PID。`applied + draining`不授权manager提前删state。
 
 companion candidate将`kite`、`kite-tui`、`kite-service`作为同一manifest/install/current launcher集合；installed resolver
-只认terminal executable相邻companion。candidate layout/preflight是本地packaging evidence，不代表三平台runtime、
-fault/soak、全部PTY或Windows state qualification已完成。
+只认terminal executable相邻companion。Windows candidate在smoke前运行current-user ACL/non-reparse state负向测试；
+candidate layout/preflight与本地packaging evidence本身仍不代表三平台runtime、fault/soak或全部PTY已完成。
 
 验证：`bun run --cwd apps/kite-service test`、`bun test packages/kite-local-runtime/test/manager`、
-`bun run --cwd apps/kite-service typecheck`。当前Windows ACL/reparse与KLSV1-07平台/release evidence保持pending。
+`bun run --cwd apps/kite-service typecheck`。当前Windows ACL/reparse实现已进入hosted candidate验证，KLSV1-07当前实现head的
+三平台process/release evidence在对应远端matrix全部成功前保持pending。

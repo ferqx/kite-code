@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   lstatSync,
@@ -197,18 +198,57 @@ describe.skipIf(process.platform === 'win32')('kite-local-runtime service filesy
 });
 
 test.skipIf(process.platform !== 'win32')(
-  'fails closed when a Windows owner ACL/reparse verifier is not available',
+  'applies and verifies the current-user Windows ACL and rejects permission drift',
   () => {
-    const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-local-runtime-state-win-'));
-    try {
-      try {
-        ensureLocalRuntimeServiceStateRoot(createKiteHomeIdentity(join(root, 'home')));
-        throw new Error('expected unsupported state primitive');
-      } catch (error) {
-        expect(error).toMatchObject({ code: 'unsupported' });
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const paths = state();
+    const access = createLocalRuntimeServiceToken();
+    publishLocalRuntimeServiceDescriptor(paths, descriptor);
+    publishLocalRuntimeServiceToken(paths, 'access', access);
+    const lock = acquireLocalRuntimeServiceLock(paths, 'instance', lockIdentity);
+    expect(readLocalRuntimeServiceDescriptor(paths)).toEqual(descriptor);
+    expect(readLocalRuntimeServiceToken(paths, 'access')).toBe(access);
+    expect(readLocalRuntimeServiceLockIdentity(paths, 'instance')).toEqual(lockIdentity);
+
+    grantWindowsWorldRead(paths.accessToken);
+    expect(() => readLocalRuntimeServiceToken(paths, 'access')).toThrow(
+      LocalRuntimeServiceStateError,
+    );
+    lock.release();
   },
+  120_000,
 );
+
+function grantWindowsWorldRead(path: string): void {
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+  const script = `
+$path = $env:KITE_WINDOWS_STATE_TEST_PATH | ConvertFrom-Json
+$acl = Get-Acl -LiteralPath $path
+$world = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+  $world,
+  [System.Security.AccessControl.FileSystemRights]::Read,
+  [System.Security.AccessControl.AccessControlType]::Allow
+)
+[void]$acl.AddAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+`;
+  const result = spawnSync(
+    join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ],
+    {
+      windowsHide: true,
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        KITE_WINDOWS_STATE_TEST_PATH: JSON.stringify(path),
+      },
+    },
+  );
+  if (result.status !== 0) throw new Error('Windows state ACL drift fixture failed.');
+}

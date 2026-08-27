@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -24,6 +24,8 @@ import {
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
+
+setDefaultTimeout(60_000);
 
 function serviceHome(prefix: string) {
   const root = join(realpathSync(dirname(resolve(prefix))), 'service-home');

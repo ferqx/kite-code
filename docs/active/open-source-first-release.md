@@ -62,7 +62,8 @@ marker时拒绝覆盖、回滚或删除。
 
 首发预构建架构为 macOS arm64、Linux x64 与 Windows x64；其他架构可以从源码运行 Bun，但没有首发
 预构建候选包。候选 workflow 不签名、不发布 Release、不上传 secret。它在三个 GitHub-hosted runner 上构建并运行
-同一 smoke，随后上传候选 artifact 供维护者检查。正式公开 Release 与 npm publish 不属于该 workflow。
+同一 smoke；Windows runner还会在构建前执行Service state current-user ACL/non-reparse owner test及ACL drift负向断言，
+随后上传候选 artifact 供维护者检查。正式公开 Release 与 npm publish 不属于该 workflow。
 
 ## 能力边界
 

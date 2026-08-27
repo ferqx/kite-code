@@ -11,7 +11,9 @@ Service不读取请求cwd、Workspace `.env`或ambient `KITE_CODE_HOME`来推导
 POSIX目录必须owner UID且`0700`，文件必须owner UID、single-link regular file且`0600`。读取采用
 `lstat → O_NOFOLLOW open → fstat/inode recheck → bounded read`；发布采用同目录exclusive temp、fsync、atomic rename、
 directory fsync与strict readback。symlink、hardlink、type、owner、permission或parent identity drift均fail closed。
-Windows缺少current-user ACL/reparse verifier时明确`unsupported`。
+Windows调用fixed system PowerShell，以current-user SID建立protected DACL，只保留该SID的FullControl；目录与文件在创建
+后收紧权限，所有敏感读取、替换、锁操作与cleanup重新验证owner、DACL、non-inherited rules与non-reparse identity。
+任一ACL/reparse drift都fail closed，不自动修复既有宽权限state。
 
 child持有`instance.lock`，manager以`lifecycle.lock`串行ensure/status/stop/restart。lock、PID与descriptor都不是单独健康
 证明；manager还必须验证`/readyz`和authenticated process-owned instance handshake。alive/uncertain owner一律保留state且
@@ -21,4 +23,5 @@ window，不能直接spawn。
 applied stop进入draining后仍由Service保留state；carrier/application全部关闭成功后才clear。remove/quarantine携带刚读取
 的exact descriptor/token/lock identity，并发replacement改变inode/nonce时必须拒绝。
 
-验证：`bun test packages/kite-local-runtime/test/service-state.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/native-infrastructure.test.ts`。
+验证：`bun test packages/kite-local-runtime/test/service-state.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/native-infrastructure.test.ts`；
+release candidate workflow在`windows-2025`单独运行state owner test，证明ACL drift负向路径后才继续candidate smoke。

@@ -32,6 +32,7 @@ import {
   type LocalRuntimeServiceStatePaths,
   resolveLocalRuntimeServiceStatePaths,
 } from './paths';
+import { secureWindowsStatePath, verifyWindowsStatePath } from './windows-state-security';
 
 /** Native state files are deliberately small; a corrupt/oversized file fails closed. */
 export const LOCAL_RUNTIME_SERVICE_STATE_LIMITS = Object.freeze({
@@ -142,15 +143,6 @@ function assertAbsolutePath(path: string, label: string): string {
   return resolve(path);
 }
 
-function assertSupportedStatePlatform(): void {
-  if (process.platform === 'win32') {
-    fail(
-      'unsupported',
-      'Windows state access requires a native owner ACL and reparse-point verifier.',
-    );
-  }
-}
-
 function assertExpectedStatePaths(paths: LocalRuntimeServiceStatePaths): string {
   const root = assertAbsolutePath(paths.root, 'State root');
   const expected = resolveLocalRuntimeServiceStatePaths(
@@ -181,12 +173,16 @@ function currentUid(): number | undefined {
 function assertOwnerOnly(
   stat: { readonly mode: number; readonly uid?: number },
   label: string,
+  path: string,
+  kind: 'directory' | 'file',
 ): void {
-  // Node's portable stat surface does not expose Windows DACLs. Do not silently treat an
-  // unverified ACL as owner-only: a future Service process must provide a platform verifier before
-  // enabling this primitive on Windows.
   if (process.platform === 'win32') {
-    fail('unsupported', `${label} requires a verified Windows owner ACL.`);
+    try {
+      verifyWindowsStatePath(path, kind);
+      return;
+    } catch (error) {
+      fail('permission', `${label} does not have a verified Windows owner ACL.`, error);
+    }
   }
   if ((stat.mode & POSIX_OWNER_MASK) !== 0) {
     fail('permission', `${label} is not owner-only.`);
@@ -213,18 +209,23 @@ function asPortableFileStat(stat: ReturnType<typeof lstatSync>): PortableFileSta
   return stat as unknown as PortableFileStat;
 }
 
-function assertDirectoryStat(stat: PortableFileStat, label: string, ownerOnly: boolean): void {
+function assertDirectoryStat(
+  stat: PortableFileStat,
+  label: string,
+  ownerOnly: boolean,
+  path: string,
+): void {
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    fail('corrupt', `${label} is not a real directory.`);
+    fail('corrupt', `${label} is not a real directory and may not be a symbolic link.`);
   }
-  if (ownerOnly) assertOwnerOnly(stat, label);
+  if (ownerOnly) assertOwnerOnly(stat, label, path, 'directory');
 }
 
-function assertRegularFileStat(stat: PortableFileStat, label: string): void {
+function assertRegularFileStat(stat: PortableFileStat, label: string, path: string): void {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) {
     fail('corrupt', `${label} is not a private regular file.`);
   }
-  assertOwnerOnly(stat, label);
+  assertOwnerOnly(stat, label, path, 'file');
 }
 
 function lstatIfPresent(path: string): PortableFileStat | undefined {
@@ -239,7 +240,7 @@ function lstatIfPresent(path: string): PortableFileStat | undefined {
 function ensureDirectoryAtPath(path: string, label: string, ownerOnly: boolean): void {
   const existing = lstatIfPresent(path);
   if (existing) {
-    assertDirectoryStat(existing, label, ownerOnly);
+    assertDirectoryStat(existing, label, ownerOnly, path);
     return;
   }
   try {
@@ -251,7 +252,14 @@ function ensureDirectoryAtPath(path: string, label: string, ownerOnly: boolean):
   }
   const created = lstatIfPresent(path);
   if (!created) fail('io', `${label} disappeared during creation.`);
-  assertDirectoryStat(created, label, ownerOnly);
+  if (process.platform === 'win32' && ownerOnly) {
+    try {
+      secureWindowsStatePath(path, 'directory');
+    } catch (error) {
+      fail('permission', `${label} could not be secured for the Windows owner.`, error);
+    }
+  }
+  assertDirectoryStat(created, label, ownerOnly, path);
 }
 
 function pathSegmentsUnderRoot(target: string): {
@@ -275,7 +283,18 @@ function pathSegmentsUnderRoot(target: string): {
 export function ensureLocalRuntimeServiceStateRoot(
   identity: KiteHomeIdentity,
 ): LocalRuntimeServiceStatePaths {
-  assertSupportedStatePlatform();
+  const validatedIdentity = ensureLocalRuntimeServiceHome(identity);
+  const home = validatedIdentity.root;
+
+  const stateDirectory = join(home, 'runtime-service');
+  const stateVersion = join(stateDirectory, 'v1');
+  ensureDirectoryAtPath(stateDirectory, 'Runtime service state directory', true);
+  ensureDirectoryAtPath(stateVersion, 'Runtime service state version directory', true);
+  return resolveLocalRuntimeServiceStatePaths(validatedIdentity);
+}
+
+/** Create or verify the explicit Service home without following aliases or widening its ACL. */
+export function ensureLocalRuntimeServiceHome(identity: KiteHomeIdentity): KiteHomeIdentity {
   const home = assertAbsolutePath(identity.root, 'Kite home');
   const homePath = pathSegmentsUnderRoot(home);
   if (homePath.segments.length === 0)
@@ -286,12 +305,13 @@ export function ensureLocalRuntimeServiceStateRoot(
     current = join(current, homePath.segments[index]!);
     ensureDirectoryAtPath(current, 'Kite home', index === homePath.segments.length - 1);
   }
-
-  const stateDirectory = join(home, 'runtime-service');
-  const stateVersion = join(stateDirectory, 'v1');
-  ensureDirectoryAtPath(stateDirectory, 'Runtime service state directory', true);
-  ensureDirectoryAtPath(stateVersion, 'Runtime service state version directory', true);
-  return resolveLocalRuntimeServiceStatePaths(identity);
+  let canonical: string;
+  try {
+    canonical = requireRealPath(home);
+  } catch (error) {
+    fail('io', 'Kite home could not be resolved after validation.', error);
+  }
+  return createKiteHomeIdentity(canonical, identity.source);
 }
 
 function validateExistingStateRoot(
@@ -311,6 +331,7 @@ function validateExistingStateRoot(
         ? 'Runtime service state root'
         : 'Runtime service state parent',
       index === parsed.segments.length - 1,
+      current,
     );
   }
   if (!stat) return undefined;
@@ -360,14 +381,14 @@ function readSecureFile(
     if (missingAllowed) return undefined;
     fail('missing', `${label} is missing.`);
   }
-  assertRegularFileStat(before, label);
+  assertRegularFileStat(before, label, path);
   if (before.size > maxBytes) fail('corrupt', `${label} is oversized.`);
 
   let descriptor: number | undefined;
   try {
     descriptor = openSync(path, constants.O_RDONLY | NO_FOLLOW);
     const opened = fstatSync(descriptor);
-    assertRegularFileStat(opened, label);
+    assertRegularFileStat(opened, label, path);
     if (!sameIdentity(before, opened)) fail('corrupt', `${label} changed during read.`);
     if (opened.size > maxBytes) fail('corrupt', `${label} is oversized.`);
     const bytes = readFileSync(descriptor);
@@ -435,7 +456,7 @@ function targetBoundary(path: string, label: string): DirectoryBoundary {
   const directory = dirname(path);
   const stat = lstatIfPresent(directory);
   if (!stat) fail('missing', `${label} parent is missing.`);
-  assertDirectoryStat(stat, `${label} parent`, true);
+  assertDirectoryStat(stat, `${label} parent`, true, directory);
   let realPath: string;
   try {
     realPath = requireRealPath(directory);
@@ -448,7 +469,7 @@ function targetBoundary(path: string, label: string): DirectoryBoundary {
 function assertBoundaryStable(boundary: DirectoryBoundary, label: string): void {
   const current = lstatIfPresent(boundary.path);
   if (!current) fail('corrupt', `${label} parent disappeared.`);
-  assertDirectoryStat(current, `${label} parent`, true);
+  assertDirectoryStat(current, `${label} parent`, true, boundary.path);
   let realPath: string;
   try {
     realPath = requireRealPath(boundary.path);
@@ -469,7 +490,7 @@ function assertTargetUnchanged(
   if (!before && current) fail('corrupt', `${label} appeared during publication.`);
   if (before && !current) fail('corrupt', `${label} disappeared during publication.`);
   if (before && current) {
-    assertRegularFileStat(current, label);
+    assertRegularFileStat(current, label, path);
     if (!sameIdentity(before, current)) fail('corrupt', `${label} changed during publication.`);
   }
 }
@@ -503,7 +524,7 @@ function publishBytes(target: string, bytes: Buffer, label: string, maxBytes: nu
   if (bytes.byteLength > maxBytes) fail('corrupt', `${label} is oversized.`);
   const boundary = targetBoundary(target, label);
   const existing = lstatIfPresent(target);
-  if (existing) assertRegularFileStat(existing, label);
+  if (existing) assertRegularFileStat(existing, label, target);
   const temporary = temporaryPath(boundary.path, target.split(/[\\/]/u).at(-1) ?? 'state');
   let descriptor: number | undefined;
   let temporaryIdentity: FileIdentity | undefined;
@@ -515,13 +536,28 @@ function publishBytes(target: string, bytes: Buffer, label: string, maxBytes: nu
       POSIX_FILE_MODE,
     );
     const created = fstatSync(descriptor);
-    assertRegularFileStat(created, 'State temporary file');
     temporaryIdentity = { dev: created.dev, ino: created.ino };
     writeFileSync(descriptor, bytes);
     if (process.platform !== 'win32') fchmodSync(descriptor, POSIX_FILE_MODE);
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
+    if (process.platform === 'win32') {
+      try {
+        secureWindowsStatePath(temporary, 'file');
+      } catch (error) {
+        fail(
+          'permission',
+          'State temporary file could not be secured for the Windows owner.',
+          error,
+        );
+      }
+    }
+    const secured = lstatIfPresent(temporary);
+    if (!secured || !sameIdentity(temporaryIdentity, secured)) {
+      fail('corrupt', 'State temporary file changed while its owner access was secured.');
+    }
+    assertRegularFileStat(secured, 'State temporary file', temporary);
 
     assertBoundaryStable(boundary, label);
     assertTargetUnchanged(target, existing, label);
@@ -531,7 +567,7 @@ function publishBytes(target: string, bytes: Buffer, label: string, maxBytes: nu
 
     const after = lstatIfPresent(target);
     if (!after) fail('io', `${label} disappeared after publication.`);
-    assertRegularFileStat(after, label);
+    assertRegularFileStat(after, label, target);
   } catch (error) {
     if (error instanceof LocalRuntimeServiceStateError) throw error;
     fail('io', `${label} could not be published.`, error);
@@ -542,7 +578,7 @@ function publishBytes(target: string, bytes: Buffer, label: string, maxBytes: nu
         assertBoundaryStable(boundary, label);
         const current = lstatIfPresent(temporary);
         if (current && sameIdentity(temporaryIdentity, current)) {
-          assertRegularFileStat(current, 'State temporary file');
+          assertRegularFileStat(current, 'State temporary file', temporary);
           unlinkSync(temporary);
         }
       } catch {
@@ -630,7 +666,7 @@ function readLockIdentityAtPath(
 ): LocalServiceLockIdentity | undefined {
   const lock = lstatIfPresent(path);
   if (!lock) return undefined;
-  assertDirectoryStat(lock, `${kind} lock`, true);
+  assertDirectoryStat(lock, `${kind} lock`, true, path);
   let entries: readonly { readonly name: string }[];
   try {
     entries = readdirSync(path, { withFileTypes: true }) as unknown as readonly {
@@ -681,12 +717,27 @@ function publishLockIdentity(
       POSIX_FILE_MODE,
     );
     const stat = fstatSync(descriptor);
-    assertRegularFileStat(stat, `${kind} lock identity`);
     writeFileSync(descriptor, encodeJsonFile(identity, `${kind} lock identity`));
     if (process.platform !== 'win32') fchmodSync(descriptor, POSIX_FILE_MODE);
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
+    if (process.platform === 'win32') {
+      try {
+        secureWindowsStatePath(path, 'file');
+      } catch (error) {
+        fail(
+          'permission',
+          `${kind} lock identity could not be secured for the Windows owner.`,
+          error,
+        );
+      }
+    }
+    const secured = lstatIfPresent(path);
+    if (!secured || !sameIdentity(stat, secured)) {
+      fail('corrupt', `${kind} lock identity changed while its owner access was secured.`);
+    }
+    assertRegularFileStat(secured, `${kind} lock identity`, path);
     syncDirectory(lockPath(paths, kind), `${kind} lock`);
     return { dev: stat.dev, ino: stat.ino };
   } catch (error) {
@@ -700,7 +751,7 @@ function publishLockIdentity(
 function lockBusyOrInvalid(path: string, kind: LocalRuntimeServiceLockKind): undefined {
   const existing = lstatIfPresent(path);
   if (!existing) return undefined;
-  assertDirectoryStat(existing, `${kind} lock`, true);
+  assertDirectoryStat(existing, `${kind} lock`, true, path);
   return undefined;
 }
 
@@ -723,7 +774,7 @@ function removeFileIfMatches<T>(input: {
   const root = assertStateRoot(input.paths);
   const before = lstatIfPresent(input.path);
   if (!before) return;
-  assertRegularFileStat(before, input.label);
+  assertRegularFileStat(before, input.label, input.path);
   const bytes = readSecureFile(input.path, input.label, input.maxBytes, false);
   if (!bytes) fail('missing', `${input.label} is missing.`);
   let actual: T;
@@ -737,7 +788,7 @@ function removeFileIfMatches<T>(input: {
   }
   const current = lstatIfPresent(input.path);
   if (!current) return;
-  assertRegularFileStat(current, input.label);
+  assertRegularFileStat(current, input.label, input.path);
   if (!sameIdentity(before, current)) fail('corrupt', `${input.label} changed during cleanup.`);
   assertBoundaryStable(root, 'Runtime service state');
   unlinkSync(input.path);
@@ -786,14 +837,14 @@ function removeLockIfMatches(
   const path = lockPath(paths, kind);
   const before = lstatIfPresent(path);
   if (!before) return;
-  assertDirectoryStat(before, `${kind} lock`, true);
+  assertDirectoryStat(before, `${kind} lock`, true, path);
   const actual = readLockIdentityFile(paths, kind);
   if (!actual || !sameLockIdentity(actual, expected)) {
     fail('corrupt', `${kind} lock does not match the cleanup identity.`);
   }
   const current = lstatIfPresent(path);
   if (!current) return;
-  assertDirectoryStat(current, `${kind} lock`, true);
+  assertDirectoryStat(current, `${kind} lock`, true, path);
   if (!sameIdentity(before, current)) fail('corrupt', `${kind} lock changed during cleanup.`);
   unlinkSync(lockIdentityPath(paths, kind));
   syncDirectory(path, `${kind} lock`);
@@ -844,7 +895,7 @@ export function quarantineLocalRuntimeServiceLock(
   const source = lockPath(paths, kind);
   const sourceStat = lstatIfPresent(source);
   if (!sourceStat) return undefined;
-  assertDirectoryStat(sourceStat, `${kind} lock`, true);
+  assertDirectoryStat(sourceStat, `${kind} lock`, true, source);
   const identity = readLockIdentityFile(paths, kind);
   if (!identity) fail('missing', `${kind} lock identity is missing.`);
   if (expected && !sameLockIdentity(identity, encodeLockIdentityForState(expected, kind))) {
@@ -874,7 +925,7 @@ export function quarantineLocalRuntimeServiceLock(
         return;
       }
       assertQuarantinePath(root.path, kind, destination);
-      assertDirectoryStat(current, `${kind} quarantined lock`, true);
+      assertDirectoryStat(current, `${kind} quarantined lock`, true, destination);
       if (!sameIdentity(quarantinedStat, current)) {
         fail('corrupt', `${kind} quarantined lock is no longer owned by this handle.`);
       }
@@ -929,6 +980,13 @@ export function tryAcquireLocalRuntimeServiceLock(
   try {
     mkdirSync(path, { mode: POSIX_DIRECTORY_MODE });
     created = true;
+    if (process.platform === 'win32') {
+      try {
+        secureWindowsStatePath(path, 'directory');
+      } catch (error) {
+        fail('permission', `${kind} lock could not be secured for the Windows owner.`, error);
+      }
+    }
   } catch (error) {
     if (!isFileSystemError(error, 'EEXIST')) {
       fail('io', `${kind} lock could not be acquired.`, error);
@@ -941,7 +999,7 @@ export function tryAcquireLocalRuntimeServiceLock(
   try {
     const lockStat = lstatIfPresent(path);
     if (!lockStat) fail('io', `${kind} lock disappeared during acquisition.`);
-    assertDirectoryStat(lockStat, `${kind} lock`, true);
+    assertDirectoryStat(lockStat, `${kind} lock`, true, path);
     lockDirectoryIdentity = { dev: lockStat.dev, ino: lockStat.ino };
     publishLockIdentity(paths, kind, value);
     syncDirectory(root.path, 'Runtime service state root');
@@ -969,7 +1027,7 @@ export function tryAcquireLocalRuntimeServiceLock(
         released = true;
         return;
       }
-      assertDirectoryStat(current, `${kind} lock`, true);
+      assertDirectoryStat(current, `${kind} lock`, true, path);
       if (!lockDirectoryIdentity || !sameIdentity(lockDirectoryIdentity, current)) {
         fail('corrupt', `${kind} lock is no longer owned by this handle.`);
       }
@@ -982,7 +1040,7 @@ export function tryAcquireLocalRuntimeServiceLock(
       if (!identityStat) {
         fail('corrupt', `${kind} lock identity disappeared before release.`);
       }
-      assertRegularFileStat(identityStat, `${kind} lock identity`);
+      assertRegularFileStat(identityStat, `${kind} lock identity`, identityFile);
       unlinkSync(identityFile);
       syncDirectory(path, `${kind} lock`);
       try {

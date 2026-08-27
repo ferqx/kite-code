@@ -119,8 +119,10 @@ compaction Gate也通过。
 KLSV1-07当前只登记本地结果：Runtime fault 36/106、CI-profile soak 7/7 cases、carrier 23/128、Service shell
 23/97，以及macOS arm64 candidate build/verify/smoke；smoke覆盖安装、CLI/TUI、Service companion、MCP stdio wrapper、
 升级、回滚与卸载，结束后无残留Service进程。CI-profile soak不提供formal qualification metrics。Windows
-current-user ACL/reparse primitive仍明确`unsupported`；GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025的当前
-实现head process/transport/release evidence仍pending，本地POSIX、workflow定义或单平台artifact不能升级平台结论。
+current-user SID/protected DACL/non-reparse primitive现在有owner正向与ACL drift负向测试，并由
+`release-candidate.yml`的`windows-2025` job在candidate smoke前执行；GitHub-hosted macOS 15、Ubuntu 24.04、Windows
+2025的当前实现head process/transport/release evidence在完整matrix成功前仍pending，本地POSIX、workflow定义或
+单平台artifact不能升级平台结论。
 
 ## 迁移期测试
 
