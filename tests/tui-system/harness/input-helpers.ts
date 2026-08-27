@@ -586,6 +586,47 @@ export async function submitUserMessage(
   });
 }
 
+export interface DeferredUserMessageDelivery {
+  readonly requestBaseline: number;
+  waitForRuntimeRequest(): Promise<void>;
+}
+
+/**
+ * Submit a message whose immediate semantic receipt is client-local (for
+ * example a visible FIFO queue acknowledgement), while keeping the later
+ * Runtime/model request as a separate mandatory phase.
+ */
+export async function submitUserMessageForDeferredDelivery(
+  tui: PtyProcess,
+  server: MockModelServer,
+  text: string,
+  options: {
+    readonly acceptWhen: (viewport: string) => boolean;
+    readonly delayMs?: number;
+    readonly requestText?: string;
+    readonly timeout?: number;
+    readonly testTiming?: { submitReceiptTimeoutMs?: number; semanticReceiptTimeoutMs?: number };
+  },
+): Promise<DeferredUserMessageDelivery> {
+  const requestBaseline = server.getRequestCount();
+  await typeText(tui, text, options.delayMs);
+  await submitCurrentInput(tui, {
+    ...options.testTiming,
+    acceptWhen: options.acceptWhen,
+    requireAcceptWhen: true,
+    semanticReceiptTimeoutMs:
+      options.testTiming?.semanticReceiptTimeoutMs ?? options.timeout ?? 10_000,
+  });
+  return Object.freeze({
+    requestBaseline,
+    waitForRuntimeRequest: () =>
+      waitForRequestMessage(server, options.requestText ?? text, options.timeout, {
+        since: requestBaseline,
+        tui,
+      }),
+  });
+}
+
 /**
  * Submit the currently active input and confirm that the input field has
  * advanced. Use this after composing an input through multiple actions (for

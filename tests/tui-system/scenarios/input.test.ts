@@ -13,6 +13,7 @@ import {
   pasteText,
   submitCurrentInput,
   submitUserMessage,
+  submitUserMessageForDeferredDelivery,
   typeText,
   waitForRequestMessage,
 } from '../harness/input-helpers';
@@ -82,24 +83,22 @@ describe('TUI PTY System — Input & Message', () => {
 
       await submitUserMessage(tui, server, 'First message', { timeout: 15000 });
 
-      const secondRequestBaseline = server.getRequestCount();
-      await typeText(tui, 'Second queued message');
-      const secondSubmission = submitCurrentInput(tui, {
-        acceptWhen: () => server.getRequestCount() > secondRequestBaseline,
-        requireAcceptWhen: true,
-        semanticReceiptTimeoutMs: 15000,
-      });
-
-      await waitForText(
-        () => tui.viewport(),
-        'Message queued; it will be sent after the current turn finishes.',
-        5000,
-      );
-      await secondSubmission;
-      await waitForRequestMessage(server, 'Second queued message', 15000, {
-        since: secondRequestBaseline,
+      const queuedDelivery = await submitUserMessageForDeferredDelivery(
         tui,
-      });
+        server,
+        'Second queued message',
+        {
+          acceptWhen: (viewport) =>
+            screenContains(
+              viewport,
+              'Message queued; it will be sent after the current turn finishes.',
+            ),
+          timeout: 15000,
+        },
+      );
+
+      expect(server.getRequestCount()).toBe(queuedDelivery.requestBaseline);
+      await queuedDelivery.waitForRuntimeRequest();
       await waitForText(() => tui.viewport(), 'Queued turn completed.', 15000);
 
       const output = stripAnsi(tui.viewport());

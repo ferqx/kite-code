@@ -58,6 +58,9 @@
 - 普通消息输入必须覆盖当前 Turn 运行期间的连续 Enter：第二条消息先显示本地排队回执，再以提交时的 Session identity
   等待 Service 权威 idle projection；遇到明确 `revision_conflict` 只使用同一 commandId 与 Service 返回的 current revision
   有界重试，最终两条模型请求和渲染各一次，不得清空后静默丢失或因切换 Session 改投目标。
+- Harness 不得用“模型请求已经出现”替代排队输入的即时语义回执；deferred-delivery helper必须分别等待本地queue receipt
+  与后续Runtime request。Native fake默认校验`start_turn.expectedRevision`，并可显式调度terminal projection先于command
+  receipt；无条件applied或同调用栈固定顺序不能作为client时序证据。
 - Workspace Trust journey必须覆盖App Control prepare/query/decision先于Runtime connect；decline不得打开Runtime，
   trusted restart才可跳过prompt。PTY exit必须证明只关闭terminal connection，不能据此停止Service owner。
 

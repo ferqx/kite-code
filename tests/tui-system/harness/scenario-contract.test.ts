@@ -290,6 +290,7 @@ export function findRawDeltaControlReadinessViolations(
         if (
           helper === 'waitForTuiReady' ||
           helper === 'submitUserMessage' ||
+          helper === 'submitUserMessageForDeferredDelivery' ||
           helper === 'submitCommand' ||
           helper === 'submitCurrentInput' ||
           helper === 'typeText' ||

@@ -279,11 +279,41 @@ test('Native TUI facade retries a queued turn after an exact revision conflict',
   await facade.dispose();
 });
 
+test('Native TUI facade bounds repeated start conflicts and preserves one command identity', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.advanceRevisionBeforeEveryStartTurn();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await expect(
+    facade.getRuntime(sessionId)!.runTask('never admitted', { dispatch: () => {} }),
+  ).rejects.toThrow('revision_conflict');
+  expect(remote.startTurnExpectedRevisions).toEqual([1, 2, 3]);
+  expect(new Set(remote.startTurnCommandIds).size).toBe(1);
+  await facade.dispose();
+});
+
+test('Native TUI facade converges when terminal projection arrives before the command receipt', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.deliverNextStartTurnReceiptAfterTerminalProjection();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.getRuntime(sessionId)!.runTask('out-of-order transport', { dispatch: () => {} });
+
+  expect(remote.deferredTurnDeliveryOrder).toEqual(['terminal_projection', 'command_receipt']);
+  expect(remote.startTurnExpectedRevisions).toEqual([1]);
+  await facade.dispose();
+});
+
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
   readonly interactionExpectedRevisions: number[] = [];
   readonly startTurnExpectedRevisions: number[] = [];
   readonly startTurnCommandIds: string[] = [];
+  readonly deferredTurnDeliveryOrder: string[] = [];
   closeCalls = 0;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
@@ -296,7 +326,10 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #staleSnapshotOnNextTurn = false;
   #restoreActiveTurn = false;
   #restoredTurnReleased = false;
+  #authoritativeRevision = 1;
   #nextStartTurnConflictRevision: number | undefined;
+  #advanceRevisionOnEveryStart = false;
+  #deferNextStartTurnReceipt = false;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -325,13 +358,23 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   releaseRestoredTurn(): void {
     this.#restoredTurnReleased = true;
+    this.#authoritativeRevision = 2;
   }
 
   conflictNextStartTurnAt(currentRevision: number): void {
     this.#nextStartTurnConflictRevision = currentRevision;
   }
 
+  advanceRevisionBeforeEveryStartTurn(): void {
+    this.#advanceRevisionOnEveryStart = true;
+  }
+
+  deliverNextStartTurnReceiptAfterTerminalProjection(): void {
+    this.#deferNextStartTurnReceipt = true;
+  }
+
   #emitApproval(sessionId: string): void {
+    this.#authoritativeRevision = 4;
     this.push(
       subscriptionUpdate(this.#subscriptionBySession.get(sessionId)!, 1, {
         type: 'notification',
@@ -411,6 +454,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       this.commands.push(command.type);
       if (command.type === 'create_session') {
         this.#sessionId = command.bootstrapSessionId ?? '';
+        this.#authoritativeRevision = 1;
         this.push(
           result(message.id, {
             status: 'applied',
@@ -446,6 +490,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         return;
       }
       if (command.type === 'rewind_session') {
+        this.#authoritativeRevision = command.expectedRevision + 1;
         this.push(
           result(message.id, {
             status: 'applied',
@@ -487,6 +532,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       if (command.type === 'respond_interaction') {
         this.interactionExpectedRevisions.push(command.expectedRevision);
         if (this.interactionExpectedRevisions.length === 1) {
+          this.#authoritativeRevision = 5;
           this.push(
             result(message.id, {
               status: 'conflict',
@@ -530,34 +576,51 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             event: { type: 'run.terminal', runId: 'run-approval', status: 'completed' },
           }),
         );
+        this.#authoritativeRevision = command.expectedRevision + 2;
         return;
       }
       if (command.type === 'start_turn') {
         this.startTurnExpectedRevisions.push(command.expectedRevision);
         this.startTurnCommandIds.push(command.commandId);
         if (this.#nextStartTurnConflictRevision !== undefined) {
-          const currentRevision = this.#nextStartTurnConflictRevision;
+          this.#authoritativeRevision = this.#nextStartTurnConflictRevision;
           this.#nextStartTurnConflictRevision = undefined;
+        }
+        if (this.#advanceRevisionOnEveryStart) {
+          this.#authoritativeRevision = Math.max(
+            this.#authoritativeRevision,
+            command.expectedRevision + 1,
+          );
+        }
+        if (command.expectedRevision !== this.#authoritativeRevision) {
           this.push(
             result(message.id, {
               status: 'conflict',
               commandId: command.commandId,
               code: 'revision_conflict',
-              currentRevision,
+              currentRevision: this.#authoritativeRevision,
             }),
           );
           return;
         }
         const acceptedRevision = command.expectedRevision + 1;
         const terminalRevision = acceptedRevision + 1;
-        this.push(
-          result(message.id, {
-            status: 'applied',
-            commandId: command.commandId,
-            sessionId: command.sessionId,
-            revision: acceptedRevision,
-          }),
-        );
+        const deferReceipt =
+          this.#deferNextStartTurnReceipt &&
+          !this.#approvalOnNextTurn &&
+          !this.#approvalSnapshotOnNextTurn &&
+          !this.#replacementApprovalSnapshotOnNextTurn &&
+          !this.#terminalSnapshotOnNextTurn &&
+          !this.#staleSnapshotOnNextTurn;
+        this.#deferNextStartTurnReceipt = false;
+        this.#authoritativeRevision = acceptedRevision;
+        const commandReceipt = result(message.id, {
+          status: 'applied',
+          commandId: command.commandId,
+          sessionId: command.sessionId,
+          revision: acceptedRevision,
+        });
+        if (!deferReceipt) this.push(commandReceipt);
         if (this.#approvalOnNextTurn) {
           this.#approvalOnNextTurn = false;
           this.#emitApproval(command.sessionId);
@@ -565,6 +628,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         }
         if (this.#approvalSnapshotOnNextTurn) {
           this.#approvalSnapshotOnNextTurn = false;
+          this.#authoritativeRevision = 4;
           this.push(
             subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
               type: 'notification',
@@ -587,6 +651,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         }
         if (this.#replacementApprovalSnapshotOnNextTurn) {
           this.#replacementApprovalSnapshotOnNextTurn = false;
+          this.#authoritativeRevision = 5;
           const subscriptionId = this.#subscriptionBySession.get(command.sessionId)!;
           const stale = {
             kind: 'approval' as const,
@@ -625,19 +690,21 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         }
         if (this.#terminalSnapshotOnNextTurn) {
           this.#terminalSnapshotOnNextTurn = false;
+          this.#authoritativeRevision = terminalRevision;
           this.push(
             subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
               type: 'notification',
               durability: 'durable',
               sessionId: command.sessionId,
-              revision: 3,
-              session: idleProjection(command.sessionId, 3),
+              revision: terminalRevision,
+              session: idleProjection(command.sessionId, terminalRevision),
             }),
           );
           return;
         }
         if (this.#staleSnapshotOnNextTurn) {
           this.#staleSnapshotOnNextTurn = false;
+          this.#authoritativeRevision = terminalRevision;
           const subscriptionId = this.#subscriptionBySession.get(command.sessionId)!;
           this.push(
             subscriptionUpdate(subscriptionId, 1, {
@@ -653,8 +720,8 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
               type: 'notification',
               durability: 'durable',
               sessionId: command.sessionId,
-              revision: 3,
-              session: idleProjection(command.sessionId, 3),
+              revision: terminalRevision,
+              session: idleProjection(command.sessionId, terminalRevision),
               event: { type: 'run.terminal', runId: 'run-after-stale', status: 'completed' },
             }),
           );
@@ -730,6 +797,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             },
           }),
         );
+        if (deferReceipt) this.deferredTurnDeliveryOrder.push('terminal_projection');
         this.push(
           subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
             type: 'notification',
@@ -740,14 +808,21 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
           }),
         );
+        if (deferReceipt) {
+          this.deferredTurnDeliveryOrder.push('command_receipt');
+          this.push(commandReceipt);
+        }
+        this.#authoritativeRevision = terminalRevision;
         return;
       }
+      const revision = ('expectedRevision' in command ? command.expectedRevision : 0) + 1;
+      this.#authoritativeRevision = revision;
       this.push(
         result(message.id, {
           status: 'applied',
           commandId: command.commandId,
           sessionId: 'sessionId' in command ? command.sessionId : this.#sessionId,
-          revision: ('expectedRevision' in command ? command.expectedRevision : 0) + 1,
+          revision,
         }),
       );
     }

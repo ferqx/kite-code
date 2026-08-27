@@ -39,6 +39,7 @@ import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
 import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage, useI18n } from './i18n';
+import { observeTuiPromptSubmission, TuiPromptSubmissionQueue } from './prompt-submission-queue';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
 import { shouldAbortStoppedRun, shouldSetIdleAfterRun } from './run-lifecycle';
@@ -439,7 +440,10 @@ function TuiApp({
       }>,
     ) => Promise<void>
   >(async () => {});
-  const promptSubmissionTailRef = React.useRef<Promise<void>>(Promise.resolve());
+  const promptSubmissionQueueRef = React.useRef<TuiPromptSubmissionQueue | null>(null);
+  if (!promptSubmissionQueueRef.current) {
+    promptSubmissionQueueRef.current = new TuiPromptSubmissionQueue();
+  }
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [sessionGrantCount, setSessionGrantCount] = React.useState(0);
   const [providerModelSnapshot, setProviderModelSnapshot] = React.useState<ProviderModelSnapshot>();
@@ -1438,11 +1442,9 @@ function TuiApp({
       }>,
     ): Promise<void> => {
       const submittedThreadId = threadIdRef.current;
-      const scheduled = promptSubmissionTailRef.current.then(() =>
-        runTaskNow(submittedThreadId, task, requestedPhase, initialSkillActivations),
+      return promptSubmissionQueueRef.current!.enqueue(submittedThreadId, (targetThreadId) =>
+        runTaskNow(targetThreadId, task, requestedPhase, initialSkillActivations),
       );
-      promptSubmissionTailRef.current = scheduled.catch(() => undefined);
-      return scheduled;
     },
     [runTaskNow],
   );
@@ -1464,18 +1466,22 @@ function TuiApp({
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.
-      if (stateRef.current.running) {
-        dispatchSessionLoad({
-          type: 'LOCAL_TEXT',
-          text: '  ⎿  Message queued; it will be sent after the current turn finishes.',
-        });
-      }
-      void runTask(value, stateRef.current.status.phase).catch((error) => {
-        dispatchSessionLoad({
-          type: 'LOCAL_TEXT',
-          text: `  ⎿  Message was not sent: ${toErrorMessage(error)}`,
-          isError: true,
-        });
+      observeTuiPromptSubmission({
+        queued: stateRef.current.running,
+        submit: () => runTask(value, stateRef.current.status.phase),
+        onQueued: () => {
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: '  ⎿  Message queued; it will be sent after the current turn finishes.',
+          });
+        },
+        onFailure: (error) => {
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  Message was not sent: ${toErrorMessage(error)}`,
+            isError: true,
+          });
+        },
       });
     },
     [dispatchSessionLoad, runTask],

@@ -626,6 +626,11 @@ class NativeTuiRuntimeClient {
       record.resolveRun = resolve;
       record.rejectRun = reject;
     });
+    // `runTask()` is the public failure channel. A concurrent
+    // waitForRunCompletion() must observe the same rejection, but the internal
+    // completion Promise must not become an unhandled rejection when there is
+    // no separate waiter.
+    void completion.catch(() => undefined);
     record.runPromise = completion;
     try {
       const commandId = this.#nextCommandId(record.threadId, 'turn');

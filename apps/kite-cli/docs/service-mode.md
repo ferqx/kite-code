@@ -28,6 +28,8 @@ presentation state machine，Runtime Client cache不是第二套UI lifecycle aut
 Host idle，再取得唯一prompt reservation并发送`start_turn`；连续输入按提交顺序逐条执行。重连/恢复时即使本地没有
 `runPromise`，只要authoritative projection仍是queued/running/waiting，client就轮询exact Session projection直到远端
 cleanup barrier idle后才放行下一条消息。等待或command失败必须返回TUI可见的“未发送”错误，不能只清空输入框。
+若terminal projection与下一条`start_turn`交叉而返回明确未执行的`revision_conflict`，client只可使用原command ID与
+Service返回的`currentRevision`有界重试；重复冲突必须失败可见，不能无限重放或创建第二Turn。
 
 Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉
 transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。
