@@ -191,7 +191,7 @@ export function runMcpStdioChildRuntime(
     });
     childPid = child.pid;
     processStartIdentity = `${childPid}:${Date.now()}:${randomUUID()}`;
-    await writeFinalRuntimeControlFrame({
+    await writeRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
       domain: MCP_STDIO_CONTROL_DOMAIN_,
       peerId: MCP_STDIO_WRAPPER_PEER_ID_,
@@ -210,7 +210,7 @@ export function runMcpStdioChildRuntime(
     const stderrPump = forwardChildStream(child.stderr, process.stderr);
     const [exitCode] = await Promise.all([child.exited, stdoutPump, stderrPump]);
     if (failed) return;
-    await writeRuntimeControlFrame({
+    await writeFinalRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
       domain: MCP_STDIO_CONTROL_DOMAIN_,
       peerId: MCP_STDIO_WRAPPER_PEER_ID_,

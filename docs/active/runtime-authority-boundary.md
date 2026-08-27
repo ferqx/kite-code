@@ -115,6 +115,8 @@ event listener后提前结束模块求值或主入口。
 terminal写入后wrapper还必须显式结束stdout并等待stream close callback；普通write callback在Windows standalone上
 不足以证明最后一个pipe frame已对Host可见。最终terminal control frame因此使用Bun standalone原生stdout write
 Promise并校验返回的exact byte count，随后才结束stream；ready与普通JSON-RPC仍走异步背压路径。
+实现与回归验证必须区分这两条写入路径：ready不能消费最终stream关闭语义，terminal也不能回退为普通
+Node stdout write callback，否则Windows standalone可在ready成功后丢失最终cleanup evidence。
 Bun standalone的argv prefix可随平台变化；Service同时对显式command args与完整`process.argv`应用同一个
 final-marker/competing-internal-mode validator，随后只把规范化的单一MCP marker交给wrapper runtime。Windows单路径
 executable argv不能因`slice(2)`为空而落入普通Service命令解析或静默退出。
