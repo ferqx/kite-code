@@ -36,6 +36,11 @@ History handler只取得Service-owned `RuntimeHistoryClient`；App routes逐条�
 queue、buffered amount、heartbeat与drain都有hard ceiling；binary/oversized/malformed/backpressure均按固定低信息语义
 fail closed，diagnostic不携带body、token、path或secret。
 
+carrier close先停止接受新业务并关闭Runtime socket，再以`stop(false)`给已进入HTTP handler的响应一个有界
+`drainDeadlineMs`刷出窗口；窗口耗尽才以`stop(true)`强制关闭listener。该顺序保证control stop的
+`applied + draining`响应可先交付调用方，同时仍让transport owner在deadline内完成退出；它不延长Session/Turn
+lifecycle，也不授权调用方在响应丢失时重放stop。
+
 ## Parent-owned stdio
 
 stdio carrier是Service-owned code，但只用于parent-owned test/internal显式composition。parent必须提供isolated Workspace

@@ -860,6 +860,7 @@ describe('Kite Service Native loopback carrier', () => {
     expect(firstCloseCalls).toBe(1);
     expect(secondCloseCalls).toBe(1);
     expect(listener.stopCalls()).toBe(1);
+    expect(listener.stopModes()).toEqual([false]);
   });
 
   test('closes a WebSocket whose upgrade races carrier shutdown before open', async () => {
@@ -1335,6 +1336,7 @@ interface FakeListener {
   readonly callbacks: () => FakeListenerCallbacks;
   readonly upgrades: () => readonly unknown[];
   readonly stopCalls: () => number;
+  readonly stopModes: () => readonly boolean[];
 }
 
 function fakeListener(
@@ -1343,6 +1345,7 @@ function fakeListener(
 ): FakeListener {
   let callbacks: FakeListenerCallbacks | undefined;
   let stops = 0;
+  const stopModes: boolean[] = [];
   const upgradeData: unknown[] = [];
   const server = {
     port: 43_210,
@@ -1353,8 +1356,9 @@ function fakeListener(
       if (upgradeBehavior === 'throw') throw new Error('upgrade failed');
       return upgradeBehavior === 'accept';
     },
-    stop: async () => {
+    stop: async (closeActiveConnections?: boolean) => {
       stops += 1;
+      stopModes.push(closeActiveConnections === true);
     },
   } as unknown as Bun.Server<never>;
   const serve = ((options: unknown) => {
@@ -1370,6 +1374,7 @@ function fakeListener(
     },
     upgrades: () => upgradeData,
     stopCalls: () => stops,
+    stopModes: () => [...stopModes],
   };
 }
 

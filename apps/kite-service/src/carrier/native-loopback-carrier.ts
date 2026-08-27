@@ -329,7 +329,8 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
             failures.push(...closeAllSockets());
             sessions.clear();
             try {
-              await bunServer?.stop(true);
+              if (bunServer)
+                await stopListenerAfterActiveResponses(bunServer, limits.drainDeadlineMs);
             } catch (error) {
               failures.push(error);
             }
@@ -353,6 +354,31 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 }
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
+
+async function stopListenerAfterActiveResponses(
+  server: Bun.Server<SocketData>,
+  deadlineMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const drained = await Promise.race([
+      Promise.resolve(server.stop(false)).then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), deadlineMs);
+      }),
+    ]);
+    if (!drained) await server.stop(true);
+  } catch (error) {
+    try {
+      await server.stop(true);
+    } catch (forceError) {
+      throw new AggregateError([error, forceError]);
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function afterDispatchCloseBarrier(
   response: Response | Promise<Response>,

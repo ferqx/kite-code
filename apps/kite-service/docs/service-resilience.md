@@ -8,7 +8,9 @@ descriptor publish → readiness fd。Service以neutral cwd/allowlisted env启�
 解析。任一步失败都不伪ready；late start进入同一close barrier，startup/close fault保留state evidence。
 
 普通stop先quiesce mutation gate。active operation返回`service_busy`并resume；空闲时commit drain，control caller先收到
-`applied + draining`，同一shell再关闭carrier/application并最后清理state。signal是owner shutdown：停止transport、
+`applied + draining`，同一shell再关闭carrier/application并最后清理state。carrier关闭listener时先给active HTTP
+response一个有界刷出窗口，超时才force close；因此control ack不依赖单个event-loop turn，但整体退出仍受drain
+deadline约束。signal是owner shutdown：停止transport、
 recovery-safe `cancelAll`、drain/dispose。TUI/CLI connection close不是owner shutdown。
 
 manager在process serial queue与cross-process lifecycle lock下执行。concurrent ensure只允许一个spawn；source/installed
