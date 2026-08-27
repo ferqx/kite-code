@@ -131,6 +131,9 @@ DNS/private/allowlist/pinned-address 检查，并忽略环境 proxy。并发 sib
 ## Native filesystem projection
 
 macOS Seatbelt profile 在生成任何 allow rule 前 canonicalize Workspace 与受控 runtime temp。
+Hardened Shell environment从只读`/private/var/select/developer_dir`解析当前Apple developer toolchain，并把其
+真实`usr/bin`置于sandbox PATH首位；不得通过`/usr/bin/git`的xcrun shim写入Seatbelt scope外的
+`DARWIN_USER_CACHE_DIR`，也不得为该cache扩大系统临时目录写权限。
 每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
 process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
 遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。最后一个

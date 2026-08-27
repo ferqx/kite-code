@@ -427,7 +427,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const status = await executor({
         workspace: ws,
-        command: 'git status --short',
+        command: 'command -v git; git status --short',
         executionTrust: 'policy_proven_read_only',
       });
       const log = await executor({
@@ -436,6 +436,10 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         executionTrust: 'policy_proven_read_only',
       });
       expect(status.ok).toBe(true);
+      if (process.platform === 'darwin') {
+        expect(status.stdout).toMatch(/^\/Library\/Developer\/.+\/usr\/bin\/git$/mu);
+      }
+      expect(status.stderr).not.toContain('xcrun_db');
       expect(log.ok).toBe(true);
       expect(log.stdout).toContain('initial');
       expect(existsSync(join(ws, 'fsmonitor-ran'))).toBe(false);
