@@ -22,6 +22,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+} from '@kite-ai/kite-local-runtime/service';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 
 export interface TestWorkspace {
@@ -392,8 +396,9 @@ export function createTestWorkspace(opts?: {
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
   const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
-  const kiteCodeDir = join(tempHome, '.kite-code');
-  mkdirSync(kiteCodeDir, { recursive: true });
+  const kiteCodeDir = ensureLocalRuntimeServiceHome(
+    createKiteHomeIdentity(join(tempHome, '.kite-code'), 'explicit_argument'),
+  ).root;
 
   // Minimal config pointing to a fake DeepSeek provider.
   // In PTY tests, the model will be overridden by the mock model server
