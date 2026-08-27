@@ -113,7 +113,7 @@ export function createManagedLocalServiceClientComposition(
       return value;
     },
   };
-  const sourceExecutable = resolve(import.meta.dir, '../../apps/kite-service/src/executable.ts');
+  const sourceExecutable = resolve(import.meta.dir, './entrypoints/service.ts');
   const installedExecutable = join(
     dirname(process.execPath),
     process.platform === 'win32' ? 'kite-service.exe' : 'kite-service',

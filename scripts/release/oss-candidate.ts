@@ -196,7 +196,7 @@ export async function buildOssCandidate(
   const servicePath = join(stageDirectory, `kite-service${executableSuffix}`);
   await compileOssReleaseExecutable('scripts/release/entrypoints/cli.ts', cliPath);
   await compileOssReleaseExecutable('scripts/release/entrypoints/tui.ts', tuiPath);
-  await compileOssReleaseExecutable('apps/kite-service/src/executable.ts', servicePath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/service.ts', servicePath);
   if (process.platform !== 'win32') {
     chmodSync(cliPath, 0o755);
     chmodSync(tuiPath, 0o755);
