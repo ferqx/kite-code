@@ -2,6 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+  WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
 import { RUNTIME_COMMAND_SCHEMA_, type RuntimeAccessNotification } from '@kite-ai/runtime-contract';
 import type { AppShellExecutor } from '#kite-service/sandbox/composition';
 import {
@@ -88,15 +92,16 @@ test('test-only Service connector executes and streams one injected shell throug
   const connection = await createInProcessTuiServiceConnector(shell).connect({ workspace });
   try {
     const trust = await connection.app.queryWorkspaceTrust({
-      schema: 'kite.app.workspace-trust.query-request.v1',
+      schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
       workspace,
     });
     await connection.app.decideWorkspaceTrust({
-      schema: 'kite.app.workspace-trust.decision-request.v1',
+      schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
       workspace: trust.workspace,
       observedStatus: trust.status,
       expectedRevision: trust.revision,
       decision: 'trust',
+      externalReadScopeDigest: trust.externalReadScope.digest,
     });
     await connection.connect();
     const sessionId = 'fixture-shell-session';

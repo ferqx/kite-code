@@ -48,9 +48,9 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 关键不变量
 
 - default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
-- Service-owned Shell composition 对普通repository继续只授权canonical Workspace；若Workspace是Git注册的linked
-  worktree，则仅把通过标准namespace、commondir与reciprocal backlink验证的primary `.git`作为只读runtime root
-  传入native sandbox，不授权primary working tree，也不把generic Shell升级为Git transaction owner。
+- Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
+  identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
+  scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。
 - Runtime Application、state与transport基础设施都必须ready后才发布descriptor；没有noop listener/state或伪ready。
 - descriptor发布身份必须由manager通过`GET /readyz`后authenticated exact `POST /_kite/instance`重新证明，不能回显或
   信任磁盘descriptor。instance/Protocol/client-contract/server/build任一缺失或不匹配都fail closed；expected build
@@ -73,7 +73,7 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 测试
 
 `bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control与Native shell/carrier；当前owner run为1358 parallel tests / 6765 expects并通过全部34个isolated
+History/App Control与Native shell/carrier；当前owner run为1363 parallel tests / 6788 expects并通过全部34个isolated
 files。manager focused evidence位于`packages/kite-local-runtime/test/manager`（37/135）。完整40个TUI PTY scenario与
 本机macOS arm64 release smoke已经通过；正式Windows及当前实现head三平台process/release qualification仍pending。
 

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import {
+  type KiteAppControlClient,
+  type KiteWorkspaceIdentity,
+  WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
+  WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
 import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
@@ -180,10 +185,11 @@ describe('cli argument parsing', () => {
               createCliConnection({
                 calls,
                 queryStatus: 'unknown',
+                externalReadRoots: ['/tmp/primary/.git'],
               }),
           },
         }),
-      ).rejects.toThrow('not trusted');
+      ).rejects.toThrow('/tmp/primary/.git');
     } finally {
       process.argv = originalArgv;
     }
@@ -224,6 +230,41 @@ describe('cli argument parsing', () => {
       'runtime:set_interaction_mode',
       'runtime:start_turn',
       'close',
+    ]);
+  });
+
+  test('explicitly confirms an external Workspace read scope before opening Runtime', async () => {
+    const calls: string[] = [];
+    const originalArgv = process.argv;
+    process.argv = [
+      'bun',
+      'kite',
+      'run',
+      '--workspace',
+      '/tmp/trusted',
+      '--task',
+      'hello',
+      '--trust-workspace',
+    ];
+    try {
+      await main({
+        serviceConnector: {
+          connect: async () =>
+            createCliConnection({
+              calls,
+              queryStatus: 'unknown',
+              externalReadRoots: ['/tmp/primary/.git'],
+            }),
+        },
+      });
+    } finally {
+      process.argv = originalArgv;
+    }
+    expect(calls.slice(0, 4)).toEqual([
+      'prepare-app-control',
+      'query-trust',
+      'decide-trust',
+      'connect-runtime',
     ]);
   });
 
@@ -268,6 +309,7 @@ function createCliConnection(input: {
   calls: string[];
   commandWorkspaces?: string[];
   queryStatus: 'trusted' | 'unknown';
+  externalReadRoots?: readonly string[];
 }): LocalKiteConnection {
   const workspace: KiteWorkspaceIdentity = {
     canonicalPath: '/tmp/trusted',
@@ -275,6 +317,10 @@ function createCliConnection(input: {
     workspaceDigest: `sha256:${'0'.repeat(64)}`,
   };
   let revision = 0;
+  const externalReadScope = {
+    roots: input.externalReadRoots ?? [],
+    digest: `sha256:${'0'.repeat(64)}` as const,
+  };
   const runtime = {
     command: async (command: {
       readonly type: string;
@@ -307,11 +353,23 @@ function createCliConnection(input: {
       queryWorkspaceTrust: async () => {
         input.calls.push('query-trust');
         return {
-          schema: 'kite.app.workspace-trust.query-response.v1',
+          schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
           workspace,
           status: input.queryStatus,
           revision: 'trust-revision-1',
           canDecide: input.queryStatus !== 'trusted',
+          externalReadScope,
+        };
+      },
+      decideWorkspaceTrust: async () => {
+        input.calls.push('decide-trust');
+        return {
+          schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
+          workspace,
+          status: 'trusted',
+          outcome: 'recorded',
+          revision: 'trust-revision-2',
+          externalReadScope,
         };
       },
     } as unknown as KiteAppControlClient,

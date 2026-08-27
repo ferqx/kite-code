@@ -32,11 +32,15 @@ tool/prompt 摘要和经过 origin-only 脱敏的 HTTP(S) 地址；不得回传 
 bounded command/address；Service 不得在 snapshot 中回传它。认证、credential write、service
 discovery/lifecycle 使用 Native-only owner 的 contract。
 
-Workspace Trust query/decision先返回 canonical full identity和revision；mutation按exact CAS执行，conflict或
+Workspace Trust query/decision先返回 canonical full identity、exact external-read scope及revision；TUI必须显示
+Workspace外的canonical只读roots，decision用scope digest与revision双重绑定。mutation按exact CAS执行，conflict或
 `outcome_unknown` 原样返回且不自动重试。Provider/model、Skill和MCP projection只包含当前终端 journey所需
 safe metadata；actual Skill body/path、raw Provider config/API key、MCP command arguments、credential、OAuth URL和
 raw diagnostic message不进入 contract。Native Provider credential write及其取消 signal只存在于
 `kite-local-runtime/client`。
+
+当前根contract revision为`kite-app-contract-v2`；Workspace Trust query response与decision request/response因新增
+external-read scope绑定使用各自`v2` exact schema，query request仍为无副作用的`v1` path input。
 
 ## 公开入口
 

@@ -17,6 +17,10 @@ import { dirname, resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
 import { workspaceTrustPath } from './paths';
+import {
+  resolveWorkspaceExternalReadScope,
+  type WorkspaceExternalReadScope,
+} from './workspace-external-read-scope';
 
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_RETRIES = 20;
@@ -81,6 +85,8 @@ export interface WorkspaceTrustRecord {
   /** ISO 8601 timestamp of the decision. */
   trustedAt: string;
   source: WorkspaceTrustSource;
+  /** Exact external read scope approved with this Workspace trust decision. */
+  externalReadScopeDigest?: `sha256:${string}`;
 }
 
 interface WorkspaceTrustFile {
@@ -109,6 +115,7 @@ export interface WorkspaceTrustSnapshot {
   readonly workspaceKey: string;
   readonly status: WorkspaceTrustStatus;
   readonly revision: string;
+  readonly externalReadScope: WorkspaceExternalReadScope;
 }
 
 // SECURITY: there is deliberately no environment-variable bypass. Bun injects
@@ -125,7 +132,9 @@ function isRecord(value: unknown): value is WorkspaceTrustRecord {
     typeof record.workspaceKey === 'string' &&
     typeof record.workspacePath === 'string' &&
     typeof record.trustedAt === 'string' &&
-    (record.source === 'user' || record.source === 'config' || record.source === 'test')
+    (record.source === 'user' || record.source === 'config' || record.source === 'test') &&
+    (record.externalReadScopeDigest === undefined ||
+      /^sha256:[a-f0-9]{64}$/u.test(String(record.externalReadScopeDigest)))
   );
 }
 
@@ -187,14 +196,18 @@ export function getWorkspaceTrustStatus(
   storePath = workspaceTrustPath(),
 ): WorkspaceTrustStatus {
   let workspaceKey: string;
+  let externalReadScope: WorkspaceExternalReadScope;
   try {
     workspaceKey = canonicalWorkspaceKey(workspace);
+    externalReadScope = resolveWorkspaceExternalReadScope(workspace);
   } catch {
     return 'unavailable';
   }
   const store = readWorkspaceTrustStore(storePath);
   if (store.status !== 'ready') return store.status;
-  return store.records[workspaceKey] ? 'trusted' : 'unknown';
+  return recordMatchesExternalReadScope(store.records[workspaceKey], externalReadScope)
+    ? 'trusted'
+    : 'unknown';
 }
 
 /**
@@ -218,6 +231,30 @@ function trustStoreRevision(store: WorkspaceTrustStoreRead): string {
   return `sha256:${createHash('sha256').update(`kite.workspace-trust.v1\0${material}`).digest('hex')}`;
 }
 
+function recordMatchesExternalReadScope(
+  record: WorkspaceTrustRecord | undefined,
+  scope: WorkspaceExternalReadScope,
+): boolean {
+  if (!record) return false;
+  // Legacy records remain valid only for a Workspace with no external roots.
+  // Adding a linked/external identity always requires a fresh confirmation.
+  return (
+    record.externalReadScopeDigest === scope.digest ||
+    (record.externalReadScopeDigest === undefined && scope.roots.length === 0)
+  );
+}
+
+function trustSnapshotRevision(
+  store: WorkspaceTrustStoreRead,
+  externalReadScope: WorkspaceExternalReadScope,
+): string {
+  return `sha256:${createHash('sha256')
+    .update(
+      `kite.workspace-trust-snapshot.v2\0${trustStoreRevision(store)}\0${externalReadScope.digest}`,
+    )
+    .digest('hex')}`;
+}
+
 /** Exact App Control snapshot; canonicalization happens before any project data is read. */
 export function getWorkspaceTrustSnapshot(
   workspace: string,
@@ -226,21 +263,32 @@ export function getWorkspaceTrustSnapshot(
   try {
     const canonicalPath = realpathSync.native(resolve(workspace));
     const workspaceKey = canonicalWorkspaceKey(canonicalPath);
+    const externalReadScope = resolveWorkspaceExternalReadScope(canonicalPath);
     const store = readWorkspaceTrustStore(storePath);
     return Object.freeze({
       canonicalPath,
       workspaceKey,
       status:
         store.status === 'ready'
-          ? store.records[workspaceKey]
+          ? recordMatchesExternalReadScope(store.records[workspaceKey], externalReadScope)
             ? 'trusted'
             : 'unknown'
           : store.status,
-      revision: trustStoreRevision(store),
+      revision: trustSnapshotRevision(store, externalReadScope),
+      externalReadScope,
     });
   } catch {
     return undefined;
   }
+}
+
+/** External read roots become sandbox inputs only after the exact scope was trusted. */
+export function getTrustedWorkspaceExternalReadRoots(
+  workspace: string,
+  storePath = workspaceTrustPath(),
+): readonly string[] {
+  const snapshot = getWorkspaceTrustSnapshot(workspace, storePath);
+  return snapshot?.status === 'trusted' ? snapshot.externalReadScope.roots : Object.freeze([]);
 }
 
 /** Persist an explicit trust decision for one workspace. */
@@ -252,8 +300,10 @@ export function trustWorkspace(input: {
 }): WorkspaceTrustDecisionResult {
   const path = input.storePath ?? workspaceTrustPath();
   let workspaceKey: string;
+  let externalReadScope: WorkspaceExternalReadScope;
   try {
     workspaceKey = canonicalWorkspaceKey(input.workspace);
+    externalReadScope = resolveWorkspaceExternalReadScope(input.workspace);
   } catch {
     return { status: 'store_unavailable', message: 'Workspace identity is unavailable.' };
   }
@@ -262,6 +312,7 @@ export function trustWorkspace(input: {
     workspacePath: resolve(input.workspace),
     trustedAt: new Date().toISOString(),
     source: input.source ?? 'user',
+    externalReadScopeDigest: externalReadScope.digest,
   };
   let releaseLock: (() => void) | undefined;
   try {
@@ -273,7 +324,7 @@ export function trustWorkspace(input: {
       return { status: 'store_unavailable', message: locked.message };
     if (
       input.expectedRevision !== undefined &&
-      input.expectedRevision !== trustStoreRevision(locked)
+      input.expectedRevision !== trustSnapshotRevision(locked, externalReadScope)
     ) {
       return {
         status: 'conflict',

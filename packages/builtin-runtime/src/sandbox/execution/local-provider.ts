@@ -40,7 +40,7 @@ export interface LocalSandboxExecutionProviderOptions {
   readonly backend: Exclude<SandboxExecutionBackend, 'none'>;
   readonly canonicalWorkspace: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
-  readonly runtimeReadOnlyRoots?: readonly string[];
+  readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
   readonly brokeredGitFeatureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_;
   readonly startupProbe?: boolean;
   readonly bubblewrapPath?: string;
@@ -261,7 +261,9 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
     const shell = policyProvenReadOnly ? '/bin/sh' : preparation.argv[0]!;
     const runtimeReadOnlyRoots = [
       ...discoverRuntimeReadOnlyRoots(),
-      ...(this.#options.runtimeReadOnlyRoots ?? []),
+      ...(typeof this.#options.runtimeReadOnlyRoots === 'function'
+        ? this.#options.runtimeReadOnlyRoots()
+        : (this.#options.runtimeReadOnlyRoots ?? [])),
     ];
     let argv: string[];
     if (this.#options.backend === 'seatbelt') {

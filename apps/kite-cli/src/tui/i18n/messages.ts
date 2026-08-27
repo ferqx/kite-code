@@ -71,6 +71,7 @@ export const enUS = {
     'This workspace may provide local configuration, skills, and MCP servers.',
   'trust.approvalSettings':
     'Kite Code may run commands and modify files according to your current approval settings.',
+  'trust.externalReadScope': 'This workspace also requires read-only access to:',
   'trust.saveFailed': 'Workspace trust could not be saved',
   'trust.needsAttention': 'Workspace trust needs attention',
   'trust.storeUnavailable': 'The trust store is unavailable:\n{path}',
@@ -323,6 +324,7 @@ export const zhCN: { [K in MessageKey]: string } = {
   'trust.openWorkspace': '是否打开此工作区？',
   'trust.providesConfiguration': '此工作区可能提供本地配置、技能和 MCP 服务器。',
   'trust.approvalSettings': 'Kite Code 可能会根据当前审批设置运行命令并修改文件。',
+  'trust.externalReadScope': '此工作区还需要对以下位置进行只读访问：',
   'trust.saveFailed': '无法保存工作区信任设置',
   'trust.needsAttention': '工作区信任设置需要处理',
   'trust.storeUnavailable': '信任设置存储不可用：\n{path}',

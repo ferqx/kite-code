@@ -397,6 +397,10 @@ function fixtureFetch(
         status: 'unknown',
         revision: 'trust-revision-1',
         canDecide: true,
+        externalReadScope: {
+          roots: [],
+          digest: `sha256:${'0'.repeat(64)}`,
+        },
       } satisfies WorkspaceTrustQueryResponse;
       break;
     case '/_kite/app/provider-credential/write':

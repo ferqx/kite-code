@@ -1,5 +1,9 @@
 import { resolve } from 'node:path';
 import {
+  WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+  WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
+import {
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   type LocalRuntimeLifecycleResult,
 } from '@kite-ai/kite-local-runtime/client';
@@ -120,7 +124,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     // routes; Runtime initialize must wait until the Workspace is trusted.
     await service.connection.prepareAppControl();
     const trust = await service.appControl.queryWorkspaceTrust({
-      schema: 'kite.app.workspace-trust.query-request.v1',
+      schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
       workspace: args.workspace,
     });
     let workspace = trust.workspace;
@@ -128,15 +132,17 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       if (!args.trustWorkspace) {
         throw new Error(
           `Workspace is not trusted: ${args.workspace}\n` +
-            'Open this folder in the TUI and accept the trust prompt, or pass --trust-workspace.',
+            'Open this folder in the TUI and accept the trust prompt, or pass --trust-workspace.' +
+            formatExternalReadScope(trust.externalReadScope.roots),
         );
       }
       const decision = await service.appControl.decideWorkspaceTrust({
-        schema: 'kite.app.workspace-trust.decision-request.v1',
+        schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
         workspace,
         observedStatus: trust.status,
         expectedRevision: trust.revision,
         decision: 'trust',
+        externalReadScopeDigest: trust.externalReadScope.digest,
       });
       if (decision.status !== 'trusted') {
         throw new Error('Workspace trust could not be recorded by the Local Runtime Service.');
@@ -280,6 +286,12 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     await iterator?.return?.();
     await service.close('cli_client_closed');
   }
+}
+
+function formatExternalReadScope(roots: readonly string[]): string {
+  return roots.length === 0
+    ? ''
+    : `\nThis workspace also requires read-only access to:\n${roots.map((root) => `  ${root}`).join('\n')}`;
 }
 
 function interactionFromRuntimeNotificationEvent(

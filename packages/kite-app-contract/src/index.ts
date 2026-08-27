@@ -6,7 +6,7 @@
  * component types belong to other owners and are deliberately absent here.
  */
 
-export const KITE_APP_CONTRACT_REVISION_ = 'kite-app-contract-v1' as const;
+export const KITE_APP_CONTRACT_REVISION_ = 'kite-app-contract-v2' as const;
 
 export * from './client';
 export * from './mcp';

@@ -146,3 +146,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0142](0142-runtime-server-client-protocol-boundary.md) | partially superseded by ADR-0144 | 保留 Protocol/Server/Client/receipt 边界；单 Workspace Server 与 App composition root 由 Local Service 决策取代 |
 | [0143](0143-local-runtime-presentation-fidelity.md) | accepted | 本地 Client DTO 保留 reasoning、工具参数与结果；完整历史与 live 使用同一 reducer |
 | [0144](0144-local-runtime-service-and-multi-workspace-admission.md) | accepted | 默认 Runtime Store 由本机 Service 单一拥有；App admission 让一个 Host 隔离多个 trusted Workspace |
+| [0145](0145-workspace-trust-binds-external-read-scope.md) | accepted | Workspace Trust 在 Runtime 连接前绑定并显示关联 external-read roots；授权不依赖命令名 |

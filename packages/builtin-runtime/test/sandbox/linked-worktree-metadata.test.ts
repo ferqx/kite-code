@@ -11,7 +11,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { resolveRegisteredGitMetadataReadOnlyRoots } from '../../src/git';
+import {
+  resolveRegisteredGitMetadataReadOnlyRoots,
+  resolveWorkspaceGitMetadataReadOnlyRoots,
+} from '../../src/git';
 import { generateBwrapArgs, generateSandboxProfile } from '../../src/sandbox';
 
 function git(workspace: string, ...args: string[]): string {
@@ -50,6 +53,7 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
       const commonDir = realpathSync.native(join(primary, '.git'));
       const roots = resolveRegisteredGitMetadataReadOnlyRoots(linked);
       expect(roots).toEqual([commonDir]);
+      expect(resolveWorkspaceGitMetadataReadOnlyRoots(linked)).toEqual([commonDir]);
 
       const profile = generateSandboxProfile(linked, { runtimeReadOnlyRoots: roots });
       expect(profile).toContain(`(subpath "${commonDir}")`);
@@ -73,7 +77,7 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
     }
   });
 
-  test('an arbitrary external gitfile or symlinked metadata grants nothing', () => {
+  test('unregistered external metadata gets no broker authority but remains discoverable for user approval', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-linked-sandbox-hostile-'));
     const external = mkdtempSync(join(tmpdir(), 'kite-linked-sandbox-private-'));
     try {
@@ -82,10 +86,20 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
       writeFileSync(join(external, 'worktrees', 'fake', 'gitdir'), join(workspace, '.git'));
       writeFileSync(join(workspace, '.git'), `gitdir: ${join(external, 'worktrees', 'fake')}\n`);
       expect(resolveRegisteredGitMetadataReadOnlyRoots(workspace)).toEqual([]);
+      expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace)).toEqual([
+        realpathSync.native(external),
+      ]);
 
       rmSync(join(workspace, '.git'));
       symlinkSync(join(external, 'worktrees', 'fake'), join(workspace, '.git'));
       expect(resolveRegisteredGitMetadataReadOnlyRoots(workspace)).toEqual([]);
+      expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace)).toEqual([
+        realpathSync.native(join(external, 'worktrees', 'fake')),
+      ]);
+
+      rmSync(join(workspace, '.git'));
+      writeFileSync(join(workspace, '.git'), `gitdir: ${'x'.repeat(5_000)}\n`);
+      expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace)).toEqual([]);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(external, { recursive: true, force: true });

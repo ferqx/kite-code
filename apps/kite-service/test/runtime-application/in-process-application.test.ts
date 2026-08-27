@@ -25,6 +25,7 @@ import { createInProcessKiteRuntimeApplication } from '../../src/runtime-applica
 
 const A = identity('/workspace/a', 'project-a', 'a');
 const B = identity('/workspace/b', 'project-b', 'b');
+const EXTERNAL_READ_SCOPE = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
 
 function identity(path: string, projectId: string, digest: string): KiteWorkspaceIdentity {
   return {
@@ -50,6 +51,7 @@ function handlers(workspace: KiteWorkspaceIdentity): KiteAppControlHandlerPorts 
         status: 'trusted',
         revision: 'trust-1',
         canDecide: false,
+        externalReadScope: EXTERNAL_READ_SCOPE,
       }),
       decide: async () => ({
         schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
@@ -57,6 +59,7 @@ function handlers(workspace: KiteWorkspaceIdentity): KiteAppControlHandlerPorts 
         status: 'trusted',
         outcome: 'already_trusted',
         revision: 'trust-1',
+        externalReadScope: EXTERNAL_READ_SCOPE,
       }),
     },
     providerModel: {

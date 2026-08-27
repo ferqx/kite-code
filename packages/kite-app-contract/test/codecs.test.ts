@@ -63,6 +63,10 @@ const workspace = {
 } as const;
 
 const revision = 'revision-1';
+const externalReadScope = {
+  roots: ['/tmp/kite-primary/.git'],
+  digest: 'sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+} as const;
 
 const trustQueryRequest: WorkspaceTrustQueryRequest = {
   schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
@@ -75,6 +79,7 @@ const trustQueryResponse: WorkspaceTrustQueryResponse = {
   status: 'unknown',
   revision,
   canDecide: true,
+  externalReadScope,
 };
 
 const trustDecisionRequest: WorkspaceTrustDecisionRequest = {
@@ -83,6 +88,7 @@ const trustDecisionRequest: WorkspaceTrustDecisionRequest = {
   observedStatus: 'unknown',
   expectedRevision: revision,
   decision: 'trust',
+  externalReadScopeDigest: externalReadScope.digest,
 };
 
 const trustDecisionResponse: WorkspaceTrustDecisionResponse = {
@@ -91,6 +97,7 @@ const trustDecisionResponse: WorkspaceTrustDecisionResponse = {
   status: 'trusted',
   outcome: 'recorded',
   revision,
+  externalReadScope,
 };
 
 const providerSnapshot: ProviderModelSnapshot = {
@@ -194,7 +201,7 @@ const releaseStatus: ReleaseStatusSnapshot = {
 
 describe('Kite App Contract', () => {
   test('publishes one fixed revision and exact route schemas', () => {
-    expect(KITE_APP_CONTRACT_REVISION_).toBe('kite-app-contract-v1');
+    expect(KITE_APP_CONTRACT_REVISION_).toBe('kite-app-contract-v2');
     expect(workspaceTrustQueryRequestCodec.schema).toBe(WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_);
     expect(workspaceTrustQueryResponseCodec.schema).toBe(WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_);
     expect(providerModelSnapshotRequestCodec.schema).toBe(PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_);

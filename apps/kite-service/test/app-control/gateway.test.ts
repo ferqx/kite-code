@@ -19,6 +19,7 @@ const WORKSPACE: KiteWorkspaceIdentity = {
   projectId: 'gateway-project',
   workspaceDigest: `sha256:${'a'.repeat(64)}`,
 };
+const EXTERNAL_READ_SCOPE = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
 
 describe('InProcess App Control gateway', () => {
   test('boots discovery without Workspace dependencies and binds them only after admission', async () => {
@@ -32,6 +33,7 @@ describe('InProcess App Control gateway', () => {
           status: 'trusted',
           revision: 'trust-1',
           canDecide: false,
+          externalReadScope: EXTERNAL_READ_SCOPE,
         }),
         decide: async () => {
           throw new Error('unused');
@@ -102,6 +104,7 @@ describe('InProcess App Control gateway', () => {
         observedStatus: 'unknown',
         expectedRevision: 'trust-1',
         decision: 'trust',
+        externalReadScopeDigest: EXTERNAL_READ_SCOPE.digest,
       }),
     ).rejects.toMatchObject({ code: 'invalid_app_control_request' });
   });

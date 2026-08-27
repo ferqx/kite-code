@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   type KiteAppControlClient,
   WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+  WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
   type WorkspaceTrustDecisionResponse,
@@ -18,11 +19,16 @@ const CANONICAL_WORKSPACE = {
   projectId: 'project_workspace',
   workspaceDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 } as const;
+const EXTERNAL_READ_SCOPE = {
+  roots: ['/canonical/primary/.git'],
+  digest: `sha256:${'b'.repeat(64)}` as const,
+};
 
 function queryResponse(
   status: WorkspaceTrustQueryResponse['status'],
   revision: string,
   canDecide = status === 'unknown',
+  externalReadScope = EXTERNAL_READ_SCOPE,
 ): WorkspaceTrustQueryResponse {
   return {
     schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
@@ -30,6 +36,7 @@ function queryResponse(
     status,
     revision,
     canDecide,
+    externalReadScope,
   };
 }
 
@@ -75,11 +82,12 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
       queries: [queryResponse('unknown', 'trust-revision-1')],
       decisions: [
         {
-          schema: 'kite.app.workspace-trust.decision-response.v1',
+          schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
           workspace: CANONICAL_WORKSPACE,
           status: 'trusted',
           outcome: 'recorded',
           revision: 'trust-revision-2',
+          externalReadScope: EXTERNAL_READ_SCOPE,
         },
       ],
     });
@@ -95,6 +103,7 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
     );
 
     await waitForFrameText(view.lastFrame, 'Trust status: unknown');
+    expect(view.lastFrame()).toContain('/canonical/primary/.git');
     expect(fixture.queryRequests).toEqual([
       { schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_, workspace: WORKSPACE },
     ]);
@@ -112,6 +121,7 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
         observedStatus: 'unknown',
         expectedRevision: 'trust-revision-1',
         decision: 'trust',
+        externalReadScopeDigest: EXTERNAL_READ_SCOPE.digest,
       },
     ]);
     expect(trusted).toBe(1);
@@ -126,11 +136,12 @@ describe('WorkspaceTrustGate App Control client boundary', () => {
       ],
       decisions: [
         {
-          schema: 'kite.app.workspace-trust.decision-response.v1',
+          schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
           workspace: CANONICAL_WORKSPACE,
           status: 'unknown',
           outcome: 'conflict',
           revision: 'trust-revision-2',
+          externalReadScope: EXTERNAL_READ_SCOPE,
         },
       ],
     });

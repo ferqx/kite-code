@@ -8,7 +8,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -29,6 +30,7 @@ describe('TUI PTY System — Workspace Trust', () => {
   let tui: PtyProcess;
   let restarted: PtyProcess | undefined;
   let declined: PtyProcess | undefined;
+  let externalGitDir = '';
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -41,6 +43,10 @@ describe('TUI PTY System — Workspace Trust', () => {
       files: { '.env': 'KITE_TRUST_ALL_WORKSPACES=1\n' },
     });
     workspace.env.CI = 'true';
+    externalGitDir = join(workspace.home, 'external-repository.git');
+    execFileSync('git', ['init', '--bare', '--quiet', externalGitDir]);
+    externalGitDir = realpathSync(externalGitDir);
+    writeFileSync(join(workspace.workspace, '.git'), `gitdir: ${externalGitDir}\n`);
 
     server.setResponses([]);
 
@@ -69,6 +75,8 @@ describe('TUI PTY System — Workspace Trust', () => {
       expect(screenContains(out, GATE_TEXT)).toBe(true);
       // The folder path must be visible so the user knows what they trust.
       expect(screenContains(out, realpathSync(workspace.workspace))).toBe(true);
+      expect(screenContains(out, 'This workspace also requires read-only access to:')).toBe(true);
+      expect(screenContains(out, externalGitDir)).toBe(true);
       expect(screenContains(out, 'Trust this workspace and continue')).toBe(true);
       expect(screenContains(out, 'Exit Kite Code')).toBe(true);
       // The main UI must not mount before a decision is made.
@@ -92,12 +100,16 @@ describe('TUI PTY System — Workspace Trust', () => {
       expect(existsSync(trustFile)).toBe(true);
       const file = JSON.parse(readFileSync(trustFile, 'utf8')) as {
         version: number;
-        records: Record<string, { workspacePath: string; source: string }>;
+        records: Record<
+          string,
+          { workspacePath: string; source: string; externalReadScopeDigest: string }
+        >;
       };
       expect(file.version).toBe(1);
       const records = Object.values(file.records);
       expect(records.length).toBe(1);
       expect(records[0]?.source).toBe('user');
+      expect(records[0]?.externalReadScopeDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
       console.log('  Trust record persisted');
     },
     TIMEOUT,

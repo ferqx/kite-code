@@ -1,4 +1,5 @@
 import {
+  arrayValue,
   booleanValue,
   type ExactJsonCodec,
   enumValue,
@@ -16,11 +17,11 @@ import {
 export const WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_ =
   'kite.app.workspace-trust.query-request.v1' as const;
 export const WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_ =
-  'kite.app.workspace-trust.query-response.v1' as const;
+  'kite.app.workspace-trust.query-response.v2' as const;
 export const WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_ =
-  'kite.app.workspace-trust.decision-request.v1' as const;
+  'kite.app.workspace-trust.decision-request.v2' as const;
 export const WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_ =
-  'kite.app.workspace-trust.decision-response.v1' as const;
+  'kite.app.workspace-trust.decision-response.v2' as const;
 
 export interface KiteWorkspaceIdentity {
   readonly canonicalPath: string;
@@ -29,6 +30,11 @@ export interface KiteWorkspaceIdentity {
 }
 
 export type WorkspaceTrustStatus = 'trusted' | 'unknown' | 'corrupt' | 'unavailable';
+
+export interface WorkspaceExternalReadScope {
+  readonly roots: readonly string[];
+  readonly digest: `sha256:${string}`;
+}
 
 export interface WorkspaceTrustQueryRequest {
   readonly schema: typeof WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_;
@@ -42,6 +48,8 @@ export interface WorkspaceTrustQueryResponse {
   readonly status: WorkspaceTrustStatus;
   readonly revision: string;
   readonly canDecide: boolean;
+  /** Exact Workspace-associated roots outside canonicalPath that trust will admit read-only. */
+  readonly externalReadScope: WorkspaceExternalReadScope;
 }
 
 export interface WorkspaceTrustDecisionRequest {
@@ -50,6 +58,8 @@ export interface WorkspaceTrustDecisionRequest {
   readonly observedStatus: WorkspaceTrustStatus;
   readonly expectedRevision: string;
   readonly decision: 'trust' | 'decline';
+  /** Binds the decision to the external roots displayed to the user. */
+  readonly externalReadScopeDigest: `sha256:${string}`;
 }
 
 export type WorkspaceTrustDecisionOutcome =
@@ -65,6 +75,7 @@ export interface WorkspaceTrustDecisionResponse {
   readonly status: WorkspaceTrustStatus;
   readonly outcome: WorkspaceTrustDecisionOutcome;
   readonly revision: string;
+  readonly externalReadScope: WorkspaceExternalReadScope;
 }
 
 export const workspaceTrustQueryRequestCodec: ExactJsonCodec<WorkspaceTrustQueryRequest> =
@@ -136,7 +147,7 @@ function encodeWorkspaceTrustQueryRequest(value: WorkspaceTrustQueryRequest): Js
 function decodeWorkspaceTrustQueryResponse(input: unknown): WorkspaceTrustQueryResponse {
   const value = exactObject(
     input,
-    ['canDecide', 'revision', 'schema', 'status', 'workspace'],
+    ['canDecide', 'externalReadScope', 'revision', 'schema', 'status', 'workspace'],
     'WorkspaceTrustQueryResponse',
   );
   assertSchema(value, WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_, 'WorkspaceTrustQueryResponse');
@@ -157,6 +168,10 @@ function decodeWorkspaceTrustQueryResponse(input: unknown): WorkspaceTrustQueryR
       required(value, 'canDecide', 'WorkspaceTrustQueryResponse'),
       'WorkspaceTrustQueryResponse.canDecide',
     ),
+    externalReadScope: decodeWorkspaceExternalReadScope(
+      required(value, 'externalReadScope', 'WorkspaceTrustQueryResponse'),
+      'WorkspaceTrustQueryResponse.externalReadScope',
+    ),
   };
 }
 
@@ -167,13 +182,21 @@ function encodeWorkspaceTrustQueryResponse(value: WorkspaceTrustQueryResponse): 
     status: value.status,
     revision: value.revision,
     canDecide: value.canDecide,
+    externalReadScope: encodeWorkspaceExternalReadScope(value.externalReadScope),
   };
 }
 
 function decodeWorkspaceTrustDecisionRequest(input: unknown): WorkspaceTrustDecisionRequest {
   const value = exactObject(
     input,
-    ['decision', 'expectedRevision', 'observedStatus', 'schema', 'workspace'],
+    [
+      'decision',
+      'expectedRevision',
+      'externalReadScopeDigest',
+      'observedStatus',
+      'schema',
+      'workspace',
+    ],
     'WorkspaceTrustDecisionRequest',
   );
   assertSchema(value, WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_, 'WorkspaceTrustDecisionRequest');
@@ -197,6 +220,10 @@ function decodeWorkspaceTrustDecisionRequest(input: unknown): WorkspaceTrustDeci
       'WorkspaceTrustDecisionRequest.decision',
       ['trust', 'decline'] as const,
     ),
+    externalReadScopeDigest: sha256Digest(
+      required(value, 'externalReadScopeDigest', 'WorkspaceTrustDecisionRequest'),
+      'WorkspaceTrustDecisionRequest.externalReadScopeDigest',
+    ),
   };
 }
 
@@ -207,13 +234,14 @@ function encodeWorkspaceTrustDecisionRequest(value: WorkspaceTrustDecisionReques
     observedStatus: value.observedStatus,
     expectedRevision: value.expectedRevision,
     decision: value.decision,
+    externalReadScopeDigest: value.externalReadScopeDigest,
   };
 }
 
 function decodeWorkspaceTrustDecisionResponse(input: unknown): WorkspaceTrustDecisionResponse {
   const value = exactObject(
     input,
-    ['outcome', 'revision', 'schema', 'status', 'workspace'],
+    ['externalReadScope', 'outcome', 'revision', 'schema', 'status', 'workspace'],
     'WorkspaceTrustDecisionResponse',
   );
   assertSchema(value, WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_, 'WorkspaceTrustDecisionResponse');
@@ -237,6 +265,10 @@ function decodeWorkspaceTrustDecisionResponse(input: unknown): WorkspaceTrustDec
       'WorkspaceTrustDecisionResponse.revision',
       256,
     ),
+    externalReadScope: decodeWorkspaceExternalReadScope(
+      required(value, 'externalReadScope', 'WorkspaceTrustDecisionResponse'),
+      'WorkspaceTrustDecisionResponse.externalReadScope',
+    ),
   };
 }
 
@@ -247,7 +279,28 @@ function encodeWorkspaceTrustDecisionResponse(value: WorkspaceTrustDecisionRespo
     status: value.status,
     outcome: value.outcome,
     revision: value.revision,
+    externalReadScope: encodeWorkspaceExternalReadScope(value.externalReadScope),
   };
+}
+
+function decodeWorkspaceExternalReadScope(
+  input: unknown,
+  label: string,
+): WorkspaceExternalReadScope {
+  const value = exactObject(input, ['digest', 'roots'], label);
+  return {
+    roots: arrayValue(
+      required(value, 'roots', label),
+      `${label}.roots`,
+      (root, index) => stringValue(root, `${label}.roots[${index}]`, { min: 1, max: 4_096 }),
+      32,
+    ),
+    digest: sha256Digest(required(value, 'digest', label), `${label}.digest`),
+  };
+}
+
+function encodeWorkspaceExternalReadScope(value: WorkspaceExternalReadScope): JsonObject {
+  return { roots: [...value.roots], digest: value.digest };
 }
 
 function encodeWorkspaceIdentity(value: KiteWorkspaceIdentity): JsonObject {

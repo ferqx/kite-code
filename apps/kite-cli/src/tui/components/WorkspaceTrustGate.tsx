@@ -98,6 +98,7 @@ export default function WorkspaceTrustGate({
         observedStatus: observed.status,
         expectedRevision: observed.revision,
         decision: 'trust',
+        externalReadScopeDigest: observed.externalReadScope.digest,
       });
       if (version !== requestVersion.current) return;
       if (
@@ -195,6 +196,16 @@ export default function WorkspaceTrustGate({
         <Box marginTop={1}>
           <Text color={t.muted}>{translate('trust.approvalSettings')}</Text>
         </Box>
+        {trustSnapshot && trustSnapshot.externalReadScope.roots.length > 0 ? (
+          <Box marginTop={1} flexDirection="column">
+            <Text color={t.muted}>{translate('trust.externalReadScope')}</Text>
+            {trustSnapshot.externalReadScope.roots.map((root) => (
+              <Text key={root} color={t.dim}>
+                {root}
+              </Text>
+            ))}
+          </Box>
+        ) : null}
         <Box marginTop={1}>
           <Text color={t.dim}>Trust status: {trustStatus}</Text>
         </Box>

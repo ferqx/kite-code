@@ -9,6 +9,7 @@ export {
   createGitBroker,
   isGitRevision,
   resolveRegisteredGitMetadataReadOnlyRoots,
+  resolveWorkspaceGitMetadataReadOnlyRoots,
 } from './broker';
 export type { BrokeredGitQualificationDecision } from './qualification';
 export { qualifyBrokeredGitNativeDeny } from './qualification';

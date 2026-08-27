@@ -134,14 +134,15 @@ macOS Seatbelt profile 在生成任何 allow rule 前 canonicalize Workspace 与
 Hardened Shell environment从只读`/private/var/select/developer_dir`解析当前Apple developer toolchain，并把其
 真实`usr/bin`置于sandbox PATH首位；不得通过`/usr/bin/git`的xcrun shim写入Seatbelt scope外的
 `DARWIN_USER_CACHE_DIR`，也不得为该cache扩大系统临时目录写权限。
-Git linked worktree 的 Workspace 内 `.git` 是指向primary repository metadata的gitfile，不能仅凭该文本扩大
-Workspace文件系统身份。Builtin Git authority只在目标位于标准`<primary>/.git/worktrees/<id>`namespace、
-`commondir`解析回同一primary `.git`、`gitdir`反向指回当前Workspace marker，且metadata tree无symlink或
-alternates时，返回唯一common `.git`只读root；任一校验失败都返回空授权。Service Shell composition把该root与
-固定Bun/Node runtime roots合并：Seatbelt只增加`file-read`，Linux bubblewrap只增加exact `--ro-bind`，都不授权
-primary working tree或外部Git metadata写入。因此`git log`、read-only `git branch`等可在合法linked worktree
-读取objects/refs，而任意外部gitfile不能借此读取其他repository；Git mutation/locking authority仍属于typed Git
-broker或另行批准的external scope。
+Git linked worktree或external gitfile的Workspace内`.git`会指向canonical Workspace之外的repository metadata；
+不能仅凭该文本扩大文件系统身份，也不能因它不是标准registered worktree就把只读操作伪装成repository损坏。
+Builtin scope discovery只解析Git实际需要读取的canonical `gitDir/commondir`，不授予权限；Service把排序后的exact
+roots及digest加入Workspace Trust snapshot/revision。TUI在Runtime connect前显示这些路径，decision同时绑定Trust
+revision与scope digest；legacy trust只有在external roots为空时继续有效。未确认、拒绝或identity drift时Runtime
+transport保持关闭，Seatbelt/bubblewrap获得零外部root；确认后Seatbelt只增加`file-read`，Linux bubblewrap只增加
+exact `--ro-bind`，都不授权primary working tree或外部Git metadata写入。该策略在Workspace scope层求值，与具体
+Shell命令名无关；typed Git broker仍单独用standard namespace、reciprocal backlink、no-symlink/no-alternates校验
+Git transaction authority。
 每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
 process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
 遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。最后一个

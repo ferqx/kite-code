@@ -141,6 +141,7 @@ function handlerFixture(
 ): HandlerFixture {
   const calls: string[] = [];
   const expectedRevisions: string[] = [];
+  const externalReadScope = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
   const raw = {
     workspaceTrust: {
       async query(): Promise<WorkspaceTrustQueryResponse> {
@@ -151,6 +152,7 @@ function handlerFixture(
           status: 'unknown',
           revision: `${label}-trust-1`,
           canDecide: true,
+          externalReadScope,
         };
       },
       async decide(
@@ -164,6 +166,7 @@ function handlerFixture(
           status: request.decision === 'trust' ? 'trusted' : 'unknown',
           outcome: request.decision === 'trust' ? 'recorded' : 'declined',
           revision: `${label}-trust-2`,
+          externalReadScope,
         };
       },
     },
@@ -268,6 +271,7 @@ describe('Kite App Control service', () => {
       observedStatus: trust.status,
       expectedRevision: trust.revision,
       decision: 'trust',
+      externalReadScopeDigest: trust.externalReadScope.digest,
     });
     await client.getProviderModelSnapshot({
       schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,

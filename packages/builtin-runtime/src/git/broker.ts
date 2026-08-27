@@ -29,6 +29,7 @@ const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 60_000;
+const MAX_GIT_IDENTITY_FILE_BYTES = 4 * 1024;
 const REVISION_PATTERN = /^(?:HEAD|[0-9a-f]{7,40}|refs\/(?:heads|tags)\/[A-Za-z0-9._/-]+)$/;
 const PROTECTED_SEGMENTS = new Set([
   '.git',
@@ -252,6 +253,23 @@ function assertRegularMetadataFile(path: string, optional = true): void {
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('metadata_symlink');
 }
 
+function readGitIdentityFile(path: string): string {
+  const stat = lstatSync(path);
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.size <= 0 ||
+    stat.size > MAX_GIT_IDENTITY_FILE_BYTES
+  ) {
+    throw new Error('metadata_identity_invalid');
+  }
+  const value = readFileSync(path, 'utf8');
+  if (Buffer.byteLength(value, 'utf8') > MAX_GIT_IDENTITY_FILE_BYTES) {
+    throw new Error('metadata_identity_invalid');
+  }
+  return value;
+}
+
 function assertNoSymlinkPath(root: string, target: string): void {
   if (!pathInside(root, target)) throw new Error('metadata_outside');
   const rel = relative(root, target);
@@ -314,7 +332,7 @@ function readGitDirectory(
     if (gitDir !== realpathSync.native(join(workspace, '.git'))) throw new Error('gitdir_invalid');
   } else if (markerStat.isFile() && !markerStat.isSymbolicLink()) {
     linked = true;
-    const match = /^gitdir:\s*(.+)\s*$/i.exec(readFileSync(marker, 'utf8'));
+    const match = /^gitdir:\s*(.+)\s*$/i.exec(readGitIdentityFile(marker));
     if (!match?.[1]) throw new Error('gitdir_file_invalid');
     gitDir = realpathSync.native(resolve(workspace, match[1]));
   } else {
@@ -336,7 +354,7 @@ function readGitDirectory(
   const commonDirFile = join(gitDir, 'commondir');
   assertRegularMetadataFile(commonDirFile);
   const commonDir = existsSync(commonDirFile)
-    ? realpathSync.native(resolve(gitDir, readFileSync(commonDirFile, 'utf8').trim()))
+    ? realpathSync.native(resolve(gitDir, readGitIdentityFile(commonDirFile).trim()))
     : gitDir;
   if (!statSync(commonDir).isDirectory()) throw new Error('common_dir_invalid');
   if (linked) {
@@ -345,7 +363,7 @@ function readGitDirectory(
     }
     const backlink = join(gitDir, 'gitdir');
     assertRegularMetadataFile(backlink, false);
-    const backlinkTarget = resolve(dirname(backlink), readFileSync(backlink, 'utf8').trim());
+    const backlinkTarget = resolve(dirname(backlink), readGitIdentityFile(backlink).trim());
     if (resolve(backlinkTarget) !== resolve(marker)) throw new Error('linked_worktree_backlink');
   } else if (workspace !== authorizedRepositoryRoot || commonDir !== gitDir) {
     throw new Error('repository_authority_mismatch');
@@ -374,13 +392,13 @@ export function resolveRegisteredGitMetadataReadOnlyRoots(
     if (markerStat.isDirectory() && !markerStat.isSymbolicLink()) return Object.freeze([]);
     if (!markerStat.isFile() || markerStat.isSymbolicLink()) return Object.freeze([]);
 
-    const match = /^gitdir:\s*(.+)\s*$/i.exec(readFileSync(marker, 'utf8'));
+    const match = /^gitdir:\s*(.+)\s*$/i.exec(readGitIdentityFile(marker));
     if (!match?.[1]) return Object.freeze([]);
     const gitDir = realpathSync.native(resolve(workspace, match[1]));
     const commonDirFile = join(gitDir, 'commondir');
     assertRegularMetadataFile(commonDirFile, false);
     const commonDir = realpathSync.native(
-      resolve(gitDir, readFileSync(commonDirFile, 'utf8').trim()),
+      resolve(gitDir, readGitIdentityFile(commonDirFile).trim()),
     );
     if (basename(commonDir) !== '.git') return Object.freeze([]);
 
@@ -388,6 +406,49 @@ export function resolveRegisteredGitMetadataReadOnlyRoots(
     const validated = readGitDirectory(workspace, authorizedRepositoryRoot);
     if (validated.gitDir !== gitDir || validated.commonDir !== commonDir) return Object.freeze([]);
     return Object.freeze([commonDir]);
+  } catch {
+    return Object.freeze([]);
+  }
+}
+
+/**
+ * Discover the canonical Git metadata roots a Workspace would read even when
+ * they are not a registered linked worktree. This function grants nothing;
+ * App Workspace Trust must display and authorize every returned external root
+ * before a native sandbox may project it read-only.
+ */
+export function resolveWorkspaceGitMetadataReadOnlyRoots(
+  workspaceInput: string,
+): readonly string[] {
+  try {
+    const workspace = realpathSync.native(resolve(workspaceInput));
+    const marker = join(workspace, '.git');
+    const markerStat = lstatSync(marker);
+    if (markerStat.isDirectory() && !markerStat.isSymbolicLink()) return Object.freeze([]);
+    if (markerStat.isSymbolicLink()) {
+      const target = realpathSync.native(marker);
+      return Object.freeze(pathInside(workspace, target) ? [] : [target]);
+    }
+    if (!markerStat.isFile()) return Object.freeze([]);
+
+    const match = /^gitdir:\s*(.+)\s*$/i.exec(readGitIdentityFile(marker));
+    if (!match?.[1]) return Object.freeze([]);
+    const gitDir = realpathSync.native(resolve(workspace, match[1]));
+    const roots = [gitDir];
+    const commonDirFile = join(gitDir, 'commondir');
+    if (existsSync(commonDirFile)) {
+      const commonDirText = readGitIdentityFile(commonDirFile).trim();
+      if (commonDirText) roots.push(realpathSync.native(resolve(gitDir, commonDirText)));
+    }
+    const externalRoots = [...new Set(roots.filter((root) => !pathInside(workspace, root)))];
+    return Object.freeze(
+      externalRoots
+        .filter(
+          (root) =>
+            !externalRoots.some((candidate) => candidate !== root && pathInside(candidate, root)),
+        )
+        .sort((left, right) => left.localeCompare(right)),
+    );
   } catch {
     return Object.freeze([]);
   }

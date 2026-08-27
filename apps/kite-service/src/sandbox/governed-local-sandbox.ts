@@ -28,7 +28,7 @@ export interface GovernedLocalSandboxCompositionOptions {
   readonly executionBoundaryDigest: string;
   readonly protectedPathRevision: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
-  readonly runtimeReadOnlyRoots?: readonly string[];
+  readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
   readonly brokeredGitFeatureRevision?: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;

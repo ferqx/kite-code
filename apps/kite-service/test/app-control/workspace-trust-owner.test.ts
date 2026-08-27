@@ -27,8 +27,19 @@ describe('Workspace Trust App Control owner', () => {
       observedStatus: first.status,
       expectedRevision: `stale-${first.revision}`,
       decision: 'trust',
+      externalReadScopeDigest: first.externalReadScope.digest,
     });
     expect(conflict.outcome).toBe('conflict');
+
+    const scopeConflict = await owner.decide({
+      schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+      workspace: first.workspace,
+      observedStatus: first.status,
+      expectedRevision: first.revision,
+      decision: 'trust',
+      externalReadScopeDigest: `sha256:${'f'.repeat(64)}`,
+    });
+    expect(scopeConflict.outcome).toBe('conflict');
 
     const recorded = await owner.decide({
       schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
@@ -36,6 +47,7 @@ describe('Workspace Trust App Control owner', () => {
       observedStatus: first.status,
       expectedRevision: first.revision,
       decision: 'trust',
+      externalReadScopeDigest: first.externalReadScope.digest,
     });
     expect(recorded).toMatchObject({ outcome: 'recorded', status: 'trusted' });
     expect(recorded.revision).not.toBe(first.revision);

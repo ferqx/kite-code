@@ -48,6 +48,7 @@ test('starts neutral and admits a trusted workspace lazily', async () => {
       observedStatus: queried.status,
       expectedRevision: queried.revision,
       decision: 'trust',
+      externalReadScopeDigest: queried.externalReadScope.digest,
     });
     expect(decided.outcome).toBe('recorded');
     await expect(

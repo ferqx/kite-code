@@ -368,6 +368,10 @@ function createFakeApplication(config: KiteServiceProcessHarnessChildConfig): {
   const appControlForWorkspace = (
     admittedWorkspace: KiteWorkspaceIdentity,
   ): KiteAppControlClient => {
+    const externalReadScope = {
+      roots: [],
+      digest: `sha256:${'0'.repeat(64)}` as const,
+    };
     const trustQuery = async (
       _request: WorkspaceTrustQueryRequest,
     ): Promise<WorkspaceTrustQueryResponse> => ({
@@ -376,6 +380,7 @@ function createFakeApplication(config: KiteServiceProcessHarnessChildConfig): {
       status: 'trusted',
       revision: 'harness-trust-v1',
       canDecide: true,
+      externalReadScope,
     });
     const trustDecision = async (
       request: WorkspaceTrustDecisionRequest,
@@ -385,6 +390,7 @@ function createFakeApplication(config: KiteServiceProcessHarnessChildConfig): {
       status: request.decision === 'trust' ? 'trusted' : 'unknown',
       outcome: request.decision === 'trust' ? 'recorded' : 'declined',
       revision: 'harness-trust-v1',
+      externalReadScope,
     });
     const getProvider = async (
       _request: ProviderModelSnapshotRequest,

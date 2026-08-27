@@ -26,6 +26,7 @@ function query(workspace: string, storePath?: string): WorkspaceTrustQueryRespon
     status: snapshot.status,
     revision: snapshot.revision,
     canDecide: snapshot.status === 'unknown' || snapshot.status === 'trusted',
+    externalReadScope: snapshot.externalReadScope,
   };
 }
 
@@ -41,7 +42,8 @@ export function createWorkspaceTrustOwner(
       const current = query(request.workspace.canonicalPath, input.storePath);
       if (
         current.workspace.projectId !== request.workspace.projectId ||
-        current.workspace.workspaceDigest !== request.workspace.workspaceDigest
+        current.workspace.workspaceDigest !== request.workspace.workspaceDigest ||
+        current.externalReadScope.digest !== request.externalReadScopeDigest
       ) {
         return {
           schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
@@ -49,6 +51,7 @@ export function createWorkspaceTrustOwner(
           status: current.status,
           outcome: 'conflict',
           revision: current.revision,
+          externalReadScope: current.externalReadScope,
         };
       }
       if (request.decision === 'decline') {
@@ -58,15 +61,21 @@ export function createWorkspaceTrustOwner(
           status: current.status,
           outcome: 'declined',
           revision: current.revision,
+          externalReadScope: current.externalReadScope,
         };
       }
-      if (current.status === 'trusted') {
+      if (
+        current.status === 'trusted' &&
+        current.status === request.observedStatus &&
+        current.revision === request.expectedRevision
+      ) {
         return {
           schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
           workspace: current.workspace,
           status: current.status,
           outcome: 'already_trusted',
           revision: current.revision,
+          externalReadScope: current.externalReadScope,
         };
       }
       if (
@@ -79,6 +88,7 @@ export function createWorkspaceTrustOwner(
           status: current.status,
           outcome: 'conflict',
           revision: current.revision,
+          externalReadScope: current.externalReadScope,
         };
       }
       const result = trustWorkspace({
@@ -99,6 +109,7 @@ export function createWorkspaceTrustOwner(
               ? 'conflict'
               : 'unavailable',
         revision: updated.revision,
+        externalReadScope: updated.externalReadScope,
       };
     },
   });

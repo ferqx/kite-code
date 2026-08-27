@@ -16,6 +16,8 @@
 
 - 中文是默认仓库 current 文档语言；产品可见 locale 至少保持现有中文/英文目录完整。
 - 路径、命令、模型名、Provider 名、schema 字段和用户/模型原文不翻译。
+- Workspace Trust 的external-read scope说明使用统一中英文key；Service投影的canonical root逐项原样显示且不翻译，
+  文案必须明确为只读访问，不能把scope描述成命令级批准或Full filesystem权限。
 - 可见错误只使用已脱敏的 bounded projection，不把 Provider 原文、credential、Artifact locator 或内部 identity 拼入译文。
 - Approval 的 queue sequence、generation 与 interaction ID 是内部 durable identity，不注册可见翻译 key；面板只翻译
   人工/自动 route、匹配请求数量与用户动作，settlement 仍使用未展示的 exact identity。

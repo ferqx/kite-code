@@ -135,6 +135,9 @@ export function createKiteInProcessAppControlComposition<
           entrypoint: 'tui',
           workspace: workspace.canonicalPath,
           config,
+          ...(options.workspaceTrustStorePath === undefined
+            ? {}
+            : { workspaceTrustStorePath: options.workspaceTrustStorePath }),
         }))
       : undefined;
     const observability = config

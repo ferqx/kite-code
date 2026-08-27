@@ -1081,12 +1081,14 @@ function createFixture(
 
   function fakeAppControl(): KiteAppControlClient {
     const currentProviderSnapshot = providerSnapshot();
+    const externalReadScope = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
     const trustQuery: WorkspaceTrustQueryResponse = {
       schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
       workspace,
       status: 'trusted',
       revision: 'revision-1',
       canDecide: false,
+      externalReadScope,
     };
     const trustDecision: WorkspaceTrustDecisionResponse = {
       schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
@@ -1094,6 +1096,7 @@ function createFixture(
       status: 'trusted',
       outcome: 'already_trusted',
       revision: 'revision-1',
+      externalReadScope,
     };
     const release: ReleaseStatusSnapshot = {
       schema: RELEASE_STATUS_RESPONSE_SCHEMA_,

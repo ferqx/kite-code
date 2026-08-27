@@ -1,4 +1,3 @@
-import { resolveRegisteredGitMetadataReadOnlyRoots } from '@kite-ai/builtin-runtime/git';
 import type {
   BuiltinPreparedShellExecutionInput,
   ExecutionBoundary,
@@ -11,6 +10,7 @@ import {
   type SandboxBackend,
 } from '@kite-ai/builtin-runtime/sandbox';
 import { computeExecutionBoundaryDigest } from '#kite-service/config/execution-boundary';
+import { getTrustedWorkspaceExternalReadRoots } from '#kite-service/config/workspace-trust';
 import { createAcknowledgedHostShellExecutor } from './acknowledged-host-shell';
 import { createGovernedLocalSandboxExecutor } from './governed-local-sandbox';
 import {
@@ -326,6 +326,8 @@ export function composeAppSandboxExecutor(input: {
   onDiagnostic?: (message: string) => void;
   /** Native conformance seam; production callers must keep the acknowledged default. */
   hostFallbackPolicy?: 'acknowledged' | 'deny';
+  /** Exact Service-owned trust store used by this Runtime composition. */
+  workspaceTrustStorePath?: string;
 }): AppShellExecutor {
   const boundary = input.config.executionBoundary;
   const surface = input.config.executionCapabilitySurface;
@@ -358,7 +360,8 @@ export function composeAppSandboxExecutor(input: {
       createGovernedLocalSandboxExecutor({
         backend,
         canonicalWorkspace: workspace,
-        runtimeReadOnlyRoots: resolveRegisteredGitMetadataReadOnlyRoots(workspace),
+        runtimeReadOnlyRoots: () =>
+          getTrustedWorkspaceExternalReadRoots(workspace, input.workspaceTrustStorePath),
         brokeredGitFeatureRevision: surface?.brokeredGitFeatureRevision ?? undefined,
         executionBoundaryDigest: boundary
           ? computeExecutionBoundaryDigest(boundary)

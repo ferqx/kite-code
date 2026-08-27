@@ -32,9 +32,9 @@
 - Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、
   不含用户内容的确定性 `activationId`，使同一逻辑 command 的重试保持同一 activation identity。
   无效注入在 activation 建立前 fail closed，不能回退生成另一个 identity 后继续执行。
-- linked worktree 的外部 Git metadata 不因 Workspace 内存在 `.git` gitfile 自动获得文件系统授权；只有标准
-  `<primary>/.git/worktrees/<id>`、`commondir` 与 reciprocal `gitdir` backlink 完整一致时，Sandbox 才向
-  Seatbelt/bubblewrap投影唯一common `.git`只读根。任意外部gitfile、symlink、broken backlink或alternates均不授权。
+- Git broker仍用标准`<primary>/.git/worktrees/<id>`、`commondir`与reciprocal backlink校验transaction authority；
+  独立的Workspace scope discovery只canonicalize Git实际读取的外部`gitDir/commondir`，不授予权限。App必须先经
+  Workspace Trust确认exact external-read scope，Sandbox才可向Seatbelt/bubblewrap投影对应只读root；该规则不依赖命令名。
 
 ## 测试
 

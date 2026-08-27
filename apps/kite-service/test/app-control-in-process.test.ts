@@ -28,6 +28,7 @@ const workspace = {
   workspaceDigest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
 } as const;
 const revision = 'revision-1';
+const externalReadScope = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
 
 function fakeService(observed: string[]): KiteAppControlClient {
   return {
@@ -39,6 +40,7 @@ function fakeService(observed: string[]): KiteAppControlClient {
         status: 'unknown',
         revision,
         canDecide: request.workspace === workspace.canonicalPath,
+        externalReadScope,
       };
     },
     async decideWorkspaceTrust(request) {
@@ -49,6 +51,7 @@ function fakeService(observed: string[]): KiteAppControlClient {
         status: request.decision === 'trust' ? 'trusted' : request.observedStatus,
         outcome: request.decision === 'trust' ? 'recorded' : 'declined',
         revision: 'revision-2',
+        externalReadScope,
       };
     },
     async getProviderModelSnapshot() {
@@ -148,6 +151,7 @@ describe('InProcess Kite App Control client', () => {
       observedStatus: trust.status,
       expectedRevision: trust.revision,
       decision: 'trust',
+      externalReadScopeDigest: trust.externalReadScope.digest,
     });
     await client.getProviderModelSnapshot({
       schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,

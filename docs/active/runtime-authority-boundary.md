@@ -48,6 +48,9 @@ connection从不取得control token。每个HTTP请求绑定发起时的Service 
 迟到响应在reconnect后拒绝；Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History
 transcript逐条复用closed`RuntimeClientEvent`validator，unknown或带额外字段的event不能跨Native边界。client close只
 释放本connection、subscription与snapshot state，不取消Session/Turn或dispose Host。
+Trust identity除canonical Workspace三元组外还绑定Service发现的exact external-read roots digest；query在Runtime连接前
+向TUI/CLI投影canonical paths，decision经revision/scope CAS后才允许Sandbox只读挂载。scope drift重新阻断connection，
+generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust record自行提升这一authority。
 
 本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
