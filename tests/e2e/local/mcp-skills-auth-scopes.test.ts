@@ -28,7 +28,8 @@ async function runFixture(
     cwd: workspace,
     env: {
       ...process.env,
-      KITE_CODE_HOME: home,
+      ...(process.platform === 'win32' ? { USERPROFILE: home } : { HOME: home }),
+      KITE_CODE_HOME: join(home, '.kite-code'),
       ...env,
     },
     stdout: 'pipe',
