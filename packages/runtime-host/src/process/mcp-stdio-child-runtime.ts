@@ -50,12 +50,24 @@ type TerminalPayload = {
   readonly cleanup: 'confirmed';
 };
 
-export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.slice(2)): void {
+export function runMcpStdioChildRuntime(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<void> {
   if (args.length !== 1 || args[0] !== MCP_STDIO_WRAPPER_ENTRYPOINT_) {
     process.exitCode = 125;
-    return;
+    return Promise.resolve();
   }
 
+  let resolveCompletion!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
+  let completed = false;
+  const complete = (): void => {
+    if (completed) return;
+    completed = true;
+    resolveCompletion();
+  };
   let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
   let goSeen = false;
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
@@ -81,6 +93,9 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
       } catch {
         // The child may already have exited.
       }
+      void Promise.resolve(child.exited).then(complete, complete);
+    } else {
+      complete();
     }
     try {
       process.stdin.destroy();
@@ -162,6 +177,8 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
   process.stdin.on('error', failClosed);
   process.stdin.resume();
 
+  return completion;
+
   async function startChild(go: GoPayload): Promise<void> {
     if (child || failed) throw new Error('MCP stdio wrapper child lifecycle is invalid.');
     child = spawnRuntimeHostProcess([go.command, ...go.args], {
@@ -215,6 +232,7 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
       // The parent may have already closed stdin.
     }
     process.exitCode = normalizeExitCode(exitCode);
+    complete();
   }
 }
 

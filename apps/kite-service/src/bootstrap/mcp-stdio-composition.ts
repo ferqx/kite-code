@@ -18,8 +18,8 @@ export function createInstalledMcpStdioProcessPort() {
 }
 
 /** Return true only for the private standalone child entrypoint. */
-export function runKiteInternalMcpStdioChild(): boolean {
+export async function runKiteInternalMcpStdioChild(): Promise<boolean> {
   if (!isMcpStdioWrapperInvocation(process.argv)) return false;
-  runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
+  await runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
   return true;
 }

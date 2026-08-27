@@ -96,7 +96,7 @@ export async function runKiteServiceMain(
   dependencies: KiteServiceMainDependencies = {},
 ): Promise<void> {
   if (isMcpStdioWrapperInvocation(args)) {
-    runMcpStdioChildRuntime(args);
+    await runMcpStdioChildRuntime(args);
     return;
   }
   const posixSupervisorMarker = '--kite-internal-posix-supervisor-v1';

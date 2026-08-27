@@ -109,7 +109,8 @@ Kernel 只拥有纯 Intent、Policy/approval、result acceptance 与 recovery/co
 ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前产生；Host 验证 ready，并完成 durable acknowledgement 后才进入 GO。pre-ready 失败必须保持 user process dispatch 为 0；terminal/cleanup unknown 不允许自动重放或切换另一 owner。
 MCP stdio wrapper的ready、JSON-RPC与terminal frame都必须等待stdout write completion后再推进生命周期；尤其最终terminal
 frame未刷入专用pipe前wrapper不得退出。Host只接受实际收到并验证的terminal evidence，process exit或已写入用户态buffer
-不能替代该证明。
+不能替代该证明。wrapper runtime返回的completion Promise只在terminal已写入或fail-closed child cleanup收敛后完成；
+Service standalone internal entry必须await该Promise，不能在安装event listener后提前结束主入口。
 
 ## SQLite Store 与 Artifact
 
