@@ -168,8 +168,16 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   }
   const stderr = await stderrDiagnostic.catch(() => 'diagnostic_unavailable');
   if (failure) {
-    if (!stderr) throw failure;
-    throw new Error(`Installed MCP stdio wrapper failed: ${stderr}`, { cause: failure });
+    const wrapperExitCode = await handle.exited.catch(() => null);
+    const exitDiagnostic = `wrapper_exit=${wrapperExitCode ?? 'unknown'}`;
+    if (!stderr) {
+      throw new Error(`Installed MCP stdio wrapper failed (${exitDiagnostic}).`, {
+        cause: failure,
+      });
+    }
+    throw new Error(`Installed MCP stdio wrapper failed (${exitDiagnostic}): ${stderr}`, {
+      cause: failure,
+    });
   }
 }
 

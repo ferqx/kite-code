@@ -115,6 +115,8 @@ event listener后提前结束模块求值或主入口。
 Windows上的Bun 1.4 standalone在child退出后不能只依赖pending stream/completion Promise维持事件循环；wrapper必须
 在整个child与pipe drain生命周期持有一个referenced keepalive，并仅在terminal evidence或fail-closed cleanup真正结算后释放。
 fail-closed诊断只写入有界stderr，且必须同步提交后再允许wrapper结束，避免Windows standalone丢失唯一故障证据。
+wrapper在bootstrap、child-started、forwarding与drained阶段使用保留的非零exit code；只有terminal frame成功提交后
+才覆盖为真实child exit code，意外中途退出不能伪装为成功。
 terminal必须作为stdout的单个最终`end(bytes, callback)`操作提交，并等待stream close callback后再推进生命周期；
 Windows standalone不得把最终frame write与stream end拆成两个操作。ready与普通JSON-RPC仍走异步背压路径。
 实现与回归验证必须区分这两条写入路径：ready不能消费最终stream关闭语义，terminal也不能回退为普通

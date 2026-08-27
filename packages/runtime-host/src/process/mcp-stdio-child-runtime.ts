@@ -23,6 +23,10 @@ import { spawnRuntimeHostProcess } from './spawn';
 
 const MAX_BOOTSTRAP_BUFFER_BYTES_ = 1024 * 1024;
 const CHILD_ENV_MAX_ENTRIES_ = 128;
+const WRAPPER_EXIT_BOOTSTRAPPING_ = 120;
+const WRAPPER_EXIT_CHILD_STARTED_ = 121;
+const WRAPPER_EXIT_FORWARDING_ = 122;
+const WRAPPER_EXIT_DRAINED_ = 123;
 
 type GoPayload = {
   readonly type: 'go';
@@ -59,6 +63,7 @@ export function runMcpStdioChildRuntime(
     return Promise.resolve();
   }
 
+  process.exitCode = WRAPPER_EXIT_BOOTSTRAPPING_;
   // Bun 1.4 on Windows can end a standalone executable while its only remaining work is an
   // awaited stream Promise. Keep one referenced handle until terminal evidence or fail-closed
   // cleanup has actually settled; the child process alone is not sufficient after it exits.
@@ -204,6 +209,7 @@ export function runMcpStdioChildRuntime(
       windowsHide: true,
     });
     childPid = child.pid;
+    process.exitCode = WRAPPER_EXIT_CHILD_STARTED_;
     processStartIdentity = `${childPid}:${Date.now()}:${randomUUID()}`;
     await writeRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
@@ -219,11 +225,13 @@ export function runMcpStdioChildRuntime(
         processStartIdentity,
       } satisfies ReadyPayload,
     });
+    process.exitCode = WRAPPER_EXIT_FORWARDING_;
 
     const stdoutPump = forwardChildStream(child.stdout, process.stdout);
     const stderrPump = forwardChildStream(child.stderr, process.stderr);
     const [exitCode] = await Promise.all([child.exited, stdoutPump, stderrPump]);
     if (failed) return;
+    process.exitCode = WRAPPER_EXIT_DRAINED_;
     await writeFinalRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
       domain: MCP_STDIO_CONTROL_DOMAIN_,

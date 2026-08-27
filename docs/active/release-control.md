@@ -126,6 +126,8 @@ smoke结束时会删除其独占临时根；Windows只对刚退出native executa
 任意用户MCP配置、credential或模型正文。
 wrapper ready或terminal拒绝后smoke仍必须调用同一handle的有界cleanup并确认process tree；失败分支不能因跳过
 cleanup而用Windows executable锁掩盖原始protocol证据。
+失败报告同时保留wrapper的有界numeric exit code，用于区分中途生命周期退出与已提交terminal后的child结果；
+该码不携带command、path、credential或用户内容。
 候选启动与 MCP stdio wrapper smoke 不创建、读取或要求 `runtime-authority.key`/Artifact key；Project identity
 只使用 canonical Workspace digest，SQLite Store 使用 strict canonical record 与 snapshot checksum。模型 API credential 与 MCP OAuth/
 系统 keyring 仍按各自产品边界处理，不得因 Runtime 撤钥而回退到环境变量或明文文件。
