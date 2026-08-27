@@ -406,7 +406,7 @@ describe('Runtime Client event projector', () => {
     ).toBeUndefined();
   });
 
-  test('binds approval settlement to revision and generation without command identity', () => {
+  test('binds approval settlement to revision and generation with a bounded command projection', () => {
     const event = projectRuntimeClientEvent(
       {
         type: 'approval.requested',
@@ -417,7 +417,7 @@ describe('Runtime Client event projector', () => {
           cwd: '/private/workspace',
           threadId: 'session-1',
           tool: 'shell',
-          command: 'secret command',
+          command: 'git status --short',
           risk: 'execute_code',
           approvalHash: 'hash',
           summary: 'Run a command',
@@ -441,9 +441,9 @@ describe('Runtime Client event projector', () => {
         sessionRevision: 12,
         generation: 7,
         grants: ['approve_once'],
+        command: 'git status --short',
       },
     });
-    expect(JSON.stringify(event)).not.toContain('secret command');
     expect(JSON.stringify(event)).not.toContain('/private/workspace');
   });
 });
