@@ -1287,13 +1287,46 @@ const GIT_LOG_FLAG_ = new Set([
   '--topo-order',
 ]);
 const GIT_LOG_VALUE_FLAG_ = new Set(['--after', '--before', '--max-count', '--since', '--until']);
+const GIT_DIFF_FLAG_ = new Set([
+  '--cached',
+  '--check',
+  '--name-only',
+  '--name-status',
+  '--no-color',
+  '--no-ext-diff',
+  '--no-index',
+  '--numstat',
+  '--shortstat',
+  '--staged',
+  '--stat',
+  '--summary',
+]);
+const GIT_DIFF_VALUE_FLAG_ = new Set(['--diff-filter', '--relative', '--submodule']);
 
 /** Closed direct-command grammar for Workspace-only Git metadata inspection. */
 function isReadOnlyGit(tokens: string[]): boolean {
   const subcommand = stripShellQuotes(tokens[1] ?? '').toLowerCase();
   if (subcommand === 'status') return isReadOnlyGitStatus(tokens.slice(2));
   if (subcommand === 'log') return isReadOnlyGitLog(tokens.slice(2));
+  if (subcommand === 'diff') return isReadOnlyGitDiff(tokens.slice(2));
   return false;
+}
+
+function isReadOnlyGitDiff(arguments_: string[]): boolean {
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = stripShellQuotes(arguments_[index] ?? '');
+    if (argument === '--') return true;
+    if (!argument.startsWith('-') || argument === '-') continue;
+    if (GIT_DIFF_FLAG_.has(argument)) continue;
+    const name = argument.split('=', 1)[0]!;
+    if (!GIT_DIFF_VALUE_FLAG_.has(name)) return false;
+    if (!argument.includes('=')) {
+      const value = stripShellQuotes(arguments_[index + 1] ?? '');
+      if (!value || value.startsWith('-')) return false;
+      index += 1;
+    }
+  }
+  return true;
 }
 
 function isReadOnlyGitStatus(arguments_: string[]): boolean {
@@ -1360,7 +1393,7 @@ export function isNetworkShellCommand(command: string): boolean {
 
 export function isWriteShellCommand(command: string): boolean {
   return (
-    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(command) ||
+    hasUnsafeOutputRedirect(command) ||
     /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(command) ||
     /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(command) ||
     /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(command)

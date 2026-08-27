@@ -35,6 +35,8 @@
 - Git broker仍用标准`<primary>/.git/worktrees/<id>`、`commondir`与reciprocal backlink校验transaction authority；
   独立的Workspace scope discovery只canonicalize Git实际读取的外部`gitDir/commondir`，不授予权限。App必须先经
   Workspace Trust确认exact external-read scope，Sandbox才可向Seatbelt/bubblewrap投影对应只读root；该规则不依赖命令名。
+- Planning中的可证明只读Shell组合（包括`git status/log/diff`、只读pipe、`head/tail/echo`和`2>/dev/null`丢弃输出）
+  保持read-only baseline直接执行；`/dev/null`重定向不是Workspace mutation，不能触发用户审批或写风险文案。
 
 ## 测试
 

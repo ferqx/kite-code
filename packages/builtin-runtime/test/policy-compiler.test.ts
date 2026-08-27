@@ -310,6 +310,20 @@ describe('Builtin operation policy compiler', () => {
       requiresApproval: true,
       sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'disabled' },
     });
+    const readOnlyPlanningInspection =
+      'git status --short | head -40 && echo "=== diff stat vs origin ===" && git diff --stat HEAD | tail -20 && echo "=== unpushed commits ===" && git log --oneline origin/feat/kite-local-runtime-service-v1..HEAD 2>/dev/null | head -20';
+    expect(
+      compile(
+        'shell_execute',
+        { command: readOnlyPlanningInspection },
+        { ...CONTEXT, phase: 'planning' },
+      ),
+    ).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      risk: 'unknown',
+      sandboxScope: { kind: 'baseline', filesystem: 'read_only', network: 'disabled' },
+    });
     expect(compile('shell_execute', { command: 'git push origin main' })).toMatchObject({
       decision: 'ask',
       sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'allow_all' },

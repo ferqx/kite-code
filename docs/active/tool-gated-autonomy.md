@@ -241,8 +241,9 @@ payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `
 该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
 `RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
 `--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
-按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、不产生
-patch 的 `git log` 和其他可证明 baseline Shell 可直接执行；已知 external/sensitive scope 才按当前 mode 审查。
+按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、`git log`、
+不写文件的`git diff`及由`head/tail/echo`组成的只读pipe可直接执行；`2>/dev/null`等只丢弃输出的redirect不产生
+Workspace mutation或人工审批。已知external/sensitive scope才按当前mode审查。
 命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment，固定关闭 system/global config、
 credential prompt、pager、external diff、optional locks 与 repository fsmonitor helper。Planning 与关键系统
 destructive hard deny 保持独立。`git_inspect` 仍可作为结构化 capability，但不由 raw Git token 强制路由，
