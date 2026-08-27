@@ -32,7 +32,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 - Every wire Session carries one complete `interactionQueue` replacement projection. Queue revision equals Session revision,
   every interaction carries that revision, identities are unique, and the optional active identity must name one queue member.
   `sessionRevision` is the current settlement CAS rather than a creation-time identity; stable kind-specific identity fields
-  remain exact when a pending interaction is re-projected after an unrelated State revision advances.
+  remain exact when a pending interaction is re-projected after an unrelated State revision advances. When active work repeats
+  the focused interaction, its entire closed identity must equal the queue member; matching only ID/revision is rejected.
   Contract-to-wire mapping materializes independent closed values so JSON/WebSocket and in-process logical messages have
   identical ownership and cycle behavior.
 - Approval interactions admit the same optional, control-filtered command projection in notifications, session projections, and `respond_interaction` commands. The wire value is bounded to 16,384 UTF-16 code units; cwd, sandbox evidence, grant subjects, credentials, and hidden execution arguments remain excluded.

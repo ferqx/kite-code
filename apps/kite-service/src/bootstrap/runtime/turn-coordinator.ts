@@ -174,6 +174,8 @@ export interface RuntimeTurnInput {
    * than appending a second message, task, turn, or skill activation.
    */
   precommittedStart?: PrecommittedStartTurnDescriptor;
+  /** Continue the already-active durable turn after a recovered interaction receipt commits. */
+  resumeCommittedInteraction?: boolean;
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
@@ -503,7 +505,8 @@ export async function* executeRuntimeTurn(
       assertPrecommittedStartTurn(kernel.getState(), precommittedStart, input.threadId);
     } else {
       const resumedInteraction =
-        getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState());
+        input.resumeCommittedInteraction === true ||
+        (getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState()));
       if (!resumedInteraction) {
         const recoveryEvents = eventsForSupersededTurnRecovery(kernel.getState());
         if (recoveryEvents.length > 0) {

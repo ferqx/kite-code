@@ -39,7 +39,6 @@ import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
 import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage, useI18n } from './i18n';
-import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
 import { shouldAbortStoppedRun, shouldSetIdleAfterRun } from './run-lifecycle';
@@ -362,7 +361,6 @@ function TuiApp({
     () => (loadTheme(workspace) === 'light' ? lightTheme : getDarkTheme(themePreset)),
     [themePreset, workspace],
   );
-  const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
   // Lazy init — only create thread when user sends first message
   const threadIdRef = React.useRef<string>('');
@@ -444,7 +442,6 @@ function TuiApp({
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [sessionGrantCount, setSessionGrantCount] = React.useState(0);
   const [providerModelSnapshot, setProviderModelSnapshot] = React.useState<ProviderModelSnapshot>();
-  const interruptClearedByResolutionRef = React.useRef(false);
 
   const refreshProviderModel = React.useCallback(async (): Promise<ProviderModelSnapshot> => {
     const snapshot = await appControl.getProviderModelSnapshot({
@@ -503,22 +500,7 @@ function TuiApp({
   );
 
   const provider = React.useMemo(() => {
-    const p = new TuiUserInputProvider();
-    const submitActionAsync = p.submitActionAsync.bind(p);
-    p.submitActionAsync = async (action) => {
-      // Every UI action, including Esc/Ctrl+C cancellation, is submitted to
-      // Runtime before the durable terminal event clears the footer.
-      interruptClearedByResolutionRef.current = true;
-      try {
-        const submitted = await submitActionAsync(action);
-        if (!submitted) interruptClearedByResolutionRef.current = false;
-        return submitted;
-      } catch (error) {
-        interruptClearedByResolutionRef.current = false;
-        throw error;
-      }
-    };
-    return p;
+    return new TuiUserInputProvider();
   }, []);
 
   const sessionManager = React.useMemo(() => {
@@ -1236,21 +1218,6 @@ function TuiApp({
         });
     },
   );
-
-  // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
-  React.useEffect(() => {
-    const prev = prevInterruptRef.current;
-    prevInterruptRef.current = state.interrupt;
-    const clearedByResolution = interruptClearedByResolutionRef.current;
-    if (shouldCancelClearedInterrupt(prev, state.interrupt, clearedByResolution)) {
-      provider.submitAction({ type: 'cancel', interactionId: prev!.interactionId });
-    }
-    if (prev && !state.interrupt) {
-      interruptClearedByResolutionRef.current = false;
-    } else if (prev && state.interrupt && prev !== state.interrupt) {
-      interruptClearedByResolutionRef.current = false;
-    }
-  }, [state.interrupt, provider]);
 
   // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
   React.useEffect(() => {

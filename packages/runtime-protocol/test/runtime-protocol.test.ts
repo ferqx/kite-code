@@ -18,6 +18,7 @@ import {
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_MESSAGE_SCHEMA_,
   RUNTIME_PROTOCOL_RESPONSE_SCHEMA_,
+  RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_,
   safeDecodeRuntimeProtocolMessage,
 } from '../src/index';
@@ -706,6 +707,41 @@ describe('Runtime Protocol', () => {
         },
       }).success,
     ).toBeTrue();
+  });
+
+  test('rejects same-revision active approval fields with different command identity', () => {
+    const approval = {
+      kind: 'approval' as const,
+      interactionId: 'approval-full-identity',
+      sessionRevision: 3,
+      generation: 1,
+      command: 'bun test',
+      grants: ['approve_once' as const],
+    };
+    const session = {
+      schema: 'kite.runtime-projection.v1' as const,
+      sessionId: 'session-1',
+      revision: 3,
+      lifecycle: 'open' as const,
+      sessionCommandGrantCount: 0,
+      interactionQueue: {
+        revision: 3,
+        activeInteractionId: approval.interactionId,
+        interactions: [approval],
+      },
+      activeWork: {
+        workId: 'work-1',
+        phase: 'building' as const,
+        status: 'waiting' as const,
+        activeTurn: {
+          turnId: 'turn-1',
+          status: 'waiting' as const,
+          interaction: { ...approval, grants: ['same_command' as const] },
+        },
+      },
+    };
+
+    expect(RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse(session).success).toBeFalse();
   });
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {

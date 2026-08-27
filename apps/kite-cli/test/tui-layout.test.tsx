@@ -1518,6 +1518,7 @@ describe('InputBlock', () => {
     let resolved: string | undefined;
     const { lastFrame, stdin } = render(
       <InputBlock
+        interactionId="input-custom-answer"
         question={question}
         provider={fakeProvider()}
         onResolved={(answer) => {
@@ -1542,8 +1543,49 @@ describe('InputBlock', () => {
     expect(lastFrame()).toContain('Option B');
 
     stdin.write('\r');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50 && resolved === undefined; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(resolved).toBe('my custom answer');
+  });
+
+  test('keeps a failed answer visible and retries only after a receipt', async () => {
+    const provider = fakeProvider();
+    let attempts = 0;
+    let resolved: string | undefined;
+    provider.setActionSink(() => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('connection unavailable');
+    });
+    const view = render(
+      <InputBlock
+        interactionId="input-retry"
+        question={fakeQuestion({ options: [], allow_free_text: true })}
+        provider={provider}
+        onResolved={(answer) => {
+          resolved = answer;
+        }}
+      />,
+    );
+
+    view.stdin.write('retryable answer');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    view.stdin.write('\r');
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(resolved).toBeUndefined();
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+
+    view.stdin.write('\r');
+    for (let attempt = 0; attempt < 50 && resolved === undefined; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(resolved).toBe('retryable answer');
+    expect(attempts).toBe(2);
   });
 
   test('shows free text input when no options', () => {
@@ -1861,10 +1903,11 @@ describe('PlanReviewBlock', () => {
     expect(lastFrame()).toContain('Esc Cancel');
   });
 
-  test('notifies the UI when a review option is selected', () => {
+  test('notifies the UI when a review option is selected', async () => {
     const resolved: string[] = [];
     const { stdin } = render(
       <PlanReviewBlock
+        interactionId="plan-select"
         plan={fakePlan()}
         provider={fakeProvider()}
         onResolved={(action) => resolved.push(action)}
@@ -1872,14 +1915,52 @@ describe('PlanReviewBlock', () => {
     );
 
     stdin.write('\r');
-
+    for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(resolved).toEqual(['approved_auto']);
+  });
+
+  test('keeps a failed plan choice visible and retries the same decision', async () => {
+    const provider = fakeProvider();
+    let attempts = 0;
+    const resolved: string[] = [];
+    provider.setActionSink(() => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('connection unavailable');
+    });
+    const view = render(
+      <PlanReviewBlock
+        interactionId="plan-retry"
+        plan={fakePlan()}
+        provider={provider}
+        onResolved={(action) => resolved.push(action)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(resolved).toEqual([]);
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+
+    view.stdin.write('\r');
+    for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(resolved).toEqual(['approved_auto']);
+    expect(attempts).toBe(2);
   });
 
   test('submits plan feedback exactly once', async () => {
     const resolved: Array<{ action: string; feedback?: string }> = [];
     const { stdin } = render(
       <PlanReviewBlock
+        interactionId="plan-feedback"
         plan={fakePlan()}
         provider={fakeProvider()}
         onResolved={(action, feedback) => resolved.push({ action, feedback })}
@@ -1891,7 +1972,9 @@ describe('PlanReviewBlock', () => {
     stdin.write('\u001b[B');
     await new Promise((resolve) => setTimeout(resolve, 10));
     stdin.write('\r');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     stdin.write('Please revise');
     await new Promise((resolve) => setTimeout(resolve, 10));
     stdin.write('\r');
@@ -5699,6 +5782,7 @@ describe('App', () => {
   test('Escape rejects only the focused approval without aborting the whole run', async () => {
     let aborts = 0;
     const actions: Action[] = [];
+    const submitted: unknown[] = [];
     const approval = fakeClientApproval({ interactionId: 'approval-cancel' });
     const pending = fakeClientPendingApproval(approval, {
       interactionId: 'approval-cancel',
@@ -5718,7 +5802,13 @@ describe('App', () => {
         })}
         dispatch={(action) => actions.push(action)}
         onToggleReason={noop}
-        provider={fakeProvider()}
+        provider={(() => {
+          const provider = fakeProvider();
+          provider.setActionSink((action) => {
+            submitted.push(action);
+          });
+          return provider;
+        })()}
         onAbort={() => {
           aborts += 1;
         }}
@@ -5729,10 +5819,12 @@ describe('App', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(aborts).toBe(0);
-    expect(actions).toContainEqual({
-      type: 'RESOLVE_INTERRUPT',
-      resolution: { action: 'reject' },
+    expect(submitted).toContainEqual({
+      type: 'reject',
+      interactionId: 'approval-cancel',
+      generation: pending.generation,
     });
+    expect(actions.some((action) => action.type === 'RESOLVE_INTERRUPT')).toBe(false);
   });
 
   test('Ctrl+C aborts the whole turn while an approval is visible', async () => {

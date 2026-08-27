@@ -74,6 +74,77 @@ export type RuntimeClientInteraction =
   | RuntimeProviderActionInteraction
   | RuntimeVerificationInteraction;
 
+/** Exact stable interaction identity; current Session settlement CAS is intentionally excluded. */
+export function sameRuntimeClientInteractionIdentity(
+  left: RuntimeClientInteraction,
+  right: RuntimeClientInteraction,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.interactionId !== right.interactionId ||
+    left.title !== right.title ||
+    left.summary !== right.summary
+  ) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'approval':
+      return (
+        right.kind === 'approval' &&
+        left.generation === right.generation &&
+        sameStrings(left.grants, right.grants) &&
+        left.command === right.command
+      );
+    case 'input':
+      return (
+        right.kind === 'input' &&
+        left.question === right.question &&
+        left.allowFreeText === right.allowFreeText &&
+        sameInputOptions(left.options, right.options)
+      );
+    case 'plan_review':
+      return (
+        right.kind === 'plan_review' &&
+        left.plan.planId === right.plan.planId &&
+        left.plan.version === right.plan.version &&
+        left.plan.structuralDigest === right.plan.structuralDigest
+      );
+    case 'provider_action':
+      return (
+        right.kind === 'provider_action' &&
+        left.action === right.action &&
+        left.provider.providerId === right.provider.providerId &&
+        left.provider.directoryRevision === right.provider.directoryRevision
+      );
+    case 'verification':
+      return (
+        right.kind === 'verification' &&
+        left.verification.verificationId === right.verification.verificationId &&
+        left.verification.revision === right.verification.revision
+      );
+  }
+}
+
+function sameInputOptions(
+  left: RuntimeInputInteraction['options'],
+  right: RuntimeInputInteraction['options'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.length === right.length &&
+    left.every(
+      (option, index) =>
+        option.id === right[index]?.id &&
+        option.label === right[index]?.label &&
+        option.description === right[index]?.description,
+    )
+  );
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 /** @deprecated Use RuntimeClientInteraction. */
 export type RuntimeInteractionProjection = RuntimeClientInteraction;
 

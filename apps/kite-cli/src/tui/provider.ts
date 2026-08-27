@@ -49,11 +49,6 @@ export class TuiUserInputProvider {
     };
   }
 
-  /** 由 UI 调用，提交用户操作 / Called by UI to submit user action */
-  submitAction(action: TuiAction): void {
-    void this.submitActionAsync(action).catch(() => undefined);
-  }
-
   /** Submit and wait until the Runtime has accepted the interaction command. */
   async submitActionAsync(action: TuiAction): Promise<boolean> {
     const pending = this.pendingInterrupt;

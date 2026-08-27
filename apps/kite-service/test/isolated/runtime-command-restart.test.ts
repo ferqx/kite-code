@@ -2,13 +2,18 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { RuntimeState } from '@kite-ai/agent-kernel';
+import { classifyBuiltinShellIntent } from '@kite-ai/builtin-runtime';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
+  type RuntimeClientInteraction,
   type RuntimeCommand,
 } from '@kite-ai/runtime-contract';
 import { createRuntimeCommandCommitEvidence } from '@kite-ai/runtime-host';
+import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteCliRuntimeAccess, createKiteRuntimeStorageOwner } from '../../src/bootstrap';
+import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
 
 type RestartCommand =
   | Extract<RuntimeCommand, { type: 'create_session' }>
@@ -141,12 +146,173 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
   }
 });
 
+test('a pending approval survives process death and resumes from its durable interaction receipt', async () => {
+  const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-approval-restart-'));
+  const checkpointPath = join(workspace, 'runtime.sqlite');
+  const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = workspace;
+  const model = createApprovalRestartModel();
+  const sessionId = 'restart-approval-session';
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      join(import.meta.dir, '..', 'fixtures', 'runtime-pending-approval-child.ts'),
+    ],
+    {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        KITE_CODE_HOME: workspace,
+        KITE_RESTART_TEST_WORKSPACE: workspace,
+        KITE_RESTART_TEST_CHECKPOINT: checkpointPath,
+        KITE_RESTART_TEST_SESSION: sessionId,
+        KITE_RESTART_TEST_MODEL_URL: model.baseURL,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  let second: ReturnType<typeof createKiteCliRuntimeAccess> | undefined;
+  try {
+    const interaction = JSON.parse(
+      await readFirstLine(child.stdout, child.stderr),
+    ) as RuntimeClientInteraction;
+    expect(interaction).toMatchObject({ kind: 'approval', sessionRevision: expect.any(Number) });
+    if (interaction.kind !== 'approval') throw new Error('Child did not persist an approval.');
+
+    await waitForPersistedInteraction(checkpointPath, sessionId, interaction.interactionId);
+
+    child.kill('SIGKILL');
+    expect(await child.exited).not.toBe(0);
+
+    const shellCommands: string[] = [];
+    second = createAccess({
+      workspace,
+      checkpointPath,
+      sessionId,
+      baseURL: model.baseURL,
+      sandboxBackend: 'seatbelt',
+      shellExecutor: async (command) => {
+        shellCommands.push(command);
+      },
+    });
+    const resumed = await second.command({
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'restart-approval-resume',
+      type: 'resume_session',
+      sessionId,
+    });
+    expect(resumed).toMatchObject({ status: 'applied', sessionId });
+    const restored = await second.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId,
+    });
+    const restoredApproval =
+      restored.status === 'ok'
+        ? restored.session?.interactionQueue.interactions.find(
+            (candidate) => candidate.interactionId === interaction.interactionId,
+          )
+        : undefined;
+    if (!restoredApproval) {
+      throw new Error(`Restarted projection omitted approval: ${JSON.stringify(restored)}`);
+    }
+    expect(restoredApproval).toMatchObject({
+      kind: 'approval',
+      interactionId: interaction.interactionId,
+      sessionRevision: restored.status === 'ok' ? restored.session?.revision : undefined,
+    });
+    if (restoredApproval?.kind !== 'approval') {
+      throw new Error('Restarted Service did not restore the pending approval.');
+    }
+
+    const receipt = await (async () => {
+      try {
+        return await second.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'restart-approval-response',
+          type: 'respond_interaction',
+          sessionId,
+          expectedRevision: restoredApproval.sessionRevision,
+          interaction: restoredApproval,
+          response: { kind: 'approval', decision: 'approve_once' },
+        });
+      } catch (error) {
+        throw new Error(`Restarted interaction command failed: ${JSON.stringify(error)}`, {
+          cause: error,
+        });
+      }
+    })();
+    expect(receipt).toMatchObject({ status: 'applied', sessionId });
+    await waitFor(() => model.requestCount() >= 2);
+    await waitForTerminal(second, sessionId);
+    await second[Symbol.asyncDispose]();
+    second = undefined;
+
+    const store = createKiteRuntimeStorageOwner(checkpointPath);
+    try {
+      const eventTypes = store.storage.sessions
+        .loadEventsStrict(sessionId)
+        .map((entry) => entry.event.type);
+      expect(eventTypes.filter((type) => type === 'approval.granted')).toHaveLength(1);
+      if (!eventTypes.includes('tool.started')) {
+        throw new Error(
+          `Restarted interaction skipped tool execution: ${JSON.stringify(
+            store.storage.sessions.loadEventsStrict(sessionId).map((entry) => entry.event),
+          )}`,
+        );
+      }
+      expect(eventTypes).toContain('tool.started');
+      expect(shellCommands).toEqual(['bun test']);
+    } finally {
+      store.storage.close();
+    }
+  } finally {
+    child.kill('SIGKILL');
+    await child.exited;
+    await second?.[Symbol.asyncDispose]();
+    model.stop();
+    if (previousKiteCodeHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousKiteCodeHome;
+    rmSync(resolve(workspace), { recursive: true, force: true });
+  }
+}, 30_000);
+
 function createAccess(input: {
   readonly workspace: string;
   readonly checkpointPath: string;
   readonly sessionId: string;
   readonly baseURL: string;
+  readonly sandboxBackend?: 'none' | 'seatbelt';
+  readonly shellExecutor?: (command: string) => Promise<void>;
 }) {
+  const shellExecutor = async ({ command }: { readonly command: string }) => {
+    await input.shellExecutor?.(command);
+    return {
+      ok: true,
+      command,
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    };
+  };
+  Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_, {
+    enumerable: false,
+    value: Object.freeze({
+      execute: async (prepared: { readonly command: string }) => {
+        await input.shellExecutor?.(prepared.command);
+        return Object.freeze({
+          ok: true,
+          command: prepared.command,
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          intent: classifyBuiltinShellIntent(prepared.command),
+          executionPhase: 'go_started' as const,
+        });
+      },
+    }),
+  });
   return createKiteCliRuntimeAccess({
     sessionId: input.sessionId,
     userId: 'restart-user',
@@ -160,15 +326,9 @@ function createAccess(input: {
       modelName: 'mock-model',
       sandbox: { enabled: false },
     },
-    shellExecutor: async ({ command }) => ({
-      ok: true,
-      command,
-      exitCode: 0,
-      stdout: '',
-      stderr: '',
-    }),
+    shellExecutor,
     interactionMode: 'accept_edits',
-    sandboxBackend: 'none',
+    sandboxBackend: input.sandboxBackend ?? 'none',
     skillOptions: {
       userKiteCodeSkillsDir: join(input.workspace, 'user-kite-skills'),
       userAgentsSkillsDir: join(input.workspace, 'user-agent-skills'),
@@ -177,6 +337,74 @@ function createAccess(input: {
     },
     initialSkillActivations: [],
   });
+}
+
+async function readFirstLine(
+  stdout: ReadableStream<Uint8Array>,
+  stderr: ReadableStream<Uint8Array>,
+): Promise<string> {
+  const reader = stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    const chunk = await Promise.race([
+      reader.read(),
+      Bun.sleep(remaining).then(() => {
+        throw new Error('Approval child stdout timed out.');
+      }),
+    ]);
+    if (chunk.done) break;
+    buffered += decoder.decode(chunk.value, { stream: true });
+    const newline = buffered.indexOf('\n');
+    if (newline >= 0) return buffered.slice(0, newline);
+  }
+  const diagnostic = await new Response(stderr).text();
+  throw new Error(`Approval child did not become ready: ${diagnostic}`);
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (predicate()) return;
+    await Bun.sleep(10);
+  }
+  throw new Error('Restarted interaction continuation did not complete.');
+}
+
+async function waitForPersistedInteraction(
+  checkpointPath: string,
+  sessionId: string,
+  interactionId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const store = createKiteRuntimeStorageOwner(checkpointPath);
+    try {
+      const snapshot = store.storage.sessions.loadSnapshotRecord<RuntimeState>(sessionId);
+      if (snapshot?.state.pendingApprovals.has(interactionId)) return;
+    } finally {
+      store.storage.close();
+    }
+    await Bun.sleep(10);
+  }
+  throw new Error('Approval child did not make its interaction durable before process death.');
+}
+
+async function waitForTerminal(
+  access: ReturnType<typeof createKiteCliRuntimeAccess>,
+  sessionId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const result = await access.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId,
+    });
+    const status = result.status === 'ok' ? result.session?.activeWork?.status : undefined;
+    if (status === 'completed' || status === 'failed' || status === 'cancelled') return;
+    await Bun.sleep(10);
+  }
+  throw new Error('Restarted interaction continuation did not reach a terminal projection.');
 }
 
 function createSessionCommand(
@@ -256,5 +484,28 @@ function createConnectionLossModelGate() {
     requestCount: () => requests,
     releaseConnectionLoss: () => release(),
     stop: () => server.stop(true),
+  };
+}
+
+function createApprovalRestartModel() {
+  const server = createMockModelServer();
+  server.setResponses([
+    {
+      message: {
+        tool_calls: [
+          {
+            id: 'restart-shell',
+            name: 'shell_execute',
+            args: { command: 'bun test' },
+          },
+        ],
+      },
+    },
+    { message: { content: 'Restarted approval completed.' } },
+  ]);
+  return {
+    baseURL: server.baseURL,
+    requestCount: () => server.getRequestCount(),
+    stop: () => server.stop(),
   };
 }

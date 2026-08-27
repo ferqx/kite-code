@@ -49,7 +49,8 @@
 - `RuntimeSessionProjection.interactionQueue` 是同 revision 的完整、有序替换集；`activeInteractionId` 必须属于该集，
   每个interaction的`sessionRevision`是当前 settlement CAS，必须等于queue/session revision；稳定交互身份由
   `interactionId`与kind-specific generation/plan/provider/verification/input/command字段共同组成。Session revision
-  前进时Service以相同稳定身份重新投影当前CAS，identity重复、缺失、内容漂移或activeWork/queue不一致全部fail closed。
+  前进时Service以相同稳定身份重新投影当前CAS，identity重复、缺失、内容漂移或activeWork/queue完整身份不一致全部
+  fail closed；同ID/revision但command、grants或其他kind-specific字段不同同样非法。
 - Live notification 与 History transcript 必须通过同一个 exact `RuntimeClientEvent` validator；closed DTO
   新增可选字段时，类型、validator 与 wire codec 必须同步，不能让实时订阅可见而恢复/回放拒绝同一事件。
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。

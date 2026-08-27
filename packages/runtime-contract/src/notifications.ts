@@ -2,6 +2,7 @@ import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeClientInteraction,
   type RuntimeSessionProjection,
+  sameRuntimeClientInteractionIdentity,
 } from './projections';
 import {
   hasExactKeys,
@@ -1155,14 +1156,25 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
 function activeInteractionMatchesQueue(value: Record<string, unknown>): boolean {
   const queue = value.interactionQueue as {
     readonly activeInteractionId?: string;
+    readonly interactions: readonly RuntimeClientInteraction[];
   };
   const work = value.activeWork as
     | { readonly activeTurn?: { readonly interaction?: RuntimeClientInteraction } }
     | undefined;
   const interaction = work?.activeTurn?.interaction;
+  const queuedInteraction =
+    queue.activeInteractionId === undefined
+      ? undefined
+      : queue.interactions.find(
+          (candidate) => candidate.interactionId === queue.activeInteractionId,
+        );
   return (
     queue.activeInteractionId === interaction?.interactionId &&
-    (interaction === undefined || interaction.sessionRevision === value.revision)
+    (interaction === undefined ||
+      (queuedInteraction !== undefined &&
+        interaction.sessionRevision === value.revision &&
+        queuedInteraction.sessionRevision === interaction.sessionRevision &&
+        sameRuntimeClientInteractionIdentity(queuedInteraction, interaction)))
   );
 }
 

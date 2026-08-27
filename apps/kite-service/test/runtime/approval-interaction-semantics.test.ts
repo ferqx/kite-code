@@ -452,13 +452,17 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
           expectedStateRevision: refreshed.sessionRevision,
         });
         if (!action) throw new Error('Refreshed approval response was rejected.');
-        return commandCommit.commit(action, {
-          scopeSessionId: state.session.threadId,
-          commandId: 'approval-current-revision-command',
-          requestDigest: 'c'.repeat(64),
-          targetSessionId: state.session.threadId,
-          committedAt: 1_700_000_000_000,
-        }).descriptor;
+        return commandCommit.commit(
+          action,
+          {
+            scopeSessionId: state.session.threadId,
+            commandId: 'approval-current-revision-command',
+            requestDigest: 'c'.repeat(64),
+            targetSessionId: state.session.threadId,
+            committedAt: 1_700_000_000_000,
+          },
+          state.revision,
+        ).descriptor;
       },
     })) {
       emitted.push(event);
@@ -468,6 +472,104 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     expect(commitCount).toBe(1);
     expect(emitted.filter((event) => event.type === 'approval.granted')).toHaveLength(1);
     expect(state.pendingApprovals.get('approval-a')?.status).toBe('authorized_queued');
+  });
+
+  test('an interaction command never rebases its accepted revision during commit', async () => {
+    let state = reduceRuntimeState(addTool(initialState(), 'shell-a'), {
+      type: 'approval.requested',
+      interactionId: 'approval-a',
+      toolCallId: 'shell-a',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: approval(),
+    });
+    let lastAppliedEvents: RuntimeEvent[] = [];
+    let commitCount = 0;
+    const session = {
+      sessionId: state.session.threadId,
+      getState: () => state,
+      commitCommandBatch: (events: readonly RuntimeEvent[]) => {
+        commitCount += 1;
+        return { receipt: {}, events };
+      },
+    } as unknown as Parameters<typeof commitInteractionCommand>[0];
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: (event) => {
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', eventId: `event-${state.revision}` };
+      },
+      processEventBatch: (events) => {
+        for (const event of events) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [...events];
+        return lastAppliedEvents;
+      },
+      getLastAppliedEvents: () => lastAppliedEvents,
+      selectPendingEffects: () =>
+        state.interactions.kind === 'awaiting_tool_approval'
+          ? [{ type: 'request_tool_approval', interactionId: 'approval-a', toolCallId: 'shell-a' }]
+          : [{ type: 'stop' }],
+      acquireRunner: () => 'approval-fixed-revision-runner',
+      releaseRunner: () => undefined,
+      beginEffect: () => {
+        throw new Error('No executor effect should start in the interaction CAS fixture.');
+      },
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: () => {
+        throw new Error('The production command path must return a precommitted action.');
+      },
+      getSandboxAvailable: () => true,
+      commitInteractionCommand: (input) => commitInteractionCommand(session, input),
+    };
+
+    const run = async (): Promise<void> => {
+      for await (const _event of runStateRuntimeLoop(kernel, async () => [], {
+        requestAction: async (effect, acceptedState, commandCommit) => {
+          const acceptedRevision = acceptedState.revision;
+          const interaction = projectRuntimeClientInteractionQueue(acceptedState, {
+            sessionRevision: acceptedRevision,
+          }).interactions.find((candidate) => candidate.interactionId === 'approval-a');
+          if (interaction?.kind !== 'approval') throw new Error('Approval fixture is unavailable.');
+          const action = mapRuntimeInteractionResponseToUserAction({
+            state: acceptedState,
+            effect,
+            interaction,
+            response: { kind: 'approval', decision: 'approve_once' },
+            expectedStateRevision: acceptedRevision,
+          });
+          if (!action) throw new Error('Approval fixture response was rejected.');
+
+          state = reduceRuntimeState(state, {
+            type: 'skill.catalog_refreshed',
+            catalogRevision: 'inspect-commit-race',
+          });
+          state = { ...state, revision: acceptedRevision + 1 };
+          return commandCommit.commit(
+            action,
+            {
+              scopeSessionId: state.session.threadId,
+              commandId: 'approval-fixed-revision-command',
+              requestDigest: 'd'.repeat(64),
+              targetSessionId: state.session.threadId,
+              committedAt: 1_700_000_000_000,
+            },
+            acceptedRevision,
+          ).descriptor;
+        },
+      })) {
+        // The fixed-revision commit must reject before any event can be yielded.
+      }
+    };
+
+    await expect(run()).rejects.toThrow(
+      'Runtime interaction command session or revision does not match current State.',
+    );
+    expect(commitCount).toBe(0);
+    expect(state.pendingApprovals.get('approval-a')?.status).toBe('awaiting_user');
   });
 
   test('an old approval rejection cannot abort the next turn of the same Task', async () => {

@@ -170,9 +170,13 @@ State投影该替换集，Protocol验证queue/entry revision、identity唯一性
 event-free snapshot时替换旧Map/queue而不是union。JSON/WebSocket与InProcess logical-message mapper必须生成相同closed
 值，不能因共享对象引用产生不同的decode结果。Service启动时的Store-only session index也从纯State投影完整queue，
 不得用空占位覆盖pending交互。interaction的`sessionRevision`表示当前settlement CAS；稳定身份由interactionId与
-kind-specific generation/plan/provider/verification/input/command字段承担，无关State revision前进后在提交瞬间受控rebase。
-TUI只有在respond command receipt accepted后才移除当前approval焦点；提交错误保持原interaction可见并由用户显式重试，
-不得吞错或在receipt前制造granted事实。
+kind-specific generation/plan/provider/verification/input/command字段承担；activeTurn重复字段必须与queue member完整相等。
+无关State revision前进时Client先取得新CAS；Host inspect接受command后CAS固定，commit不得用最新State revision替换。
+TUI所有approval/input/plan的Enter/Esc都只有在respond command receipt accepted后才结束提交态；提交错误保持原interaction
+可见并由用户显式重试，不得吞错、fire-and-forget cancel或在receipt前制造granted/answered事实。Service process重启后
+从durable State重建pending effect与continuation，applied response receipt由Host作为原Turn的single-use execution重新调度，
+不依赖旧waiter且不重复dispatch。每个durable event携带其exact post-event State queue；缺失历史State时unavailable，
+不得伪造空替换集。
 
 每个新建或恢复 Session 先持有自己的 bootstrap readiness promise，后续 turn、compaction、reset、mode、cancel、rewind 与 close 必须等待 exact `create_session` / `resume_session` applied receipt，再读取 committed revision 并提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
 Ctrl+C通过Native TUI client提交durable`cancel_turn`；若notification在读取revision与Host admission之间前移

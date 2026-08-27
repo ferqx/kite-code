@@ -98,6 +98,8 @@ export interface RuntimeInteractionCommandCommitPort {
   commit(
     action: RuntimeUserAction,
     evidence: RuntimeCommandCommitEvidence,
+    /** Revision accepted by Host inspection; commit must never substitute a newer State revision. */
+    expectedRevision: number,
   ): CommittedInteractionCommand;
 }
 
@@ -844,7 +846,11 @@ export async function* runStateRuntimeLoop(
         try {
           const actionState = kernel.getState();
           const commandCommit: RuntimeInteractionCommandCommitPort = Object.freeze({
-            commit: (candidate: RuntimeUserAction, evidence: RuntimeCommandCommitEvidence) => {
+            commit: (
+              candidate: RuntimeUserAction,
+              evidence: RuntimeCommandCommitEvidence,
+              expectedRevision: number,
+            ) => {
               if (!kernel.commitInteractionCommand) {
                 throw new Error('Runtime interaction command commit is unavailable.');
               }
@@ -856,7 +862,7 @@ export async function* runStateRuntimeLoop(
                 action: candidate,
                 sessionId: commitState.session.threadId,
                 interactionId: effect.interactionId,
-                expectedRevision: commitState.revision,
+                expectedRevision,
                 effectType: effect.type,
                 reservationReconciliationEvents:
                   effect.type === 'request_provider_action'

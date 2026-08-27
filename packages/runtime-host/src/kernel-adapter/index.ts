@@ -158,6 +158,7 @@ export type {
   StateRuntimeVerificationAdmission,
 } from './session';
 export { createRuntimeHostStateSession, STATE_RUNTIME_SESSION_FORMAT_ } from './session';
+export { runtimeHostStateProjectAcceptedEvent } from './state-reducer';
 export {
   runtimeHostStateActivePlanning,
   runtimeHostStateActiveSkillFrames,

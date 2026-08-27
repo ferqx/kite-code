@@ -39,8 +39,15 @@ Runtime approval projector保留用户当前要批准的有界原始command；�
 grant subject与Host内部payload仍不进入client interaction。
 公开interaction的`sessionRevision`是本次projection的当前Host CAS；`interactionId`及kind-specific
 generation/plan digest/provider revision/verification revision/input和有界command组成稳定身份。无关State event推进revision
-时，Service可在相同稳定身份上重新投影当前CAS；`respond_interaction`只在提交瞬间重新投影、完整比对并将decision与
-receipt原子提交，不能继续使用waiter创建时的旧revision，也不能放宽稳定身份字段。
+时，Service可在相同稳定身份上重新投影当前CAS；Client必须先取得该新projection。Host一旦接受
+`respond_interaction(expectedRevision=N)`进入inspect，后续commit仍固定使用N；inspect与commit之间State变为N+1时
+必须冲突，不能在commit时暗中rebase。activeTurn与queue中的重复interaction字段必须完整身份相等，不只比较ID/revision。
+
+pending interaction的settlement owner不是进程内waiter。Service重启并`resume_session`后，bridge从durable State重建
+effect、active work与Turn continuation；合法response与receipt原子提交后，Host把`respond_interaction`作为同一Turn的
+single-use prepared execution重新调度。旧broker waiter只服务仍存活进程，disconnect或process death不使持久approval
+变成不可执行UI，也不能造成重复grant或重复Tool dispatch。每个durable event notification使用该event revision的真实
+post-event State投影完整queue；无法取得exact State时返回unavailable/不发布，绝不制造权威空queue。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation

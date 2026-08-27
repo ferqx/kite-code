@@ -190,25 +190,43 @@ export default function App({
       const approvalInteractionId = focusedApprovalEntry?.interactionId;
       if (approvalInteractionId) {
         const approvalGeneration = focusedApprovalEntry.generation;
-        if (approvalGeneration == null) return;
-        // Escape rejects only the focused approval. The exact interaction id
-        // is carried to both the provider and Runtime; duplicate delivery is
-        // harmless because both layers de-duplicate it.
-        provider.submitAction({
-          type: 'reject',
-          interactionId: approvalInteractionId,
-          generation: approvalGeneration,
-        });
-        dispatch({
-          type: 'RESOLVE_INTERRUPT',
-          resolution: { action: 'reject' },
-        });
+        if (approvalGeneration == null) return false;
+        void provider
+          .submitActionAsync({
+            type: 'reject',
+            interactionId: approvalInteractionId,
+            generation: approvalGeneration,
+          })
+          .then((accepted) => {
+            if (!accepted) throw new Error('Approval rejection was not accepted.');
+          })
+          .catch(() => {
+            dispatch({
+              type: 'LOCAL_TEXT',
+              text: 'Confirmation was not accepted. Press Esc to retry.',
+              isError: true,
+            });
+          });
+        return true;
       } else if (state.interrupt) {
-        provider.submitAction({
-          type: 'cancel',
-          interactionId: state.interrupt.interactionId,
-        });
+        void provider
+          .submitActionAsync({
+            type: 'cancel',
+            interactionId: state.interrupt.interactionId,
+          })
+          .then((accepted) => {
+            if (!accepted) throw new Error('Interaction cancellation was not accepted.');
+          })
+          .catch(() => {
+            dispatch({
+              type: 'LOCAL_TEXT',
+              text: 'Confirmation was not accepted. Press Esc to retry.',
+              isError: true,
+            });
+          });
+        return true;
       }
+      return false;
     },
     onAbort,
   );

@@ -17,6 +17,7 @@ import {
 import {
   createRuntimeHostStateSession,
   projectRuntimeHostStateRestartRecoveryEvents,
+  runtimeHostStateProjectAcceptedEvent,
   runtimeHostStateRestartRecoveryCapabilityInvocationIds,
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
@@ -39,7 +40,11 @@ import {
   type CommittedForkSessionCommand,
   commitForkSessionCommand,
 } from './command-fork-decision';
-import { commitInteractionCommand } from './command-interaction-decision';
+import {
+  type CommittedInteractionCommand,
+  commitInteractionCommand,
+  type RuntimeInteractionCommandCommitInput,
+} from './command-interaction-decision';
 import { type CommittedRewindCommand, commitRewindCommand } from './command-rewind-decision';
 import { createAppRuntimeEffectExecutor } from './runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
@@ -117,6 +122,8 @@ export interface RuntimeSessionCoordinator {
   getState(): Readonly<RuntimeState>;
   /** Exact persisted revision assigned to one event yielded by this coordinator. */
   revisionForEvent?(event: RuntimeEvent): number | undefined;
+  /** Exact post-event State retained for current-process notification projection. */
+  stateForEvent?(event: RuntimeEvent): Readonly<RuntimeState> | undefined;
   getStateRuntimeStorage(): StateRuntimeStorage;
   isTurnActive(): boolean;
   beginTurn(): void;
@@ -172,6 +179,10 @@ export interface RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
     context?: StartTurnSkillPlanningContext,
   ): CommittedStartTurnCommand;
+  /** Commits one Host-inspected interaction command against its exact accepted revision. */
+  commitInteractionCommand?(
+    input: RuntimeInteractionCommandCommitInput,
+  ): CommittedInteractionCommand;
   executeTurn(
     input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
@@ -242,6 +253,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     processEvents(events: RuntimeEvent[]): void;
   };
   readonly #eventRevisions = new WeakMap<object, number>();
+  readonly #eventStates = new WeakMap<object, Readonly<RuntimeState>>();
   readonly #pendingEventRevisions: Array<{
     readonly event: RuntimeEvent;
     readonly revision: number;
@@ -380,14 +392,21 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       getState: () => this.getState(),
       processEvent: (event: RuntimeEvent) => {
         this.#assertOpen();
+        const before = this.session.getState();
         this.session.processEvent(event);
+        this.#recordLastAppliedEventRevisions(before);
       },
       processEventBatch: (events: RuntimeEvent[]) => {
         this.#assertOpen();
-        return [...this.session.processEventBatch(events)];
+        const before = this.session.getState();
+        const applied = [...this.session.processEventBatch(events)];
+        this.#recordLastAppliedEventRevisions(before);
+        return applied;
       },
       cancelRun: (reason?: string) => {
         this.#assertOpen();
+        // The registered turn cancellation persists through #runtimePort,
+        // which records the exact State for every canonical event.
         return this.#activeCancelRun(reason);
       },
     });
@@ -417,6 +436,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     );
     if (index < 0) return undefined;
     return this.#pendingEventRevisions.splice(index, 1)[0]!.revision;
+  }
+
+  stateForEvent(event: RuntimeEvent): Readonly<RuntimeState> | undefined {
+    return this.#eventStates.get(event);
   }
 
   getStateRuntimeStorage(): StateRuntimeStorage {
@@ -489,7 +512,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
   ): CommittedControlCommand {
     this.#assertOpen();
+    const before = this.session.getState();
     const committed = commitInteractionModeCommand(this.session, command, evidence);
+    this.#recordLastAppliedEventRevisions(before);
     // State is authoritative; the live coordinator view follows only after
     // the command receipt transaction has succeeded.
     this.#interactionMode = command.mode;
@@ -502,7 +527,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
   ): CommittedControlCommand {
     this.#assertOpen();
+    const before = this.session.getState();
     const committed = commitCancelTurnCommand(this.session, command, evidence);
+    this.#recordLastAppliedEventRevisions(before);
     this.#activeCommittedCommandCancel(committed.events, 'Cancelled by user.');
     return committed;
   }
@@ -515,7 +542,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     if (this.#activeOperation && this.#activeOperation !== 'turn') {
       throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
     }
+    const before = this.session.getState();
     const committed = commitCloseSessionCommand(this.session, command, evidence);
+    this.#recordLastAppliedEventRevisions(before);
     if (committed.wasActive) {
       this.#activeCommittedCommandCancel(committed.events, 'Runtime session closed.');
     }
@@ -527,7 +556,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
   ): CommittedControlCommand {
     this.#assertOpen();
-    return commitClearSessionCommandGrantsCommand(this.session, command, evidence);
+    const before = this.session.getState();
+    const committed = commitClearSessionCommandGrantsCommand(this.session, command, evidence);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
   }
 
   commitForkSessionCommand(
@@ -558,15 +590,19 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     if (this.#activeOperation) {
       throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
     }
-    return commitRewindCommand(this.session, command, evidence);
+    const before = this.session.getState();
+    const committed = commitRewindCommand(this.session, command, evidence);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
   }
 
   persistRewindTerminal(
     event: Extract<RuntimeEvent, { type: 'session.rewind_completed' | 'session.rewind_failed' }>,
   ): readonly RuntimeEvent[] {
     this.#assertOpen();
+    const before = this.session.getState();
     const applied = this.session.processEventBatch([event]);
-    this.#recordLastAppliedEventRevisions();
+    this.#recordLastAppliedEventRevisions(before);
     return applied;
   }
 
@@ -579,7 +615,20 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     if (this.#activeOperation) {
       throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
     }
-    return commitStartTurnCommand(this.session, command, evidence, context);
+    const before = this.session.getState();
+    const committed = commitStartTurnCommand(this.session, command, evidence, context);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitInteractionCommand(
+    input: RuntimeInteractionCommandCommitInput,
+  ): CommittedInteractionCommand {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const result = commitInteractionCommand(this.session, input);
+    this.#recordLastAppliedEventRevisions(before);
+    return result;
   }
 
   async *executeTurn(
@@ -836,15 +885,17 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
           : undefined;
       let applied: readonly RuntimeEvent[];
       if (batchRelease) {
+        const before = this.session.getState();
         this.session.commitApprovalBatch(batchRelease, batchRelease.sessionRevision);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         applied = this.session.getLastAppliedEvents();
       } else {
+        const before = this.session.getState();
         const settlement = approvalRejectionSettlementEvents(this.session.getState(), events);
         applied = this.session.processEventBatch([...events, ...additionalEvents, ...settlement], {
           source: 'command',
         });
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
       }
       return { status: 'applied', events: [...applied] };
     };
@@ -855,19 +906,22 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       runtimeStore: this.#store,
       getState: () => this.session.getState(),
       processEvent: (event: RuntimeEvent) => {
+        const before = this.session.getState();
         const result = this.session.processEvent(event);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       processEventBatch: (events: RuntimeEvent[]) => {
+        const before = this.session.getState();
         const result = this.session.processEventBatch(events);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       processEvents: (events: RuntimeEvent[]) => {
         for (const event of events) {
+          const before = this.session.getState();
           this.session.processEvent(event);
-          this.#recordLastAppliedEventRevisions();
+          this.#recordLastAppliedEventRevisions(before);
         }
       },
       getLastAppliedEvents: () => this.session.getLastAppliedEvents(),
@@ -880,11 +934,13 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       beginEffect: (effect) => this.session.beginEffect(effect),
       isEffectEventCurrent: (lease, event) => this.session.isEffectEventCurrent(lease, event),
       applyEffectEvent: (lease, event) => {
+        const before = this.session.getState();
         const result = this.session.applyEffectEvent(lease, event);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       applyEffectEvents: (lease, events, acknowledgement, requiredEffectLease) => {
+        const before = this.session.getState();
         const result = this.session.applyEffectEvents(
           lease,
           events,
@@ -897,10 +953,11 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
               }
             : undefined,
         );
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       applyEffectResult: (lease, events, requiredEffectLease) => {
+        const before = this.session.getState();
         const result = this.session.applyEffectResult(
           lease,
           events,
@@ -912,19 +969,21 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
               }
             : undefined,
         );
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       applyLateResourceReconciliation: (events) => {
+        const before = this.session.getState();
         const result = this.session.applyLateResourceReconciliation(events);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       applyAction,
       getSandboxAvailable: () => this.#sandboxAvailable === true,
       commitInteractionCommand: (input) => {
+        const before = this.session.getState();
         const result = commitInteractionCommand(this.session, input);
-        this.#recordLastAppliedEventRevisions();
+        this.#recordLastAppliedEventRevisions(before);
         return result;
       },
       releaseEffect: (lease) => this.session.releaseEffect(lease),
@@ -932,14 +991,20 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     return Object.freeze(port);
   }
 
-  #recordLastAppliedEventRevisions(): void {
+  #recordLastAppliedEventRevisions(before: Readonly<RuntimeState>): void {
     const events = this.session.getLastAppliedEvents();
     const finalRevision = this.session.getState().revision;
     const firstRevision = finalRevision - events.length + 1;
+    let projectedState = before;
     for (const [index, event] of events.entries()) {
       const revision = firstRevision + index;
+      projectedState = {
+        ...runtimeHostStateProjectAcceptedEvent(projectedState, event),
+        revision,
+      } as RuntimeState;
       if (revision <= this.#lastRecordedEventRevision) continue;
       this.#eventRevisions.set(event, revision);
+      this.#eventStates.set(event, projectedState);
       this.#pendingEventRevisions.push({ event, revision });
       this.#lastRecordedEventRevision = revision;
     }

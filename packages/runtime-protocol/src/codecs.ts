@@ -1,6 +1,7 @@
 import {
   RUNTIME_TOOL_DISPLAY_NAMES_,
   RUNTIME_TOOL_PRESENTATIONS_,
+  sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
 import { z } from 'zod';
 import {
@@ -549,9 +550,19 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
       });
     }
     const turnInteraction = value.activeWork?.activeTurn?.interaction;
+    const queuedInteraction =
+      value.interactionQueue.activeInteractionId === undefined
+        ? undefined
+        : value.interactionQueue.interactions.find(
+            (candidate) => candidate.interactionId === value.interactionQueue.activeInteractionId,
+          );
     if (
       value.interactionQueue.activeInteractionId !== turnInteraction?.interactionId ||
-      (turnInteraction !== undefined && turnInteraction.sessionRevision !== value.revision)
+      (turnInteraction !== undefined &&
+        (queuedInteraction === undefined ||
+          turnInteraction.sessionRevision !== value.revision ||
+          queuedInteraction.sessionRevision !== turnInteraction.sessionRevision ||
+          !sameRuntimeClientInteractionIdentity(queuedInteraction, turnInteraction)))
     ) {
       context.addIssue({
         code: 'custom',

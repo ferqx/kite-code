@@ -527,6 +527,49 @@ describe('runtime contract package boundary', () => {
     }
   });
 
+  test('rejects duplicate active interaction fields unless their full identity matches', () => {
+    const approval = {
+      kind: 'approval' as const,
+      interactionId: 'approval-full-identity',
+      sessionRevision: 7,
+      generation: 1,
+      command: 'bun test',
+      grants: ['approve_once' as const],
+    };
+    const notification = {
+      type: 'session_upsert' as const,
+      serverInstanceId: 'server-1',
+      generation: 2,
+      indexRevision: 9,
+      session: {
+        schema: RUNTIME_PROJECTION_SCHEMA_,
+        sessionId: 'session-1',
+        revision: 7,
+        lifecycle: 'open' as const,
+        interactionQueue: {
+          revision: 7,
+          activeInteractionId: approval.interactionId,
+          interactions: [approval],
+        },
+        activeWork: {
+          workId: 'work-1',
+          phase: 'building' as const,
+          status: 'waiting' as const,
+          activeTurn: {
+            turnId: 'turn-1',
+            status: 'waiting' as const,
+            interaction: { ...approval, command: 'bun test --changed' },
+          },
+        },
+      },
+    };
+
+    expect(isRuntimeSessionIndexNotification(notification)).toBe(false);
+    expect(() => assertRuntimeSessionIndexNotification(notification)).toThrow(
+      'Invalid RuntimeSessionIndexNotification',
+    );
+  });
+
   test('validates closed query fields and rejects non-JSON command payloads', () => {
     const query = {
       schema: 'kite.runtime-query.v1' as const,

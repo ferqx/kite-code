@@ -18,7 +18,8 @@ export function useGlobalKeys(
   wizardEscBackRef?: MutableRefObject<boolean>,
   layeredOverlayEscRef?: MutableRefObject<boolean>,
   onTogglePlanMode?: () => void,
-  onCancelInterrupt?: () => void,
+  /** Return true when an interaction owner accepted responsibility for Esc. */
+  onCancelInterrupt?: () => boolean,
   onAbort?: () => void,
 ) {
   const overlayActiveRef = useRef(overlayActive);
@@ -66,8 +67,8 @@ export function useGlobalKeys(
         if (supplementEscRef?.current) return;
         if (wizardEscBackRef?.current) return;
         if (layeredOverlayEscRef?.current) return;
-        if (overlayActiveRef.current) onCancelInterrupt?.();
-        else onAbort?.();
+        if (overlayActiveRef.current && onCancelInterrupt?.() === true) return;
+        if (!overlayActiveRef.current) onAbort?.();
         dispatch({ type: 'ESCAPE' });
         return;
       }

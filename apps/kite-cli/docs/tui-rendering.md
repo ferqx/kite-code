@@ -44,8 +44,9 @@
 - 决定必须同时匹配可见 queue entry 的 `interactionId` 与 generation；旧卡片、重连前 generation 或缺少
   durable identity 的卡片不能授权。TUI 的选项过滤只影响展示，最终 settlement 仍由 Host 对 State 27
   revision/generation/interaction identity fail closed。
-- Enter后overlay显示提交中，并在Runtime command receipt accepted前保持原选择；提交失败显示本地化重试提示，
-  不移除approval、不标记authorized，也不把一次失败写入永久去重集合。旧React owner的cleanup不能清除当前action sink。
+- Approval、Input与Plan overlay的Enter/Esc动作都先显示提交中，并在Runtime command receipt accepted前保持原交互；
+  提交失败显示本地化重试提示，不移除interaction、不标记authorized/answered/cancelled，也不把一次失败写入永久去重
+  集合。旧React owner的cleanup不能清除当前action sink；不存在同步submit或interrupt-clear后补发cancel的展示旁路。
 - user route不显示多余的“人工审批”标签；Auto route仍可显示“自动审查”。必要的匹配请求数量可见，但queue
   sequence、generation或interaction ID不显示；这些字段仍完整保留在client state与settlement校验中。
 - Live 与 replay 都从同一 client-safe event identity 构造 block；本地提交态不能与 durable

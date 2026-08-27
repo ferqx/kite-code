@@ -84,6 +84,8 @@ function SingleQuestion({
   const [selected, setSelected] = useState(0);
   const [freeText, setFreeText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionFailed, setSubmissionFailed] = useState(false);
   const moveSelection = (next: number) => {
     setSelected(next);
     if (hasCustom && next === totalSlots - 1) {
@@ -116,23 +118,34 @@ function SingleQuestion({
       if (key.return || input === '\r' || input === '\n') {
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
-        if (opt) {
-          provider.submitAction({
-            type: 'input',
-            interactionId,
-            text: opt.label,
-            optionId: opt.id,
-          });
-          onResolved(opt.label);
-        }
+        if (opt) void submit(opt.label, opt.id);
       }
     },
   );
 
+  async function submit(value: string, optionId?: string) {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmissionFailed(false);
+    try {
+      const accepted = await provider.submitActionAsync({
+        type: 'input',
+        interactionId,
+        text: value,
+        ...(optionId === undefined ? {} : { optionId }),
+      });
+      if (!accepted) throw new Error('Input submission was not accepted.');
+      onResolved(value);
+    } catch {
+      setSubmissionFailed(true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const handleSubmit = (value: string) => {
     if (value.trim()) {
-      provider.submitAction({ type: 'input', interactionId, text: value });
-      onResolved(value);
+      void submit(value);
     } else {
       setShowEmptyHint(true);
       setTimeout(() => setShowEmptyHint(false), 2000);
@@ -197,6 +210,11 @@ function SingleQuestion({
       }
     >
       {question.context && <Text color={t.dim}>{question.context}</Text>}
+      {(submitting || submissionFailed) && (
+        <Text color={submissionFailed ? t.error : t.dim}>
+          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+        </Text>
+      )}
 
       {options.length > 0 ? (
         <Box flexDirection="column" marginTop={question.context ? 1 : 0}>
@@ -256,6 +274,8 @@ function MultiQuestionWizard({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [freeText, setFreeText] = useState('');
   const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionFailed, setSubmissionFailed] = useState(false);
 
   // 同步 step 到 ref，供全局 ESC handler 判断是否应回退而非取消
   // Sync step to ref so global ESC handler knows to skip (back vs cancel)
@@ -333,17 +353,26 @@ function MultiQuestionWizard({
       setFreeText('');
     } else {
       // 最后一步 → 提交 / Final step → submit
-      setDone(true);
       const summary = Object.entries(currentAnswers)
         .map(([k, v]) => `${k}: ${v}`)
         .join('; ');
-      provider.submitAction({
-        type: 'input',
-        interactionId,
-        text: summary,
-        answers: currentAnswers,
-      });
-      onResolved(summary, currentAnswers);
+      if (submitting) return;
+      setSubmitting(true);
+      setSubmissionFailed(false);
+      void provider
+        .submitActionAsync({
+          type: 'input',
+          interactionId,
+          text: summary,
+          answers: currentAnswers,
+        })
+        .then((accepted) => {
+          if (!accepted) throw new Error('Input submission was not accepted.');
+          setDone(true);
+          onResolved(summary, currentAnswers);
+        })
+        .catch(() => setSubmissionFailed(true))
+        .finally(() => setSubmitting(false));
     }
   }
 
@@ -456,6 +485,11 @@ function MultiQuestionWizard({
     >
       {/* 上下文 / Context */}
       {isSingle && question.context && <Text color={t.dim}>{question.context}</Text>}
+      {(submitting || submissionFailed) && (
+        <Text color={submissionFailed ? t.error : t.dim}>
+          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+        </Text>
+      )}
 
       {/* 当前问题内容 / Current question content */}
       <Box marginTop={isSingle ? 0 : 1} flexDirection="column">

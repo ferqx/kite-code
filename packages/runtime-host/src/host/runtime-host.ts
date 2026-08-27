@@ -561,7 +561,7 @@ function authorizePreparedExecution(
     throw new Error('Runtime Host prepared execution requires an applied receipt.');
   }
   const expectedOperation =
-    command.type === 'start_turn'
+    command.type === 'start_turn' || command.type === 'respond_interaction'
       ? 'turn'
       : command.type === 'compact_session'
         ? 'compaction'

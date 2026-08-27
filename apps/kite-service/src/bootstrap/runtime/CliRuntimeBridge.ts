@@ -16,6 +16,7 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
+  sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
 import type {
   RuntimeHostCommandInspection,
@@ -48,7 +49,7 @@ import {
   projectRuntimeClientInteraction,
   projectRuntimeClientInteractionQueue,
   type RuntimeInteractionEffect,
-  sameRuntimeClientInteractionIdentity,
+  resolveRuntimeInteractionEffect,
 } from '../../runtime-client/interaction-projector';
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
@@ -101,6 +102,14 @@ interface PendingCliInteraction {
   readonly interaction: RuntimeClientInteraction;
   readonly commandCommit: RuntimeInteractionCommandCommitPort;
   readonly brokerIdentity: RuntimeInteractionIdentity;
+}
+
+interface CliRuntimeTurnExecutionInput {
+  readonly operationId: string;
+  readonly task: string;
+  readonly userGoal: string;
+  readonly precommittedStart?: PrecommittedStartTurnDescriptor;
+  readonly resumeCommittedInteraction?: boolean;
 }
 
 export function createCliRuntimeBridge(
@@ -186,7 +195,10 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     const coordinator = this.#ensureCoordinator();
     this.#created = true;
     this.#closed = false;
-    this.#revision = coordinator.getState().revision;
+    const state = coordinator.getState();
+    this.#revision = state.revision;
+    this.#activeWork = activeWorkFromState(state);
+    this.#running = this.#activeWork?.status === 'waiting';
     if (!coordinator.recoveryChanged) return;
     publish({
       schema: RUNTIME_NOTIFICATION_SCHEMA_,
@@ -262,16 +274,21 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     if (command.type === 'respond_interaction') {
       const pending = this.#pendingInteraction;
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) {
+        return terminal(this.#rejected(command, 'interaction_mismatch'));
+      }
+      const state = coordinator.getState();
+      const effect = pending?.effect ?? resolveRuntimeInteractionEffect(state, command.interaction);
       if (
-        !pending ||
-        !coordinator ||
-        !sameInteractionIdentity(pending.interaction, command.interaction)
+        !effect ||
+        (pending && !sameInteractionIdentity(pending.interaction, command.interaction)) ||
+        (!pending && !coordinator.commitInteractionCommand)
       ) {
         return terminal(this.#rejected(command, 'interaction_mismatch'));
       }
       const action = mapRuntimeInteractionResponseToUserAction({
-        state: coordinator.getState(),
-        effect: pending.effect,
+        state,
+        effect,
         interaction: command.interaction,
         response: command.response,
         expectedStateRevision: command.expectedRevision,
@@ -282,28 +299,57 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         decision: {
           targetSessionId: this.#input.sessionId,
           commit: async (evidence) => {
-            const committed = pending.commandCommit.commit(action, evidence);
+            const committed = pending
+              ? pending.commandCommit.commit(action, evidence, command.expectedRevision)
+              : coordinator.commitInteractionCommand!({
+                  action,
+                  sessionId: command.sessionId,
+                  interactionId: command.interaction.interactionId,
+                  expectedRevision: command.expectedRevision,
+                  effectType: effect.type,
+                  reservationReconciliationEvents: [],
+                  sandboxAvailable: coordinator.getSandboxAvailable() === true,
+                  evidence,
+                });
             const receipt = receiptFromStored(committed.receipt);
             return {
               receipt,
               activation: async (publish) => {
-                if (this.#pendingInteraction !== pending) {
+                if (pending && this.#pendingInteraction !== pending) {
                   throw new Error(
                     'Runtime interaction activation no longer owns its pending waiter.',
                   );
                 }
-                this.#pendingInteraction = undefined;
+                if (pending) this.#pendingInteraction = undefined;
                 this.#revision = receipt.revision;
                 this.#activeWork = clearActiveInteraction(this.#activeWork);
                 this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
-                const resolution = this.#interactionBroker.resolve(
-                  pending.brokerIdentity,
-                  committed.descriptor,
-                );
-                if (resolution !== 'resolved') {
-                  throw new Error(`Runtime interaction broker resolution failed: ${resolution}`);
+                if (pending) {
+                  const resolution = this.#interactionBroker.resolve(
+                    pending.brokerIdentity,
+                    committed.descriptor,
+                  );
+                  if (resolution !== 'resolved') {
+                    throw new Error(`Runtime interaction broker resolution failed: ${resolution}`);
+                  }
+                } else {
+                  this.#running = true;
+                  this.#activePublish = publish;
+                  this.#activeWork = runningWorkFromState(
+                    coordinator.getState(),
+                    command.commandId,
+                  );
                 }
               },
+              ...(pending
+                ? {}
+                : {
+                    preparedExecution: this.#preparedInteractionResume(
+                      command.commandId,
+                      coordinator,
+                      receipt,
+                    ),
+                  }),
             };
           },
         },
@@ -667,7 +713,49 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         committedRevision: receipt.revision,
         operation: 'turn',
         run: (signal, requestAbort) =>
-          this.#runTurn(command, this.#ensureCoordinator(), descriptor, signal, requestAbort),
+          this.#runTurn(
+            {
+              operationId: command.commandId,
+              task: command.input,
+              userGoal: command.input,
+              precommittedStart: descriptor,
+            },
+            this.#ensureCoordinator(),
+            signal,
+            requestAbort,
+          ),
+      },
+    };
+  }
+
+  #preparedInteractionResume(
+    operationId: string,
+    coordinator: RuntimeSessionCoordinator,
+    receipt: Extract<RuntimeCommandReceipt, { status: 'applied' }>,
+  ): RuntimeHostPreparedExecution {
+    const state = coordinator.getState();
+    const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+    if (!task || state.turn.status !== 'active') {
+      throw new Error('Recovered Runtime interaction has no active durable turn to resume.');
+    }
+    return {
+      execution: {
+        sessionId: this.#input.sessionId,
+        operationId,
+        committedRevision: receipt.revision,
+        operation: 'turn',
+        run: (signal, requestAbort) =>
+          this.#runTurn(
+            {
+              operationId,
+              task: task.userGoal,
+              userGoal: task.userGoal,
+              resumeCommittedInteraction: true,
+            },
+            coordinator,
+            signal,
+            requestAbort,
+          ),
       },
     };
   }
@@ -683,6 +771,12 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     for (const [index, event] of events.entries()) {
       const revision = firstRevision + index;
       const projectedEvent = safelyProjectRuntimeEvent(event, revision);
+      const eventState = this.#runtimeSessionCoordinator
+        .get(this.#input.sessionId)
+        ?.stateForEvent?.(event);
+      if (!eventState || eventState.revision !== revision) {
+        throw new Error('Runtime committed event State projection is unavailable.');
+      }
       publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
@@ -690,7 +784,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         revision,
         projection: {
           kind,
-          session: this.#projection(revision),
+          session: this.#projection(revision, eventState),
           ...(projectedEvent === undefined ? {} : { event: projectedEvent }),
         },
       });
@@ -714,7 +808,16 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   }
 
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
-    const projection = this.#projection();
+    let projection: RuntimeSessionProjection;
+    try {
+      projection = this.#projection();
+    } catch {
+      return Promise.resolve({
+        status: 'unavailable',
+        queryType: query.type,
+        code: 'session_unavailable',
+      });
+    }
     if (query.type === 'list_sessions') {
       return Promise.resolve({
         status: 'ok',
@@ -834,9 +937,8 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   }
 
   async #runTurn(
-    command: Extract<RuntimeCommand, { type: 'start_turn' }>,
+    execution: CliRuntimeTurnExecutionInput,
     coordinator: RuntimeSessionCoordinator,
-    precommittedStart: PrecommittedStartTurnDescriptor,
     signal: AbortSignal,
     requestAbort: (reason: string) => void,
   ): Promise<void> {
@@ -851,11 +953,11 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     const publishPresentation = (event: RuntimeEvent): void => {
       const notification = projectRuntimeEphemeralNotification(event, {
         sessionId: this.#input.sessionId,
-        workId: this.#activeWork?.workId ?? command.commandId,
-        turnId: this.#activeWork?.activeTurn?.turnId ?? command.commandId,
+        workId: this.#activeWork?.workId ?? execution.operationId,
+        turnId: this.#activeWork?.activeTurn?.turnId ?? execution.operationId,
         actorId: 'runtime-agent',
-        attemptId: command.commandId,
-        streamId: command.commandId,
+        attemptId: execution.operationId,
+        streamId: execution.operationId,
         sequence: sequence + 1,
       });
       if (!notification) {
@@ -867,8 +969,8 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     try {
       const generator = coordinator.executeTurn(
         {
-          task: command.input,
-          userGoal: command.input,
+          task: execution.task,
+          userGoal: execution.userGoal,
           userId: this.#input.userId,
           threadId: this.#input.sessionId,
           workspace: this.#input.workspace,
@@ -894,7 +996,12 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           skillOptions: this.#input.skillOptions,
           skills: this.#input.skillManifests ? [...this.#input.skillManifests] : [],
           initialSkillActivations: [],
-          precommittedStart,
+          ...(execution.precommittedStart === undefined
+            ? {}
+            : { precommittedStart: execution.precommittedStart }),
+          ...(execution.resumeCommittedInteraction === true
+            ? { resumeCommittedInteraction: true }
+            : {}),
         },
         this.#createClientActionProvider(publish),
       );
@@ -902,7 +1009,13 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         if (presentation.push(event, publishPresentation)) continue;
         presentation.flush();
         const eventRevision = coordinator.revisionForEvent?.(event);
-        if (eventRevision === undefined || eventRevision <= publishedRevision) {
+        const eventState = coordinator.stateForEvent?.(event);
+        if (
+          eventRevision === undefined ||
+          eventRevision <= publishedRevision ||
+          !eventState ||
+          eventState.revision !== eventRevision
+        ) {
           throw new Error('Runtime event revision was unavailable or out of order.');
         }
         const projectedEvent = projectRuntimeClientEvent(event, {
@@ -937,7 +1050,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           revision: this.#revision,
           projection: {
             kind: 'turn',
-            session: this.#projection(),
+            session: this.#projection(eventRevision, eventState),
             event: projectedEvent,
           },
         });
@@ -1091,21 +1204,24 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     publish: (notification: RuntimeNotification) => void = this.#activePublish ?? (() => undefined),
   ): void {
     this.#flushActivePresentation();
-    const events =
-      this.#runtimeSessionCoordinator.get(this.#input.sessionId)?.control.cancelRun(reason) ?? [];
+    const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+    const events = coordinator?.control.cancelRun(reason) ?? [];
     for (const event of events) {
-      this.#revision =
-        this.#runtimeSessionCoordinator.get(this.#input.sessionId)?.getState().revision ??
-        this.#revision;
+      const revision = coordinator?.revisionForEvent?.(event);
+      const eventState = coordinator?.stateForEvent?.(event);
+      if (revision === undefined || !eventState || eventState.revision !== revision) {
+        throw new Error('Runtime cancellation event State projection is unavailable.');
+      }
+      this.#revision = revision;
       publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
         sessionId: this.#input.sessionId,
-        revision: this.#revision,
+        revision,
         projection: {
           kind: 'turn',
-          session: this.#projection(),
-          event: projectRuntimeClientEvent(event, { sessionRevision: this.#revision }),
+          session: this.#projection(revision, eventState),
+          event: projectRuntimeClientEvent(event, { sessionRevision: revision }),
         },
       });
     }
@@ -1115,23 +1231,24 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     this.#activePresentationFrame?.flush();
   }
 
-  #projection(revision = this.#revision): RuntimeSessionProjection {
+  #projection(
+    revision = this.#revision,
+    exactState?: Readonly<RuntimeState>,
+  ): RuntimeSessionProjection {
     const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
-    let state: Readonly<RuntimeState> | undefined;
-    try {
-      state = coordinator?.getState();
-    } catch {
-      state = undefined;
+    const state = exactState ?? coordinator?.getState();
+    if (!state || state.revision !== revision) {
+      throw new Error(
+        'Runtime interaction State is unavailable for the exact projection revision.',
+      );
     }
     const interactionQueue: RuntimeInteractionQueueProjection =
-      state?.revision === revision
-        ? projectRuntimeClientInteractionQueue(state, {
-            sessionRevision: revision,
-            ...(this.#activeWork?.activeTurn?.interaction === undefined
-              ? {}
-              : { focusedInteraction: this.#activeWork.activeTurn.interaction }),
-          })
-        : Object.freeze({ revision, interactions: Object.freeze([]) });
+      projectRuntimeClientInteractionQueue(state, {
+        sessionRevision: revision,
+        ...(this.#activeWork?.activeTurn?.interaction === undefined
+          ? {}
+          : { focusedInteraction: this.#activeWork.activeTurn.interaction }),
+      });
     const activeInteraction =
       interactionQueue.activeInteractionId === undefined
         ? undefined
@@ -1308,6 +1425,53 @@ function clearActiveInteraction(
     activeTurn: work.activeTurn
       ? { ...work.activeTurn, status: 'running', interaction: undefined }
       : undefined,
+  };
+}
+
+function activeWorkFromState(
+  state: Readonly<RuntimeState>,
+): RuntimeSessionProjection['activeWork'] {
+  const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+  if (!task) return undefined;
+  const interactionQueue = projectRuntimeClientInteractionQueue(state, {
+    sessionRevision: state.revision,
+  });
+  const interaction =
+    interactionQueue.activeInteractionId === undefined
+      ? undefined
+      : interactionQueue.interactions.find(
+          (candidate) => candidate.interactionId === interactionQueue.activeInteractionId,
+        );
+  const status =
+    state.turn.status === 'active'
+      ? interaction
+        ? ('waiting' as const)
+        : ('running' as const)
+      : state.turn.status === 'completed'
+        ? ('completed' as const)
+        : ('cancelled' as const);
+  return {
+    workId: task.taskId,
+    phase: task.planning.kind === 'executing' ? 'building' : 'planning',
+    status,
+    activeTurn: {
+      turnId: state.turn.turnId,
+      status,
+      ...(interaction === undefined ? {} : { interaction }),
+    },
+  };
+}
+
+function runningWorkFromState(
+  state: Readonly<RuntimeState>,
+  fallbackWorkId: string,
+): NonNullable<RuntimeSessionProjection['activeWork']> {
+  const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+  return {
+    workId: task?.taskId ?? fallbackWorkId,
+    phase: task?.planning.kind === 'executing' ? 'building' : 'planning',
+    status: 'running',
+    activeTurn: { turnId: state.turn.turnId, status: 'running' },
   };
 }
 

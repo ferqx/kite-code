@@ -53,7 +53,10 @@ preflight与active launcher验证都把companion作为required file。source mod
   不能把snapshot与旧client interaction做并集，也不能因对象共享引用改变logical-message行为。Store-only启动/index
   hydration直接从已加载Runtime State投影完整queue，不实例化Workspace context，也不能把pending交互伪装为空。
   pending interaction在无关State revision前进后以稳定kind-specific identity和当前Session CAS重新投影；结算transaction
-  使用提交瞬间的State revision，旧generation/digest/provider/verification/input/command内容仍fail closed。
+  固定使用Host inspect已接受的command revision，inspect与commit之间State再前进必须CAS失败，不能自动替换成更新revision。
+  Service重启后从durable State重建pending effect与active Turn continuation；结算receipt applied后由Host重新调度原Turn，
+  不依赖旧进程的waiter/closure，也不重复提交approval或dispatch工具。旧generation/digest/provider/verification/input/command
+  内容仍fail closed。
 - Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
   identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
   scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。

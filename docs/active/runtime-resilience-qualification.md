@@ -16,15 +16,18 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 
-Native TUI interaction不能fire-and-forget：client必须等待`respond_interaction` receipt，失败时保留可见approval与可重试
-identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live
+Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
+失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live
 notification与response command两向codec中一致；History可见而live subscription丢失同一interaction属于hard failure。
 gap/reset snapshot还必须携带完整、同revision的interaction queue替换集：无interaction的active snapshot清旧focus，
 新queue删除旧entry并保留仍pending的并发sibling，idle snapshot清除残留Map。相同notification经JSON/WebSocket与
 InProcess logical-message必须得到同一Client state；共享对象引用不能被误判为cycle或静默关闭subscription。Service
 启动/index hydration从纯持久State生成该完整queue，不得提交伪空替换集。pending interaction的公开`sessionRevision`
-随当前CAS前进，稳定kind-specific identity不变；结算必须在当前State revision原子commit，旧generation/digest或被修改的
-input/command字段仍拒绝。双Client相同response只有一个applied，另一个只可idempotent replay。
+随当前CAS前进，稳定kind-specific identity不变；Host inspect接受后结算CAS固定，inspect→commit间revision前进必须失败，
+旧generation/digest或被修改的input/command字段仍拒绝。activeTurn/queue同ID但完整身份漂移也拒绝。双Client相同response
+只有一个applied，另一个只可idempotent replay。真实process-death资格还必须覆盖pending approval从Store恢复、response receipt、
+原Turn continuation与Tool一次dispatch；进程内broker/waiter不能作为恢复证据。batch中每个notification必须携带自身revision的
+exact post-event queue，无法读取时unavailable而不是空queue。
 
 Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
 重放。当前唯一production composition位于`apps/kite-service`：它在同一process拥有真实Host、State 27 / Store 6、Builtin、

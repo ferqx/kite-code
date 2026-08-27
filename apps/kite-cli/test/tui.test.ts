@@ -89,7 +89,7 @@ describe('TuiUserInputProvider', () => {
     await Bun.sleep(10);
     expect(resolved).toBe(false);
 
-    provider.submitAction({
+    await provider.submitActionAsync({
       type: 'approve',
       interactionId: 'approval-1',
       generation: 1,
@@ -118,7 +118,7 @@ describe('TuiUserInputProvider', () => {
     const promise = provider.requestAction(payload);
     expect(provider.getPendingInterrupt()).toEqual(payload);
 
-    provider.submitAction({ type: 'input', text: 'answer' });
+    await provider.submitActionAsync({ type: 'input', text: 'answer' });
     await promise;
     expect(provider.getPendingInterrupt()).toBeNull();
   });
@@ -154,7 +154,7 @@ describe('TuiUserInputProvider', () => {
       summary: 'run echo',
     });
 
-    provider.submitAction({
+    await provider.submitActionAsync({
       type: 'approve',
       interactionId: 'approval-generation-2',
       generation: 1,
@@ -163,18 +163,19 @@ describe('TuiUserInputProvider', () => {
     await Bun.sleep(5);
     expect(provider.getPendingInterrupt()?.interactionId).toBe('approval-generation-2');
 
-    provider.submitAction({
+    const accepted = provider.submitActionAsync({
       type: 'approve',
       interactionId: 'approval-generation-2',
       generation: 2,
       grant: 'approve_once',
     });
-    provider.submitAction({
+    const duplicate = provider.submitActionAsync({
       type: 'approve',
       interactionId: 'approval-generation-2',
       generation: 2,
       grant: 'approve_once',
     });
+    expect(await Promise.all([accepted, duplicate])).toEqual([true, false]);
     await expect(promise).resolves.toMatchObject({
       type: 'approve',
       interactionId: 'approval-generation-2',

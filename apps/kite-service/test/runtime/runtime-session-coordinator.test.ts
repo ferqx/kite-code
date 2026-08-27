@@ -542,6 +542,7 @@ describe('retained TUI session coordinator', () => {
     try {
       const coordinator = access.ensure(identity(sessionId));
       const command = startCommand(sessionId, coordinator.getState().revision);
+      const beforeRevision = coordinator.getState().revision;
       const firstPlan = planStartTurnCommand(coordinator.getState(), command);
       const retryPlan = planStartTurnCommand(coordinator.getState(), command);
       expect(retryPlan.descriptor).toEqual(firstPlan.descriptor);
@@ -555,6 +556,17 @@ describe('retained TUI session coordinator', () => {
       expect(coordinator.getState().transcript.messages).toHaveLength(1);
       expect(coordinator.isTurnActive()).toBe(false);
       assertPrecommittedStartTurn(coordinator.getState(), committed.descriptor, sessionId);
+      expect(
+        committed.events.map((event) => ({
+          revision: coordinator.revisionForEvent?.(event),
+          stateRevision: coordinator.stateForEvent?.(event)?.revision,
+        })),
+      ).toEqual(
+        committed.events.map((_, index) => ({
+          revision: beforeRevision + index + 1,
+          stateRevision: beforeRevision + index + 1,
+        })),
+      );
 
       expect(() => coordinator.commitStartTurnCommand(command, commandEvidence(sessionId))).toThrow(
         'revision conflict',

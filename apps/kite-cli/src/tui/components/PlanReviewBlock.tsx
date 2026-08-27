@@ -30,6 +30,8 @@ export default function PlanReviewBlock({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [supplementText, setSupplementText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionFailed, setSubmissionFailed] = useState(false);
 
   // Mode: 'options' = choose approve/supplement/reject; 'supplement' = type feedback
   const [mode, setMode] = useState<'options' | 'supplement'>('options');
@@ -57,47 +59,58 @@ export default function PlanReviewBlock({
     description: option.desc,
   }));
 
-  function resolve(action: string, feedback?: string) {
+  async function resolve(action: string, feedback?: string) {
+    if (submitting) return;
+    let submission: Parameters<TuiUserInputProvider['submitActionAsync']>[0];
     switch (action) {
       case 'approved_auto':
-        provider.submitAction({
+        submission = {
           type: 'plan_review_decision',
           interactionId,
           decision: { kind: 'approve', nextMode: 'auto' },
-        });
-        onResolved('approved_auto');
+        };
         break;
       case 'approved_accept_edits':
-        provider.submitAction({
+        submission = {
           type: 'plan_review_decision',
           interactionId,
           decision: { kind: 'approve', nextMode: 'accept_edits' },
-        });
-        onResolved('approved_accept_edits');
+        };
         break;
       case 'supplemented':
-        provider.submitAction({
+        submission = {
           type: 'plan_review_decision',
           interactionId,
           decision: { kind: 'revise', feedback: feedback ?? '' },
-        });
-        onResolved('supplemented', feedback);
+        };
         break;
       case 'rejected':
-        provider.submitAction({
+        submission = {
           type: 'plan_review_decision',
           interactionId,
           decision: { kind: 'cancel' },
-        });
-        onResolved('rejected');
+        };
         break;
+      default:
+        return;
+    }
+    setSubmitting(true);
+    setSubmissionFailed(false);
+    try {
+      const accepted = await provider.submitActionAsync(submission);
+      if (!accepted) throw new Error('Plan review submission was not accepted.');
+      onResolved(action, feedback);
+    } catch {
+      setSubmissionFailed(true);
+    } finally {
+      setSubmitting(false);
     }
   }
 
   function handleSupplementSubmit(value: string) {
     if (value.trim()) {
       if (supplementEscRef) supplementEscRef.current = false;
-      resolve('supplemented', value.trim());
+      void resolve('supplemented', value.trim());
     } else {
       setShowEmptyHint(true);
       setTimeout(() => setShowEmptyHint(false), 2000);
@@ -135,7 +148,7 @@ export default function PlanReviewBlock({
           if (supplementEscRef) supplementEscRef.current = true;
           setMode('supplement');
         } else {
-          resolve(opt.action);
+          void resolve(opt.action);
         }
         return;
       }
@@ -164,6 +177,11 @@ export default function PlanReviewBlock({
         />
       }
     >
+      {(submitting || submissionFailed) && (
+        <Text color={submissionFailed ? t.error : t.dim}>
+          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+        </Text>
+      )}
       {mode === 'options' ? (
         <>
           <Box>

@@ -63,11 +63,11 @@
 - Approval Overlay 只绑定 durable queue 当前 `activeApprovalId`；后台 pending record 不抢占 Footer 或键盘。
 - Enter/Esc 携带 exact `interactionId` 与 generation；Enter 提交当前 grant，Esc 只拒绝当前焦点，迟到 action 为 no-op。
 - Ctrl+C 取消整轮 queued/awaiting/authorized/running siblings，不能退化为 focused reject。
-- approval在`respond_interaction`获得applied/idempotent receipt前保持可见；accepted receipt可把当前焦点标记为
-  approving，canonical granted/batch-released/rejected仍拥有durable结果。transport/protocol/identity失败不得被吞掉，
-  UI显示可重试错误且不伪造已授权事实。
-- 确认提交期间的durable settlement是同一用户动作的完成，interrupt-clear effect不得将其误判为
-  外部清理并再发cancel；否则已授权工具可能执行后又把所属Subagent/Turn取消。
+- approval、ask_user、Plan review及其Enter/Esc动作在`respond_interaction`获得applied/idempotent receipt前保持可见；
+  accepted receipt后才允许本地结束提交态，canonical granted/batch-released/rejected/input/plan event仍拥有durable结果。
+  transport/protocol/identity失败不得被吞掉，UI显示可重试错误且不伪造已授权、已回答或已取消事实。
+- 不存在interrupt清除后自动补发cancel的旁路。交互只由当前用户动作的一次receipt链路与后续authoritative queue/event
+  收敛；否则已接受动作可能被第二个fire-and-forget cancel覆盖。
 - `ask_user` 单题把问题放入标题，多题使用 `n / total` meta；自定义输入留在原列表，已完成回答不得在恢复时重开。
 - Plan review、MCP recovery/admission 与其他交互同样只由 canonical terminal event 清除。
 - Plan approval 由单个 `plan.approved.executionMode` 同时固定本次 Task 执行模式与 Session/TUI 镜像；不得
