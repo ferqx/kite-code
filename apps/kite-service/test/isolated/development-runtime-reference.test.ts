@@ -208,6 +208,7 @@ function session(
     revision,
     ...(displayName === undefined ? {} : { displayName }),
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

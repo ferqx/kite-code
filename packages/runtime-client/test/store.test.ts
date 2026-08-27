@@ -193,6 +193,7 @@ function projection(
     revision,
     ...(displayName ? { displayName } : {}),
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

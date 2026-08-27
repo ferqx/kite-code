@@ -9,15 +9,16 @@
 - reducer、block replay 与 interaction UI 只接收封闭 `RuntimeClientEvent`/client interaction projection。未知或无法安全投影的事实显示固定 unavailable/error 状态，绝不扩张为 `any` 或 raw Runtime event。
 - TUI本地只缓存`model.responded.messageId → requestId`与tool queue的opaque `presentationGroupId`配对；匹配结果只
   决定Presentation step归属，不参与Runtime command、approval或execution identity。新事件不按“当前block/上一条event”
-  猜group，旧History缺字段时才使用兼容顺序归约。
+  猜group；identity缺失或不匹配的工具保持独立neutral group，不得把当前Thought当作wildcard owner。
 - 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
   reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
   两个不同轮次的相同文本仍保留两条。`USER_MESSAGE` 只用于不会进入 Runtime 的本地 slash echo。
 - 历史 Session 的完整 durable replay 只通过 `RuntimeClient.history` 的 App-injected `RuntimeHistoryClient`
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
-  不是完整 history source。event-free snapshot仍是当前activity/interaction的权威projection：Native adapter把它作为
-  显式reconciliation action交给同一reducer，而不是在Client或React component中猜测终态。它只恢复当前closed
-  interaction或停止已经不存在的active work，不制造approval settlement或用户取消事件。
+  不是完整 history source。event-free snapshot仍是当前activity/interaction的权威projection：Service投影同revision
+  完整interaction queue与active identity，Native adapter和reducer按该集合替换本地interaction Map、pending approvals
+  与focus，而不是追加一个focused interaction。它可清除已不存在的旧queue项或停止已经不存在的active work，但不制造
+  approval settlement或用户取消事件。
 - TUI 不直接 import 或持有 Runtime Host、SQLite/Store、Kernel、Builtin executor、RuntimeLogQueryPort 或 transport/server concrete type；它不自建 mailbox、receipt、recovery 或 SQLite fallback。
 - TUI 的 Native client surface 是显式 `TuiRuntimeClientFacade` / `TuiSessionFacade` method 与字段清单；不得从
   Service `SessionManager` 推导类型，也不得使用 Proxy、Reflect fallback、动态 member cache 或 set trap 让

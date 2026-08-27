@@ -141,15 +141,51 @@ test('Native TUI facade restores an approval from a snapshot without waiting for
   expect(actions).toContainEqual({
     type: 'RECONCILE_RUNTIME_PROJECTION',
     active: true,
-    interaction: expect.objectContaining({
-      kind: 'approval',
-      interactionId: 'approval-native-receipt',
-      command: 'echo approved',
-    }),
+    interactionQueue: {
+      revision: 4,
+      activeInteractionId: 'approval-native-receipt',
+      interactions: [
+        expect.objectContaining({
+          kind: 'approval',
+          interactionId: 'approval-native-receipt',
+          command: 'echo approved',
+        }),
+      ],
+    },
   });
   await facade.submitUserAction({
     type: 'approve',
     interactionId: 'approval-native-receipt',
+    generation: 0,
+    grant: 'approve_once',
+  });
+  await run;
+  await facade.dispose();
+});
+
+test('Native TUI facade replaces stale interactions from an authoritative snapshot queue', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.replaceApprovalSnapshotOnNextTurn();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const run = facade
+    .getRuntime(sessionId)!
+    .runTask('replace stale approval', { dispatch: () => {} });
+
+  await Bun.sleep(5);
+  await expect(
+    facade.submitUserAction({
+      type: 'approve',
+      interactionId: 'approval-stale',
+      generation: 0,
+      grant: 'approve_once',
+    }),
+  ).rejects.toThrow('no longer pending');
+  expect(remote.commands).not.toContain('respond_interaction');
+  await facade.submitUserAction({
+    type: 'approve',
+    interactionId: 'approval-replacement',
     generation: 0,
     grant: 'approve_once',
   });
@@ -172,6 +208,7 @@ test('Native TUI facade completes an active run from an idle snapshot after a su
   expect(actions).toContainEqual({
     type: 'RECONCILE_RUNTIME_PROJECTION',
     active: false,
+    interactionQueue: { revision: 3, interactions: [] },
   });
   await facade.dispose();
 });
@@ -191,6 +228,7 @@ test('Native TUI facade ignores an idle snapshot older than the accepted turn re
   expect(actions).not.toContainEqual({
     type: 'RECONCILE_RUNTIME_PROJECTION',
     active: false,
+    interactionQueue: expect.anything(),
   });
   expect(
     actions.some(
@@ -210,6 +248,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #nextSubscription = 0;
   #approvalOnNextTurn = false;
   #approvalSnapshotOnNextTurn = false;
+  #replacementApprovalSnapshotOnNextTurn = false;
   #terminalSnapshotOnNextTurn = false;
   #staleSnapshotOnNextTurn = false;
   readonly #subscriptionBySession = new Map<string, string>();
@@ -220,6 +259,10 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   requestApprovalSnapshotOnNextTurn(): void {
     this.#approvalSnapshotOnNextTurn = true;
+  }
+
+  replaceApprovalSnapshotOnNextTurn(): void {
+    this.#replacementApprovalSnapshotOnNextTurn = true;
   }
 
   finishNextTurnWithSnapshot(): void {
@@ -443,6 +486,44 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
                 title: 'shell_execute',
                 summary: 'Approve a shell command',
               }),
+            }),
+          );
+          return;
+        }
+        if (this.#replacementApprovalSnapshotOnNextTurn) {
+          this.#replacementApprovalSnapshotOnNextTurn = false;
+          const subscriptionId = this.#subscriptionBySession.get(command.sessionId)!;
+          const stale = {
+            kind: 'approval' as const,
+            interactionId: 'approval-stale',
+            sessionRevision: 4,
+            generation: 0,
+            grants: ['approve_once'] as const,
+          };
+          const replacement = {
+            kind: 'approval' as const,
+            interactionId: 'approval-replacement',
+            sessionRevision: 5,
+            generation: 0,
+            grants: ['approve_once'] as const,
+          };
+          this.push(
+            subscriptionUpdate(subscriptionId, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 4,
+              session: projection(command.sessionId, 4, 'waiting', stale),
+              event: { type: 'interaction.available', interaction: stale },
+            }),
+          );
+          this.push(
+            subscriptionUpdate(subscriptionId, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: 5,
+              session: projection(command.sessionId, 5, 'waiting', replacement),
             }),
           );
           return;
@@ -675,6 +756,11 @@ function projection(
     lifecycle: 'open',
     model: { provider: 'fixture-provider', name: 'fixture-model' },
     sessionCommandGrantCount: 0,
+    interactionQueue: {
+      revision,
+      ...(interaction === undefined ? {} : { activeInteractionId: interaction.interactionId }),
+      interactions: interaction === undefined ? [] : [structuredClone(interaction)],
+    },
     activeWork: {
       workId: 'work-1',
       phase: 'building',
@@ -696,6 +782,7 @@ function idleProjection(sessionId: string, revision: number) {
     lifecycle: 'open',
     model: { provider: 'fixture-provider', name: 'fixture-model' },
     sessionCommandGrantCount: 0,
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

@@ -298,6 +298,7 @@ function sessionProjection(revision: number): RuntimeSessionProjection {
     revision,
     workspace: workspace.canonicalPath,
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

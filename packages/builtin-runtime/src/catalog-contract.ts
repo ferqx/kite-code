@@ -1473,12 +1473,9 @@ export function isDestructiveShellCommand(command: string): boolean {
 }
 
 export function isVcsMutationShellCommand(command: string): boolean {
-  const withoutCurrentBranchInspection = command.replace(
-    /\bgit\s+branch\s+--show-current(?=\s*(?:$|&&|\|\||[;|]))/gu,
-    'git status',
-  );
+  if (isReadOnlyShellCommand(command)) return false;
   return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    withoutCurrentBranchInspection,
+    command,
   );
 }
 

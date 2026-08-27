@@ -1009,6 +1009,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
               revision: snapshot.revision,
               workspace: snapshot.session.workspace,
               lifecycle: 'open' as const,
+              interactionQueue: { revision: snapshot.revision, interactions: [] },
               ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
             });
           });

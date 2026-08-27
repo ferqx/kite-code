@@ -1121,7 +1121,7 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       value,
       presentKeys(
         value,
-        ['schema', 'sessionId', 'revision', 'lifecycle'],
+        ['schema', 'sessionId', 'revision', 'lifecycle', 'interactionQueue'],
         ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork', 'model'],
       ),
     ) &&
@@ -1145,7 +1145,48 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
         isBoundedString(value.model.name) &&
         (!Object.hasOwn(value.model, 'reasoningEnabled') ||
           typeof value.model.reasoningEnabled === 'boolean'))) &&
-    (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork))
+    isRuntimeInteractionQueueProjection(value.interactionQueue) &&
+    (value.interactionQueue as { readonly revision: unknown }).revision === value.revision &&
+    (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork)) &&
+    activeInteractionMatchesQueue(value)
+  );
+}
+
+function activeInteractionMatchesQueue(value: Record<string, unknown>): boolean {
+  const queue = value.interactionQueue as {
+    readonly activeInteractionId?: string;
+  };
+  const work = value.activeWork as
+    | { readonly activeTurn?: { readonly interaction?: RuntimeClientInteraction } }
+    | undefined;
+  const interaction = work?.activeTurn?.interaction;
+  return (
+    queue.activeInteractionId === interaction?.interactionId &&
+    (interaction === undefined || interaction.sessionRevision === value.revision)
+  );
+}
+
+function isRuntimeInteractionQueueProjection(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(
+      value,
+      presentKeys(value, ['revision', 'interactions'], ['activeInteractionId']),
+    ) ||
+    !isNonNegativeSafeInteger(value.revision) ||
+    !Array.isArray(value.interactions) ||
+    value.interactions.length > 256 ||
+    !value.interactions.every(isRuntimeClientInteraction) ||
+    (Object.hasOwn(value, 'activeInteractionId') && !isIdentifier(value.activeInteractionId))
+  ) {
+    return false;
+  }
+  const ids = value.interactions.map((interaction) => interaction.interactionId);
+  return (
+    new Set(ids).size === ids.length &&
+    value.interactions.every((interaction) => interaction.sessionRevision === value.revision) &&
+    (!Object.hasOwn(value, 'activeInteractionId') ||
+      ids.includes(value.activeInteractionId as string))
   );
 }
 

@@ -292,6 +292,7 @@ function session(sessionId: string, revision: number): RuntimeSessionProjection 
     sessionId,
     revision,
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

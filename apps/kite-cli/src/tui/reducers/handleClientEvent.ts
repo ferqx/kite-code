@@ -1,6 +1,7 @@
 import type {
   RuntimeClientEvent,
   RuntimeClientInteraction,
+  RuntimeInteractionQueueProjection,
   RuntimeToolPresentation,
 } from '@kite-ai/runtime-contract';
 import {
@@ -228,6 +229,58 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         `Runtime update unavailable: ${event.reason}.`,
       );
   }
+}
+
+/** Replace local interaction state with one complete authoritative Runtime queue. */
+export function reconcileClientInteractionQueue(
+  state: TuiState,
+  queue: RuntimeInteractionQueueProjection,
+): TuiState {
+  const previousApprovals = state.pendingApprovals ?? new Map();
+  const pendingApprovals = new Map<string, TuiPendingApproval>();
+  for (const [sequence, interaction] of queue.interactions.entries()) {
+    if (interaction.kind !== 'approval') continue;
+    const previous = previousApprovals.get(interaction.interactionId);
+    const sameIdentity = previous?.generation === interaction.generation;
+    pendingApprovals.set(interaction.interactionId, {
+      interactionId: interaction.interactionId,
+      toolCallId: previous?.toolCallId ?? interaction.interactionId,
+      route: previous?.route ?? 'user',
+      status: sameIdentity ? previous.status : 'queued_user',
+      sequence,
+      generation: interaction.generation,
+      clientInteraction: interaction,
+      ...(sameIdentity && previous.result !== undefined ? { result: previous.result } : {}),
+    });
+  }
+  let next: TuiState = {
+    ...state,
+    interrupt: null,
+    activeApprovalId: null,
+    pendingApprovals,
+  };
+  const active =
+    queue.activeInteractionId === undefined
+      ? undefined
+      : queue.interactions.find(
+          (interaction) => interaction.interactionId === queue.activeInteractionId,
+        );
+  if (!active) return next;
+  if (active.kind === 'approval') {
+    const pending = pendingApprovals.get(active.interactionId);
+    if (!pending) return next;
+    return {
+      ...next,
+      activeApprovalId: active.interactionId,
+      interrupt: {
+        kind: 'approval',
+        interactionId: active.interactionId,
+        toolCallId: pending.toolCallId,
+      },
+    };
+  }
+  next = projectInteraction(next, active);
+  return next;
 }
 
 function appendFinalOnce(state: TuiState, summary: string): TuiState {
@@ -1057,7 +1110,12 @@ function awaitSafeThoughtTerminal(state: TuiState): TuiState {
 
 function ensureContentFreeThought(state: TuiState, requestId?: string): TuiState {
   const current = findSummaryById(state, state.currentThoughtSummaryId);
-  if (current?.active) {
+  const currentOwnsRequest =
+    current?.active === true &&
+    (requestId === undefined ||
+      current.modelRequestId === requestId ||
+      (current.modelRequestId === undefined && current.tools.length === 0));
+  if (current?.active && currentOwnsRequest) {
     return replaceBlockById(state, current.id, {
       ...current,
       ...(requestId === undefined ? {} : { modelRequestId: requestId }),
@@ -1065,8 +1123,9 @@ function ensureContentFreeThought(state: TuiState, requestId?: string): TuiState
       hasThinking: true,
     });
   }
+  const base = current?.active ? settleCurrentThought(state) : state;
   const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
-    id: state.nextBlockId,
+    id: base.nextBlockId,
     kind: 'tool_summary',
     tools: [],
     totalElapsedMs: 0,
@@ -1077,7 +1136,7 @@ function ensureContentFreeThought(state: TuiState, requestId?: string): TuiState
     hasThought: true,
     hasThinking: true,
   };
-  const next = appendBlock(state, block);
+  const next = appendBlock(base, block);
   return {
     ...next,
     currentThoughtSummaryId: block.id,
@@ -1287,7 +1346,9 @@ function materializeSafeClientTool(
 
   const active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
   const activeOwnsRequest =
-    modelRequestId === undefined || active?.modelRequestId === modelRequestId;
+    modelRequestId === undefined
+      ? active?.modelRequestId === undefined && active?.hasThought !== true
+      : active?.modelRequestId === modelRequestId;
   if (active?.active && activeOwnsRequest) {
     const pendingCaption = active.pendingCaption;
     const tools = [
@@ -1322,6 +1383,7 @@ function materializeSafeClientTool(
     };
   }
 
+  const detachedFromActiveThought = active?.active === true && modelRequestId === undefined;
   const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
     id: withoutPending.nextBlockId,
     kind: 'tool_summary',
@@ -1348,12 +1410,18 @@ function materializeSafeClientTool(
         summary: toolSummary,
       },
     ]),
-    active: true,
+    active: !detachedFromActiveThought,
     ...(modelRequestId === undefined ? {} : { modelRequestId }),
     hasThought: false,
     latestActivity: { kind: 'tool', callId: toolId },
   };
   const next = appendBlock(withoutPending, block);
+  if (detachedFromActiveThought) {
+    return {
+      ...next,
+      explorationSummaryIds: { ...withoutPending.explorationSummaryIds, [toolId]: block.id },
+    };
+  }
   return {
     ...next,
     explorationSummaryIds: { ...withoutPending.explorationSummaryIds, [toolId]: block.id },

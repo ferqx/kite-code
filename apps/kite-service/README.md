@@ -48,6 +48,9 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 关键不变量
 
 - default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
+- 每个Session projection都从同一durable State revision投影完整、有序的client-safe interaction queue与唯一focus；
+  intermediate revision不得携带未来queue。Runtime Contract/Protocol、Native与InProcess carrier消费同一替换语义，
+  不能把snapshot与旧client interaction做并集，也不能因对象共享引用改变logical-message行为。
 - Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
   identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
   scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。
@@ -73,7 +76,7 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 测试
 
 `bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control与Native shell/carrier；当前owner run为1363 parallel tests / 6788 expects并通过全部34个isolated
+History/App Control与Native shell/carrier；当前owner run为1364 parallel tests / 6787 expects并通过全部34个isolated
 files。manager focused evidence位于`packages/kite-local-runtime/test/manager`（37/135）。完整40个TUI PTY scenario与
 本机macOS arm64 release smoke已经通过；正式Windows及当前实现head三平台process/release qualification仍pending。
 

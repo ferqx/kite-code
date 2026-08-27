@@ -7,6 +7,7 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   isReadOnlyShellCommand,
+  isVcsMutationShellCommand,
 } from '@kite-ai/builtin-runtime';
 import {
   type CapabilityPolicyCompilation,
@@ -280,6 +281,9 @@ describe('Builtin operation policy compiler', () => {
     const inspection =
       'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
     expect(isReadOnlyShellCommand(inspection)).toBe(true);
+    expect(isVcsMutationShellCommand(inspection)).toBe(false);
+    expect(isReadOnlyShellCommand('git branch --show-current 2>/dev/null')).toBe(true);
+    expect(isVcsMutationShellCommand('git branch --show-current 2>/dev/null')).toBe(false);
     expect(compile('shell_execute', { command: inspection })).toMatchObject({
       decision: 'allow',
       requiresApproval: false,
@@ -293,6 +297,7 @@ describe('Builtin operation policy compiler', () => {
       'git branch --show-current && git branch feature/new',
     ]) {
       expect(isReadOnlyShellCommand(command)).toBe(false);
+      expect(isVcsMutationShellCommand(command)).toBe(true);
     }
   });
 

@@ -544,6 +544,7 @@ describe('Runtime Protocol', () => {
             workspace: '/private/workspace',
             lifecycle: 'open',
             sessionCommandGrantCount: 2,
+            interactionQueue: { revision: 4, interactions: [] },
           },
         },
       }),
@@ -558,6 +559,7 @@ describe('Runtime Protocol', () => {
         revision: 4,
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
   });
@@ -575,6 +577,7 @@ describe('Runtime Protocol', () => {
         workspace: '/private/workspace',
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
     expect(wire).toEqual({
@@ -588,6 +591,7 @@ describe('Runtime Protocol', () => {
         revision: 4,
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
     expect(mapSubscriptionMessageToClientUpdate(wire)).toEqual(wire);
@@ -667,6 +671,19 @@ describe('Runtime Protocol', () => {
               revision: 3,
               lifecycle: 'open',
               sessionCommandGrantCount: 0,
+              interactionQueue: {
+                revision: 3,
+                activeInteractionId: 'interaction-1',
+                interactions: [
+                  {
+                    kind: 'input',
+                    interactionId: 'interaction-1',
+                    sessionRevision: 3,
+                    question: 'Continue?',
+                    allowFreeText: true,
+                  },
+                ],
+              },
               activeWork: {
                 workId: 'work-1',
                 phase: 'building',
@@ -693,7 +710,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'b48d238d:731d86b4';
+    const expectedDigest = '499d39ab:731d86b4';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

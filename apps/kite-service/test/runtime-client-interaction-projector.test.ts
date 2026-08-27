@@ -4,6 +4,7 @@ import type { RuntimeState } from '../src/bootstrap/runtime/state-runtime';
 import {
   mapRuntimeInteractionResponseToUserAction,
   projectRuntimeClientInteraction,
+  projectRuntimeClientInteractionQueue,
   type RuntimeInteractionEffect,
 } from '../src/runtime-client/interaction-projector';
 
@@ -286,6 +287,42 @@ describe('Runtime client interaction projector', () => {
     });
   });
 
+  test('projects the complete ordered user interaction queue with one explicit focus', () => {
+    const current = state({
+      revision: 11,
+      approvalGeneration: 4,
+      activeApprovalId: 'approval-2',
+      interactions: {
+        kind: 'awaiting_tool_approval',
+        interactionId: 'approval-2',
+        toolCallId: 'tool-2',
+        approval: { tool: 'shell', summary: 'safe', grantOptions: ['approve_once'] },
+      },
+      pendingApprovals: new Map([
+        ['approval-2', pendingApproval(4, 'approval-2', 'tool-2', 2)],
+        ['approval-1', pendingApproval(4, 'approval-1', 'tool-1', 1)],
+      ]),
+    });
+
+    expect(projectRuntimeClientInteractionQueue(current)).toEqual({
+      revision: 11,
+      activeInteractionId: 'approval-2',
+      interactions: [
+        expect.objectContaining({ interactionId: 'approval-1', sessionRevision: 11 }),
+        expect.objectContaining({ interactionId: 'approval-2', sessionRevision: 11 }),
+      ],
+    });
+    expect(
+      projectRuntimeClientInteractionQueue({
+        ...current,
+        revision: 12,
+        interactions: { kind: 'idle' },
+        pendingApprovals: new Map(),
+        activeApprovalId: null,
+      }),
+    ).toEqual({ revision: 12, interactions: [] });
+  });
+
   test('fails closed for stale session identity and never projects private provider state', () => {
     const provider = providerState('awaiting_provider_action');
     const effect = providerEffect('request_provider_action');
@@ -328,10 +365,15 @@ function state(overrides: Record<string, unknown>): RuntimeState {
   } as RuntimeState;
 }
 
-function pendingApproval(generation: number) {
+function pendingApproval(
+  generation: number,
+  interactionId = 'approval-1',
+  toolCallId = 'tool-1',
+  sequence = 1,
+) {
   return {
-    interactionId: 'approval-1',
-    toolCallId: 'tool-1',
+    interactionId,
+    toolCallId,
     route: 'user',
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: false,
@@ -343,7 +385,7 @@ function pendingApproval(generation: number) {
       grantOptions: ['approve_once'],
     },
     invocation: { args: { path: '/private/secret' } },
-    sequence: 1,
+    sequence,
     generation,
     createdAt: '2026-08-26T00:00:00.000Z',
     status: 'awaiting_user',

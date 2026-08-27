@@ -442,13 +442,13 @@ class NativeTuiRuntimeClient {
   #reconcileRuntimeProjection(record: NativeSessionRecord): void {
     const work = record.projection?.activeWork;
     const active = isActiveWork(work);
-    const interaction = active ? work.activeTurn?.interaction : undefined;
-    if (interaction) {
+    const interactionQueue = record.projection!.interactionQueue;
+    record.interactions.clear();
+    for (const interaction of interactionQueue.interactions) {
       record.interactions.set(interaction.interactionId, interaction);
-      record.pendingInterrupt = true;
-    } else if (!active) {
-      record.interactions.clear();
-      record.pendingInterrupt = false;
+    }
+    record.pendingInterrupt = record.interactions.size > 0;
+    if (!active) {
       record.resolveRun?.();
       record.resolveRun = undefined;
       record.rejectRun = undefined;
@@ -457,7 +457,7 @@ class NativeTuiRuntimeClient {
       record.dispatch({
         type: 'RECONCILE_RUNTIME_PROJECTION',
         active,
-        ...(interaction === undefined ? {} : { interaction }),
+        interactionQueue,
       });
     }
   }

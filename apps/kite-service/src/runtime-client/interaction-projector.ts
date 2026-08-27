@@ -1,6 +1,7 @@
 import {
   isRuntimeClientInteraction,
   type RuntimeClientInteraction,
+  type RuntimeInteractionQueueProjection,
   type RuntimeInteractionResponse,
 } from '@kite-ai/runtime-contract';
 import type { RuntimeUserAction } from '#kite-service/bootstrap/runtime/state-actions';
@@ -12,6 +13,8 @@ export type RuntimeInteractionEffect = Extract<RuntimeEffect, { type: `request_$
 export interface RuntimeInteractionProjectionContext {
   /** Host/Server projection revision used by the settlement command fence. */
   readonly sessionRevision?: number;
+  /** Current in-memory focus, revalidated against durable State before projection. */
+  readonly focusedInteraction?: RuntimeClientInteraction;
 }
 
 /**
@@ -70,26 +73,11 @@ export function projectRuntimeClientInteraction(
         !pending ||
         pending.interactionId !== effect.interactionId ||
         pending.toolCallId !== effect.toolCallId ||
-        pending.generation !== state.approvalGeneration ||
-        !['queued_user', 'awaiting_user', 'approving'].includes(pending.status)
+        pending.generation !== state.approvalGeneration
       ) {
         return null;
       }
-      const grants = pending.approval.grantOptions.filter(
-        (grant): grant is 'approve_once' | 'same_command' =>
-          grant === 'approve_once' || grant === 'same_command',
-      );
-      if (grants.length === 0 || new Set(grants).size !== grants.length) return null;
-      return validInteraction({
-        kind: 'approval',
-        interactionId: pending.interactionId,
-        sessionRevision: revision,
-        generation: pending.generation,
-        grants,
-        command: projectRuntimeClientCommand(pending.approval.command),
-        title: projectRuntimeClientText(pending.approval.tool, 256),
-        summary: projectRuntimeClientText(pending.approval.summary, 1_024),
-      });
+      return projectPendingRuntimeApproval(state, pending, revision);
     }
     case 'request_user_input': {
       const interaction = state.interactions;
@@ -212,6 +200,143 @@ export function projectRuntimeClientInteraction(
       });
     }
     default:
+      return null;
+  }
+}
+
+/** Project the complete ordered set used to replace Client/TUI interaction state after a gap. */
+export function projectRuntimeClientInteractionQueue(
+  state: Readonly<RuntimeState>,
+  context: RuntimeInteractionProjectionContext = {},
+): RuntimeInteractionQueueProjection {
+  const revision = context.sessionRevision ?? state.revision;
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    return Object.freeze({ revision: 0, interactions: Object.freeze([]) });
+  }
+  const approvals = [...state.pendingApprovals.values()]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((pending) => projectPendingRuntimeApproval(state, pending, revision))
+    .filter((interaction): interaction is Extract<RuntimeClientInteraction, { kind: 'approval' }> =>
+      Boolean(interaction),
+    );
+  const focused = projectFocusedRuntimeInteraction(state, revision, context.focusedInteraction);
+  const focusedIsQueuedApproval =
+    focused?.kind === 'approval' &&
+    approvals.some((entry) => entry.interactionId === focused.interactionId);
+  const interactions = focused && !focusedIsQueuedApproval ? [focused, ...approvals] : approvals;
+  const activeInteractionId =
+    focused?.interactionId ??
+    (state.activeApprovalId &&
+    approvals.some((entry) => entry.interactionId === state.activeApprovalId)
+      ? state.activeApprovalId
+      : undefined);
+  return Object.freeze({
+    revision,
+    ...(activeInteractionId === undefined ? {} : { activeInteractionId }),
+    interactions: Object.freeze(interactions),
+  });
+}
+
+function projectPendingRuntimeApproval(
+  state: Readonly<RuntimeState>,
+  pending: Readonly<RuntimeState['pendingApprovals']> extends ReadonlyMap<string, infer Entry>
+    ? Entry
+    : never,
+  revision: number,
+): Extract<RuntimeClientInteraction, { kind: 'approval' }> | null {
+  if (
+    pending.route !== 'user' ||
+    pending.generation !== state.approvalGeneration ||
+    !['queued_user', 'awaiting_user', 'approving'].includes(pending.status)
+  ) {
+    return null;
+  }
+  const grants = pending.approval.grantOptions.filter(
+    (grant): grant is 'approve_once' | 'same_command' =>
+      grant === 'approve_once' || grant === 'same_command',
+  );
+  if (grants.length === 0 || new Set(grants).size !== grants.length) return null;
+  const projected = validInteraction({
+    kind: 'approval',
+    interactionId: pending.interactionId,
+    sessionRevision: revision,
+    generation: pending.generation,
+    grants,
+    command: projectRuntimeClientCommand(pending.approval.command),
+    title: projectRuntimeClientText(pending.approval.tool, 256),
+    summary: projectRuntimeClientText(pending.approval.summary, 1_024),
+  });
+  return projected?.kind === 'approval' ? projected : null;
+}
+
+function projectFocusedRuntimeInteraction(
+  state: Readonly<RuntimeState>,
+  revision: number,
+  hint?: RuntimeClientInteraction,
+): RuntimeClientInteraction | null {
+  if (hint) {
+    const effect = resolveRuntimeInteractionEffect(state, hint);
+    if (effect)
+      return projectRuntimeClientInteraction(state, effect, { sessionRevision: revision });
+  }
+  const interaction = state.interactions;
+  switch (interaction.kind) {
+    case 'awaiting_tool_approval':
+      return projectRuntimeClientInteraction(
+        state,
+        {
+          type: 'request_tool_approval',
+          interactionId: interaction.interactionId,
+          toolCallId: interaction.toolCallId,
+        },
+        { sessionRevision: revision },
+      );
+    case 'awaiting_user_input':
+      return projectRuntimeClientInteraction(
+        state,
+        {
+          type: 'request_user_input',
+          interactionId: interaction.interactionId,
+          toolCallId: interaction.toolCallId,
+        },
+        { sessionRevision: revision },
+      );
+    case 'awaiting_review':
+      return projectRuntimeClientInteraction(
+        state,
+        {
+          type: 'request_plan_review',
+          interactionId: interaction.interactionId,
+          toolCallId: interaction.toolCallId,
+        },
+        { sessionRevision: revision },
+      );
+    case 'awaiting_provider_action':
+      return projectRuntimeClientInteraction(
+        state,
+        {
+          type: 'request_provider_action',
+          interactionId: interaction.interactionId,
+          providerId: interaction.providerId,
+          action: interaction.action,
+          originatingToolCallId: interaction.originatingToolCallId,
+        },
+        { sessionRevision: revision },
+      );
+    case 'awaiting_provider_admission':
+      return projectRuntimeClientInteraction(
+        state,
+        {
+          type: 'request_provider_admission',
+          interactionId: interaction.interactionId,
+          providerId: interaction.providerId,
+          providerStatus: interaction.providerStatus,
+          retryable: interaction.retryable,
+        },
+        { sessionRevision: revision },
+      );
+    case 'idle':
+    case 'awaiting_auto_review':
       return null;
   }
 }

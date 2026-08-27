@@ -459,6 +459,7 @@ describe('runtime contract package boundary', () => {
       revision: 7,
       lifecycle: 'open' as const,
       displayName: 'Refactor runtime contract',
+      interactionQueue: { revision: 7, interactions: [] },
     };
     const notifications = [
       { type: 'index_reset_begin' as const, ...base },
@@ -480,6 +481,50 @@ describe('runtime contract package boundary', () => {
     expect(
       isRuntimeSessionIndexNotification({ type: 'index_reset_end', ...base, rawState: {} }),
     ).toBe(false);
+    for (const interactionQueue of [
+      { revision: 6, interactions: [] },
+      { revision: 7, activeInteractionId: 'missing', interactions: [] },
+      {
+        revision: 7,
+        activeInteractionId: 'queue-only-focus',
+        interactions: [
+          {
+            kind: 'approval',
+            interactionId: 'queue-only-focus',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+        ],
+      },
+      {
+        revision: 7,
+        interactions: [
+          {
+            kind: 'approval',
+            interactionId: 'duplicate',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+          {
+            kind: 'approval',
+            interactionId: 'duplicate',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+        ],
+      },
+    ]) {
+      expect(
+        isRuntimeSessionIndexNotification({
+          type: 'session_upsert',
+          ...base,
+          session: { ...session, interactionQueue },
+        }),
+      ).toBe(false);
+    }
   });
 
   test('validates closed query fields and rejects non-JSON command payloads', () => {

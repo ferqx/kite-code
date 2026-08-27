@@ -4,7 +4,7 @@ import type { TuiState } from '../types';
 import type { Action } from './actions';
 import { agentReducer } from './agentReducer';
 import { checkpointReducer } from './checkpointReducer';
-import { handleClientEventAction } from './handleClientEvent';
+import { handleClientEventAction, reconcileClientInteractionQueue } from './handleClientEvent';
 import { handleEventAction } from './handleEvent';
 import { sessionReducer } from './sessionReducer';
 import { skillReducer } from './skillReducer';
@@ -68,12 +68,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     return handleClientEventAction(state, action.event);
   }
   if (action.type === 'RECONCILE_RUNTIME_PROJECTION') {
-    const reconciled = action.interaction
-      ? handleClientEventAction(state, {
-          type: 'interaction.available',
-          interaction: action.interaction,
-        })
-      : state;
+    const reconciled = reconcileClientInteractionQueue(state, action.interactionQueue);
     return agentReducer(reconciled, action) ?? reconciled;
   }
   if (action.type === 'LOCAL_TEXT') {

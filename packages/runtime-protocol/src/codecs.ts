@@ -495,6 +495,31 @@ const activeWork = z
     activeTurn: activeTurn.optional(),
   })
   .strict();
+const interactionQueue = z
+  .object({
+    revision: safeRevision,
+    activeInteractionId: identifier.optional(),
+    interactions: z.array(interaction).max(256),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const ids = value.interactions.map((entry) => entry.interactionId);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({ code: 'custom', message: 'interaction queue identities must be unique' });
+    }
+    if (value.activeInteractionId !== undefined && !ids.includes(value.activeInteractionId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'active interaction must exist in the interaction queue',
+      });
+    }
+    if (value.interactions.some((entry) => entry.sessionRevision !== value.revision)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'interaction revisions must match the interaction queue revision',
+      });
+    }
+  });
 export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
   .object({
     schema: z.literal('kite.runtime-projection.v1'),
@@ -512,9 +537,28 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
       .strict()
       .optional(),
     sessionCommandGrantCount: safeRevision,
+    interactionQueue,
     activeWork: activeWork.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.interactionQueue.revision !== value.revision) {
+      context.addIssue({
+        code: 'custom',
+        message: 'interaction queue revision must match the session projection revision',
+      });
+    }
+    const turnInteraction = value.activeWork?.activeTurn?.interaction;
+    if (
+      value.interactionQueue.activeInteractionId !== turnInteraction?.interactionId ||
+      (turnInteraction !== undefined && turnInteraction.sessionRevision !== value.revision)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'active turn interaction must match the interaction queue focus',
+      });
+    }
+  });
 const checkpoint = z
   .object({
     checkpointId: identifier,

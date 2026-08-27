@@ -372,6 +372,7 @@ class MatrixRuntime implements RuntimeAccess {
       sessionId,
       revision: 0,
       lifecycle: 'open',
+      interactionQueue: { revision: 0, interactions: [] },
     };
     return { status: 'applied' as const, commandId: command.commandId, sessionId, revision: 0 };
   }

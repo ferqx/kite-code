@@ -1,6 +1,7 @@
 import type {
   RuntimeAccessNotification,
   RuntimeClientEvent,
+  RuntimeClientInteraction,
   RuntimeCommand,
   RuntimeNotification,
   RuntimeQuery,
@@ -178,7 +179,7 @@ function mapSession(session: RuntimeSessionProjection) {
                   ...(activeTurn.summary === undefined ? {} : { summary: activeTurn.summary }),
                   ...(activeTurn.interaction === undefined
                     ? {}
-                    : { interaction: activeTurn.interaction }),
+                    : { interaction: mapInteraction(activeTurn.interaction) }),
                   ...(activeTurn.evidence === undefined
                     ? {}
                     : {
@@ -200,8 +201,55 @@ function mapSession(session: RuntimeSessionProjection) {
     lifecycle: session.lifecycle,
     ...(session.model === undefined ? {} : { model: session.model }),
     sessionCommandGrantCount: session.sessionCommandGrantCount ?? 0,
+    interactionQueue: {
+      revision: session.interactionQueue.revision,
+      ...(session.interactionQueue.activeInteractionId === undefined
+        ? {}
+        : { activeInteractionId: session.interactionQueue.activeInteractionId }),
+      interactions: session.interactionQueue.interactions.map(mapInteraction),
+    },
     ...(activeWork === undefined ? {} : { activeWork }),
   });
+}
+
+function mapInteraction(interaction: RuntimeClientInteraction): RuntimeClientInteraction {
+  const base = {
+    interactionId: interaction.interactionId,
+    sessionRevision: interaction.sessionRevision,
+    ...(interaction.title === undefined ? {} : { title: interaction.title }),
+    ...(interaction.summary === undefined ? {} : { summary: interaction.summary }),
+  };
+  switch (interaction.kind) {
+    case 'approval':
+      return {
+        ...base,
+        kind: interaction.kind,
+        generation: interaction.generation,
+        grants: [...interaction.grants],
+        ...(interaction.command === undefined ? {} : { command: interaction.command }),
+      };
+    case 'input':
+      return {
+        ...base,
+        kind: interaction.kind,
+        question: interaction.question,
+        allowFreeText: interaction.allowFreeText,
+        ...(interaction.options === undefined
+          ? {}
+          : { options: interaction.options.map((option) => ({ ...option })) }),
+      };
+    case 'plan_review':
+      return { ...base, kind: interaction.kind, plan: { ...interaction.plan } };
+    case 'provider_action':
+      return {
+        ...base,
+        kind: interaction.kind,
+        provider: { ...interaction.provider },
+        action: interaction.action,
+      };
+    case 'verification':
+      return { ...base, kind: interaction.kind, verification: { ...interaction.verification } };
+  }
 }
 
 /** Drops workspace and every unknown future field at the only Contract-to-wire notification seam. */

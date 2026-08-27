@@ -120,6 +120,7 @@ function sessionProjection(session: HarnessSession): RuntimeSessionProjection {
     displayName: session.displayName,
     updatedAt: session.updatedAt,
     lifecycle: 'open',
+    interactionQueue: { revision: session.revision, interactions: [] },
   };
 }
 

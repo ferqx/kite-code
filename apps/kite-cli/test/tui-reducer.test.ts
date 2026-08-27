@@ -92,13 +92,19 @@ describe('TUI RuntimeClientEvent reducer', () => {
       {
         type: 'RECONCILE_RUNTIME_PROJECTION',
         active: true,
-        interaction: {
-          kind: 'approval',
-          interactionId: 'snapshot-approval-1',
-          sessionRevision: 12,
-          generation: 4,
-          grants: ['approve_once'],
-          command: 'ls packages',
+        interactionQueue: {
+          revision: 12,
+          activeInteractionId: 'snapshot-approval-1',
+          interactions: [
+            {
+              kind: 'approval',
+              interactionId: 'snapshot-approval-1',
+              sessionRevision: 12,
+              generation: 4,
+              grants: ['approve_once'],
+              command: 'ls packages',
+            },
+          ],
         },
       },
     );
@@ -117,6 +123,54 @@ describe('TUI RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('replaces stale approval state from the complete Runtime interaction queue', () => {
+    let state = apply(createInitialState(), {
+      type: 'approval.queued',
+      queueSequence: 1,
+      interaction: {
+        kind: 'approval',
+        interactionId: 'snapshot-old',
+        sessionRevision: 8,
+        generation: 1,
+        grants: ['approve_once'],
+      },
+    });
+    state = eventReducer(state, {
+      type: 'RECONCILE_RUNTIME_PROJECTION',
+      active: true,
+      interactionQueue: {
+        revision: 9,
+        activeInteractionId: 'snapshot-new',
+        interactions: [
+          {
+            kind: 'approval',
+            interactionId: 'snapshot-new',
+            sessionRevision: 9,
+            generation: 2,
+            grants: ['approve_once'],
+          },
+        ],
+      },
+    });
+
+    expect([...state.pendingApprovals!.keys()]).toEqual(['snapshot-new']);
+    expect(state.interrupt).toEqual(
+      expect.objectContaining({ kind: 'approval', interactionId: 'snapshot-new' }),
+    );
+
+    state = eventReducer(
+      { ...state, running: false, interrupt: null },
+      {
+        type: 'RECONCILE_RUNTIME_PROJECTION',
+        active: false,
+        interactionQueue: { revision: 10, interactions: [] },
+      },
+    );
+    expect(state.pendingApprovals).toEqual(new Map());
+    expect(state.activeApprovalId).toBeNull();
+    expect(state.interrupt).toBeNull();
+  });
+
   test('settles presentation activity from an idle snapshot without inventing cancellation', () => {
     let state = apply(
       { ...createInitialState(), running: true },
@@ -128,6 +182,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
     state = eventReducer(state, {
       type: 'RECONCILE_RUNTIME_PROJECTION',
       active: false,
+      interactionQueue: { revision: 3, interactions: [] },
     });
 
     expect(state.running).toBe(false);

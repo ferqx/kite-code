@@ -1154,6 +1154,12 @@ describe('closed RuntimeClientEvent reducer', () => {
         kind: 'tool_summary',
         active: false,
         responsePending: false,
+        modelRequestId: 'request-1',
+        tools: [],
+      }),
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: false,
         tools: [expect.objectContaining({ callId: 'read-1' })],
       }),
       expect.objectContaining({
@@ -1205,23 +1211,32 @@ describe('closed RuntimeClientEvent reducer', () => {
         { kind: 'tool_summary' }
       > => block.kind === 'tool_summary',
     );
-    expect(summaries).toHaveLength(2);
+    expect(summaries).toHaveLength(3);
     expect(summaries[0]).toEqual(
       expect.objectContaining({
         active: false,
         modelMs: 73,
-        tools: [expect.objectContaining({ callId: 'read-1', args: { path: 'src/one.ts' } })],
+        tools: [],
       }),
     );
     expect(summaries[1]).toEqual(
       expect.objectContaining({
         active: false,
-        modelMs: 31,
+        tools: [expect.objectContaining({ callId: 'read-1', args: { path: 'src/one.ts' } })],
+      }),
+    );
+    expect(summaries[2]).toEqual(
+      expect.objectContaining({
+        active: false,
         tools: [expect.objectContaining({ callId: 'read-2', args: { path: 'src/two.ts' } })],
       }),
     );
     expect(blocks).toContainEqual(
-      expect.objectContaining({ kind: 'text', content: 'Final answer.' }),
+      expect.objectContaining({
+        kind: 'text',
+        content: 'Final answer.',
+        thoughtContent: 'Comparing both files.',
+      }),
     );
     expect(
       blocks.filter(
@@ -1398,6 +1413,64 @@ describe('closed RuntimeClientEvent reducer', () => {
         .filter((block) => block.kind === 'tool_summary')
         .map((block) => block.modelRequestId),
     ).toEqual(['group-request-1', 'group-request-2']);
+  });
+
+  test('keeps missing and mismatched tool identities outside the active Thought', () => {
+    const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    let state = createInitialState();
+    for (const event of [
+      { type: 'model.requested', requestId: 'identity-request-1' },
+      {
+        type: 'model.responded',
+        requestId: 'identity-request-1',
+        messageId: 'identity-message-1',
+        toolCallCount: 1,
+      },
+      { type: 'model.requested', requestId: 'identity-request-2' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'identity-request-2',
+        state: 'completed',
+        segmentId: 'identity-reasoning-2',
+        text: 'New reasoning.',
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'identity-missing',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'identity-missing' },
+      {
+        type: 'tool.queued',
+        toolId: 'identity-mismatch',
+        presentationGroupId: 'identity-message-1',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: 'README' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'identity-mismatch' },
+    ] satisfies RuntimeClientEvent[]) {
+      state = reduce(state, event);
+    }
+
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_summary');
+    const activeThought = summaries.find((block) => block.modelRequestId === 'identity-request-2');
+    expect(activeThought?.tools).toHaveLength(0);
+    expect(activeThought?.timeline).toContainEqual(
+      expect.objectContaining({ kind: 'thinking', text: 'New reasoning.' }),
+    );
+    expect(
+      summaries
+        .filter((block) => block.modelRequestId === undefined)
+        .flatMap((block) => block.tools.map((tool) => tool.callId)),
+    ).toEqual(['identity-missing', 'identity-mismatch']);
   });
 
   test('keeps late final reasoning with its answer instead of the preceding search step', () => {

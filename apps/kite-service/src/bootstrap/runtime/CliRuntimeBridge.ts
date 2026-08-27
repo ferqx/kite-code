@@ -11,6 +11,7 @@ import {
   type RuntimeCommand,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
+  type RuntimeInteractionQueueProjection,
   type RuntimeNotification,
   type RuntimeQuery,
   type RuntimeQueryResult,
@@ -45,6 +46,7 @@ import { projectRuntimeClientEvent } from '../../runtime-client/event-projector'
 import {
   mapRuntimeInteractionResponseToUserAction,
   projectRuntimeClientInteraction,
+  projectRuntimeClientInteractionQueue,
   type RuntimeInteractionEffect,
 } from '../../runtime-client/interaction-projector';
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
@@ -688,7 +690,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         revision,
         projection: {
           kind,
-          session: { ...this.#projection(), revision },
+          session: this.#projection(revision),
           ...(projectedEvent === undefined ? {} : { event: projectedEvent }),
         },
       });
@@ -1114,18 +1116,54 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     this.#activePresentationFrame?.flush();
   }
 
-  #projection(): RuntimeSessionProjection {
+  #projection(revision = this.#revision): RuntimeSessionProjection {
+    const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+    let state: Readonly<RuntimeState> | undefined;
+    try {
+      state = coordinator?.getState();
+    } catch {
+      state = undefined;
+    }
+    const interactionQueue: RuntimeInteractionQueueProjection =
+      state?.revision === revision
+        ? projectRuntimeClientInteractionQueue(state, {
+            sessionRevision: revision,
+            ...(this.#activeWork?.activeTurn?.interaction === undefined
+              ? {}
+              : { focusedInteraction: this.#activeWork.activeTurn.interaction }),
+          })
+        : Object.freeze({ revision, interactions: Object.freeze([]) });
+    const activeInteraction =
+      interactionQueue.activeInteractionId === undefined
+        ? undefined
+        : interactionQueue.interactions.find(
+            (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
+          );
+    const activeWork = this.#activeWork
+      ? {
+          ...this.#activeWork,
+          activeTurn: this.#activeWork.activeTurn
+            ? {
+                ...this.#activeWork.activeTurn,
+                ...(activeInteraction === undefined
+                  ? { interaction: undefined }
+                  : { interaction: activeInteraction }),
+              }
+            : undefined,
+        }
+      : undefined;
     return {
       schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId: this.#input.sessionId,
-      revision: this.#revision,
+      revision,
       workspace: this.#input.workspace,
       lifecycle: this.#closed ? 'closed' : 'open',
       model: {
         provider: this.#input.config.providerName,
         name: this.#input.config.modelName,
       },
-      ...(this.#activeWork === undefined ? {} : { activeWork: this.#activeWork }),
+      interactionQueue,
+      ...(activeWork === undefined ? {} : { activeWork }),
     };
   }
 

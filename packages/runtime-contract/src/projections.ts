@@ -77,6 +77,13 @@ export type RuntimeClientInteraction =
 /** @deprecated Use RuntimeClientInteraction. */
 export type RuntimeInteractionProjection = RuntimeClientInteraction;
 
+/** Complete, ordered client-safe interaction state at one Session revision. */
+export interface RuntimeInteractionQueueProjection {
+  readonly revision: number;
+  readonly activeInteractionId?: string;
+  readonly interactions: readonly RuntimeClientInteraction[];
+}
+
 export interface RuntimeTurnProjection {
   readonly turnId: string;
   readonly status: 'queued' | 'running' | 'waiting' | 'completed' | 'cancelled' | 'failed';
@@ -109,6 +116,8 @@ export interface RuntimeSessionProjection {
   };
   /** Count only; grant subjects and bindings never cross the client boundary. */
   readonly sessionCommandGrantCount?: number;
+  /** Authoritative replacement set; array order is the pending interaction order. */
+  readonly interactionQueue: RuntimeInteractionQueueProjection;
   readonly activeWork?: RuntimeWorkProjection;
 }
 

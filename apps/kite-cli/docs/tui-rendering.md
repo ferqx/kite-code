@@ -51,9 +51,11 @@
 - Live 与 replay 都从同一 client-safe event identity 构造 block；本地提交态不能与 durable
   `user.message` 各自追加一份相同消息。
 - Server subscription 的event-free snapshot/gap reset必须进入同一个presentation reducer做显式reconciliation：
-  `activeWork.activeTurn.interaction`恢复当前交互表面，缺少active work则只结束本地running projection。snapshot不是
-  synthetic Runtime event，不能伪造approved/rejected/cancelled/completed事实；Client缓存更新本身也不能让React继续
-  保留旧“执行中”。低于本地command receipt revision的迟到snapshot不得结束当前run。
+  Session携带同revision的完整`interactionQueue`、有序pending identities与唯一active identity；Native adapter和TUI
+  必须用它替换本地Map/approval queue，而不是与旧event state做并集。active但空queue会清除旧interrupt；切换focus会
+  删除queue中已不存在的旧项；idle snapshot即使本地`running=false/interrupt=null`也必须清空残留pending approvals。
+  snapshot不是synthetic Runtime event，不能伪造approved/rejected/cancelled/completed事实；低于本地command receipt
+  revision的迟到snapshot不得结束当前run。
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
   `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
@@ -94,7 +96,8 @@
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
 - 新tool queue event用`presentationGroupId == model.responded.messageId`把closed tool batch解析到对应`requestId`；
   reducer只有精确匹配才写入summary的model request identity，不能按相邻文本或当前block猜测。旧History缺少该可选
-  identity时保留原有顺序归约兼容，但新live/replay projector必须提供并验证它。
+  identity或identity不匹配时只能进入独立neutral tool summary，绝不能并入当前或后续Thought；新live/replay
+  projector必须提供并验证该identity。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
 - 非流式兼容路径的多个 caption 继续按既有 Markdown 渲染与间距规则显示；流式 `model.text_delta` 不进入该路径。

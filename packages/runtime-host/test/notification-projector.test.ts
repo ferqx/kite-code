@@ -335,6 +335,7 @@ function sessionProjection(sessionId: string, revision: number): RuntimeSessionP
     sessionId,
     revision,
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

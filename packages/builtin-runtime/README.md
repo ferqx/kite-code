@@ -40,6 +40,8 @@
   保持read-only baseline直接执行；受限Workspace inventory `for`循环仅允许relative literal/glob iterator、唯一loop
   variable展开，以及逐段通过同一只读grammar的body/trailing pipeline。`/dev/null`重定向不是Workspace mutation，不能
   触发用户审批或写风险文案；动态iterator、外部路径、写入、命令替换或未验证suffix仍不能取得read-only分类。
+  VCS mutation classifier必须先复用同一个完整read-only grammar结果：任何已证明read-only的Git组合（包括
+  `git branch --show-current 2>/dev/null`）都不能同时返回mutation；其他branch操作仍保持VCS mutation。
 
 ## 测试
 

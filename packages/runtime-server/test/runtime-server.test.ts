@@ -391,13 +391,14 @@ describe('Runtime Server', () => {
       revision: 1,
       displayName: 'x'.repeat(256),
       lifecycle: 'open' as const,
+      interactionQueue: { revision: 1, interactions: [] },
     }));
     const server = new RuntimeServer(
       { runtime, admission: allowAdmission },
       {
         ...serverOptions(),
-        limits: { maxOutboundBytes: 1_400 },
-        globalLimits: { maxQueuedBytes: 1_400 },
+        limits: { maxOutboundBytes: 2_000 },
+        globalLimits: { maxQueuedBytes: 2_000 },
       },
     );
     const slowTransport = new TestConnection();
@@ -492,6 +493,7 @@ describe('Runtime Server', () => {
           sessionId: 'session-1',
           revision: 4,
           lifecycle: 'open',
+          interactionQueue: { revision: 4, interactions: [] },
         },
       },
       { type: 'index_reset_end', serverInstanceId: 'server-1', generation: 7, indexRevision: 4 },
@@ -557,6 +559,7 @@ describe('Runtime Server', () => {
           sessionId: `session-${index}`,
           revision: index,
           lifecycle: 'open' as const,
+          interactionQueue: { revision: index, interactions: [] },
         },
       })),
       { type: 'index_reset_end', serverInstanceId: 'server-1', generation: 8, indexRevision: 1 },
@@ -570,6 +573,7 @@ describe('Runtime Server', () => {
           sessionId: 'live-session',
           revision: 2,
           lifecycle: 'open',
+          interactionQueue: { revision: 2, interactions: [] },
         },
       },
     ];
@@ -1009,6 +1013,7 @@ function durableNotification(revision: number): RuntimeNotification {
         sessionId: 'session-1',
         revision,
         lifecycle: 'open',
+        interactionQueue: { revision, interactions: [] },
       },
     },
   };
@@ -1034,6 +1039,7 @@ class FakeRuntime implements RuntimeAccess {
     revision: number;
     displayName?: string;
     lifecycle: 'open';
+    interactionQueue: { revision: number; interactions: [] };
   }> = [];
   sessionProjectionRevision: number | undefined;
   endAfterNotifications = false;
@@ -1068,6 +1074,10 @@ class FakeRuntime implements RuntimeAccess {
               sessionId: query.sessionId,
               revision: this.sessionProjectionRevision,
               lifecycle: 'open' as const,
+              interactionQueue: {
+                revision: this.sessionProjectionRevision,
+                interactions: [],
+              },
             },
           };
     }

@@ -5,8 +5,8 @@ import type {
   ContextStatusSnapshot,
   RuntimeCheckpointProjection,
   RuntimeClientEvent,
-  RuntimeClientInteraction,
   RuntimeCommandReceipt,
+  RuntimeInteractionQueueProjection,
   RuntimeRewindPreviewProjection,
   RuntimeSessionProjection,
   WorkspaceAccess,
@@ -26,7 +26,7 @@ export type SessionPresentationAction =
        */
       readonly type: 'RECONCILE_RUNTIME_PROJECTION';
       readonly active: boolean;
-      readonly interaction?: RuntimeClientInteraction;
+      readonly interactionQueue: RuntimeInteractionQueueProjection;
     }
   | { readonly type: 'LOCAL_TEXT'; readonly text: string; readonly isError?: boolean }
   | { readonly type: 'SET_EXITED' }
