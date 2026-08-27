@@ -115,9 +115,8 @@ event listener后提前结束模块求值或主入口。
 Windows上的Bun 1.4 standalone在child退出后不能只依赖pending stream/completion Promise维持事件循环；wrapper必须
 在整个child与pipe drain生命周期持有一个referenced keepalive，并仅在terminal evidence或fail-closed cleanup真正结算后释放。
 fail-closed诊断只写入有界stderr，且必须同步提交后再允许wrapper结束，避免Windows standalone丢失唯一故障证据。
-terminal写入后wrapper还必须显式结束stdout并等待stream close callback；普通write callback在Windows standalone上
-不足以证明最后一个pipe frame已对Host可见。最终terminal control frame因此直接对专用stdout fd执行有界同步
-写入并校验每次正向byte progress，随后才结束stream；ready与普通JSON-RPC仍走异步背压路径。
+terminal必须作为stdout的单个最终`end(bytes, callback)`操作提交，并等待stream close callback后再推进生命周期；
+Windows standalone不得把最终frame write与stream end拆成两个操作。ready与普通JSON-RPC仍走异步背压路径。
 实现与回归验证必须区分这两条写入路径：ready不能消费最终stream关闭语义，terminal也不能回退为普通
 Node stdout write callback，否则Windows standalone可在ready成功后丢失最终cleanup evidence。
 Bun standalone的argv prefix可随平台变化；Service同时对显式command args与完整`process.argv`应用同一个

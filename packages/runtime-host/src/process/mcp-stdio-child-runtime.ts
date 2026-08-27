@@ -240,7 +240,6 @@ export function runMcpStdioChildRuntime(
         cleanup: 'confirmed',
       } satisfies TerminalPayload,
     });
-    await endWritable(process.stdout);
     try {
       process.stdin.destroy();
     } catch {
@@ -283,14 +282,13 @@ async function writeFinalRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<
   const controlFrame = createRuntimeControlFrame(frame);
   const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
   try {
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const written = writeSync(process.stdout.fd, bytes, offset, bytes.byteLength - offset);
-      if (!Number.isSafeInteger(written) || written <= 0) {
-        throw new Error('MCP stdio terminal frame did not reach the Host pipe.');
+    await new Promise<void>((resolve, reject) => {
+      try {
+        process.stdout.end(bytes, resolve);
+      } catch (error) {
+        reject(error);
       }
-      offset += written;
-    }
+    });
   } finally {
     bytes.fill(0);
   }
@@ -404,16 +402,6 @@ async function writeWritable(target: NodeJS.WritableStream, data: Uint8Array): P
         if (error) reject(error);
         else resolve();
       });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-async function endWritable(target: NodeJS.WritableStream): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    try {
-      target.end(resolve);
     } catch (error) {
       reject(error);
     }
