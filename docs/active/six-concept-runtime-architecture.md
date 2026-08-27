@@ -159,6 +159,9 @@ route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数�
 `model.retry.delayMs`。
 
 TUI 与 foreground CLI 都只通过Native `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path进行 command/query/subscribe；one-shot ticket、initialize、admission、subscription ordering和Server routing均不可绕过。TUI通过`apps/kite-cli/src/adapters/tui/session-adapter.ts`获取typed client surface，二者均不接触Kernel state、Host execution control、Builtin executor或SQLite handle。完整旧Session history不从notification replay、trace、JSONL或Server history补偿，而是走`RuntimeClient.history → RuntimeHistoryClient → Service exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与live使用同一TUI reducer。
+模型展示由closed `requestId/messageId/presentationGroupId`建立因果分组：reasoning/text按request归属，tool queue只在
+其opaque group与对应model message精确匹配时进入同一presentation step。该identity不授权执行，TUI不得用事件相邻
+关系代替；旧History缺字段只走兼容归约。
 
 Approval的bounded command、revision、generation与grant集合必须由Runtime Contract、Protocol notification/session projection和
 `respond_interaction` command使用同一个closed shape；任一wire codec遗漏字段都必须fail test，不能静默丢弃live interaction。

@@ -55,6 +55,7 @@ export const initialState: TuiState = {
   thoughtPhaseStatus: undefined,
   currentModelRequestId: undefined,
   toolBearingModelRequestId: undefined,
+  toolBearingPresentationGroupId: undefined,
   currentModelReasoningStreamed: false,
   currentModelReasoningText: undefined,
   currentModelReasoningRequestId: undefined,

@@ -731,6 +731,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .object({
       type: z.literal('tool.queued'),
       toolId: identifier,
+      presentationGroupId: identifier.optional(),
       toolName: runtimeToolDisplayName.optional(),
       displayLabel: displayLabel.optional(),
       presentation: runtimeToolPresentation,

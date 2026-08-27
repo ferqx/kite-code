@@ -70,6 +70,9 @@ export function projectRuntimeClientEvent(
       return {
         type: 'tool.queued',
         toolId: event.toolCallId,
+        ...(event.modelMessageId === undefined
+          ? {}
+          : { presentationGroupId: event.modelMessageId }),
         toolName: projectRuntimeToolDisplayName(event.name),
         ...toolDisplayLabelField(event.name),
         presentation: projectRuntimeToolPresentation(event),

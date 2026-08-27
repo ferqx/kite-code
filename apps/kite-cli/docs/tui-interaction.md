@@ -7,6 +7,9 @@
 - TUI command/query/subscribe 只消费 typed Native client surface；生产路径固定为 terminal
   `LocalKiteConnection/RuntimeClient → companion kite-service RuntimeServer → Service RuntimeAccess`。TUI 不组合 Server。
 - reducer、block replay 与 interaction UI 只接收封闭 `RuntimeClientEvent`/client interaction projection。未知或无法安全投影的事实显示固定 unavailable/error 状态，绝不扩张为 `any` 或 raw Runtime event。
+- TUI本地只缓存`model.responded.messageId → requestId`与tool queue的opaque `presentationGroupId`配对；匹配结果只
+  决定Presentation step归属，不参与Runtime command、approval或execution identity。新事件不按“当前block/上一条event”
+  猜group，旧History缺字段时才使用兼容顺序归约。
 - 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
   reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
   两个不同轮次的相同文本仍保留两条。`USER_MESSAGE` 只用于不会进入 Runtime 的本地 slash echo。

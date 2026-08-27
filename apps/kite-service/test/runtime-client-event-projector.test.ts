@@ -12,6 +12,7 @@ describe('Runtime Client event projector', () => {
         {
           type: 'tool.queued',
           toolCallId: 'tool-1',
+          modelMessageId: 'model-message-1',
           name: 'write_file',
           args: { path: '/private/secret', content: 'password=hidden' },
         } as RuntimeEvent,
@@ -20,6 +21,7 @@ describe('Runtime Client event projector', () => {
     ).toEqual({
       type: 'tool.queued',
       toolId: 'tool-1',
+      presentationGroupId: 'model-message-1',
       toolName: 'write_file',
       presentation: 'standalone',
       arguments: { path: '/private/secret', content: '[redacted]' },

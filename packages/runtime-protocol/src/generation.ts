@@ -80,6 +80,7 @@ export function generateRuntimeProtocolTypeScript(): string {
     'export type RuntimeProtocolToolQueuedEvent = {',
     "  readonly type: 'tool.queued';",
     '  readonly toolId: RuntimeProtocolIdentifier;',
+    '  readonly presentationGroupId?: RuntimeProtocolIdentifier;',
     '  readonly presentation: RuntimeProtocolToolPresentation;',
     '  readonly displayLabel?: string;',
     '  readonly arguments: { readonly [key: string]: RuntimeProtocolJsonValue };',

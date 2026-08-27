@@ -316,6 +316,7 @@ describe('Runtime Protocol', () => {
       mapRuntimeClientEventToProtocol({
         type: 'tool.queued',
         toolId: 'tool-1',
+        presentationGroupId: 'model-message-1',
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -324,6 +325,7 @@ describe('Runtime Protocol', () => {
     ).toEqual({
       type: 'tool.queued',
       toolId: 'tool-1',
+      presentationGroupId: 'model-message-1',
       toolName: 'read_file',
       presentation: 'exploration',
       arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -691,7 +693,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'f9c2662b:d27f08a3';
+    const expectedDigest = 'b48d238d:731d86b4';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

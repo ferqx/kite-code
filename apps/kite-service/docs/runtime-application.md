@@ -51,6 +51,9 @@ durable事件、reasoning completion与Turn终结前必须先flush。relocated `
 `CliRuntimeBridge`复用同一实现，因此InProcess/Service或不同carrier只能改变传输，不能改变TUI看到的事件粒度、顺序或
 聚合语义。frame是active Turn owner；interaction、cancel、close与shutdown旁路在发布durable notification前也必须先
 flush，不能让terminal越过仍在buffer中的reasoning/progress。
+tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentationGroupId`，与closed
+`model.responded.messageId`配对。它只提供模型步骤聚合因果关系，不携带prompt、Provider handle、Kernel State或
+execution authority；Service不得让TUI从事件相邻关系反推该归属。
 
 ## Clean-cutover non-goals
 

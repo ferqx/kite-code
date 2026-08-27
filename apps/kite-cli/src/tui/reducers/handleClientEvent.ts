@@ -46,6 +46,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         currentModelRequestId: event.requestId,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
+        toolBearingPresentationGroupId: undefined,
         currentModelReasoningSegmentId: undefined,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
@@ -209,6 +210,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
+        toolBearingPresentationGroupId: undefined,
         currentModelReasoningRequestId: undefined,
       };
     case 'rewind.terminal':
@@ -789,7 +791,7 @@ function clearCompletedModelState(state: TuiState, requestId: string): TuiState 
     currentModelTextStreamed: undefined,
     ...(ownsCurrentRequest ? { currentModelRequestId: undefined } : {}),
     ...(state.toolBearingModelRequestId === requestId
-      ? { toolBearingModelRequestId: undefined }
+      ? { toolBearingModelRequestId: undefined, toolBearingPresentationGroupId: undefined }
       : {}),
     ...(ownsReasoning
       ? {
@@ -829,6 +831,7 @@ function projectModelResponded(
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: event.requestId,
+        toolBearingPresentationGroupId: event.messageId,
         thoughtPhaseStatus: 'running',
       };
     }
@@ -916,6 +919,7 @@ function projectModelResponded(
       ...resumed,
       currentModelRequestId: undefined,
       toolBearingModelRequestId: event.requestId,
+      toolBearingPresentationGroupId: event.messageId,
       thoughtPhaseStatus: 'running',
     };
   }
@@ -955,6 +959,7 @@ function settleUserCancelledTerminal(state: TuiState): TuiState {
     currentModelRequestId: undefined,
     currentModelTextStreamed: undefined,
     toolBearingModelRequestId: undefined,
+    toolBearingPresentationGroupId: undefined,
     currentModelReasoningSegmentId: undefined,
     currentModelReasoningStreamed: false,
     currentModelReasoningText: undefined,
@@ -1004,6 +1009,7 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
+        toolBearingPresentationGroupId: undefined,
       }
     : next;
 }
@@ -1199,6 +1205,11 @@ function queueSafeClientTool(
         ...(event.displayLabel === undefined ? {} : { displayName: event.displayLabel }),
         args: { ...event.arguments },
         presentation: queuedToolPresentation(event),
+        ...(event.presentationGroupId !== undefined &&
+        event.presentationGroupId === state.toolBearingPresentationGroupId &&
+        state.toolBearingModelRequestId !== undefined
+          ? { modelRequestId: state.toolBearingModelRequestId }
+          : {}),
       },
     },
   };
@@ -1260,6 +1271,7 @@ function materializeSafeClientTool(
   status: SafeToolStatus,
   toolSummary: string,
   totalLines?: number,
+  modelRequestId?: string,
 ): TuiState {
   const withoutPending = removePendingTool(state, toolId);
   const existing = findSummaryById(withoutPending, withoutPending.explorationSummaryIds[toolId]);
@@ -1274,7 +1286,9 @@ function materializeSafeClientTool(
     );
 
   const active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
-  if (active?.active) {
+  const activeOwnsRequest =
+    modelRequestId === undefined || active?.modelRequestId === modelRequestId;
+  if (active?.active && activeOwnsRequest) {
     const pendingCaption = active.pendingCaption;
     const tools = [
       ...active.tools,
@@ -1335,6 +1349,7 @@ function materializeSafeClientTool(
       },
     ]),
     active: true,
+    ...(modelRequestId === undefined ? {} : { modelRequestId }),
     hasThought: false,
     latestActivity: { kind: 'tool', callId: toolId },
   };
@@ -1364,6 +1379,8 @@ function startSafeClientTool(state: TuiState, toolId: string, summary: string): 
       pending.args,
       'running',
       summary,
+      undefined,
+      pending.modelRequestId,
     );
   }
   return appendSafeTool(
@@ -1425,6 +1442,7 @@ function finishSafeClientTool(
       status,
       summary,
       result?.totalLines,
+      pending.modelRequestId,
     );
   }
   if (pending) {

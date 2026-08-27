@@ -243,6 +243,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         toolBearingModelRequestId: undefined,
+        toolBearingPresentationGroupId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,

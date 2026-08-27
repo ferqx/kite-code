@@ -91,6 +91,9 @@
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
+- 新tool queue event用`presentationGroupId == model.responded.messageId`把closed tool batch解析到对应`requestId`；
+  reducer只有精确匹配才写入summary的model request identity，不能按相邻文本或当前block猜测。旧History缺少该可选
+  identity时保留原有顺序归约兼容，但新live/replay projector必须提供并验证它。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
 - 非流式兼容路径的多个 caption 继续按既有 Markdown 渲染与间距规则显示；流式 `model.text_delta` 不进入该路径。

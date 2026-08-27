@@ -1342,6 +1342,54 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('groups exploration tools only through their exact model presentation identity', () => {
+    const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    let state = createInitialState();
+    for (const event of [
+      { type: 'model.requested', requestId: 'group-request-1' },
+      {
+        type: 'model.responded',
+        requestId: 'group-request-1',
+        messageId: 'group-message-1',
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'group-read-1',
+        presentationGroupId: 'group-message-1',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'group-read-1' },
+    ] satisfies RuntimeClientEvent[]) {
+      state = reduce(state, event);
+    }
+    const first = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(first).toEqual(
+      expect.objectContaining({ modelRequestId: 'group-request-1', summaryLine: 'read 1 file' }),
+    );
+
+    state = reduce(state, { type: 'model.requested', requestId: 'group-request-2' });
+    state = reduce(state, {
+      type: 'reasoning.activity',
+      requestId: 'group-request-2',
+      state: 'completed',
+      segmentId: 'group-reasoning-2',
+      text: 'A distinct step.',
+    });
+    expect(
+      state.turns
+        .flatMap((turn) => turn.blocks)
+        .filter((block) => block.kind === 'tool_summary')
+        .map((block) => block.modelRequestId),
+    ).toEqual(['group-request-1', 'group-request-2']);
+  });
+
   test('keeps late final reasoning with its answer instead of the preceding search step', () => {
     const events = [
       {

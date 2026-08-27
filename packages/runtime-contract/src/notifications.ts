@@ -157,6 +157,8 @@ export type RuntimeClientEvent =
   | {
       readonly type: 'tool.queued';
       readonly toolId: string;
+      /** Opaque model-message identity used only for presentation grouping. */
+      readonly presentationGroupId?: string;
       /** Closed presentation category, never a raw tool/provider string. */
       readonly toolName?: RuntimeToolDisplayName;
       /** App-owned bounded label for a dynamic tool name. */

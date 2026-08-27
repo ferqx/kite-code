@@ -12,7 +12,8 @@
 - 本地展示 DTO 保留有界 reasoning segment、动态工具 label、JSON-safe arguments、terminal result/progress
   与取消原因；只过滤明显 credential/authority material，不把普通 path/pattern/command/result 清空。
 - `model.text_delta` 与 `reasoning.activity` 必须携带对应 model request identity；live projector 保留 Kernel
-  event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。
+  event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
+  opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
 - 为未来 transport adapter 提供中立数据边界。
 
@@ -46,6 +47,8 @@
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
   不携带 callback、Store handle 或历史 interaction settlement authority。
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。
+- 新写入的tool queue projection用`presentationGroupId`与`model.responded.messageId`精确配对；该字段只参与
+  Presentation grouping，不是execution、authorization或settlement identity。旧History没有该可选字段时仍可回放。
 - Contract 不泄漏具体执行、存储或展示 authority。
 
 ## 测试

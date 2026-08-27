@@ -339,6 +339,8 @@ export interface TuiState {
       displayName?: string;
       args: Record<string, unknown>;
       presentation: RuntimeToolPresentation;
+      /** Exact model request resolved from the event's presentation group. */
+      modelRequestId?: string;
     }
   >;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
@@ -355,6 +357,8 @@ export interface TuiState {
    *  remains correlated to its sibling response components without becoming
    *  a Thought caption. */
   toolBearingModelRequestId?: string;
+  /** Model message identity paired with toolBearingModelRequestId. */
+  toolBearingPresentationGroupId?: string;
   /** Whether the current model invocation has emitted at least one reasoning delta. */
   currentModelReasoningStreamed?: boolean;
   /** Latest cumulative reasoning segment, cached off-screen between boundaries. */
