@@ -51,11 +51,14 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
       await runtime.close('tui-test-dispose');
     },
   };
+  const events: string[] = [];
   const facade = createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
+    flushPresentation: async () => {
+      events.push('presentation.flush');
+    },
   });
-  const events: string[] = [];
   const sessionId = facade.createSession('/tmp/tui-client-workspace');
   await facade.waitForSessionReady(sessionId);
   const session = facade.getRuntime(sessionId);
@@ -72,6 +75,8 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   expect(remote.commands).toContain('start_turn');
   expect(events).toContain('tool.progress');
   expect(events).toContain('run.terminal');
+  expect(events.indexOf('reasoning.activity')).toBeLessThan(events.indexOf('presentation.flush'));
+  expect(events.indexOf('presentation.flush')).toBeLessThan(events.indexOf('model.text_delta'));
 
   session!.setLocalReplayRecovery(true);
   const continued = await facade.forkRecoveredSessionForContinuation(sessionId);
@@ -247,6 +252,46 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             compositionRevision: 'runtime-state-store',
             streamId: command.commandId,
             sequence: 1,
+            event: {
+              type: 'reasoning.activity',
+              requestId: 'request-1',
+              segmentId: 'segment-1',
+              state: 'completed',
+              text: 'fixture reasoning',
+            },
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'ephemeral',
+            sessionId: command.sessionId,
+            workId: 'work-1',
+            turnId: 'turn-1',
+            actorId: 'runtime-agent',
+            attemptId: command.commandId,
+            compositionRevision: 'runtime-state-store',
+            streamId: command.commandId,
+            sequence: 2,
+            event: {
+              type: 'model.text_delta',
+              requestId: 'request-1',
+              text: 'fixture answer paragraph',
+            },
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'ephemeral',
+            sessionId: command.sessionId,
+            workId: 'work-1',
+            turnId: 'turn-1',
+            actorId: 'runtime-agent',
+            attemptId: command.commandId,
+            compositionRevision: 'runtime-state-store',
+            streamId: command.commandId,
+            sequence: 3,
             event: {
               type: 'tool.progress',
               toolId: 'shell-1',

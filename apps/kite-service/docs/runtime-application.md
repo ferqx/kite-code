@@ -41,7 +41,8 @@ Live presentation在进入closed `RuntimeClientEvent` projector前统一经过Se
 reasoning/text在一帧内只投影最新值并固定按reasoning→text顺序发布，tool progress按`toolCallId + stream`有界合并；
 durable事件、reasoning completion与Turn终结前必须先flush。relocated `SessionRuntime` seam与concrete
 `CliRuntimeBridge`复用同一实现，因此InProcess/Service或不同carrier只能改变传输，不能改变TUI看到的事件粒度、顺序或
-聚合语义。
+聚合语义。frame是active Turn owner；interaction、cancel、close与shutdown旁路在发布durable notification前也必须先
+flush，不能让terminal越过仍在buffer中的reasoning/progress。
 
 ## Clean-cutover non-goals
 

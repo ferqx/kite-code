@@ -15,4 +15,8 @@ reconnect重新ensure/discover并切换Runtime Client generation，原子清除�
 再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
 snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
 
+Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后必须
+等待注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。这个
+client屏障与Service 50ms framing共同保持旧InProcess可见顺序，不在adapter内按数据源添加渲染分支。
+
 验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。

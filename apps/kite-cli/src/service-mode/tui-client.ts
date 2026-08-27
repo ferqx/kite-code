@@ -366,14 +366,17 @@ class NativeTuiRuntimeClient {
     try {
       for await (const notification of notifications) {
         if (controller.signal.aborted || this.#closed) return;
-        this.#applyNotification(record, notification);
+        await this.#applyNotification(record, notification);
       }
     } catch (error) {
       if (!controller.signal.aborted && !this.#closed) record.subscriptionError = error;
     }
   }
 
-  #applyNotification(record: NativeSessionRecord, notification: RuntimeAccessNotification): void {
+  async #applyNotification(
+    record: NativeSessionRecord,
+    notification: RuntimeAccessNotification,
+  ): Promise<void> {
     let event: RuntimeClientEvent | undefined;
     if (isRuntimeNotification(notification)) {
       if (notification.durability === 'ephemeral') {
@@ -400,6 +403,9 @@ class NativeTuiRuntimeClient {
       record.dispatch({ type: 'RUNTIME_EVENT', event });
     } else {
       record.eventBuffer.push(event);
+    }
+    if (event.type === 'reasoning.activity' && event.state === 'completed') {
+      await this.#flushPresentation?.();
     }
     if (isTerminalEvent(event)) {
       if (isActiveWork(record.projection?.activeWork)) {

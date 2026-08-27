@@ -66,7 +66,8 @@
 - TUI reducer只消费canonical framed client events，不按InProcess、Native Service或carrier分支渲染。Service在投影前
   以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
   durable边界与Turn结束前先flush。数据源切换不得把累计文本拆成逐行block，也不得把同一阶段的Thinking移到独立
-  dynamic区域。
+  dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
+  terminal或interaction事件；整轮完成后的单次flush不能替代这个事件间屏障。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。

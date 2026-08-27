@@ -55,7 +55,9 @@ cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/aut
 State、Store handle 和 settlement callback 仍禁止。该本地内容不进入 metric、diagnostic 或远程 reporter，
 也不把 development WebSocket 提升为 production Web。Service-owned presentation frame在closed projector前统一合并
 累计reasoning/text与tool progress，并在durable边界前flush；legacy Session seam与concrete Service bridge共享该实现，
-因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。
+因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。interaction/cancel/close/shutdown等旁路durable
+publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
+后续client event，不能让terminal先结算后再补一个独立Thought。
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 

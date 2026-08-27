@@ -139,6 +139,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   #running = false;
   #closed = false;
   #activePublish: ((notification: RuntimeNotification) => void) | undefined;
+  #activePresentationFrame: RuntimePresentationFrame | undefined;
   #activeWork: RuntimeSessionProjection['activeWork'];
   #pendingInteraction: PendingCliInteraction | undefined;
 
@@ -675,6 +676,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     publish: (notification: RuntimeNotification) => void,
     kind: 'session' | 'turn',
   ): void {
+    this.#flushActivePresentation();
     const firstRevision = finalRevision - events.length + 1;
     for (const [index, event] of events.entries()) {
       const revision = firstRevision + index;
@@ -843,6 +845,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     let publishedRevision = this.#revision;
     let sequence = 0;
     const presentation = new RuntimePresentationFrame();
+    this.#activePresentationFrame = presentation;
     const publishPresentation = (event: RuntimeEvent): void => {
       const notification = projectRuntimeEphemeralNotification(event, {
         sessionId: this.#input.sessionId,
@@ -944,6 +947,9 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         presentation.flush();
       } catch {
         status = signal.aborted ? 'cancelled' : 'failed';
+      }
+      if (this.#activePresentationFrame === presentation) {
+        this.#activePresentationFrame = undefined;
       }
       this.#running = false;
       this.#activePublish = undefined;
@@ -1054,6 +1060,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           brokerIdentity,
         };
         if (state.revision > priorRevision) {
+          this.#flushActivePresentation();
           publish({
             schema: RUNTIME_NOTIFICATION_SCHEMA_,
             durability: 'durable',
@@ -1082,6 +1089,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     reason: string,
     publish: (notification: RuntimeNotification) => void = this.#activePublish ?? (() => undefined),
   ): void {
+    this.#flushActivePresentation();
     const events =
       this.#runtimeSessionCoordinator.get(this.#input.sessionId)?.control.cancelRun(reason) ?? [];
     for (const event of events) {
@@ -1100,6 +1108,10 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         },
       });
     }
+  }
+
+  #flushActivePresentation(): void {
+    this.#activePresentationFrame?.flush();
   }
 
   #projection(): RuntimeSessionProjection {
