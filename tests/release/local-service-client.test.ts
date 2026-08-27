@@ -7,10 +7,72 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createManagedLocalServiceClientComposition } from '../../scripts/release/local-service-client';
+import {
+  createManagedLocalServiceClientComposition,
+  selectKiteServiceEnvironmentSource,
+  sourceServiceBuildIdentity,
+} from '../../scripts/release/local-service-client';
+
+test('managed client forwards only explicit built-in provider environment keys', () => {
+  expect(
+    selectKiteServiceEnvironmentSource({
+      PATH: '/usr/bin',
+      DEEPSEEK_API_KEY: 'deepseek-secret',
+      OPENAI_API_KEY: 'openai-secret',
+      OPENAI_BASE_URL: 'https://openai.example/v1',
+      UNLISTED_API_KEY: 'must-not-cross',
+      KITE_CODE_HOME: '/ambient',
+    }),
+  ).toEqual(
+    expect.objectContaining({
+      PATH: '/usr/bin',
+      DEEPSEEK_API_KEY: 'deepseek-secret',
+      OPENAI_API_KEY: 'openai-secret',
+      OPENAI_BASE_URL: 'https://openai.example/v1',
+    }),
+  );
+  const selected = selectKiteServiceEnvironmentSource({
+    UNLISTED_API_KEY: 'must-not-cross',
+    KITE_CODE_HOME: '/ambient',
+  });
+  expect(selected.UNLISTED_API_KEY).toBeUndefined();
+  expect(selected.KITE_CODE_HOME).toBeUndefined();
+});
+
+test('source Service build identity changes with tracked and bounded untracked inputs', () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-build-id-'));
+  try {
+    mkdirSync(join(root, 'apps', 'kite-service'), { recursive: true });
+    mkdirSync(join(root, 'packages', 'fixture'), { recursive: true });
+    const tracked = join(root, 'apps', 'kite-service', 'entry.ts');
+    writeFileSync(tracked, 'export const value = 1;\n');
+    runGit(root, ['init']);
+    runGit(root, ['config', 'user.email', 'tests@kite.local']);
+    runGit(root, ['config', 'user.name', 'Kite Tests']);
+    runGit(root, ['add', '.']);
+    runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture']);
+
+    const clean = sourceServiceBuildIdentity(root);
+    writeFileSync(tracked, 'export const value = 2;\n');
+    const trackedDirty = sourceServiceBuildIdentity(root);
+    writeFileSync(tracked, 'export const value = 3;\n');
+    const trackedChangedAgain = sourceServiceBuildIdentity(root);
+    const untracked = join(root, 'packages', 'fixture', 'new.ts');
+    writeFileSync(untracked, 'export const added = true;\n');
+    const withUntracked = sourceServiceBuildIdentity(root);
+
+    expect(clean).toMatch(/^dev:[0-9a-f]{40}$/u);
+    expect(trackedDirty).toMatch(/^dev:[0-9a-f]{40}:dirty:[0-9a-f]{64}$/u);
+    expect(trackedChangedAgain).not.toBe(trackedDirty);
+    expect(withUntracked).not.toBe(trackedChangedAgain);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('managed client derives default KiteHome only from the canonical OS identity', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-managed-home-'));
@@ -81,3 +143,14 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function runGit(root: string, args: readonly string[]): void {
+  const result = Bun.spawnSync(['git', '-C', root, ...args], {
+    stdout: 'ignore',
+    stderr: 'pipe',
+    env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Git fixture failed: ${result.stderr.toString()}`);
+  }
+}

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -70,6 +71,36 @@ describe('managed candidate install lifecycle', () => {
     expect(readInstallStatus(prefix)).toEqual(rolledBack);
     uninstallOssCandidate(prefix);
     expect(existsSync(prefix)).toBe(false);
+  });
+
+  test('uses the supplied custom Service home for every ordinary lifecycle stop', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-custom-service-home-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    const identity = serviceHome(prefix);
+    const firstLog = join(parent, 'first-arguments.log');
+    const secondLog = join(parent, 'second-arguments.log');
+    const first = await createOssCandidateFixture(
+      '0.1.0',
+      currentOssReleaseTarget(),
+      'applied',
+      firstLog,
+    );
+    const second = await createOssCandidateFixture(
+      '0.1.1',
+      currentOssReleaseTarget(),
+      'applied',
+      secondLog,
+    );
+    roots.push(first.root, second.root);
+
+    await installCandidate({ archivePath: first.archivePath, prefix, serviceHome: identity });
+    await installCandidate({ archivePath: second.archivePath, prefix, serviceHome: identity });
+    rollbackCandidate(prefix, { serviceHome: identity });
+    uninstallCandidate(prefix, { serviceHome: identity });
+
+    expectAllKiteHomeArguments(firstLog, identity.root);
+    expectAllKiteHomeArguments(secondLog, identity.root);
   });
 
   test('refuses unmanaged, broad, or link-containing targets', async () => {
@@ -195,4 +226,11 @@ function nonNativeTarget(): OssReleaseTarget {
   return current.id === 'macos-arm64'
     ? { id: 'linux-x64', os: 'linux', arch: 'x64', executableSuffix: '' }
     : { id: 'macos-arm64', os: 'darwin', arch: 'arm64', executableSuffix: '' };
+}
+
+function expectAllKiteHomeArguments(path: string, expectedHome: string): void {
+  const args = readFileSync(path, 'utf8').trim().split('\n');
+  const positions = args.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
+  expect(positions.length).toBeGreaterThan(0);
+  for (const position of positions) expect(args[position + 1]).toBe(expectedHome);
 }

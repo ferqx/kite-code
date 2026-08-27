@@ -13,10 +13,11 @@ export async function createOssCandidateFixture(
   version: string,
   target: OssReleaseTarget = currentOssReleaseTarget(),
   stopOutcome: 'applied' | 'service_busy' = 'applied',
+  argumentLogPath?: string,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-oss-candidate-test-'));
   const archivePath = join(root, 'candidate.tar.gz');
-  const cli = await fixtureCliBytes(root, target, stopOutcome);
+  const cli = await fixtureCliBytes(root, target, stopOutcome, argumentLogPath);
   const suffix = target.executableSuffix;
   const files = new Map<string, Uint8Array>([
     [`bin/kite${suffix}`, cli],
@@ -58,20 +59,24 @@ async function fixtureCliBytes(
   root: string,
   target: OssReleaseTarget,
   stopOutcome: 'applied' | 'service_busy',
+  argumentLogPath?: string,
 ): Promise<Uint8Array> {
   if (target.os !== 'win32' || process.platform !== 'win32') {
-    return bytes(
+    const recordArguments = argumentLogPath
+      ? `printf '%s\\n' "$@" >> '${argumentLogPath.replaceAll("'", "'\\''")}'\n`
+      : '';
+    const script =
       stopOutcome === 'applied'
         ? '#!/bin/sh\nif [ "$1" = "service" ] && [ "$2" = "status" ]; then echo \'{"outcome":"applied","state":"absent"}\'; elif [ "$1" = "service" ] && [ "$2" = "stop" ]; then echo stopped; else echo Kite; fi\n'
-        : '#!/bin/sh\nif [ "$1" = "service" ] && [ "$2" = "status" ]; then echo \'{"outcome":"service_busy","state":"ready"}\'; elif [ "$1" = "service" ] && [ "$2" = "stop" ]; then echo busy; exit 1; else echo Kite; fi\n',
-    );
+        : '#!/bin/sh\nif [ "$1" = "service" ] && [ "$2" = "status" ]; then echo \'{"outcome":"service_busy","state":"ready"}\'; elif [ "$1" = "service" ] && [ "$2" = "stop" ]; then echo busy; exit 1; else echo Kite; fi\n';
+    return bytes(script.replace('#!/bin/sh\n', `#!/bin/sh\n${recordArguments}`));
   }
 
   const entrypoint = join(root, 'fixture-cli.ts');
   const executable = join(root, 'fixture-kite.exe');
   writeFileSync(
     entrypoint,
-    `const args = process.argv.slice(1);\nif (args.includes('status')) console.log(${JSON.stringify(
+    `${argumentLogPath ? `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(argumentLogPath)}, process.argv.slice(1).join('\\n') + '\\n');\n` : ''}const args = process.argv.slice(1);\nif (args.includes('status')) console.log(${JSON.stringify(
       JSON.stringify(
         stopOutcome === 'applied'
           ? { outcome: 'applied', state: 'absent' }

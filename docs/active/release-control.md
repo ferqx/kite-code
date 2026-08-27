@@ -38,6 +38,10 @@ matrix尚未取得，必须保持pending，不能以workflow定义、本地通�
 候选中的`kite`与`kite-tui`由release entrypoint注入同一managed connector/manager；前台`run/resume`与TUI默认
 ensure/connect companion，CLI另提供`kite service ensure/status/stop/restart`。connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
+managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
+`DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
+Service。source mode的build identity除HEAD外还绑定Service/package/root build inputs的tracked binary diff及有界
+untracked regular-file内容摘要；摘要不可用或越界时fail closed，dirty source不能复用同HEAD的旧detached Service。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装后的 launcher 通过 managed-install marker 从当前
@@ -104,6 +108,8 @@ matrix 或 approved registry。
 upgrade、rollback与uninstall在替换或删除binary前必须调用当前candidate的普通`kite service stop`并确认
 `service status --json`为`applied + absent`，随后取得同一Native lifecycle fence。`service_busy`、identity uncertain、
 state残留或任何stop/status失败都保持active candidate与managed tree不变；installer不force kill、不手工清state。
+调用方提供custom `KiteHomeIdentity`时，ordinary stop、status确认与后续lifecycle fence必须全部使用该同一root；不得
+省略`--kite-home`而误停默认Service，也不得用默认home的absence替代custom owner清理证据。
 managed client接管显式或OS-derived Kite home时先拒绝symlink/non-owner identity，再仅把home目录本身收紧为owner-only；
 既有descriptor/token/lock权限漂移仍fail closed，不借cleanup或install自动修复。
 installer默认OS-derived code root同样直接交给Service home owner primitive创建/验证，不先用平台默认`mkdir`产生不同

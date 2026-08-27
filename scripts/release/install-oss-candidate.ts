@@ -78,7 +78,7 @@ export async function installOssCandidate(input: {
         `Managed install target ${existing.target} cannot be replaced by ${candidate.manifest.target.id}.`,
       );
     }
-    ordinaryStopManagedService(root, existing);
+    ordinaryStopManagedService(root, existing, input.serviceHome);
   }
   const fence = acquireInstallerServiceFence(input.serviceHome);
   try {
@@ -113,7 +113,7 @@ export function rollbackOssCandidate(
   const marker = loadMarker(root);
   assertManagedTreeForUninstall(root, marker, 128);
   if (!marker.previousCandidateId) throw new Error('No previous Kite Code candidate is available.');
-  ordinaryStopManagedService(root, marker);
+  ordinaryStopManagedService(root, marker, options.serviceHome);
   const releaseRoot = join(root, 'releases', marker.previousCandidateId);
   const manifest = verifyMaterializedRelease(releaseRoot, marker.previousCandidateId);
   const fence = acquireInstallerServiceFence(options.serviceHome);
@@ -141,7 +141,7 @@ export function uninstallOssCandidate(
   const marker = loadMarker(root);
   assertMarkerRoot(root, marker);
   assertManagedTreeForUninstall(root, marker, 128);
-  ordinaryStopManagedService(root, marker);
+  ordinaryStopManagedService(root, marker, options.serviceHome);
   const fence = acquireInstallerServiceFence(options.serviceHome);
   try {
     rmSync(root, { recursive: true, force: false });
@@ -416,7 +416,11 @@ function verifyActiveLauncher(root: string, candidateId: string, name: string): 
   if (!active.equals(stored)) throw new Error(`Managed active launcher does not match: ${name}`);
 }
 
-function ordinaryStopManagedService(root: string, marker: InstallMarker): void {
+function ordinaryStopManagedService(
+  root: string,
+  marker: InstallMarker,
+  serviceHome?: KiteHomeIdentity,
+): void {
   const suffix = marker.target.startsWith('windows-') ? '.exe' : '';
   const executable = join(root, 'bin', `kite${suffix}`);
   const spawnOptions = {
@@ -430,11 +434,15 @@ function ordinaryStopManagedService(root: string, marker: InstallMarker): void {
         : { HOME: userInfo().homedir }),
     },
   } as const;
-  const stopped = Bun.spawnSync([executable, 'service', 'stop'], spawnOptions);
+  const homeArguments = serviceHome ? ['--kite-home', serviceHome.root] : [];
+  const stopped = Bun.spawnSync([executable, 'service', 'stop', ...homeArguments], spawnOptions);
   if (stopped.exitCode !== 0) {
     throw new Error('Managed Service ordinary stop failed; active candidate is unchanged.');
   }
-  const status = Bun.spawnSync([executable, 'service', 'status', '--json'], spawnOptions);
+  const status = Bun.spawnSync(
+    [executable, 'service', 'status', '--json', ...homeArguments],
+    spawnOptions,
+  );
   if (status.exitCode !== 0) {
     throw new Error('Managed Service stop could not be confirmed; active candidate is unchanged.');
   }
