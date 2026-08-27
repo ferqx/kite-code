@@ -65,9 +65,23 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
         });
       }
       if (stopped.outcome !== 'applied') {
-        throw new Error(
-          `Managed TUI test Service did not stop cleanly: ${stopped.outcome}/${stopped.diagnostic ?? stopped.state}`,
-        );
+        if (stopped.outcome === 'outcome_unknown') {
+          for (let attempt = 0; attempt < 50; attempt += 1) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+            const observed = await managed.lifecycle.status({
+              clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+            });
+            if (observed.outcome === 'applied' && observed.state === 'absent') {
+              stopped = observed;
+              break;
+            }
+          }
+        }
+        if (stopped.outcome !== 'applied') {
+          throw new Error(
+            `Managed TUI test Service did not stop cleanly: ${stopped.outcome}/${stopped.diagnostic ?? stopped.state}`,
+          );
+        }
       }
       stoppedWorkspaces.add(workspace);
     } catch (error) {
@@ -78,7 +92,9 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
   for (const server of fixtures.mockServers ?? []) {
     if (!server) continue;
     try {
-      server.assertComplete();
+      server.assertComplete({
+        allowUnconsumedResponses: process.env.KITE_FAULT_SOAK_PROCESS_NONCE !== undefined,
+      });
     } catch (error) {
       errors.push(error);
     }

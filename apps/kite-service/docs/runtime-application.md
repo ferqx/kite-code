@@ -36,6 +36,8 @@ owner，browser-safe App Contract不携带secret。
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
+动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一投影为
+`mcp:dynamic_tool`，具体工具名只从独立有界safe summary展示。
 
 Live presentation在进入closed `RuntimeClientEvent` projector前统一经过Service-owned 50ms presentation frame。累计
 reasoning/text在一帧内只投影最新值并固定按reasoning→text顺序发布，tool progress按`toolCallId + stream`有界合并；

@@ -128,6 +128,8 @@ smoke结束时会删除其独占临时根；Windows只对刚退出native executa
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
+fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；
+仍为ready/uncertain时保持临时root并使smoke失败。
 固定MCP wrapper fixture的stderr会被持续drain，但失败报告最多保留240个清洗后的可打印字符；该诊断不得包含
 任意用户MCP配置、credential或模型正文。
 wrapper ready或terminal拒绝后smoke仍必须调用同一handle的有界cleanup并确认process tree；失败分支不能因跳过

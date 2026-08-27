@@ -35,6 +35,9 @@
 - Runner 为每个文件设置 deadline，拥有 child process group/tree，并在成功、失败或 timeout 后回收。
 - 场景不得读取开发机 credential、真实配置或 live Provider；live MCP/Model 使用独立显式命令。
 - timeout、orphan process、残留 worktree/path 或缺失 terminal evidence 都是硬失败。
+- fault-soak nonce下，注入取消可以合法留下未消费的预配置model response；cleanup只放宽该项，仍拒绝额外请求与未闭合
+  tool continuation。普通PTY与release smoke继续要求response queue全部消费。
+- manager stop返回`outcome_unknown`时cleanup不重放stop，只在有界窗口query status；仅`applied + absent`可继续删除fixture。
 
 ## Journey 规则
 

@@ -444,6 +444,7 @@ export function projectRuntimeToolDisplayName(name: string): RuntimeToolDisplayN
 /** Keeps canonical categories closed while retaining bounded local dynamic labels. */
 export function projectRuntimeToolDisplayLabel(name: string): string | undefined {
   if (RUNTIME_TOOL_DISPLAY_NAME_SET.has(name)) return undefined;
+  if (name.startsWith('mcp__')) return 'mcp:dynamic_tool';
   const label = projectRuntimeClientText(name, 512);
   return label.length === 0 ? undefined : label;
 }

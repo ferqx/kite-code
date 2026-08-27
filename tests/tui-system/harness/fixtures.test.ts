@@ -135,6 +135,7 @@ describe('mock model fixture', () => {
       server.setResponses([{ message: { content: 'must be consumed' } }]);
       expect(() => server.setResponses([])).toThrow('unconsumed response');
       expect(() => server.assertComplete()).toThrow('were unconsumed');
+      expect(() => server.assertComplete({ allowUnconsumedResponses: true })).not.toThrow();
     } finally {
       server.stop();
     }

@@ -118,7 +118,7 @@ export interface MockModelServer {
   /** GET URLs received by the local model-discovery fixture. */
   getModelRequests(): string[];
   /** Fail when requests exceeded the queue or configured responses remain unused. */
-  assertComplete(): void;
+  assertComplete(options?: { readonly allowUnconsumedResponses?: boolean }): void;
   /** Stop the server */
   stop(): void;
 }
@@ -597,7 +597,7 @@ export function createMockModelServer(): MockModelServer {
       };
     },
     getModelRequests: () => [...modelRequests],
-    assertComplete() {
+    assertComplete(options) {
       const failures: string[] = [];
       if (unexpectedRequests.length > 0) {
         failures.push(
@@ -606,7 +606,7 @@ export function createMockModelServer(): MockModelServer {
             .join(', ')}`,
         );
       }
-      if (responseCursor < responses.length) {
+      if (responseCursor < responses.length && !options?.allowUnconsumedResponses) {
         failures.push(
           `${responses.length - responseCursor} configured response(s) were unconsumed`,
         );
