@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { writeSync } from 'node:fs';
 import {
   canonicalControlFrameJson,
   isRuntimeControlFrame,
@@ -192,7 +191,7 @@ export function runMcpStdioChildRuntime(
     });
     childPid = child.pid;
     processStartIdentity = `${childPid}:${Date.now()}:${randomUUID()}`;
-    writeFinalRuntimeControlFrame({
+    await writeFinalRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
       domain: MCP_STDIO_CONTROL_DOMAIN_,
       peerId: MCP_STDIO_WRAPPER_PEER_ID_,
@@ -266,17 +265,13 @@ async function writeRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): 
   }
 }
 
-function writeFinalRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): void {
+async function writeFinalRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): Promise<void> {
   const controlFrame = createRuntimeControlFrame(frame);
   const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
   try {
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const written = writeSync(process.stdout.fd, bytes, offset, bytes.byteLength - offset);
-      if (!Number.isSafeInteger(written) || written <= 0) {
-        throw new Error('MCP stdio terminal frame did not reach the Host pipe.');
-      }
-      offset += written;
+    const written = await Bun.write(Bun.stdout, bytes);
+    if (written !== bytes.byteLength) {
+      throw new Error('MCP stdio terminal frame did not reach the Host pipe.');
     }
   } finally {
     bytes.fill(0);
