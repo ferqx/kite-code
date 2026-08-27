@@ -78,7 +78,11 @@ const localRuntimeServiceDescriptorSchema = z
     startedAt,
     endpoint,
     protocolVersion: z.literal(RUNTIME_PROTOCOL_VERSION),
-    clientContractRevision: z.literal(LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_),
+    // Descriptor discovery must decode a bounded previous revision so the
+    // manager can report `client_contract_incompatible` and use the separately
+    // authenticated control channel to stop an old resident Service. Runtime
+    // and App connections still require the exact current revision.
+    clientContractRevision: boundedIdentity,
     serverVersion: boundedIdentity,
     buildId: boundedIdentity,
   })

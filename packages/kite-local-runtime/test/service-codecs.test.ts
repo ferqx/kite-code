@@ -37,7 +37,10 @@ describe('kite-local-runtime service codecs', () => {
         ...descriptor,
         clientContractRevision: 'kite-local-runtime-contract-v1',
       }),
-    ).toMatchObject({ success: false });
+    ).toMatchObject({
+      success: true,
+      data: { clientContractRevision: 'kite-local-runtime-contract-v1' },
+    });
   });
 
   test('accepts the exact descriptor and rejects secret/path additions', () => {

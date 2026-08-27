@@ -194,6 +194,10 @@ function diagnosticForHandshake(
   runtime: ManagerRuntimeOptions,
   descriptor: LocalRuntimeServiceDescriptor,
 ): LifecycleDiagnostic | undefined {
+  if (descriptor.protocolVersion !== runtime.protocolVersion) return 'protocol_incompatible';
+  if (descriptor.clientContractRevision !== runtime.clientContractRevision) {
+    return 'client_contract_incompatible';
+  }
   if (handshake.outcome === 'incompatible') {
     if (handshake.diagnostic === 'protocol_incompatible') return 'protocol_incompatible';
     if (handshake.diagnostic === 'client_contract_incompatible') {

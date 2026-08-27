@@ -24,6 +24,8 @@ spawn replacement或把caller descriptor回显成握手成功。
 client-contract identity包含当前browser-safe `kite-app-contract` revision。Workspace Trust或其他App Control exact DTO
 升级时，旧驻留Service必须在instance handshake/descriptor discovery阶段返回`client_contract_incompatible`，不得先建立
 connection后把旧响应降级成Trust `unavailable`或尝试兼容解码。
+descriptor只为升级管理有界读取旧revision；在instance lock、process identity与control token仍精确匹配时，manager可停止
+旧实例并启动当前Service。该兼容读取不签发ticket、不开放Runtime/App route，也不清理alive/uncertain identity。
 
 Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime WebSocket前使用access token，但只有
 Service返回trusted canonical identity后connect route才签发ticket。request path/cwd/clientInfo不产生Trust authority。

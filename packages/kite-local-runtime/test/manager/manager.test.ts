@@ -509,6 +509,31 @@ describe('Kite Local Runtime lifecycle manager', () => {
     expect(harness.state.clearStaleCount).toBe(0);
   });
 
+  test('stops an identity-verified resident Service with an older client contract', async () => {
+    const oldDescriptor = {
+      ...descriptor(),
+      clientContractRevision: 'kite-local-runtime-contract-v1',
+    };
+    const harness = createHarness(oldDescriptor);
+    harness.handshake = healthyHandshake({
+      clientContractRevision: oldDescriptor.clientContractRevision,
+    });
+    const service = manager(harness);
+
+    await expect(service.status({ requestId: 'old-contract-status' })).resolves.toMatchObject({
+      outcome: 'incompatible',
+      state: 'ready',
+      diagnostic: 'client_contract_incompatible',
+    });
+    await expect(service.stop({ requestId: 'old-contract-stop' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'absent',
+      diagnostic: 'not_running',
+    });
+    expect(harness.counts.controlStop).toBe(1);
+    expect(harness.counts.spawn).toBe(0);
+  });
+
   test('stop busy leaves state published and restart does not retry the control mutation', async () => {
     const harness = createHarness(descriptor());
     harness.controlResult = { outcome: 'service_busy', diagnostic: 'service_busy' };

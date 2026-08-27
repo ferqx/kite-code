@@ -51,6 +51,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 
 - descriptor schema为`kite.local-runtime-service.v1`，只含instance/PID/start time、loopback endpoint、Protocol、client
   contract revision、server version与build ID；token、Workspace、Store/executable path、credential与Session字段fail closed。
+- descriptor discovery可有界读取旧client-contract revision，使manager能明确报告incompatible并经独立control token停止
+  已验证的旧实例；Runtime/App connection仍只接受当前exact revision，绝不以兼容读取授权业务连接。
 - authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
   content-type缺失、malformed/extra field或instance/server/build identity mismatch统一`identity_uncertain`；

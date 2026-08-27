@@ -82,6 +82,8 @@ Protocol/client-contract/serverVersion/build identity一致。server identity dr
 Native client-contract identity显式包含当前`kite-app-contract` revision；因此Workspace Trust/App Control的exact DTO
 revision变化会同步改变Service handshake identity。旧驻留Service必须在App response解码前被判
 `client_contract_incompatible`，不能以Trust `unavailable`掩盖版本不兼容，也不能silent fallback到旧codec。
+manager可有界读取旧descriptor revision，以便在instance lock、process identity与control token都精确匹配时停止旧实例；
+这只是lifecycle upgrade seam，不授权Runtime/App connection、ticket、state清理或replacement spawn。
 
 ## Authority sequence
 
