@@ -121,6 +121,9 @@ Windows上的Bun 1.4 standalone在child退出后不能只依赖pending stream/co
 fail-closed诊断只写入有界stderr，且必须同步提交后再允许wrapper结束，避免Windows standalone丢失唯一故障证据。
 wrapper在bootstrap、child-started、forwarding与drained阶段使用保留的非零exit code；只有terminal frame成功提交后
 才覆盖为真实child exit code，意外中途退出不能伪装为成功。
+Host的`spawn()`只在validated ready后返回handle；若ready前EOF、协议拒绝或timeout，Host必须先有界终止process tree、
+等待wrapper exit，再把有界numeric `wrapper_exit`附到startup error。调用方即使尚未取得handle也能区分生命周期阶段，
+且该诊断不能包含command、path、environment或MCP正文。
 terminal必须作为stdout的单个最终`end(bytes, callback)`操作提交，并等待stream close callback后再推进生命周期；
 Windows standalone不得把最终frame write与stream end拆成两个操作。ready与普通JSON-RPC仍走异步背压路径。
 实现与回归验证必须区分这两条写入路径：ready不能消费最终stream关闭语义，terminal也不能回退为普通
