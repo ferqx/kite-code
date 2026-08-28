@@ -9,6 +9,7 @@ export interface SqliteEffectLeaseStore {
 export function createSqliteEffectLeaseStore(
   db: Database,
   isClosed: () => boolean,
+  beforeWrite?: () => void,
 ): SqliteEffectLeaseStore {
   const deleteExpired = db.query(
     'DELETE FROM runtime_effect_leases WHERE session_id = ? AND effect_id = ? AND expires_at_ms <= ?',
@@ -36,6 +37,7 @@ export function createSqliteEffectLeaseStore(
     ): boolean => {
       if (isClosed() || expiresAtMs <= Date.now()) return false;
       const now = Date.now();
+      beforeWrite?.();
       return db.transaction(() => {
         deleteExpired.run(sessionId, effectId, now);
         insert.run(sessionId, effectId, ownerId, expiresAtMs);
@@ -50,11 +52,15 @@ export function createSqliteEffectLeaseStore(
     ): boolean => {
       if (isClosed() || expiresAtMs <= Date.now()) return false;
       const now = Date.now();
+      beforeWrite?.();
       renew.run(expiresAtMs, sessionId, effectId, ownerId, now);
       return hasLease(sessionId, effectId, ownerId, now);
     },
     releaseEffectLease: (sessionId: string, effectId: string, ownerId: string): void => {
-      if (!isClosed()) release.run(sessionId, effectId, ownerId);
+      if (!isClosed()) {
+        beforeWrite?.();
+        release.run(sessionId, effectId, ownerId);
+      }
     },
   });
   return Object.freeze({ port, hasLease });

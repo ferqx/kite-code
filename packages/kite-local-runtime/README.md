@@ -3,7 +3,7 @@
 ## 定位
 
 `@kite-ai/kite-local-runtime` 是 Kite managed Local Service 的 Bun/Node-only、repo-private Native substrate。它以互斥
-`./client`、`./manager`、`./service` exports冻结descriptor/token/lock/lifecycle、instance handshake、Native
+`./client`、`./coordinator`、`./manager`、`./service` exports冻结descriptor/token/lock/lifecycle、instance handshake、Native
 credential及Runtime/History/App Control connection contract；它不创建Runtime Host/Store/Server composition。
 
 ## 拥有职责
@@ -13,12 +13,22 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   authenticated control plane；caller确认Workspace trusted后才显式`connect()`。
 - `./manager`：单一ensure/status/stop/restart state machine、native process/spawn/PID probe、cross-process lifecycle lock、
   neutral environment与explicit executable resolver composition。manager拥有control token；普通connection不取得它。
-- source mode在POSIX直接执行repo-owned shebang entry；Windows没有shebang executable语义，因此固定由当前Bun runtime
-  执行同一个`service.ts` entry。installed mode在三平台始终直接执行resolved companion binary，不经PATH fallback。
+- source mode在POSIX直接执行repo-owned shebang entry（Service、Coordinator、Worker、Gateway各自的 exact entry）；Windows没有
+  shebang executable语义，因此固定由当前Bun runtime执行对应 TypeScript entry。installed mode在三平台始终直接执行 resolved
+  companion binary，不经PATH fallback。
 - manager probe先 `GET /readyz`做liveness precheck，再以access token `POST /_kite/instance`、exact `{}` body读取
   process-owned strict identity；绝不从磁盘descriptor合成healthy response。
 - `./service`：strict descriptor/lock/token codec与fixed `runtime-service/v1` filesystem layout；提供no-follow、owner-only、
-  bounded read、sibling temp+fsync+atomic rename、instance/lifecycle lock及exact stale quarantine/cleanup primitive。
+  bounded read、sibling temp+fsync+atomic rename、instance/lifecycle lock及exact stale quarantine/cleanup primitive。该Native-only
+  入口还窄导出同一套Windows state entry secure/verify helper，供Coordinator/Worker/Gateway state owner复用；`./client`与browser
+  contract不导出或捆入Win32 ACL/FFI实现。
+- `./coordinator`：private、Native-only 的 closed Coordinator control-plane frame/handshake、固定 method allowlist、
+  Worker/Web/Coordinator instance/build/protocol identity、bounded ID/deadline/idempotency/size/depth validation，以及
+  可注入 transport 的 typed request client/dispatcher。POSIX endpoint 只描述 owner-only Unix socket identity，Windows endpoint
+  只描述 current-user SID-bound named-pipe identity；descriptor 不携带 socket/pipe path。其 carrier 使用 length-prefixed
+  bounded frame、initialize deadline、单连接有界队列和 fail-closed partial/malformed/oversized 处理；平台不可用时返回
+  typed `unsupported`，绝不退回 TCP。Coordinator registry 是纯内存 control-plane owner，只保存 Worker identity、path-free
+  Session metadata、directory revision 与唯一 Web Gateway registry。
 - 固定client contract revision、Protocol V1 identity与loopback endpoint shape；拒绝unknown field、non-loopback endpoint、
   secret-bearing descriptor与unsafe JSON。
 
@@ -26,6 +36,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
 
 - 不监听端口，不实现HTTP/WebSocket listener，也不创建Host、Runtime Server、Builtin Runtime、SQLite或第二composition；
   这些production owner只在`apps/kite-service`。
+- `./coordinator`不实现generic RPC、Runtime command/event/model/tool/credential data plane、Worker/Store/Host/Web Gateway；
+  transport、OS peer verification与process lifecycle仍由上层 owner 注入。
 - manager只在PID明确dead且exact identity仍匹配时cleanup；alive/uncertain、malformed state、handshake mismatch与unknown stop
   outcome均fail closed，不kill、不spawn replacement、不回显descriptor identity。
 - status对完整absent返回`applied + absent + not_running`；若只剩descriptor/instance-lock stale evidence，必须先由process
@@ -42,8 +54,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 
 ## 公开入口
 
-只导出 `@kite-ai/kite-local-runtime/client`、`@kite-ai/kite-local-runtime/manager` 与
-`@kite-ai/kite-local-runtime/service`。不提供root export，不暴露跨layerimplementation。
+只导出 `@kite-ai/kite-local-runtime/client`、`@kite-ai/kite-local-runtime/coordinator`、
+`@kite-ai/kite-local-runtime/manager` 与 `@kite-ai/kite-local-runtime/service`。不提供root export，不暴露跨layerimplementation。
 
 ## 关键不变量
 

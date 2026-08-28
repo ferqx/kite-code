@@ -43,7 +43,7 @@ test('managed client forwards only explicit built-in provider environment keys',
   expect(selected.KITE_CODE_HOME).toBeUndefined();
 });
 
-test('source Service build identity ignores unrelated commits and changes with owned inputs', () => {
+test('source release build identity includes terminal, Service, Worker, Gateway, and package inputs', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-build-id-'));
   try {
     mkdirSync(join(root, 'apps', 'kite-service'), { recursive: true });
@@ -62,7 +62,8 @@ test('source Service build identity ignores unrelated commits and changes with o
     writeFileSync(unrelated, 'export const presentationOnly = true;\n');
     runGit(root, ['add', '.']);
     runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'unrelated cli change']);
-    expect(sourceServiceBuildIdentity(root)).toBe(clean);
+    const committedClientChange = sourceServiceBuildIdentity(root);
+    expect(committedClientChange).not.toBe(clean);
 
     writeFileSync(tracked, 'export const value = 2;\n');
     runGit(root, ['add', '.']);
@@ -77,6 +78,7 @@ test('source Service build identity ignores unrelated commits and changes with o
     const withUntracked = sourceServiceBuildIdentity(root);
 
     expect(clean).toMatch(/^dev:[0-9a-f]{40}$/u);
+    expect(committedClientChange).toMatch(/^dev:[0-9a-f]{40}$/u);
     expect(committedServiceChange).toMatch(/^dev:[0-9a-f]{40}$/u);
     expect(committedServiceChange).not.toBe(clean);
     expect(trackedDirty).toMatch(/^dev:[0-9a-f]{40}:dirty:[0-9a-f]{64}$/u);

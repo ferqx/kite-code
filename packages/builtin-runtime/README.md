@@ -42,6 +42,10 @@
   触发用户审批或写风险文案；动态iterator、外部路径、写入、命令替换或未验证suffix仍不能取得read-only分类。
   VCS mutation classifier必须先复用同一个完整read-only grammar结果：任何已证明read-only的Git组合（包括
   `git branch --show-current 2>/dev/null`）都不能同时返回mutation；其他branch操作仍保持VCS mutation。
+- Windows managed sandbox runner discovery只接受v2 managed-install marker、唯一`active` regular-file pointer与
+  完整candidate identity（marker、pointer、`.candidate-id`、manifest digest必须一致）。Runner、Shell runtime与
+  Coreutils均须是no-follow regular files；running process固定stable launcher显式pin的candidate，不从cwd、PATH或
+  ambient home fallback。Windows ACL/write-through与三平台安装证据仍由release qualification负责，不能由本地测试代替。
 
 ## 测试
 

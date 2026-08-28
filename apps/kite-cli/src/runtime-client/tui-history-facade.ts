@@ -3,7 +3,9 @@ import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import type { SessionData, SessionInfo } from '#kite-cli/session-types';
 
 function formatLocalDateTime(timestamp: number): string {
-  const date = new Date(timestamp * 1000);
+  // Runtime Store/History timestamps are epoch milliseconds. Multiplying by 1000 produced
+  // five-digit years and could make an otherwise valid Session row fail bounded TUI layout.
+  const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '(unknown)';
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(

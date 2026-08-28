@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeClient } from '@kite-ai/runtime-client';
 import type {
   RuntimeAccessNotification,
@@ -32,6 +31,14 @@ import type {
 } from '../adapters/tui/session-adapter';
 import { createTuiHistoryFacade } from '../runtime-client/tui-history-facade';
 import type { RuntimePresentationEvent } from '../tui/runtime-presentation';
+import {
+  acquireKiteServiceModeController,
+  createKiteServiceModeSession,
+  detachKiteServiceModeController,
+  type KiteServiceModeConnection,
+  type KiteServiceModeControllerLease,
+  releaseKiteServiceModeController,
+} from './adapter';
 
 const CANCEL_RETRY_LIMIT = 8;
 const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
@@ -77,12 +84,13 @@ interface NativeSessionRecord {
   runIdlePromise: Promise<void> | undefined;
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
+  controllerLease: KiteServiceModeControllerLease | undefined;
   resolveRun: (() => void) | undefined;
   rejectRun: ((error: unknown) => void) | undefined;
 }
 
 export interface NativeTuiRuntimeClientOptions {
-  readonly connection: LocalKiteConnection;
+  readonly connection: KiteServiceModeConnection;
   readonly workspace: string;
   readonly flushPresentation?: () => Promise<void>;
 }
@@ -122,7 +130,7 @@ export function createNativeTuiRuntimeClientFactory(
 }
 
 class NativeTuiRuntimeClient {
-  readonly #connection: LocalKiteConnection;
+  readonly #connection: KiteServiceModeConnection;
   readonly #runtime: RuntimeClient;
   readonly #history: ReturnType<typeof createTuiHistoryFacade>;
   readonly #workspace: string;
@@ -284,6 +292,7 @@ class NativeTuiRuntimeClient {
       runIdlePromise: undefined,
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
+      controllerLease: undefined,
       resolveRun: undefined,
       rejectRun: undefined,
     };
@@ -292,16 +301,35 @@ class NativeTuiRuntimeClient {
   }
 
   async #createRemoteSession(record: NativeSessionRecord): Promise<void> {
-    const receipt = await this.#runtime.command({
-      schema: RUNTIME_COMMAND_SCHEMA_,
-      commandId: this.#nextCommandId(record.threadId, 'create'),
-      type: 'create_session',
-      workspace: record.workspace,
-      bootstrapSessionId: record.threadId,
-    });
-    this.#assertApplied(receipt);
-    this.#recordRevision(record, receipt);
-    record.dormant = false;
+    if (this.#connection.controller) {
+      const created = await createKiteServiceModeSession(this.#connection, record.threadId);
+      record.controllerLease = created.lease;
+      record.revision = created.sessionRevision;
+      record.dormant = false;
+      return;
+    }
+    const lease = await this.#ensureControllerForMutation(record);
+    try {
+      const receipt = await this.#runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: this.#nextCommandId(record.threadId, 'create'),
+        type: 'create_session',
+        workspace: record.workspace,
+        bootstrapSessionId: record.threadId,
+      });
+      this.#assertApplied(receipt);
+      this.#recordRevision(record, receipt);
+      record.dormant = false;
+    } catch (error) {
+      // A newly reserved Session must not retain a Controller lease when its
+      // atomic create boundary failed. This is a release only; it never
+      // cancels a Runtime turn.
+      if (lease) {
+        await releaseKiteServiceModeController(this.#connection, lease).catch(() => undefined);
+        record.controllerLease = undefined;
+      }
+      throw error;
+    }
   }
 
   async #admitAndSubscribe(
@@ -326,6 +354,14 @@ class NativeTuiRuntimeClient {
   }
 
   async #resumeRemoteSession(record: NativeSessionRecord): Promise<void> {
+    // Opening an existing Session in the release TUI is Observer-only. The
+    // History/Runtime subscription is sufficient to render it; Controller
+    // acquisition is deferred until the user invokes a mutation.
+    if (this.#connection.controller) {
+      await this.#connection.connect();
+      record.dormant = false;
+      return;
+    }
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'resume'),
@@ -373,6 +409,16 @@ class NativeTuiRuntimeClient {
     } catch (error) {
       if (!controller.signal.aborted && !this.#closed) record.subscriptionError = error;
     }
+  }
+
+  async #ensureControllerForMutation(
+    record: NativeSessionRecord,
+  ): Promise<KiteServiceModeControllerLease | undefined> {
+    if (!this.#connection.controller) return undefined;
+    if (record.controllerLease) return record.controllerLease;
+    const lease = await acquireKiteServiceModeController(this.#connection, record.threadId);
+    record.controllerLease = lease;
+    return lease;
   }
 
   async #applyNotification(
@@ -633,6 +679,7 @@ class NativeTuiRuntimeClient {
     void completion.catch(() => undefined);
     record.runPromise = completion;
     try {
+      await this.#ensureControllerForMutation(record);
       const commandId = this.#nextCommandId(record.threadId, 'turn');
       let expectedRevision = this.#revision(record);
       let receipt: RuntimeCommandReceipt | undefined;
@@ -739,6 +786,7 @@ class NativeTuiRuntimeClient {
     mode: 'accept_edits' | 'auto' | 'full',
   ): Promise<void> {
     await this.#waitForSessionReady(record.threadId);
+    await this.#ensureControllerForMutation(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'mode'),
@@ -770,6 +818,7 @@ class NativeTuiRuntimeClient {
     }
     const commandId = this.#nextCommandId(record.threadId, 'interaction');
     await this.#waitForSessionReady(record.threadId);
+    await this.#ensureControllerForMutation(record);
     let interaction = pendingInteraction;
     let expectedRevision = interaction.sessionRevision;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -844,6 +893,7 @@ class NativeTuiRuntimeClient {
     const work = record.projection?.activeWork;
     if (!isActiveWork(work)) return;
     const activeWork = work;
+    await this.#ensureControllerForMutation(record);
     const turnId = activeWork.activeTurn?.turnId ?? record.threadId;
     let expectedRevision = this.#revision(record);
     for (let attempt = 0; attempt < CANCEL_RETRY_LIMIT; attempt += 1) {
@@ -883,6 +933,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(sessionId);
     if (!record) throw new Error(`Runtime session is unavailable: ${sessionId}`);
     await this.#cancelRuntimeOperations(sessionId);
+    await this.#ensureControllerForMutation(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'delete'),
@@ -993,6 +1044,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(input.sourceThreadId);
     if (!record) throw new Error(`Runtime session is unavailable: ${input.sourceThreadId}`);
     await this.#waitForSessionReady(input.sourceThreadId);
+    await this.#ensureControllerForMutation(record);
     const commandId = this.#nextCommandId(input.sourceThreadId, 'rewind');
     let resolveTerminal!: (event: Extract<RuntimeClientEvent, { type: 'rewind.terminal' }>) => void;
     let rejectTerminal!: (error: unknown) => void;
@@ -1043,6 +1095,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(sessionId);
     if (!record) return undefined;
     await this.#waitForSessionReady(sessionId);
+    await this.#ensureControllerForMutation(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'fork'),
@@ -1071,6 +1124,7 @@ class NativeTuiRuntimeClient {
     onCommand?: TuiContextCompactionCommand,
   ): Promise<TuiContextCompactionResult> {
     await this.#waitForSessionReady(sessionId);
+    await this.#ensureControllerForMutation(this.#sessions.get(sessionId)!);
     onProgress?.('preparing');
     const commandId = this.#nextCommandId(sessionId, 'compact');
     onCommand?.({ type: 'user.command_invoked', commandId, command: '/compact' });
@@ -1091,6 +1145,7 @@ class NativeTuiRuntimeClient {
   async #handleContextReset(sessionId: string): Promise<TuiContextCompactionResult> {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
+    await this.#ensureControllerForMutation(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'reset'),
@@ -1129,6 +1184,7 @@ class NativeTuiRuntimeClient {
   async #clearSessionCommandGrants(sessionId: string): Promise<RuntimeCommandReceipt> {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
+    await this.#ensureControllerForMutation(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'clear-grants'),
@@ -1153,6 +1209,15 @@ class NativeTuiRuntimeClient {
       record.rejectRun?.(closedError);
       for (const waiter of record.rewindWaiters.values()) waiter.reject(closedError);
       record.rewindWaiters.clear();
+    }
+    // Detach only leases acquired by this client. Closing the transport must
+    // never cancel a Turn, release another client's lease, or invoke a
+    // Runtime Controller command outside this exact native boundary.
+    for (const record of this.#sessions.values()) {
+      const lease = record.controllerLease;
+      if (!lease) continue;
+      await detachKiteServiceModeController(this.#connection, lease).catch(() => undefined);
+      record.controllerLease = undefined;
     }
     this.#sessions.clear();
     this.#views.clear();

@@ -22,15 +22,28 @@ import {
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
 } from '@kite-ai/builtin-runtime/skills';
-import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import type { RuntimeCommandContext, SubAgentEventSink } from '@kite-ai/runtime-contract';
 import { committedResourceUsage } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#kite-service/config/features';
 import type { AgentConfig } from '#kite-service/config/index';
 import type { CapabilityExecutionPort } from '#runtime-spi';
+import type {
+  WorkspaceEffectAttemptContext,
+  WorkspaceEffectDispatchComposition,
+} from '../../workspace-worker/effect-adapter';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
 import type { RuntimeEffect, RuntimeState, StateRuntimeStorage } from './state-runtime';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
+
+export type AppWorkspaceEffectDispatchComposition = Readonly<WorkspaceEffectDispatchComposition> & {
+  readonly context: Readonly<WorkspaceEffectAttemptContext>;
+};
+
+/** Builds one Worker effect composition for one admission-time command context. */
+export type AppWorkspaceEffectCompositionFactory = (
+  context: Readonly<RuntimeCommandContext>,
+) => AppWorkspaceEffectDispatchComposition;
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
@@ -54,6 +67,10 @@ export interface RuntimeExecutorDependencies {
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
+  /** Admission-time in-process command context pinned by the Runtime Host closure. */
+  commandContext?: Readonly<RuntimeCommandContext>;
+  /** Worker-owned Store/effect composition; configured callers require commandContext. */
+  workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
   subagentEventSink?: SubAgentEventSink;
   /** Explicit unit-test seam; production creates the compactor only through modelEffectCoordinator. */
   testContextCompactor?: ContextCompactor;

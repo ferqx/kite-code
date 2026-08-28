@@ -141,6 +141,7 @@ function emptyHistorySession(session: HarnessSession): RuntimeHistorySessionTran
       updatedAt: Date.parse(session.updatedAt),
       lastSequence: session.revision,
     },
+    records: [],
     events: [],
     interactionMode: 'auto',
     recovery: 'normal',

@@ -9,6 +9,7 @@ import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeClientInteraction,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
   type RuntimeInteractionQueueProjection,
@@ -59,6 +60,7 @@ import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
+import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-dependencies';
 import type { RuntimeUserAction } from './state-actions';
 import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
@@ -91,6 +93,8 @@ export interface CliRuntimeBridgeInput {
     readonly mode: 'off' | 'metadata' | 'content';
   }) => void;
   readonly onSessionLoggingDiagnostic?: (message: string) => void;
+  /** Worker-owned effect composition factory; it receives only pinned admission context. */
+  readonly workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
 }
 
 export type CliRuntimeInteractionResolution =
@@ -110,6 +114,7 @@ interface CliRuntimeTurnExecutionInput {
   readonly userGoal: string;
   readonly precommittedStart?: PrecommittedStartTurnDescriptor;
   readonly resumeCommittedInteraction?: boolean;
+  readonly commandContext?: Readonly<RuntimeCommandContext>;
 }
 
 export function createCliRuntimeBridge(
@@ -348,6 +353,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
                       command.commandId,
                       coordinator,
                       receipt,
+                      context.commandContext,
                     ),
                   }),
             };
@@ -393,7 +399,12 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
                 };
                 this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
               },
-              preparedExecution: this.#preparedStart(command, committed.descriptor, receipt),
+              preparedExecution: this.#preparedStart(
+                command,
+                committed.descriptor,
+                receipt,
+                context.commandContext,
+              ),
             };
           },
         },
@@ -708,6 +719,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     command: Extract<RuntimeCommand, { type: 'start_turn' }>,
     descriptor: PrecommittedStartTurnDescriptor,
     receipt: Extract<RuntimeCommandReceipt, { status: 'applied' }>,
+    commandContext?: Readonly<RuntimeCommandContext>,
   ): RuntimeHostPreparedExecution {
     return {
       execution: {
@@ -722,6 +734,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
               task: command.input,
               userGoal: command.input,
               precommittedStart: descriptor,
+              ...(commandContext === undefined ? {} : { commandContext }),
             },
             this.#ensureCoordinator(),
             signal,
@@ -735,6 +748,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     operationId: string,
     coordinator: RuntimeSessionCoordinator,
     receipt: Extract<RuntimeCommandReceipt, { status: 'applied' }>,
+    commandContext?: Readonly<RuntimeCommandContext>,
   ): RuntimeHostPreparedExecution {
     const state = coordinator.getState();
     const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
@@ -754,6 +768,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
               task: task.userGoal,
               userGoal: task.userGoal,
               resumeCommittedInteraction: true,
+              ...(commandContext === undefined ? {} : { commandContext }),
             },
             coordinator,
             signal,
@@ -989,6 +1004,14 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           sandboxBackend: this.#input.sandboxBackend,
           frontend: 'cli',
           signal,
+          ...(execution.commandContext === undefined
+            ? {}
+            : { commandContext: execution.commandContext }),
+          ...(this.#input.workspaceEffectCompositionFactory === undefined
+            ? {}
+            : {
+                workspaceEffectCompositionFactory: this.#input.workspaceEffectCompositionFactory,
+              }),
           abortExecution: requestAbort,
           sessionLoggingPolicy: this.#input.config.sessionLoggingPolicy,
           sessionLoggingContentInspector: createModelSecretDetector({

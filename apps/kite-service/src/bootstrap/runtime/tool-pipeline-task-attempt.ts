@@ -2,6 +2,7 @@ import {
   type BuiltinOperationExecutionValue,
   createBuiltinPreparedTaskDispatchAdapter,
 } from '@kite-ai/builtin-runtime';
+import type { RuntimeCommandContext } from '@kite-ai/runtime-contract';
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
   RuntimeHostSuspendedToolInvocationAuthority,
@@ -20,6 +21,11 @@ import type {
   ToolPipelineTaskSubagentSuspension,
 } from '@kite-ai/runtime-spi';
 import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
+import {
+  requiresWorkspaceEffectGate,
+  type WorkspaceEffectDispatchComposition,
+  WorkspaceEffectOutcomeUnknownError,
+} from '../../workspace-worker/effect-adapter';
 import {
   type CreateAppBuiltinPreparedDispatchPortInput,
   createAppBuiltinPreparedTaskDispatchPort,
@@ -49,6 +55,8 @@ export interface AppTaskToolPipelineAttemptInput {
   readonly governance: Readonly<GovernanceInputWithoutClassified>;
   readonly admission: Readonly<GovernanceAdmission>;
   readonly threadId: string;
+  /** Admission-time command context; never recovered from Session state. */
+  readonly commandContext?: Readonly<RuntimeCommandContext>;
   readonly attempt: number;
   readonly taskId: string | null;
   readonly planId: string | null;
@@ -75,6 +83,12 @@ export interface AppTaskToolPipelineAttemptInput {
     readonly prepared: Readonly<PreparedToolInvocation>;
     readonly terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
   }) => Readonly<ToolPipelineTaskSubagentSuspension> | null;
+  /** Optional Worker-owned effect gate with explicit authenticated context. */
+  readonly workspaceEffect?: Readonly<WorkspaceEffectDispatchComposition> & {
+    readonly context: Readonly<
+      import('../../workspace-worker/effect-adapter').WorkspaceEffectAttemptContext
+    >;
+  };
 }
 
 export type AppTaskToolPipelineAttemptResult =
@@ -304,41 +318,64 @@ export function createAppTaskToolPipelineAttemptRuntime(input: {
       verifyPreparedIdentity: attemptInput.turn.callbacks.verifyPreparedIdentity,
       port,
     });
+    const dispatchTask = async (
+      candidate: Readonly<PreparedToolInvocation>,
+    ): Promise<Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>> => {
+      const terminal = await dispatch.dispatch(candidate);
+      if (hasTaskBlockedMarker(terminal)) {
+        if (!isBlockedTaskTerminal(terminal)) {
+          throw new Error('Task blocked result is not an exact Builtin suspension envelope.');
+        }
+        const suspension = attemptInput.projectSuspension({
+          executionMode: attemptInput.executionMode,
+          prepared,
+          terminal,
+        });
+        if (!suspension) {
+          throw new Error('Task suspension projection is unavailable.');
+        }
+        return Object.freeze({
+          kind: 'suspended' as const,
+          suspension,
+          result: Object.freeze({
+            status: 'success' as const,
+            content: terminal.content,
+            structuredContent: terminal.structuredContent,
+            ...(terminal.providerMeta === undefined ? {} : { providerMeta: terminal.providerMeta }),
+          }),
+        });
+      }
+      if (taskExecutionClaimedSuspension) {
+        throw new Error('Task suspension result failed the Builtin projection boundary.');
+      }
+      return Object.freeze({ kind: 'committed' as const, terminal });
+    };
     const outcomeDispatch = Object.freeze({
       verifyPreparedIdentity: dispatch.verifyPreparedIdentity,
       dispatch: async (
         candidate: Readonly<PreparedToolInvocation>,
       ): Promise<Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>> => {
-        const terminal = await dispatch.dispatch(candidate);
-        if (hasTaskBlockedMarker(terminal)) {
-          if (!isBlockedTaskTerminal(terminal)) {
-            throw new Error('Task blocked result is not an exact Builtin suspension envelope.');
-          }
-          const suspension = attemptInput.projectSuspension({
-            executionMode: attemptInput.executionMode,
+        if (attemptInput.workspaceEffect && requiresWorkspaceEffectGate(classifiedValue)) {
+          const effectAttempt = attemptInput.workspaceEffect.createAttempt({
+            context: attemptInput.workspaceEffect.context,
             prepared,
-            terminal,
+            classified: classifiedValue,
+            attempt: attemptInput.attempt,
           });
-          if (!suspension) {
-            throw new Error('Task suspension projection is unavailable.');
+          if (
+            effectAttempt.invocationId !== prepared.identity.invocationId ||
+            effectAttempt.attemptId !== prepared.identity.attemptId ||
+            effectAttempt.requestDigest !== prepared.identity.admissionDigest
+          ) {
+            throw new Error('Workspace effect attempt is not bound to the prepared Task.');
           }
-          return Object.freeze({
-            kind: 'suspended' as const,
-            suspension,
-            result: Object.freeze({
-              status: 'success' as const,
-              content: terminal.content,
-              structuredContent: terminal.structuredContent,
-              ...(terminal.providerMeta === undefined
-                ? {}
-                : { providerMeta: terminal.providerMeta }),
-            }),
-          });
+          const gated = await attemptInput.workspaceEffect.gate.run(effectAttempt, () =>
+            dispatchTask(candidate),
+          );
+          if (gated.status !== 'applied') throw new WorkspaceEffectOutcomeUnknownError();
+          return gated.result;
         }
-        if (taskExecutionClaimedSuspension) {
-          throw new Error('Task suspension result failed the Builtin projection boundary.');
-        }
-        return Object.freeze({ kind: 'committed' as const, terminal });
+        return dispatchTask(candidate);
       },
     });
     scope.router.bind(prepared, outcomeDispatch);

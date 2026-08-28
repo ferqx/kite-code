@@ -23,9 +23,20 @@ describe('slash command suggestions', () => {
       'rewind',
       'export',
       'context',
+      'web',
       'clear',
       'help',
       'exit',
+    ]);
+  });
+
+  test('describes /web as discovery-only', () => {
+    expect(findSlashCommandDefs('web')).toEqual([
+      {
+        name: 'web',
+        aliases: [],
+        description: 'Show the existing read-only Web Gateway URL',
+      },
     ]);
   });
 

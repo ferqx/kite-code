@@ -129,9 +129,13 @@ runner 只使用 manifest 固定的 POSIX runtime 与最小 environment allowlis
 可通过 invocation runtime/PATH 暴露，但不会复制 repository。默认 command language 仍为 POSIX/Bash，
 也可显式调用 cmd.exe、pwsh 或 powershell.exe。
 
-Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/isksh` runtime 保留在当前
-managed candidate payload。激活的 `kite.exe`/`kite-tui.exe` 通过 install marker 定位该 payload；缺失或
-digest 不一致使 backend 不可用，不会加载未固定的 host runner。
+Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/isksh` runtime 保留在 immutable
+managed candidate root。v2 managed-install marker 与唯一 `active` regular-file pointer 绑定当前 candidate；stable
+launcher 将其启动时的 candidate root 显式 pin 给 child process，running process 不重新读取 pointer。Runner resolver
+只接受 marker、pointer、`.candidate-id` 与 candidate `manifest.json` identity 完全一致的 candidate，并对 launcher、
+marker、pointer、candidate root、runner manifest、runner 与 Shell/Coreutils runtime 执行 no-follow/non-reparse/
+regular-file 检查；缺失、替换或 digest 不一致使 backend 不可用，不会加载未固定的 host runner，也不会回退 cwd、PATH
+或 ambient home。真实 Windows ACL/write-through 与三平台 candidate/process qualification 仍待 hosted/真实证据。
 
 ## protocol V6 与 manifest V1
 

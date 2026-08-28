@@ -983,6 +983,7 @@ function createFixture(
           updatedAt: 0,
           lastSequence: 0,
         },
+        records: [],
         events: [],
         interactionMode: 'auto',
         recovery: 'normal',

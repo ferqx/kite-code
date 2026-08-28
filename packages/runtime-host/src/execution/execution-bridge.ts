@@ -1,5 +1,6 @@
 import type {
   RuntimeCommand,
+  RuntimeCommandContext,
   RuntimeCommandReceipt,
   RuntimeNotification,
   RuntimeQuery,
@@ -45,6 +46,8 @@ export type RuntimeHostCommandInspection =
 /** Host-derived, content-free command target facts. Bridges must not derive them. */
 export interface RuntimeHostCommandInspectionContext {
   readonly targetSessionId: string;
+  /** Admission-time in-process context; never serialized on Runtime Protocol. */
+  readonly commandContext?: Readonly<RuntimeCommandContext>;
 }
 
 /**

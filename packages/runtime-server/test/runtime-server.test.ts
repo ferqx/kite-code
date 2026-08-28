@@ -3,6 +3,7 @@ import type {
   RuntimeAccess,
   RuntimeAccessNotification,
   RuntimeCommand,
+  RuntimeCommandContext,
   RuntimeNotification,
   RuntimeQuery,
   RuntimeSubscription,
@@ -212,6 +213,42 @@ describe('Runtime Server', () => {
       result: { status: 'ok', queryType: 'list_sessions' },
     });
     expect(runtime.queries).toHaveLength(1);
+  });
+
+  test('pins admission connection and binding reference into the in-process command context', async () => {
+    const runtime = new FakeRuntime();
+    const pair = createRuntimeServerInProcessHub(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => ({
+            allowed: true as const,
+            workspace: '/trusted/workspace',
+            bindingReference: `binding:${input.connectionId}`,
+          }),
+        },
+      },
+      serverOptions(),
+    ).open();
+    const messages = pair.client.messages()[Symbol.asyncIterator]();
+    await initializePair(pair, messages);
+
+    await pair.client.send(commandRequest('command-context-1'));
+    expect(await next(messages)).toMatchObject({
+      id: 'command-context-1',
+      result: { status: 'applied' },
+    });
+    expect(runtime.commandContexts).toHaveLength(1);
+    expect(runtime.commandContexts[0]).toMatchObject({
+      schema: 'kite.runtime-command-context.v1',
+      connectionId: 'connection-1',
+      requestId: 'command-context-1',
+      bindingReference: 'binding:connection-1',
+    });
+    expect(Object.isFrozen(runtime.commandContexts[0])).toBeTrue();
+    expect(Object.isFrozen(runtime.commandContexts[0]?.clientInfo)).toBeTrue();
+    expect(runtime.commandContexts[0]).not.toHaveProperty('workspace');
+    await pair.connection.close();
   });
 
   test('binds distinct per-connection admission ports while resume/query retain persisted authority', async () => {
@@ -1028,6 +1065,7 @@ function emptyIndex(): RuntimeAccessNotification[] {
 
 class FakeRuntime implements RuntimeAccess {
   commands: RuntimeCommand[] = [];
+  commandContexts: Array<RuntimeCommandContext | undefined> = [];
   queries: RuntimeQuery[] = [];
   subscriptions: RuntimeSubscription[] = [];
   notifications: RuntimeAccessNotification[] = [];
@@ -1045,8 +1083,9 @@ class FakeRuntime implements RuntimeAccess {
   endAfterNotifications = false;
   throwOnIteratorReturn = false;
 
-  async command(command: RuntimeCommand) {
+  async command(command: RuntimeCommand, context?: RuntimeCommandContext) {
     this.commands.push(command);
+    this.commandContexts.push(context);
     await this.commandGate;
     return {
       status: 'applied' as const,

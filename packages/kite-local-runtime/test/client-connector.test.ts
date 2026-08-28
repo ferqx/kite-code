@@ -275,6 +275,7 @@ function historyTranscript(event: unknown): unknown {
       updatedAt: 1,
       lastSequence: 1,
     },
+    records: [{ sequence: 1, events: [event] }],
     events: [event],
     interactionMode: 'full',
     recovery: 'normal',

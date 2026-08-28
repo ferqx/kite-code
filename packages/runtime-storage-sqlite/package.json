@@ -13,6 +13,7 @@
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
-    "@kite-ai/runtime-host": "workspace:*"
+    "@kite-ai/runtime-host": "workspace:*",
+    "zod": "^4.3.6"
   }
 }

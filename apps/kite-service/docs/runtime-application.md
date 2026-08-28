@@ -16,6 +16,11 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
+默认 Service composition 当前仍是 State 27 / Store 6。`workspace-worker/production.ts` 是另一条显式 production path：它只接收
+Coordinator/layout owner 已 materialize/admit 的 Store 7 owner、Workspace binding 与 generation，随后在同一 Worker 内组合唯一
+Host/Application/Controller/effect authority；Worker 不创建 manifest、不打开第二 Store，也不把 Store 7 隐式回退为 Store 6。Coordinator
+和 Web Gateway 是独立 companion process owner，不能通过本页的 Service composition 推导为同一进程。
+
 ## Workspace、Trust 与 routing
 
 Service neutral boot不解析请求Workspace的config/MCP/Skill或启动Workspace runtime。第一阶段，authenticated App Control
@@ -70,11 +75,18 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 `model.responded.messageId`配对。它只提供模型步骤聚合因果关系，不携带prompt、Provider handle、Kernel State或
 execution authority；Service不得让TUI从事件相邻关系反推该归属。
 
+Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
+Worker binding reference）。Worker application 的 effect composition 只接受该已固定 context，并由 Store 7 authority、Controller
+generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
+Protocol wire frame，也不向 Web Observer 暴露。
+
 ## Clean-cutover non-goals
 
-没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、Web/Desktop/public SDK、
-generic RPC、OS Service或Store schema迁移。Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated
-nondefault checkpoint path；它不是第二default root。Store 6/State 27保持不变。
+没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private
+Web Observer/Gateway 是独立的只读 companion，不把 Browser 变成 Controller；remote/LAN Web、Desktop/public SDK 仍不属于 V1。
+Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
+Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
+schema fallback。
 
 ## 验证
 

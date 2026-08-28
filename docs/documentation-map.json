@@ -65,7 +65,20 @@
       "sources": ["packages/kite-app-contract/src/**", "packages/kite-app-contract/package.json"],
       "authorities": [
         "packages/kite-app-contract/README.md",
-        "docs/active/six-concept-runtime-architecture.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/coordinator-workspace-worker-web.md"
+      ]
+    },
+    {
+      "id": "kite-web",
+      "sources": ["apps/kite-web/src/**", "apps/kite-web/package.json"],
+      "authorities": [
+        "apps/kite-web/README.md",
+        "docs/README.md",
+        "tests/README.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -79,7 +92,8 @@
       "authorities": [
         "packages/kite-local-runtime/README.md",
         "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -143,6 +157,7 @@
         "apps/kite-service/src/bootstrap/**",
         "apps/kite-service/src/app-control/**",
         "apps/kite-service/src/config/**",
+        "apps/kite-service/src/coordinator/**",
         "apps/kite-service/src/git/**",
         "apps/kite-service/src/logs/**",
         "apps/kite-service/src/observability/**",
@@ -152,7 +167,10 @@
         "apps/kite-service/src/runtime-client/**",
         "apps/kite-service/src/sandbox/**",
         "apps/kite-service/src/session-logger/**",
-        "apps/kite-service/src/workspace/**"
+        "apps/kite-service/src/workspace/**",
+        "apps/kite-service/src/web-gateway/**",
+        "apps/kite-service/src/web-observer/**",
+        "apps/kite-service/src/workspace-worker/**"
       ],
       "excludeSources": [
         "apps/kite-service/src/runtime-client/**",
@@ -173,7 +191,8 @@
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/workspace-trust.md",
         "docs/active/mcp-control-plane.md",
-        "docs/active/sqlite-runtime-log-query.md"
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -266,7 +285,8 @@
         "packages/runtime-storage-sqlite/README.md",
         "docs/active/runtime-authority-boundary.md",
         "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -341,7 +361,8 @@
         "apps/kite-service/docs/runtime-application.md",
         "apps/kite-cli/docs/tui-interaction.md",
         "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/runtime-authority-boundary.md"
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -400,7 +421,11 @@
         "scripts/runtime-packages/**",
         "scripts/run-runtime-workspace-script.ts"
       ],
-      "authorities": ["docs/active/six-concept-runtime-architecture.md"]
+      "authorities": [
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/README.md",
+        "tests/README.md"
+      ]
     },
     {
       "id": "test-system",
@@ -489,7 +514,8 @@
       ],
       "authorities": [
         "docs/active/execution-platform-support.md",
-        "docs/active/execution-boundary.md"
+        "docs/active/execution-boundary.md",
+        "docs/active/windows-shell-sandbox.md"
       ]
     },
     {
@@ -517,7 +543,8 @@
       ],
       "authorities": [
         "docs/active/execution-boundary.md",
-        "docs/active/runtime-authority-boundary.md"
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/windows-shell-sandbox.md"
       ]
     },
     {

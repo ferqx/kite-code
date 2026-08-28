@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
 import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
+import {
+  WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+  type WorkerControllerClient,
+  type WorkerControllerDurableOperation,
+  type WorkerControllerMutationResponse,
+} from '@kite-ai/kite-app-contract/worker-controller';
 import type {
   LocalKiteConnection,
   LocalRuntimeServiceDescriptor,
@@ -306,6 +312,64 @@ test('Native TUI facade converges when terminal projection arrives before the co
   expect(remote.deferredTurnDeliveryOrder).toEqual(['terminal_projection', 'command_receipt']);
   expect(remote.startTurnExpectedRevisions).toEqual([1]);
   await facade.dispose();
+});
+
+test('Native TUI opens an existing Session as Observer, then acquires its lease without reconnecting', async () => {
+  const remote = new FakeRuntimeConnection();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  let connectCalls = 0;
+  let reconnectCalls = 0;
+  const facade = facadeFor(remote, {
+    controller,
+    onConnect: () => {
+      connectCalls += 1;
+    },
+    onReconnect: () => {
+      reconnectCalls += 1;
+    },
+  });
+  const session = facade.registerSession('existing-session', '/tmp/tui-client-workspace');
+  await facade.waitForSessionReady('existing-session');
+
+  await session.runTask('mutate existing session', { dispatch: () => {} });
+
+  expect(connectCalls).toBe(1);
+  expect(reconnectCalls).toBe(0);
+  expect(remote.commands).not.toContain('resume_session');
+  expect(remote.commands).toContain('start_turn');
+  expect(controllerCalls).toEqual([
+    'read:existing-session',
+    'request:existing-session',
+    'read:existing-session',
+  ]);
+  await facade.dispose();
+  expect(remote.commands).not.toContain('cancel_turn');
+});
+
+test('Native TUI detaches every tracked Session lease on dispose without cancelling Turns', async () => {
+  const remote = new FakeRuntimeConnection();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  const facade = facadeFor(remote, { controller });
+  const first = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(first);
+  const second = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(second);
+
+  await facade.dispose();
+
+  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([
+    `detach:${first}`,
+    `detach:${second}`,
+  ]);
+  expect(controllerCalls.filter((call) => call.startsWith('create:'))).toEqual([
+    `create:${first}`,
+    `create:${second}`,
+  ]);
+  expect(remote.commands).not.toContain('create_session');
+  expect(remote.commands).not.toContain('cancel_turn');
+  expect(remote.closeCalls).toBe(1);
 });
 
 class FakeRuntimeConnection implements RuntimeClientConnection {
@@ -956,13 +1020,20 @@ function idleProjection(sessionId: string, revision: number) {
   };
 }
 
-function facadeFor(remote: FakeRuntimeConnection) {
+function facadeFor(
+  remote: FakeRuntimeConnection,
+  options: {
+    readonly controller?: WorkerControllerClient;
+    readonly onConnect?: () => void;
+    readonly onReconnect?: () => void;
+  } = {},
+) {
   const runtime = new RuntimeClient({
     transport: transport(remote),
     clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
     history: history(),
   });
-  const connection: LocalKiteConnection = {
+  const connection: LocalKiteConnection & { readonly controller?: WorkerControllerClient } = {
     runtime,
     history: history(),
     app: {} as KiteAppControlClient,
@@ -981,15 +1052,165 @@ function facadeFor(remote: FakeRuntimeConnection) {
     snapshotStore: runtime.snapshotStore,
     subscribe: (listener) => runtime.snapshotStore.subscribe(listener),
     prepareAppControl: async () => undefined,
-    connect: async () => undefined,
-    reconnect: () => runtime.reconnect(),
+    connect: async () => {
+      options.onConnect?.();
+    },
+    reconnect: async () => {
+      options.onReconnect?.();
+      await runtime.reconnect();
+    },
     close: async () => runtime.close('tui-test-close'),
     [Symbol.asyncDispose]: async () => runtime.close('tui-test-dispose'),
+    ...(options.controller === undefined ? {} : { controller: options.controller }),
   };
   return createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
   });
+}
+
+interface TestControllerState {
+  status: 'idle' | 'active' | 'detached';
+  controllerGeneration: number;
+  connectionGeneration: number;
+  interactionGeneration: number;
+  clientId: string | null;
+  workerInstanceId: string | null;
+}
+
+function createControllerClient(workerInstanceId: string, calls: string[]): WorkerControllerClient {
+  const states = new Map<string, TestControllerState>();
+  const stateFor = (sessionId: string): TestControllerState => {
+    const current = states.get(sessionId);
+    if (current) return current;
+    const initial: TestControllerState = {
+      status: 'idle',
+      controllerGeneration: 0,
+      connectionGeneration: 0,
+      interactionGeneration: 0,
+      clientId: null,
+      workerInstanceId: null,
+    };
+    states.set(sessionId, initial);
+    return initial;
+  };
+  const operation = (
+    request: {
+      readonly sessionId: string;
+      readonly requestId: string;
+      readonly requestDigest: string;
+    },
+    operationName: WorkerControllerDurableOperation,
+    state: TestControllerState,
+  ): WorkerControllerMutationResponse => ({
+    schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+    operation: operationName,
+    status: 'applied',
+    receipt: {
+      schema: 'kite.app.worker-controller.receipt.v1',
+      sessionId: request.sessionId,
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      operation: operationName,
+      status: 'applied',
+      code: operationName === 'request_control' ? 'acquired' : 'detached',
+      controllerGeneration: state.controllerGeneration,
+      connectionGeneration: state.connectionGeneration,
+      interactionGeneration: state.interactionGeneration,
+      clientId: state.clientId,
+      workerInstanceId: state.workerInstanceId,
+      completedAt: 1,
+    },
+    ...(operationName === 'request_control'
+      ? {
+          lease: {
+            sessionId: request.sessionId,
+            clientId: state.clientId!,
+            connectionGeneration: state.connectionGeneration,
+            controllerGeneration: state.controllerGeneration,
+            workerInstanceId,
+            status: 'active' as const,
+          },
+        }
+      : {}),
+  });
+  return {
+    async createSession(request) {
+      calls.push(`create:${request.sessionId}`);
+      const created: TestControllerState = {
+        status: 'active',
+        controllerGeneration: 1,
+        connectionGeneration: 1,
+        interactionGeneration: 0,
+        clientId: 'client-tui-test',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, created);
+      const durable = operation(request, 'request_control', created);
+      return { ...durable, operation: 'create_session', sessionRevision: 1 };
+    },
+    async read(request) {
+      calls.push(`read:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      return {
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'read_controller',
+        state: {
+          sessionId: request.sessionId,
+          status: state.status,
+          controllerGeneration: state.controllerGeneration,
+          connectionGeneration: state.connectionGeneration,
+          clientId: state.clientId,
+          workerInstanceId: state.workerInstanceId,
+          interactionGeneration: state.interactionGeneration,
+          resumeCapabilityExpiresAtMs: null,
+        },
+      };
+    },
+    async requestControl(request) {
+      calls.push(`request:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      if (state.status === 'active') throw new Error('Controller is busy.');
+      const active: TestControllerState = {
+        ...state,
+        status: 'active',
+        controllerGeneration: state.controllerGeneration + 1,
+        connectionGeneration: 1,
+        clientId: 'client-tui-test',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, active);
+      return operation(request, 'request_control', active);
+    },
+    async releaseControl() {
+      throw new Error('unused');
+    },
+    async detach(request) {
+      calls.push(`detach:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      states.set(request.sessionId, { ...state, status: 'detached' });
+      return operation(request, 'detach_controller', state);
+    },
+    async issueResumeCapability() {
+      throw new Error('unused');
+    },
+    async resume() {
+      throw new Error('unused');
+    },
+    async mintDetachedRecoveryCapability() {
+      throw new Error('unused');
+    },
+    async abandonDetachedController() {
+      throw new Error('unused');
+    },
+    async validateResumeCapability() {
+      return {
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'validate_resume_capability',
+        status: 'missing',
+      };
+    },
+  };
 }
 
 function subscriptionUpdate(subscriptionId: string, generation: number, message: object): object {

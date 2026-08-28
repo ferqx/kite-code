@@ -69,7 +69,27 @@ describe('ordinary open-source candidate archive', () => {
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     });
-    expect(verified.files.size).toBe(8);
+    expect(verified.files.size).toBe(18);
+    expect(verified.manifest.releaseSlots).toEqual(
+      expect.objectContaining({
+        coordinator: {
+          entrypoint: 'bin/kite-coordinator',
+          identity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        },
+        worker: {
+          entrypoint: 'bin/kite-worker',
+          identity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        },
+        gateway: {
+          entrypoint: 'bin/kite-web-gateway',
+          identity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        },
+        web: {
+          entrypoint: 'payload/web/index.html',
+          identity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        },
+      }),
+    );
   });
 
   test('rejects archive and payload tampering', async () => {
@@ -89,6 +109,51 @@ describe('ordinary open-source candidate archive', () => {
       `${createHash('sha256').update(bytes).digest('hex')}  ${basename(restored.archivePath)}\n`,
     );
     await expect(verifyOssCandidate(restored.archivePath)).rejects.toThrow();
+  });
+
+  test('rejects companion release-slot aliases', async () => {
+    const fixture = await createFixture('0.1.0');
+    const manifest = structuredClone(fixture.manifest);
+    if (manifest.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    manifest.releaseSlots.coordinator.entrypoint = 'bin/kite';
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/aliased-companion.tar.gz`,
+      manifest,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/aliased-companion.tar.gz`)).rejects.toThrow(
+      'fixed companion path',
+    );
+  });
+
+  test('rejects a missing or aliased Web payload slot', async () => {
+    const fixture = await createFixture('0.1.0');
+    const missing = structuredClone(fixture.manifest);
+    if (missing.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    missing.releaseSlots.web = { entrypoint: null, identity: null };
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/missing-web.tar.gz`,
+      manifest: missing,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/missing-web.tar.gz`)).rejects.toThrow(
+      'fixed payload path',
+    );
+
+    const aliased = structuredClone(fixture.manifest);
+    if (aliased.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    aliased.releaseSlots.web.entrypoint = 'docs/RELEASE_NOTES.md';
+    aliased.releaseSlots.web.identity = fixture.manifest.files.find(
+      (entry) => entry.path === 'docs/RELEASE_NOTES.md',
+    )!.sha256;
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/aliased-web.tar.gz`,
+      manifest: aliased,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/aliased-web.tar.gz`)).rejects.toThrow(
+      'fixed payload path',
+    );
   });
 
   test('writes byte-identical archives for the same manifest and files', async () => {

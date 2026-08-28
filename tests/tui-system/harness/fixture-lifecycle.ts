@@ -1,4 +1,16 @@
+import { existsSync } from 'node:fs';
 import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
+import {
+  createCoordinatorProcessStatePort,
+  decodeCoordinatorProcessDescriptor,
+  readCoordinatorProcessStartIdentity,
+  resolveCoordinatorStatePaths,
+} from '@kite-ai/kite-local-runtime/coordinator';
+import { createKiteHomeIdentity, type KiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import {
+  createWorkspaceWorkerProcessStatePort,
+  decodeWorkspaceWorkerProcessDescriptor,
+} from '../../../apps/kite-service/src/workspace-worker';
 import { createManagedLocalServiceClientComposition } from '../../../scripts/release/local-service-client';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
@@ -41,6 +53,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
       if (!codeRoot) {
         throw new Error('TUI test workspace is missing its explicit KITE_CODE_HOME.');
       }
+      await stopTestOwnedCoordinatorTree(codeRoot);
       const managed = createManagedLocalServiceClientComposition({
         argv: ['tui-system-cleanup', '--kite-home', codeRoot],
         environment: workspace.env,
@@ -138,4 +151,59 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
   if (errors.length > 0) {
     throw new AggregateError(errors, 'TUI system fixture cleanup failed');
   }
+}
+
+/**
+ * Stop companions intentionally designed to outlive a terminal client. This is test-owner
+ * cleanup only: production managers never kill by PID, and this helper signals a process only
+ * after its server-owned PID + OS start token match the isolated fixture descriptor exactly.
+ */
+export async function stopTestOwnedCoordinatorTree(codeRoot: string): Promise<void> {
+  const home: KiteHomeIdentity = createKiteHomeIdentity(codeRoot, 'explicit_argument');
+  if (!existsSync(resolveCoordinatorStatePaths(home).root)) return;
+  const workerState = createWorkspaceWorkerProcessStatePort(home);
+  if (!workerState.listDescriptors) {
+    throw new Error('Workspace Worker fixture state cannot enumerate owned processes.');
+  }
+  const workers = await workerState.listDescriptors();
+  for (const raw of workers) {
+    const descriptor = decodeWorkspaceWorkerProcessDescriptor(raw);
+    await signalExactFixtureProcess(
+      descriptor.pid,
+      descriptor.processStartIdentity,
+      'Workspace Worker',
+    );
+  }
+  const rawCoordinator = await createCoordinatorProcessStatePort(home).readDescriptor();
+  if (rawCoordinator === undefined) return;
+  const descriptor = decodeCoordinatorProcessDescriptor(rawCoordinator);
+  await signalExactFixtureProcess(descriptor.pid, descriptor.processStartIdentity, 'Coordinator');
+}
+
+async function signalExactFixtureProcess(
+  pid: number,
+  expectedStartIdentity: string,
+  label: string,
+): Promise<void> {
+  const actual = await readCoordinatorProcessStartIdentity(pid, process.platform);
+  if (actual !== expectedStartIdentity) {
+    throw new Error(`${label} fixture process identity is uncertain; refusing cleanup signal.`);
+  }
+  process.kill(pid, 'SIGTERM');
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (isNativeError(error, 'ESRCH')) return;
+      throw error;
+    }
+    const current = await readCoordinatorProcessStartIdentity(pid, process.platform);
+    if (current !== expectedStartIdentity) return;
+  }
+  throw new Error(`${label} fixture process did not stop within the cleanup deadline.`);
+}
+
+function isNativeError(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
 }

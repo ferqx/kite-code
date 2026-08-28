@@ -14,7 +14,7 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite-ai/builtin-runtime/skills';
-import type { InteractionMode } from '@kite-ai/runtime-contract';
+import type { InteractionMode, RuntimeCommandContext } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -24,6 +24,7 @@ import {
   type StateRuntimeEffectExecutor,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
+  type AppWorkspaceEffectCompositionFactory,
   prepareRuntimeEffectForBudget,
   type RuntimeExecutorDependencies,
 } from '#kite-service/bootstrap/runtime/runtime-effect-dependencies';
@@ -205,6 +206,10 @@ export interface RuntimeTurnInput {
   thinkingLevel?: string | null;
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
+  /** Admission-time command identity; never recovered from Session state. */
+  commandContext?: Readonly<RuntimeCommandContext>;
+  /** Optional Worker-owned effect composition factory bound to that context. */
+  workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
   /** Exact State 27 session owned by the App/Host session coordinator. */
@@ -653,6 +658,10 @@ export async function* executeRuntimeTurn(
       skills: input.skills,
       skillOptions: input.skillOptions,
       signal: executionSignal,
+      ...(input.commandContext === undefined ? {} : { commandContext: input.commandContext }),
+      ...(input.workspaceEffectCompositionFactory === undefined
+        ? {}
+        : { workspaceEffectCompositionFactory: input.workspaceEffectCompositionFactory }),
       onCompactionProgress: input.onCompactionProgress,
       compactionReporter: input.config.compaction?.localDebug?.enabled
         ? createLocalCompactionDebugReporter({

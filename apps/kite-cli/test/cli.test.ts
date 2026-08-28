@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { resolve } from 'node:path';
 import {
   type KiteAppControlClient,
@@ -7,6 +7,7 @@ import {
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
+import type { CoordinatorRequestClient } from '@kite-ai/kite-local-runtime/coordinator';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
 
@@ -18,6 +19,69 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['service', 'status', '--json']).serviceJson).toBe(true);
     expect(parseArgs(['service', 'stop']).command).toBe('service-stop');
     expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
+  });
+
+  test('recognizes only the closed Web Gateway lifecycle commands', () => {
+    expect(parseArgs(['web']).command).toBe('web-ensure');
+    expect(parseArgs(['web', '--json'])).toMatchObject({ command: 'web-ensure', webJson: true });
+    expect(parseArgs(['web', 'status'])).toMatchObject({
+      command: 'web-status',
+      webJson: false,
+    });
+    expect(parseArgs(['web', 'status', '--json'])).toMatchObject({
+      command: 'web-status',
+      webJson: true,
+    });
+    expect(parseArgs(['web', 'stop']).command).toBe('web-stop');
+    expect(parseArgs(['web', 'stop', 'now']).command).toBe('help');
+    expect(parseArgs(['web', 'status', 'verbose']).command).toBe('help');
+    expect(parseArgs(['web', 'prompt']).command).toBe('help');
+    expect(parseArgs(['web', 'create']).command).toBe('help');
+    expect(parseArgs(['web', '--kite-home', '/tmp/kite-home']).command).toBe('web-ensure');
+    expect(parseArgs(['web', 'status', '--json', '--kite-home', '/tmp/kite-home']).command).toBe(
+      'web-status',
+    );
+  });
+
+  test('prints only the Coordinator-issued one-shot launch URL for web ensure', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const calls: string[] = [];
+    let printed: unknown[][] = [];
+    process.argv = ['bun', 'kite', 'web'];
+    try {
+      await main({ coordinatorClient: webCoordinator(calls) });
+      printed = output.mock.calls;
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+    expect(calls).toEqual(['handshake', 'ensure']);
+    expect(printed).toEqual([[`http://127.0.0.1:43124/#${'a'.repeat(43)}`]]);
+  });
+
+  test('reports Web Gateway status without starting it', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const calls: string[] = [];
+    let printed: unknown[][] = [];
+    process.argv = ['bun', 'kite', 'web', 'status', '--json'];
+    try {
+      await main({ coordinatorClient: webCoordinator(calls) });
+      printed = output.mock.calls;
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+    expect(calls).toEqual(['handshake', 'discover']);
+    expect(printed).toEqual([
+      [
+        JSON.stringify({
+          state: 'ready',
+          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
+        }),
+      ],
+    ]);
   });
 
   test('keeps service run private and renders lifecycle results without secrets', () => {
@@ -163,7 +227,7 @@ describe('cli argument parsing', () => {
       'Interaction mode flags are supported only by run and resume',
     );
     expect(() => parseArgs(['service', 'stop', '--json'])).toThrow(
-      'The --json option is supported only by service status',
+      'The --json option is unsupported for this command',
     );
   });
 
@@ -304,6 +368,97 @@ describe('cli argument parsing', () => {
     expect(result.skills).toEqual([]);
   });
 });
+
+function webCoordinator(calls: string[]): CoordinatorRequestClient {
+  const unused = async (): Promise<never> => {
+    throw new Error('unexpected Coordinator call');
+  };
+  return {
+    handshake: async () => {
+      calls.push('handshake');
+      return {
+        schema: 'kite.local-coordinator-handshake.v1',
+        kind: 'handshake_response',
+        protocolVersion: 1,
+        requestId: 'handshake-1',
+        idempotencyKey: 'handshake-key-1',
+        deadlineMs: 5_000,
+        accepted: true,
+        diagnostic: 'accepted',
+        coordinator: {
+          role: 'coordinator',
+          instanceId: 'coordinator-1',
+          buildId: 'build-1',
+          protocolVersion: 1,
+          protocolRevision: 'kite-local-coordinator-protocol-v1',
+          clientContractRevision: 'kite-local-coordinator-client-v1',
+        },
+      };
+    },
+    ensureWebGateway: async () => {
+      calls.push('ensure');
+      return {
+        schema: 'kite.local-coordinator-frame.v1',
+        kind: 'response',
+        protocolVersion: 1,
+        requestId: 'ensure-1',
+        idempotencyKey: 'ensure-key-1',
+        deadlineMs: 5_000,
+        method: 'ensureWebGateway',
+        outcome: 'ok',
+        result: {
+          gateway: {
+            identity: {
+              role: 'web_gateway',
+              instanceId: 'gateway-1',
+              buildId: 'build-1',
+              protocolVersion: 1,
+              protocolRevision: 'kite-local-coordinator-protocol-v1',
+              clientContractRevision: 'kite-local-coordinator-client-v1',
+            },
+            endpoint: { origin: 'http://127.0.0.1:43124' },
+          },
+          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
+        },
+      };
+    },
+    status: unused,
+    resolveWorkspaceWorker: unused,
+    ensureWorkspaceWorker: unused,
+    resolveSessionWorkspace: unused,
+    listSessionMetadata: unused,
+    mintWorkerConnectionCapability: unused,
+    discoverWebGateway: async () => {
+      calls.push('discover');
+      return {
+        schema: 'kite.local-coordinator-frame.v1',
+        kind: 'response',
+        protocolVersion: 1,
+        requestId: 'discover-1',
+        idempotencyKey: 'discover-key-1',
+        deadlineMs: 5_000,
+        method: 'discoverWebGateway',
+        outcome: 'ok',
+        result: {
+          gateway: {
+            identity: {
+              role: 'web_gateway',
+              instanceId: 'gateway-1',
+              buildId: 'build-1',
+              protocolVersion: 1,
+              protocolRevision: 'kite-local-coordinator-protocol-v1',
+              clientContractRevision: 'kite-local-coordinator-client-v1',
+            },
+            endpoint: { origin: 'http://127.0.0.1:43124' },
+          },
+          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
+        },
+      };
+    },
+    stopWebGateway: unused,
+    subscribeDirectoryChanges: unused,
+  } as CoordinatorRequestClient;
+}
 
 function createCliConnection(input: {
   calls: string[];

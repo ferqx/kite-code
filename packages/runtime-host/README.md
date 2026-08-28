@@ -10,6 +10,8 @@
 - 管理 attempt acknowledgement、effect lease、cancellation、cleanup 和 restart recovery。
 - 拥有 persistent scoped command receipt 的验证与 replay decision；Store 负责持久记录的原子落盘，bridge/Server/Client 不得推断或另建 receipt authority。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
+- 接收 Runtime Server 的进程内 `RuntimeCommandContext`，在 Host inspect/commit 到 prepared execution bridge 时保持同一冻结
+  connection/request/binding identity；Host 不把它序列化、不从 Session 反查 Worker binding，也不持有 Worker credential。
 - 启动一个 frozen RuntimeModule snapshot，关闭 bridge 后逆序释放 module。
 
 ## 不拥有职责
@@ -35,6 +37,8 @@
   interaction并原子提交applied receipt后，作为同一Turn的single-use continuation调度；其他command不得借此启动Turn。
 - `delete_session` 由 Host 串行化并委托 SessionStore 在一个 transaction 中提交 retained receipt 与删除；
   删除后 registry/lifecycle 不得再 flush snapshot 重建该 Session。
+- command context 不是新的 Runtime authority：只有 App-owned admission 可以提供 opaque binding reference；Worker effect composition
+  必须按该 reference 与当前 Controller/resource authority 验证，缺失或漂移时 fail closed。
 
 ## 测试
 

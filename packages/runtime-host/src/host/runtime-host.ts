@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { authorizeEffect } from '@kite-ai/agent-kernel';
 import {
   assertRuntimeCommand,
+  freezeRuntimeCommandContext,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeCommandReceipt,
   type RuntimeQuery,
   type RuntimeQueryResult,
@@ -144,12 +146,19 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     return this.#startPromise;
   }
 
-  command(command: RuntimeCommand): Promise<RuntimeCommandReceipt> {
-    return this.#beginAccess(() => this.#executeCommand(command));
+  command(
+    command: RuntimeCommand,
+    context?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeCommandReceipt> {
+    return this.#beginAccess(() => this.#executeCommand(command, context));
   }
 
-  async #executeCommand(command: RuntimeCommand): Promise<RuntimeCommandReceipt> {
+  async #executeCommand(
+    command: RuntimeCommand,
+    context?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeCommandReceipt> {
     assertRuntimeCommand(command);
+    const pinnedContext = context === undefined ? undefined : freezeRuntimeCommandContext(context);
     await this.start();
     const evidence = createRuntimeCommandCommitEvidence({
       command,
@@ -203,7 +212,11 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         await this.#recoverSession(command.sessionId);
       }
 
-      const inspected = await this.#inspectCommand(command, targetSessionIdFor(command));
+      const inspected = await this.#inspectCommand(
+        command,
+        targetSessionIdFor(command),
+        pinnedContext,
+      );
       if (inspected.kind === 'terminal') return assertTerminalReceipt(command, inspected);
       const expectedTarget = targetSessionIdFor(command);
       if (inspected.decision.targetSessionId !== expectedTarget) {
@@ -317,8 +330,15 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   async #inspectCommand(
     command: RuntimeCommand,
     targetSessionId: string,
+    context?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeHostCommandInspection> {
-    return this.#bridge.inspectCommand(command, Object.freeze({ targetSessionId }));
+    return this.#bridge.inspectCommand(
+      command,
+      Object.freeze({
+        targetSessionId,
+        ...(context === undefined ? {} : { commandContext: context }),
+      }),
+    );
   }
 
   #schedulePreparedExecution(

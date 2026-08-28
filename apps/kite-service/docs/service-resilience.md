@@ -25,10 +25,18 @@ alive/uncertain PID、malformed state、handshake mismatch、unknown stop outcom
 restart只在Service正常清除descriptor/token/instance lock后执行一次ensure；只有PID确认dead才可exact quarantine/cleanup，
 从不kill未知或alive PID。`applied + draining`不授权manager提前删state。
 
-companion candidate将`kite`、`kite-tui`、`kite-service`作为同一manifest/install/current launcher集合；installed resolver
-只认terminal executable相邻companion。Windows candidate在smoke前运行current-user ACL/non-reparse state负向测试；
-candidate layout/preflight与本地packaging evidence本身仍不代表三平台runtime、fault/soak或全部PTY已完成。
+companion candidate将`kite`、`kite-tui`、`kite-service`、`kite-coordinator`、`kite-worker`与`kite-web-gateway`作为同一
+manifest/install/current launcher集合，并携带 `payload/web` 静态资产；v2 managed-install marker与唯一`active` regular-file
+pointer绑定immutable candidate root。stable launcher把启动时candidate root pin给child process；running process不重新读取
+pointer。首次安装才atomic-copy stable launcher，upgrade/rollback只验证既有launcher identity，不逐文件替换或停止仍在运行的
+旧candidate。Windows installed resolver还要求marker、pointer、`.candidate-id`与candidate `manifest.json` identity exact，并
+对launcher、candidate root、runner manifest与runtime执行no-follow/non-reparse/regular-file检查；失败时不回退source、cwd、PATH或
+ambient home。
+当前 candidate manifest 的 releaseSlots 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
+这些 slots 和本地 asset smoke 不等于三平台 process/runtime qualification。Windows ACL/write-through 与三平台 candidate/process
+qualification 仍待真实 hosted 证据；candidate layout/preflight与本地packaging evidence不代表三平台runtime、fault/soak或全部
+PTY已完成。
 
 验证：`bun run --cwd apps/kite-service test`、`bun test packages/kite-local-runtime/test/manager`、
-`bun run --cwd apps/kite-service typecheck`。当前Windows ACL/reparse实现已进入hosted candidate验证，KLSV1-07当前实现head的
-三平台process/release evidence在对应远端matrix全部成功前保持pending。
+`bun run --cwd apps/kite-service typecheck`。当前 Windows runner no-follow/candidate-pin 只登记本地定向测试；Windows
+ACL/write-through 与 KLSV1-07 当前实现 head 的三平台 process/release evidence 在对应远端 matrix 全部成功前保持 pending。

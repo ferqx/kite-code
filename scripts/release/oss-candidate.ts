@@ -1,15 +1,53 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { z } from 'zod';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const releaseFileSchema = z
   .object({
-    path: z.string().regex(/^(?:bin|docs|native|release|vendor)(?:\/[A-Za-z0-9._-]+)+$/),
+    path: z.string().regex(/^(?:bin|docs|native|payload|release|vendor)(?:\/[A-Za-z0-9._-]+)+$/),
     sha256: digestSchema,
     size: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const releaseSlotSchema = z
+  .object({
+    entrypoint: z
+      .string()
+      .regex(/^(?:bin|docs|native|payload|release|vendor)(?:\/[A-Za-z0-9._-]+)+$/)
+      .nullable(),
+    identity: digestSchema.nullable(),
+  })
+  .strict()
+  .superRefine((slot, context) => {
+    if ((slot.entrypoint === null) !== (slot.identity === null)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Release slots must provide both entrypoint and identity, or neither.',
+      });
+    }
+  });
+
+const releaseSlotsSchema = z
+  .object({
+    cli: releaseSlotSchema,
+    tui: releaseSlotSchema,
+    service: releaseSlotSchema,
+    coordinator: releaseSlotSchema,
+    worker: releaseSlotSchema,
+    gateway: releaseSlotSchema,
+    web: releaseSlotSchema,
   })
   .strict();
 
@@ -38,11 +76,14 @@ export const ossCandidateManifestSchema = z
         remoteTelemetry: z.literal('off'),
       })
       .strict(),
-    files: z.array(releaseFileSchema).min(5).max(16),
+    /** Explicitly optional for archive verification; installation requires this v1.1 shape. */
+    releaseSlots: releaseSlotsSchema.optional(),
+    files: z.array(releaseFileSchema).min(5).max(32),
   })
   .strict();
 
 export type OssCandidateManifest = z.infer<typeof ossCandidateManifestSchema>;
+export type OssCandidateReleaseSlots = z.infer<typeof releaseSlotsSchema>;
 
 export interface OssReleaseTarget {
   id: string;
@@ -89,6 +130,53 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
   ['vendor/isksh/LICENSE.coreutils', 'vendor/isksh/LICENSE.coreutils'],
 ] as const;
 
+export function releaseLauncherArchivePaths(manifest: OssCandidateManifest): {
+  cli: string;
+  tui: string;
+  service: string;
+  coordinator: string;
+  worker: string;
+  gateway: string;
+} {
+  return releaseLauncherArchivePathsForTarget(manifest.target.os);
+}
+
+export interface OssCompanionArchivePaths {
+  coordinator: string;
+  worker: string;
+  gateway: string;
+}
+
+export function companionArchivePaths(
+  target: Pick<OssReleaseTarget, 'os'> | Pick<OssCandidateManifest['target'], 'os'>,
+): OssCompanionArchivePaths {
+  const suffix = target.os === 'win32' ? '.exe' : '';
+  return {
+    coordinator: `bin/kite-coordinator${suffix}`,
+    worker: `bin/kite-worker${suffix}`,
+    gateway: `bin/kite-web-gateway${suffix}`,
+  };
+}
+
+function releaseLauncherArchivePathsForTarget(os: OssReleaseTarget['os']): {
+  cli: string;
+  tui: string;
+  service: string;
+  coordinator: string;
+  worker: string;
+  gateway: string;
+} {
+  const suffix = os === 'win32' ? '.exe' : '';
+  return {
+    cli: `release/launchers/kite${suffix}`,
+    tui: `release/launchers/kite-tui${suffix}`,
+    service: `release/launchers/kite-service${suffix}`,
+    coordinator: `release/launchers/kite-coordinator${suffix}`,
+    worker: `release/launchers/kite-worker${suffix}`,
+    gateway: `release/launchers/kite-web-gateway${suffix}`,
+  };
+}
+
 /**
  * Resolve every workspace package export directly to repository source. Bun standalone on
  * Windows can crash while pretty-printing a backslash path reached
@@ -101,7 +189,11 @@ export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>>
   '@kite-ai/kite-cli/tui': 'apps/kite-cli/src/tui/executable.tsx',
   '@kite-ai/kite-service': 'apps/kite-service/src/index.ts',
   '@kite-ai/kite-app-contract': 'packages/kite-app-contract/src/index.ts',
+  '@kite-ai/kite-app-contract/worker-controller':
+    'packages/kite-app-contract/src/worker-controller.ts',
+  '@kite-ai/kite-app-contract/web': 'packages/kite-app-contract/src/web.ts',
   '@kite-ai/kite-local-runtime/client': 'packages/kite-local-runtime/src/client/index.ts',
+  '@kite-ai/kite-local-runtime/coordinator': 'packages/kite-local-runtime/src/coordinator/index.ts',
   '@kite-ai/kite-local-runtime/manager': 'packages/kite-local-runtime/src/manager/index.ts',
   '@kite-ai/kite-local-runtime/service': 'packages/kite-local-runtime/src/service/index.ts',
   '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
@@ -194,21 +286,54 @@ export async function buildOssCandidate(
   const cliPath = join(stageDirectory, `kite${executableSuffix}`);
   const tuiPath = join(stageDirectory, `kite-tui${executableSuffix}`);
   const servicePath = join(stageDirectory, `kite-service${executableSuffix}`);
+  const coordinatorPath = join(stageDirectory, `kite-coordinator${executableSuffix}`);
+  const workerPath = join(stageDirectory, `kite-worker${executableSuffix}`);
+  const gatewayPath = join(stageDirectory, `kite-web-gateway${executableSuffix}`);
+  const launcherPath = join(stageDirectory, `kite-release-launcher${executableSuffix}`);
   await compileOssReleaseExecutable('scripts/release/entrypoints/cli.ts', cliPath);
   await compileOssReleaseExecutable('scripts/release/entrypoints/tui.ts', tuiPath);
   await compileOssReleaseExecutable('scripts/release/entrypoints/service.ts', servicePath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/coordinator.ts', coordinatorPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/worker.ts', workerPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/gateway.ts', gatewayPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/launcher.ts', launcherPath);
+  const webAssets = await buildWebReleaseAssets(join(stageDirectory, 'web'));
   if (process.platform !== 'win32') {
     chmodSync(cliPath, 0o755);
     chmodSync(tuiPath, 0o755);
     chmodSync(servicePath, 0o755);
+    chmodSync(coordinatorPath, 0o755);
+    chmodSync(workerPath, 0o755);
+    chmodSync(gatewayPath, 0o755);
+    chmodSync(launcherPath, 0o755);
   }
 
   const archiveFiles = new Map<string, Uint8Array>();
-  archiveFiles.set(`bin/kite${executableSuffix}`, readBytes(cliPath));
-  archiveFiles.set(`bin/kite-tui${executableSuffix}`, readBytes(tuiPath));
-  archiveFiles.set(`bin/kite-service${executableSuffix}`, readBytes(servicePath));
+  const cliBytes = readBytes(cliPath);
+  const tuiBytes = readBytes(tuiPath);
+  const serviceBytes = readBytes(servicePath);
+  const coordinatorBytes = readBytes(coordinatorPath);
+  const workerBytes = readBytes(workerPath);
+  const gatewayBytes = readBytes(gatewayPath);
+  const launcherBytes = readBytes(launcherPath);
+  archiveFiles.set(`bin/kite${executableSuffix}`, cliBytes);
+  archiveFiles.set(`bin/kite-tui${executableSuffix}`, tuiBytes);
+  archiveFiles.set(`bin/kite-service${executableSuffix}`, serviceBytes);
+  archiveFiles.set(`bin/kite-coordinator${executableSuffix}`, coordinatorBytes);
+  archiveFiles.set(`bin/kite-worker${executableSuffix}`, workerBytes);
+  archiveFiles.set(`bin/kite-web-gateway${executableSuffix}`, gatewayBytes);
+  const launcherPaths = releaseLauncherArchivePathsForTarget(releaseTarget.os);
+  archiveFiles.set(launcherPaths.cli, launcherBytes);
+  archiveFiles.set(launcherPaths.tui, launcherBytes);
+  archiveFiles.set(launcherPaths.service, launcherBytes);
+  archiveFiles.set(launcherPaths.coordinator, launcherBytes);
+  archiveFiles.set(launcherPaths.worker, launcherBytes);
+  archiveFiles.set(launcherPaths.gateway, launcherBytes);
   for (const [archiveName, sourcePath] of RELEASE_ASSETS) {
     archiveFiles.set(archiveName, readBytes(resolve(sourcePath)));
+  }
+  for (const [assetPath, assetBytes] of webAssets) {
+    archiveFiles.set(`payload/web/${assetPath}`, assetBytes);
   }
   if (releaseTarget.os === 'win32') {
     for (const [archiveName, sourcePath] of WINDOWS_SANDBOX_RELEASE_ASSETS) {
@@ -238,10 +363,87 @@ export async function buildOssCandidate(
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     },
+    releaseSlots: {
+      cli: { entrypoint: `bin/kite${executableSuffix}`, identity: sha256(cliBytes) },
+      tui: { entrypoint: `bin/kite-tui${executableSuffix}`, identity: sha256(tuiBytes) },
+      service: {
+        entrypoint: `bin/kite-service${executableSuffix}`,
+        identity: sha256(serviceBytes),
+      },
+      coordinator: {
+        entrypoint: `bin/kite-coordinator${executableSuffix}`,
+        identity: sha256(coordinatorBytes),
+      },
+      worker: {
+        entrypoint: `bin/kite-worker${executableSuffix}`,
+        identity: sha256(workerBytes),
+      },
+      gateway: {
+        entrypoint: `bin/kite-web-gateway${executableSuffix}`,
+        identity: sha256(gatewayBytes),
+      },
+      web: {
+        entrypoint: 'payload/web/index.html',
+        identity: sha256(requiredFile(archiveFiles, 'payload/web/index.html')),
+      },
+    },
     files: releaseFiles,
   });
   await writeOssCandidateArchive({ archivePath, manifest, files: archiveFiles });
   return verifyOssCandidate(archivePath, releaseTarget.id);
+}
+
+async function buildWebReleaseAssets(outputDirectory: string): Promise<Map<string, Uint8Array>> {
+  const repositoryRoot = resolve(import.meta.dir, '../..');
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      'x',
+      'vite',
+      'build',
+      '--outDir',
+      outputDirectory,
+      '--emptyOutDir',
+      '--sourcemap',
+      'false',
+    ],
+    {
+      cwd: resolve(repositoryRoot, 'apps/kite-web'),
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NODE_ENV: 'production' },
+    },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error('Web release assets could not be built.');
+  }
+  const root = resolve(outputDirectory);
+  const assets = new Map<string, Uint8Array>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) break;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.isSymbolicLink()) throw new Error('Web release assets contain a symlink.');
+        pending.push(absolute);
+        continue;
+      }
+      if (!entry.isFile() || entry.isSymbolicLink()) {
+        throw new Error('Web release assets contain an unsupported entry.');
+      }
+      const path = relative(root, absolute).replaceAll('\\', '/');
+      if (path !== 'index.html' && !/^assets\/[A-Za-z0-9_-]+\.(?:css|js)$/u.test(path)) {
+        throw new Error(`Web release asset is outside the fixed allowlist: ${path}`);
+      }
+      assets.set(path, readBytes(absolute));
+    }
+  }
+  if (!assets.has('index.html') || ![...assets].some(([path]) => path.endsWith('.js'))) {
+    throw new Error('Web release assets are incomplete.');
+  }
+  return assets;
 }
 
 export async function verifyOssCandidate(
@@ -286,6 +488,7 @@ export async function verifyOssCandidate(
       throw new Error(`Candidate file checksum mismatch: ${entry.path}`);
     }
   }
+  validateReleaseSlots(manifest, files);
   const expectedChecksums = encodeChecksums(manifest.files);
   if (new TextDecoder().decode(requiredFile(files, 'CHECKSUMS.sha256')) !== expectedChecksums) {
     throw new Error('CHECKSUMS.sha256 does not match the manifest.');
@@ -300,6 +503,34 @@ export async function verifyOssCandidate(
     candidateId: manifestSha256.slice('sha256:'.length, 'sha256:'.length + 24),
     files,
   };
+}
+
+function validateReleaseSlots(
+  manifest: OssCandidateManifest,
+  files: ReadonlyMap<string, Uint8Array>,
+): void {
+  if (manifest.releaseSlots === undefined) return;
+  const companions = companionArchivePaths(manifest.target);
+  for (const [name, expectedPath] of Object.entries(companions)) {
+    const slot = manifest.releaseSlots[name as keyof OssCandidateReleaseSlots];
+    if (slot.entrypoint !== null && slot.entrypoint !== expectedPath) {
+      throw new Error(`Release slot ${name} is not bound to its fixed companion path.`);
+    }
+  }
+  const web = manifest.releaseSlots.web;
+  if (web.entrypoint !== 'payload/web/index.html' || web.identity === null) {
+    throw new Error('Release slot web is not bound to its fixed payload path.');
+  }
+  for (const [name, slot] of Object.entries(manifest.releaseSlots)) {
+    if (slot.entrypoint === null || slot.identity === null) continue;
+    const bytes = files.get(slot.entrypoint);
+    if (bytes === undefined) {
+      throw new Error(`Release slot ${name} points to a missing entrypoint: ${slot.entrypoint}`);
+    }
+    if (sha256(bytes) !== slot.identity) {
+      throw new Error(`Release slot ${name} identity does not match: ${slot.entrypoint}`);
+    }
+  }
 }
 
 export async function createSmokeVariantCandidate(
@@ -321,12 +552,20 @@ export function executableArchivePaths(manifest: OssCandidateManifest): {
   cli: string;
   tui: string;
   service: string;
+  coordinator: string | null;
+  worker: string | null;
+  gateway: string | null;
+  web: string | null;
 } {
   const suffix = manifest.target.os === 'win32' ? '.exe' : '';
   return {
     cli: `bin/kite${suffix}`,
     tui: `bin/kite-tui${suffix}`,
     service: `bin/kite-service${suffix}`,
+    coordinator: manifest.releaseSlots?.coordinator.entrypoint ?? null,
+    worker: manifest.releaseSlots?.worker.entrypoint ?? null,
+    gateway: manifest.releaseSlots?.gateway.entrypoint ?? null,
+    web: manifest.releaseSlots?.web.entrypoint ?? null,
   };
 }
 

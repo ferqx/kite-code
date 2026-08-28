@@ -15,6 +15,7 @@ const WORKSPACES = [
   'packages/builtin-runtime',
   'apps/kite-cli',
   'apps/kite-service',
+  'apps/kite-web',
 ] as const;
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);

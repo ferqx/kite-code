@@ -13,7 +13,10 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 - `apps/kite-cli/test/`：CLI/TUI presentation、client preference、managed Native adapter与fake/client conformance；不得
   创建default Host/Store composition。
 - `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
-  sandbox/session logging、Service shell与carriers；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
+  sandbox/session logging、Service shell与carriers；Coordinator/Worker/Web Gateway/Web Observer production composition、
+  process、Store 7、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
+- `apps/kite-web/test/`：Browser observer presentation/reducer 与 browser-safe DTO consumer；不得引入 Native、Host、
+  Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
 - `packages/kite-local-runtime/test/manager/`：manager lifecycle、Native process/state/lock/environment与authenticated
   instance handshake；manager不再以App-private source留在Service workspace。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
@@ -58,7 +61,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
-默认 workspace runner 当前覆盖十三个 workspace。`packages/kite-app-contract/test/` 验证browser-safe、no-secret、
+默认 workspace runner 当前覆盖十四个 workspace。`apps/kite-web/test/` 验证Browser observer presentation reducer；
+`packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
 `POST /_kite/instance`，包括strict schema/keys/values/content-type/size、malformed与instance/server/build identity
@@ -110,19 +114,18 @@ isolated Workspace admission与nondefault `--checkpoints` path，不能打开man
 
 ## KLSV1-06/07 当前 evidence 边界
 
-KLSV1-06本地cutover Gate已执行：Service owner为1358 parallel tests / 6765 expects并通过全部34个isolated
-files；CLI owner为661 parallel + 76 sandbox + 1 conformance，共738 tests；完整TUI system通过40个isolated PTY
-scenario files；Runtime transport为3 tests / 852 expects。manager suite为37 pass / 135 expects，相关package
-typecheck、Biome与diff-check通过。13-workspace typecheck/build及runtime package/core/pre-release/test-ownership/
-compaction Gate也通过。
+KLSV1/KCWW本地cutover Gate已执行：当前default runner的Service owner为1488 tests / 8273 expects，CLI owner为
+704 + 76 sandbox + 1 conformance，共781 tests；Web workspace为17 tests。Runtime transport为3 tests / 852 expects。
+相关package typecheck、Biome与diff-check通过；14-workspace typecheck及runtime package/core/pre-release/test-ownership Gate也通过。
 
-KLSV1-07当前只登记本地结果：Runtime fault 36/106、CI-profile soak 7/7 cases、carrier 23/128、Service shell
-23/97，以及macOS arm64 candidate build/verify/smoke；smoke覆盖安装、CLI/TUI、Service companion、MCP stdio wrapper、
-升级、回滚与卸载，结束后无残留Service进程。CI-profile soak不提供formal qualification metrics。Windows
-current-user SID/protected DACL/non-reparse primitive现在有owner正向与ACL drift负向测试，并由
-`release-candidate.yml`的`windows-2025` job在candidate smoke前执行；GitHub-hosted macOS 15、Ubuntu 24.04、Windows
-2025的当前实现head process/transport/release evidence在完整matrix成功前仍pending，本地POSIX、workflow定义或
-单平台artifact不能升级平台结论。
+KLSV1-07当前只登记本地结果：Runtime fault 36/106、CI-profile soak 7/7 cases、carrier 23/129、Service shell
+23/97，以及macOS arm64 candidate build/verify/smoke；smoke覆盖安装、CLI/TUI、Service/Coordinator/Worker/Gateway companion
+assets、真实 Coordinator→Worker ensure/mint/handshake、Web payload、MCP stdio wrapper、精确PID+OS start-token绑定的test-owned
+companion cleanup、升级、回滚与卸载，结束后无该smoke残留进程。当前 release manifest 的 `releaseSlots`
+已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；asset/entrypoint smoke 不提供 formal
+qualification metrics。Windows managed runner v2 marker、唯一 `active` pointer、immutable candidate pin 与 no-follow/fail-closed
+只已有本地定向测试；真实 Windows ACL/write-through 及 GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025 的当前实现 head
+process/transport/release evidence 在完整 matrix 成功前仍 pending，本地 POSIX、workflow 定义或单平台 artifact 不能升级平台结论。
 
 ## 迁移期测试
 

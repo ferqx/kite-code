@@ -1,5 +1,21 @@
 import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import type {
+  WorkerControllerAbandonDetachedRequest,
+  WorkerControllerCreateSessionRequest,
+  WorkerControllerCreateSessionResponse,
+  WorkerControllerDetachRequest,
+  WorkerControllerIssueResumeCapabilityRequest,
+  WorkerControllerMintDetachedRecoveryRequest,
+  WorkerControllerOperationResponse,
+  WorkerControllerReadRequest,
+  WorkerControllerReadResponse,
+  WorkerControllerReleaseControlRequest,
+  WorkerControllerRequestControlRequest,
+  WorkerControllerResumeCapabilityResponse,
+  WorkerControllerResumeRequest,
+  WorkerControllerValidateResumeRequest,
+} from '@kite-ai/kite-app-contract/worker-controller';
+import type {
   NativeProviderCredentialRequest,
   NativeProviderCredentialResult,
 } from '@kite-ai/kite-local-runtime/client';
@@ -27,7 +43,67 @@ export interface ServiceWorkspaceAdmissionPort {
  * of every wire DTO.
  */
 export interface ServiceRuntimeAdmissionPortFactory {
-  create(workspace: KiteWorkspaceIdentity, connectionId: string): RuntimeServerAdmissionPort;
+  create(
+    workspace: KiteWorkspaceIdentity,
+    connectionId: string,
+    connectionKind?: 'native_client' | 'web_observer',
+    binding?: ServiceRuntimeConnectionBinding,
+  ): RuntimeServerAdmissionPort;
+}
+
+/** Native connection facts extracted from an authenticated Worker capability/ticket. */
+export interface ServiceRuntimeConnectionBinding {
+  readonly clientId: string;
+  readonly connectionGeneration: number;
+  readonly workerInstanceId: string;
+  /** Session selected by the native Controller binding headers, if any. */
+  readonly controllerSessionId?: string;
+  /** Generation observed when the one-shot connection ticket was minted. */
+  readonly controllerGeneration?: number;
+}
+
+/** Explicit native-only Controller surface; no generic operation dispatcher is exposed. */
+export interface ServiceControllerPort {
+  createSession(
+    request: WorkerControllerCreateSessionRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerCreateSessionResponse>;
+  read(
+    request: WorkerControllerReadRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerReadResponse>;
+  requestControl(
+    request: WorkerControllerRequestControlRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  releaseControl(
+    request: WorkerControllerReleaseControlRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  detach(
+    request: WorkerControllerDetachRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  issueResumeCapability(
+    request: WorkerControllerIssueResumeCapabilityRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  resume(
+    request: WorkerControllerResumeRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  mintDetachedRecoveryCapability(
+    request: WorkerControllerMintDetachedRecoveryRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  abandonDetachedController(
+    request: WorkerControllerAbandonDetachedRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerOperationResponse>;
+  validateResumeCapability(
+    request: WorkerControllerValidateResumeRequest,
+    binding: ServiceRuntimeConnectionBinding,
+  ): Promise<WorkerControllerResumeCapabilityResponse>;
 }
 
 /** Closed App Control surface selected after canonical Workspace admission. */
@@ -67,6 +143,8 @@ export interface KiteServiceApplicationPort {
   readonly runtimeAdmission: ServiceRuntimeAdmissionPortFactory;
   readonly appControl: ServiceAppControlPort;
   readonly credential?: ServiceCredentialPort;
+  /** Native-only Controller routes; never part of the Web Observer contract. */
+  readonly controller?: ServiceControllerPort;
   readonly control?: ServiceControlPort;
   readonly onConnectionBound?: (connectionId: string, workspace: KiteWorkspaceIdentity) => void;
   readonly onConnectionClosed?: (connectionId: string) => void;

@@ -15,6 +15,9 @@
   event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
   opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
+- 为已认证的 App admission 定义可选的进程内 `RuntimeCommandContext`（connection/request identity 与 opaque
+  Worker binding reference）；它只随 `RuntimeAccess.command()` 在本进程内传递，永不进入 Runtime Protocol、History 或 Browser
+  contract。
 - 为未来 transport adapter 提供中立数据边界。
 
 ## 不拥有职责
@@ -42,6 +45,8 @@
   interaction可选携带有界原始command供用户作知情决定；它不携带cwd、grant subject或binding digest。
 - `RuntimeSubscriptionSpec` 是唯一可序列化 selector；`AbortSignal` 只属于 local
   `RuntimeSubscription`，不得进入 wire。
+- `RuntimeCommandContext` 必须在 admission 后 strict validate/freeze；`bindingReference` 只能由 App-owned admission
+  提供，Contract package 不解释其内容、不持有 credential，也不按 Session 反查 authority。
 - `plan.approved` 是审核 settlement 的封闭 client event，携带 interaction identity、Session revision 与
   execution mode；Client 不从 raw Plan/Kernel event 推断审核已完成。
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，

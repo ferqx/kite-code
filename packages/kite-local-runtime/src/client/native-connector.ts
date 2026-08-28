@@ -1937,9 +1937,9 @@ function decodeRuntimeLogEventDetail(value: unknown): RuntimeLogEventDetail {
 
 function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTranscript {
   if (!isRecord(value)) throw invalidResponseError();
-  assertOnlyKeys(value, ['events', 'interactionMode', 'recovery', 'session']);
+  assertOnlyKeys(value, ['events', 'interactionMode', 'records', 'recovery', 'session']);
   const session = decodeRuntimeLogSessionEntry(value.session);
-  if (!Array.isArray(value.events)) throw invalidResponseError();
+  if (!Array.isArray(value.events) || !Array.isArray(value.records)) throw invalidResponseError();
   const events: RuntimeClientEvent[] = [];
   for (const event of value.events) {
     try {
@@ -1948,6 +1948,34 @@ function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTr
       throw invalidResponseError();
     }
     events.push(event);
+  }
+  const records: RuntimeHistorySessionTranscript['records'][number][] = [];
+  let previousSequence = -1;
+  for (const record of value.records) {
+    if (!isRecord(record)) throw invalidResponseError();
+    assertOnlyKeys(record, ['events', 'sequence']);
+    if (
+      !nonNegativeSafeInteger(record.sequence) ||
+      record.sequence <= previousSequence ||
+      record.sequence > session.lastSequence ||
+      !Array.isArray(record.events)
+    ) {
+      throw invalidResponseError();
+    }
+    previousSequence = record.sequence;
+    const recordEvents: RuntimeClientEvent[] = [];
+    for (const event of record.events) {
+      try {
+        assertRuntimeClientEvent(event);
+      } catch {
+        throw invalidResponseError();
+      }
+      recordEvents.push(event);
+    }
+    records.push(Object.freeze({ sequence: record.sequence, events: Object.freeze(recordEvents) }));
+  }
+  if (JSON.stringify(records.flatMap((record) => record.events)) !== JSON.stringify(events)) {
+    throw invalidResponseError();
   }
   if (
     value.interactionMode !== 'accept_edits' &&
@@ -1959,6 +1987,7 @@ function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTr
     throw invalidResponseError();
   return Object.freeze({
     session,
+    records: Object.freeze(records),
     events: Object.freeze(events),
     interactionMode: value.interactionMode,
     recovery: value.recovery,

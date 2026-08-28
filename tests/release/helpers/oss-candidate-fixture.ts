@@ -19,10 +19,25 @@ export async function createOssCandidateFixture(
   const archivePath = join(root, 'candidate.tar.gz');
   const cli = await fixtureCliBytes(root, target, stopOutcome, argumentLogPath);
   const suffix = target.executableSuffix;
+  const launcher = await fixtureLauncherBytes(root, target);
+  const coordinator = bytes('#!/bin/sh\nexit 1\n');
+  const worker = bytes('#!/bin/sh\nexit 1\n');
+  const gateway = bytes('#!/bin/sh\nexit 1\n');
+  const web = bytes('<!doctype html><html><body><div id="root"></div></body></html>\n');
   const files = new Map<string, Uint8Array>([
     [`bin/kite${suffix}`, cli],
     [`bin/kite-tui${suffix}`, bytes('#!/bin/sh\necho Kite TUI\n')],
     [`bin/kite-service${suffix}`, bytes('#!/bin/sh\necho Kite Service\n')],
+    [`bin/kite-coordinator${suffix}`, coordinator],
+    [`bin/kite-worker${suffix}`, worker],
+    [`bin/kite-web-gateway${suffix}`, gateway],
+    ['payload/web/index.html', web],
+    [`release/launchers/kite${suffix}`, launcher],
+    [`release/launchers/kite-tui${suffix}`, launcher],
+    [`release/launchers/kite-service${suffix}`, launcher],
+    [`release/launchers/kite-coordinator${suffix}`, launcher],
+    [`release/launchers/kite-worker${suffix}`, launcher],
+    [`release/launchers/kite-web-gateway${suffix}`, launcher],
     ['docs/MAINTAINER_CHECKLIST.md', bytes('# Checklist\n')],
     ['docs/KNOWN_LIMITATIONS.md', bytes('# Limitations\n')],
     ['docs/RELEASE_NOTES.md', bytes('# Notes\n')],
@@ -47,12 +62,54 @@ export async function createOssCandidateFixture(
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     },
+    releaseSlots: {
+      cli: { entrypoint: `bin/kite${suffix}`, identity: digest(cli) },
+      tui: {
+        entrypoint: `bin/kite-tui${suffix}`,
+        identity: digest(files.get(`bin/kite-tui${suffix}`)!),
+      },
+      service: {
+        entrypoint: `bin/kite-service${suffix}`,
+        identity: digest(files.get(`bin/kite-service${suffix}`)!),
+      },
+      coordinator: {
+        entrypoint: `bin/kite-coordinator${suffix}`,
+        identity: digest(coordinator),
+      },
+      worker: { entrypoint: `bin/kite-worker${suffix}`, identity: digest(worker) },
+      gateway: {
+        entrypoint: `bin/kite-web-gateway${suffix}`,
+        identity: digest(gateway),
+      },
+      web: { entrypoint: 'payload/web/index.html', identity: digest(web) },
+    },
     files: [...files]
       .map(([path, value]) => ({ path, size: value.byteLength, sha256: digest(value) }))
       .sort((left, right) => left.path.localeCompare(right.path)),
   });
   await writeOssCandidateArchive({ archivePath, manifest, files });
   return { root, archivePath, manifest, files };
+}
+
+async function fixtureLauncherBytes(root: string, target: OssReleaseTarget): Promise<Uint8Array> {
+  if (target.os !== 'win32' || process.platform !== 'win32') {
+    return bytes(
+      '#!/bin/sh\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\ncandidate=$(cat "$root/active")\nexec "$root/releases/$candidate/bin/$(basename -- "$0")" "$@"\n',
+    );
+  }
+  const entrypoint = join(root, 'fixture-launcher.ts');
+  const executable = join(root, 'fixture-launcher.exe');
+  writeFileSync(
+    entrypoint,
+    `const fs = require('node:fs');\nconst path = require('node:path');\nconst root = path.dirname(path.dirname(process.execPath));\nconst candidate = fs.readFileSync(path.join(root, 'active'), 'utf8').trim();\nconst name = path.basename(process.execPath);\nconst child = Bun.spawn([path.join(root, 'releases', candidate, 'bin', name), ...process.argv.slice(2)], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });\nprocess.exitCode = await child.exited;\n`,
+  );
+  const built = await Bun.build({
+    entrypoints: [entrypoint],
+    compile: { outfile: executable, autoloadDotenv: false, autoloadBunfig: false },
+    minify: true,
+  });
+  if (!built.success) throw new Error('Windows release fixture launcher compilation failed.');
+  return new Uint8Array(readFileSync(executable));
 }
 
 async function fixtureCliBytes(

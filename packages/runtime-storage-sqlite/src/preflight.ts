@@ -20,11 +20,28 @@ import type {
   RuntimeEventMetadata,
   RuntimeSnapshotCodec,
 } from '@kite-ai/runtime-host/storage';
+import type { SqliteRuntimeLayoutPaths } from './layout';
 
 export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 27;
 export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 6;
 export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-server-v1-2026-08-26' as const;
+/** Store 7 is an opt-in Workspace Worker target until the layout cutover is committed. */
+export const SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION = 7;
+export const SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH =
+  'kite-coordinator-workspace-worker-web-v1-2026-08-28' as const;
 export type SqliteRuntimeJournalMode = 'wal' | 'delete';
+
+export interface SqliteRuntimeWorkspaceBinding {
+  readonly layoutGeneration: string;
+  readonly workerScopeId: string;
+  readonly workspaceIdentityDigest: string;
+}
+
+export interface SqliteRuntimeSessionBinding {
+  readonly workerScopeId: string;
+  readonly projectId: string;
+  readonly workspaceDigest: string;
+}
 
 /** Platform-safe journal mode for the current Store implementation. */
 export function defaultSqliteRuntimeJournalMode(): SqliteRuntimeJournalMode {
@@ -121,6 +138,10 @@ export interface SqliteRuntimeStorageInput<Event = unknown, State = unknown> {
   readonly options?: SqliteRuntimeStorageOptions;
   /** Optional session boundary to check before the write connection is opened. */
   readonly sessionId?: string;
+  /** Store 7 opt-in binding. Omit to retain the current Store 6 authority. */
+  readonly workspaceBinding?: SqliteRuntimeWorkspaceBinding;
+  /** Active generation authority required when reopening an existing Store 7 writer. */
+  readonly workspaceLayout?: SqliteRuntimeLayoutPaths;
 }
 
 export interface EventRow {
@@ -238,6 +259,100 @@ const CURRENT_STORE_TABLE_COLUMNS = {
     'original_receipt_json',
     'committed_revision',
     'committed_at',
+  ],
+} as const;
+
+const WORKSPACE_STORE_TABLE_COLUMNS = {
+  runtime_store_meta: ['key', 'value'],
+  runtime_events: [
+    'session_id',
+    'event_id',
+    'sequence',
+    'schema_version',
+    'event_json',
+    'causation_id',
+    'occurred_at',
+    'created_at',
+  ],
+  runtime_sessions: [
+    'session_id',
+    'project_id',
+    'workspace_digest',
+    'worker_scope_id',
+    'workspace_identity_digest',
+    'state_schema',
+    'format_epoch',
+    'revision',
+    'name',
+    'model_provider',
+    'model_name',
+    'updated_at',
+  ],
+  runtime_snapshots: [
+    'session_id',
+    'schema_version',
+    'format_epoch',
+    'revision',
+    'state_json',
+    'event_position',
+    'state_checksum',
+    'created_at',
+  ],
+  runtime_named_snapshots: [
+    'session_id',
+    'name',
+    'schema_version',
+    'format_epoch',
+    'revision',
+    'state_json',
+    'event_position',
+    'state_checksum',
+    'created_at',
+  ],
+  runtime_file_preimages: [
+    'session_id',
+    'path',
+    'event_position',
+    'content',
+    'existed',
+    'post_hash',
+    'post_existed',
+    'created_at',
+  ],
+  runtime_effect_leases: [
+    'session_id',
+    'effect_id',
+    'owner_id',
+    'lease_revision',
+    'certainty',
+    'expires_at_ms',
+  ],
+  runtime_command_receipts: [
+    'scope_session_id',
+    'command_id',
+    'worker_scope_id',
+    'project_id',
+    'workspace_digest',
+    'request_digest',
+    'target_session_id',
+    'original_receipt_json',
+    'committed_revision',
+    'committed_at',
+  ],
+  session_workspace_tombstone: [
+    'session_id',
+    'worker_scope_id',
+    'project_id',
+    'workspace_digest',
+    'deleted_revision',
+    'deleted_at',
+  ],
+  session_directory_outbox: [
+    'session_id',
+    'worker_scope_id',
+    'revision',
+    'updated_at',
+    'tombstone',
   ],
 } as const;
 
@@ -405,6 +520,240 @@ export function assertCurrentSqliteRuntimeStoreConnection(
   return values;
 }
 
+export function assertSqliteRuntimeWorkspaceBinding(binding: SqliteRuntimeWorkspaceBinding): void {
+  for (const [label, value] of [
+    ['layout generation', binding.layoutGeneration],
+    ['Worker scope', binding.workerScopeId],
+    ['Workspace identity digest', binding.workspaceIdentityDigest],
+  ] as const) {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.length > 512 ||
+      value.includes('\0') ||
+      /\p{Cc}/u.test(value)
+    ) {
+      throw new SqliteRuntimeStorageOpenError(`Store 7 ${label} binding is invalid.`);
+    }
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/u.test(binding.layoutGeneration)) {
+    throw new SqliteRuntimeStorageOpenError('Store 7 layout generation binding is invalid.');
+  }
+  if (!/^(?:sha256:)?[a-f0-9]{16,128}$/u.test(binding.workspaceIdentityDigest)) {
+    throw new SqliteRuntimeStorageOpenError(
+      'Store 7 Workspace identity digest binding is invalid.',
+    );
+  }
+}
+
+function assertExactTableColumns(
+  database: Database,
+  expected: Readonly<Record<string, readonly string[]>>,
+): void {
+  const expectedTables = Object.keys(expected).sort();
+  const actualTables = database
+    .query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .all()
+    .map((entry) => entry.name);
+  if (
+    actualTables.length !== expectedTables.length ||
+    actualTables.some((table, index) => table !== expectedTables[index])
+  ) {
+    throw new SqliteRuntimeFormatMismatchError(null, null);
+  }
+  for (const [table, required] of Object.entries(expected)) {
+    const columns = database
+      .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+      .all()
+      .map((entry) => entry.name);
+    if (
+      columns.length !== required.length ||
+      required.some((column, index) => columns[index] !== column)
+    ) {
+      throw new SqliteRuntimeFormatMismatchError(null, null);
+    }
+  }
+  const expectedIndexes = ['runtime_events_session_sequence', 'runtime_file_preimages_position'];
+  const actualIndexes = database
+    .query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
+    )
+    .all()
+    .map((entry) => entry.name);
+  if (
+    actualIndexes.length !== expectedIndexes.length ||
+    actualIndexes.some((index, position) => index !== expectedIndexes[position])
+  ) {
+    throw new SqliteRuntimeFormatMismatchError(null, null);
+  }
+}
+
+/** Validate the exact Store 7 marker, DDL, and all persisted ownership rows. */
+export function assertWorkspaceSqliteRuntimeStoreConnection(
+  database: Database,
+  binding: SqliteRuntimeWorkspaceBinding,
+): ReadonlyMap<string, string> {
+  assertSqliteRuntimeWorkspaceBinding(binding);
+  const marker = database
+    .query<{ key: string; value: string }, []>(
+      "SELECT key, value FROM runtime_store_meta WHERE key IN ('format_version', 'runtime_format_epoch', 'layout_generation', 'worker_scope_id', 'workspace_identity_digest')",
+    )
+    .all();
+  const values = new Map(marker.map((entry) => [entry.key, entry.value]));
+  if (
+    Number(values.get('format_version')) !== SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION ||
+    values.get('runtime_format_epoch') !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH ||
+    values.get('layout_generation') !== binding.layoutGeneration ||
+    values.get('worker_scope_id') !== binding.workerScopeId ||
+    values.get('workspace_identity_digest') !== binding.workspaceIdentityDigest
+  ) {
+    throw new SqliteRuntimeFormatMismatchError(
+      Number(values.get('format_version')) || null,
+      values.get('runtime_format_epoch') ?? null,
+    );
+  }
+  assertExactTableColumns(database, WORKSPACE_STORE_TABLE_COLUMNS);
+  assertWorkspaceStoreOwnershipRows(database, binding);
+  return values;
+}
+
+function assertWorkspaceStoreOwnershipRows(
+  database: Database,
+  binding: SqliteRuntimeWorkspaceBinding,
+): void {
+  const sessions = database
+    .query<
+      {
+        session_id: string;
+        project_id: string;
+        workspace_digest: string;
+        worker_scope_id: string;
+        workspace_identity_digest: string;
+        state_schema: number;
+        format_epoch: string;
+      },
+      []
+    >(
+      'SELECT session_id, project_id, workspace_digest, worker_scope_id, workspace_identity_digest, state_schema, format_epoch FROM runtime_sessions',
+    )
+    .all();
+  for (const session of sessions) {
+    if (
+      !session.session_id ||
+      !session.project_id ||
+      !session.workspace_digest ||
+      session.worker_scope_id !== binding.workerScopeId ||
+      session.workspace_identity_digest !== binding.workspaceIdentityDigest ||
+      session.state_schema !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+      session.format_epoch !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+    ) {
+      throw new SqliteRuntimeFormatMismatchError(session.state_schema, session.format_epoch);
+    }
+  }
+
+  const tombstones = database
+    .query<
+      {
+        session_id: string;
+        worker_scope_id: string;
+        project_id: string;
+        workspace_digest: string;
+        deleted_revision: number;
+        deleted_at: number;
+      },
+      []
+    >(
+      'SELECT session_id, worker_scope_id, project_id, workspace_digest, deleted_revision, deleted_at FROM session_workspace_tombstone',
+    )
+    .all();
+  for (const tombstone of tombstones) {
+    if (
+      !tombstone.session_id ||
+      tombstone.worker_scope_id !== binding.workerScopeId ||
+      !tombstone.project_id ||
+      !tombstone.workspace_digest ||
+      !Number.isSafeInteger(tombstone.deleted_revision) ||
+      tombstone.deleted_revision < 0 ||
+      !Number.isSafeInteger(tombstone.deleted_at) ||
+      database
+        .query<{ session_id: string }, [string]>(
+          'SELECT session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+        .get(tombstone.session_id)
+    ) {
+      throw new SqliteRuntimeFormatMismatchError(
+        SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      );
+    }
+  }
+
+  const receipts = database
+    .query<
+      {
+        scope_session_id: string;
+        command_id: string;
+        worker_scope_id: string;
+        project_id: string;
+        workspace_digest: string;
+        target_session_id: string;
+        committed_revision: number;
+      },
+      []
+    >(
+      'SELECT scope_session_id, command_id, worker_scope_id, project_id, workspace_digest, target_session_id, committed_revision FROM runtime_command_receipts',
+    )
+    .all();
+  for (const receipt of receipts) {
+    if (!receipt.scope_session_id || !receipt.command_id || !receipt.target_session_id) {
+      throw new SqliteRuntimeFormatMismatchError(
+        SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      );
+    }
+    const session = database
+      .query<
+        { project_id: string; workspace_digest: string; worker_scope_id: string; revision: number },
+        [string]
+      >(
+        'SELECT project_id, workspace_digest, worker_scope_id, revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+      )
+      .get(receipt.target_session_id);
+    const tombstone = database
+      .query<
+        {
+          project_id: string;
+          workspace_digest: string;
+          worker_scope_id: string;
+          deleted_revision: number;
+        },
+        [string]
+      >(
+        'SELECT project_id, workspace_digest, worker_scope_id, deleted_revision FROM session_workspace_tombstone WHERE session_id = ? LIMIT 1',
+      )
+      .get(receipt.target_session_id);
+    const owner = session ?? tombstone;
+    if (
+      !owner ||
+      receipt.worker_scope_id !== binding.workerScopeId ||
+      receipt.worker_scope_id !== owner.worker_scope_id ||
+      receipt.project_id !== owner.project_id ||
+      receipt.workspace_digest !== owner.workspace_digest ||
+      !Number.isSafeInteger(receipt.committed_revision) ||
+      receipt.committed_revision < 0 ||
+      ('revision' in owner && receipt.committed_revision > owner.revision) ||
+      ('deleted_revision' in owner && receipt.committed_revision > owner.deleted_revision)
+    ) {
+      throw new SqliteRuntimeFormatMismatchError(
+        SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      );
+    }
+  }
+}
+
 /**
  * Open a no-follow read snapshot without mutating the source Store. When a
  * WAL exists, the database and sidecars are copied into an isolated directory
@@ -462,6 +811,7 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
   dbPath: string,
   codec?: SqliteRuntimeSnapshotCodec<Event, State>,
   sessionId?: string,
+  workspaceBinding?: SqliteRuntimeWorkspaceBinding,
 ): void {
   if (dbPath === ':memory:') return;
   assertNoFollowDatabasePath(dbPath);
@@ -478,7 +828,9 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
       if (hasData) throw new SqliteRuntimeFormatMismatchError(null, null);
       return;
     }
-    const values = assertCurrentSqliteRuntimeStoreConnection(database);
+    const values = workspaceBinding
+      ? assertWorkspaceSqliteRuntimeStoreConnection(database, workspaceBinding)
+      : assertCurrentSqliteRuntimeStoreConnection(database);
     // A database-wide owner is used for session discovery and must not let one
     // damaged historical session block every healthy session. Deep event and
     // snapshot validation belongs to a session-scoped open.
@@ -531,20 +883,39 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
         const state = codec.decodeState<State>(row.state_json);
         const metadata = codec.snapshotMetadata(state);
         const identity = codec.sessionIdentity?.(state);
-        const session = database
-          .query<
-            {
-              project_id: string;
-              workspace_digest: string;
-              state_schema: number;
-              format_epoch: string;
-              revision: number;
-            },
-            [string]
-          >(
-            'SELECT project_id, workspace_digest, state_schema, format_epoch, revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
-          )
-          .get(currentSessionId);
+        const session = workspaceBinding
+          ? database
+              .query<
+                {
+                  project_id: string;
+                  workspace_digest: string;
+                  worker_scope_id: string;
+                  workspace_identity_digest: string;
+                  state_schema: number;
+                  format_epoch: string;
+                  revision: number;
+                },
+                [string]
+              >(
+                'SELECT project_id, workspace_digest, worker_scope_id, workspace_identity_digest, state_schema, format_epoch, revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+              )
+              .get(currentSessionId)
+          : database
+              .query<
+                {
+                  project_id: string;
+                  workspace_digest: string;
+                  worker_scope_id?: string;
+                  workspace_identity_digest?: string;
+                  state_schema: number;
+                  format_epoch: string;
+                  revision: number;
+                },
+                [string]
+              >(
+                'SELECT project_id, workspace_digest, state_schema, format_epoch, revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+              )
+              .get(currentSessionId);
         const eventRevision =
           database
             .query<{ sequence: number }, [string, number]>(
@@ -553,7 +924,10 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
             .get(currentSessionId, row.event_position)?.sequence ?? 0;
         if (
           row.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-          row.format_epoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
+          row.format_epoch !==
+            (workspaceBinding
+              ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+              : SQLITE_RUNTIME_FORMAT_EPOCH) ||
           metadata.schemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
           metadata.stateRevision !== row.revision ||
           row.revision !== eventRevision ||
@@ -561,8 +935,14 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
           !session ||
           session.project_id !== identity.projectId ||
           session.workspace_digest !== identity.canonicalWorkspaceDigest ||
+          (workspaceBinding !== undefined &&
+            (session.worker_scope_id !== workspaceBinding.workerScopeId ||
+              session.workspace_identity_digest !== workspaceBinding.workspaceIdentityDigest)) ||
           session.state_schema !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-          session.format_epoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
+          session.format_epoch !==
+            (workspaceBinding
+              ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+              : SQLITE_RUNTIME_FORMAT_EPOCH) ||
           session.revision !== row.revision
         ) {
           throw new SqliteRuntimeFormatMismatchError(

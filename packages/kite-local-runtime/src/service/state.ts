@@ -378,6 +378,31 @@ export function ensureLocalRuntimeServiceHome(identity: KiteHomeIdentity): KiteH
   return createKiteHomeIdentity(canonical, identity.source);
 }
 
+/**
+ * Reuse the Native no-follow/owner-only directory walk for another fixed
+ * repo-private local-runtime state owner. Callers provide only literal safe
+ * path segments; request or Workspace input must never reach this primitive.
+ */
+export function ensurePrivateKiteHomeDirectory(
+  identity: KiteHomeIdentity,
+  segments: readonly string[],
+): string {
+  if (
+    segments.length === 0 ||
+    segments.length > 8 ||
+    segments.some((segment) => !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(segment))
+  ) {
+    fail('invalid_path', 'Private Kite home directory segments are invalid.');
+  }
+  const validatedIdentity = ensureLocalRuntimeServiceHome(identity);
+  let current = validatedIdentity.root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    ensureDirectoryAtPath(current, 'Private Kite home state directory', true);
+  }
+  return current;
+}
+
 function validateExistingStateRoot(
   paths: LocalRuntimeServiceStatePaths,
 ): DirectoryBoundary | undefined {

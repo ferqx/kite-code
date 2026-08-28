@@ -130,6 +130,11 @@ export interface RuntimeLogEventPage {
  */
 export interface RuntimeHistorySessionTranscript {
   readonly session: RuntimeLogSessionEntry;
+  /** Durable source-sequence groups; History and live presentation fold the same event vocabulary. */
+  readonly records: readonly {
+    readonly sequence: number;
+    readonly events: readonly RuntimeClientEvent[];
+  }[];
   readonly events: readonly RuntimeClientEvent[];
   /** Folded history fallback; an admitted live Host projection remains authoritative. */
   readonly interactionMode: InteractionMode;

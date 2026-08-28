@@ -1,11 +1,18 @@
 # Managed Local Service mode
 
-本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。KLSV1-06 后该目录承载默认 Native client
-adapter，不再是 opt-in migration path。release/source composition负责注入 connector与lifecycle；CLI不导入Service App。
+本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。该目录承载 terminal 使用的 Native client adapter；
+当前 release/source 默认 connector 由 Coordinator resolve/mint 后直接连接 Workspace Worker。显式 `kite service *` 仍注入 legacy
+Service lifecycle manager，但不是默认 run/resume/TUI data plane；CLI不导入Service App。
 
-adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、service status与
+adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、owner status与
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
-token，不discover/spawn Service，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
+token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
+
+Web Gateway lifecycle 不属于该 Service adapter。CLI 的 `kite web [--json]`、`kite web status [--json]` 与 `kite web stop`
+只通过单独注入的 `CoordinatorRequestClient` 分别执行 ensure、已有 Gateway discovery 与 stop；CLI 不自行启动 Gateway、
+读取其内部状态或取得 Controller。`scripts/release/entrypoints/cli.ts` 已按命令注入 managed Coordinator client；layout、
+Coordinator 或 Gateway 不可用时明确返回 unavailable。该 parser/adapter contract 与 tests 不代表 hosted Web qualification；
+candidate `releaseSlots` 已绑定 Coordinator、Worker、Gateway、Web entrypoint/identity。
 
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
 TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败

@@ -16,6 +16,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/builtin-runtime', 'packages/builtin-runtime'],
   ['@kite-ai/kite-cli', 'apps/kite-cli'],
   ['@kite-ai/kite-service', 'apps/kite-service'],
+  ['@kite-ai/kite-web', 'apps/kite-web'],
 ] as const);
 
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
@@ -58,7 +59,13 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-spi',
     '@kite-ai/runtime-storage-sqlite',
   ],
+  // The browser observer is a private application, not a package consumed by
+  // another workspace. Its only internal dependency is the browser-safe DTO
+  // contract; its UI/tooling dependencies are intentionally app-local.
+  '@kite-ai/kite-web': ['@kite-ai/kite-app-contract'],
 });
+
+const NON_EXPORTING_PRIVATE_APPS: ReadonlySet<string> = new Set(['@kite-ai/kite-web']);
 
 const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
   '@kite-ai/runtime-contract': [
@@ -269,7 +276,7 @@ function loadPackages(root: string, violations: RuntimePackageViolation[]): Pack
     }
 
     const exportTargets = parseExportTargets(manifest.exports, relativePath, violations);
-    if (exportTargets.size === 0) {
+    if (exportTargets.size === 0 && !NON_EXPORTING_PRIVATE_APPS.has(expectedName)) {
       addViolation(
         violations,
         'PUBLIC_EXPORT_MISSING',
@@ -612,7 +619,10 @@ function validateImports(
       continue;
     }
 
-    if (edge.specifier.startsWith('#app/') || edge.specifier.startsWith('@/app/')) {
+    if (
+      edge.specifier.startsWith('#app/') ||
+      (edge.specifier.startsWith('@/app/') && edge.owner.name !== '@kite-ai/kite-web')
+    ) {
       addViolation(
         violations,
         'RETIRED_APP_ALIAS_IMPORT',
@@ -623,7 +633,13 @@ function validateImports(
     }
 
     if (edge.specifier.startsWith('@/')) {
-      if (edge.owner.name !== '@kite-ai/kite-cli') {
+      const aliasRoot =
+        edge.owner.name === '@kite-ai/kite-cli'
+          ? join(root, 'src')
+          : edge.owner.name === '@kite-ai/kite-web'
+            ? join(root, 'apps/kite-web/src')
+            : undefined;
+      if (!aliasRoot) {
         addViolation(
           violations,
           'FORBIDDEN_ROOT_ALIAS_IMPORT',
@@ -632,7 +648,7 @@ function validateImports(
         );
         continue;
       }
-      const target = resolveSourceFile(join(root, 'src'), edge.specifier.slice(2));
+      const target = resolveSourceFile(aliasRoot, edge.specifier.slice(2));
       if (!target) {
         addViolation(
           violations,
@@ -732,7 +748,7 @@ function validateExternalDependency(
       `${path}/package.json`,
     );
   }
-  if (isUiPackage(dependency) && owner !== '@kite-ai/kite-cli') {
+  if (isUiPackage(dependency) && owner !== '@kite-ai/kite-cli' && owner !== '@kite-ai/kite-web') {
     addViolation(
       violations,
       'FORBIDDEN_UI_IMPORT',
@@ -765,7 +781,8 @@ function validateExternalImport(
       owner === '@kite-ai/runtime-client' ||
       owner === '@kite-ai/kite-app-contract' ||
       owner === '@kite-ai/agent-kernel' ||
-      owner === '@kite-ai/runtime-spi'
+      owner === '@kite-ai/runtime-spi' ||
+      owner === '@kite-ai/kite-web'
     ) {
       addViolation(
         violations,
@@ -809,7 +826,18 @@ function externalPackageName(specifier: string): string | undefined {
 }
 
 function isUiPackage(name: string): boolean {
-  return name === 'react' || name === 'ink' || name.startsWith('@inkjs/');
+  return (
+    name === 'react' ||
+    name === 'react-dom' ||
+    name === 'lucide-react' ||
+    name === 'vite' ||
+    name === 'tailwindcss' ||
+    name === '@tailwindcss/vite' ||
+    name === '@vitejs/plugin-react' ||
+    name.startsWith('@radix-ui/') ||
+    name === 'ink' ||
+    name.startsWith('@inkjs/')
+  );
 }
 
 function validateAmbientAuthority(
@@ -975,7 +1003,7 @@ function validatePublicExports(
         }
       }
     }
-    if (!hasRuntimeValue) {
+    if (!hasRuntimeValue && !NON_EXPORTING_PRIVATE_APPS.has(entry.name)) {
       addViolation(
         violations,
         'PACKAGE_RUNTIME_VALUE_MISSING',
@@ -1042,7 +1070,7 @@ function validateConsumers(
     const testConsumer = entry.testFiles.some((file) =>
       readFileSync(file, 'utf8').includes(`from '${entry.name}`),
     );
-    if (!externalConsumer && !testConsumer) {
+    if (!NON_EXPORTING_PRIVATE_APPS.has(entry.name) && !externalConsumer && !testConsumer) {
       addViolation(
         violations,
         'PACKAGE_CONSUMER_MISSING',
@@ -1320,6 +1348,15 @@ function validateCompositionRoot(
   )) {
     const sourcePath = normalizedRelative(root, edge.source);
     if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite-ai/runtime-contract') {
+      continue;
+    }
+    if (
+      sourcePath === 'apps/kite-service/src/coordinator/production.ts' &&
+      edge.targetPackage?.name === '@kite-ai/runtime-storage-sqlite'
+    ) {
+      // The Coordinator is a second process composition root, but its only concrete Runtime
+      // package is the active-layout/Catalog fence owner. It must never import Host, Server,
+      // Builtin, Runtime Client/Protocol, or Workspace Store data-plane composition here.
       continue;
     }
     const authority = compositionAuthorityBinding(edge);

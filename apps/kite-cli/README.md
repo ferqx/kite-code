@@ -2,17 +2,21 @@
 
 ## 定位
 
-`@kite-ai/kite-cli` 是 terminal presentation 与 Native client App。KLSV1-06 clean cutover 后，它不再是 Runtime
-composition root；默认 TUI、`run` 与 `resume` 只连接由 companion `kite-service` 拥有的 Local Runtime Service。
+`@kite-ai/kite-cli` 是 terminal presentation 与 Native client App。它不再是 Runtime composition root；当前 release/source
+entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canonical Workspace 对应的 Workspace Worker，随后直接连接
+该 Worker 的 Runtime data plane。`kite service *` 只保留为显式 legacy Service maintenance surface，不是默认执行路径。
 
 ## 拥有职责
 
 - 拥有 CLI parser/output、Ink TUI、terminal interaction/rendering、client-safe reducer/projection，以及 language、theme、
   color preset、key binding 等 presentation-local preference。
-- 通过 release composition 注入的 `kite-local-runtime/client` connector 取得 Runtime、History、App Control、Native
-  credential 与 connection snapshot；CLI/TUI 自身不读取 descriptor/token/lock，也不 spawn Service。
+- 通过 release composition 注入的 Worker connector 取得 Runtime、History、App Control、Native credential 与 connection
+  snapshot；CLI/TUI 自身不读取 descriptor/token/lock，也不直接 spawn Worker。Coordinator client 只负责 closed resolve/ensure/mint。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
+- CLI parser/main 已实现封闭的 Web Gateway lifecycle surface：`kite web [--json]` 请求 ensure 并打印 Coordinator
+  返回的一次性 launch URL，`kite web status [--json]` 只 discovery 已有 Gateway，`kite web stop` 请求显式 stop。
+  这些命令只接受注入的 `CoordinatorRequestClient`，CLI 不自行发现、spawn、访问 Gateway 或取得 Controller。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
@@ -27,8 +31,10 @@ composition root；默认 TUI、`run` 与 `resume` 只连接由 companion `kite-
   repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
 - 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend
   fallback。managed Service 不可用时直接失败。
-- 不拥有 Service process/state/lifecycle manager。`kite service ensure/status/stop/restart` 只把命令转交给 release
-  composition 注入的窄 manager port；CLI 不自行 discover、spawn、kill 或清理 Service state。
+- 不拥有 Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart` 只把显式 maintenance 命令转交 legacy
+  Service manager；默认 run/resume/TUI 使用 Coordinator + Worker connector。CLI 不自行 discover、spawn、kill 或清理 owner state。
+- `scripts/release/entrypoints/cli.ts` 按命令注入 legacy Service manager、production `CoordinatorRequestClient` 或 Worker connector；
+  layout、Coordinator、Worker 或 Gateway 不可用时均 fail closed。parser/main contract 与本地 tests 不等于三平台 qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
   parent-owned test/internal、显式非默认 Store 场景。
 
@@ -41,7 +47,8 @@ libraries。不得依赖 `@kite-ai/runtime-host`、`@kite-ai/runtime-server`、`
 ## 公开入口
 
 导出 package 根入口以及 `@kite-ai/kite-cli/cli`、`@kite-ai/kite-cli/tui`。release/source entrypoint在 CLI 外组合
-managed connector/lifecycle；installed candidate 从相邻的 `bin/kite-service` companion 启动同一 Service owner。
+managed connector/lifecycle；installed candidate 从同一 immutable release root 解析相邻 Coordinator、Worker、Gateway 与显式 legacy
+Service companion。
 
 ## 关键不变量
 
@@ -49,10 +56,13 @@ managed connector/lifecycle；installed candidate 从相邻的 `bin/kite-service
   fake/native conformance test，不能重新取得 backend object。
 - Runtime initialize 前必须完成 Service-owned Workspace Trust query/decision；wire path、cwd 或 client metadata不能
   提升 Workspace authority。
-- connection close 与 Service owner shutdown分离。exit/reconnect只处理本 client generation；Service Session、Turn、
-  interaction 与 Store lifecycle仍由 Service决定。
+- connection close 与 Worker owner shutdown分离。exit/reconnect只处理本 client generation；Session、Turn、interaction、Controller
+  与 Store lifecycle仍由所属 Worker决定。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
+- TUI `/web` 是 discovery-only：只调用可选的 `discoverWebGateway` callback；没有已有 Gateway 时显示
+  `Kite Web is not running. Run \`kite-code web\`.`，不启动 Gateway、不取得 Controller。release TUI entrypoint 已注入该
+  discovery callback；它不会把 Browser Observer 升级为 Controller，也不能把本地 asset/entrypoint smoke 写成 hosted support。
 
 ## 本地文档
 
@@ -67,8 +77,8 @@ managed connector/lifecycle；installed candidate 从相邻的 `bin/kite-service
 ## 测试
 
 `bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
-Service Host/Store owner tests位于 `apps/kite-service/test`。当前CLI owner为680 parallel + 76 sandbox + 1
-conformance，共757 tests；完整TUI system另通过40个isolated PTY scenario files。
+Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前default runner的CLI owner为704 tests，加76个sandbox与
+1个native conformance，共781 tests；完整TUI system由独立PTY runner验证。
 
 ## 文档影响
 

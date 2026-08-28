@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
-  constants,
-  copyFileSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -23,9 +24,6 @@ import {
   type KiteHomeIdentity,
   LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
   type LocalRuntimeServiceDirectoryLock,
-  readLocalRuntimeServiceDescriptor,
-  readLocalRuntimeServiceLockIdentity,
-  readLocalRuntimeServiceToken,
   tryAcquireLocalRuntimeServiceLock,
 } from '@kite-ai/kite-local-runtime/service';
 import { z } from 'zod';
@@ -33,6 +31,7 @@ import {
   currentOssReleaseTarget,
   defaultOssCandidateArchivePath,
   ossCandidateManifestSchema,
+  releaseLauncherArchivePaths,
   type VerifiedOssCandidate,
   verifyOssCandidate,
 } from './oss-candidate';
@@ -40,7 +39,7 @@ import {
 const markerSchema = z
   .object({
     schema: z.literal('KiteCodeManagedInstall'),
-    version: z.literal(1),
+    version: z.literal(2),
     canonicalRoot: z.string().min(1),
     currentCandidateId: z.string().regex(/^[a-f0-9]{24}$/),
     previousCandidateId: z
@@ -48,11 +47,14 @@ const markerSchema = z
       .regex(/^[a-f0-9]{24}$/)
       .nullable(),
     target: z.string().regex(/^(macos|linux|windows)-(arm64|x64)$/),
+    activePointer: z.literal('active'),
   })
   .strict();
 
-type InstallMarker = z.infer<typeof markerSchema>;
+export type InstallMarker = z.infer<typeof markerSchema>;
 const MARKER_FILE = '.kite-code-managed.json';
+export const ACTIVE_RELEASE_POINTER_FILE = 'active' as const;
+const INSTALL_MARKER_VERSION = 2 as const;
 
 export function defaultInstallPrefix(): string {
   return resolve(userInfo().homedir, '.local', 'share', 'kite-code');
@@ -78,18 +80,18 @@ export async function installOssCandidate(input: {
         `Managed install target ${existing.target} cannot be replaced by ${candidate.manifest.target.id}.`,
       );
     }
-    ordinaryStopManagedService(root, existing, input.serviceHome);
   }
   const fence = acquireInstallerServiceFence(input.serviceHome);
   try {
     const releaseRoot = join(root, 'releases', candidate.candidateId);
     materializeRelease(candidate, releaseRoot);
-    verifyMaterializedRelease(releaseRoot, candidate.candidateId);
+    const manifest = verifyMaterializedRelease(releaseRoot, candidate.candidateId);
+    assertInstallableRelease(manifest);
     assertMarkerWriteReady(root);
-    activateRelease(root, releaseRoot, candidate.manifest.target.os === 'win32');
+    activateRelease(root, releaseRoot, manifest);
     const marker: InstallMarker = {
       schema: 'KiteCodeManagedInstall',
-      version: 1,
+      version: INSTALL_MARKER_VERSION,
       canonicalRoot: realpathSync.native(root),
       currentCandidateId: candidate.candidateId,
       previousCandidateId:
@@ -97,7 +99,9 @@ export async function installOssCandidate(input: {
           ? existing.currentCandidateId
           : (existing?.previousCandidateId ?? null),
       target: candidate.manifest.target.id,
+      activePointer: ACTIVE_RELEASE_POINTER_FILE,
     };
+    writeActiveReleasePointer(root, candidate.candidateId);
     writeMarker(root, marker);
     return marker;
   } finally {
@@ -113,19 +117,20 @@ export function rollbackOssCandidate(
   const marker = loadMarker(root);
   assertManagedTreeForUninstall(root, marker, 128);
   if (!marker.previousCandidateId) throw new Error('No previous Kite Code candidate is available.');
-  ordinaryStopManagedService(root, marker, options.serviceHome);
   const releaseRoot = join(root, 'releases', marker.previousCandidateId);
   const manifest = verifyMaterializedRelease(releaseRoot, marker.previousCandidateId);
+  assertInstallableRelease(manifest);
   const fence = acquireInstallerServiceFence(options.serviceHome);
   try {
     assertMarkerWriteReady(root);
-    activateRelease(root, releaseRoot, manifest.target.os === 'win32');
+    activateRelease(root, releaseRoot, manifest);
     const next: InstallMarker = {
       ...marker,
       currentCandidateId: marker.previousCandidateId,
       previousCandidateId: marker.currentCandidateId,
       target: manifest.target.id,
     };
+    writeActiveReleasePointer(root, marker.previousCandidateId);
     writeMarker(root, next);
     return next;
   } finally {
@@ -152,7 +157,9 @@ export function uninstallOssCandidate(
 
 export function readInstallStatus(prefix: string): InstallMarker {
   const root = requireManagedRoot(prefix);
-  return loadMarker(root);
+  const marker = loadMarker(root);
+  assertActiveReleasePointer(root, marker);
+  return marker;
 }
 
 function materializeRelease(candidate: VerifiedOssCandidate, releaseRoot: string): void {
@@ -179,6 +186,7 @@ function materializeRelease(candidate: VerifiedOssCandidate, releaseRoot: string
     });
     verifyMaterializedRelease(temporaryRoot, candidate.candidateId);
     renameSync(temporaryRoot, releaseRoot);
+    syncDirectory(releasesRoot);
   } catch (error) {
     if (existsSync(temporaryRoot)) rmSync(temporaryRoot, { recursive: true, force: false });
     throw error;
@@ -211,12 +219,26 @@ function verifyMaterializedRelease(releaseRoot: string, candidateId: string) {
   return manifest;
 }
 
-function activateRelease(root: string, releaseRoot: string, windows: boolean): void {
-  const suffix = windows ? '.exe' : '';
+function activateRelease(
+  root: string,
+  releaseRoot: string,
+  manifest: z.infer<typeof ossCandidateManifestSchema>,
+): void {
+  assertInstallableRelease(manifest);
+  const suffix = manifest.target.os === 'win32' ? '.exe' : '';
   const binRoot = join(root, 'bin');
   if (existsSync(binRoot)) assertSafeDirectory(binRoot, 'Managed bin directory');
   else mkdirSync(binRoot, { mode: 0o700 });
-  for (const name of [`kite${suffix}`, `kite-tui${suffix}`, `kite-service${suffix}`]) {
+  const launcherPaths = releaseLauncherArchivePaths(manifest);
+  const launchers = [
+    [`kite${suffix}`, launcherPaths.cli],
+    [`kite-tui${suffix}`, launcherPaths.tui],
+    [`kite-service${suffix}`, launcherPaths.service],
+    [`kite-coordinator${suffix}`, launcherPaths.coordinator],
+    [`kite-worker${suffix}`, launcherPaths.worker],
+    [`kite-web-gateway${suffix}`, launcherPaths.gateway],
+  ] as const;
+  for (const [name] of launchers) {
     const destination = join(binRoot, name);
     if (existsSync(`${destination}.next`)) {
       throw new Error(`Managed activation temporary already exists: ${name}`);
@@ -228,16 +250,143 @@ function activateRelease(root: string, releaseRoot: string, windows: boolean): v
       }
     }
   }
-  for (const name of [`kite${suffix}`, `kite-tui${suffix}`, `kite-service${suffix}`]) {
-    const source = join(releaseRoot, 'bin', name);
+  for (const [name, archivePath] of launchers) {
+    const source = join(releaseRoot, ...archivePath.split('/'));
     const destination = join(binRoot, name);
-    const temporary = `${destination}.next`;
-    copyFileSync(source, temporary, constants.COPYFILE_EXCL);
-    if (!windows) chmodSync(temporary, 0o755);
     if (existsSync(destination)) {
-      rmSync(destination, { force: false });
+      const active = readRegularFile(destination);
+      const expected = readRegularFile(source);
+      if (!active.equals(expected)) {
+        throw new Error(`Stable launcher identity changed: ${name}`);
+      }
+      continue;
+    }
+    const temporary = `${destination}.next`;
+    copyRegularFileAtomically(source, temporary, destination, 0o755);
+  }
+}
+
+function assertInstallableRelease(manifest: z.infer<typeof ossCandidateManifestSchema>): void {
+  if (manifest.releaseSlots === undefined) {
+    throw new Error('Candidate is missing the release slot manifest; legacy candidate is blocked.');
+  }
+  const expected = executableArchivePathsForManifest(manifest);
+  const files = new Set(manifest.files.map((entry) => entry.path));
+  for (const [name, path] of Object.entries(expected)) {
+    if (!files.has(path))
+      throw new Error(`Candidate release slot ${name} is not archived: ${path}`);
+  }
+  const web = manifest.releaseSlots.web;
+  if (web.entrypoint !== 'payload/web/index.html' || web.identity === null) {
+    throw new Error('Candidate release slot web is not bound to its fixed payload entrypoint.');
+  }
+  if (!files.has(web.entrypoint)) {
+    throw new Error(`Candidate release slot web is not archived: ${web.entrypoint}`);
+  }
+  const launchers = releaseLauncherArchivePaths(manifest);
+  for (const path of Object.values(launchers)) {
+    if (!files.has(path)) throw new Error(`Candidate stable launcher is not archived: ${path}`);
+  }
+}
+
+function executableArchivePathsForManifest(manifest: z.infer<typeof ossCandidateManifestSchema>): {
+  cli: string;
+  tui: string;
+  service: string;
+  coordinator: string;
+  worker: string;
+  gateway: string;
+} {
+  const suffix = manifest.target.os === 'win32' ? '.exe' : '';
+  const slots = manifest.releaseSlots;
+  if (!slots) throw new Error('Candidate release slots are unavailable.');
+  const expected = {
+    cli: `bin/kite${suffix}`,
+    tui: `bin/kite-tui${suffix}`,
+    service: `bin/kite-service${suffix}`,
+    coordinator: `bin/kite-coordinator${suffix}`,
+    worker: `bin/kite-worker${suffix}`,
+    gateway: `bin/kite-web-gateway${suffix}`,
+  } as const;
+  for (const [name, path] of Object.entries(expected)) {
+    const slot = slots[name as keyof typeof expected];
+    if (slot.entrypoint !== path || slot.identity === null) {
+      throw new Error(`Candidate release slot ${name} is not bound to its executable.`);
+    }
+  }
+  return expected;
+}
+
+function copyRegularFileAtomically(
+  source: string,
+  temporary: string,
+  destination: string,
+  mode: number,
+): void {
+  const bytes = readRegularFile(source);
+  writeFileSync(temporary, bytes, { mode, flag: 'wx' });
+  try {
+    chmodSync(temporary, mode);
+    syncRegularFile(temporary);
+    if (existsSync(destination)) {
+      throw new Error(`Managed launcher appeared during activation: ${destination}`);
     }
     renameSync(temporary, destination);
+    syncDirectory(dirname(destination));
+  } catch (error) {
+    if (existsSync(temporary)) rmSync(temporary, { force: false });
+    throw error;
+  }
+}
+
+function writeActiveReleasePointer(root: string, candidateId: string): void {
+  if (!/^[a-f0-9]{24}$/u.test(candidateId))
+    throw new Error('Active release candidate identity is invalid.');
+  const pointer = join(root, ACTIVE_RELEASE_POINTER_FILE);
+  if (existsSync(pointer)) {
+    const stat = lstatSync(pointer);
+    if (stat.isSymbolicLink() || !stat.isFile())
+      throw new Error('Active release pointer is unsafe.');
+  }
+  const temporary = `${pointer}.next`;
+  if (existsSync(temporary)) throw new Error('Active release pointer temporary already exists.');
+  writeFileSync(temporary, `${candidateId}\n`, { mode: 0o600, flag: 'wx' });
+  try {
+    syncRegularFile(temporary);
+    renameSync(temporary, pointer);
+    syncDirectory(root);
+  } catch (error) {
+    if (existsSync(temporary)) rmSync(temporary, { force: false });
+    throw new Error('Active release pointer could not be atomically replaced.', { cause: error });
+  }
+}
+
+function readActiveReleasePointer(root: string): string {
+  const pointer = join(root, ACTIVE_RELEASE_POINTER_FILE);
+  const value = readRegularFile(pointer).toString('utf8');
+  if (!/^[a-f0-9]{24}\n$/u.test(value)) throw new Error('Active release pointer is invalid.');
+  return value.trim();
+}
+
+function syncRegularFile(path: string): void {
+  const descriptor = openSync(path, 'r');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function syncDirectory(path: string): void {
+  // Windows has no portable directory-fsync primitive in Node. The temporary
+  // regular file is still flushed before atomic rename; Windows write-through
+  // durability remains a platform qualification requirement.
+  if (process.platform === 'win32') return;
+  const descriptor = openSync(path, 'r');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -334,6 +483,7 @@ function writeMarker(root: string, marker: InstallMarker): void {
     rmSync(markerPath(root), { force: false });
   }
   renameSync(temporary, markerPath(root));
+  syncDirectory(root);
 }
 
 function assertMarkerWriteReady(root: string): void {
@@ -352,12 +502,15 @@ function assertManagedTreeForUninstall(
   marker: InstallMarker,
   maxEntries: number,
 ): void {
-  const expected = new Set<string>([MARKER_FILE, 'bin', 'releases']);
+  const expected = new Set<string>([MARKER_FILE, ACTIVE_RELEASE_POINTER_FILE, 'bin', 'releases']);
   const windows = marker.target.startsWith('windows-');
   const suffix = windows ? '.exe' : '';
   expected.add(`bin/kite${suffix}`);
   expected.add(`bin/kite-tui${suffix}`);
   expected.add(`bin/kite-service${suffix}`);
+  expected.add(`bin/kite-coordinator${suffix}`);
+  expected.add(`bin/kite-worker${suffix}`);
+  expected.add(`bin/kite-web-gateway${suffix}`);
   const releasesRoot = join(root, 'releases');
   assertSafeDirectory(releasesRoot, 'Managed releases directory');
   const releaseIds = new Set<string>();
@@ -369,6 +522,7 @@ function assertManagedTreeForUninstall(
     const releaseRelative = `releases/${entry.name}`;
     expected.add(releaseRelative);
     const manifest = verifyMaterializedRelease(join(root, releaseRelative), entry.name);
+    assertInstallableRelease(manifest);
     if (entry.name === marker.currentCandidateId && manifest.target.id !== marker.target) {
       throw new Error('Managed marker target does not match the active release.');
     }
@@ -383,9 +537,28 @@ function assertManagedTreeForUninstall(
   if (marker.previousCandidateId && !releaseIds.has(marker.previousCandidateId)) {
     throw new Error('Managed rollback release is missing.');
   }
-  verifyActiveLauncher(root, marker.currentCandidateId, `kite${suffix}`);
-  verifyActiveLauncher(root, marker.currentCandidateId, `kite-tui${suffix}`);
-  verifyActiveLauncher(root, marker.currentCandidateId, `kite-service${suffix}`);
+  assertActiveReleasePointer(root, marker);
+  const activeManifest = verifyMaterializedRelease(
+    join(root, 'releases', marker.currentCandidateId),
+    marker.currentCandidateId,
+  );
+  assertInstallableRelease(activeManifest);
+  verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite${suffix}`);
+  verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-tui${suffix}`);
+  verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-service${suffix}`);
+  verifyActiveLauncher(
+    root,
+    marker.currentCandidateId,
+    activeManifest,
+    `kite-coordinator${suffix}`,
+  );
+  verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-worker${suffix}`);
+  verifyActiveLauncher(
+    root,
+    marker.currentCandidateId,
+    activeManifest,
+    `kite-web-gateway${suffix}`,
+  );
 
   const pending = [root];
   let entries = 0;
@@ -410,9 +583,29 @@ function assertManagedTreeForUninstall(
   }
 }
 
-function verifyActiveLauncher(root: string, candidateId: string, name: string): void {
+function assertActiveReleasePointer(root: string, marker: InstallMarker): void {
+  if (marker.activePointer !== ACTIVE_RELEASE_POINTER_FILE) {
+    throw new Error('Managed marker points to an unsupported active release pointer.');
+  }
+  if (readActiveReleasePointer(root) !== marker.currentCandidateId) {
+    throw new Error('Managed active release pointer does not match its marker.');
+  }
+}
+
+function verifyActiveLauncher(
+  root: string,
+  candidateId: string,
+  manifest: z.infer<typeof ossCandidateManifestSchema>,
+  name: string,
+): void {
+  const launcherPaths = releaseLauncherArchivePaths(manifest);
+  const archivePath = name.startsWith('kite-service')
+    ? launcherPaths.service
+    : name.startsWith('kite-tui')
+      ? launcherPaths.tui
+      : launcherPaths.cli;
   const active = readRegularFile(join(root, 'bin', name));
-  const stored = readRegularFile(join(root, 'releases', candidateId, 'bin', name));
+  const stored = readRegularFile(join(root, 'releases', candidateId, ...archivePath.split('/')));
   if (!active.equals(stored)) throw new Error(`Managed active launcher does not match: ${name}`);
 }
 
@@ -487,20 +680,10 @@ function acquireInstallerServiceFence(
   if (!lock) {
     throw new Error('Managed Service lifecycle is busy; active candidate is unchanged.');
   }
-  try {
-    if (
-      readLocalRuntimeServiceDescriptor(paths) !== undefined ||
-      readLocalRuntimeServiceToken(paths, 'access') !== undefined ||
-      readLocalRuntimeServiceToken(paths, 'control') !== undefined ||
-      readLocalRuntimeServiceLockIdentity(paths, 'instance') !== undefined
-    ) {
-      throw new Error('Managed Service owner is still present; active candidate is unchanged.');
-    }
-    return lock;
-  } catch (error) {
-    lock.release();
-    throw error;
-  }
+  // This fence serializes installer lifecycle operations but deliberately does not
+  // inspect or stop the running companion. Pointer activation is independent from
+  // an already-running immutable candidate process.
+  return lock;
 }
 
 function addExpectedPath(expected: Set<string>, path: string): void {

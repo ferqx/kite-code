@@ -74,6 +74,17 @@ console.log(`[test] workspace parallelism=${concurrency}`);
 const workspaceExit = await runTestJobs(root, workspaceJobs, concurrency);
 if (workspaceExit !== 0) process.exit(workspaceExit);
 
+// React Testing Library requires Vitest's configured jsdom environment. Running these files
+// through Bun's generic test process would make the default gate report a false DOM failure.
+const webTest = Bun.spawn([process.execPath, 'run', '--cwd', 'apps/kite-web', 'test'], {
+  cwd: root,
+  stdin: 'inherit',
+  stdout: 'inherit',
+  stderr: 'inherit',
+});
+const webExit = await webTest.exited;
+if (webExit !== 0) process.exit(webExit);
+
 const integrationExit = await runTestJobs(root, integrationJobs, concurrency);
 if (integrationExit !== 0) process.exit(integrationExit);
 

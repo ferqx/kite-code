@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -64,7 +65,9 @@ describe('managed candidate install lifecycle', () => {
     roots.push(parent);
     const prefix = join(parent, 'managed');
     const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
+    expectAdjacentCompanionAssets(prefix, firstMarker.currentCandidateId);
     const secondMarker = await installOssCandidate({ archivePath: second.archivePath, prefix });
+    expectAdjacentCompanionAssets(prefix, secondMarker.currentCandidateId);
     expect(secondMarker.previousCandidateId).toBe(firstMarker.currentCandidateId);
     const rolledBack = rollbackOssCandidate(prefix);
     expect(rolledBack.currentCandidateId).toBe(firstMarker.currentCandidateId);
@@ -73,7 +76,22 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(prefix)).toBe(false);
   });
 
-  test('uses the supplied custom Service home for every ordinary lifecycle stop', async () => {
+  test('fails closed when the active pointer no longer matches its marker', async () => {
+    const fixture = await createOssCandidateFixture('0.1.0');
+    roots.push(fixture.root);
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-pointer-integrity-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    const marker = await installOssCandidate({ archivePath: fixture.archivePath, prefix });
+    writeFileSync(join(prefix, 'active'), `${'f'.repeat(24)}\n`);
+
+    expect(() => readInstallStatus(prefix)).toThrow('pointer');
+    expect(
+      readFileSync(join(prefix, 'releases', marker.currentCandidateId, '.candidate-id'), 'utf8'),
+    ).toBe(`${marker.currentCandidateId}\n`);
+  });
+
+  test('uses the supplied custom Service home when uninstall stops the active Service', async () => {
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-custom-service-home-'));
     roots.push(parent);
     const prefix = join(parent, 'managed');
@@ -100,7 +118,7 @@ describe('managed candidate install lifecycle', () => {
     uninstallCandidate(prefix, { serviceHome: identity });
 
     expectAllKiteHomeArguments(firstLog, identity.root);
-    expectAllKiteHomeArguments(secondLog, identity.root);
+    expect(existsSync(secondLog)).toBe(false);
   });
 
   test('refuses unmanaged, broad, or link-containing targets', async () => {
@@ -171,21 +189,32 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 
-  test('leaves the active candidate unchanged when ordinary Service stop is busy', async () => {
+  test('switches the active pointer while ordinary Service stop is busy', async () => {
     const target = currentOssReleaseTarget();
-    const first = await createOssCandidateFixture('0.1.0', target, 'service_busy');
-    const second = await createOssCandidateFixture('0.1.1');
-    roots.push(first.root, second.root);
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-upgrade-busy-'));
     roots.push(parent);
+    const stopLog = join(parent, 'stop-arguments.log');
+    const first = await createOssCandidateFixture('0.1.0', target, 'service_busy', stopLog);
+    const second = await createOssCandidateFixture('0.1.1');
+    roots.push(first.root, second.root);
     const prefix = join(parent, 'managed');
     const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
 
-    await expect(installOssCandidate({ archivePath: second.archivePath, prefix })).rejects.toThrow(
-      'ordinary stop failed',
+    const firstPayload = readFileSync(
+      join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', 'kite'),
     );
-    expect(readInstallStatus(prefix)).toEqual(firstMarker);
-    expect(readdirSync(join(prefix, 'releases'))).toHaveLength(1);
+    const stableLauncher = readFileSync(join(prefix, 'bin', 'kite'));
+    const secondMarker = await installOssCandidate({ archivePath: second.archivePath, prefix });
+    expect(secondMarker.currentCandidateId).not.toBe(firstMarker.currentCandidateId);
+    expect(readFileSync(join(prefix, 'active'), 'utf8')).toBe(
+      `${secondMarker.currentCandidateId}\n`,
+    );
+    expect(
+      readFileSync(join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', 'kite')),
+    ).toEqual(firstPayload);
+    expect(readFileSync(join(prefix, 'bin', 'kite'))).toEqual(stableLauncher);
+    expect(readdirSync(join(prefix, 'releases'))).toHaveLength(2);
+    expect(existsSync(stopLog)).toBe(false);
   });
 
   test('refuses to replace a managed install with a different platform target', async () => {
@@ -220,6 +249,20 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 });
+
+function expectAdjacentCompanionAssets(prefix: string, candidateId: string): void {
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  for (const name of ['kite-coordinator', 'kite-worker', 'kite-web-gateway']) {
+    const stable = join(prefix, 'bin', `${name}${suffix}`);
+    const candidate = join(prefix, 'releases', candidateId, 'bin', `${name}${suffix}`);
+    const stableStat = lstatSync(stable);
+    const candidateStat = lstatSync(candidate);
+    expect(stableStat.isSymbolicLink()).toBe(false);
+    expect(candidateStat.isSymbolicLink()).toBe(false);
+    expect(stableStat.isFile()).toBe(true);
+    expect(candidateStat.isFile()).toBe(true);
+  }
+}
 
 function nonNativeTarget(): OssReleaseTarget {
   const current = currentOssReleaseTarget();

@@ -38,8 +38,13 @@ const PROVIDER_ENVIRONMENT_KEYS = Object.freeze([
 ] as const);
 
 const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
+  'apps/kite-cli',
   'apps/kite-service',
+  'apps/kite-web',
   'packages',
+  'scripts/release/entrypoints',
+  'scripts/release/local-coordinator-client.ts',
+  'scripts/release/local-service-client.ts',
   'package.json',
   'bun.lock',
   'tsconfig.json',
@@ -294,8 +299,27 @@ export function sourceServiceBuildIdentity(repositoryRoot: string): string {
   return `dev:${sourceTreeId}:dirty:${digest.digest('hex')}`;
 }
 
-function installedBuildIdentity(executable: string): string {
-  const installRoot = dirname(dirname(executable));
+export function installedBuildIdentity(executable: string): string {
+  const hintedCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
+  if (hintedCandidateRoot !== undefined && !isAbsolute(hintedCandidateRoot)) {
+    throw new Error(`Managed candidate root is not absolute for ${basename(executable)}.`);
+  }
+  const executablePath =
+    hintedCandidateRoot === undefined ? realpathSync.native(executable) : undefined;
+  const candidateRoot = resolve(
+    hintedCandidateRoot ?? dirname(dirname(executablePath ?? executable)),
+  );
+  const candidateId = basename(candidateRoot);
+  if (!/^[a-f0-9]{24}$/u.test(candidateId)) {
+    throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
+  }
+  if (realpathSync.native(candidateRoot) !== candidateRoot) {
+    throw new Error(`Managed candidate root is not immutable for ${basename(executable)}.`);
+  }
+  const installRoot = dirname(dirname(candidateRoot));
+  if (basename(dirname(candidateRoot)) !== 'releases') {
+    throw new Error(`Managed candidate layout is invalid for ${basename(executable)}.`);
+  }
   const marker = JSON.parse(
     readFileSync(join(installRoot, '.kite-code-managed.json'), 'utf8'),
   ) as unknown;
@@ -304,6 +328,7 @@ function installedBuildIdentity(executable: string): string {
   }
   const record = marker as Record<string, unknown>;
   const exactKeys = [
+    'activePointer',
     'canonicalRoot',
     'currentCandidateId',
     'previousCandidateId',
@@ -314,19 +339,29 @@ function installedBuildIdentity(executable: string): string {
   if (
     Object.keys(record).sort().join('\0') !== exactKeys.join('\0') ||
     record.schema !== 'KiteCodeManagedInstall' ||
-    record.version !== 1 ||
+    record.version !== 2 ||
     record.canonicalRoot !== realpathSync.native(installRoot) ||
     typeof record.currentCandidateId !== 'string' ||
-    !/^[a-f0-9]{24}$/u.test(record.currentCandidateId)
+    !/^[a-f0-9]{24}$/u.test(record.currentCandidateId) ||
+    record.activePointer !== 'active'
   ) {
     throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
   }
-  const materializedId = readFileSync(
-    join(installRoot, 'releases', record.currentCandidateId, '.candidate-id'),
-    'utf8',
-  ).trim();
-  if (materializedId !== record.currentCandidateId) {
+  const activePointer = readFileSync(join(installRoot, 'active'), 'utf8');
+  if (!/^[a-f0-9]{24}\n$/u.test(activePointer)) {
+    throw new Error(`Managed active release pointer is invalid for ${basename(executable)}.`);
+  }
+  if (activePointer.trim() !== record.currentCandidateId) {
+    throw new Error(`Managed active release pointer is inconsistent for ${basename(executable)}.`);
+  }
+  const materializedId = readFileSync(join(candidateRoot, '.candidate-id'), 'utf8').trim();
+  if (materializedId !== candidateId) {
     throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
   }
-  return record.currentCandidateId;
+  const manifest = readFileSync(join(candidateRoot, 'manifest.json'));
+  const manifestCandidateId = createHash('sha256').update(manifest).digest('hex').slice(0, 24);
+  if (manifestCandidateId !== candidateId) {
+    throw new Error(`Managed candidate manifest identity is invalid for ${basename(executable)}.`);
+  }
+  return candidateId;
 }

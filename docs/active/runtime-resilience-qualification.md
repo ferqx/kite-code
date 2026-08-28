@@ -54,7 +54,7 @@ release matrix及正式hosted qualification仍pending。Windows state primitive�
 owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Windows candidate job，但必须等待当前实现head
 的远端结果，不能用POSIX或本机测试替代。
 
-当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
+当前local evidence为manager 37/135、carrier 23/129、Service shell 23/97、Runtime transport 3/852、Runtime fault
 36/106、CI-profile soak 7/7 cases、Service owner 1365 parallel tests / 6795 expects加34个isolated files、CLI owner
 757 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal

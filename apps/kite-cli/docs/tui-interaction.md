@@ -44,6 +44,17 @@
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
+## Web Gateway 发现
+
+`/web` 是严格 discovery-only 的 TUI action。它只调用可选的 `discoverWebGateway` callback，成功时显示 Coordinator
+返回的一次性 launch URL；没有 callback 或没有已运行 Gateway 时显示
+`Kite Web is not running. Run \`kite-code web\`.`，发现失败时显示固定 unavailable 文案。`/web` 不启动或停止
+Gateway、不创建 Session、不发送 Runtime command，也不取得 Controller/Worker capability。
+
+当前 release TUI entrypoint 已注入 `discoverWebGateway`；因此 `/web` 可以 discovery 已有 Gateway 并显示 one-shot launch URL，
+但不能由 `/web` 启动 Gateway、取得 Controller 或发送 Runtime command。候选 `releaseSlots` 已绑定 Coordinator、Worker、Gateway、
+Web entrypoint/identity；本地 asset/entrypoint smoke 不替代 Windows/Linux hosted process 与 Web qualification。
+
 ## 单一交互表面
 
 - Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。

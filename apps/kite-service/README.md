@@ -2,9 +2,10 @@
 
 ## 定位
 
-`@kite-ai/kite-service` 是唯一 production Runtime composition root。KLSV1-06 clean cutover 后，默认 Store 的
-Runtime Host、Runtime Server、SQLite、Builtin Runtime、Runtime Application、raw History projector与 App Control
-owner全部只在本Service；`apps/kite-cli` 只保留 terminal presentation与Native client。
+`@kite-ai/kite-service` workspace 拥有 production backend composition。当前 release/source 的默认 TUI、`run` 与 `resume`
+走 Local Coordinator → canonical Workspace Worker；每个 Worker 独占已 admission 的 Store 7、Runtime Host/Application、Controller
+与 effect authority。旧单 Service/Store 6 composition仍保留给显式 `kite service *` maintenance/compatibility journey，layout
+fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 terminal presentation与Native client。
 
 ## 拥有职责
 
@@ -14,6 +15,13 @@ owner全部只在本Service；`apps/kite-cli` 只保留 terminal presentation与
   observability、session logging、checkpoint与release/execution status owner；向client只投影closed safe contract。
 - `src/executable.ts` 是managed companion foreground entry。它从manager提供的显式neutral environment构造canonical
   default checkpoint/config paths，启动Native infrastructure，并以dedicated fd发布readiness；stdout不承载readiness。
+- `src/coordinator/production.ts`、`src/workspace-worker/production.ts` 与 `src/web-gateway/production.ts` 分别组合
+  Coordinator control plane、单 Workspace Worker Store 7/Host/Application 与只读 Web Gateway BFF。release entrypoint 只把
+  显式 source/installed executable、neutral environment、layout generation 与 readiness fd 注入这些 owner；不从 cwd、PATH、
+  ambient home 或 legacy Service fallback 推导运行时。
+- Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 7 writer、Controller/effect authority 与
+  Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
+  不把 Worker endpoint、capability 或 Store path 投影到 Browser。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
@@ -26,7 +34,8 @@ owner全部只在本Service；`apps/kite-cli` 只保留 terminal presentation与
 - 不拥有 terminal CLI/TUI、Ink/React、presentation reducer或client preference；不导入 `apps/kite-cli`。
 - 不提供第二默认Store、embedded fallback、app-to-app import、dual write、try-new-catch-old、通用多Store或OS Service。
 - 不把development WebSocket reference、parent-owned stdio test carrier或KLSV1-05 fake process harness描述为额外
-  production listener。Web/Desktop/public SDK仍不在V1支持面。
+  production listener。Web 仅通过 private loopback Gateway 提供永久只读 Observer；remote/LAN、多租户、Desktop/public SDK
+  仍不在V1支持面。
 - manager lifecycle/state/process primitive由 `@kite-ai/kite-local-runtime/manager` 提供，release composition选择
   explicit source/installed companion与Kite home；Service process不自行扮演client manager。
 
@@ -41,13 +50,20 @@ package根入口只服务repo内部composition/test。compiled `kite-service` co
 managed manager以显式absolute executable、neutral cwd、allowlisted env和dedicated readiness fd启动；普通用户通过
 `kite service ensure/status/stop/restart` 控制窄lifecycle surface。
 
-OSS candidate同包输出 `bin/kite`、`bin/kite-tui` 与相邻 `bin/kite-service`（Windows为`.exe`）；manifest、install
-preflight与active launcher验证都把companion作为required file。source mode固定解析repo内Service entry，installed mode
-固定解析当前terminal executable相邻companion，不从cwd或PATH猜测。
+OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bin/kite-coordinator`、`bin/kite-worker`、
+`bin/kite-web-gateway`（Windows为`.exe`）及 `payload/web` 静态资产；manifest、install preflight与active launcher验证都
+把这些 independent companion assets 绑定到 candidate identity。source mode固定解析repo内各自 entry，installed mode固定解析
+当前 candidate 的相邻 companion，不从 cwd 或 PATH 猜测。
 
 ## 关键不变量
 
 - default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
+- 默认 release terminal path 使用 State 27 / Store 7 Workspace Worker；显式 legacy Service 仍只认识 State 27 / Store 6，并在
+  committed layout/fence 存在时 fail closed。Worker 只在 Coordinator 完成 materialize/admit、active layout 与 binding 复核后打开
+  Store 7；两条路径不双写，也不存在 try-new-catch-old fallback。
+- Runtime admission 将 authenticated `connectionId`、`requestId` 与 Worker binding reference 作为只存在于进程内的
+  `RuntimeCommandContext` 传入 prepared execution closure；effect adapter 再按 Store 7 Controller/resource authority 验证，
+  不把该 context 加入 Runtime wire protocol 或 Browser contract。
 - 每个Session projection都从同一durable State revision投影完整、有序的client-safe interaction queue与唯一focus；
   intermediate revision不得携带未来queue。Runtime Contract/Protocol、Native与InProcess carrier消费同一替换语义，
   不能把snapshot与旧client interaction做并集，也不能因对象共享引用改变logical-message行为。Store-only启动/index
@@ -82,9 +98,10 @@ preflight与active launcher验证都把companion作为required file。source mod
 ## 测试
 
 `bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control与Native shell/carrier；当前owner run为1365 parallel tests / 6795 expects并通过全部34个isolated
-files。manager focused evidence位于`packages/kite-local-runtime/test/manager`（37/135）。完整40个TUI PTY scenario与
-本机macOS arm64 release smoke已经通过；正式Windows及当前实现head三平台process/release qualification仍pending。
+History/App Control、Coordinator/Worker/Web与Native shell/carrier；当前default owner run为1488 tests / 8273 expects，
+manager/Coordinator focused evidence位于`packages/kite-local-runtime/test`。完整TUI PTY scenario与
+本机macOS arm64 installed release smoke已经覆盖 Coordinator→Worker ensure/mint/handshake、TUI startup、精确 test-owned companion
+cleanup、upgrade/rollback/uninstall并通过；正式 Linux/Windows hosted process/release qualification 仍 pending。
 
 ## 文档影响
 

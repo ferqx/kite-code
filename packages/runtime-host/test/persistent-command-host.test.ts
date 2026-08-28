@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeCommandReceipt,
   type RuntimeNotification,
   type RuntimeQuery,
@@ -246,6 +247,26 @@ describe('Host persistent receipt command flow', () => {
     expect(h.bridge.inspectionContexts[0]?.targetSessionId).toMatch(/^create_[a-f0-9]{64}$/u);
     expect(h.bridge.inspectionContexts[1]?.targetSessionId).toMatch(/^fork_[a-f0-9]{64}$/u);
     expect(h.bridge.inspectionContexts[0]?.targetSessionId).not.toContain(':');
+    await host[Symbol.asyncDispose]();
+  });
+
+  test('pins the admission command context into Host inspection without Session lookup', async () => {
+    const h = harness();
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    const context: RuntimeCommandContext = {
+      schema: 'kite.runtime-command-context.v1',
+      connectionId: 'connection-7',
+      requestId: 'rpc-7',
+      bindingReference: 'binding-7',
+    };
+
+    await host.command(startCommand(), context);
+
+    expect(h.bridge.inspectionContexts[0]?.commandContext).toEqual(context);
+    expect(Object.isFrozen(h.bridge.inspectionContexts[0]?.commandContext)).toBeTrue();
     await host[Symbol.asyncDispose]();
   });
 

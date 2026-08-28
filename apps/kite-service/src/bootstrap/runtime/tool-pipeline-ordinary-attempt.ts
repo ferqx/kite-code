@@ -14,6 +14,7 @@ import type {
   ProtectedPathEvaluator,
   SandboxPreparationArtifactStore,
 } from '@kite-ai/builtin-runtime/sandbox';
+import type { RuntimeCommandContext } from '@kite-ai/runtime-contract';
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
   RuntimeHostRetryableToolInvocationAuthority,
@@ -35,6 +36,12 @@ import type {
 import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import type { AppPreparedShellExecutionPort } from '../../sandbox/prepared-tool-pipeline';
+import {
+  requiresWorkspaceEffectGate,
+  type WorkspaceEffectDispatchComposition,
+  WorkspaceEffectOutcomeUnknownError,
+} from '../../workspace-worker/effect-adapter';
+import type { WorkspaceEffectAttempt } from '../../workspace-worker/effect-gate';
 import {
   type AppBuiltinPreassembledMechanismResolverInput,
   createAppBuiltinMechanismResolver,
@@ -147,6 +154,8 @@ export interface AppOrdinaryToolPipelineAttemptInput {
   readonly governance: Readonly<GovernanceInputWithoutClassified>;
   readonly admission: Readonly<GovernanceAdmission>;
   readonly threadId: string;
+  /** Admission-time command context; never recovered from Session state. */
+  readonly commandContext?: Readonly<RuntimeCommandContext>;
   readonly attempt: number;
   /** Allows at most one new attempt after State durably admits safe-read evidence. */
   readonly allowSafeReadRetry?: boolean;
@@ -172,6 +181,16 @@ export interface AppOrdinaryToolPipelineAttemptInput {
   readonly shell?: Readonly<AppOrdinaryShellComposition>;
   /** Optional child-attempt lifecycle; it never parses or authorizes tool semantics. */
   readonly lifecycle?: Readonly<AppOrdinaryToolPipelineAttemptLifecycle>;
+  /**
+   * Optional Worker-owned effect gate. Legacy Service callers omit this until
+   * a real WorkerCommandContext is available; when supplied it is mandatory
+   * for every invocation classified as effectful.
+   */
+  readonly workspaceEffect?: Readonly<WorkspaceEffectDispatchComposition> & {
+    readonly context: Readonly<
+      import('../../workspace-worker/effect-adapter').WorkspaceEffectAttemptContext
+    >;
+  };
 }
 
 type StageFailure = ToolPipelineStageFailure<'resolve' | 'validate' | 'classify', string>;
@@ -494,31 +513,71 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
         verifyPreparedIdentity: dispatch.verifyPreparedIdentity,
         dispatch: async (value: Parameters<typeof dispatch.dispatch>[0]) => {
           const attempt = attemptInput.attempt;
-          let terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
-          let projected: Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>;
+          let lifecycleSettled = false;
+          const settleLifecycle = async (input: {
+            readonly attempt: number;
+            readonly result?: Readonly<BuiltinOperationExecutionValue>;
+            readonly error?: unknown;
+          }): Promise<void> => {
+            if (lifecycleSettled) return;
+            await attemptInput.lifecycle?.afterDispatch?.(input);
+            lifecycleSettled = true;
+          };
+          const executeBuiltin = async (): Promise<
+            Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>
+          > => {
+            let terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
+            let projected: Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>;
+            try {
+              terminal = await dispatch.dispatch(value);
+              projected = projectBuiltinToolDispatchOutcome({
+                operationId: target.operationId,
+                retryEligibility: request.retryEligibility,
+                allowSafeReadRetry: attemptInput.allowSafeReadRetry === true,
+                terminal,
+              });
+            } catch (error) {
+              await settleLifecycle({ attempt, error });
+              throw error;
+            }
+            await settleLifecycle({
+              attempt,
+              ...(projected.kind === 'retryable'
+                ? { error: new Error('State admitted a new safe-read Tool attempt.') }
+                : terminal.structuredContent === undefined
+                  ? {}
+                  : { result: terminal.structuredContent }),
+            });
+            return projected;
+          };
           try {
             await attemptInput.lifecycle?.beforeDispatch?.(attempt);
             await attemptInput.lifecycle?.afterAcknowledgement?.({ attempt, prepared });
-            terminal = await dispatch.dispatch(value);
-            projected = projectBuiltinToolDispatchOutcome({
-              operationId: target.operationId,
-              retryEligibility: request.retryEligibility,
-              allowSafeReadRetry: attemptInput.allowSafeReadRetry === true,
-              terminal,
-            });
+            if (attemptInput.workspaceEffect && requiresWorkspaceEffectGate(classifiedValue)) {
+              const effectAttempt: WorkspaceEffectAttempt =
+                attemptInput.workspaceEffect.createAttempt({
+                  context: attemptInput.workspaceEffect.context,
+                  prepared,
+                  classified: classifiedValue,
+                  attempt,
+                });
+              assertPreparedEffectAttempt(effectAttempt, prepared);
+              const gated = await attemptInput.workspaceEffect.gate.run(
+                effectAttempt,
+                executeBuiltin,
+              );
+              if (gated.status !== 'applied') {
+                const error = new WorkspaceEffectOutcomeUnknownError();
+                await settleLifecycle({ attempt, error });
+                throw error;
+              }
+              return gated.result;
+            }
+            return await executeBuiltin();
           } catch (error) {
-            await attemptInput.lifecycle?.afterDispatch?.({ attempt, error });
+            await settleLifecycle({ attempt, error });
             throw error;
           }
-          await attemptInput.lifecycle?.afterDispatch?.({
-            attempt,
-            ...(projected.kind === 'retryable'
-              ? { error: new Error('State admitted a new safe-read Tool attempt.') }
-              : terminal.structuredContent === undefined
-                ? {}
-                : { result: terminal.structuredContent }),
-          });
-          return projected;
         },
       }),
     );
@@ -719,6 +778,19 @@ export function isAppOrdinaryToolPipelineOperationId(
 
 function isPreparedGrantUsed(value: string): value is 'none' | 'approve_once' | 'same_command' {
   return value === 'none' || value === 'approve_once' || value === 'same_command';
+}
+
+function assertPreparedEffectAttempt(
+  attempt: Readonly<WorkspaceEffectAttempt>,
+  prepared: Readonly<PreparedToolInvocation>,
+): void {
+  if (
+    attempt.invocationId !== prepared.identity.invocationId ||
+    attempt.attemptId !== prepared.identity.attemptId ||
+    attempt.requestDigest !== prepared.identity.admissionDigest
+  ) {
+    throw new Error('Workspace effect attempt is not bound to the prepared invocation.');
+  }
 }
 
 function stageFailure(
