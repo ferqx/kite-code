@@ -199,15 +199,32 @@ function ensureNeutralDirectory(path: string): void {
 }
 
 export function sourceServiceBuildIdentity(repositoryRoot: string): string {
-  const commitResult = Bun.spawnSync(['git', '-C', repositoryRoot, 'rev-parse', 'HEAD'], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-    env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
-  });
-  const commit = commitResult.stdout.toString().trim();
-  if (commitResult.exitCode !== 0 || !/^[0-9a-f]{40}$/u.test(commit)) {
+  const treeResult = Bun.spawnSync(
+    [
+      'git',
+      '-C',
+      repositoryRoot,
+      'ls-tree',
+      '-r',
+      '-z',
+      'HEAD',
+      '--',
+      ...SOURCE_SERVICE_BUILD_PATHS,
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+    },
+  );
+  if (treeResult.exitCode !== 0) {
     throw new Error('Source Service build identity is unavailable.');
   }
+  const sourceTreeId = createHash('sha256')
+    .update('kite-source-service-tree-v1\0')
+    .update(treeResult.stdout)
+    .digest('hex')
+    .slice(0, 40);
   const diffResult = Bun.spawnSync(
     ['git', '-C', repositoryRoot, 'diff', '--binary', 'HEAD', '--', ...SOURCE_SERVICE_BUILD_PATHS],
     {
@@ -241,11 +258,11 @@ export function sourceServiceBuildIdentity(repositoryRoot: string): string {
   if (untracked.length > MAX_SOURCE_BUILD_UNTRACKED_FILES) {
     throw new Error('Source Service working tree exceeds the untracked file bound.');
   }
-  if (diffResult.stdout.byteLength === 0 && untracked.length === 0) return `dev:${commit}`;
+  if (diffResult.stdout.byteLength === 0 && untracked.length === 0) return `dev:${sourceTreeId}`;
 
   const digest = createHash('sha256');
   digest.update('kite-source-service-build-v1\0');
-  digest.update(commit);
+  digest.update(sourceTreeId);
   digest.update('\0tracked\0');
   digest.update(diffResult.stdout);
   let untrackedBytes = 0;
@@ -274,7 +291,7 @@ export function sourceServiceBuildIdentity(repositoryRoot: string): string {
     digest.update('\0');
     digest.update(readFileSync(absolute));
   }
-  return `dev:${commit}:dirty:${digest.digest('hex')}`;
+  return `dev:${sourceTreeId}:dirty:${digest.digest('hex')}`;
 }
 
 function installedBuildIdentity(executable: string): string {

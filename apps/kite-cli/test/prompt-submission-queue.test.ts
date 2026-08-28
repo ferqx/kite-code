@@ -1,8 +1,48 @@
 import { expect, test } from 'bun:test';
 import {
+  ensureTuiPromptSession,
   observeTuiPromptSubmission,
   TuiPromptSubmissionQueue,
 } from '../src/tui/prompt-submission-queue';
+
+test('TUI prompt session creates the initial Runtime synchronously when startup effect has not run', () => {
+  const created: string[] = [];
+  const resolution = ensureTuiPromptSession({
+    submittedSessionId: '',
+    getActiveSessionId: () => '',
+    createSession: () => {
+      created.push('session-created');
+      return 'session-created';
+    },
+  });
+
+  expect(resolution).toEqual({ sessionId: 'session-created', created: true });
+  expect(created).toEqual(['session-created']);
+});
+
+test('TUI prompt session preserves a submitted identity and reuses an existing startup Session', () => {
+  let createCalls = 0;
+  const createSession = () => {
+    createCalls += 1;
+    return 'unexpected';
+  };
+
+  expect(
+    ensureTuiPromptSession({
+      submittedSessionId: 'submitted-session',
+      getActiveSessionId: () => 'new-foreground-session',
+      createSession,
+    }),
+  ).toEqual({ sessionId: 'submitted-session', created: false });
+  expect(
+    ensureTuiPromptSession({
+      submittedSessionId: '',
+      getActiveSessionId: () => 'startup-session',
+      createSession,
+    }),
+  ).toEqual({ sessionId: 'startup-session', created: false });
+  expect(createCalls).toBe(0);
+});
 
 test('TUI prompt queue preserves FIFO order and the enqueue-time Session identity', async () => {
   const queue = new TuiPromptSubmissionQueue();

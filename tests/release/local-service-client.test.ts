@@ -43,7 +43,7 @@ test('managed client forwards only explicit built-in provider environment keys',
   expect(selected.KITE_CODE_HOME).toBeUndefined();
 });
 
-test('source Service build identity changes with tracked and bounded untracked inputs', () => {
+test('source Service build identity ignores unrelated commits and changes with owned inputs', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-build-id-'));
   try {
     mkdirSync(join(root, 'apps', 'kite-service'), { recursive: true });
@@ -57,15 +57,28 @@ test('source Service build identity changes with tracked and bounded untracked i
     runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture']);
 
     const clean = sourceServiceBuildIdentity(root);
+    const unrelated = join(root, 'apps', 'kite-cli', 'presentation.ts');
+    mkdirSync(join(root, 'apps', 'kite-cli'), { recursive: true });
+    writeFileSync(unrelated, 'export const presentationOnly = true;\n');
+    runGit(root, ['add', '.']);
+    runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'unrelated cli change']);
+    expect(sourceServiceBuildIdentity(root)).toBe(clean);
+
     writeFileSync(tracked, 'export const value = 2;\n');
-    const trackedDirty = sourceServiceBuildIdentity(root);
+    runGit(root, ['add', '.']);
+    runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'service change']);
+    const committedServiceChange = sourceServiceBuildIdentity(root);
     writeFileSync(tracked, 'export const value = 3;\n');
+    const trackedDirty = sourceServiceBuildIdentity(root);
+    writeFileSync(tracked, 'export const value = 4;\n');
     const trackedChangedAgain = sourceServiceBuildIdentity(root);
     const untracked = join(root, 'packages', 'fixture', 'new.ts');
     writeFileSync(untracked, 'export const added = true;\n');
     const withUntracked = sourceServiceBuildIdentity(root);
 
     expect(clean).toMatch(/^dev:[0-9a-f]{40}$/u);
+    expect(committedServiceChange).toMatch(/^dev:[0-9a-f]{40}$/u);
+    expect(committedServiceChange).not.toBe(clean);
     expect(trackedDirty).toMatch(/^dev:[0-9a-f]{40}:dirty:[0-9a-f]{64}$/u);
     expect(trackedChangedAgain).not.toBe(trackedDirty);
     expect(withUntracked).not.toBe(trackedChangedAgain);

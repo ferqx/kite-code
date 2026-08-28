@@ -40,8 +40,9 @@ ensure/connect companion，CLI另提供`kite service ensure/status/stop/restart`
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
-Service。source mode的build identity除HEAD外还绑定Service/package/root build inputs的tracked binary diff及有界
-untracked regular-file内容摘要；摘要不可用或越界时fail closed，dirty source不能复用同HEAD的旧detached Service。
+Service。source mode的build identity只绑定Service/package/root build inputs的committed tree、tracked binary diff及有界
+untracked regular-file内容摘要；CLI/TUI/docs-only commit不改变Service identity，避免仍兼容的detached Service被误判
+`build_mismatch`。摘要不可用或越界时fail closed，dirty Service source不能复用旧detached Service。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装后的 launcher 通过 managed-install marker 从当前

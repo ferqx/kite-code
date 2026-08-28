@@ -17,6 +17,8 @@
   reservation并发送；不得在`tryReservePrompt()`失败时静默清空。恢复中的active projection即使没有本地run Promise也必须
   等待Service projection变为idle。队列在Enter时固定Session identity，切换前台不能改投目标；单条失败仍对调用方可见且
   不阻塞后续消息。排队会显示明确提示，最终command失败显示可重试的“未发送”错误。
+- 主输入可以先于初始Session的React effect取得键盘focus；首次Enter必须同步复用active Session或创建唯一fresh Session，
+  再进入同一FIFO。空session ID或缺失Runtime必须转成可见失败，不能以resolved Promise静默清空输入。
 - 历史 Session 的完整 durable replay 只通过 `RuntimeClient.history` 的 App-injected `RuntimeHistoryClient`
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
   不是完整 history source。event-free snapshot仍是当前activity/interaction的权威projection：Service投影同revision

@@ -18,6 +18,18 @@ export class TuiPromptSubmissionQueue {
   }
 }
 
+export function ensureTuiPromptSession(options: {
+  readonly submittedSessionId: string;
+  readonly getActiveSessionId: () => string;
+  readonly createSession: () => string;
+}): { readonly sessionId: string; readonly created: boolean } {
+  const existing = options.submittedSessionId || options.getActiveSessionId();
+  if (existing) return Object.freeze({ sessionId: existing, created: false });
+  const sessionId = options.createSession();
+  if (!sessionId) throw new Error('TUI Runtime did not create an initial Session.');
+  return Object.freeze({ sessionId, created: true });
+}
+
 export function observeTuiPromptSubmission(options: {
   readonly queued: boolean;
   readonly submit: () => Promise<void>;

@@ -39,7 +39,11 @@ import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
 import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage, useI18n } from './i18n';
-import { observeTuiPromptSubmission, TuiPromptSubmissionQueue } from './prompt-submission-queue';
+import {
+  ensureTuiPromptSession,
+  observeTuiPromptSubmission,
+  TuiPromptSubmissionQueue,
+} from './prompt-submission-queue';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
 import { shouldAbortStoppedRun, shouldSetIdleAfterRun } from './run-lifecycle';
@@ -662,6 +666,25 @@ function TuiApp({
     void _requestTuiExit?.();
   }, [dispatch]);
 
+  const ensurePromptSession = React.useCallback(
+    (submittedSessionId: string): string => {
+      const resolved = ensureTuiPromptSession({
+        submittedSessionId,
+        getActiveSessionId: sessionManager.getActiveId,
+        createSession: () => sessionManager.createSession(workspace),
+      });
+      threadIdRef.current = resolved.sessionId;
+      if (resolved.created) {
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
+      }
+      return resolved.sessionId;
+    },
+    [dispatch, sessionManager, workspace],
+  );
+
   // Start with one fresh in-memory session. Historical entries are discovered
   // by the selector and are deliberately not registered here: registration
   // opens/reconciles a Runtime and must happen only after a selected session
@@ -669,13 +692,8 @@ function TuiApp({
   React.useEffect(() => {
     // Always start a new session — user switches to historical ones via
     // /resume. A discovery failure is therefore unable to block new input.
-    const newId = sessionManager.createSession(workspace);
-    threadIdRef.current = newId;
-    dispatch({
-      type: 'SET_SESSIONS',
-      sessions: sessionManager.getSnapshot(),
-    });
-  }, [sessionManager.createSession, workspace, sessionManager.getSnapshot, dispatch]);
+    ensurePromptSession('');
+  }, [ensurePromptSession]);
 
   /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
   const loadSessionById = React.useCallback(
@@ -1312,9 +1330,9 @@ function TuiApp({
       // A prompt queued behind an active turn belongs to the Session that was
       // foreground when the user pressed Enter. Do not retarget it if the user
       // switches Sessions while the preceding turn is still completing.
-      let threadId = submittedThreadId;
+      let threadId = ensurePromptSession(submittedThreadId);
       let rt = sessionManager.getRuntime(threadId);
-      if (!rt) return;
+      if (!rt) throw new Error(`Runtime session is unavailable: ${threadId}`);
 
       if (rt.localReplayRecovery) {
         const continued = await sessionManager.forkRecoveredSessionForContinuation(threadId);
@@ -1430,7 +1448,7 @@ function TuiApp({
         })();
       }
     },
-    [dispatch, sessionManager],
+    [dispatch, ensurePromptSession, sessionManager],
   );
   const runTask = React.useCallback(
     (
