@@ -217,8 +217,11 @@ interactionMode 表达，不能由 approval grant 或 reviewer payload 产生第
 Shell 的 read-only classifier 不是 Policy 授权来源，也不能让命令在 Planning 或 Building 中免审。它只用于
 只读 Subagent role ceiling、scheduler metadata，以及已按 mode 授权后选择 hardened execution environment。
 分类仍必须按每个程序的参数与操作数语义 fail closed：只有有限、已验证的只读 grammar 可以得到
-`read_only + sideEffect=false`。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
-模式不得进入该 grammar；例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
+`read_only + sideEffect=false`。Workspace inventory的受限`for` shape只允许relative literal/glob iterator、单一
+loop variable与逐段复用现有只读grammar的body/suffix；它解决同一Policy allow fact被generic Shell
+`minimumApproval`重复升级为人工审批的问题，不是通用Shell parser或新的授权来源。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
+模式不得进入该 grammar；Git branch只额外接受零操作数`git branch --show-current`，列举、创建、删除、重命名或
+附加操作数仍是非只读。例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
 file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
 substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
 走只读 fast path；未加引号的 brace expansion 也必须拒绝，避免它在静态检查后合成危险 option。`file`
@@ -241,8 +244,9 @@ payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `
 该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
 `RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
 `--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
-按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、不产生
-patch 的 `git log` 和其他可证明 baseline Shell 可直接执行；已知 external/sensitive scope 才按当前 mode 审查。
+按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、`git log`、
+不写文件的`git diff`及由`head/tail/echo`组成的只读pipe可直接执行；`2>/dev/null`等只丢弃输出的redirect不产生
+Workspace mutation或人工审批。已知external/sensitive scope才按当前mode审查。
 命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment，固定关闭 system/global config、
 credential prompt、pager、external diff、optional locks 与 repository fsmonitor helper。Planning 与关键系统
 destructive hard deny 保持独立。`git_inspect` 仍可作为结构化 capability，但不由 raw Git token 强制路由，
@@ -439,7 +443,7 @@ SPI registry 保留 immutable definition/executor identity，App 只保留 compo
 RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与四类 Model operations。
 App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 的公开模型投影由 Builtin
 `projectSubagentResult()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
-`packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`
+`packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`
 与 RM schema parity 测试棘轮守护：Builtin catalog 的 28/20/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution

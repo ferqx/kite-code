@@ -78,6 +78,11 @@ interface SubscriptionState {
   readonly spec: RuntimeSubscriptionSpec;
   readonly queue: RuntimeNotificationQueue;
   readonly signal?: AbortSignal;
+  readonly ready?: Readonly<{
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: RuntimeClientError) => void;
+  }>;
   remoteId?: string;
   remoteGeneration?: number;
   /** Local connection generation that owns the remote subscription identity. */
@@ -189,6 +194,27 @@ export class RuntimeClient implements AsyncDisposable {
     });
   }
 
+  /**
+   * Acquire a stream only after the remote initial watermark is ready. This
+   * prevents a command from racing the Server's initial subscription phase
+   * and losing live ephemeral notifications produced in that window.
+   */
+  async subscribeReady(
+    subscription: RuntimeSubscription,
+  ): Promise<AsyncIterable<RuntimeAccessNotification>> {
+    const state = this.#createSubscription(subscription.spec, subscription.signal, true);
+    try {
+      await this.#activateSubscription(state);
+      await state.ready!.promise;
+      return state.queue.iterable(() => {
+        void this.#closeSubscription(state, true).catch(() => undefined);
+      });
+    } catch (error) {
+      await this.#closeSubscription(state, false);
+      throw error;
+    }
+  }
+
   /** Optional lifecycle handle for consumers that need the remote subscription identity. */
   async subscribeHandle(spec: RuntimeSubscriptionSpec): Promise<RuntimeClientSubscription> {
     const state = this.#createSubscription(spec);
@@ -207,12 +233,28 @@ export class RuntimeClient implements AsyncDisposable {
     return this.#closeSubscription(state, true);
   }
 
-  #createSubscription(spec: RuntimeSubscriptionSpec, signal?: AbortSignal): SubscriptionState {
+  #createSubscription(
+    spec: RuntimeSubscriptionSpec,
+    signal?: AbortSignal,
+    waitForReady = false,
+  ): SubscriptionState {
+    let ready: SubscriptionState['ready'];
+    if (waitForReady) {
+      let resolve!: () => void;
+      let reject!: (error: RuntimeClientError) => void;
+      const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      void promise.catch(() => undefined);
+      ready = Object.freeze({ promise, resolve, reject });
+    }
     const state: SubscriptionState = {
       id: `client-subscription-${++this.#nextSubscription}`,
       spec,
       queue: new RuntimeNotificationQueue(),
       signal,
+      ...(ready ? { ready } : {}),
     };
     this.#subscriptions.set(state.id, state);
     const onAbort = (): void => {
@@ -229,6 +271,7 @@ export class RuntimeClient implements AsyncDisposable {
 
   async #closeSubscription(state: SubscriptionState, sendUnsubscribe: boolean): Promise<boolean> {
     if (!this.#subscriptions.delete(state.id)) return false;
+    state.ready?.reject(closedError());
     state.queue.close();
     if (state.signal && state.onAbort) state.signal.removeEventListener('abort', state.onAbort);
     const remoteId = state.remoteId;
@@ -255,6 +298,7 @@ export class RuntimeClient implements AsyncDisposable {
     const connection = this.#connection;
     this.#connection = undefined;
     for (const state of this.#subscriptions.values()) {
+      state.ready?.reject(closedError());
       state.remoteId = undefined;
       state.remoteGeneration = undefined;
       state.queue.close();
@@ -576,6 +620,7 @@ export class RuntimeClient implements AsyncDisposable {
             sessionId: spec.sessionId,
           });
         }
+        state.ready?.resolve();
         return;
     }
   }

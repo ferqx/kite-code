@@ -391,7 +391,13 @@ function idempotentReplay(sessionId = 'session-1') {
 }
 
 function projection(sessionId: string): RuntimeSessionProjection {
-  return { schema: 'kite.runtime-projection.v1', sessionId, revision: 0, lifecycle: 'open' };
+  return {
+    schema: 'kite.runtime-projection.v1',
+    sessionId,
+    revision: 0,
+    lifecycle: 'open',
+    interactionQueue: { revision: 0, interactions: [] },
+  };
 }
 
 function receiptKey(

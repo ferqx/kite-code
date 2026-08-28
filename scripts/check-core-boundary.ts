@@ -81,10 +81,20 @@ function resolveImport(file: string, specifier: string, sourceRoot: string): str
   if (specifier.startsWith('@/tests/')) {
     return resolve(dirname(sourceRoot), 'tests', specifier.slice('@/tests/'.length));
   }
+  if (specifier.startsWith('#kite-cli/')) {
+    const appSourceRoot = resolve(dirname(sourceRoot), 'apps/kite-cli/src');
+    const target = resolve(appSourceRoot, specifier.slice('#kite-cli/'.length));
+    return isWithin(target, appSourceRoot) && resolveSourceModule(target) ? target : null;
+  }
+  if (specifier.startsWith('#kite-service/')) {
+    const serviceSourceRoot = resolve(dirname(sourceRoot), 'apps/kite-service/src');
+    const target = resolve(serviceSourceRoot, specifier.slice('#kite-service/'.length));
+    return isWithin(target, serviceSourceRoot) && resolveSourceModule(target) ? target : null;
+  }
   if (specifier.startsWith('@/app/sandbox/')) {
     const relocated = resolve(
       dirname(sourceRoot),
-      'apps/kite/src/sandbox',
+      'apps/kite-service/src/sandbox',
       specifier.slice('@/app/sandbox/'.length),
     );
     if (resolveSourceModule(relocated)) return relocated;
@@ -237,7 +247,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
   );
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite/src/bootstrap/runtime/subagent',
+    'apps/kite-service/src/bootstrap/runtime/subagent',
   );
   const taskTool = resolve(relocatedSubagentRoot, 'task-tool');
   const concreteProviderModules = [
@@ -270,7 +280,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
 function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite/src/bootstrap/runtime/subagent',
+    'apps/kite-service/src/bootstrap/runtime/subagent',
   );
   const toolAdapter = normalizedModulePath(resolve(relocatedSubagentRoot, 'tool-adapter'));
   const taskTool = normalizedModulePath(resolve(relocatedSubagentRoot, 'task-tool'));
@@ -406,7 +416,7 @@ function forbiddenSandboxProviderAuthority(sourceRoot: string): Violation[] {
 }
 
 function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
-  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite/src/sandbox');
+  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite-service/src/sandbox');
   const appSandboxRoot = existsSync(relocatedAppSandbox)
     ? relocatedAppSandbox
     : resolve(sourceRoot, 'app/sandbox');
@@ -759,20 +769,33 @@ const controllersRoot = join(coreRoot, 'controllers');
 const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
 const packagesRoot = join(root, 'packages');
-const appSourceRoot = join(root, 'apps', 'kite', 'src');
+const appSourceRoot = join(root, 'apps', 'kite-cli', 'src');
+const serviceSourceRoot = join(root, 'apps', 'kite-service', 'src');
 const packageSourceRoots = existsSync(packagesRoot)
   ? readdirSync(packagesRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => join(packagesRoot, entry.name, 'src'))
       .filter(existsSync)
   : [];
-const productionSourceRoots = [sourceRoot, appSourceRoot, ...packageSourceRoots, scriptsRoot];
+const productionSourceRoots = [
+  sourceRoot,
+  appSourceRoot,
+  serviceSourceRoot,
+  ...packageSourceRoots,
+  scriptsRoot,
+].filter(existsSync);
 const checkerFile = resolve(root, 'scripts/check-core-boundary.ts');
 const violations = [
-  ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
+  ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [
+    appRoot,
+    appSourceRoot,
+    serviceSourceRoot,
+  ]),
   ...forbiddenImports('protocol must not import core or app', protocolRoot, sourceRoot, [
     coreRoot,
     appRoot,
+    appSourceRoot,
+    serviceSourceRoot,
   ]),
   ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),

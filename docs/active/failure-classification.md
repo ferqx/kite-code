@@ -2,10 +2,10 @@
 
 状态：active
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
-验证：`bun test apps/kite/test/runtime/failures.test.ts apps/kite/test/runtime/failure-taxonomy.test.ts apps/kite/test/runtime/failure-mode-conformance.test.ts apps/kite/test/runtime/resource-budget-admission.test.ts apps/kite/test/runtime/tool-outcome-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite/test/subagent-continuation-codec.test.ts apps/kite/test/subagent-runner.test.ts`。
+验证：`bun test apps/kite-service/test/runtime/failures.test.ts apps/kite-service/test/runtime/failure-taxonomy.test.ts apps/kite-service/test/runtime/failure-mode-conformance.test.ts apps/kite-service/test/runtime/resource-budget-admission.test.ts apps/kite-service/test/runtime/tool-outcome-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/subagent-continuation-codec.test.ts apps/kite-service/test/subagent-runner.test.ts`。
 
 Runtime failures use the Agent-Kernel-owned `ClassifiedFailure`; App
-`apps/kite/src/bootstrap/runtime/failures.ts` is only the Runtime State type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Auto-review 的 `ask_user` 决定不是失败：它携带 `escalatedToUser`，并在用户批准或拒绝前保持非终态；明确 `reject` 记录 `auto_review_rejected`，技术 reviewer failure 则沿人工审批升级路径处理，不伪造成模型拒绝。
+`apps/kite-service/src/bootstrap/runtime/failures.ts` is only the Runtime State type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Auto-review 的 `ask_user` 决定不是失败：它携带 `escalatedToUser`，并在用户批准或拒绝前保持非终态；明确 `reject` 记录 `auto_review_rejected`，技术 reviewer failure 则沿人工审批升级路径处理，不伪造成模型拒绝。
 
 CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
 `planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造

@@ -26,6 +26,8 @@
   不同投影均被拒绝或标记 resync。Server 的短期 notification replay 只帮助断线恢复，不是完整 history。
 - History adapter 与 control transport 正交注入；Client facade 可以同时暴露两者，但 history 不通过 Server
   retention，也不让 Client 取得 raw Runtime event 或 Store authority。
+- Native descriptor/discovery/process、WebSocket/History/App Control connector contract 位于
+  `@kite-ai/kite-local-runtime/client`；本 package 不反向依赖该 Native owner，也不在 browser build 中加入环境分支。
 
 ## 允许依赖
 
@@ -33,7 +35,9 @@
 
 ## 公开入口
 
-只导出 package 根入口；具体 stdio/WebSocket/进程 I/O 由 App carrier 拥有。
+只导出 package 根入口；具体 stdio/development carrier 仍由当前 App 拥有，Native connector 已由独立
+`kite-local-runtime/client` 组合本接口。Runtime Client 本身保持 transport-neutral，并重新导出closed
+`assertRuntimeClientEvent` validator供Native History复用唯一client-safe event边界。
 
 ## 测试
 

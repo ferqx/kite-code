@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { buildPolicyProvenReadOnlyEnv } from '../trusted-readonly-environment';
 import { DEFAULT_RESOURCE_LIMITS, type ResourceLimits } from '../types';
 
@@ -38,12 +38,26 @@ export function buildHardenedEnv(
     }
   }
   if (process.env.HOME) env.HOME = process.env.HOME;
+  const developerBin = selectedDarwinDeveloperBin();
+  if (developerBin) {
+    env.PATH = env.PATH ? `${developerBin}${delimiter}${env.PATH}` : developerBin;
+  }
   env.TMPDIR = sandboxTmp;
   env.TMP = sandboxTmp;
   env.TEMP = sandboxTmp;
   env.XDG_CACHE_HOME = join(sandboxTmp, '.cache');
   env.BUN_INSTALL_CACHE_DIR = sandboxBunCache;
   return env;
+}
+
+/** Resolve the selected Apple toolchain without invoking the xcrun shim or its external cache. */
+export function selectedDarwinDeveloperBin(): string | undefined {
+  if (process.platform !== 'darwin') return undefined;
+  try {
+    return realpathSync.native('/private/var/select/developer_dir/usr/bin');
+  } catch {
+    return undefined;
+  }
 }
 
 const SAFE_ENV_KEYS = [

@@ -34,6 +34,8 @@
         "@biomejs/biome": "^2.5.0",
         "@kite-ai/agent-kernel": "workspace:*",
         "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/kite-app-contract": "workspace:*",
+        "@kite-ai/kite-local-runtime": "workspace:*",
         "@kite-ai/runtime-client": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-host": "workspace:*",
@@ -49,12 +51,14 @@
         "typescript": "^5.9.3",
       },
     },
-    "apps/kite": {
-      "name": "@kite-ai/kite",
+    "apps/kite-cli": {
+      "name": "@kite-ai/kite-cli",
       "version": "0.1.0",
       "dependencies": {
         "@inkjs/ui": "^2.0.0",
         "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/kite-app-contract": "workspace:*",
+        "@kite-ai/kite-local-runtime": "workspace:*",
         "@kite-ai/runtime-client": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-host": "workspace:*",
@@ -73,6 +77,10 @@
         "string-width": "^8.2.0",
         "zod": "^4.3.6",
       },
+    },
+    "apps/kite-service": {
+      "name": "@kite-ai/kite-service",
+      "version": "0.0.0",
     },
     "packages/agent-kernel": {
       "name": "@kite-ai/agent-kernel",
@@ -94,6 +102,23 @@
         "jsdom": "^26.1.0",
         "turndown": "^7.2.1",
         "yaml": "^2.9.0",
+        "zod": "^4.3.6",
+      },
+    },
+    "packages/kite-app-contract": {
+      "name": "@kite-ai/kite-app-contract",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kite-ai/runtime-contract": "workspace:*",
+      },
+    },
+    "packages/kite-local-runtime": {
+      "name": "@kite-ai/kite-local-runtime",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kite-ai/kite-app-contract": "workspace:*",
+        "@kite-ai/runtime-client": "workspace:*",
+        "@kite-ai/runtime-protocol": "workspace:*",
         "zod": "^4.3.6",
       },
     },
@@ -214,7 +239,13 @@
 
     "@kite-ai/builtin-runtime": ["@kite-ai/builtin-runtime@workspace:packages/builtin-runtime"],
 
-    "@kite-ai/kite": ["@kite-ai/kite@workspace:apps/kite"],
+    "@kite-ai/kite-app-contract": ["@kite-ai/kite-app-contract@workspace:packages/kite-app-contract"],
+
+    "@kite-ai/kite-cli": ["@kite-ai/kite-cli@workspace:apps/kite-cli"],
+
+    "@kite-ai/kite-local-runtime": ["@kite-ai/kite-local-runtime@workspace:packages/kite-local-runtime"],
+
+    "@kite-ai/kite-service": ["@kite-ai/kite-service@workspace:apps/kite-service"],
 
     "@kite-ai/runtime-client": ["@kite-ai/runtime-client@workspace:packages/runtime-client"],
 

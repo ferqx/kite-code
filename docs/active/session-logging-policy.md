@@ -4,7 +4,7 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicy` 时。
 
-验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite/test/session-logger/metadata.test.ts apps/kite/test/session-logger/recorder.test.ts apps/kite/test/isolated/session-logger/writer.test.ts apps/kite/test/session-logger/active-session-lease.test.ts apps/kite/test/session-logger/retention.test.ts apps/kite/test/isolated/session-logger/writer-security.test.ts apps/kite/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
@@ -44,8 +44,9 @@ Client-safe command/receipt/projection/stream DTO；Runtime 执行仍按既有 r
 collector，Host 不复制正文、reasoning、Tool 参数、credential 或 Artifact 内容。
 
 RM-06 的 Host lifecycle、effect supervisor 与 restart recovery 也不成为第二个 Session Logger owner。Host
-只管理 execution signal、SQLite Store acknowledgement/lease 与 Client-safe notification；唯一 App execution
-bridge 继续把既有 Runtime events 写入原 collector。取消、续租失败和 recovery 不得把正文、reasoning、Tool
+只管理 execution signal、SQLite Store acknowledgement/lease 与 Client-safe notification；唯一 Service execution
+bridge 把既有 Runtime events 写入 Service-owned collector。CLI/TUI只消费client-safe projection，不持有writer。
+取消、续租失败和 recovery 不得把正文、reasoning、Tool
 参数、credential 或 Artifact 内容复制到 Host receipt/notification。
 
 `SessionLogCollector` 只接受 `off | metadata | content` 三种已解析模式。App 配置加载边界先
@@ -153,8 +154,8 @@ collector 在 content 路径先按 event type allowlist 拒绝事件，再调用
 或 thread 标识，content 模式不生成 `summary.json` 或独立 error log。正文进入 mapper 前还必须
 取得可信 runtime secret detector 的结构化 `clear` 结论；detector 缺失、返回 unknown/secret
 或抛错时拒绝该正文。Regex 脱敏只能作为 clear 结论后的纵深防御，不能作为允许落盘的依据。
-唯一 detector owner 是 `@kite-ai/builtin-runtime/model` 的 `createModelSecretDetector`。CLI/TUI
-composition 与 App run composition 都使用它，以当前 Runtime 持有的 API key 与 credential 类环境
+唯一 detector owner 是 `@kite-ai/builtin-runtime/model` 的 `createModelSecretDetector`。Service Runtime
+composition 使用它，以当前 Runtime 持有的 API key 与 credential 类环境
 变量建立 exact-match secret 集合，并叠加保守 secret shape/protected-path 检测；不存在第二 detector
 别名、实现或 fallback。这样既确保披露为 content 时 clear 正文实际可写，也确保命中 secret 的整条
 正文不写。
@@ -224,9 +225,13 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 损坏 lease、未知 root 条目或无法证明完整扫描时拒绝建立新 writer，也不把旧全量 serializer
 作为兼容 fallback。
 
-默认测试 runner 同时隔离 `HOME` 与 `KITE_CODE_HOME`。直接执行 session writer 定向测试时，
+默认测试 runner 同时隔离 `HOME`，并把 `KITE_CODE_HOME` 显式设为该临时 home 下的 exact
+`.kite-code` root。直接执行 session writer 定向测试时，
 测试文件自身也必须创建并清理临时 `KITE_CODE_HOME`，不得依赖 runner 包装层，避免开发者的真实
 `~/.kite-code/sessions` 被测试 session 污染。
+原生ACL smoke也把`KITE_CODE_HOME`当作exact code root：该root必须位于测试创建、当前用户拥有的private
+container内；link/reparse negative必须直接替换`<codeRoot>/sessions`，不得继续攻击旧的
+`<home>/.kite-code/sessions`路径后误报已验证。
 
 单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
@@ -234,5 +239,7 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分别上传带 OS/Bun
 身份的 `session-log-acl-<runner>` JSON 证据。Windows smoke 的独立只读验证固定调用 `System32` 下的
 Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用生产 ACL API，因此能独立
-验证实际写入的 owner 和 DACL。
+验证实际写入的 owner 和 DACL。该一次性evidence verifier有30秒有界上限，以容纳hosted runner的module cold start；
+timeout仍使job失败，不降级为未验证或跳过ACL断言。smoke的空root maintenance使用5秒有界预算，避免把hosted
+filesystem调度抖动误作50ms production hot-path超限；仍要求capacity satisfied且不改变production默认deadline。
 > 路径同步：session logging 使用当前无版本命名的 runtime state/store 路径。

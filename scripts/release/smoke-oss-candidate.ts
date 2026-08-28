@@ -31,6 +31,7 @@ const smokeRoot = mkdtempSync(join(tmpdir(), 'kite-code-release-smoke-'));
 const prefix = join(smokeRoot, 'install');
 const variantPath = join(smokeRoot, 'variant.tar.gz');
 
+let smokeFailure: unknown;
 try {
   await installOssCandidate({ archivePath: verified.archivePath, prefix });
   await runInstalledSmokes(prefix, verified.manifest.target.os === 'win32');
@@ -60,6 +61,7 @@ try {
         'install',
         'cli-help-version',
         'tui-version-pty-startup',
+        'service-companion',
         'mcp-stdio-authenticated-wrapper',
         'upgrade',
         'rollback',
@@ -67,14 +69,34 @@ try {
       ],
     }),
   );
+} catch (error) {
+  smokeFailure = error;
 } finally {
-  if (existsSync(smokeRoot)) rmSync(smokeRoot, { recursive: true, force: true });
+  try {
+    if (existsSync(smokeRoot)) {
+      // Windows can retain a just-exited native executable briefly. Keep the
+      // cleanup bounded, but do not let that transient lock hide the actual
+      // smoke failure that caused this path to run.
+      rmSync(smokeRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: process.platform === 'win32' ? 50 : 0,
+        retryDelay: 100,
+      });
+    }
+  } catch (cleanupError) {
+    smokeFailure = smokeFailure
+      ? new AggregateError([smokeFailure, cleanupError], 'Release smoke and cleanup both failed')
+      : cleanupError;
+  }
 }
+if (smokeFailure) throw smokeFailure;
 
 async function runInstalledSmokes(prefix: string, windows: boolean): Promise<void> {
   const suffix = windows ? '.exe' : '';
   const cli = join(prefix, 'bin', `kite${suffix}`);
   const tui = join(prefix, 'bin', `kite-tui${suffix}`);
+  const service = join(prefix, 'bin', `kite-service${suffix}`);
   const help = Bun.spawnSync([cli, '--help'], { stdout: 'pipe', stderr: 'pipe' });
   if (help.exitCode !== 0 || !help.stdout.toString().includes('Usage:')) {
     throw installedSmokeError('CLI help', help);
@@ -87,7 +109,7 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
   if (tuiVersion.exitCode !== 0 || !tuiVersion.stdout.toString().startsWith('Kite Code TUI ')) {
     throw installedSmokeError('TUI version', tuiVersion);
   }
-  await runInstalledMcpStdioWrapperSmoke(cli);
+  await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
 }
 
@@ -100,6 +122,7 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
     args: [resolve('tests/fixtures/mcp-governance-server.ts')],
     cwd: resolve('.'),
   });
+  const stderrDiagnostic = collectBoundedStreamDiagnostic(handle.stderr);
   const reader = handle.stdout.getReader();
   let failure: unknown;
   try {
@@ -128,10 +151,16 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   } catch (error) {
     failure = error;
   }
-  reader.releaseLock();
+  const remainingOutput = drainRemainingMcpOutput(reader).catch((error: unknown) => {
+    failure ??= error;
+  });
   await handle.closeInput().catch(() => undefined);
   try {
     await handle.terminal;
+  } catch (error) {
+    failure ??= error;
+  }
+  try {
     const cleanup = await handle.cleanup();
     if (!cleanup.confirmedExited || !cleanup.terminalReceived || cleanup.unconfirmedProcessCount) {
       failure ??= new Error('Installed MCP stdio wrapper cleanup was not confirmed.');
@@ -139,7 +168,30 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
   } catch (error) {
     failure ??= error;
   }
-  if (failure) throw failure;
+  await remainingOutput;
+  reader.releaseLock();
+  const stderr = await stderrDiagnostic.catch(() => 'diagnostic_unavailable');
+  if (failure) {
+    const wrapperExitCode = await handle.exited.catch(() => null);
+    const exitDiagnostic = `wrapper_exit=${wrapperExitCode ?? 'unknown'}`;
+    if (!stderr) {
+      throw new Error(`Installed MCP stdio wrapper failed (${exitDiagnostic}).`, {
+        cause: failure,
+      });
+    }
+    throw new Error(`Installed MCP stdio wrapper failed (${exitDiagnostic}): ${stderr}`, {
+      cause: failure,
+    });
+  }
+}
+
+async function drainRemainingMcpOutput(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  while (true) {
+    const next = await reader.read();
+    if (next.done) return;
+  }
 }
 
 async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {
@@ -189,4 +241,23 @@ function boundedStartupDiagnostic(value: Uint8Array): string {
     .decode(value)
     .slice(0, 240)
     .replace(/[^\x20-\x7e\r\n\t]/g, '?');
+}
+
+async function collectBoundedStreamDiagnostic(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let diagnostic = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (diagnostic.length < 240) {
+        diagnostic += decoder.decode(value, { stream: true }).slice(0, 240 - diagnostic.length);
+      }
+    }
+    if (diagnostic.length < 240) diagnostic += decoder.decode().slice(0, 240 - diagnostic.length);
+  } finally {
+    reader.releaseLock();
+  }
+  return diagnostic.replace(/[^\x20-\x7e\r\n\t]/g, '?');
 }

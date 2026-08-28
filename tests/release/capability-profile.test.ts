@@ -5,7 +5,7 @@ import {
   type CapabilityProfile,
   evaluateCapabilityProfileAdmission,
   parseCapabilityProfile,
-} from '#app/config/release-capabilities';
+} from '#kite-service/config/release-capabilities';
 
 const profilePaths = [
   'auto-compaction.json',

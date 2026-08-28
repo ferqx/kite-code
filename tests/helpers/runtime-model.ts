@@ -34,35 +34,35 @@ import type {
   SubagentHandle,
   SuspendedSubagentSnapshot,
 } from '@kite-ai/runtime-spi';
-import { projectPrimaryModelEffect } from '#app/bootstrap/runtime/model-effect';
-import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
-import { subagentContinuationCursorId } from '#app/bootstrap/runtime/subagent/continuation-codec';
-import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
-import type { RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
+import { projectPrimaryModelEffect } from '#kite-service/bootstrap/runtime/model-effect';
+import { ProviderReadinessCoordinator } from '#kite-service/bootstrap/runtime/provider-readiness';
+import type { RuntimeActionProvider } from '#kite-service/bootstrap/runtime/state-runner';
+import { subagentContinuationCursorId } from '#kite-service/bootstrap/runtime/subagent/continuation-codec';
+import { normalizeTerminalRuntimeEvent } from '#kite-service/bootstrap/runtime/terminal-outcome';
+import type { RuntimeTurnInput } from '#kite-service/bootstrap/runtime/turn-coordinator';
 import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '#runtime-host';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { createAppRuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
-import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import { createPipelineSubagentRuntime } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
-import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
+import { createAppRuntimeEffectExecutor } from '../../apps/kite-service/src/bootstrap/runtime/runtime-effect-coordinator';
+import type { RuntimeExecutorDependencies } from '../../apps/kite-service/src/bootstrap/runtime/runtime-effect-dependencies';
+import type { RuntimeEffectExecutor } from '../../apps/kite-service/src/bootstrap/runtime/state-runtime';
+import { createPipelineSubagentRuntime } from '../../apps/kite-service/src/bootstrap/runtime/subagent/pipeline-runtime';
+import { createAppToolPipelineComposition } from '../../apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition';
 import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
-} from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import { createAppTaskToolPipelineAttemptRuntime } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-task-attempt';
-import { executeAppRuntimeTools } from '../../apps/kite/src/runtime/tool-execution/router';
-import { createAppStateToolPipelinePersistence } from '../../apps/kite/src/runtime/tool-persistence';
+} from '../../apps/kite-service/src/bootstrap/runtime/tool-pipeline-ordinary-attempt';
+import { createAppTaskToolPipelineAttemptRuntime } from '../../apps/kite-service/src/bootstrap/runtime/tool-pipeline-task-attempt';
+import { executeAppRuntimeTools } from '../../apps/kite-service/src/runtime/tool-execution/router';
+import { createAppStateToolPipelinePersistence } from '../../apps/kite-service/src/runtime/tool-persistence';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   type AppPreparedShellExecutionCarrier,
   type AppPreparedShellExecutionPort,
   appPreparedShellExecutionPort,
   projectAppHostShellResult,
-} from '../../apps/kite/src/sandbox/prepared-tool-pipeline';
+} from '../../apps/kite-service/src/sandbox/prepared-tool-pipeline';
 import {
   runTestRuntimeAgent as runRuntimeAgentForTest,
   type TestRuntimeAgentInput,

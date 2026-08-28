@@ -26,17 +26,17 @@ describe('layered test runner', () => {
     const second = join(root, 'tests', 'second.test.ts');
     writeFileSync(
       first,
-      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs';" +
+      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(firstOutput) +
-        ', process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(process.env.HOME); });',
+        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code')); });",
     );
     writeFileSync(
       second,
-      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs';" +
+      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(secondOutput) +
-        ', process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(process.env.HOME); });',
+        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code')); });",
     );
     expect(
       await runTestJobs(

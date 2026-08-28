@@ -2,6 +2,7 @@ import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeClientInteraction,
   type RuntimeSessionProjection,
+  sameRuntimeClientInteractionIdentity,
 } from './projections';
 import {
   hasExactKeys,
@@ -101,6 +102,16 @@ export interface RuntimeClientTerminalOutcome {
   readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
 }
 
+export interface RuntimeClientRewindFileOutcome {
+  readonly restored: readonly string[];
+  readonly deleted: readonly string[];
+  readonly failed: readonly { readonly path: string; readonly error: string }[];
+  readonly conflicts: readonly {
+    readonly path: string;
+    readonly reason: 'modified_after_kite_write' | 'unverified_postimage';
+  }[];
+}
+
 /**
  * Closed client event vocabulary. Unknown Runtime/domain events must be
  * omitted; they must never cross this boundary as a generic object.
@@ -147,6 +158,8 @@ export type RuntimeClientEvent =
   | {
       readonly type: 'tool.queued';
       readonly toolId: string;
+      /** Opaque model-message identity used only for presentation grouping. */
+      readonly presentationGroupId?: string;
       /** Closed presentation category, never a raw tool/provider string. */
       readonly toolName?: RuntimeToolDisplayName;
       /** App-owned bounded label for a dynamic tool name. */
@@ -313,6 +326,16 @@ export type RuntimeClientEvent =
       readonly recoveryEntry: RuntimeClientTerminalOutcome['recoveryEntry'];
     }
   | {
+      readonly type: 'rewind.terminal';
+      readonly rewindId: string;
+      readonly commandId: string;
+      readonly sourceSessionId: string;
+      readonly targetSessionId: string;
+      readonly status: 'completed' | 'failed';
+      readonly fileOutcome?: RuntimeClientRewindFileOutcome;
+      readonly failureCode?: 'checkpoint_unavailable' | 'execution_failed';
+    }
+  | {
       readonly type: 'session.notice';
       readonly code: 'reconnected' | 'history_gap' | 'session_closed';
       readonly message?: string;
@@ -435,6 +458,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
       'summary',
       'generation',
       'grants',
+      'command',
       'question',
       'allowFreeText',
       'options',
@@ -456,9 +480,10 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           presentKeys(
             value,
             ['kind', 'interactionId', 'sessionRevision', 'generation', 'grants'],
-            ['title', 'summary'],
+            ['title', 'summary', 'command'],
           ),
         ) &&
+        (!Object.hasOwn(value, 'command') || isBoundedUserText(value.command)) &&
         isNonNegativeSafeInteger(value.generation) &&
         Array.isArray(value.grants) &&
         value.grants.length > 0 &&
@@ -599,10 +624,11 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'toolId', 'presentation', 'arguments', 'summary'],
-            ['toolName', 'displayLabel'],
+            ['presentationGroupId', 'toolName', 'displayLabel'],
           ),
         ) &&
         isIdentifier(value.toolId) &&
+        (!Object.hasOwn(value, 'presentationGroupId') || isIdentifier(value.presentationGroupId)) &&
         isBoundedString(value.summary) &&
         isRuntimeToolPresentation(value.presentation) &&
         isRecord(value.arguments) &&
@@ -838,6 +864,27 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value.recoveryEntry === 'new_run' ||
           value.recoveryEntry === 'operator_action')
       );
+    case 'rewind.terminal':
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'rewindId', 'commandId', 'sourceSessionId', 'targetSessionId', 'status'],
+            ['fileOutcome', 'failureCode'],
+          ),
+        ) &&
+        isIdentifier(value.rewindId) &&
+        isIdentifier(value.commandId) &&
+        isIdentifier(value.sourceSessionId) &&
+        isIdentifier(value.targetSessionId) &&
+        (value.status === 'completed' || value.status === 'failed') &&
+        (!Object.hasOwn(value, 'fileOutcome') ||
+          isRuntimeClientRewindFileOutcome(value.fileOutcome)) &&
+        (!Object.hasOwn(value, 'failureCode') ||
+          value.failureCode === 'checkpoint_unavailable' ||
+          value.failureCode === 'execution_failed')
+      );
     case 'session.notice':
       return (
         hasExactKeys(value, presentKeys(value, ['type', 'code'], ['message'])) &&
@@ -1038,6 +1085,36 @@ function isRuntimeClientTerminalOutcome(value: unknown): value is RuntimeClientT
   );
 }
 
+function isRuntimeClientRewindFileOutcome(value: unknown): value is RuntimeClientRewindFileOutcome {
+  if (!isRecord(value) || !hasExactKeys(value, ['restored', 'deleted', 'failed', 'conflicts'])) {
+    return false;
+  }
+  const paths = (candidate: unknown): candidate is readonly string[] =>
+    Array.isArray(candidate) && candidate.length <= 10_000 && candidate.every(isBoundedString);
+  return (
+    paths(value.restored) &&
+    paths(value.deleted) &&
+    Array.isArray(value.failed) &&
+    value.failed.length <= 10_000 &&
+    value.failed.every(
+      (entry) =>
+        isRecord(entry) &&
+        hasExactKeys(entry, ['path', 'error']) &&
+        isBoundedString(entry.path) &&
+        isBoundedString(entry.error),
+    ) &&
+    Array.isArray(value.conflicts) &&
+    value.conflicts.length <= 10_000 &&
+    value.conflicts.every(
+      (entry) =>
+        isRecord(entry) &&
+        hasExactKeys(entry, ['path', 'reason']) &&
+        isBoundedString(entry.path) &&
+        (entry.reason === 'modified_after_kite_write' || entry.reason === 'unverified_postimage'),
+    )
+  );
+}
+
 function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProjection {
   if (!isRecord(value)) return false;
   return (
@@ -1045,8 +1122,8 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       value,
       presentKeys(
         value,
-        ['schema', 'sessionId', 'revision', 'lifecycle'],
-        ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork'],
+        ['schema', 'sessionId', 'revision', 'lifecycle', 'interactionQueue'],
+        ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork', 'model'],
       ),
     ) &&
     value.schema === RUNTIME_PROJECTION_SCHEMA_ &&
@@ -1059,7 +1136,69 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       value.lifecycle === 'unavailable') &&
     (!Object.hasOwn(value, 'displayName') || isBoundedString(value.displayName)) &&
     (!Object.hasOwn(value, 'updatedAt') || isBoundedString(value.updatedAt)) &&
-    (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork))
+    (!Object.hasOwn(value, 'model') ||
+      (isRecord(value.model) &&
+        hasExactKeys(
+          value.model,
+          presentKeys(value.model, ['provider', 'name'], ['reasoningEnabled']),
+        ) &&
+        isBoundedString(value.model.provider) &&
+        isBoundedString(value.model.name) &&
+        (!Object.hasOwn(value.model, 'reasoningEnabled') ||
+          typeof value.model.reasoningEnabled === 'boolean'))) &&
+    isRuntimeInteractionQueueProjection(value.interactionQueue) &&
+    (value.interactionQueue as { readonly revision: unknown }).revision === value.revision &&
+    (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork)) &&
+    activeInteractionMatchesQueue(value)
+  );
+}
+
+function activeInteractionMatchesQueue(value: Record<string, unknown>): boolean {
+  const queue = value.interactionQueue as {
+    readonly activeInteractionId?: string;
+    readonly interactions: readonly RuntimeClientInteraction[];
+  };
+  const work = value.activeWork as
+    | { readonly activeTurn?: { readonly interaction?: RuntimeClientInteraction } }
+    | undefined;
+  const interaction = work?.activeTurn?.interaction;
+  const queuedInteraction =
+    queue.activeInteractionId === undefined
+      ? undefined
+      : queue.interactions.find(
+          (candidate) => candidate.interactionId === queue.activeInteractionId,
+        );
+  return (
+    queue.activeInteractionId === interaction?.interactionId &&
+    (interaction === undefined ||
+      (queuedInteraction !== undefined &&
+        interaction.sessionRevision === value.revision &&
+        queuedInteraction.sessionRevision === interaction.sessionRevision &&
+        sameRuntimeClientInteractionIdentity(queuedInteraction, interaction)))
+  );
+}
+
+function isRuntimeInteractionQueueProjection(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(
+      value,
+      presentKeys(value, ['revision', 'interactions'], ['activeInteractionId']),
+    ) ||
+    !isNonNegativeSafeInteger(value.revision) ||
+    !Array.isArray(value.interactions) ||
+    value.interactions.length > 256 ||
+    !value.interactions.every(isRuntimeClientInteraction) ||
+    (Object.hasOwn(value, 'activeInteractionId') && !isIdentifier(value.activeInteractionId))
+  ) {
+    return false;
+  }
+  const ids = value.interactions.map((interaction) => interaction.interactionId);
+  return (
+    new Set(ids).size === ids.length &&
+    value.interactions.every((interaction) => interaction.sessionRevision === value.revision) &&
+    (!Object.hasOwn(value, 'activeInteractionId') ||
+      ids.includes(value.activeInteractionId as string))
   );
 }
 

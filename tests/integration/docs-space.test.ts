@@ -23,7 +23,8 @@ describe('repository knowledge system', () => {
       'packages/runtime-host/README.md',
       'packages/runtime-storage-sqlite/README.md',
       'packages/builtin-runtime/README.md',
-      'apps/kite/README.md',
+      'apps/kite-cli/README.md',
+      'apps/kite-service/README.md',
     ];
     const required = [
       '## 定位',

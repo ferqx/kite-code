@@ -111,11 +111,13 @@ export function shardTestFiles(files: readonly string[], requestedShards: number
 
 function testEnvironment(prefix: string): { env: Record<string, string>; dispose(): void } {
   const home = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const codeRoot = join(home, '.kite-code');
   return {
     env: {
       ...process.env,
       HOME: home,
-      KITE_CODE_HOME: home,
+      // KLSV1 Service contract: this is the exact code root, not an OS-home override.
+      KITE_CODE_HOME: codeRoot,
       ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
     } as Record<string, string>,
     dispose: () => rmSync(home, { recursive: true, force: true }),

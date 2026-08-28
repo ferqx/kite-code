@@ -19,12 +19,12 @@ import {
   windowsApprovedNetworkScopeError,
   wrapWindowsRestrictedTokenCommand,
 } from '@kite-ai/builtin-runtime/sandbox';
+import { composeAppSandboxExecutor } from '#kite-service/sandbox/composition';
 import {
   createWindowsSandboxControlSession,
   decodeWindowsSandboxRunnerFrame,
   encodeWindowsSandboxRuntimeControlFrame,
-} from '#app/sandbox/windows-restricted-token-runtime';
-import { composeAppSandboxExecutor } from '@/app/sandbox/composition';
+} from '#kite-service/sandbox/windows-restricted-token-runtime';
 import {
   createSandboxExecutor,
   type TestSandboxDisposalReceipt,

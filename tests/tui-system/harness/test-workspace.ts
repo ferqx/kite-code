@@ -22,6 +22,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+} from '@kite-ai/kite-local-runtime/service';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 
 export interface TestWorkspace {
@@ -392,8 +396,9 @@ export function createTestWorkspace(opts?: {
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
   const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
-  const kiteCodeDir = join(tempHome, '.kite-code');
-  mkdirSync(kiteCodeDir, { recursive: true });
+  const kiteCodeDir = ensureLocalRuntimeServiceHome(
+    createKiteHomeIdentity(join(tempHome, '.kite-code'), 'explicit_argument'),
+  ).root;
 
   // Minimal config pointing to a fake DeepSeek provider.
   // In PTY tests, the model will be overridden by the mock model server
@@ -449,9 +454,9 @@ export function createTestWorkspace(opts?: {
 
   const env: Record<string, string> = {
     HOME: tempHome,
-    KITE_CODE_HOME: tempHome,
-    // Override checkpoint path to use temp dir
-    // (the TUI reads this via defaultCheckpointPath() which uses KITE_CODE_HOME)
+    // Service KITE_CODE_HOME is the exact validated code root; it no longer
+    // receives a second `.kite-code` suffix inside the child.
+    KITE_CODE_HOME: kiteCodeDir,
   };
 
   const configPath = join(kiteCodeDir, 'kite-code.jsonc');

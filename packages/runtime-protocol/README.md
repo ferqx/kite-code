@@ -28,6 +28,15 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 - The only request methods are initialize, Runtime command/query/subscribe/unsubscribe and ping. Server notifications are subscription and draining facts; the Server never makes Client requests.
 - New Contract discriminants do not become wire capabilities until an explicit exhaustive mapper and codec change admits them. Raw Runtime events, credentials, headers, provider bodies, authority identities and Store locators do not cross this boundary. User-local presentation may carry bounded reasoning, ordinary tool paths/commands/arguments and terminal output through their exact closed DTOs; obvious credential-shaped values remain redacted.
 - `model.text_delta` and `reasoning.activity` carry a required `requestId`; codecs and mappers preserve it exactly and reject missing or additional fields.
+- `tool.queued.presentationGroupId`, when present, is a bounded opaque identifier copied from the App projection. It pairs the tool with `model.responded.messageId` for presentation only; it grants no Runtime authority and unknown/additional grouping fields fail closed.
+- Every wire Session carries one complete `interactionQueue` replacement projection. Queue revision equals Session revision,
+  every interaction carries that revision, identities are unique, and the optional active identity must name one queue member.
+  `sessionRevision` is the current settlement CAS rather than a creation-time identity; stable kind-specific identity fields
+  remain exact when a pending interaction is re-projected after an unrelated State revision advances. When active work repeats
+  the focused interaction, its entire closed identity must equal the queue member; matching only ID/revision is rejected.
+  Contract-to-wire mapping materializes independent closed values so JSON/WebSocket and in-process logical messages have
+  identical ownership and cycle behavior.
+- Approval interactions admit the same optional, control-filtered command projection in notifications, session projections, and `respond_interaction` commands. The wire value is bounded to 16,384 UTF-16 code units; cwd, sandbox evidence, grant subjects, credentials, and hidden execution arguments remain excluded.
 - Session deletion is admitted only as the explicit `delete_session` V1 command with scoped command identity and revision fencing. It does not expose a Store/SQLite operation or an alternate App delete path.
 - Workspace identity is App-injected at the command mapper and never accepted on the wire.
 

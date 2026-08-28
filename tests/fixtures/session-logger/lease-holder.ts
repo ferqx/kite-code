@@ -1,4 +1,4 @@
-import { SessionLogWriter } from '#app/session-logger/writer';
+import { SessionLogWriter } from '#kite-service/session-logger/writer';
 
 const boundedPolicy =
   process.env.KITE_TEST_BOUNDED_POLICY === '1'

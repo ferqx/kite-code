@@ -4,6 +4,7 @@ export {
   type RuntimeServerInProcessEndpoint,
   type RuntimeServerInProcessHub,
   type RuntimeServerInProcessLimits,
+  type RuntimeServerInProcessOpenOptions,
   type RuntimeServerInProcessPair,
 } from './in-process';
 export {
@@ -19,5 +20,6 @@ export {
   type RuntimeServerGlobalLimits,
   type RuntimeServerLimits,
   type RuntimeServerLogicalMessageConnection,
+  type RuntimeServerOpenOptions,
   type RuntimeServerOptions,
 } from './server';

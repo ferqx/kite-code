@@ -6,12 +6,15 @@ const WORKSPACES = [
   'packages/runtime-protocol',
   'packages/runtime-server',
   'packages/runtime-client',
+  'packages/kite-app-contract',
+  'packages/kite-local-runtime',
   'packages/agent-kernel',
   'packages/runtime-spi',
   'packages/runtime-host',
   'packages/runtime-storage-sqlite',
   'packages/builtin-runtime',
-  'apps/kite',
+  'apps/kite-cli',
+  'apps/kite-service',
 ] as const;
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);

@@ -171,7 +171,9 @@ describe('check-core-boundary', () => {
 
   test('rejects test helper imports from App, package, and script production roots', () => {
     const result = fixture({
-      'apps/kite/src/invalid.ts':
+      'apps/kite-cli/src/invalid.ts':
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
+      'apps/kite-service/src/invalid.ts':
         "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
       'packages/runtime-spi/src/invalid.ts':
         "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
@@ -181,14 +183,15 @@ describe('check-core-boundary', () => {
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();
     expect(stderr.match(/production source must not import test helper providers/g)?.length).toBe(
-      3,
+      4,
     );
   });
 
   test('rejects retired Tool Runner symbols in every production root', () => {
     const result = fixture({
       'src/core/invalid.ts': 'export const invokeGovernedTool = true;\n',
-      'apps/kite/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
+      'apps/kite-cli/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
+      'apps/kite-service/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
       'packages/runtime-spi/src/invalid.ts': 'export const containsBrokeredGitInvocation = true;\n',
       'scripts/invalid.ts': 'export const invokeGovernedTool = true;\n',
     });
@@ -197,7 +200,7 @@ describe('check-core-boundary', () => {
       result.stderr
         .toString()
         .match(/retired Core Tool Runner symbols must not exist in production source/g)?.length,
-    ).toBe(4);
+    ).toBe(5);
   });
 
   test('rejects LocalFilesystemProvider imports of policy, Runtime authority, and App modules', () => {
@@ -207,7 +210,7 @@ describe('check-core-boundary', () => {
       'src/core/runtime/reducer.ts': 'export const reducer = true;\n',
       'src/core/runtime/kernel.ts': 'export const kernel = true;\n',
       'src/core/runtime/store.ts': 'export const store = true;\n',
-      'apps/kite/src/tui/view.ts': 'export const view = true;\n',
+      'apps/kite-cli/src/tui/view.ts': 'export const view = true;\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
         "import { policy } from '@kite-ai/builtin-runtime/sandbox';\n" +
         "import { approval } from '@/core/policies/approval-policy.ts';\n" +

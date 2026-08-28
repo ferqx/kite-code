@@ -124,11 +124,13 @@ describe('runtime contract package boundary', () => {
       sessionRevision: 7,
       generation: 3,
       grants: ['approve_once', 'same_command'] as const,
+      command: 'git status --short',
       title: 'Allow tool',
     };
     expect(isRuntimeClientInteraction(interaction)).toBe(true);
     expect(() => assertRuntimeClientInteraction(interaction)).not.toThrow();
     expect(isRuntimeClientInteraction({ ...interaction, cwd: '/private/workspace' })).toBe(false);
+    expect(isRuntimeClientInteraction({ ...interaction, command: 42 })).toBe(false);
     expect(
       isRuntimeClientInteraction({ ...interaction, grants: ['approve_once', 'full_access'] }),
     ).toBe(false);
@@ -321,12 +323,23 @@ describe('runtime contract package boundary', () => {
       isRuntimeClientEvent({
         type: 'tool.queued',
         toolId: 'tool-1',
+        presentationGroupId: 'model-message-1',
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
         summary: 'Queued.',
       }),
     ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.queued',
+        toolId: 'tool-1',
+        presentationGroupId: '',
+        presentation: 'exploration',
+        arguments: {},
+        summary: 'Queued.',
+      }),
+    ).toBe(false);
     expect(
       isRuntimeClientEvent({
         type: 'tool.queued',
@@ -446,6 +459,7 @@ describe('runtime contract package boundary', () => {
       revision: 7,
       lifecycle: 'open' as const,
       displayName: 'Refactor runtime contract',
+      interactionQueue: { revision: 7, interactions: [] },
     };
     const notifications = [
       { type: 'index_reset_begin' as const, ...base },
@@ -467,6 +481,93 @@ describe('runtime contract package boundary', () => {
     expect(
       isRuntimeSessionIndexNotification({ type: 'index_reset_end', ...base, rawState: {} }),
     ).toBe(false);
+    for (const interactionQueue of [
+      { revision: 6, interactions: [] },
+      { revision: 7, activeInteractionId: 'missing', interactions: [] },
+      {
+        revision: 7,
+        activeInteractionId: 'queue-only-focus',
+        interactions: [
+          {
+            kind: 'approval',
+            interactionId: 'queue-only-focus',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+        ],
+      },
+      {
+        revision: 7,
+        interactions: [
+          {
+            kind: 'approval',
+            interactionId: 'duplicate',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+          {
+            kind: 'approval',
+            interactionId: 'duplicate',
+            sessionRevision: 7,
+            generation: 1,
+            grants: ['approve_once'],
+          },
+        ],
+      },
+    ]) {
+      expect(
+        isRuntimeSessionIndexNotification({
+          type: 'session_upsert',
+          ...base,
+          session: { ...session, interactionQueue },
+        }),
+      ).toBe(false);
+    }
+  });
+
+  test('rejects duplicate active interaction fields unless their full identity matches', () => {
+    const approval = {
+      kind: 'approval' as const,
+      interactionId: 'approval-full-identity',
+      sessionRevision: 7,
+      generation: 1,
+      command: 'bun test',
+      grants: ['approve_once' as const],
+    };
+    const notification = {
+      type: 'session_upsert' as const,
+      serverInstanceId: 'server-1',
+      generation: 2,
+      indexRevision: 9,
+      session: {
+        schema: RUNTIME_PROJECTION_SCHEMA_,
+        sessionId: 'session-1',
+        revision: 7,
+        lifecycle: 'open' as const,
+        interactionQueue: {
+          revision: 7,
+          activeInteractionId: approval.interactionId,
+          interactions: [approval],
+        },
+        activeWork: {
+          workId: 'work-1',
+          phase: 'building' as const,
+          status: 'waiting' as const,
+          activeTurn: {
+            turnId: 'turn-1',
+            status: 'waiting' as const,
+            interaction: { ...approval, command: 'bun test --changed' },
+          },
+        },
+      },
+    };
+
+    expect(isRuntimeSessionIndexNotification(notification)).toBe(false);
+    expect(() => assertRuntimeSessionIndexNotification(notification)).toThrow(
+      'Invalid RuntimeSessionIndexNotification',
+    );
   });
 
   test('validates closed query fields and rejects non-JSON command payloads', () => {

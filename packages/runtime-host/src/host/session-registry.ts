@@ -25,7 +25,23 @@ export class SessionRegistry {
     if (current && current.revision > projection.revision) return 'unchanged';
     if (current && current.revision === projection.revision) {
       if (canonicalProjection(current) !== canonicalProjection(projection)) {
-        throw new Error('Runtime Session projection diverged at the same revision.');
+        const stableCurrent = withoutModel(current);
+        const stableProjection = withoutModel(projection);
+        if (
+          canonicalProjection(stableCurrent) !== canonicalProjection(stableProjection) &&
+          !isExecutionCleanupEnrichment(stableCurrent, stableProjection)
+        ) {
+          throw new Error('Runtime Session projection diverged at the same revision.');
+        }
+        const enriched =
+          projection.model === undefined && current.model !== undefined
+            ? { ...projection, model: current.model }
+            : projection;
+        if (canonicalProjection(current) !== canonicalProjection(enriched)) {
+          this.#projections.set(enriched.sessionId, enriched);
+          this.#emit({ type: 'upsert', projection: enriched });
+          return 'updated';
+        }
       }
       return 'unchanged';
     }
@@ -64,6 +80,46 @@ export class SessionRegistry {
   #emit(change: SessionProjectionChange): void {
     for (const listener of this.#listeners) listener(change);
   }
+}
+
+function isExecutionCleanupEnrichment(
+  current: RuntimeSessionProjection,
+  next: RuntimeSessionProjection,
+): boolean {
+  const currentWork = current.activeWork;
+  const nextWork = next.activeWork;
+  if (!currentWork || !nextWork) return false;
+  if (!['queued', 'running', 'waiting'].includes(currentWork.status)) return false;
+  if (!['completed', 'cancelled', 'failed'].includes(nextWork.status)) return false;
+  if (currentWork.activeTurn && nextWork.activeTurn?.status !== nextWork.status) return false;
+  const expected: RuntimeSessionProjection = {
+    ...current,
+    activeWork: {
+      ...currentWork,
+      status: nextWork.status,
+      activeTurn: currentWork.activeTurn
+        ? { ...currentWork.activeTurn, status: nextWork.status, interaction: undefined }
+        : undefined,
+    },
+  };
+  return stableSerializeIgnoringUndefined(expected) === stableSerializeIgnoringUndefined(next);
+}
+
+function stableSerializeIgnoringUndefined(value: unknown): string {
+  if (value === undefined) return '';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerializeIgnoringUndefined).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableSerializeIgnoringUndefined(record[key])}`)
+    .join(',')}}`;
+}
+
+function withoutModel(projection: RuntimeSessionProjection): RuntimeSessionProjection {
+  const { model: _model, ...stable } = projection;
+  return stable;
 }
 
 function canonicalProjection(projection: RuntimeSessionProjection): string {

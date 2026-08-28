@@ -12,6 +12,7 @@ import {
   createRuntimeServerInProcessHub,
   type DEFAULT_RUNTIME_SERVER_LIMITS,
   RuntimeServer,
+  type RuntimeServerAdmissionInput,
   type RuntimeServerAdmissionPort,
   type RuntimeServerLogicalMessageConnection,
 } from '../src/index';
@@ -213,6 +214,68 @@ describe('Runtime Server', () => {
     expect(runtime.queries).toHaveLength(1);
   });
 
+  test('binds distinct per-connection admission ports while resume/query retain persisted authority', async () => {
+    const runtime = new FakeRuntime();
+    const backend = recordingAdmission('/persisted/workspace');
+    const hub = createRuntimeServerInProcessHub(
+      { runtime, admission: backend.port },
+      serverOptions(),
+    );
+    const firstAdmission = connectionAdmission('/workspace/first', backend.port);
+    const secondAdmission = connectionAdmission('/workspace/second', backend.port);
+    const first = hub.open({ admission: firstAdmission.port });
+    const second = hub.open({ admission: secondAdmission.port });
+    const firstMessages = first.client.messages()[Symbol.asyncIterator]();
+    const secondMessages = second.client.messages()[Symbol.asyncIterator]();
+    await initializePair(first, firstMessages);
+    await initializePair(second, secondMessages);
+
+    await first.client.send(commandRequest('create-first'));
+    await second.client.send(commandRequest('create-second'));
+    expect(await next(firstMessages)).toMatchObject({
+      id: 'create-first',
+      result: { status: 'applied' },
+    });
+    expect(await next(secondMessages)).toMatchObject({
+      id: 'create-second',
+      result: { status: 'applied' },
+    });
+    expect(runtime.commands.slice(0, 2)).toEqual([
+      expect.objectContaining({ type: 'create_session', workspace: '/workspace/first' }),
+      expect.objectContaining({ type: 'create_session', workspace: '/workspace/second' }),
+    ]);
+
+    await first.client.send(resumeRequest('resume-first', 'persisted-first'));
+    expect(await next(firstMessages)).toMatchObject({
+      id: 'resume-first',
+      result: { status: 'applied' },
+    });
+    await second.client.send(queryListRequest('query-second'));
+    expect(await next(secondMessages)).toMatchObject({
+      id: 'query-second',
+      result: { status: 'ok', queryType: 'list_sessions' },
+    });
+
+    const resumed = runtime.commands.at(-1);
+    expect(resumed).toMatchObject({ type: 'resume_session', sessionId: 'persisted-first' });
+    expect(resumed).not.toHaveProperty('workspace');
+    expect(backend.inputs.map((input) => input.operation)).toEqual(
+      expect.arrayContaining(['runtime/command', 'runtime/query']),
+    );
+    expect(firstAdmission.inputs.map((input) => input.operation)).toContain('runtime/command');
+    expect(secondAdmission.inputs.map((input) => input.operation)).toContain('runtime/query');
+
+    await first.connection.close('first_disconnect');
+    expect(hub.server.connectionCount).toBe(1);
+    const firstCallsAfterClose = firstAdmission.inputs.length;
+    await expect(first.client.send(commandRequest('after-close'))).rejects.toThrow(
+      'connection is closed',
+    );
+    expect(firstAdmission.inputs).toHaveLength(firstCallsAfterClose);
+    await second.connection.close('second_disconnect');
+    expect(hub.server.connectionCount).toBe(0);
+  });
+
   test('acknowledges session subscriptions before ready and same-subscription FIFO replay', async () => {
     const runtime = new FakeRuntime();
     runtime.sessionProjectionRevision = 2;
@@ -328,13 +391,14 @@ describe('Runtime Server', () => {
       revision: 1,
       displayName: 'x'.repeat(256),
       lifecycle: 'open' as const,
+      interactionQueue: { revision: 1, interactions: [] },
     }));
     const server = new RuntimeServer(
       { runtime, admission: allowAdmission },
       {
         ...serverOptions(),
-        limits: { maxOutboundBytes: 1_400 },
-        globalLimits: { maxQueuedBytes: 1_400 },
+        limits: { maxOutboundBytes: 2_000 },
+        globalLimits: { maxQueuedBytes: 2_000 },
       },
     );
     const slowTransport = new TestConnection();
@@ -429,6 +493,7 @@ describe('Runtime Server', () => {
           sessionId: 'session-1',
           revision: 4,
           lifecycle: 'open',
+          interactionQueue: { revision: 4, interactions: [] },
         },
       },
       { type: 'index_reset_end', serverInstanceId: 'server-1', generation: 7, indexRevision: 4 },
@@ -494,6 +559,7 @@ describe('Runtime Server', () => {
           sessionId: `session-${index}`,
           revision: index,
           lifecycle: 'open' as const,
+          interactionQueue: { revision: index, interactions: [] },
         },
       })),
       { type: 'index_reset_end', serverInstanceId: 'server-1', generation: 8, indexRevision: 1 },
@@ -507,6 +573,7 @@ describe('Runtime Server', () => {
           sessionId: 'live-session',
           revision: 2,
           lifecycle: 'open',
+          interactionQueue: { revision: 2, interactions: [] },
         },
       },
     ];
@@ -792,6 +859,50 @@ describe('Runtime Server', () => {
     expect(transport.sent).toContainEqual(expect.objectContaining({ method: 'server/draining' }));
     expect(runtime.commands).toHaveLength(0);
   });
+
+  test('releases connection accounting when the carrier close reports an error', async () => {
+    const runtime = new FakeRuntime();
+    const transport = new TestConnection();
+    transport.failClose = true;
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+
+    await expect(connection.close('carrier_failure')).rejects.toThrow('simulated close failure');
+    expect(connection.state).toBe('closed');
+    expect(server.connectionCount).toBe(0);
+
+    const recoveredTransport = new TestConnection();
+    const recovered = server.open(recoveredTransport);
+    expect(recovered.state).toBe('uninitialized');
+    await recovered.close();
+  });
+
+  test('releases subscription accounting when an iterator refuses to close', async () => {
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    runtime.throwOnIteratorReturn = true;
+    const transport = new TestConnection();
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+    transport.push(initialize);
+    await eventually(() => transport.sent.length === 1);
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'subscribe-throws-on-close',
+      method: 'runtime/subscribe',
+      params: { subscription: { scope: 'sessions' } },
+    });
+    await eventually(() =>
+      transport.sent.some(
+        (message) => 'id' in message && message.id === 'subscribe-throws-on-close',
+      ),
+    );
+
+    await expect(connection.close('iterator_failure')).rejects.toThrow(
+      'simulated iterator close failure',
+    );
+    expect(server.connectionCount).toBe(0);
+  });
 });
 
 const allowAdmission: RuntimeServerAdmissionPort = {
@@ -836,6 +947,59 @@ function commandRequest(id: string) {
   } as const;
 }
 
+function resumeRequest(id: string, sessionId: string) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'runtime/command',
+    params: {
+      command: {
+        schema: 'kite.runtime-command.v1',
+        commandId: id,
+        type: 'resume_session',
+        sessionId,
+      },
+    },
+  } as const;
+}
+
+function queryListRequest(id: string) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'runtime/query',
+    params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+  } as const;
+}
+
+function recordingAdmission(workspace: string) {
+  const inputs: RuntimeServerAdmissionInput[] = [];
+  const port: RuntimeServerAdmissionPort = {
+    authorize: async (input) => {
+      inputs.push(input);
+      return { allowed: true as const, workspace };
+    },
+  };
+  return { inputs, port };
+}
+
+function connectionAdmission(workspace: string, persisted: RuntimeServerAdmissionPort) {
+  const inputs: RuntimeServerAdmissionInput[] = [];
+  const port: RuntimeServerAdmissionPort = {
+    authorize: async (input) => {
+      inputs.push(input);
+      if (
+        input.operation === 'runtime/command' &&
+        (input.command as { readonly type?: unknown } | undefined)?.type === 'create_session'
+      ) {
+        return { allowed: true as const, workspace };
+      }
+      return persisted.authorize(input);
+    },
+  };
+  return { inputs, port };
+}
+
 function durableNotification(revision: number): RuntimeNotification {
   return {
     schema: 'kite.runtime-notification.v1',
@@ -849,6 +1013,7 @@ function durableNotification(revision: number): RuntimeNotification {
         sessionId: 'session-1',
         revision,
         lifecycle: 'open',
+        interactionQueue: { revision, interactions: [] },
       },
     },
   };
@@ -874,9 +1039,11 @@ class FakeRuntime implements RuntimeAccess {
     revision: number;
     displayName?: string;
     lifecycle: 'open';
+    interactionQueue: { revision: number; interactions: [] };
   }> = [];
   sessionProjectionRevision: number | undefined;
   endAfterNotifications = false;
+  throwOnIteratorReturn = false;
 
   async command(command: RuntimeCommand) {
     this.commands.push(command);
@@ -907,6 +1074,10 @@ class FakeRuntime implements RuntimeAccess {
               sessionId: query.sessionId,
               revision: this.sessionProjectionRevision,
               lifecycle: 'open' as const,
+              interactionQueue: {
+                revision: this.sessionProjectionRevision,
+                interactions: [],
+              },
             },
           };
     }
@@ -931,6 +1102,9 @@ class FakeRuntime implements RuntimeAccess {
           },
           return: async () => {
             runtime.iteratorReturns += 1;
+            if (runtime.throwOnIteratorReturn) {
+              throw new Error('simulated iterator close failure');
+            }
             return { done: true as const, value: undefined };
           },
         };
@@ -943,6 +1117,7 @@ class TestConnection implements RuntimeServerLogicalMessageConnection {
   readonly #incoming = new AsyncValues<unknown>();
   readonly sent: RuntimeProtocolMessage[] = [];
   closed = false;
+  failClose = false;
   failNextSend = false;
   sendCalls = 0;
   sendGate: Promise<void> | undefined;
@@ -965,6 +1140,7 @@ class TestConnection implements RuntimeServerLogicalMessageConnection {
   close(): void {
     this.closed = true;
     this.#incoming.close();
+    if (this.failClose) throw new Error('simulated close failure');
   }
 }
 

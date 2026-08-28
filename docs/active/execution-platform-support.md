@@ -5,11 +5,11 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
-tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite/test/isolated/sandbox/execution-boundary.test.ts
-apps/kite/test/sandbox/network-boundary.test.ts apps/kite/test/sandbox/network-boundary-concurrency.test.ts
-apps/kite/test/git-broker.test.ts apps/kite/test/runtime/git-tool-controller.test.ts
-apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-service/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
+tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
+apps/kite-service/test/sandbox/network-boundary.test.ts apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts
+apps/kite-service/test/git-broker.test.ts apps/kite-service/test/runtime/git-tool-controller.test.ts
+apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -41,12 +41,18 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 G
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
 
-Runtime Protocol V1 不扩大该生产支持集合。shipped production consumer 仍只有本地 TUI 与用户在场的
-foreground CLI；stdio 只作为 Desktop/test 父进程拥有的 reference child，loopback WebSocket/browser/Desktop
-只作 development/reference/conformance evidence，均不进入 release manifest 或 platform support matrix。`.github/workflows/runtime-stdio-smoke.yml`
-与 `.github/workflows/runtime-transport-qualification.yml` 的 macOS 15、Ubuntu 24.04、Windows 2025 矩阵只提供
-qualification checks；KRSV1-07/09 的三平台 PR 结果返回前，必须标记为 pending，不能把 workflow 定义或本地测试
-写成三平台通过或 production support evidence。
+Local Runtime Service不扩大该production effectful支持集合。shipped terminal consumer仍只有本地TUI与用户在场的
+foreground CLI，但二者当前都通过managed Native client连接`apps/kite-service`的唯一Host/Store/Builtin composition；
+internal stdio与development/reference carrier不构成Web/Desktop支持。普通candidate已包含同identity的`kite-service`
+companion，installer也定义ordinary stop/lifecycle fence的fail-closed cutover；当前只登记owner-local focused evidence，
+完整40个PTY scenarios、本地fault与CI-profile soak、本机macOS arm64 release smoke已通过；CI-profile soak不提供formal
+资源资格，单平台结果也不能推断三平台passed。这些事实仍不能改变下方effectful execution空支持集。
+
+KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 companion process/release matrix尚未取得，必须标记pending，不能把
+workflow定义、本地测试或单平台artifact写成三平台通过。Windows Service state现实现current-user SID、protected
+owner-only DACL与non-reparse verifier，并把ACL drift负向测试接入Windows candidate job；远端当前实现head通过前仍不能
+推导Windows process support。Service可被打包也不表示Shell、writer、Skill child或local stdio MCP获得production
+execution admission。
 
 ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
 TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
@@ -218,7 +224,7 @@ binary 存在但没有 negative syscall conformance 时仍为 `unavailable`，�
 审批前 Policy/dispatch boundary、审批后 control-root 隐藏、syscall filter、硬 process-tree 上限和完整 child/入口继承未证明时，Linux 结论
 继续是 `excluded`。
 
-当前本地增量实现把 TUI 与 foreground CLI 收敛到同一个 App sandbox composition root，并为
+当前本地增量实现把 TUI 与 foreground CLI 收敛到同一个 Service sandbox composition root，并为
 Linux 候选已加入带 Runtime 唯一 `--unit=...` 的 `systemd-run --user --scope` + cgroup v2 `TasksMax`
 argv-only contract，以及 strict exact-unit/path、kill-all、`populated=0`/空 `cgroup.procs` candidate parser；
 但当前 dispatch record 不能在 GO 前 durable ack ControlGroup，也不能持久化 empty receipt，因此 Local
@@ -314,7 +320,7 @@ descendant exit 与入口组合证据，不能由本机静态/单元测试升级
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
 
 Darwin 的 native negative conformance 还会在
-`apps/kite/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
+`apps/kite-service/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
 session descendant；即使 supervisor 的 PGID 被终止，测试也必须得到
 `cleanupConfirmed=false`，并回收该 fixture。系统 `launchd.plist(5)` 的
 `AbandonProcessGroup=false` 只承诺终止与 job 相同的 process group，`sandbox(7)` 只描述新进程继承
@@ -324,7 +330,7 @@ sandbox restriction；二者都不是 detached/session descendant 的 owner/desc
 Seatbelt 继续 blocked/fail closed。
 `.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
 `packages/builtin-runtime/src/sandbox/**`、`packages/runtime-host/src/**`、
-`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite/src/sandbox/**` 与平台 probe
+`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite-service/src/sandbox/**` 与平台 probe
 脚本和 `tests/execution/**`；macOS required job 只运行 Seatbelt profile、Provider fail-closed contract 与
 POSIX supervisor detached/session negative/conformance，不再把旧 direct Seatbelt executor 的成功执行当作
 资格 oracle；Linux 运行对应 native bubblewrap candidate，三平台共同运行 `sandbox-execution-provider`
@@ -350,6 +356,8 @@ PS-02 的 protocol、Pipeline、allocating lifecycle、Host-owned spawn、recove
 的 artifact upload；任一 required step、source identity、canonical digest 或 artifact 缺失都使 job
 失败。Linux cgroup descendant cleanup 与 full-chain 仍是显式 opt-in candidate-only diagnostic，不能
 冒充该 evidence。
+Runtime backend relocation后，POSIX supervisor与sandbox execution provider的required conformance路径固定在
+`apps/kite-service/test/isolated/execution/`；workflow与contract test必须拒绝已删除的CLI backend test路径。
 Cross-platform exclusion contracts 在每个 runner 内固定 `max-concurrency=1` 并有 10 分钟硬上限；尤其
 Windows 不得让多个 Bun sandbox/process lifecycle fixture 并行持有 native handle，测试完成后进程不收敛
 也必须以 timeout 失败，不能无限占用 matrix 或跳过后续 Cargo/native E2E。

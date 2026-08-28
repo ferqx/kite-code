@@ -31,6 +31,8 @@
 - Provider work 前必须完成 durable attempt acknowledgement。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。
 - Session lifecycle、mailbox、effect lease、cleanup、recovery 与 persistent scoped receipt decision 只有一个 Host owner；Server 仅通过 `RuntimeAccess` 调用它。
+- prepared execution只允许command类型对应的封闭operation。`respond_interaction`仅在Service从durable State恢复pending
+  interaction并原子提交applied receipt后，作为同一Turn的single-use continuation调度；其他command不得借此启动Turn。
 - `delete_session` 由 Host 串行化并委托 SessionStore 在一个 transaction 中提交 retained receipt 与删除；
   删除后 registry/lifecycle 不得再 flush snapshot 重建该 Session。
 

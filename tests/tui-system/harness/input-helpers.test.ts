@@ -8,6 +8,7 @@ import {
   submitCommand,
   submitCurrentInput,
   submitUserMessage,
+  submitUserMessageForDeferredDelivery,
   typeText,
   waitForRequestMessage,
 } from './input-helpers';
@@ -673,6 +674,54 @@ describe('TUI input helpers', () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.messages[0]?.content).toBe('hello');
+  });
+
+  test('deferred message submission separates the local queue receipt from Runtime delivery', async () => {
+    let currentInput = '';
+    let queued = false;
+    const requests: Array<{ body: Record<string, never>; messages: Array<{ content: string }> }> =
+      [];
+    let submittedText = '';
+    const tui = fakePty(
+      (data) => {
+        if (data === '\r') {
+          submittedText = currentInput;
+          currentInput = '';
+          queued = true;
+          return;
+        }
+        currentInput += data;
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => (queued ? 'Message queued' : `❯ ${currentInput}`);
+    const server = {
+      baseURL: 'http://127.0.0.1/v1',
+      port: 0,
+      setResponses() {},
+      getRequestCount: () => requests.length,
+      getRequests: () => requests,
+      hasRequestMessage: (text: string, since: number) =>
+        requests
+          .slice(since)
+          .some((request) => request.messages.some((message) => message.content.includes(text))),
+      setModelsResponse() {},
+      getModelRequests: () => [],
+      assertComplete() {},
+      stop() {},
+    } as MockModelServer;
+
+    const delivery = await submitUserMessageForDeferredDelivery(tui, server, 'next', {
+      acceptWhen: (viewport) => viewport.includes('Message queued'),
+      delayMs: 0,
+      timeout: 100,
+    });
+
+    expect(delivery.requestBaseline).toBe(0);
+    expect(requests).toHaveLength(0);
+    requests.push({ body: {}, messages: [{ content: submittedText }] });
+    await delivery.waitForRuntimeRequest();
+    expect(requests[0]?.messages[0]?.content).toBe('next');
   });
 
   test('submitCurrentInput retries Enter until the active field advances', async () => {

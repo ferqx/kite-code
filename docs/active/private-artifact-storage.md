@@ -4,7 +4,7 @@
 
 读取时机：修改 Model、Capability、Filesystem preimage、Sandbox preparation 或 Subagent private Artifact 的 ref、路径、schema、发布、读取、retention 或 GC 时。
 
-验证：`bun test packages/builtin-runtime/test/isolated/private-immutable-artifacts.test.ts tests/integration/model-artifacts.test.ts tests/isolated/runtime/capability-artifacts.test.ts packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts apps/kite/test/subagent-artifacts.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test packages/builtin-runtime/test/isolated/private-immutable-artifacts.test.ts tests/integration/model-artifacts.test.ts tests/isolated/runtime/capability-artifacts.test.ts packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts apps/kite-service/test/subagent-artifacts.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109/0110/0114/0115、ADR-0127、`model-provider-boundary.md`。
 

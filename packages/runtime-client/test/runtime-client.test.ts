@@ -529,6 +529,7 @@ function session(sessionId: string, revision: number) {
     revision,
     lifecycle: 'open' as const,
     sessionCommandGrantCount: 0,
+    interactionQueue: { revision, interactions: [] },
   };
 }
 function subscriptionUpdate(generation: number, message: object): object {

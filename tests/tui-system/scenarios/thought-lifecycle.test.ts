@@ -70,7 +70,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 0 — 多轮探索跨模型调用聚合为单一阶段块（ADR-0030 / 规则 24）
+  // Test 0 — 流式正文按 ADR-0036 切开相邻探索阶段
   //
   // 放在其他测试之前，因为共享 PTY session 中
   // 后续测试的 mock responses 会与前面的 auxiliary calls 竞争。
@@ -80,14 +80,14 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: PHASE_TWO 思考 + search_files  ← 新一轮模型调用
   //   Response 3: 文本输出（阶段结束，最终回答脱离）
   //
-  // 预期 TUI 现象（ADR-0030）：
-  //   - model.requested 不再切分：两轮工具同块，标题
-  //     "Thinking Xs · read 1 file, searched 1 file pattern"
+  // 预期 TUI 现象（ADR-0036 / ADR-0045）：
+  //   - reasoning completed 后才显示，工具活动在同一窗口覆盖 reasoning
+  //   - 每段流式正文都是 sibling text，后续工具在正文之后建立新阶段
   //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'multi-round exploration aggregates into one phase block across model calls (ADR-0030)',
+    'streamed narration separates adjacent exploration activity without becoming a caption',
     async () => {
       server.setResponses([
         // Response 1: Phase 1 thinking + first tool
@@ -129,20 +129,30 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // Adjacent closed categories merge across model requests. Local
-      // reasoning reached the reducer but is folded out of the settled view.
+      // Local reasoning reached the reducer but is folded out of the settled
+      // view. The two streamed narrations remain normal text boundaries, so
+      // the following tools cannot be collapsed back into one caption block.
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, 'read 1 file')).toBe(true);
+      expect(screenContains(output, 'searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(false);
       expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(true);
       expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(true);
       expect(screenContains(output, 'PHASE_ONE')).toBe(false);
       expect(screenContains(output, 'PHASE_TWO')).toBe(false);
       const lines = clean.split('\n').map((line) => line.trim());
-      const headerIndex = lines.findIndex((line) => line.startsWith('Thinking '));
-      const firstCaptionIndex = lines.indexOf('先查看项目入口和核心配置。');
-      expect(firstCaptionIndex).toBe(headerIndex + 2);
-      expect(lines[firstCaptionIndex - 1]).toBe('');
-      expect(lines.indexOf('继续搜索源码和文档目录。')).toBe(firstCaptionIndex + 1);
+      const firstNarration = lines.indexOf('先查看项目入口和核心配置。');
+      const firstRead = lines.findIndex(
+        (line, index) => index > firstNarration && line.includes('read 1 file'),
+      );
+      const secondNarration = lines.indexOf('继续搜索源码和文档目录。');
+      const laterSearch = lines.findIndex(
+        (line, index) => index > secondNarration && line.includes('searched 1 file pattern'),
+      );
+      expect(firstNarration).toBeGreaterThan(-1);
+      expect(firstRead).toBeGreaterThan(firstNarration);
+      expect(secondNarration).toBeGreaterThan(firstRead);
+      expect(laterSearch).toBeGreaterThan(secondNarration);
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -273,21 +283,21 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 多阶段思考跨模型调用合并为一个阶段块（ADR-0030 / 规则 24）
+  // Test 2 — 每个模型请求拥有独立的思考/工具组件边界
   //
   // 消息结构：
   //   Response 1: reasoning + read_file(CLAUDE.md)
   //   Response 2: reasoning + read_file(package.json)  ← 新一轮模型调用
   //   Response 3: content 文本输出（阶段结束）
   //
-  // 预期 TUI 现象（ADR-0030）：
-  //   - 两轮合并为单个 "Thinking Xs · read 2 files" 阶段块
-  //     （模型调用是 kernel 实现细节，不是用户感知的思考边界）
-  //   - 两个工具步骤同块可见
+  // 预期 TUI 现象：
+  //   - 每个 model.requested(requestId) 结算前一个组件
+  //   - 两轮分别显示 "Thinking Xs · read 1 file"
+  //   - 不依赖相邻事件顺序把不同 request 的工具聚合到同一块
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'multi-phase reasoning merges into one phase block across model calls (ADR-0030)',
+    'successive model requests keep separate reasoning and tool components',
     async () => {
       server.setResponses([
         // Phase 1
@@ -325,10 +335,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // The adjacent terminal reads merge by closed category. Their local
-      // paths/reasoning were available while active and fold at settlement.
-      expect(screenContains(output, 'read 2 files')).toBe(true);
-      expect(screenContains(output, 'Thinking ')).toBe(true);
+      expect(screenContains(output, 'read 2 files')).toBe(false);
+      expect(clean.match(/Thinking \d+s · read 1 file/gu)?.length ?? 0).toBe(2);
       expect(screenContains(output, 'Phase 1:')).toBe(false);
       expect(screenContains(output, 'Phase 2:')).toBe(false);
 
@@ -421,7 +429,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'post-Bash searches and later reasoning settle as one upgraded phase',
+    'post-Bash searches and later reasoning keep request-scoped components',
     async () => {
       server.setResponses([
         {
@@ -476,9 +484,16 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       expect(screenContains(output, 'Bash')).toBe(true);
-      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
+      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(false);
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      const bash = clean.indexOf('● Bash Ran:');
+      const searchSummary = clean.indexOf('searched 2 file patterns');
+      const laterThinking = clean.lastIndexOf('Thinking ');
+      const finalText = clean.indexOf('POST_BASH_DONE:');
+      expect(searchSummary).toBeGreaterThan(bash);
+      expect(laterThinking).toBeGreaterThan(searchSummary);
+      expect(finalText).toBeGreaterThan(laterThinking);
       expect(tui.scrollback()).not.toContain('● Find');
 
       await waitForCondition(
@@ -534,14 +549,17 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .split('\n')
         .filter((line) => line.includes('searched 2 file patterns'));
       expect(searchLines).toHaveLength(1);
-      expect(searchLines[0]).toMatch(/Thinking \d+s.*searched 2 file patterns/u);
+      expect(searchLines[0]?.trim()).toBe('searched 2 file patterns');
       expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
+      expect(replay.indexOf('Thinking ')).toBeGreaterThan(
+        replay.indexOf('searched 2 file patterns'),
+      );
     },
     TIMEOUT,
   );
 
   test(
-    'project overview sequence keeps captions compact and upgrades post-error searches',
+    'project overview keeps streamed narration as text and upgrades post-error searches',
     async () => {
       const captions = [
         '好的，我来探索一下这个项目。先看看整体结构。',
@@ -641,35 +659,40 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const lines = stripAnsi(output)
         .split('\n')
         .map((line) => line.trim());
-      const firstThinking = lines.findIndex(
-        (line) =>
-          line.startsWith('Thinking ') && line.includes('read 8 files, searched 4 file patterns'),
+      expect(lines.some((line) => line.includes('read 8 files, searched 4 file patterns'))).toBe(
+        false,
       );
-      expect(firstThinking).toBeGreaterThan(-1);
-      captions.slice(0, -1).forEach((caption, index) => {
-        expect(lines[firstThinking + index + 2]).toBe(caption);
+      const narrationLines = captions.map((caption) => lines.indexOf(caption));
+      narrationLines.forEach((line) => {
+        expect(line).toBeGreaterThan(-1);
       });
-      expect(lines[firstThinking + 1]).toBe('');
+      for (let index = 1; index < narrationLines.length; index += 1) {
+        expect(narrationLines[index]).toBeGreaterThan(narrationLines[index - 1]!);
+      }
 
-      // The fifth narration trails the settled first Thought as final text;
-      // it receives the same single-row block gap, not a duplicated caption
-      // paragraph gap. The four confirmed captions remain consecutive.
-      const lastCaption = lines.indexOf(captions.at(-1)!);
-      expect(lastCaption).toBe(lines.indexOf(captions.at(-2)!) + 2);
-      expect(lines[lastCaption - 1]).toBe('');
+      // Every narration is a normal sibling text block. The later Bash and
+      // post-Bash exploration therefore follow it instead of sharing a
+      // permanent caption collection inside the first Thought.
+      const lastNarration = narrationLines.at(-1)!;
 
       const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
-      expect(bash).toBeGreaterThan(lastCaption);
+      expect(bash).toBeGreaterThan(lastNarration);
+      const postBashSearch = lines.findIndex(
+        (line, index) => index > bash && line === 'searched 2 file patterns',
+      );
+      expect(postBashSearch).toBeGreaterThan(bash);
       const secondThinking = lines.findIndex(
-        (line, index) =>
-          index > bash && line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
+        (line, index) => index > postBashSearch && line.startsWith('Thinking '),
       );
       expect(secondThinking).toBeGreaterThan(bash);
-      expect(lines).not.toContain('searched 2 file patterns');
-      expect(lines[secondThinking + 1]).toBe('');
-      expect(lines[secondThinking + 2]).toBe(
-        'PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。',
-      );
+      expect(
+        lines.some(
+          (line) => line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
+        ),
+      ).toBe(false);
+      expect(
+        lines.indexOf('PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。'),
+      ).toBeGreaterThan(secondThinking);
       expect(tui.scrollback()).not.toContain('● Find');
 
       console.log('  [project-overview] clean output:', stripAnsi(output));

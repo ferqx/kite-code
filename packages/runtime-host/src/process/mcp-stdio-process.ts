@@ -375,7 +375,11 @@ async function spawnRuntimeHostMcpStdioProcess(
   } catch (error) {
     await terminateOnce();
     if (abortListener) input.signal?.removeEventListener('abort', abortListener);
-    throw error;
+    const wrapperExitCode = await exited.catch(() => null);
+    throw new Error(
+      `MCP stdio validated ready failed (wrapper_exit=${wrapperExitCode ?? 'unknown'}).`,
+      { cause: error },
+    );
   }
 
   return Object.freeze({

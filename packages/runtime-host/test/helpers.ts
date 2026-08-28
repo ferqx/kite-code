@@ -36,6 +36,7 @@ export function projection(sessionId: string, revision: number): RuntimeSessionP
     revision,
     workspace: `/workspace/${sessionId}`,
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

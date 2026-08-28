@@ -1156,11 +1156,56 @@ function isReadOnlyRipgrep(tokens: string[]): boolean {
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed || /[\r\n]/.test(trimmed) || hasUnsafeOutputRedirect(trimmed)) return false;
+  if (isReadOnlyWorkspaceForLoop(trimmed)) return true;
   if (/[$`]/.test(trimmed) || /[<>]\(/.test(trimmed)) return false;
   if (hasUnquotedBraceExpansion(trimmed)) return false;
   const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
   if (stripped.includes('&')) return false;
   return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
+}
+
+/**
+ * Recognize the narrow loop shape emitted for workspace inventory. This is
+ * intentionally not a general shell parser: the iterator is restricted to
+ * relative literal/glob paths, the loop variable is the only expansion, and
+ * both the body and any trailing pipeline must independently satisfy the
+ * existing read-only grammar after substitution.
+ */
+function isReadOnlyWorkspaceForLoop(command: string): boolean {
+  const match =
+    /^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;]+)\s*;\s*do\s+(.+?)\s*;\s*done(.*)$/u.exec(
+      command,
+    );
+  if (!match) return false;
+  const variable = match[1]!;
+  const iterator = match[2]!.trim();
+  const body = match[3]!.trim();
+  const suffix = match[4]!.trim();
+  if (/\b(?:case|for|if|until|while)\b/u.test(body)) return false;
+
+  const iteratorTokens = iterator.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/gu) ?? [];
+  if (
+    iteratorTokens.length === 0 ||
+    !iteratorTokens.every((token) => {
+      const value = stripShellQuotes(token);
+      return (
+        value.length > 0 &&
+        !value.startsWith('/') &&
+        !/^[A-Za-z]:[\\/]/u.test(value) &&
+        !value.startsWith('~') &&
+        !value.split(/[\\/]/u).includes('..') &&
+        /^[A-Za-z0-9_./*?[\]-]+$/u.test(value)
+      );
+    })
+  ) {
+    return false;
+  }
+
+  const variableReference = new RegExp(`\\$\\{${variable}\\}|\\$${variable}\\b`, 'gu');
+  const substitutedBody = body.replace(variableReference, '__kite_workspace_loop_item__');
+  if (/[$`]/u.test(substitutedBody) || !isReadOnlyShellCommand(substitutedBody)) return false;
+  if (!suffix) return true;
+  return isReadOnlyShellCommand(`echo __kite_workspace_loop_complete__ ${suffix}`);
 }
 
 function hasUnquotedBraceExpansion(command: string): boolean {
@@ -1287,13 +1332,50 @@ const GIT_LOG_FLAG_ = new Set([
   '--topo-order',
 ]);
 const GIT_LOG_VALUE_FLAG_ = new Set(['--after', '--before', '--max-count', '--since', '--until']);
+const GIT_DIFF_FLAG_ = new Set([
+  '--cached',
+  '--check',
+  '--name-only',
+  '--name-status',
+  '--no-color',
+  '--no-ext-diff',
+  '--no-index',
+  '--numstat',
+  '--shortstat',
+  '--staged',
+  '--stat',
+  '--summary',
+]);
+const GIT_DIFF_VALUE_FLAG_ = new Set(['--diff-filter', '--relative', '--submodule']);
 
 /** Closed direct-command grammar for Workspace-only Git metadata inspection. */
 function isReadOnlyGit(tokens: string[]): boolean {
   const subcommand = stripShellQuotes(tokens[1] ?? '').toLowerCase();
   if (subcommand === 'status') return isReadOnlyGitStatus(tokens.slice(2));
   if (subcommand === 'log') return isReadOnlyGitLog(tokens.slice(2));
+  if (subcommand === 'diff') return isReadOnlyGitDiff(tokens.slice(2));
+  if (subcommand === 'branch') {
+    const arguments_ = tokens.slice(2).map(stripShellQuotes);
+    return arguments_.length === 1 && arguments_[0] === '--show-current';
+  }
   return false;
+}
+
+function isReadOnlyGitDiff(arguments_: string[]): boolean {
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = stripShellQuotes(arguments_[index] ?? '');
+    if (argument === '--') return true;
+    if (!argument.startsWith('-') || argument === '-') continue;
+    if (GIT_DIFF_FLAG_.has(argument)) continue;
+    const name = argument.split('=', 1)[0]!;
+    if (!GIT_DIFF_VALUE_FLAG_.has(name)) return false;
+    if (!argument.includes('=')) {
+      const value = stripShellQuotes(arguments_[index + 1] ?? '');
+      if (!value || value.startsWith('-')) return false;
+      index += 1;
+    }
+  }
+  return true;
 }
 
 function isReadOnlyGitStatus(arguments_: string[]): boolean {
@@ -1360,7 +1442,7 @@ export function isNetworkShellCommand(command: string): boolean {
 
 export function isWriteShellCommand(command: string): boolean {
   return (
-    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(command) ||
+    hasUnsafeOutputRedirect(command) ||
     /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(command) ||
     /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(command) ||
     /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(command)
@@ -1391,6 +1473,7 @@ export function isDestructiveShellCommand(command: string): boolean {
 }
 
 export function isVcsMutationShellCommand(command: string): boolean {
+  if (isReadOnlyShellCommand(command)) return false;
   return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
     command,
   );

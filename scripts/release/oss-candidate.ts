@@ -96,9 +96,14 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
  * node_modules links.
  */
 export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>> = Object.freeze({
-  '@kite-ai/kite': 'apps/kite/src/index.ts',
-  '@kite-ai/kite/cli': 'apps/kite/src/cli/executable.ts',
-  '@kite-ai/kite/tui': 'apps/kite/src/tui/executable.tsx',
+  '@kite-ai/kite-cli': 'apps/kite-cli/src/index.ts',
+  '@kite-ai/kite-cli/cli': 'apps/kite-cli/src/cli/executable.ts',
+  '@kite-ai/kite-cli/tui': 'apps/kite-cli/src/tui/executable.tsx',
+  '@kite-ai/kite-service': 'apps/kite-service/src/index.ts',
+  '@kite-ai/kite-app-contract': 'packages/kite-app-contract/src/index.ts',
+  '@kite-ai/kite-local-runtime/client': 'packages/kite-local-runtime/src/client/index.ts',
+  '@kite-ai/kite-local-runtime/manager': 'packages/kite-local-runtime/src/manager/index.ts',
+  '@kite-ai/kite-local-runtime/service': 'packages/kite-local-runtime/src/service/index.ts',
   '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
   '@kite-ai/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
   '@kite-ai/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
@@ -188,16 +193,20 @@ export async function buildOssCandidate(
   const executableSuffix = releaseTarget.executableSuffix;
   const cliPath = join(stageDirectory, `kite${executableSuffix}`);
   const tuiPath = join(stageDirectory, `kite-tui${executableSuffix}`);
+  const servicePath = join(stageDirectory, `kite-service${executableSuffix}`);
   await compileOssReleaseExecutable('scripts/release/entrypoints/cli.ts', cliPath);
   await compileOssReleaseExecutable('scripts/release/entrypoints/tui.ts', tuiPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/service.ts', servicePath);
   if (process.platform !== 'win32') {
     chmodSync(cliPath, 0o755);
     chmodSync(tuiPath, 0o755);
+    chmodSync(servicePath, 0o755);
   }
 
   const archiveFiles = new Map<string, Uint8Array>();
   archiveFiles.set(`bin/kite${executableSuffix}`, readBytes(cliPath));
   archiveFiles.set(`bin/kite-tui${executableSuffix}`, readBytes(tuiPath));
+  archiveFiles.set(`bin/kite-service${executableSuffix}`, readBytes(servicePath));
   for (const [archiveName, sourcePath] of RELEASE_ASSETS) {
     archiveFiles.set(archiveName, readBytes(resolve(sourcePath)));
   }
@@ -311,16 +320,21 @@ export async function createSmokeVariantCandidate(
 export function executableArchivePaths(manifest: OssCandidateManifest): {
   cli: string;
   tui: string;
+  service: string;
 } {
   const suffix = manifest.target.os === 'win32' ? '.exe' : '';
-  return { cli: `bin/kite${suffix}`, tui: `bin/kite-tui${suffix}` };
+  return {
+    cli: `bin/kite${suffix}`,
+    tui: `bin/kite-tui${suffix}`,
+    service: `bin/kite-service${suffix}`,
+  };
 }
 
 export async function compileOssReleaseExecutable(
   entrypoint: string,
   outfile: string,
 ): Promise<void> {
-  const repositoryRoot = resolve('.');
+  const repositoryRoot = resolve(import.meta.dir, '../..');
   const result = await Bun.build({
     entrypoints: [resolve(entrypoint)],
     root: repositoryRoot,
@@ -381,7 +395,8 @@ export async function compileOssReleaseExecutable(
               }[args.path] ?? undefined;
             if (exact) return { path: resolve(repositoryRoot, exact) };
             const prefix = [
-              ['#app/', 'apps/kite/src/'],
+              ['#kite-cli/', 'apps/kite-cli/src/'],
+              ['#kite-service/', 'apps/kite-service/src/'],
               ['#builtin-runtime/sandbox/', 'packages/builtin-runtime/src/sandbox/'],
               ['#runtime-host/', 'packages/runtime-host/src/'],
               ['@/', 'src/'],

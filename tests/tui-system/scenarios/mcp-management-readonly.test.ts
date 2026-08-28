@@ -482,9 +482,11 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');
     const clientConversation = tui.screenFramesSince(conversationFrames).join('\n');
     // Dynamic MCP execution must retain a concrete label; it must not regress
-    // to the generic `● Tool` card that hides which lifecycle is running.
-    expect(tui.scrollback()).toContain('● mcp:dynamic_tool');
-    expect(tui.scrollback()).not.toContain('● Tool');
+    // to the generic `● Tool` card that hides which lifecycle is running. Use
+    // the captured frame history because a final Ink redraw may legitimately
+    // move an earlier card out of the terminal's current scrollback snapshot.
+    expect(clientConversation).toContain('● mcp:dynamic_tool');
+    expect(clientConversation).not.toContain('● Tool');
     expect(clientConversation).toContain(remoteToolName);
     expect(clientConversation).not.toContain(`mcp__docs__${remoteToolName}`);
     expect(clientConversation).not.toContain('runtime binding');

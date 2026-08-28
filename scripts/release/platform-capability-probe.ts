@@ -30,9 +30,12 @@ import {
   wrapWindowsRestrictedTokenCommand,
 } from '@kite-ai/builtin-runtime/sandbox';
 import { z } from 'zod';
-import type { AgentConfig } from '#app/config';
-import { composeAppGitBroker, resolveAppGitExecutable } from '../../apps/kite/src/git/composition';
-import { composeAppSandboxExecutor } from '../../apps/kite/src/sandbox/composition';
+import type { AgentConfig } from '#kite-service/config';
+import {
+  composeAppGitBroker,
+  resolveAppGitExecutable,
+} from '../../apps/kite-service/src/git/composition';
+import { composeAppSandboxExecutor } from '../../apps/kite-service/src/sandbox/composition';
 import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';

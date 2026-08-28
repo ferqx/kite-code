@@ -77,7 +77,7 @@ describe('Runtime Host MCP stdio process port', () => {
           args: [fixture],
           cwd: workspace,
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/wrapper_exit=/u);
     }
   });
 

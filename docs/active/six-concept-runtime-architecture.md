@@ -4,7 +4,7 @@
 
 读取时机：修改 Agent loop、Kernel state/event/reducer、Capability、Policy、Execution、Verification、Host lifecycle、Builtin module、SQLite storage 或 App composition 时。
 
-验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`。
+验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`、`bun run --cwd packages/kite-local-runtime test`、`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-cli test`。
 
 相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143；模块局部边界见各 workspace README。
 
@@ -33,26 +33,65 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server V1：十个 workspace 与唯一 composition
+## Runtime Server 与 Local Service client contract：十三个 workspace、一个当前 concrete composition
 
-Runtime package Gate 固定检查十个 runtime workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、`runtime-client`、`agent-kernel`、`runtime-spi`、`runtime-host`、`runtime-storage-sqlite`、`builtin-runtime` 与 `apps/kite`。它们不是十个可互换 Runtime；依赖和 authority 必须保持下列层级：
+Runtime package Gate 当前检查十三个 workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、
+`runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
+`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli` 与 private `apps/kite-service`。它们不是可互换 Runtime；依赖和 authority 必须
+保持下列层级：
 
 ```text
 runtime-contract ─────────────────────────────────────────→ ∅
 runtime-protocol ─────────────────────────────────────────→ runtime-contract
 runtime-client ───────────────────────────────────────────→ runtime-contract + runtime-protocol
 runtime-server ───────────────────────────────────────────→ runtime-contract + runtime-protocol
+kite-app-contract ────────────────────────────────────────→ runtime-contract
+kite-local-runtime ───────────────────────────────────────→ app-contract + client + protocol
 agent-kernel ─────────────────────────────────────────────→ ∅
 runtime-spi ──────────────────────────────────────────────→ runtime-contract
 runtime-host ─────────────────────────────────────────────→ agent-kernel + runtime-contract + runtime-spi
 runtime-storage-sqlite ───────────────────────────────────→ runtime-host
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
-apps/kite ────────────────────────────────────────────────→ client + server + host + builtin + sqlite + protocol + contract + spi
+apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + contract
+apps/kite-service ─────────────────────────────────────────→ app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
 
-`apps/kite/src/bootstrap.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host/Store/Kernel/Builtin assembly，注入 Workspace admission 与 concrete carrier I/O，并组合 Client 和 Server。App 是 listener、local auth、carrier lifecycle 与 exhaustive local history adaptation 的唯一 owner。不存在 sidecar Runtime Server、第二 composition root、第二 Store writer、dual write、alternate transport execution path、`try-new-catch-old` fallback 或 legacy Host bridge。
+`@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
+journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
+I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native
+出口：`./service`已经实现Native filesystem state/lock primitive，`./client`冻结descriptor/lifecycle/raw credential
+codec并实现Native connector；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
+任一 App source。
+
+`apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
+SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App
+Control owner。一个 Service process可承载多个 canonical Workspace与同一 Workspace的多个 Session；context按完整
+Project identity隔离，重启从这一个 Store恢复 Session identity，跨 Workspace create/resume/query/subscribe/fork
+fail closed。不存在第二 composition root、第二默认 Store writer、dual write、alternate execution backend、
+`try-new-catch-old` fallback或legacy Host bridge。
+
+Runtime Application的共享 operation gate先阻止新 mutation admission，再等待active临界区并决定resume或commit drain。
+Service-owned interaction broker持有durable generation/revision waiter；connection disconnect只释放client binding，
+不取消Turn/approval或关闭Host，只有显式owner shutdown关闭broker。Workspace Trust、Provider/model、MCP、Skill、
+execution/release和Native first-run credential由Service的exact App Control/credential owner提供；config、actual Skill、
+MCP runtime provider、shell/sandbox、observability与History projector也都按canonical Workspace在Service内组合。
+
+`apps/kite-cli`只拥有CLI/TUI/presentation、UI-local preferences与Native client composition。CLI/TUI先通过
+authenticated App Control完成Workspace Trust query/decision，再建立one-shot ticket Runtime connection；之后只消费
+Runtime/History/App Control/credential client。client close只关闭本connection/subscription/snapshot state，不取消
+Session或dispose Service Host。CLI不依赖Server、Host、Builtin、SQLite或Runtime SPI，也不导入Service source；Service
+同样不导入CLI source。发布组合只把typed manager/connector传给terminal App，没有app-to-app production import、
+embedded fallback或第二默认Store。`kite service ensure/status/stop/restart`只是同一typed manager的显式lifecycle
+surface，不把control token或process/state authority交给普通Runtime connection。
+
+Native manager把`GET /readyz`只作为liveness precheck，随后用restart-scoped access token执行exact
+`POST /_kite/instance`与`{}` body。它严格验证content type、大小、closed keys以及
+`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`，并比较descriptor/PID/
+Protocol/client contract/server version/build identity。malformed、server identity drift或无关listener返回
+`unavailable/identity_uncertain`；descriptor/expected build不匹配返回`incompatible/build_mismatch`。两类都保留state、
+`spawn=0`，且绝不从调用者descriptor回显或重建健康身份。
 
 ## Runtime Kernel
 
@@ -101,7 +140,7 @@ Builtin concrete operation modules位于 `git/model/planning/subagent/verificati
 
 ## Session、Context 与 Model
 
-App Session 代码位于 `apps/kite/src/runtime/session/`：
+App Session 代码位于 `apps/kite-service/src/runtime/session/`：
 
 - `session-registry` 只管理运行时身份；
 - `session-lifecycle` 管理列表、加载、删除与命名；
@@ -119,14 +158,32 @@ route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数�
 共享协调只在真实 `provider_rate_limited` observation 后生效，且实际时隙延迟必须写入各 invocation 自己的
 `model.retry.delayMs`。
 
-TUI 与 foreground CLI 都只通过 `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path 进行 command/query/subscribe；InProcess 同样经过 Protocol codec、initialize、admission、subscription ordering 和 Server routing。TUI 通过 `apps/kite/src/adapters/tui/session-adapter.ts` 获取 typed client surface，二者均不接触 Kernel state、Host execution control、Builtin executor 或 SQLite handle。完整旧 Session history 不从 notification replay、trace、JSONL 或 Server history 补偿，而是走 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与 live 使用同一 TUI reducer。
+TUI 与 foreground CLI 都只通过Native `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path进行 command/query/subscribe；one-shot ticket、initialize、admission、subscription ordering和Server routing均不可绕过。TUI通过`apps/kite-cli/src/adapters/tui/session-adapter.ts`获取typed client surface，二者均不接触Kernel state、Host execution control、Builtin executor或SQLite handle。完整旧Session history不从notification replay、trace、JSONL或Server history补偿，而是走`RuntimeClient.history → RuntimeHistoryClient → Service exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与live使用同一TUI reducer。
+模型展示由closed `requestId/messageId/presentationGroupId`建立因果分组：reasoning/text按request归属，tool queue只在
+其opaque group与对应model message精确匹配时进入同一presentation step。该identity不授权执行，TUI不得用事件相邻
+关系代替；identity缺失或不匹配只形成独立neutral tool group，绝不把当前Thought当通配owner。
+
+Approval的bounded command、revision、generation与grant集合必须由Runtime Contract、Protocol notification/session projection和
+`respond_interaction` command使用同一个closed shape；任一wire codec遗漏字段都必须fail test，不能静默丢弃live interaction。
+Session projection另外携带与Session同revision的完整有序interaction queue和唯一active identity；Service从durable
+State投影该替换集，Protocol验证queue/entry revision、identity唯一性和active membership，Native Client/TUI收到
+event-free snapshot时替换旧Map/queue而不是union。JSON/WebSocket与InProcess logical-message mapper必须生成相同closed
+值，不能因共享对象引用产生不同的decode结果。Service启动时的Store-only session index也从纯State投影完整queue，
+不得用空占位覆盖pending交互。interaction的`sessionRevision`表示当前settlement CAS；稳定身份由interactionId与
+kind-specific generation/plan/provider/verification/input/command字段承担；activeTurn重复字段必须与queue member完整相等。
+无关State revision前进时Client先取得新CAS；Host inspect接受command后CAS固定，commit不得用最新State revision替换。
+TUI所有approval/input/plan的Enter/Esc都只有在respond command receipt accepted后才结束提交态；提交错误保持原interaction
+可见并由用户显式重试，不得吞错、fire-and-forget cancel或在receipt前制造granted/answered事实。Service process重启后
+从durable State重建pending effect与continuation，applied response receipt由Host作为原Turn的single-use execution重新调度，
+不依赖旧waiter且不重复dispatch。每个durable event携带其exact post-event State queue；缺失历史State时unavailable，
+不得伪造空替换集。
 
 每个新建或恢复 Session 先持有自己的 bootstrap readiness promise，后续 turn、compaction、reset、mode、cancel、rewind 与 close 必须等待 exact `create_session` / `resume_session` applied receipt，再读取 committed revision 并提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
-Ctrl+C 的同步 TUI surface 在返回前先调用真实 SessionRuntime 取消，使 Provider、Shell preparation 与交互 waiter
-立即收到本地 AbortSignal；随后仍须通过同一 Runtime Client path 提交 durable `cancel_turn` 并消费回执。
-若 notification 在读取 revision 与 Host admission 之间前移 committed revision，Client 使用 conflict 回执中的最新
-revision 和新 command ID 重试；不可重试的拒绝投影为 `run.error`，不能静默丢弃。该同步适配不创建第二 mailbox、
-receipt cache 或 root-controller authority，Host lifecycle 仍只在 applied receipt 后执行自己的 abort。
+Ctrl+C通过Native TUI client提交durable`cancel_turn`；若notification在读取revision与Host admission之间前移
+committed revision，Client使用conflict回执中的最新revision和新command ID有界重试。terminal App不持有Service
+进程内AbortController、第二mailbox、receipt cache或root-controller authority，Host lifecycle仍只在applied receipt后
+执行自己的abort。不可重试的拒绝必须进入client错误/终态投影，不能静默改写为本地取消。TUI exit与Ctrl+C不同：exit
+只关闭client connection，不隐式调用`abortAll()`或dispose Service Host。
 
 历史 Session 的 `resume_session` 还是 presentation admission barrier：先在唯一 Coordinator 中提交通用 restart facts，
 再完成 Subagent Provider/sandbox process authority cleanup，随后 TUI await readiness、重读 Store head，最后才提交前台
@@ -177,13 +234,13 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
-- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；
-- `check:runtime-packages`：十个 workspace、依赖图、exports、deep import、cycle 与唯一 composition authority；
+- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
+- `check:runtime-packages`：十三个 workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
 
 ## Workspace 文档与测试 owner
 
 Package/App 的职责、允许依赖、公开入口与局部不变量由各自 README 拥有；本页只定义跨 workspace 的 Runtime
-authority 和依赖方向。TUI 展示与系统测试规范位于 `apps/kite/docs/`，测试归属与默认执行位于
+authority 和依赖方向。TUI 展示与系统测试规范位于 `apps/kite-cli/docs/`，测试归属与默认执行位于
 `tests/README.md`。ADR、book、plan、completed、design、deprecated 和索引不替代 current authority。

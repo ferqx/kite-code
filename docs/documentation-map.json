@@ -61,6 +61,147 @@
       ]
     },
     {
+      "id": "kite-app-contract",
+      "sources": ["packages/kite-app-contract/src/**", "packages/kite-app-contract/package.json"],
+      "authorities": [
+        "packages/kite-app-contract/README.md",
+        "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-client",
+      "sources": ["packages/kite-local-runtime/src/**", "packages/kite-local-runtime/package.json"],
+      "excludeSources": [
+        "packages/kite-local-runtime/src/service/**",
+        "packages/kite-local-runtime/src/client/native-connector.ts",
+        "packages/kite-local-runtime/src/manager/**"
+      ],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-connector",
+      "sources": ["packages/kite-local-runtime/src/client/native-connector.ts"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/execution-platform-support.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-service-state",
+      "sources": ["packages/kite-local-runtime/src/service/**"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-manager",
+      "sources": ["packages/kite-local-runtime/src/manager/**"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "apps/kite-service/docs/service-state.md",
+        "apps/kite-service/docs/service-resilience.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/execution-platform-support.md"
+      ]
+    },
+    {
+      "id": "kite-service-application",
+      "sources": [
+        "apps/kite-service/package.json",
+        "apps/kite-service/src/index.ts",
+        "apps/kite-service/src/executable.ts",
+        "apps/kite-service/src/composition.ts",
+        "apps/kite-service/src/native-infrastructure.ts",
+        "apps/kite-service/src/ports.ts",
+        "apps/kite-service/src/readiness.ts",
+        "apps/kite-service/src/shell.ts",
+        "apps/kite-service/src/signals.ts"
+      ],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/service-state.md",
+        "apps/kite-service/docs/service-resilience.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-service-runtime-owner",
+      "sources": [
+        "apps/kite-service/src/bootstrap.ts",
+        "apps/kite-service/src/bootstrap/**",
+        "apps/kite-service/src/app-control/**",
+        "apps/kite-service/src/config/**",
+        "apps/kite-service/src/git/**",
+        "apps/kite-service/src/logs/**",
+        "apps/kite-service/src/observability/**",
+        "apps/kite-service/src/release/**",
+        "apps/kite-service/src/runtime/**",
+        "apps/kite-service/src/runtime-application/**",
+        "apps/kite-service/src/runtime-client/**",
+        "apps/kite-service/src/sandbox/**",
+        "apps/kite-service/src/session-logger/**",
+        "apps/kite-service/src/workspace/**"
+      ],
+      "excludeSources": [
+        "apps/kite-service/src/runtime-client/**",
+        "apps/kite-service/src/sandbox/**",
+        "apps/kite-service/src/observability/**",
+        "apps/kite-service/src/session-logger/**",
+        "apps/kite-service/src/config/session-logging-policy.ts",
+        "apps/kite-service/src/config/mcp-config.ts",
+        "apps/kite-service/src/config/mcp-config-repository.ts",
+        "apps/kite-service/src/config/mcp-project-approvals.ts",
+        "apps/kite-service/src/config/mcp-server-config.ts"
+      ],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/runtime-application.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/mcp-control-plane.md",
+        "docs/active/sqlite-runtime-log-query.md"
+      ]
+    },
+    {
+      "id": "kite-service-carrier",
+      "sources": ["apps/kite-service/src/carrier/**"],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/runtime-server-carrier.md",
+        "apps/kite-service/docs/service-auth.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/sqlite-runtime-log-query.md"
+      ]
+    },
+    {
+      "id": "kite-service-process-harness",
+      "sources": ["apps/kite-service/src/process-harness/**"],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/process-harness.md",
+        "apps/kite-service/docs/service-resilience.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/execution-platform-support.md"
+      ]
+    },
+    {
       "id": "agent-kernel",
       "sources": ["packages/agent-kernel/src/**", "packages/agent-kernel/package.json"],
       "excludeSources": [
@@ -153,42 +294,35 @@
       "authorities": ["docs/active/mcp-runtime-governance.md"]
     },
     {
-      "id": "kite-app",
-      "sources": ["apps/kite/src/**", "apps/kite/package.json"],
+      "id": "kite-cli",
+      "sources": ["apps/kite-cli/src/**", "apps/kite-cli/package.json"],
       "excludeSources": [
-        "apps/kite/src/adapters/tui/**",
-        "apps/kite/src/tui/**",
-        "apps/kite/src/observability/**",
-        "apps/kite/src/session-logger/**",
-        "apps/kite/src/config/session-logging-policy.ts",
-        "apps/kite/src/config/mcp-config.ts",
-        "apps/kite/src/config/mcp-config-repository.ts",
-        "apps/kite/src/config/mcp-project-approvals.ts",
-        "apps/kite/src/config/mcp-server-config.ts",
-        "apps/kite/src/bootstrap.ts",
-        "apps/kite/src/carrier/**",
-        "apps/kite/src/cli/executable.ts",
-        "apps/kite/src/cli/index.ts",
-        "apps/kite/src/logs/runtime-log-presentation.ts",
-        "apps/kite/src/runtime-client/history-adapter.ts",
-        "apps/kite/src/runtime-client/presentation-history.ts",
-        "apps/kite/src/runtime-client/tui-history-facade.ts",
-        "apps/kite/src/sandbox/**",
-        "apps/kite/src/release/**"
+        "apps/kite-cli/src/adapters/tui/**",
+        "apps/kite-cli/src/tui/**",
+        "apps/kite-cli/src/cli/executable.ts",
+        "apps/kite-cli/src/cli/index.ts",
+        "apps/kite-cli/src/runtime-client/tui-history-facade.ts",
+        "apps/kite-cli/src/service-mode/**"
       ],
-      "authorities": ["apps/kite/README.md", "docs/active/six-concept-runtime-architecture.md"]
+      "authorities": ["apps/kite-cli/README.md", "docs/active/six-concept-runtime-architecture.md"]
     },
     {
-      "id": "kite-runtime-carriers",
-      "sources": [
-        "apps/kite/src/bootstrap.ts",
-        "apps/kite/src/carrier/**",
-        "apps/kite/src/cli/executable.ts",
-        "apps/kite/src/cli/index.ts"
-      ],
+      "id": "kite-service-mode-adapter",
+      "sources": ["apps/kite-cli/src/service-mode/**"],
       "authorities": [
-        "apps/kite/README.md",
-        "apps/kite/docs/runtime-server-carrier.md",
+        "apps/kite-cli/README.md",
+        "apps/kite-cli/docs/service-mode.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-cli-command-runtime",
+      "sources": ["apps/kite-cli/src/cli/executable.ts", "apps/kite-cli/src/cli/index.ts"],
+      "authorities": [
+        "apps/kite-cli/README.md",
+        "apps/kite-cli/docs/service-mode.md",
+        "apps/kite-cli/docs/tui-interaction.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/runtime-authority-boundary.md",
         "docs/active/runtime-resilience-qualification.md",
@@ -199,62 +333,61 @@
     {
       "id": "kite-runtime-history",
       "sources": [
-        "apps/kite/src/logs/runtime-log-presentation.ts",
-        "apps/kite/src/runtime-client/history-adapter.ts",
-        "apps/kite/src/runtime-client/presentation-history.ts",
-        "apps/kite/src/runtime-client/tui-history-facade.ts"
+        "apps/kite-service/src/runtime-client/**",
+        "apps/kite-cli/src/runtime-client/tui-history-facade.ts"
       ],
       "authorities": [
-        "apps/kite/README.md",
-        "apps/kite/docs/tui-interaction.md",
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/runtime-application.md",
+        "apps/kite-cli/docs/tui-interaction.md",
         "docs/active/sqlite-runtime-log-query.md",
         "docs/active/runtime-authority-boundary.md"
       ]
     },
     {
       "id": "tui-localization",
-      "sources": ["apps/kite/src/tui/i18n/**"],
-      "authorities": ["apps/kite/docs/tui-localization.md"]
+      "sources": ["apps/kite-cli/src/tui/i18n/**"],
+      "authorities": ["apps/kite-cli/docs/tui-localization.md"]
     },
     {
       "id": "tui-rendering",
       "sources": [
-        "apps/kite/src/tui/render/**",
-        "apps/kite/src/tui/components/**",
-        "apps/kite/src/tui/DiffPreview.tsx",
-        "apps/kite/src/tui/Footer.tsx",
-        "apps/kite/src/tui/Header.tsx",
-        "apps/kite/src/tui/OutputArea.tsx",
-        "apps/kite/src/tui/StatsLine.tsx",
-        "apps/kite/src/tui/StatusBar.tsx",
-        "apps/kite/src/tui/theme.ts",
-        "apps/kite/src/tui/reducers/**",
-        "apps/kite/src/tui/replay-blocks.ts",
-        "apps/kite/src/tui/runtime-presentation.ts",
-        "apps/kite/src/tui/types.ts"
+        "apps/kite-cli/src/tui/render/**",
+        "apps/kite-cli/src/tui/components/**",
+        "apps/kite-cli/src/tui/DiffPreview.tsx",
+        "apps/kite-cli/src/tui/Footer.tsx",
+        "apps/kite-cli/src/tui/Header.tsx",
+        "apps/kite-cli/src/tui/OutputArea.tsx",
+        "apps/kite-cli/src/tui/StatsLine.tsx",
+        "apps/kite-cli/src/tui/StatusBar.tsx",
+        "apps/kite-cli/src/tui/theme.ts",
+        "apps/kite-cli/src/tui/reducers/**",
+        "apps/kite-cli/src/tui/replay-blocks.ts",
+        "apps/kite-cli/src/tui/runtime-presentation.ts",
+        "apps/kite-cli/src/tui/types.ts"
       ],
-      "authorities": ["apps/kite/docs/tui-rendering.md"]
+      "authorities": ["apps/kite-cli/docs/tui-rendering.md"]
     },
     {
       "id": "tui-interaction",
-      "sources": ["apps/kite/src/tui/**", "apps/kite/src/adapters/tui/**"],
+      "sources": ["apps/kite-cli/src/tui/**", "apps/kite-cli/src/adapters/tui/**"],
       "excludeSources": [
-        "apps/kite/src/tui/i18n/**",
-        "apps/kite/src/tui/render/**",
-        "apps/kite/src/tui/components/**",
-        "apps/kite/src/tui/DiffPreview.tsx",
-        "apps/kite/src/tui/Footer.tsx",
-        "apps/kite/src/tui/Header.tsx",
-        "apps/kite/src/tui/OutputArea.tsx",
-        "apps/kite/src/tui/StatsLine.tsx",
-        "apps/kite/src/tui/StatusBar.tsx",
-        "apps/kite/src/tui/theme.ts",
-        "apps/kite/src/tui/reducers/**",
-        "apps/kite/src/tui/replay-blocks.ts",
-        "apps/kite/src/tui/runtime-presentation.ts",
-        "apps/kite/src/tui/types.ts"
+        "apps/kite-cli/src/tui/i18n/**",
+        "apps/kite-cli/src/tui/render/**",
+        "apps/kite-cli/src/tui/components/**",
+        "apps/kite-cli/src/tui/DiffPreview.tsx",
+        "apps/kite-cli/src/tui/Footer.tsx",
+        "apps/kite-cli/src/tui/Header.tsx",
+        "apps/kite-cli/src/tui/OutputArea.tsx",
+        "apps/kite-cli/src/tui/StatsLine.tsx",
+        "apps/kite-cli/src/tui/StatusBar.tsx",
+        "apps/kite-cli/src/tui/theme.ts",
+        "apps/kite-cli/src/tui/reducers/**",
+        "apps/kite-cli/src/tui/replay-blocks.ts",
+        "apps/kite-cli/src/tui/runtime-presentation.ts",
+        "apps/kite-cli/src/tui/types.ts"
       ],
-      "authorities": ["apps/kite/docs/tui-interaction.md"]
+      "authorities": ["apps/kite-cli/docs/tui-interaction.md"]
     },
     {
       "id": "runtime-workspace-boundaries",
@@ -288,7 +421,7 @@
     {
       "id": "tui-system-tests",
       "sources": ["scripts/run-tui-system-tests.ts", "tests/tui-system/harness/**"],
-      "authorities": ["apps/kite/docs/tui-system-testing.md", "tests/README.md"]
+      "authorities": ["apps/kite-cli/docs/tui-system-testing.md", "tests/README.md"]
     },
     {
       "id": "runtime-resilience",
@@ -304,17 +437,18 @@
       "sources": [
         ".github/workflows/runtime-stdio-smoke.yml",
         ".github/workflows/runtime-transport-qualification.yml",
-        "apps/kite/test/isolated/bun-stdio-child-transport.test.ts",
-        "apps/kite/test/isolated/bun-websocket-transport.test.ts",
-        "apps/kite/test/isolated/development-loopback-carrier.test.ts",
-        "apps/kite/test/isolated/development-runtime-reference.test.ts",
-        "apps/kite/test/isolated/development-websocket-runtime-client.test.ts",
-        "apps/kite/test/isolated/runtime-stdio-carrier.test.ts",
-        "apps/kite/test/isolated/runtime-stdio-child.test.ts",
-        "apps/kite/test/isolated/runtime-transport-conformance.test.ts"
+        "packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts",
+        "packages/kite-local-runtime/test/bun-websocket-transport.test.ts",
+        "apps/kite-service/test/isolated/development-loopback-carrier.test.ts",
+        "apps/kite-service/test/isolated/development-runtime-reference.test.ts",
+        "apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts",
+        "apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts",
+        "apps/kite-service/test/isolated/runtime-stdio-child.test.ts",
+        "apps/kite-service/test/isolated/runtime-transport-conformance.test.ts"
       ],
       "authorities": [
-        "apps/kite/docs/runtime-server-carrier.md",
+        "apps/kite-service/docs/runtime-server-carrier.md",
+        "packages/kite-local-runtime/README.md",
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/execution-platform-support.md",
         "tests/README.md"
@@ -324,7 +458,6 @@
       "id": "release-candidate",
       "sources": [
         "release/**",
-        "apps/kite/src/release/**",
         "scripts/release/**",
         "tests/release/**",
         "docs/adr/0069-first-release-terminal-scope.md",
@@ -362,10 +495,10 @@
     {
       "id": "mcp-control-plane",
       "sources": [
-        "apps/kite/src/config/mcp-config.ts",
-        "apps/kite/src/config/mcp-config-repository.ts",
-        "apps/kite/src/config/mcp-project-approvals.ts",
-        "apps/kite/src/config/mcp-server-config.ts",
+        "apps/kite-service/src/config/mcp-config.ts",
+        "apps/kite-service/src/config/mcp-config-repository.ts",
+        "apps/kite-service/src/config/mcp-project-approvals.ts",
+        "apps/kite-service/src/config/mcp-server-config.ts",
         ".github/workflows/mcp-native-keyring-smoke.yml",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
@@ -380,7 +513,7 @@
       "sources": [
         "packages/builtin-runtime/src/sandbox/**",
         "packages/runtime-host/src/process/**",
-        "apps/kite/src/sandbox/**"
+        "apps/kite-service/src/sandbox/**"
       ],
       "authorities": [
         "docs/active/execution-boundary.md",
@@ -390,9 +523,9 @@
     {
       "id": "observability-and-session-logging",
       "sources": [
-        "apps/kite/src/observability/**",
-        "apps/kite/src/session-logger/**",
-        "apps/kite/src/config/session-logging-policy.ts",
+        "apps/kite-service/src/observability/**",
+        "apps/kite-service/src/session-logger/**",
+        "apps/kite-service/src/config/session-logging-policy.ts",
         "scripts/release/session-log-acl-smoke.ts",
         ".github/workflows/session-log-acl-smoke.yml"
       ],

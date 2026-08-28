@@ -45,7 +45,7 @@ packages/agent-kernel/           state/event/reducer/scheduler authority
 packages/runtime-host/           lifecycle、execution 与 storage ports
 packages/builtin-runtime/        builtin domain modules
 packages/runtime-storage-sqlite/ SQLite storage adapter
-apps/kite/                       concrete composition、CLI 与 TUI
+apps/kite-cli/                       concrete composition、CLI 与 TUI
 ```
 
 核心入口：
@@ -55,8 +55,8 @@ apps/kite/                       concrete composition、CLI 与 TUI
 - `packages/runtime-host/src/execution/`：通用 Tool Pipeline lifecycle；
 - `packages/builtin-runtime/src/`：Capability catalog 与领域执行模块；
 - `packages/runtime-storage-sqlite/src/adapter.ts`：SQLite 生命周期与持久化 adapter；
-- `apps/kite/src/bootstrap.ts`：唯一 concrete composition root；
-- `apps/kite/src/cli/` 与 `apps/kite/src/tui/`：CLI/TUI 输入输出适配。
+- `apps/kite-cli/src/bootstrap.ts`：唯一 concrete composition root；
+- `apps/kite-cli/src/cli/` 与 `apps/kite-cli/src/tui/`：CLI/TUI 输入输出适配。
 
 ## 不变量
 

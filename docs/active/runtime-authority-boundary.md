@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime authority、Client/Protocol/Server carrier、identity、Grant/Receipt、持久化、子进程协议、Model/MCP transport、Credential broker 或 Runtime State/SQLite Store 时。
 
-验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/isolated/runtime-command-restart.test.ts apps/kite/test/isolated/runtime-server-multi-client.test.ts apps/kite/test/isolated/runtime-transport-conformance.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
 相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143。
 
@@ -17,22 +17,70 @@ Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App c
 `resolveProjectIdentity()` 结果校验 durable digest，不能把 Builtin sandbox 用于边界比较的 Windows
 case-folded path 再次哈希成第二个 Project identity。二者仍指向同一真实 Workspace，但只有前者拥有
 持久 Project digest，后者只拥有 path containment/equality 语义。不存在 `ProjectIdentityStore`、
-`ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。App 仍是
+`ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。Service App是
 唯一 composition root，Host/Store operation 仍各有一个 production owner。
 
 ## Runtime Server / Client authority boundary
 
 `RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
 
-App 为每个 Server instance 固定一个 canonical trusted Workspace。admission 可以 authorize frozen operation 并注入 App-owned Workspace/Project facts，但绝不从 `clientInfo`、display name 或 request body 派生 authority，也不 command、cache domain state 或写 revision。只有 `apps/kite/src/bootstrap.ts` 组合 Host、Server、Client、Store、carrier 与 local auth。TUI 与 foreground CLI 只有一条 production path：`RuntimeClient → RuntimeServer → RuntimeAccess`；InProcess 不是 bypass，因为它经过同一 Protocol codec、initialize、limits、admission 与 subscription ordering。完整 history 独立走 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`；TUI list/load 不直接调用 SessionStore，Server notification retention、trace 与 JSONL 不能成为 history fallback。
+App 为Server提供backend default admission，并可为每个logical connection绑定不同的canonical trusted Workspace。
+admission可以authorize frozen operation，但绝不从`clientInfo`、display name或request body派生authority，也不command、
+cache domain state或写revision。只有create mapper使用connection admitted Workspace替换不可信wire path；
+resume/query/subscribe/fork按唯一Store中的持久Session identity解析，并与connection Workspace完整
+`canonicalPath + projectId + workspaceDigest`交叉校验。process-wide list query只由Store owner回答，不注入caller
+Workspace。connection close释放admission/subscription/interaction binding，不取消Runtime work或关闭Host。
+
+`RuntimeWorkspaceContextFactory`按完整identity缓存per-Workspace config/model/MCP/Skill/shell context，Router按Session
+identity选择context；同digest不同canonical facts、跨Workspace改绑和fork均fail closed。Runtime Application的
+operation gate统一Runtime与App Control mutation，quiesce阻止新admission并等待active临界区。App Control mutation
+保留exact revision CAS，lost response/`outcome_unknown`只允许query state后显式决定，不能自动重放。
+只有`apps/kite-service/src/composition.ts`组合Host、Server、Store、Builtin、carrier与local auth。它还拥有raw History
+projector/SQLite readonly reader、Workspace-scoped App Control与default Store lifecycle。TUI与foreground CLI只有Native
+`RuntimeClient → RuntimeServer → RuntimeAccess`一条production path；完整history独立走
+`RuntimeClient.history → RuntimeHistoryClient → Service exhaustive client-event projector → RuntimeLogQueryPort → SQLite
+readonly reader`。`apps/kite-cli`不依赖Host、Server、Builtin、SQLite或Runtime SPI，不创建embedded/default Store，
+也不在Native连接失败时回退旧owner。
+
+Native connector只读取exact descriptor与access token，先准备authenticated no-secret App Control，再在Trust通过后取得
+Workspace-bound one-shot ticket并组合Runtime WebSocket、三个History HTTP route与exact App Control/credential client；
+connection从不取得control token。每个HTTP请求绑定发起时的Service instance与connector identity generation，旧instance
+迟到响应在reconnect后拒绝；Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History
+transcript逐条复用closed`RuntimeClientEvent`validator，unknown或带额外字段的event不能跨Native边界。client close只
+释放本connection、subscription与snapshot state，不取消Session/Turn或dispose Host。
+Trust identity除canonical Workspace三元组外还绑定Service发现的exact external-read roots digest；query在Runtime连接前
+向TUI/CLI投影canonical paths，decision经revision/scope CAS后才允许Sandbox只读挂载。scope drift重新阻断connection，
+generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust record自行提升这一authority。
 
 本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
 cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/authority material 仍过滤，raw RuntimeEvent、
 State、Store handle 和 settlement callback 仍禁止。该本地内容不进入 metric、diagnostic 或远程 reporter，
-也不把 development WebSocket 提升为 production Web。
+也不把 development WebSocket 提升为 production Web。审批interaction同样保留用户正在决定的有界command；
+TUI必须以command为主内容，不能用策略summary替换，也不展示
+冗余的user-route“人工审批”标签。cwd、grant subject、binding digest与Host内部payload继续留在边界内。
+Service-owned presentation frame在closed projector前统一合并累计reasoning/text与tool progress，并在durable边界前flush；
+legacy Session seam与concrete Service bridge共享该实现，
+因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。interaction/cancel/close/shutdown等旁路durable
+publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
+后续client event，不能让terminal先结算后再补一个独立Thought。
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
+
+Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
+raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
+instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
+Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
+restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX
+no-follow/owner-only primitive，以及Windows current-user SID、protected owner-only DACL、non-reparse verifier；两者都在
+敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有production loopback carrier、required-port shell与唯一default
+Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用的dead-only stale manager。manager先用
+`GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
+`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
+Protocol/client-contract/serverVersion/build identity一致。server identity drift、malformed或无关listener返回
+`unavailable/identity_uncertain`；descriptor/expected build mismatch返回`incompatible/build_mismatch`。两类都保留state、
+`spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
+该instance proof也不创建persisted Project authority或跨Host Store fence。
 
 ## Authority sequence
 
@@ -69,6 +117,26 @@ Kernel 只拥有纯 Intent、Policy/approval、result acceptance 与 recovery/co
 `RuntimeControlFrame` 是严格结构化的进程控制协议，不是密码学 envelope。它固定 schema、domain、peerId、invocationId、单调 sequence 与 exact payload；unknown field、wrong peer/invocation、replay、truncated/oversized/noncanonical payload 都 fail closed。POSIX 与 MCP stdio 通过继承 FD/专用 stdin 建立 wrapper channel；Windows 使用 runner control stdin/stdout 与 Job/process handles。实际用户命令不继承 Host control channel。
 
 ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前产生；Host 验证 ready，并完成 durable acknowledgement 后才进入 GO。pre-ready 失败必须保持 user process dispatch 为 0；terminal/cleanup unknown 不允许自动重放或切换另一 owner。
+MCP stdio wrapper的ready、JSON-RPC与terminal frame都必须等待stdout write completion后再推进生命周期；尤其最终terminal
+frame未刷入专用pipe前wrapper不得退出。Host只接受实际收到并验证的terminal evidence，process exit或已写入用户态buffer
+不能替代该证明。wrapper runtime返回的completion Promise只在terminal已写入或fail-closed child cleanup收敛后完成；
+Service standalone internal entry与executable module root都必须await该Promise，不能以fire-and-forget `.catch()`在安装
+event listener后提前结束模块求值或主入口。
+Windows上的Bun 1.4 standalone在child退出后不能只依赖pending stream/completion Promise维持事件循环；wrapper必须
+在整个child与pipe drain生命周期持有一个referenced keepalive，并仅在terminal evidence或fail-closed cleanup真正结算后释放。
+fail-closed诊断只写入有界stderr，且必须同步提交后再允许wrapper结束，避免Windows standalone丢失唯一故障证据。
+wrapper在bootstrap、child-started、forwarding与drained阶段使用保留的非零exit code；只有terminal frame成功提交后
+才覆盖为真实child exit code，意外中途退出不能伪装为成功。
+Host的`spawn()`只在validated ready后返回handle；若ready前EOF、协议拒绝或timeout，Host必须先有界终止process tree、
+等待wrapper exit，再把有界numeric `wrapper_exit`附到startup error。调用方即使尚未取得handle也能区分生命周期阶段，
+且该诊断不能包含command、path、environment或MCP正文。
+terminal必须作为stdout的单个最终`end(bytes, callback)`操作提交，并等待stream close callback后再推进生命周期；
+Windows standalone不得把最终frame write与stream end拆成两个操作。ready与普通JSON-RPC仍走异步背压路径。
+实现与回归验证必须区分这两条写入路径：ready不能消费最终stream关闭语义，terminal也不能回退为普通
+Node stdout write callback，否则Windows standalone可在ready成功后丢失最终cleanup evidence。
+Bun standalone的argv prefix可随平台变化；Service同时对显式command args与完整`process.argv`应用同一个
+final-marker/competing-internal-mode validator，随后只把规范化的单一MCP marker交给wrapper runtime。Windows单路径
+executable argv不能因`slice(2)`为空而落入普通Service命令解析或静默退出。
 
 ## SQLite Store 与 Artifact
 
@@ -86,7 +154,7 @@ State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / 
 
 ## Carrier scope
 
-stdio 是 App-owned child I/O：bounded UTF-8 JSONL 从 stdin 输入，stdout 只承载 protocol，diagnostics 使用 stderr；EOF 只释放 connection，不会创建新的 Runtime owner，只有 parent capability 可以请求 composition shutdown。loopback WebSocket carrier 仅是 development/test evidence：由 App 拥有、只 bind loopback、经 bootstrap-local-auth，并接受 exact Host/Origin/CSP/no-CORS/frame/heartbeat checks。它不读取 raw SQLite，也不扩大 log-query authority。它不改变 ADR-0053：不能据此发布 `kite server --web`、production Web entrypoint 或 Web support claim。
+stdio是Service-owned internal child I/O：bounded UTF-8 JSONL从stdin输入，stdout只承载protocol，diagnostics使用stderr；EOF只释放connection，不会创建新的Runtime owner，只有parent capability可以请求composition shutdown。默认terminal入口使用Service-ownedNative loopback carrier：只bind loopback，经restart-scoped token/ticket认证，并接受exact Host/Origin/CSP/no-CORS/frame/heartbeat checks。另有development/reference WebSocket carrier只用于conformance。两者都不改变ADR-0053：不能据此发布`kite server --web`、production Web UI或remote support claim。
 
 Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free ref。文件权限、no-follow、atomic rename、fsync、schema readback 与 Runtime receipt identity 共同检测损坏和混淆；不存在 `model-artifacts.key`、key loss 终态或无 Artifact dispatch fallback。
 

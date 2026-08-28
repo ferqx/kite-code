@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test apps/kite/test/isolated/runtime/agent.integration.test.ts apps/kite/test/runtime/completion-guard.test.ts apps/kite/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite/test/subagent-runner.test.ts apps/kite/test/isolated/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/runtime/completion-guard.test.ts apps/kite-service/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite-service/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite-service/test/subagent-runner.test.ts apps/kite-service/test/isolated/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、ADR-0137、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
@@ -14,7 +14,7 @@ Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的�
 
 Builtin frozen catalog 已把 `read_plan`、`write_plan`、`update_plan` 的 model schema、parser、effects、
 availability、revision 与 operation owner 收口到 `@kite-ai/builtin-runtime`，并通过唯一 SPI snapshot 投影；
-`apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 Runtime State/SQLite Store persistence/effect bridge，不是第二 schema authority。
+`apps/kite-service/src/bootstrap/runtime/plan-runtime.ts` 是 Service 的 Runtime State/SQLite Store persistence/effect bridge，不是第二 schema authority。
 Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
 均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 Builtin catalog entry 只保留 schema、contract、

@@ -18,6 +18,7 @@ import {
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_MESSAGE_SCHEMA_,
   RUNTIME_PROTOCOL_RESPONSE_SCHEMA_,
+  RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_,
   safeDecodeRuntimeProtocolMessage,
 } from '../src/index';
@@ -182,6 +183,7 @@ describe('Runtime Protocol', () => {
         sessionRevision: 7,
         generation: 2,
         grants: ['approve_once'],
+        command: 'git status --short --branch',
       },
       response: { kind: 'approval', decision: 'approve_once' },
     };
@@ -193,6 +195,19 @@ describe('Runtime Protocol', () => {
         params: { command },
       }).success,
     ).toBeTrue();
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
+        id: 'rpc-approval-command-too-long',
+        method: 'runtime/command',
+        params: {
+          command: {
+            ...command,
+            interaction: { ...command.interaction, command: 'x'.repeat(16_385) },
+          },
+        },
+      }).success,
+    ).toBeFalse();
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
@@ -302,6 +317,7 @@ describe('Runtime Protocol', () => {
       mapRuntimeClientEventToProtocol({
         type: 'tool.queued',
         toolId: 'tool-1',
+        presentationGroupId: 'model-message-1',
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -310,6 +326,7 @@ describe('Runtime Protocol', () => {
     ).toEqual({
       type: 'tool.queued',
       toolId: 'tool-1',
+      presentationGroupId: 'model-message-1',
       toolName: 'read_file',
       presentation: 'exploration',
       arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -344,6 +361,21 @@ describe('Runtime Protocol', () => {
       },
       summary: 'Completed.',
     });
+    const approvalQueued = {
+      type: 'approval.queued' as const,
+      interaction: {
+        kind: 'approval' as const,
+        interactionId: 'approval-1',
+        sessionRevision: 8,
+        generation: 0,
+        grants: ['approve_once'] as ('approve_once' | 'same_command')[],
+        command: 'git status --short --branch',
+        title: 'shell_execute',
+        summary: 'Approve a shell command',
+      },
+      queueSequence: 0,
+    };
+    expect(mapRuntimeClientEventToProtocol(approvalQueued)).toEqual(approvalQueued);
     expect(
       RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
         type: 'tool.queued',
@@ -478,6 +510,25 @@ describe('Runtime Protocol', () => {
       retryable: true,
       recoveryEntry: 'retry',
     });
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'rewind.terminal',
+        rewindId: 'rewind-1',
+        commandId: 'rewind-command-1',
+        sourceSessionId: 'session-1',
+        targetSessionId: 'session-2',
+        status: 'completed',
+        fileOutcome: { restored: ['safe.txt'], deleted: [], failed: [], conflicts: [] },
+      }),
+    ).toEqual({
+      type: 'rewind.terminal',
+      rewindId: 'rewind-1',
+      commandId: 'rewind-command-1',
+      sourceSessionId: 'session-1',
+      targetSessionId: 'session-2',
+      status: 'completed',
+      fileOutcome: { restored: ['safe.txt'], deleted: [], failed: [], conflicts: [] },
+    });
     expect(mapRuntimeClientEventToProtocol({ type: 'future_event' } as never)).toBeUndefined();
     expect(
       mapRuntimeNotificationToSubscriptionMessage({
@@ -494,6 +545,7 @@ describe('Runtime Protocol', () => {
             workspace: '/private/workspace',
             lifecycle: 'open',
             sessionCommandGrantCount: 2,
+            interactionQueue: { revision: 4, interactions: [] },
           },
         },
       }),
@@ -508,6 +560,7 @@ describe('Runtime Protocol', () => {
         revision: 4,
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
   });
@@ -525,6 +578,7 @@ describe('Runtime Protocol', () => {
         workspace: '/private/workspace',
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
     expect(wire).toEqual({
@@ -538,6 +592,7 @@ describe('Runtime Protocol', () => {
         revision: 4,
         lifecycle: 'open',
         sessionCommandGrantCount: 2,
+        interactionQueue: { revision: 4, interactions: [] },
       },
     });
     expect(mapSubscriptionMessageToClientUpdate(wire)).toEqual(wire);
@@ -617,6 +672,19 @@ describe('Runtime Protocol', () => {
               revision: 3,
               lifecycle: 'open',
               sessionCommandGrantCount: 0,
+              interactionQueue: {
+                revision: 3,
+                activeInteractionId: 'interaction-1',
+                interactions: [
+                  {
+                    kind: 'input',
+                    interactionId: 'interaction-1',
+                    sessionRevision: 3,
+                    question: 'Continue?',
+                    allowFreeText: true,
+                  },
+                ],
+              },
               activeWork: {
                 workId: 'work-1',
                 phase: 'building',
@@ -641,9 +709,44 @@ describe('Runtime Protocol', () => {
     ).toBeTrue();
   });
 
+  test('rejects same-revision active approval fields with different command identity', () => {
+    const approval = {
+      kind: 'approval' as const,
+      interactionId: 'approval-full-identity',
+      sessionRevision: 3,
+      generation: 1,
+      command: 'bun test',
+      grants: ['approve_once' as const],
+    };
+    const session = {
+      schema: 'kite.runtime-projection.v1' as const,
+      sessionId: 'session-1',
+      revision: 3,
+      lifecycle: 'open' as const,
+      sessionCommandGrantCount: 0,
+      interactionQueue: {
+        revision: 3,
+        activeInteractionId: approval.interactionId,
+        interactions: [approval],
+      },
+      activeWork: {
+        workId: 'work-1',
+        phase: 'building' as const,
+        status: 'waiting' as const,
+        activeTurn: {
+          turnId: 'turn-1',
+          status: 'waiting' as const,
+          interaction: { ...approval, grants: ['same_command' as const] },
+        },
+      },
+    };
+
+    expect(RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse(session).success).toBeFalse();
+  });
+
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '15fd1015:f4d30d5f';
+    const expectedDigest = '499d39ab:731d86b4';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

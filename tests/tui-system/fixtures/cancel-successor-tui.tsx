@@ -1,10 +1,11 @@
-import { runTui } from '@kite-ai/kite/tui';
-import type { AppShellExecutor } from '@/app/sandbox/composition';
+import { runTui } from '@kite-ai/kite-cli/tui';
+import type { AppShellExecutor } from '#kite-service/sandbox/composition';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   type AppPreparedShellExecutionPort,
   projectAppHostShellResult,
-} from '@/app/sandbox/prepared-tool-pipeline';
+} from '#kite-service/sandbox/prepared-tool-pipeline';
+import { createInProcessTuiServiceConnector } from './in-process-service-connector';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 let invocation = 0;
@@ -80,9 +81,8 @@ Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_, {
 });
 
 shellExecutor.prepare = async () => ({
-  mode: 'denied',
+  mode: 'host_shell',
   backend: 'none',
-  reason: 'fixture sandbox unavailable',
 });
 
-runTui({ shellExecutor });
+runTui({ connectService: createInProcessTuiServiceConnector(shellExecutor) });

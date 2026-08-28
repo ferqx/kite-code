@@ -1,16 +1,53 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, parse } from 'node:path';
+import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import {
-  installOssCandidate,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, parse, resolve } from 'node:path';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+} from '@kite-ai/kite-local-runtime/service';
+import {
+  installOssCandidate as installCandidate,
   readInstallStatus,
-  rollbackOssCandidate,
-  uninstallOssCandidate,
+  rollbackOssCandidate as rollbackCandidate,
+  uninstallOssCandidate as uninstallCandidate,
 } from '../../scripts/release/install-oss-candidate';
+import {
+  currentOssReleaseTarget,
+  type OssReleaseTarget,
+} from '../../scripts/release/oss-candidate';
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
+
+setDefaultTimeout(60_000);
+
+function serviceHome(prefix: string) {
+  const root = join(realpathSync(dirname(resolve(prefix))), 'service-home');
+  return ensureLocalRuntimeServiceHome(createKiteHomeIdentity(root, 'explicit_argument'));
+}
+
+function installOssCandidate(input: { archivePath: string; prefix: string }) {
+  if (resolve(input.prefix) === parse(resolve(input.prefix)).root) return installCandidate(input);
+  return installCandidate({ ...input, serviceHome: serviceHome(input.prefix) });
+}
+
+function rollbackOssCandidate(prefix: string) {
+  return rollbackCandidate(prefix, { serviceHome: serviceHome(prefix) });
+}
+
+function uninstallOssCandidate(prefix: string) {
+  return uninstallCandidate(prefix, { serviceHome: serviceHome(prefix) });
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -36,6 +73,36 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(prefix)).toBe(false);
   });
 
+  test('uses the supplied custom Service home for every ordinary lifecycle stop', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-custom-service-home-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    const identity = serviceHome(prefix);
+    const firstLog = join(parent, 'first-arguments.log');
+    const secondLog = join(parent, 'second-arguments.log');
+    const first = await createOssCandidateFixture(
+      '0.1.0',
+      currentOssReleaseTarget(),
+      'applied',
+      firstLog,
+    );
+    const second = await createOssCandidateFixture(
+      '0.1.1',
+      currentOssReleaseTarget(),
+      'applied',
+      secondLog,
+    );
+    roots.push(first.root, second.root);
+
+    await installCandidate({ archivePath: first.archivePath, prefix, serviceHome: identity });
+    await installCandidate({ archivePath: second.archivePath, prefix, serviceHome: identity });
+    rollbackCandidate(prefix, { serviceHome: identity });
+    uninstallCandidate(prefix, { serviceHome: identity });
+
+    expectAllKiteHomeArguments(firstLog, identity.root);
+    expectAllKiteHomeArguments(secondLog, identity.root);
+  });
+
   test('refuses unmanaged, broad, or link-containing targets', async () => {
     const fixture = await createOssCandidateFixture('0.1.0');
     roots.push(fixture.root);
@@ -50,6 +117,25 @@ describe('managed candidate install lifecycle', () => {
     await expect(
       installOssCandidate({ archivePath: fixture.archivePath, prefix: parse(parent).root }),
     ).rejects.toThrow('filesystem root');
+  });
+
+  test('rejects repository descendants even when invoked from an unrelated cwd', async () => {
+    const fixture = await createOssCandidateFixture('0.1.0');
+    roots.push(fixture.root);
+    const unrelated = mkdtempSync(join(tmpdir(), 'kite-oss-unrelated-cwd-'));
+    roots.push(unrelated);
+    const previousCwd = process.cwd();
+    process.chdir(unrelated);
+    try {
+      await expect(
+        installCandidate({
+          archivePath: fixture.archivePath,
+          prefix: join(resolve(import.meta.dir, '../..'), '.installer-must-not-write-here'),
+        }),
+      ).rejects.toThrow('repository');
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   test('refuses to uninstall an install tree containing an unknown user file', async () => {
@@ -85,13 +171,26 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 
+  test('leaves the active candidate unchanged when ordinary Service stop is busy', async () => {
+    const target = currentOssReleaseTarget();
+    const first = await createOssCandidateFixture('0.1.0', target, 'service_busy');
+    const second = await createOssCandidateFixture('0.1.1');
+    roots.push(first.root, second.root);
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-upgrade-busy-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
+
+    await expect(installOssCandidate({ archivePath: second.archivePath, prefix })).rejects.toThrow(
+      'ordinary stop failed',
+    );
+    expect(readInstallStatus(prefix)).toEqual(firstMarker);
+    expect(readdirSync(join(prefix, 'releases'))).toHaveLength(1);
+  });
+
   test('refuses to replace a managed install with a different platform target', async () => {
     const first = await createOssCandidateFixture('0.1.0');
-    const otherTarget = await createOssCandidateFixture('0.1.1', {
-      id: 'linux-x64',
-      os: 'linux',
-      arch: 'x64',
-    });
+    const otherTarget = await createOssCandidateFixture('0.1.1', nonNativeTarget());
     roots.push(first.root, otherTarget.root);
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-target-safety-'));
     roots.push(parent);
@@ -100,7 +199,7 @@ describe('managed candidate install lifecycle', () => {
 
     await expect(
       installOssCandidate({ archivePath: otherTarget.archivePath, prefix }),
-    ).rejects.toThrow('cannot be replaced');
+    ).rejects.toThrow('does not match');
     expect(readInstallStatus(prefix)).toEqual(firstMarker);
   });
 
@@ -121,3 +220,17 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 });
+
+function nonNativeTarget(): OssReleaseTarget {
+  const current = currentOssReleaseTarget();
+  return current.id === 'macos-arm64'
+    ? { id: 'linux-x64', os: 'linux', arch: 'x64', executableSuffix: '' }
+    : { id: 'macos-arm64', os: 'darwin', arch: 'arm64', executableSuffix: '' };
+}
+
+function expectAllKiteHomeArguments(path: string, expectedHome: string): void {
+  const args = readFileSync(path, 'utf8').trim().split('\n');
+  const positions = args.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
+  expect(positions.length).toBeGreaterThan(0);
+  for (const position of positions) expect(args[position + 1]).toBe(expectedHome);
+}

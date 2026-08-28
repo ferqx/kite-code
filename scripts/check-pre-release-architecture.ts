@@ -8,7 +8,8 @@ const packageSources = readdirSync(join(root, 'packages'))
   .map((name) => join(root, 'packages', name, 'src'))
   .filter(existsSync);
 const productionRoots = [
-  join(root, 'apps/kite/src'),
+  join(root, 'apps/kite-cli/src'),
+  join(root, 'apps/kite-service/src'),
   ...packageSources,
   join(root, 'native'),
 ].filter(existsSync);
@@ -132,9 +133,9 @@ function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
     relativePath === 'packages/runtime-host/src/format/storage-binding.ts' ||
     relativePath === 'packages/runtime-storage-sqlite/src/compatibility.ts' ||
     relativePath === 'packages/runtime-storage-sqlite/src/index.ts' ||
-    relativePath === 'apps/kite/src/bootstrap/runtime/state-store-compatibility.ts' ||
-    relativePath === 'apps/kite/src/runtime-client/history-adapter.ts' ||
-    relativePath === 'apps/kite/src/bootstrap.ts'
+    relativePath === 'apps/kite-service/src/bootstrap/runtime/state-store-compatibility.ts' ||
+    relativePath === 'apps/kite-service/src/runtime-client/history-adapter.ts' ||
+    relativePath === 'apps/kite-service/src/bootstrap.ts'
   );
 }
 
@@ -155,13 +156,30 @@ function inspectSource(path: string): void {
       );
     }
     if (
-      relativePath.startsWith('apps/kite/src/runtime/') &&
+      relativePath.startsWith('apps/kite-service/src/runtime/') &&
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       /(?:^|[/#])tui(?:[/]|$)/u.test(node.moduleSpecifier.text)
     ) {
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push(`${relativePath}:${position.line + 1}: App Runtime imports TUI`);
+    }
+    if (
+      relativePath.startsWith('apps/kite-service/src/') &&
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      (node.moduleSpecifier.text === 'react' ||
+        node.moduleSpecifier.text.startsWith('react/') ||
+        node.moduleSpecifier.text === 'ink' ||
+        node.moduleSpecifier.text.startsWith('ink-') ||
+        node.moduleSpecifier.text === '@kite-ai/kite-cli' ||
+        node.moduleSpecifier.text.startsWith('@kite-ai/kite-cli/') ||
+        node.moduleSpecifier.text.startsWith('#kite-cli/'))
+    ) {
+      const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      violations.push(
+        `${relativePath}:${position.line + 1}: Runtime Service imports CLI or UI authority`,
+      );
     }
     if (
       ts.isImportDeclaration(node) &&
@@ -212,7 +230,10 @@ function inspectSource(path: string): void {
   ) {
     violations.push(`${relativePath}: SQLite format-selection or compatibility branch`);
   }
-  if (relativePath.startsWith('apps/kite/src/') && /\.sessions\.deleteSession\s*\(/u.test(source)) {
+  if (
+    relativePath.startsWith('apps/kite-cli/src/') &&
+    /\.sessions\.deleteSession\s*\(/u.test(source)
+  ) {
     violations.push(`${relativePath}: App may not delete Runtime Store sessions directly`);
   }
 }
@@ -249,7 +270,7 @@ for (const name of readdirSync(activeDocsRoot)) {
   }
 }
 
-const compositionRoots = ['apps/kite/src/bootstrap.ts'].filter((path) =>
+const compositionRoots = ['apps/kite-service/src/bootstrap.ts'].filter((path) =>
   existsSync(join(root, path)),
 );
 if (compositionRoots.length !== 1) violations.push('composition root count is not exactly one');
@@ -290,27 +311,28 @@ const requiredDomainFiles = [
   'packages/builtin-runtime/src/subagent/runtime-module.ts',
   'packages/builtin-runtime/src/subagent/index.ts',
   'packages/builtin-runtime/src/verification/runtime-module.ts',
-  'apps/kite/src/runtime/session/session-registry.ts',
-  'apps/kite/src/runtime/session/session-lifecycle.ts',
-  'apps/kite/src/runtime/session/rewind-service.ts',
-  'apps/kite/src/runtime/session/planning-mode-service.ts',
-  'apps/kite/src/runtime/session/context-compaction-service.ts',
-  'apps/kite/src/runtime/session/session-projection.ts',
-  'apps/kite/src/adapters/tui/session-adapter.ts',
-  'apps/kite/src/runtime/tool-execution/router.ts',
-  'apps/kite/src/runtime/tool-execution/builtin-executor.ts',
-  'apps/kite/src/runtime/tool-execution/mcp-executor.ts',
-  'apps/kite/src/runtime/tool-execution/subagent-executor.ts',
-  'apps/kite/src/runtime/tool-execution/skill-executor.ts',
-  'apps/kite/src/runtime/tool-execution/terminal-projection.ts',
-  'apps/kite/src/runtime/tool-persistence/attempt-recorder.ts',
-  'apps/kite/src/runtime/tool-persistence/acknowledgement-validator.ts',
-  'apps/kite/src/runtime/tool-persistence/receipt-committer.ts',
-  'apps/kite/src/runtime/tool-persistence/filesystem-evidence.ts',
-  'apps/kite/src/runtime/tool-persistence/filesystem-mutation.ts',
-  'apps/kite/src/runtime/tool-persistence/subagent-suspension.ts',
-  'apps/kite/src/runtime/tool-persistence/terminal-event-projector.ts',
-  'apps/kite/src/runtime/tool-persistence/recovery-committer.ts',
+  'apps/kite-service/src/runtime/session/session-registry.ts',
+  'apps/kite-service/src/runtime/session/session-lifecycle.ts',
+  'apps/kite-service/src/runtime/session/rewind-service.ts',
+  'apps/kite-service/src/runtime/session/planning-mode-service.ts',
+  'apps/kite-service/src/runtime/session/context-compaction-service.ts',
+  'apps/kite-service/src/runtime/session/session-projection.ts',
+  'apps/kite-service/src/logs/runtime-log-presentation.ts',
+  'apps/kite-cli/src/adapters/tui/session-adapter.ts',
+  'apps/kite-service/src/runtime/tool-execution/router.ts',
+  'apps/kite-service/src/runtime/tool-execution/builtin-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/mcp-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/subagent-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/skill-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/terminal-projection.ts',
+  'apps/kite-service/src/runtime/tool-persistence/attempt-recorder.ts',
+  'apps/kite-service/src/runtime/tool-persistence/acknowledgement-validator.ts',
+  'apps/kite-service/src/runtime/tool-persistence/receipt-committer.ts',
+  'apps/kite-service/src/runtime/tool-persistence/filesystem-evidence.ts',
+  'apps/kite-service/src/runtime/tool-persistence/filesystem-mutation.ts',
+  'apps/kite-service/src/runtime/tool-persistence/subagent-suspension.ts',
+  'apps/kite-service/src/runtime/tool-persistence/terminal-event-projector.ts',
+  'apps/kite-service/src/runtime/tool-persistence/recovery-committer.ts',
   'packages/runtime-storage-sqlite/src/schema.ts',
   'packages/runtime-storage-sqlite/src/connection.ts',
   'packages/runtime-storage-sqlite/src/event-store.ts',
@@ -323,6 +345,15 @@ const requiredDomainFiles = [
 ];
 for (const path of requiredDomainFiles) {
   if (!existsSync(join(root, path))) violations.push(`${path}: required domain module is missing`);
+}
+
+for (const path of ['apps/kite-service/src/logs/runtime-log-presentation.ts']) {
+  const ignored = Bun.spawnSync(['git', 'check-ignore', '--quiet', path], {
+    cwd: root,
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  if (ignored.exitCode === 0) violations.push(`${path}: required domain module is ignored`);
 }
 
 if (violations.length > 0) {

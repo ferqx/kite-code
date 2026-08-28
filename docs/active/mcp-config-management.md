@@ -2,8 +2,8 @@
 
 状态：active
 读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
-验证：`bun test apps/kite/test/isolated/mcp-config-catalog.test.ts apps/kite/test/isolated/mcp-config-repository.test.ts apps/kite/test/mcp-config-reconcile.test.ts apps/kite/test/isolated/mcp-project-approval.test.ts apps/kite/test/mcp-supervisor.test.ts packages/builtin-runtime/test/mcp-credential-store.test.ts apps/kite/test/mcp-oauth-integration.test.ts apps/kite/test/mcp-panel.test.tsx apps/kite/test/tui-slash-command.test.ts apps/kite/test/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0019、ADR-0013、ADR-0014、ADR-0018、`apps/kite/src/config/mcp-config-repository.ts`、`apps/kite/src/config/mcp-config.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`apps/kite/src/tui/mcp/`。
+验证：`bun test apps/kite-service/test/isolated/mcp-config-catalog.test.ts apps/kite-service/test/isolated/mcp-config-repository.test.ts apps/kite-service/test/mcp-config-reconcile.test.ts apps/kite-service/test/isolated/mcp-project-approval.test.ts apps/kite-service/test/mcp-supervisor.test.ts packages/builtin-runtime/test/mcp-credential-store.test.ts apps/kite-service/test/mcp-oauth-integration.test.ts apps/kite-cli/test/mcp-panel.test.tsx apps/kite-cli/test/tui-slash-command.test.ts apps/kite-cli/test/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0019、ADR-0013、ADR-0014、ADR-0018、`apps/kite-service/src/config/mcp-config-repository.ts`、`apps/kite-service/src/config/mcp-config.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`apps/kite-cli/src/tui/mcp/`。
 
 ## 来源与优先级
 

@@ -39,9 +39,9 @@ describe('execution-boundary conformance workflow', () => {
     }
     expect(workflow).toContain('packages/builtin-runtime/src/sandbox/**');
     expect(workflow).toContain('packages/runtime-host/src/process/**');
-    expect(workflow).toContain('apps/kite/src/config/execution-boundary.ts');
+    expect(workflow).toContain('apps/kite-service/src/config/execution-boundary.ts');
     expect(keyringWorkflow).toContain('packages/builtin-runtime/src/mcp/credential-store.ts');
-    expect(sessionLogWorkflow).toContain('apps/kite/src/session-logger/**');
-    expect(sessionLogWorkflow).toContain('apps/kite/src/config/paths.ts');
+    expect(sessionLogWorkflow).toContain('apps/kite-service/src/session-logger/**');
+    expect(sessionLogWorkflow).toContain('apps/kite-service/src/config/paths.ts');
   });
 });

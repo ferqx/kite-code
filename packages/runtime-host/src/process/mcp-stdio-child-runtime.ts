@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import {
   canonicalControlFrameJson,
   isRuntimeControlFrame,
@@ -22,6 +23,10 @@ import { spawnRuntimeHostProcess } from './spawn';
 
 const MAX_BOOTSTRAP_BUFFER_BYTES_ = 1024 * 1024;
 const CHILD_ENV_MAX_ENTRIES_ = 128;
+const WRAPPER_EXIT_BOOTSTRAPPING_ = 120;
+const WRAPPER_EXIT_CHILD_STARTED_ = 121;
+const WRAPPER_EXIT_FORWARDING_ = 122;
+const WRAPPER_EXIT_DRAINED_ = 123;
 
 type GoPayload = {
   readonly type: 'go';
@@ -50,12 +55,30 @@ type TerminalPayload = {
   readonly cleanup: 'confirmed';
 };
 
-export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.slice(2)): void {
+export function runMcpStdioChildRuntime(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<void> {
   if (args.length !== 1 || args[0] !== MCP_STDIO_WRAPPER_ENTRYPOINT_) {
     process.exitCode = 125;
-    return;
+    return Promise.resolve();
   }
 
+  process.exitCode = WRAPPER_EXIT_BOOTSTRAPPING_;
+  // Bun 1.4 on Windows can end a standalone executable while its only remaining work is an
+  // awaited stream Promise. Keep one referenced handle until terminal evidence or fail-closed
+  // cleanup has actually settled; the child process alone is not sufficient after it exits.
+  const lifecycleKeepAlive = setInterval(() => undefined, 1_000);
+  let resolveCompletion!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
+  let completed = false;
+  const complete = (): void => {
+    if (completed) return;
+    completed = true;
+    clearInterval(lifecycleKeepAlive);
+    resolveCompletion();
+  };
   let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
   let goSeen = false;
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
@@ -70,7 +93,15 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
     failed = true;
     if (error) {
       try {
-        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        const diagnostic = Buffer.from(
+          `${error instanceof Error ? error.message : String(error)}\n`,
+          'utf8',
+        );
+        try {
+          writeSync(process.stderr.fd, diagnostic);
+        } finally {
+          diagnostic.fill(0);
+        }
       } catch {
         // The parent may already have closed stderr.
       }
@@ -81,6 +112,9 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
       } catch {
         // The child may already have exited.
       }
+      void Promise.resolve(child.exited).then(complete, complete);
+    } else {
+      complete();
     }
     try {
       process.stdin.destroy();
@@ -162,6 +196,8 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
   process.stdin.on('error', failClosed);
   process.stdin.resume();
 
+  return completion;
+
   async function startChild(go: GoPayload): Promise<void> {
     if (child || failed) throw new Error('MCP stdio wrapper child lifecycle is invalid.');
     child = spawnRuntimeHostProcess([go.command, ...go.args], {
@@ -173,6 +209,7 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
       windowsHide: true,
     });
     childPid = child.pid;
+    process.exitCode = WRAPPER_EXIT_CHILD_STARTED_;
     processStartIdentity = `${childPid}:${Date.now()}:${randomUUID()}`;
     await writeRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
@@ -188,12 +225,14 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
         processStartIdentity,
       } satisfies ReadyPayload,
     });
+    process.exitCode = WRAPPER_EXIT_FORWARDING_;
 
     const stdoutPump = forwardChildStream(child.stdout, process.stdout);
     const stderrPump = forwardChildStream(child.stderr, process.stderr);
     const [exitCode] = await Promise.all([child.exited, stdoutPump, stderrPump]);
     if (failed) return;
-    await writeRuntimeControlFrame({
+    process.exitCode = WRAPPER_EXIT_DRAINED_;
+    await writeFinalRuntimeControlFrame({
       schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
       domain: MCP_STDIO_CONTROL_DOMAIN_,
       peerId: MCP_STDIO_WRAPPER_PEER_ID_,
@@ -215,6 +254,7 @@ export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.s
       // The parent may have already closed stdin.
     }
     process.exitCode = normalizeExitCode(exitCode);
+    complete();
   }
 }
 
@@ -241,6 +281,22 @@ async function writeRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): 
   const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
   try {
     await writeWritable(process.stdout, bytes);
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+async function writeFinalRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): Promise<void> {
+  const controlFrame = createRuntimeControlFrame(frame);
+  const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      try {
+        process.stdout.end(bytes, resolve);
+      } catch (error) {
+        reject(error);
+      }
+    });
   } finally {
     bytes.fill(0);
   }
@@ -348,8 +404,16 @@ function normalizeExitCode(value: number): number {
 }
 
 async function writeWritable(target: NodeJS.WritableStream, data: Uint8Array): Promise<void> {
-  if (target.write(data)) return;
-  await new Promise<void>((resolve) => target.once('drain', resolve));
+  await new Promise<void>((resolve, reject) => {
+    try {
+      target.write(data, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 if (import.meta.main) {

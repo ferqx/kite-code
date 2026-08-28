@@ -147,6 +147,7 @@ describe('TUI PTY System — File Rewind', () => {
       await submitCommand(tui, '/rewind');
       // 检查点面板以用户消息描述恢复边界，不暴露 event / snapshot ID。
       await waitForText(() => tui.viewport(), '回退', 15000);
+      await waitForText(() => tui.viewport(), 'Enter 继续', 15000);
 
       // Enter 只进入确认层；默认选择恢复代码和会话。
       tui.write('\r');

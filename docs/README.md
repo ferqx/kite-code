@@ -34,6 +34,25 @@ carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime
 同一生产文件仍只能命中一个 source owner，新增 transport、receipt 或 workspace 时必须同步代表路径矩阵，
 不得靠重叠规则让任意一份无关 authority 满足检查。
 
+当前 terminal App workspace 的规范路径是 `apps/kite-cli`，workspace-local source alias 是
+`#kite-cli/*`；旧 `apps/kite`、`@kite-ai/kite`、`#app/*` 与 `@/app/*` 只可作为历史记录或明确的负向
+fixture。后续新增 Service 或 package 时，只有在 source 与 owner README 实际存在的同一改动中才加入 V2
+规则，不以无效 future path 或空 workspace 预占 documentation owner。
+
+Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
+`kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
+使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+
+KLSV1-06 clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
+MCP、Sandbox、Observability、Session Logger、release 与 process harness 使用互斥 owner；`manager/**` 已迁入
+`kite-local-runtime-manager`。不得添加覆盖整个 Service source 的 generic 通配规则，也不得让已迁出的 CLI 路径
+继续满足 Service authority。Native filesystem primitive 仍由 `kite-local-runtime-service-state` 独占；代表路径测试
+固定验证每个生产文件只命中一个 owner，并验证 `apps/kite-cli` 仍有真实 package consumer，不能靠放宽 public entry
+消除 consumer gate。
+
+process harness 继续是未公开 fake-application fixture，不能用其 source 满足真实 composition 或 release authority。
+CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager、carrier 或 backend。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

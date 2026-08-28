@@ -6,6 +6,8 @@ import {
   compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
+  isReadOnlyShellCommand,
+  isVcsMutationShellCommand,
 } from '@kite-ai/builtin-runtime';
 import {
   type CapabilityPolicyCompilation,
@@ -252,6 +254,53 @@ describe('Builtin operation policy compiler', () => {
     });
   });
 
+  test('proves only bounded workspace inventory loops read-only', () => {
+    const inventory =
+      'for d in packages/* apps/*; do echo "=== $d ==="; ls "$d"; done 2>/dev/null | head -120';
+    expect(isReadOnlyShellCommand(inventory)).toBe(true);
+    expect(compile('shell_execute', { command: inventory })).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      effectiveEffects: { filesystem: 'read' },
+    });
+
+    for (const command of [
+      'for d in packages/*; do rm -rf "$d"; done',
+      'for d in /tmp/*; do cat "$d"; done',
+      'for d in ../*; do cat "$d"; done',
+      'for d in $TARGETS; do cat "$d"; done',
+      'for d in packages/*; do echo "$d" > inventory.txt; done',
+      'for d in packages/*; do cat "$d"; done | tee inventory.txt',
+      'for d in packages/*; do "$d"; done',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(false);
+    }
+  });
+
+  test('treats only exact current-branch inspection as read-only Git', () => {
+    const inspection =
+      'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
+    expect(isReadOnlyShellCommand(inspection)).toBe(true);
+    expect(isVcsMutationShellCommand(inspection)).toBe(false);
+    expect(isReadOnlyShellCommand('git branch --show-current 2>/dev/null')).toBe(true);
+    expect(isVcsMutationShellCommand('git branch --show-current 2>/dev/null')).toBe(false);
+    expect(compile('shell_execute', { command: inspection })).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      effectiveEffects: { filesystem: 'read' },
+    });
+    for (const command of [
+      'git branch -a',
+      'git branch feature/new',
+      'git branch -d old',
+      'git branch --show-current feature/new',
+      'git branch --show-current && git branch feature/new',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(false);
+      expect(isVcsMutationShellCommand(command)).toBe(true);
+    }
+  });
+
   test('keeps Git inside the baseline without a subcommand allowlist and reviews known expansion', () => {
     for (const command of [
       'git status --short',
@@ -309,6 +358,20 @@ describe('Builtin operation policy compiler', () => {
       decision: 'ask',
       requiresApproval: true,
       sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'disabled' },
+    });
+    const readOnlyPlanningInspection =
+      'git status --short | head -40 && echo "=== diff stat vs origin ===" && git diff --stat HEAD | tail -20 && echo "=== unpushed commits ===" && git log --oneline origin/feat/kite-local-runtime-service-v1..HEAD 2>/dev/null | head -20';
+    expect(
+      compile(
+        'shell_execute',
+        { command: readOnlyPlanningInspection },
+        { ...CONTEXT, phase: 'planning' },
+      ),
+    ).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      risk: 'unknown',
+      sandboxScope: { kind: 'baseline', filesystem: 'read_only', network: 'disabled' },
     });
     expect(compile('shell_execute', { command: 'git push origin main' })).toMatchObject({
       decision: 'ask',

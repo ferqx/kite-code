@@ -8,7 +8,7 @@ export interface RuntimeEvidenceSummary {
 
 export interface RuntimeInteractionBase {
   readonly interactionId: string;
-  /** The committed Session revision that must fence settlement. */
+  /** Current Session CAS revision that must fence settlement of this projection. */
   readonly sessionRevision: number;
   readonly title?: string;
   readonly summary?: string;
@@ -19,6 +19,8 @@ export interface RuntimeApprovalInteraction extends RuntimeInteractionBase {
   /** State 27 queue generation; a response for another generation is invalid. */
   readonly generation: number;
   readonly grants: readonly ('approve_once' | 'same_command')[];
+  /** Bounded original command shown for an informed approval decision. */
+  readonly command?: string;
 }
 
 export interface RuntimeInputInteraction extends RuntimeInteractionBase {
@@ -60,9 +62,10 @@ export interface RuntimeVerificationInteraction extends RuntimeInteractionBase {
 }
 
 /**
- * Closed, client-safe interaction vocabulary. It deliberately excludes cwd,
- * raw command/provider payloads, grant subjects, binding digests, and child
- * identities. Host settlement must compare this identity against State 27.
+ * Closed, client-safe interaction vocabulary. Approval carries the bounded
+ * command the user is deciding on, but still excludes cwd, provider payloads,
+ * grant subjects, binding digests, and child identities. Host settlement must
+ * compare this identity against State 27.
  */
 export type RuntimeClientInteraction =
   | RuntimeApprovalInteraction
@@ -71,8 +74,86 @@ export type RuntimeClientInteraction =
   | RuntimeProviderActionInteraction
   | RuntimeVerificationInteraction;
 
+/** Exact stable interaction identity; current Session settlement CAS is intentionally excluded. */
+export function sameRuntimeClientInteractionIdentity(
+  left: RuntimeClientInteraction,
+  right: RuntimeClientInteraction,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.interactionId !== right.interactionId ||
+    left.title !== right.title ||
+    left.summary !== right.summary
+  ) {
+    return false;
+  }
+  switch (left.kind) {
+    case 'approval':
+      return (
+        right.kind === 'approval' &&
+        left.generation === right.generation &&
+        sameStrings(left.grants, right.grants) &&
+        left.command === right.command
+      );
+    case 'input':
+      return (
+        right.kind === 'input' &&
+        left.question === right.question &&
+        left.allowFreeText === right.allowFreeText &&
+        sameInputOptions(left.options, right.options)
+      );
+    case 'plan_review':
+      return (
+        right.kind === 'plan_review' &&
+        left.plan.planId === right.plan.planId &&
+        left.plan.version === right.plan.version &&
+        left.plan.structuralDigest === right.plan.structuralDigest
+      );
+    case 'provider_action':
+      return (
+        right.kind === 'provider_action' &&
+        left.action === right.action &&
+        left.provider.providerId === right.provider.providerId &&
+        left.provider.directoryRevision === right.provider.directoryRevision
+      );
+    case 'verification':
+      return (
+        right.kind === 'verification' &&
+        left.verification.verificationId === right.verification.verificationId &&
+        left.verification.revision === right.verification.revision
+      );
+  }
+}
+
+function sameInputOptions(
+  left: RuntimeInputInteraction['options'],
+  right: RuntimeInputInteraction['options'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.length === right.length &&
+    left.every(
+      (option, index) =>
+        option.id === right[index]?.id &&
+        option.label === right[index]?.label &&
+        option.description === right[index]?.description,
+    )
+  );
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 /** @deprecated Use RuntimeClientInteraction. */
 export type RuntimeInteractionProjection = RuntimeClientInteraction;
+
+/** Complete, ordered client-safe interaction state at one Session revision. */
+export interface RuntimeInteractionQueueProjection {
+  readonly revision: number;
+  readonly activeInteractionId?: string;
+  readonly interactions: readonly RuntimeClientInteraction[];
+}
 
 export interface RuntimeTurnProjection {
   readonly turnId: string;
@@ -98,8 +179,16 @@ export interface RuntimeSessionProjection {
   readonly workspace?: string;
   readonly updatedAt?: string;
   readonly lifecycle: 'open' | 'closed' | 'unavailable';
+  /** Safe selected route; provider credentials and endpoint configuration never cross. */
+  readonly model?: {
+    readonly provider: string;
+    readonly name: string;
+    readonly reasoningEnabled?: boolean;
+  };
   /** Count only; grant subjects and bindings never cross the client boundary. */
   readonly sessionCommandGrantCount?: number;
+  /** Authoritative replacement set; array order is the pending interaction order. */
+  readonly interactionQueue: RuntimeInteractionQueueProjection;
   readonly activeWork?: RuntimeWorkProjection;
 }
 

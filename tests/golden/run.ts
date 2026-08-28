@@ -4,8 +4,8 @@ import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { RuntimeUserAction } from '#app/bootstrap/runtime/state-actions';
-import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import type { RuntimeUserAction } from '#kite-service/bootstrap/runtime/state-actions';
+import { runStateRuntimeLoop } from '#kite-service/bootstrap/runtime/state-runner';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 

@@ -8,21 +8,21 @@ import {
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
   type ReleaseProfile,
-} from '#app/config';
+} from '#kite-service/config';
 import {
   decodeIdentityBoundRolloutCache,
   loadRolloutCacheFile,
   type RolloutArtifactIdentity,
   RolloutCacheError,
   writeRolloutCacheFile,
-} from '../../apps/kite/src/release/rollout-cache';
+} from '../../apps/kite-service/src/release/rollout-cache';
 import {
   DisableOnlyRolloutError,
   encodeSyntheticRolloutSignature,
   ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT,
   resolveDisableOnlyRollout,
   verifyDisableOnlyRolloutManifest,
-} from '../../apps/kite/src/release/rollout-manifest-loader';
+} from '../../apps/kite-service/src/release/rollout-manifest-loader';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
 import { signSyntheticRolloutManifest } from '../../scripts/release/sign-rollout-manifest';
 

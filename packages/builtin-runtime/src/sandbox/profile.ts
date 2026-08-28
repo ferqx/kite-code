@@ -13,8 +13,9 @@ export interface SandboxProfileOptions {
   runtimeReadOnlyRoots?: readonly string[];
   /**
    * When `'allow'`, the profile additionally reads the user's external Git
-   * configuration. The canonical Workspace itself is always admitted as one
-   * complete filesystem identity, including `.git`.
+   * configuration. The canonical Workspace itself is admitted as one complete
+   * filesystem identity. A linked worktree's external metadata must be added
+   * separately as an authority-validated runtimeReadOnlyRoot.
    */
   gitAccess?: SandboxGitAccess;
 }

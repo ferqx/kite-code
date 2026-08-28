@@ -1005,6 +1005,42 @@ describe('runtime host command and projection authority', () => {
     await host[Symbol.asyncDispose]();
   });
 
+  test('authorizes one recovered interaction continuation as the original turn operation', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 1));
+    let dispatchCalls = 0;
+    bridge.prepareImplementation = async (command) => {
+      if (command.type !== 'respond_interaction') {
+        throw new Error(`unexpected command: ${command.type}`);
+      }
+      bridge.projections.set(command.sessionId, projection(command.sessionId, 2));
+      return {
+        receipt: applied(command.commandId, command.sessionId, 2),
+        execution: {
+          sessionId: command.sessionId,
+          operationId: command.commandId,
+          committedRevision: 2,
+          operation: 'turn' as const,
+          run: async () => {
+            dispatchCalls += 1;
+          },
+        },
+      };
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    await expect(host.command(respondInteractionCommand())).resolves.toMatchObject({
+      status: 'applied',
+      revision: 2,
+    });
+    await host.waitForSessionIdle('session-1');
+    expect(dispatchCalls).toBe(1);
+    await host[Symbol.asyncDispose]();
+  });
+
   test('keeps the AbortController in Host when execution requests an abort', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-1', projection('session-1', 0));
@@ -1315,6 +1351,26 @@ function startCommand(
     sessionId,
     expectedRevision,
     input: commandId,
+  };
+}
+
+function respondInteractionCommand(): Extract<RuntimeCommand, { type: 'respond_interaction' }> {
+  const interaction = {
+    kind: 'approval' as const,
+    interactionId: 'approval-1',
+    sessionRevision: 1,
+    generation: 0,
+    command: 'bun test',
+    grants: ['approve_once' as const],
+  };
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId: 'respond-1',
+    type: 'respond_interaction',
+    sessionId: 'session-1',
+    expectedRevision: 1,
+    interaction,
+    response: { kind: 'approval', decision: 'approve_once' },
   };
 }
 

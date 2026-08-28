@@ -55,6 +55,16 @@ export interface RuntimeServerAdmissionPort {
   authorize(input: RuntimeServerAdmissionInput): Promise<RuntimeServerAdmissionDecision>;
 }
 
+/**
+ * Per-connection App binding. The Server only sees the narrow admission port;
+ * carriers must not pass tickets, Workspace objects, or transport metadata.
+ */
+export interface RuntimeServerOpenOptions {
+  readonly admission?: RuntimeServerAdmissionPort;
+  /** App lifecycle binding; a connection close must not imply Runtime owner shutdown. */
+  readonly onClose?: (connectionId: string) => void;
+}
+
 export interface RuntimeServerBackend {
   readonly runtime: RuntimeAccess;
   readonly admission: RuntimeServerAdmissionPort;
@@ -124,7 +134,10 @@ export class RuntimeServer {
     this.#globalLimits = normalizeGlobalLimits(options.globalLimits);
   }
 
-  open(connection: RuntimeServerLogicalMessageConnection): RuntimeServerConnection {
+  open(
+    connection: RuntimeServerLogicalMessageConnection,
+    options?: RuntimeServerOpenOptions,
+  ): RuntimeServerConnection {
     if (this.#draining || this.#connections.size >= this.#globalLimits.maxConnections) {
       void connection.close('server_draining');
       return closedConnection();
@@ -132,6 +145,7 @@ export class RuntimeServer {
     const session = new ServerConnection(
       `connection-${++this.#nextConnection}`,
       this.#backend,
+      options?.admission ?? this.#backend.admission,
       connection,
       this.#options.serverInfo,
       this.#limits,
@@ -139,7 +153,15 @@ export class RuntimeServer {
       () => this.#reserveSubscription(),
       () => this.#releaseSubscription(),
       (delta) => this.#reserveQueuedBytes(delta),
-      () => this.#connections.delete(session),
+      () => {
+        try {
+          options?.onClose?.(session.connectionId);
+        } catch {
+          // App cleanup diagnostics cannot retain Server connection accounting.
+        } finally {
+          this.#connections.delete(session);
+        }
+      },
     );
     this.#connections.add(session);
     session.start();
@@ -196,10 +218,12 @@ class ServerConnection implements RuntimeServerConnection {
   #nextSubscription = 0;
   #nextGeneration = 0;
   #closed: Promise<void> | undefined;
+  #admission: RuntimeServerAdmissionPort | undefined;
 
   constructor(
     connectionId: string,
     backend: RuntimeServerBackend,
+    admission: RuntimeServerAdmissionPort,
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     limits: RuntimeServerLimits,
@@ -211,6 +235,7 @@ class ServerConnection implements RuntimeServerConnection {
   ) {
     this.connectionId = connectionId;
     this.#backend = backend;
+    this.#admission = admission;
     this.#connection = connection;
     this.#serverInfo = serverInfo;
     this.#limits = limits;
@@ -232,7 +257,7 @@ class ServerConnection implements RuntimeServerConnection {
   }
 
   start(): void {
-    void this.#receive();
+    void this.#receive().catch(() => undefined);
   }
 
   async beginDraining(): Promise<void> {
@@ -246,9 +271,24 @@ class ServerConnection implements RuntimeServerConnection {
       },
       'control',
     );
-    await this.#stopSubscriptions();
-    await withDeadline(this.#outbound.whenIdle(), this.#drainTimeoutMs);
-    await this.close('drain_complete');
+    let failure: unknown;
+    let failed = false;
+    try {
+      await this.#stopSubscriptions();
+      await withDeadline(this.#outbound.whenIdle(), this.#drainTimeoutMs);
+    } catch (error) {
+      failure = error;
+      failed = true;
+    }
+    try {
+      await this.close('drain_complete');
+    } catch (error) {
+      if (!failed) {
+        failure = error;
+        failed = true;
+      }
+    }
+    if (failed) throw failure;
   }
 
   async close(reason = 'connection_closed'): Promise<void> {
@@ -510,7 +550,9 @@ class ServerConnection implements RuntimeServerConnection {
     request: RuntimeProtocolRequest,
     clientInfo = this.#clientInfo,
   ): Promise<RuntimeServerAdmissionDecision> {
-    return this.#backend.admission.authorize({
+    const admission = this.#admission;
+    if (!admission) return { allowed: false, reason: 'unavailable' };
+    return admission.authorize({
       connectionId: this.connectionId,
       operation: request.method,
       requestId: request.id,
@@ -573,18 +615,51 @@ class ServerConnection implements RuntimeServerConnection {
   }
 
   async #stopSubscriptions(): Promise<void> {
-    await Promise.all(
+    const results = await Promise.allSettled(
       [...this.#subscriptions.values()].map((subscription) => subscription.close()),
     );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failure) throw failure.reason;
   }
 
   async #close(reason: string): Promise<void> {
     if (this.#state === 'closed') return;
     this.#state = 'closed';
-    await this.#stopSubscriptions();
-    this.#outbound.close();
-    await this.#connection.close(reason);
-    this.#onClose();
+    // Do not retain an App connection binding after the logical connection has
+    // closed. Any authorization already in flight owns its own Promise and may
+    // settle, but no later request can consult this binding.
+    this.#admission = undefined;
+    let failure: unknown;
+    let failed = false;
+    try {
+      await this.#stopSubscriptions();
+    } catch (error) {
+      failure = error;
+      failed = true;
+    }
+    try {
+      this.#outbound.close();
+    } catch (error) {
+      if (!failed) {
+        failure = error;
+        failed = true;
+      }
+    }
+    try {
+      await this.#connection.close(reason);
+    } catch (error) {
+      if (!failed) {
+        failure = error;
+        failed = true;
+      }
+    } finally {
+      // Server connection accounting and the per-connection admission binding
+      // must be released even when a carrier or subscription close fails.
+      this.#onClose();
+    }
+    if (failed) throw failure;
   }
 }
 
@@ -634,10 +709,10 @@ class Subscription {
   start(): void {
     if (!this.#iterator) throw new Error('Subscription iterator was not acquired.');
     if (this.#spec.scope === 'session') {
-      void this.#runSession();
+      void this.#runSession().catch(() => undefined);
       return;
     }
-    void this.#run();
+    void this.#run().catch(() => undefined);
   }
 
   async prepareInitialBoundary(): Promise<void> {
@@ -677,11 +752,17 @@ class Subscription {
     if (this.#closed) return;
     this.#closed = true;
     this.#controller.abort();
+    let failure: unknown;
+    let failed = false;
     try {
       await this.#iterator?.return?.();
+    } catch (error) {
+      failure = error;
+      failed = true;
     } finally {
       this.#onClose();
     }
+    if (failed) throw failure;
   }
 
   async #run(): Promise<void> {

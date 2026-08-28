@@ -1,0 +1,23 @@
+{
+  "name": "@kite-ai/kite-local-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/client/index.ts",
+  "exports": {
+    "./client": "./src/client/index.ts",
+    "./manager": "./src/manager/index.ts",
+    "./service": "./src/service/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/client/index.ts ./src/manager/index.ts ./src/service/index.ts --outdir ./dist --target bun",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
+  },
+  "dependencies": {
+    "@kite-ai/kite-app-contract": "workspace:*",
+    "@kite-ai/runtime-client": "workspace:*",
+    "@kite-ai/runtime-protocol": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

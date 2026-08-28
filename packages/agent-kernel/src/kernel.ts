@@ -23,7 +23,7 @@ export interface AuthorizedEffect {
   readonly schema: 'kite.authorized-effect.current';
   readonly sessionId: string;
   readonly operationId: string;
-  readonly operation: 'turn' | 'compaction';
+  readonly operation: 'turn' | 'compaction' | 'rewind';
   readonly committedRevision: number;
 }
 

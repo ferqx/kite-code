@@ -1,5 +1,5 @@
 import { type AgentState, type KernelEvent, reduceAgentState } from '@kite-ai/agent-kernel';
-import { projectVerificationSchemaAdmissions } from '#app/bootstrap/runtime/verification-schema-admission';
+import { projectVerificationSchemaAdmissions } from '#kite-service/bootstrap/runtime/verification-schema-admission';
 
 export {
   admitRecoveryAttempt,

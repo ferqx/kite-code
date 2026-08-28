@@ -82,6 +82,8 @@ describe('TUI PTY System — model streaming', () => {
       // A completed segment gets one live Thought frame before answer deltas;
       // settled scrollback keeps only the compact Thinking header.
       expect(screenContains(responseHistory, 'Thinking ')).toBe(true);
+      expect(screenContains(responseHistory, '└─ STREAM_THINKING')).toBe(true);
+      expect(screenContains(responseHistory, 'STREAM_PRIVATE_TAIL')).toBe(true);
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);

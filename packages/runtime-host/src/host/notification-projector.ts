@@ -44,7 +44,10 @@ interface StreamCursor {
 export class NotificationProjector {
   readonly #registry: SessionRegistry;
   readonly #serverInstanceId: string;
-  readonly #history = new Map<string, RuntimeNotification[]>();
+  readonly #history = new Map<
+    string,
+    Array<Extract<RuntimeNotification, { readonly durability: 'durable' }>>
+  >();
   readonly #subscribers = new Set<Subscriber>();
   readonly #streamCursors = new Map<string, StreamCursor>();
   readonly #stopRegistryListener: () => void;
@@ -72,7 +75,11 @@ export class NotificationProjector {
       }
       if (this.#registry.commitProjection(notification.projection.session) === 'unchanged') return;
       const history = this.#history.get(notification.sessionId) ?? [];
-      history.push(notification);
+      if (history.at(-1)?.revision === notification.revision) {
+        history[history.length - 1] = notification;
+      } else {
+        history.push(notification);
+      }
       if (history.length > RUNTIME_HOST_DURABLE_HISTORY_LIMIT) {
         history.splice(0, history.length - RUNTIME_HOST_DURABLE_HISTORY_LIMIT);
       }

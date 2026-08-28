@@ -263,10 +263,12 @@ describe('SQLite compatibility store', () => {
       );
       db.close();
       const source = discoverSqliteRuntimeCompatibilitySource(sourcePath)!;
-      expect(source.listSessions().map((session) => session.sessionId)).toEqual([
-        'legacy',
-        'broken',
-      ]);
+      expect(
+        source
+          .listSessions()
+          .map((session) => session.sessionId)
+          .sort(),
+      ).toEqual(['broken', 'legacy']);
       const writer = createSqliteRuntimeCompatibilityWriter({
         databasePath: targetPath,
         profile: {

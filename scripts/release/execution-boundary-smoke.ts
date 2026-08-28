@@ -1,18 +1,21 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_ } from '#app/config/release-profile';
+import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_ } from '#kite-service/config/release-profile';
 import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
 const ADVERSARIAL_CASES = [
-  ['filesystem_symlink_and_path_traversal', 'apps/kite/test/policies/protected-path.test.ts'],
+  [
+    'filesystem_symlink_and_path_traversal',
+    'apps/kite-service/test/policies/protected-path.test.ts',
+  ],
   [
     'network_dns_redirect_and_private_destination',
-    'apps/kite/test/sandbox/network-boundary.test.ts',
+    'apps/kite-service/test/sandbox/network-boundary.test.ts',
   ],
   [
     'network_parallel_receipt_isolation',
-    'apps/kite/test/sandbox/network-boundary-concurrency.test.ts',
+    'apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts',
   ],
   [
     'mcp_transport_receipt_and_revision_isolation',
@@ -26,7 +29,10 @@ const ADVERSARIAL_CASES = [
     'process_tree_hard_limit_and_orphan_cleanup',
     'tests/qualification/sandbox/process-tree-limit.test.ts',
   ],
-  ['sandbox_missing_fail_closed', 'apps/kite/test/isolated/sandbox/execution-boundary.test.ts'],
+  [
+    'sandbox_missing_fail_closed',
+    'apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts',
+  ],
   [
     'worktree_collision_ownership_and_cleanup',
     'tests/isolated/workspace/worktree-controller.test.ts',

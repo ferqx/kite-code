@@ -4,7 +4,7 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite/test/runtime/` 与 `tests/integration/`
+验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite-cli/test/runtime/` 与 `tests/integration/`
 Model/compaction/provider suites，以及 `bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0114、ADR-0115、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
@@ -114,8 +114,11 @@ suspension lineage；每个 sibling 的 ordinal 独立从 1 开始，resume 从 
 continuation 与 current attempt lineage 任一漂移都在 Gateway lookup 前 fail closed。production 只显式构造
 live Source。
 
-production composition 使用 owner-only `~/.kite-code/model-artifacts/`，不创建或加载 Artifact
-installation key。既有 Artifact 缺失、损坏或路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
+production Service composition 使用由 manager 验证并显式注入的 exact `KITE_CODE_HOME` 作为 code root，
+模型与计划 Artifact 分别位于该 root 下的 `model-artifacts/` 与 `plans/`，不得再次追加 `.kite-code`，也不得从
+Workspace cwd、dotenv 或 ambient `HOME` 改写该 root。仅未注入 Service identity 的 library fallback 保留
+`~/.kite-code`；显式参数始终优先。模型 Artifact 不创建或加载 installation key。既有 Artifact 缺失、损坏或
+路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
 Runtime 使用 State 27/SAQ epoch；
 `modelInvocations` 是当前格式的必需 evidence 投影，字段缺失属于 corruption，不从旧 transcript/config
 反推历史 Surface。同一 schema/epoch 内已列明的旧 Provider admission 事件形状仍可回放；未知 source 不进入

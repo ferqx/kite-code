@@ -1,6 +1,7 @@
 import {
   RUNTIME_TOOL_DISPLAY_NAMES_,
   RUNTIME_TOOL_PRESENTATIONS_,
+  sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
 import { z } from 'zod';
 import {
@@ -27,6 +28,7 @@ const rpcId = z
   .refine((value) => !/\p{Cc}/u.test(value));
 const safeRevision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const shortText = z.string().max(8_192).refine(noForbiddenControls);
+const approvalCommand = z.string().max(16_384).refine(noForbiddenControls);
 const runtimeToolDisplayName = z.enum(RUNTIME_TOOL_DISPLAY_NAMES_);
 const runtimeToolPresentation = z.enum(RUNTIME_TOOL_PRESENTATIONS_);
 const displayLabel = z.string().min(1).max(512).refine(noForbiddenControls);
@@ -90,6 +92,7 @@ const interaction = z.discriminatedUnion('kind', [
         .array(z.enum(['approve_once', 'same_command']))
         .min(1)
         .max(2),
+      command: approvalCommand.optional(),
     })
     .strict(),
   z
@@ -493,6 +496,31 @@ const activeWork = z
     activeTurn: activeTurn.optional(),
   })
   .strict();
+const interactionQueue = z
+  .object({
+    revision: safeRevision,
+    activeInteractionId: identifier.optional(),
+    interactions: z.array(interaction).max(256),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const ids = value.interactions.map((entry) => entry.interactionId);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({ code: 'custom', message: 'interaction queue identities must be unique' });
+    }
+    if (value.activeInteractionId !== undefined && !ids.includes(value.activeInteractionId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'active interaction must exist in the interaction queue',
+      });
+    }
+    if (value.interactions.some((entry) => entry.sessionRevision !== value.revision)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'interaction revisions must match the interaction queue revision',
+      });
+    }
+  });
 export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
   .object({
     schema: z.literal('kite.runtime-projection.v1'),
@@ -501,10 +529,47 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
     displayName: z.string().max(256).optional(),
     updatedAt: z.string().max(128).optional(),
     lifecycle: z.enum(['open', 'closed', 'unavailable']),
+    model: z
+      .object({
+        provider: shortText,
+        name: shortText,
+        reasoningEnabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     sessionCommandGrantCount: safeRevision,
+    interactionQueue,
     activeWork: activeWork.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.interactionQueue.revision !== value.revision) {
+      context.addIssue({
+        code: 'custom',
+        message: 'interaction queue revision must match the session projection revision',
+      });
+    }
+    const turnInteraction = value.activeWork?.activeTurn?.interaction;
+    const queuedInteraction =
+      value.interactionQueue.activeInteractionId === undefined
+        ? undefined
+        : value.interactionQueue.interactions.find(
+            (candidate) => candidate.interactionId === value.interactionQueue.activeInteractionId,
+          );
+    if (
+      value.interactionQueue.activeInteractionId !== turnInteraction?.interactionId ||
+      (turnInteraction !== undefined &&
+        (queuedInteraction === undefined ||
+          turnInteraction.sessionRevision !== value.revision ||
+          queuedInteraction.sessionRevision !== turnInteraction.sessionRevision ||
+          !sameRuntimeClientInteractionIdentity(queuedInteraction, turnInteraction)))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'active turn interaction must match the interaction queue focus',
+      });
+    }
+  });
 const checkpoint = z
   .object({
     checkpointId: identifier,
@@ -721,6 +786,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .object({
       type: z.literal('tool.queued'),
       toolId: identifier,
+      presentationGroupId: identifier.optional(),
       toolName: runtimeToolDisplayName.optional(),
       displayLabel: displayLabel.optional(),
       presentation: runtimeToolPresentation,
@@ -956,6 +1022,35 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
         })
         .strict()
         .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('rewind.terminal'),
+      rewindId: identifier,
+      commandId: identifier,
+      sourceSessionId: identifier,
+      targetSessionId: identifier,
+      status: z.enum(['completed', 'failed']),
+      fileOutcome: z
+        .object({
+          restored: z.array(shortText).max(10_000),
+          deleted: z.array(shortText).max(10_000),
+          failed: z.array(z.object({ path: shortText, error: shortText }).strict()).max(10_000),
+          conflicts: z
+            .array(
+              z
+                .object({
+                  path: shortText,
+                  reason: z.enum(['modified_after_kite_write', 'unverified_postimage']),
+                })
+                .strict(),
+            )
+            .max(10_000),
+        })
+        .strict()
+        .optional(),
+      failureCode: z.enum(['checkpoint_unavailable', 'execution_failed']).optional(),
     })
     .strict(),
   z

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-26（Kite Runtime Server V1 完成并归档）
+最后更新：2026-08-27（Kite Local Runtime Service V1 的 KLSV1-00～05 完成）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-27-kite-local-runtime-service-v1.md`](2026-08-27-kite-local-runtime-service-v1.md) | active | P1 | KRSV1 completion、ADR-0053/0129/0139/0140/0141/0142/0143/0144、当前 Runtime/Workspace Trust/Log Query/Release authority | 将 `apps/kite` 拆为 terminal-only `kite-cli` 与唯一 Runtime root `kite-service`，新增 browser-safe App contract 和 Native local-runtime substrate；不实现 Browser/Desktop、通用多 Store 或 OS Service | KLSV1-00～06 已完成至唯一owner/default Store clean cutover；KLSV1-07本地fault/soak/PTY/macOS arm64 release Gate已通过，等待当前实现head的GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025真实evidence；KLSV1-08未开始 |
 | [`2026-08-26-kite-runtime-server-v1.md`](2026-08-26-kite-runtime-server-v1.md) | archived | P1 | ADR-0142、ADR-0053/0129/0137/0138/0140/0141、当前 Runtime/Store/Log Query authority | 接管 LOGWEB-05～09 的 listener/auth/App carrier authority 并关闭旧任务；保留 LOGWEB-00～04 query-only 产出，HTTP/SSE/Web UI 不迁入 | KRSV1-00～10 全部完成；封闭 Protocol、transport-neutral Server/Client、TUI/CLI InProcess 单路径、原子持久 receipt、stdio 与 development-only WebSocket qualification；[完成记录](../execution/completed/2026-08-26-kite-runtime-server-v1.md) |
 | [`2026-08-25-shell-sandbox-approval-queue-optimization.md`](2026-08-25-shell-sandbox-approval-queue-optimization.md) | archived | P0 | ADR-0133、ADR-0136、当前 Runtime/Store/Sandbox/TUI | 方案一已实施；ADR-0137 定义当前 SAQ 契约，ADR-0138 后续补充未知格式静默忽略与已知会话懒迁移；本地全量、required checks 与三平台 probe 已通过 | Sandbox-first phase/mode 矩阵、两类 grant、durable approval queue、same-command 原子批量释放、Plan + Full 正交；[完成记录](../execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md) |
 | [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | superseded | P1 | ADR-0129、当前 SQLite Runtime Log Query | KRSV1 接管 LOGWEB-05～09 的重叠 authority 并关闭未实施任务；LOGWEB-00～04 保持 current query-only 基础 | 已完成 Runtime Log DTO、只读 Host port、SQLite reader 与 App safe projector；未创建且未迁移 listener/SSE/Web UI |

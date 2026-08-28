@@ -16,16 +16,17 @@ import {
 } from 'node:fs';
 import { version as osVersion, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite-ai/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,
   sessionLogRoot,
   userKiteCodeDir,
-} from '#app/config/paths';
-import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
-import { SESSION_LOG_LEASE_FILE } from '../../apps/kite/src/session-logger/active-session-lease';
-import { SessionLogWriter } from '../../apps/kite/src/session-logger/writer';
+} from '#kite-service/config/paths';
+import type { SessionLoggingPolicy } from '#kite-service/config/session-logging-policy';
+import { SESSION_LOG_LEASE_FILE } from '../../apps/kite-service/src/session-logger/active-session-lease';
+import { SessionLogWriter } from '../../apps/kite-service/src/session-logger/writer';
+
+const WINDOWS_SESSION_LOG_ACL_EVIDENCE_TIMEOUT_MS = 30_000;
 
 const SMOKE_POLICY: SessionLoggingPolicy = {
   version: 1,
@@ -54,13 +55,16 @@ export interface SessionLogAclSmokeEvidence {
 }
 
 export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidence> {
-  const root = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
+  const container = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
+  const root = join(container, 'kite-code');
+  mkdirSync(root, { mode: 0o700 });
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = root;
   try {
     const writer = new SessionLogWriter('native-smoke', 'session', 'events', undefined, undefined, {
       policy: SMOKE_POLICY,
       heartbeatIntervalMs: 0,
+      maintenanceDeadlineMs: 5_000,
     });
     writer.write({
       schemaVersion: 1,
@@ -146,18 +150,21 @@ export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenc
   } finally {
     if (previousHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
-    rmSync(root, { recursive: true, force: true });
+    rmSync(container, { recursive: true, force: true });
   }
 }
 
 async function verifyLinkRejection(root: string): Promise<void> {
   await verifyFileAndDirectoryLinkRejection(root);
   const secondHome = join(root, 'linked-home');
-  const kite = join(secondHome, '.kite-code');
   const outside = join(root, 'outside');
-  mkdirSync(kite, { recursive: true });
+  mkdirSync(secondHome);
   mkdirSync(outside);
-  symlinkSync(outside, join(kite, 'sessions'), process.platform === 'win32' ? 'junction' : 'dir');
+  symlinkSync(
+    outside,
+    join(secondHome, 'sessions'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = secondHome;
   try {
@@ -170,7 +177,7 @@ async function verifyLinkRejection(root: string): Promise<void> {
     } catch {
       rejected = true;
     }
-    if (!rejected || !lstatSync(join(kite, 'sessions')).isSymbolicLink()) {
+    if (!rejected || !lstatSync(join(secondHome, 'sessions')).isSymbolicLink()) {
       throw new Error('Session-log writer did not reject the linked/reparse-point root.');
     }
     if (existsSync(join(outside, 'native-smoke'))) {
@@ -285,7 +292,7 @@ foreach ($path in $paths) {
     {
       encoding: 'utf8',
       windowsHide: true,
-      timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+      timeout: WINDOWS_SESSION_LOG_ACL_EVIDENCE_TIMEOUT_MS,
       killSignal: 'SIGKILL',
       env: {
         ...process.env,

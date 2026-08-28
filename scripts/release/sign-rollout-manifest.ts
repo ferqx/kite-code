@@ -6,7 +6,7 @@ import {
   encodeDisableOnlyRolloutManifest,
   encodeSyntheticRolloutSignature,
   type SyntheticRolloutSignature,
-} from '../../apps/kite/src/release/rollout-manifest-loader';
+} from '../../apps/kite-service/src/release/rollout-manifest-loader';
 import { parseCanonicalJson, sha256Digest } from './canonical-json';
 
 const SYNTHETIC_ROLLOUT_PRIVATE_KEYS = Object.freeze({

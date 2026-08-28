@@ -67,7 +67,8 @@ export function analyzeTestOwnership(repositoryRoot: string): TestOwnershipViola
   const violations: TestOwnershipViolation[] = [];
   const rootTests = collect(join(root, 'tests'));
   const ownerTests = [
-    ...collect(join(root, 'apps', 'kite', 'test')),
+    ...collect(join(root, 'apps', 'kite-cli', 'test')),
+    ...collect(join(root, 'apps', 'kite-service', 'test')),
     ...readdirSync(join(root, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => collect(join(root, 'packages', entry.name, 'test'))),
@@ -89,13 +90,14 @@ export function analyzeTestOwnership(repositoryRoot: string): TestOwnershipViola
     if (suite === 'integration') {
       for (const specifier of moduleSpecifiers(source)) {
         if (
+          specifier.startsWith('#kite-cli/') ||
           specifier.startsWith('#app/') ||
           specifier.startsWith('@/app/') ||
           /^#(?:agent-kernel|builtin-runtime|runtime-contract|runtime-host|runtime-spi|runtime-storage)/u.test(
             specifier,
           ) ||
           /(?:^|\/)packages\/[^/]+\/src(?:\/|$)/u.test(specifier) ||
-          /(?:^|\/)apps\/kite\/src(?:\/|$)/u.test(specifier) ||
+          /(?:^|\/)apps\/kite-cli\/src(?:\/|$)/u.test(specifier) ||
           /@kite-ai\/[^/]+\/src(?:\/|$)/u.test(specifier)
         ) {
           violations.push({

@@ -150,7 +150,7 @@ describe('platform capability probe admission', () => {
     for (const path of [
       'packages/builtin-runtime/src/sandbox/**',
       'packages/runtime-host/src/process/**',
-      'apps/kite/src/sandbox/**',
+      'apps/kite-service/src/sandbox/**',
       'vendor/isksh/**',
     ]) {
       expect(workflow).toContain(`- "${path}"`);
@@ -203,8 +203,14 @@ describe('platform capability probe admission', () => {
     expect(macosStepStart).toBeGreaterThan(0);
     expect(posixStepStart).toBeGreaterThan(macosStepStart);
     const macosRequiredStep = requiredSteps.slice(macosStepStart, posixStepStart);
-    expect(macosRequiredStep).toContain('apps/kite/test/isolated/sandbox.test.ts');
+    expect(macosRequiredStep).toContain('apps/kite-cli/test/isolated/sandbox.test.ts');
     expect(macosRequiredStep).not.toContain('tests/qualification/sandbox-executor.test.ts');
+    expect(requiredSteps.slice(posixStepStart)).toContain(
+      'apps/kite-service/test/isolated/execution/posix-supervisor.test.ts',
+    );
+    expect(requiredSteps).not.toContain(
+      'apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts',
+    );
 
     const windowsFailClosedStep = requiredSteps.indexOf(
       'name: Windows restricted-token native fail-closed conformance',

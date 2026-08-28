@@ -3,7 +3,7 @@ import {
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
   releaseCapabilitySchema,
-} from '#app/config/release-capabilities';
+} from '#kite-service/config/release-capabilities';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);

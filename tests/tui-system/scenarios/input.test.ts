@@ -13,6 +13,7 @@ import {
   pasteText,
   submitCurrentInput,
   submitUserMessage,
+  submitUserMessageForDeferredDelivery,
   typeText,
   waitForRequestMessage,
 } from '../harness/input-helpers';
@@ -68,6 +69,44 @@ describe('TUI PTY System — Input & Message', () => {
       expect(screenContains(output, 'Test message from PTY')).toBe(true);
       expect(screenContains(output, 'I received your message!')).toBe(true);
       expect(stripAnsi(output).split('Test message from PTY').length - 1).toBe(1);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'queues a second message while the current turn is running',
+    async () => {
+      server.setResponses([
+        { message: { content: 'First turn completed.' }, delay: 800 },
+        { message: { content: 'Queued turn completed.' }, delay: 50 },
+      ]);
+
+      await submitUserMessage(tui, server, 'First message', { timeout: 15000 });
+
+      const queuedDelivery = await submitUserMessageForDeferredDelivery(
+        tui,
+        server,
+        'Second queued message',
+        {
+          acceptWhen: (viewport) =>
+            screenContains(
+              viewport,
+              'Message queued; it will be sent after the current turn finishes.',
+            ),
+          timeout: 15000,
+        },
+      );
+
+      expect(server.getRequestCount()).toBe(queuedDelivery.requestBaseline);
+      await queuedDelivery.waitForRuntimeRequest();
+      await waitForText(() => tui.viewport(), 'Queued turn completed.', 15000);
+
+      const output = stripAnsi(tui.viewport());
+      expect(output.split('First message').length - 1).toBe(1);
+      expect(output.split('Second queued message').length - 1).toBe(1);
+      expect(output.indexOf('First turn completed.')).toBeLessThan(
+        output.indexOf('Queued turn completed.'),
+      );
     },
     TIMEOUT,
   );

@@ -4,7 +4,7 @@
 
 读取时机：修改发布脚本、安装器、候选版本 workflow、生产路线图、Task 状态或首发能力边界时。
 
-验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
+验证：`bun test packages/kite-local-runtime/test/isolated/service-state.test.ts tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
 
 相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status.json`、`.github/workflows/release-candidate.yml`。
 
@@ -32,15 +32,17 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
-Runtime Protocol V1 不改变首发拓扑：production consumer 仍为本地 TUI 与用户在场的 foreground CLI。
-`kite server --stdio` 是 Desktop/test parent-owned reference child；loopback WebSocket、browser 与 Desktop reference
-只用于 development/reference/conformance，均不交付完整 UI、不进入候选 manifest 或支持集合。runtime stdio/transport
-workflow 的 macOS、Ubuntu、Windows checks 在 KRSV1 PR 得到真实结论前均为 pending qualification，不能计入 G0/G1 或
-用作 Web production support 证据。
+首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，
+唯一Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。Service-owned internal stdio、development
+loopback WebSocket、browser与Desktop reference只用于internal child/reference/conformance，不交付Web UI或remote access。
+KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
+companion/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、
+CLI/TUI、Service companion、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据。
 
 ## 制品与安装
 
-`bun run release:build` 为当前平台编译独立的 `kite` CLI 与 `kite-tui`，生成 gzip tar、严格 manifest、
+`bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与同candidate identity的`kite-service` companion，
+生成 gzip tar、严格 manifest、
 逐文件 SHA-256 和 archive SHA-256。checksum 是完整性信息，不是签名、notarization、provenance 或
 attestation。构建只允许当前 OS/architecture 的 native target；macOS、Linux、Windows 各自由对应
 GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime 下载替代真实平台验证。PR workflow
@@ -50,15 +52,19 @@ GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime
 必须生成字节一致的 `.tar.gz`，不能让构建墙钟改变候选 SHA-256。
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
-checksum；CI 额外传入 `--require-clean-source`，拒绝上传从 dirty worktree 生成的候选。`bun run
-release:smoke` 在临时 prefix 中完成安装、CLI help/version、已安装 standalone TUI 的 version 与真实 PTY
-startup、第二候选安装、回滚和卸载。候选先写入并验证 `releases/<candidateId>.next`，再原子改名到最终目录。
-upgrade 与 rollback 会先完整验证既有 managed tree；upgrade 还拒绝跨 OS/architecture target 替换。安装器只修改带自身 marker
-的显式 prefix；目标为根目录、用户 home、符号链接或不匹配 marker 时拒绝覆盖、回滚或删除。
+checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
+临时prefix中完成安装、CLI help/version、已安装standalone TUI通过managed Service的真实PTY startup、installed
+companion MCP stdio wrapper、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
+改名到最终目录。upgrade、rollback与uninstall先用当前candidate执行普通Service stop并确认state absent，再取得
+Native lifecycle fence；busy、unknown、残留state或identity不确定时active candidate保持不变。upgrade还拒绝跨
+OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、符号链接或不匹配
+marker时拒绝覆盖、回滚或删除。
 
 首发预构建架构为 macOS arm64、Linux x64 与 Windows x64；其他架构可以从源码运行 Bun，但没有首发
 预构建候选包。候选 workflow 不签名、不发布 Release、不上传 secret。它在三个 GitHub-hosted runner 上构建并运行
-同一 smoke，随后上传候选 artifact 供维护者检查。正式公开 Release 与 npm publish 不属于该 workflow。
+同一 smoke；Windows runner还会在构建前执行Service state current-user ACL/non-reparse owner test及ACL drift负向断言，
+该process-global/child-process owner suite固定置于`packages/kite-local-runtime/test/isolated/`并由workflow串行运行，
+随后上传候选 artifact 供维护者检查。正式公开 Release 与 npm publish 不属于该 workflow。
 
 ## 能力边界
 

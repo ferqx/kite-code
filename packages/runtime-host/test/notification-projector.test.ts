@@ -12,6 +12,50 @@ import {
 import { SessionRegistry } from '../src/host/session-registry';
 
 describe('NotificationProjector durable subscriptions', () => {
+  test('accepts only a same-revision active-to-terminal cleanup enrichment', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    projector.publish({
+      ...durable('cleanup', 1),
+      projection: { kind: 'work', session: activeProjection('cleanup', 1) },
+    });
+    projector.publish({
+      ...durable('cleanup', 1),
+      projection: {
+        kind: 'work',
+        session: {
+          ...sessionProjection('cleanup', 1),
+          activeWork: {
+            workId: 'work-1',
+            phase: 'building',
+            status: 'cancelled',
+            activeTurn: { turnId: 'turn-1', status: 'cancelled' },
+          },
+        },
+      },
+    });
+    expect(registry.projection('cleanup')?.activeWork?.status).toBe('cancelled');
+    expect(() =>
+      projector.publish({
+        ...durable('cleanup', 1),
+        projection: {
+          kind: 'work',
+          session: { ...sessionProjection('cleanup', 1), workspace: '/different' },
+        },
+      }),
+    ).toThrow('diverged');
+
+    const iterator = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'cleanup', afterRevision: 0 } })
+      [Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toMatchObject({
+      revision: 1,
+      projection: { session: { activeWork: { status: 'cancelled' } } },
+    });
+    await iterator.return?.();
+    projector.close();
+  });
+
   test('replays continuous deltas and uses a full snapshot after a retained-history gap', async () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry);
@@ -291,6 +335,7 @@ function sessionProjection(sessionId: string, revision: number): RuntimeSessionP
     sessionId,
     revision,
     lifecycle: 'open',
+    interactionQueue: { revision, interactions: [] },
   };
 }
 

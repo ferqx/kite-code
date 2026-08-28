@@ -224,7 +224,7 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 | 入口                    | source 值  | 位置                                             |
 | ----------------------- | ---------- | ------------------------------------------------ |
 | CLI/start configuration mode | `'config'` | App composition / Session mode                |
-| TUI 权限选择器确认 Full | `'user'`   | `apps/kite/src/runtime/session/runtime-session.ts` |
+| TUI 权限选择器确认 Full | `'user'`   | `apps/kite-service/src/runtime/session/runtime-session.ts` |
 | 测试注入                | `'test'`   | `packages/runtime-host/test/policies/authorization-elevation.test.ts` |
 | System (禁止签发 grant)  | `'system'` | Auto reviewer / Kernel validation              |
 
@@ -261,7 +261,7 @@ grants、receipts、generation-sensitive waiters、turn-scoped capability bindin
 
 ```bash
 bun run --cwd packages/agent-kernel test
-bun test packages/runtime-host/test/policies/authorization-elevation.test.ts packages/agent-kernel/test/shell-policy-matrix.test.ts apps/kite/test/runtime/actions.test.ts
+bun test packages/runtime-host/test/policies/authorization-elevation.test.ts packages/agent-kernel/test/shell-policy-matrix.test.ts apps/kite-service/test/runtime/actions.test.ts
 ```
 
 测试覆盖：

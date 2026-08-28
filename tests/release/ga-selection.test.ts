@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { RELEASE_CAPABILITIES } from '#app/config/release-capabilities';
+import { RELEASE_CAPABILITIES } from '#kite-service/config/release-capabilities';
 import { evaluateGaSelectionGate, validateGaSelection } from '../../scripts/release/ga-selection';
 
 const digest = `sha256:${'a'.repeat(64)}` as const;
