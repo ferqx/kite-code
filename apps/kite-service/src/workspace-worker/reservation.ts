@@ -353,7 +353,29 @@ function reservationHandle(
     },
     async release() {
       if (released) return;
-      const current = assertOwned(path, managerRecord);
+      const current = readReservation(path);
+      if (!current) {
+        if (
+          (managerRecord.state === 'claimed' || managerRecord.state === 'worker_owned') &&
+          managerRecord.workerPid !== undefined &&
+          managerRecord.workerProcessStartIdentity !== undefined &&
+          (await processState(
+            managerRecord.workerPid,
+            managerRecord.workerProcessStartIdentity,
+          )) === 'dead'
+        ) {
+          released = true;
+          return;
+        }
+        throw new Error('Workspace reservation ownership changed.');
+      }
+      if (
+        current.nonce !== managerRecord.nonce ||
+        current.workerScopeId !== managerRecord.workerScopeId ||
+        current.workspaceDigest !== managerRecord.workspaceDigest
+      ) {
+        throw new Error('Workspace reservation ownership changed.');
+      }
       if (current.state === 'claimed' || current.state === 'worker_owned') {
         if (
           current.workerPid === undefined ||

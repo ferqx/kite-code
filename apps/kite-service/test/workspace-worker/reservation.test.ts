@@ -135,7 +135,9 @@ describe('cross-home Workspace reservation', () => {
   test('child owner lock claims the exact reservation before Store ownership is released', async () => {
     const root = makeRoot('kite-reservation-child-');
     const coordinationHome = createKiteHomeIdentity(join(root, 'coordination'));
-    const port = reservationPort(coordinationHome, 'manager-one');
+    const port = reservationPort(coordinationHome, 'manager-one', (start) =>
+      start === 'worker-start-child' ? 'dead' : 'alive',
+    );
     const workspace = workspaceIdentity('/workspace/child');
     const reservation = await port.acquire({ workerScopeId: 'scope-child', workspace });
     if (!reservation || 'outcome' in reservation) throw new Error('reservation was not acquired');
@@ -161,6 +163,7 @@ describe('cross-home Workspace reservation', () => {
       workerProcessStartIdentity: 'worker-start-child',
     });
     await ownerLock[Symbol.asyncDispose]();
+    await expect(reservation.release()).resolves.toBeUndefined();
     const next = await port.acquire({ workerScopeId: 'scope-child-next', workspace });
     expect(next).not.toBeUndefined();
     if (next && !('outcome' in next)) await next.release();

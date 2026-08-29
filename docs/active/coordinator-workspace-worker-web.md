@@ -159,7 +159,9 @@ binding；manifest/journal保留的是first-write前admission digest，只要求
 比较或重定基线。未写target仍必须匹配该digest，任一header/binding/evidence drift继续fail closed。
 Coordinator从持久Worker descriptor恢复时必须先比较PID与OS start token；confirmed dead在尝试旧control endpoint handshake前
 清除exact descriptor/control credential并允许replacement，alive才恢复authenticated control/reservation。uncertain或PID reuse
-不清理、不spawn，不能让已死亡loopback endpoint被误报为identity drift而永久阻塞正常restart。
+不清理、不spawn，不能让已死亡loopback endpoint被误报为identity drift而永久阻塞正常restart。若Worker在正常退出时已删除
+同一handed-off reservation，manager只在该Worker PID/start token confirmed dead时将缺失文件视为幂等release；reserved/launching、
+alive/uncertain或replacement identity仍fail closed。
 
 ## Fault、release 与平台 evidence 边界
 
