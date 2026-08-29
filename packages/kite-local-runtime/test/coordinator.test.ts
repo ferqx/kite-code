@@ -418,6 +418,8 @@ describe('Coordinator length-prefixed carrier', () => {
     await expect(clientApi.handshake()).resolves.toMatchObject({ accepted: true });
     await expect(clientApi.status()).resolves.toMatchObject({ outcome: 'ok' });
     await transport.close?.();
+    await waitFor(() => carrier.activeConnections === 0);
+    expect(carrier.activeConnections).toBe(0);
     await carrier.close();
   });
 
@@ -673,6 +675,14 @@ function closed(socket: CoordinatorCarrierSocket): Promise<void> {
     socket.onClose(resolve);
     socket.onEnd(resolve);
   });
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 250): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Coordinator connection did not close in time.');
+    await Bun.sleep(5);
+  }
 }
 
 function workerRegistration(instanceId: string): CoordinatorWorkerRegistration {

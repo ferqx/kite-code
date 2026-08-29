@@ -93,8 +93,11 @@ export function createCoordinatorSocketRequestTransport(
     if (closed) return;
     closed = true;
     handshaken = false;
+    const connection = socket;
     inbox?.close();
-    socket?.end();
+    // Closing the inbox invokes its onClose callback, which clears the outer `socket` binding.
+    // Retain the exact connection first so the peer always receives our half-close.
+    connection?.end();
     socket = undefined;
     inbox = undefined;
   }

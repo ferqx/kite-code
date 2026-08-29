@@ -47,7 +47,8 @@ macOS Coordinator/Worker process identity的`ps lstart`读取固定使用`LC_ALL
 identity读取，不把PID数值本身升级为cleanup authority；token不匹配、读取失败或PID reuse仍保持uncertain/fail closed。
 Native carrier的client `transport.close()`使用half-close；server收到peer end后必须先drain已排队response，再发送自身FIN并幂等释放
 connection。不能只从active registry移除而保留half-open native socket，否则`kite web/status`等短命令虽已打印结果仍无法退出。
-该connection close只结束本次control-plane client generation，不停止Coordinator、Worker、Gateway、Turn或Controller。
+client必须在inbox close callback清除外层binding前保留并half-close exact socket；该connection close只结束本次control-plane client
+generation，不停止Coordinator、Worker、Gateway、Turn或Controller。
 
 这些仍由 `kite-local-runtime` 作为 Native-only primitive 提供；`apps/kite-service/src/coordinator/production.ts` 现在把它们与
 Coordinator process main、Worker/Gateway process manager、Catalog active-layout admission、共享 registry 和 release entrypoint
