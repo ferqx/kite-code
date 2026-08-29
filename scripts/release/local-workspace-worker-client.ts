@@ -133,12 +133,6 @@ export function createManagedLocalWorkspaceWorkerConnector(
 ): LocalWorkspaceWorkerConnector {
   const coordinator = options.coordinatorClient;
   const baseFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const defaultClientInfo = Object.freeze({
-    name: 'kite-workspace-worker-client',
-    version: '0.1.0',
-    instanceId: `workspace-worker-client-${randomUUID()}`,
-  });
-
   return Object.freeze({
     connect: async (input: {
       readonly workspace: string;
@@ -146,7 +140,12 @@ export function createManagedLocalWorkspaceWorkerConnector(
     }): Promise<LocalWorkspaceWorkerConnection> => {
       const workspace = canonicalizeWorkspace(input.workspace);
       const clientInfo = validateClientInfo(
-        input.clientInfo ?? options.clientInfo ?? defaultClientInfo,
+        input.clientInfo ??
+          options.clientInfo ?? {
+            name: 'kite-workspace-worker-client',
+            version: '0.1.0',
+            instanceId: `workspace-worker-client-${randomUUID()}`,
+          },
       );
       const connectionState = createConnectionState();
       const manager = createWorkerEnsurePort(connectionState, workspace, clientInfo);
@@ -229,17 +228,9 @@ export function createManagedLocalWorkspaceWorkerConnector(
     clientInfo: RuntimeClientInfo,
   ): Promise<LocalRuntimeServiceDescriptor> {
     const nextGeneration = state.generation + 1;
-    const worker = await ensureCoordinatorWorkerAfterRecovery(coordinator, workspace);
-    const capability = await mintWorkerCapability(
+    const { worker, capability, handshake } = await establishWorkerBindingAfterRecovery(
       coordinator,
-      worker,
       workspace,
-      clientInfo,
-      nextGeneration,
-    );
-    const handshake = await authenticateWorkerInstance(
-      worker,
-      capability,
       clientInfo,
       nextGeneration,
       baseFetch,
@@ -377,28 +368,52 @@ async function ensureCoordinatorWorker(
   return validateWorkerReference(response.result.worker, workspace);
 }
 
-async function ensureCoordinatorWorkerAfterRecovery(
+async function establishWorkerBindingAfterRecovery(
   coordinator: CoordinatorClient,
   workspace: KiteWorkspaceIdentity,
-): Promise<CoordinatorWorkerReference> {
-  let lastUnavailable: LocalWorkspaceWorkerClientError | undefined;
+  clientInfo: RuntimeClientInfo,
+  generation: number,
+  fetcher: LocalRuntimeFetch,
+): Promise<{
+  readonly worker: CoordinatorWorkerReference;
+  readonly capability: string;
+  readonly handshake: WorkerHandshake;
+}> {
+  let lastRecoveryError: LocalWorkspaceWorkerClientError | undefined;
   for (let attempt = 0; attempt <= WORKER_RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
     if (attempt > 0) {
       await waitForWorkerRecovery(WORKER_RECOVERY_RETRY_DELAYS_MS[attempt - 1]!);
     }
     try {
-      return await ensureCoordinatorWorker(coordinator, workspace);
+      const worker = await ensureCoordinatorWorker(coordinator, workspace);
+      const capability = await mintWorkerCapability(
+        coordinator,
+        worker,
+        workspace,
+        clientInfo,
+        generation,
+      );
+      const handshake = await authenticateWorkerInstance(
+        worker,
+        capability,
+        clientInfo,
+        generation,
+        fetcher,
+      );
+      return { worker, capability, handshake };
     } catch (error) {
       if (
         !(error instanceof LocalWorkspaceWorkerClientError) ||
-        error.code !== 'worker_unavailable'
+        (error.code !== 'worker_unavailable' &&
+          error.code !== 'capability_unavailable' &&
+          error.code !== 'handshake_failed')
       ) {
         throw error;
       }
-      lastUnavailable = error;
+      lastRecoveryError = error;
     }
   }
-  throw lastUnavailable!;
+  throw lastRecoveryError!;
 }
 
 async function waitForWorkerRecovery(delayMs: number): Promise<void> {

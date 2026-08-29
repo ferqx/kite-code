@@ -361,9 +361,11 @@ function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity
 }
 
 describe('release Workspace Worker connector', () => {
-  test('closes a transient dead-Worker recovery window inside one connect', async () => {
+  test('closes transient ensure, capability, and handshake recovery windows inside one connect', async () => {
     const fixture = createFixture();
     let ensureAttempts = 0;
+    let mintAttempts = 0;
+    let handshakeAttempts = 0;
     const coordinator = {
       ...fixture.coordinator,
       async ensureWorkspaceWorker(
@@ -378,19 +380,70 @@ describe('release Workspace Worker connector', () => {
         }
         return fixture.coordinator.ensureWorkspaceWorker(input);
       },
+      async mintWorkerConnectionCapability(
+        input: Parameters<CoordinatorRequestClient['mintWorkerConnectionCapability']>[0],
+      ) {
+        mintAttempts += 1;
+        if (mintAttempts === 1) {
+          return {
+            outcome: 'error' as const,
+            error: { code: 'outcome_unknown' as const, diagnostic: 'handler_rejected' as const },
+          } as Awaited<ReturnType<CoordinatorRequestClient['mintWorkerConnectionCapability']>>;
+        }
+        return fixture.coordinator.mintWorkerConnectionCapability(input);
+      },
     };
+    const actualFetch = fixtureFetch(fixture);
     const connector = createManagedLocalWorkspaceWorkerConnector({
       coordinatorClient: coordinator,
-      fetch: fixtureFetch(fixture),
+      fetch: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input.toString());
+        if (url.pathname === KITE_SERVICE_INSTANCE_HANDSHAKE_PATH) {
+          handshakeAttempts += 1;
+          if (handshakeAttempts === 1) return new Response('{}', { status: 503 });
+        }
+        return actualFetch(input, init);
+      },
       clientInfo: { name: 'release-test', version: '1', instanceId: 'release-client-recovery' },
     });
 
     const connection = await connector.connect({ workspace: fixture.workspace.canonicalPath });
     try {
-      expect(ensureAttempts).toBe(2);
+      expect(ensureAttempts).toBe(4);
+      expect(mintAttempts).toBe(3);
+      expect(handshakeAttempts).toBe(2);
       expect(connection.service.instanceId).toBe(fixture.reference.identity.instanceId);
     } finally {
       await connection.close();
+    }
+  });
+
+  test('assigns a distinct default client identity to concurrent logical connections', async () => {
+    const fixture = createFixture();
+    const clientIds: string[] = [];
+    const coordinator = {
+      ...fixture.coordinator,
+      async mintWorkerConnectionCapability(
+        input: Parameters<CoordinatorRequestClient['mintWorkerConnectionCapability']>[0],
+      ) {
+        clientIds.push(input.clientId);
+        return fixture.coordinator.mintWorkerConnectionCapability(input);
+      },
+    };
+    const connector = createManagedLocalWorkspaceWorkerConnector({
+      coordinatorClient: coordinator,
+      fetch: fixtureFetch(fixture),
+    });
+
+    const [first, second] = await Promise.all([
+      connector.connect({ workspace: fixture.workspace.canonicalPath }),
+      connector.connect({ workspace: fixture.workspace.canonicalPath }),
+    ]);
+    try {
+      expect(clientIds).toHaveLength(2);
+      expect(new Set(clientIds).size).toBe(2);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
     }
   });
 

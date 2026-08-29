@@ -297,7 +297,7 @@ describe('Coordinator Worker manager adapter', () => {
         connectionGeneration: 1,
         purpose: 'web_observer',
       }),
-    ).rejects.toMatchObject({ code: 'identity_mismatch' });
+    ).rejects.toMatchObject({ code: 'unavailable' });
     expect(harness.calls.mint).toHaveLength(0);
   });
 

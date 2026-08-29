@@ -377,13 +377,24 @@ export function createWorkspaceWorkerProcessManager(
         ? { kind: 'none' }
         : { kind: 'blocked', diagnostic: 'outcome_unknown' };
     }
-    if (credential === undefined || !controlCredential.safeParse(credential).success) {
-      return { kind: 'blocked', diagnostic: 'outcome_unknown' };
-    }
     try {
       const descriptor = decodeWorkspaceWorkerProcessDescriptor(raw);
       if (descriptor.identity.workerScopeId !== workerScopeId) return { kind: 'corrupt' };
       const status = await inspect(descriptor);
+      if (credential === undefined) {
+        if (status !== 'dead') return { kind: 'blocked', diagnostic: 'outcome_unknown' };
+        const dead = makeManagedWorker({
+          descriptor,
+          registryRegistered: false,
+          statePublished: true,
+        });
+        return (await cleanupDead(dead))
+          ? { kind: 'none' }
+          : { kind: 'blocked', diagnostic: 'identity_uncertain' };
+      }
+      if (!controlCredential.safeParse(credential).success) {
+        return { kind: 'blocked', diagnostic: 'outcome_unknown' };
+      }
       if (status === 'uncertain') {
         return { kind: 'blocked', diagnostic: 'identity_uncertain' };
       }
@@ -485,7 +496,6 @@ export function createWorkspaceWorkerProcessManager(
         );
       }
       if (record.statePublished) {
-        await invoke(() => options.state!.clear(record.descriptor), operationTimeoutMs);
         const credential = await invoke(
           () => options.state!.readControlCredential(record.descriptor.identity.workerScopeId),
           operationTimeoutMs,
@@ -500,6 +510,7 @@ export function createWorkspaceWorkerProcessManager(
             operationTimeoutMs,
           );
         }
+        await invoke(() => options.state!.clear(record.descriptor), operationTimeoutMs);
       }
       records.delete(record.descriptor.identity.workerScopeId);
       stopUnknown.delete(record.descriptor.identity.workerScopeId);
@@ -567,19 +578,50 @@ export function createWorkspaceWorkerProcessManager(
             'outcome_unknown',
           );
         }
+        if (!existing.record.control) {
+          return result(
+            'ensure',
+            'outcome_unknown',
+            'starting',
+            existing.record.registration,
+            'outcome_unknown',
+          );
+        }
+        const identity = await invoke(
+          () => existing.record.control!.describeIdentity(),
+          operationTimeoutMs,
+        ).catch(() => undefined);
+        if (!identity) {
+          return result(
+            'ensure',
+            'outcome_unknown',
+            'starting',
+            existing.record.registration,
+            'outcome_unknown',
+          );
+        }
+        if (!controlIdentityMatches(existing.record.descriptor, identity)) {
+          return result(
+            'ensure',
+            'unavailable',
+            'ready',
+            existing.record.registration,
+            'identity_uncertain',
+          );
+        }
         return existingWorkerResult(existing.record, request, activeLayout, 'ensure');
       }
       if (status === 'uncertain') {
         return result(
           'ensure',
-          'unavailable',
-          'ready',
+          'outcome_unknown',
+          'starting',
           existing.record.registration,
           'identity_uncertain',
         );
       }
       if (!(await cleanupDead(existing.record))) {
-        return result('ensure', 'unavailable', 'absent', undefined, 'identity_uncertain');
+        return result('ensure', 'outcome_unknown', 'starting', undefined, 'identity_uncertain');
       }
     }
 

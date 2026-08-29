@@ -77,6 +77,9 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
   descriptor/control credential并允许replacement；alive才进入authenticated Worker handshake与reservation recovery；
   uncertain或PID reuse保持fail closed，不用已死亡endpoint阻断后续restart。Worker已正常释放同一exact reservation、文件因而
   已不存在时，manager仅在handed-off PID/start token confirmed dead后把release视为幂等完成；launching或身份不确定仍拒绝。
+  同进程ensure在OS/control identity短暂不确定或dead-state cleanup未收敛时返回recovery-pending，不清理、不二次spawn；
+  cleanup先删除exact credential再删除descriptor，descriptor阶段失败后只有confirmed-dead recovery可继续清理，避免留下
+  无descriptor的token-only状态。已知alive Worker返回ready前还要重做authenticated control identity检查。
 - Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
   identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
   scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。

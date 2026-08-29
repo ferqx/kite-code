@@ -163,8 +163,8 @@ export function createCoordinatorWorkerManagerAdapter(
         !sameWorkspace(currentWorkspace, worker.workspace)
       ) {
         throw new CoordinatorWorkerManagerAdapterError(
-          'identity_mismatch',
-          'Workspace Worker reference is stale.',
+          'unavailable',
+          'Workspace Worker reference changed during capability mint.',
         );
       }
       const result = await invokeManager(() =>
@@ -184,7 +184,7 @@ export function createCoordinatorWorkerManagerAdapter(
       }
       if (result.outcome !== 'applied') {
         throw new CoordinatorWorkerManagerAdapterError(
-          result.diagnostic === 'identity_uncertain' ? 'identity_mismatch' : 'unavailable',
+          result.diagnostic === 'identity_uncertain' ? 'outcome_unknown' : 'unavailable',
           'Workspace Worker capability is unavailable.',
         );
       }

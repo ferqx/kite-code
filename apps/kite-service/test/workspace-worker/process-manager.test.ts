@@ -39,6 +39,9 @@ interface HarnessOptions {
   readonly admissionFailure?: boolean;
   readonly stopResult?: 'closed' | 'busy' | 'outcome_unknown' | 'unavailable';
   readonly ownerReservation?: OwnerReservationPort;
+  readonly describeIdentityFailures?: number;
+  readonly clearCredentialFailures?: number;
+  readonly clearDescriptorFailures?: number;
 }
 
 interface OwnerReservationPort {
@@ -57,6 +60,7 @@ interface Harness {
   readonly spawnInputs: WorkspaceWorkerProcessChild[];
   readonly spawnCount: () => number;
   readonly setStatus: (scope: string, status: WorkspaceWorkerProcessStatus) => void;
+  readonly setDescribeIdentityFailures: (count: number) => void;
   readonly statusFor: (scope: string) => WorkspaceWorkerProcessStatus;
   readonly registry: {
     readonly registered: WorkspaceWorkerProcessDescriptor[];
@@ -184,6 +188,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
   const events: string[] = [];
   const ownerReservation = options.ownerReservation ?? createOwnerReservationPort();
   let spawnCalls = 0;
+  let describeIdentityFailures = options.describeIdentityFailures ?? 0;
+  let clearCredentialFailures = options.clearCredentialFailures ?? 0;
+  let clearDescriptorFailures = options.clearDescriptorFailures ?? 0;
   const readyGates = new Map<string, ReturnType<typeof deferred<WorkspaceWorkerReadySignal>>>();
 
   const managerOptions: WorkspaceWorkerProcessManagerOptions = {
@@ -239,6 +246,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
         controls.set(scope, controlsForScope);
         const control = Object.freeze({
           async describeIdentity() {
+            if (describeIdentityFailures > 0) {
+              describeIdentityFailures -= 1;
+              throw new Error('transient control identity failure');
+            }
             return {
               workerScopeId: scope,
               workerInstanceId: instanceId,
@@ -328,6 +339,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
         state.published.push(value);
       },
       async clear(value) {
+        if (clearDescriptorFailures > 0) {
+          clearDescriptorFailures -= 1;
+          throw new Error('transient descriptor cleanup failure');
+        }
         stateValues.delete(value.identity.workerScopeId);
         state.cleared.push(value);
       },
@@ -340,6 +355,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
         return credential;
       },
       async clearControlCredential(scope: string, expected: string) {
+        if (clearCredentialFailures > 0) {
+          clearCredentialFailures -= 1;
+          throw new Error('transient credential cleanup failure');
+        }
         if (credentials.get(scope) !== expected) throw new Error('credential marker mismatch');
         credentials.delete(scope);
       },
@@ -364,6 +383,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
     setStatus(scope, status) {
       const identity = processIdentityByScope.get(scope);
       if (identity) statuses.set(`${identity.pid}:${identity.start}`, status);
+    },
+    setDescribeIdentityFailures(count) {
+      describeIdentityFailures = count;
     },
     statusFor(scope) {
       const identity = processIdentityByScope.get(scope);
@@ -522,6 +544,68 @@ describe('Workspace Worker process manager', () => {
     const replacement = await harness.manager.ensure(ensureRequest('scope-dead', workspace));
     expect(replacement).toMatchObject({ outcome: 'applied', state: 'ready' });
     expect(harness.spawnCount()).toBe(2);
+  });
+
+  test('keeps uncertain and transient control identity recovery pending without a second spawn', async () => {
+    const owner = createOwnerReservationPort();
+    const harness = createHarness({ ownerReservation: owner });
+    const workspace = makeWorkspace('recovery-pending', 'a');
+    await expect(
+      harness.manager.ensure(ensureRequest('scope-recovery-pending', workspace)),
+    ).resolves.toMatchObject({ outcome: 'applied', state: 'ready' });
+
+    harness.setDescribeIdentityFailures(1);
+    await expect(
+      harness.manager.ensure(ensureRequest('scope-recovery-pending', workspace)),
+    ).resolves.toMatchObject({ outcome: 'outcome_unknown', state: 'starting' });
+    expect(harness.spawnCount()).toBe(1);
+
+    harness.setStatus('scope-recovery-pending', 'uncertain');
+    await expect(
+      harness.manager.ensure(ensureRequest('scope-recovery-pending', workspace)),
+    ).resolves.toMatchObject({
+      outcome: 'outcome_unknown',
+      state: 'starting',
+      diagnostic: 'identity_uncertain',
+    });
+    expect(harness.spawnCount()).toBe(1);
+
+    harness.setStatus('scope-recovery-pending', 'dead');
+    owner.held.delete(workspace.workspaceDigest);
+    await expect(
+      harness.manager.ensure(ensureRequest('scope-recovery-pending', workspace)),
+    ).resolves.toMatchObject({ outcome: 'applied', state: 'ready' });
+    expect(harness.spawnCount()).toBe(2);
+  });
+
+  test('recovers dead descriptor cleanup after credential or descriptor clear fails once', async () => {
+    for (const failure of ['credential', 'descriptor'] as const) {
+      const owner = createOwnerReservationPort();
+      const harness = createHarness({
+        ownerReservation: owner,
+        ...(failure === 'credential'
+          ? { clearCredentialFailures: 1 }
+          : { clearDescriptorFailures: 1 }),
+      });
+      const scope = `scope-cleanup-${failure}`;
+      const workspace = makeWorkspace(`cleanup-${failure}`, failure === 'credential' ? 'b' : 'c');
+      await harness.manager.ensure(ensureRequest(scope, workspace));
+      harness.setStatus(scope, 'dead');
+      owner.held.delete(workspace.workspaceDigest);
+
+      await expect(harness.manager.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+        outcome: 'outcome_unknown',
+        state: 'starting',
+      });
+      const restarted = harness.restart(async (descriptor) =>
+        harness.controlLinks.get(descriptor.identity.workerScopeId),
+      );
+      await expect(restarted.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+        outcome: 'applied',
+        state: 'ready',
+      });
+      expect(harness.spawnCount()).toBe(2);
+    }
   });
 
   test('blocks replay after a readiness identity mismatch', async () => {
