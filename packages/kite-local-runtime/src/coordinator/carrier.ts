@@ -552,8 +552,10 @@ class CoordinatorCarrierConnection {
     if (!next) {
       if (this.#closeAfterDrain) {
         this.#closed = true;
+        if (this.#handshakeTimer !== undefined) clearTimeout(this.#handshakeTimer);
         this.#socket.end();
         this.#onClose();
+        this.#diagnose('closed');
       }
       return;
     }
@@ -576,7 +578,11 @@ class CoordinatorCarrierConnection {
       this.#fail(errorCodeForFraming(error));
       return;
     }
-    this.#finishClose();
+    // A peer half-close must receive our FIN after already-queued responses drain. Merely
+    // dropping the connection from the registry leaves the client socket referenced forever,
+    // which prevents short-lived CLI commands from exiting.
+    this.#closeAfterDrain = true;
+    this.#drainOutbound();
   }
 
   #fail(code: CoordinatorCarrierErrorCode): void {
@@ -589,6 +595,7 @@ class CoordinatorCarrierConnection {
   }
 
   #finishClose(): void {
+    if (this.#closed) return;
     if (this.#handshakeTimer !== undefined) clearTimeout(this.#handshakeTimer);
     this.#closed = true;
     this.#onClose();

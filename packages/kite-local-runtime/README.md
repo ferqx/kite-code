@@ -30,7 +30,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   只描述 current-user SID-bound named-pipe identity；descriptor 不携带 socket/pipe path。其 carrier 使用 length-prefixed
   bounded frame、initialize deadline、单连接有界队列和 fail-closed partial/malformed/oversized 处理；平台不可用时返回
   typed `unsupported`，绝不退回 TCP。Coordinator registry 是纯内存 control-plane owner，只保存 Worker identity、path-free
-  Session metadata、directory revision 与唯一 Web Gateway registry。
+  Session metadata、directory revision 与唯一 Web Gateway registry。peer half-close后carrier先drain已排队response，再由server
+  完成FIN并幂等释放connection；client `transport.close()`不会留下永久half-open socket，因此`kite web/status`等短命令打印结果后
+  能正常退出。该socket close不等于停止Coordinator、Worker或Gateway owner。
 - 固定client contract revision、Protocol V1 identity与loopback endpoint shape；拒绝unknown field、non-loopback endpoint、
   secret-bearing descriptor与unsafe JSON。
 

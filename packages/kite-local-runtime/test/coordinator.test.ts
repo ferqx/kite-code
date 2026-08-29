@@ -465,7 +465,17 @@ describe('Coordinator length-prefixed carrier', () => {
       method: 'status',
       outcome: 'ok',
     });
+    const peerClosed = closed(socket);
     socket.end();
+    await expect(
+      Promise.race([
+        peerClosed,
+        Bun.sleep(250).then(() => {
+          throw new Error('Coordinator server did not finish the peer half-close.');
+        }),
+      ]),
+    ).resolves.toBeUndefined();
+    expect(carrier.activeConnections).toBe(0);
     await carrier.close();
     expect(carrier.activeConnections).toBe(0);
     expect(diagnostics).not.toContain('malformed_frame');
