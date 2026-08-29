@@ -56,6 +56,11 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 该规则同样覆盖manual compaction：command intent与effect terminal都通过Coordinator记录各自post-event State后才发布；
 不得直接写Session再让Bridge用batch最终State投影早期revision，否则activation必须fail closed且不能调度compaction。
 
+Store8 capability存在时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
+resource receipt和State decision共同提交。bridge activation先调用Coordinator的queued→running transition，再发布notification或交给
+Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
+current Store7 composition不提供该capability，不能用内存activeWork补写Run或降级为partial查询。
+
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。

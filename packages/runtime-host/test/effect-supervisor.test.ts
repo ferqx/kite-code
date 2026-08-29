@@ -49,6 +49,29 @@ describe('Host EffectSupervisor', () => {
     expect(calls).toEqual(['decision']);
   });
 
+  test('refuses Run mutations when the storage owner has no Store 8 port', () => {
+    const calls: string[] = [];
+    const supervisor = new EffectSupervisor(storageFixture(calls));
+    const input = {
+      ...transactionInput(),
+      runMutation: {
+        type: 'insert' as const,
+        run: {
+          sessionId: 'session-1',
+          runId: 'run-1',
+          startCommandId: 'command-1',
+          phase: 'building' as const,
+          status: 'queued' as const,
+          createdRevision: 1,
+          lastRevision: 1,
+          createdAtMs: 100,
+        },
+      },
+    };
+    expect(() => supervisor.commit('decision', input)).toThrow('Store 8 authority');
+    expect(calls).toEqual([]);
+  });
+
   test('never reaches an external dispatch when attempt acknowledgement fails', () => {
     let providerCalls = 0;
     const storage = storageFixture([]);

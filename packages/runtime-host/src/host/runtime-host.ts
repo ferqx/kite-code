@@ -45,6 +45,7 @@ import {
   resolveRuntimeCommandReceipt,
 } from './command-receipt';
 import { NotificationProjector } from './notification-projector';
+import { parseRuntimeStoredCommandResource, projectRuntimeStoredRun } from './run-projection';
 import { SessionRegistry } from './session-registry';
 
 /**
@@ -243,7 +244,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       } else if (command.type === 'close_session') {
         this.#lifecycle.close(committed.receipt.sessionId, 'Runtime session closed.');
       }
-      return committed.receipt;
+      return receiptFromStoredReceipt(stored);
     });
     this.#pendingCommands.set(identity, { digest: evidence.requestDigest, promise: execution });
     try {
@@ -284,7 +285,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     }
     // A delete receipt intentionally outlives its target Session. Replaying it
     // must never call App recovery or recreate a snapshot/Runtime owner.
-    if (command.type === 'delete_session') return receipt;
+    if (command.type === 'delete_session' || command.type === 'start_turn') return receipt;
     await this.#recoverSession(receipt.sessionId);
     return receipt;
   }
@@ -389,6 +390,51 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
             queryType: query.type,
             code: 'session_not_found',
           };
+    }
+    if (query.type === 'get_run' || query.type === 'list_runs') {
+      const runs = this.storage.runs;
+      if (!runs) {
+        return {
+          status: 'unavailable',
+          queryType: query.type,
+          code: 'unsupported',
+        };
+      }
+      if (!this.storage.sessions.loadSnapshotRecord(query.sessionId)) {
+        return {
+          status: 'not_found',
+          queryType: query.type,
+          code: 'session_not_found',
+        };
+      }
+      if (query.type === 'get_run') {
+        const run = runs.get(query.sessionId, query.runId);
+        return run
+          ? {
+              status: 'ok',
+              queryType: query.type,
+              revision: run.lastRevision,
+              run: projectRuntimeStoredRun(run),
+            }
+          : {
+              status: 'not_found',
+              queryType: query.type,
+              code: 'run_not_found',
+            };
+      }
+      const page = runs.list({
+        sessionId: query.sessionId,
+        limit: query.limit,
+        ...(query.status === undefined ? {} : { status: query.status }),
+        ...(query.phase === undefined ? {} : { phase: query.phase }),
+        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+      });
+      return {
+        status: 'ok',
+        queryType: query.type,
+        runs: page.entries.map(projectRuntimeStoredRun),
+        ...(page.nextCursor === undefined ? {} : { nextRunCursor: page.nextCursor }),
+      };
     }
     const result = await this.#bridge.query(query);
     this.#commitQueryProjection(result);
@@ -837,10 +883,12 @@ function sameAppliedReceipt(
 function receiptFromStoredReceipt(
   receipt: RuntimeStoredCommandReceipt,
 ): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
+  const resource = parseRuntimeStoredCommandResource(receipt.resourceResult);
   return {
     status: 'applied',
     commandId: receipt.commandId,
     sessionId: receipt.targetSessionId,
     revision: receipt.committedRevision,
+    ...(resource === undefined ? {} : { resource }),
   };
 }

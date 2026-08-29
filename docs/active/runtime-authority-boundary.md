@@ -82,10 +82,14 @@ revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-
 Web Gateway的`/api-docs`只读取candidate内固定OpenAPI静态资产，不建立Agent context、Runtime logical connection、Coordinator/Worker
 discovery或Store query，也不提供execute control；因此该参考页不是新的RuntimeAccess、data plane或Browser Controller surface。
 
-KRSRUN-01A已在`runtime-host/storage`冻结neutral Run row/query/page/insert/transition及receipt resource-result contract，并在SQLite owner内实现
-未发布的State 27 / Store 8 exact schema/preflight/same-connection Run port。它尚未接入Host transaction、`RuntimeStorage` production
-composition、active layout或Worker：current writer仍是Store 7，ServerInfo仍不含`runs`。Store 6/7 receipt writer明确拒绝resource result，
-Store 7与Store 8 preflight双向拒绝；因此该target不是第二RuntimeAccess、optional Store 7 DDL或fallback。
+KRSRUN-01B已把unpublished Store 8 capability接入Host transaction机制：start的State/event/snapshot/revision、queued Run与original
+resource receipt同一commit；activation在publish/schedule前推进running，interaction/terminal/cancel/recovery State batch同步推进waiting/
+running/terminal。Private Runtime Contract/Protocol只新增closed Run receipt与bounded get/page；Host query直接消费neutral port且不触发
+recovery。Start receipt replay在lookup命中后直接返回original queued resource，不recover、inspect、activate、prepare或schedule。
+
+这仍不是production cutover：`adapter.ts`、active layout、Worker opener与release继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run
+mutation，private Run query返回unsupported，ServerInfo/Public handler仍无`runs`。Store 7与Store 8 preflight继续双向拒绝，Coordinator/Catalog/
+Agent adapter不持Run事实；因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

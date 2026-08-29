@@ -388,6 +388,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
             return {
               receipt,
               activation: async (publish) => {
+                coordinator.activateStartTurnRun?.(committed.descriptor.turnId);
                 this.#revision = receipt.revision;
                 this.#running = true;
                 this.#activePublish = publish;

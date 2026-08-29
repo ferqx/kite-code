@@ -17,7 +17,12 @@ import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { createArtifactPort, type RuntimeStorageBoundary } from '@kite-ai/runtime-host/storage';
+import {
+  createArtifactPort,
+  type RuntimeStorage,
+  type RuntimeStorageBoundary,
+  type RuntimeStoredRun,
+} from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite-ai/runtime-spi';
 import {
   createRuntimeModuleRegistry,
@@ -88,6 +93,79 @@ describe('runtime host package boundary', () => {
     await expect(
       host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
     ).rejects.toThrow('disposed');
+  });
+
+  test('serves bounded Store 8 Run queries without App recovery or event scans', async () => {
+    const bridge = new TestExecutionBridge();
+    const run: RuntimeStoredRun = {
+      sessionId: 'session-1',
+      runId: 'run-1',
+      startCommandId: 'command-1',
+      phase: 'building',
+      status: 'running',
+      createdRevision: 2,
+      lastRevision: 3,
+      createdAtMs: 100,
+      startedAtMs: 110,
+    };
+    const base = testStorage();
+    const storage = {
+      ...base,
+      sessions: {
+        ...base.sessions,
+        loadSnapshotRecord: (sessionId: string) =>
+          sessionId === 'session-1'
+            ? {
+                state: {},
+                metadata: {
+                  eventPosition: 3,
+                  stateRevision: 3,
+                  stateChecksum: 'checksum',
+                  schemaVersion: 27,
+                },
+              }
+            : null,
+      },
+      runs: {
+        get: (sessionId: string, runId: string) =>
+          sessionId === run.sessionId && runId === run.runId ? run : null,
+        list: () => ({ entries: [run], hasMore: false }),
+        insert: () => undefined,
+        transition: () => 'applied' as const,
+      },
+    } as RuntimeStorage;
+    const host = createRuntimeHost({
+      storage,
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_run',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'get_run',
+      revision: 3,
+      run: { schema: 'kite.runtime-run.v1', runId: 'run-1', status: 'running' },
+    });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'list_runs',
+      runs: [{ runId: 'run-1' }],
+    });
+    expect(bridge.recoveries).toEqual([]);
+    await host[Symbol.asyncDispose]();
   });
 
   test('accepts one prebuilt registry and exact snapshot without taking another snapshot', async () => {

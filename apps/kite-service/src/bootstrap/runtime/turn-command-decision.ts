@@ -229,7 +229,18 @@ export function commitStartTurnCommand(
     context,
     evidence.committedAt,
   );
-  const committed = session.commitCommandBatch(planned.events, evidence);
+  const committed = session.commitCommandBatch(
+    planned.events,
+    session.supportsRunStorage()
+      ? Object.freeze({
+          ...evidence,
+          runStart: Object.freeze({
+            runId: planned.descriptor.turnId,
+            phase: planned.descriptor.phase,
+          }),
+        })
+      : evidence,
+  );
   return Object.freeze({
     receipt: committed.receipt,
     events: committed.events as readonly RuntimeEvent[],

@@ -7,6 +7,7 @@ import type {
   RuntimeStoredCommandReceipt,
 } from '../storage';
 import { assertRuntimeStoredCommandResourceResult } from '../storage';
+import { parseRuntimeStoredCommandResource } from './run-projection';
 
 const APPLIED_RECEIPT_KEYS = ['commandId', 'revision', 'sessionId', 'status'] as const;
 
@@ -85,11 +86,13 @@ export function resolveRuntimeCommandReceipt(
       code: 'invalid_command',
     });
   }
+  const resource = parseRuntimeStoredCommandResource(record.resourceResult);
   return Object.freeze({
     status: 'idempotent_replay',
     commandId: applied.commandId,
     sessionId: applied.sessionId,
     originalRevision: applied.revision,
+    ...(resource === undefined ? {} : { resource }),
   });
 }
 

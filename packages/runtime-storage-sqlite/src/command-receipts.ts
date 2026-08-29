@@ -1,10 +1,12 @@
 import type { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 import type {
   RuntimeCommandReceiptLookup,
   RuntimeCommandReceiptLookupInput,
   RuntimeCommandReceiptPort,
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
+import { assertRuntimeStoredCommandResourceResult } from '@kite-ai/runtime-host/storage';
 import {
   SqliteRuntimeCommandReceiptValidationError,
   type SqliteRuntimeSessionBinding,
@@ -28,11 +30,29 @@ export function assertSqliteRuntimeCommandReceipt(
   receipt: RuntimeStoredCommandReceipt,
   transactionSessionId?: string,
   committedRevision?: number,
+  allowResourceResult = false,
 ): void {
-  if (receipt.resourceResult !== undefined) {
+  if (receipt.resourceResult !== undefined && !allowResourceResult) {
     throw new SqliteRuntimeCommandReceiptValidationError(
       'Runtime command resource result requires the Store 8 receipt writer.',
     );
+  }
+  if (receipt.resourceResult !== undefined) {
+    try {
+      assertRuntimeStoredCommandResourceResult(receipt.resourceResult);
+    } catch (error) {
+      throw new SqliteRuntimeCommandReceiptValidationError(
+        `Runtime command resource result is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (
+      createHash('sha256').update(receipt.resourceResult.json).digest('hex') !==
+      receipt.resourceResult.digest
+    ) {
+      throw new SqliteRuntimeCommandReceiptValidationError(
+        'Runtime command resource result digest does not match its canonical JSON.',
+      );
+    }
   }
   assertReceiptText(receipt.scopeSessionId, 'scope session identity');
   assertReceiptText(receipt.commandId, 'command identity');
@@ -93,6 +113,8 @@ export function createSqliteRuntimeCommandReceiptWriter(
         readonly db: Database;
         readonly workspaceBinding?: SqliteRuntimeWorkspaceBinding;
         readonly beforeWrite?: () => void;
+        /** Store 8-only result triple; Store 6/7 must leave this false. */
+        readonly resourceResults?: boolean;
       }
     | Database,
 ): SqliteRuntimeCommandReceiptWriter {
@@ -100,24 +122,41 @@ export function createSqliteRuntimeCommandReceiptWriter(
   const db = configured ? input.db : input;
   const workspaceBinding = configured ? input.workspaceBinding : undefined;
   const beforeWrite = configured ? input.beforeWrite : undefined;
+  const resourceResults = configured ? input.resourceResults === true : false;
   const selectSessionBinding = workspaceBinding
     ? db.query<SqliteRuntimeSessionBinding, [string]>(
         'SELECT worker_scope_id AS workerScopeId, project_id AS projectId, workspace_digest AS workspaceDigest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
       )
     : undefined;
   const insert = workspaceBinding
-    ? db.query(
-        `INSERT INTO runtime_command_receipts (
+    ? resourceResults
+      ? db.query(
+          `INSERT INTO runtime_command_receipts (
+            scope_session_id, command_id, worker_scope_id, project_id, workspace_digest,
+            request_digest, target_session_id, original_receipt_json, committed_revision,
+            committed_at, result_schema, result_json, result_digest
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+      : db.query(
+          `INSERT INTO runtime_command_receipts (
           scope_session_id, command_id, worker_scope_id, project_id, workspace_digest,
           request_digest, target_session_id, original_receipt_json, committed_revision, committed_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-    : db.query(
-        `INSERT INTO runtime_command_receipts (
+        )
+    : resourceResults
+      ? db.query(
+          `INSERT INTO runtime_command_receipts (
+            scope_session_id, command_id, request_digest, target_session_id,
+            original_receipt_json, committed_revision, committed_at,
+            result_schema, result_json, result_digest
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+      : db.query(
+          `INSERT INTO runtime_command_receipts (
           scope_session_id, command_id, request_digest, target_session_id,
           original_receipt_json, committed_revision, committed_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      );
+        );
   return Object.freeze({
     insert(
       receipt: RuntimeStoredCommandReceipt,
@@ -125,7 +164,12 @@ export function createSqliteRuntimeCommandReceiptWriter(
       committedRevision: number,
       sessionBinding?: SqliteRuntimeSessionBinding,
     ): void {
-      assertSqliteRuntimeCommandReceipt(receipt, transactionSessionId, committedRevision);
+      assertSqliteRuntimeCommandReceipt(
+        receipt,
+        transactionSessionId,
+        committedRevision,
+        resourceResults,
+      );
       if (workspaceBinding) {
         const owner = sessionBinding ?? selectSessionBinding?.get(receipt.targetSessionId);
         if (!owner || !matchesWorkspaceBinding(owner, workspaceBinding)) {
@@ -134,7 +178,7 @@ export function createSqliteRuntimeCommandReceiptWriter(
           );
         }
         beforeWrite?.();
-        insert.run(
+        const values = [
           receipt.scopeSessionId,
           receipt.commandId,
           owner.workerScopeId,
@@ -145,10 +189,18 @@ export function createSqliteRuntimeCommandReceiptWriter(
           receipt.originalReceiptJson,
           receipt.committedRevision,
           receipt.committedAt,
-        );
+          ...(resourceResults
+            ? [
+                receipt.resourceResult?.schema ?? null,
+                receipt.resourceResult?.json ?? null,
+                receipt.resourceResult?.digest ?? null,
+              ]
+            : []),
+        ];
+        insert.run(...values);
       } else {
         beforeWrite?.();
-        insert.run(
+        const values = [
           receipt.scopeSessionId,
           receipt.commandId,
           receipt.requestDigest,
@@ -156,7 +208,15 @@ export function createSqliteRuntimeCommandReceiptWriter(
           receipt.originalReceiptJson,
           receipt.committedRevision,
           receipt.committedAt,
-        );
+          ...(resourceResults
+            ? [
+                receipt.resourceResult?.schema ?? null,
+                receipt.resourceResult?.json ?? null,
+                receipt.resourceResult?.digest ?? null,
+              ]
+            : []),
+        ];
+        insert.run(...values);
       }
     },
   });
@@ -167,45 +227,37 @@ export function createSqliteRuntimeCommandReceiptPort(input: {
   readonly db: Database;
   readonly isClosed: () => boolean;
   readonly workspaceBinding?: SqliteRuntimeWorkspaceBinding;
+  /** Store 8-only result triple; Store 6/7 must leave this false. */
+  readonly resourceResults?: boolean;
 }): RuntimeCommandReceiptPort {
+  type ReceiptRow = {
+    scope_session_id: string;
+    command_id: string;
+    worker_scope_id?: string;
+    project_id?: string;
+    workspace_digest?: string;
+    request_digest: string;
+    target_session_id: string;
+    original_receipt_json: string;
+    committed_revision: number;
+    committed_at: number;
+    result_schema?: string | null;
+    result_json?: string | null;
+    result_digest?: string | null;
+  };
+  const resourceColumns = input.resourceResults
+    ? ', result_schema, result_json, result_digest'
+    : '';
   const find = input.workspaceBinding
-    ? input.db.query<
-        {
-          scope_session_id: string;
-          command_id: string;
-          worker_scope_id: string;
-          project_id: string;
-          workspace_digest: string;
-          request_digest: string;
-          target_session_id: string;
-          original_receipt_json: string;
-          committed_revision: number;
-          committed_at: number;
-        },
-        [string, string]
-      >(
+    ? input.db.query<ReceiptRow, [string, string]>(
         `SELECT scope_session_id, command_id, worker_scope_id, project_id, workspace_digest,
-          request_digest, target_session_id, original_receipt_json, committed_revision, committed_at
+          request_digest, target_session_id, original_receipt_json, committed_revision, committed_at${resourceColumns}
           FROM runtime_command_receipts
           WHERE scope_session_id = ? AND command_id = ? LIMIT 1`,
       )
-    : input.db.query<
-        {
-          scope_session_id: string;
-          command_id: string;
-          worker_scope_id?: string;
-          project_id?: string;
-          workspace_digest?: string;
-          request_digest: string;
-          target_session_id: string;
-          original_receipt_json: string;
-          committed_revision: number;
-          committed_at: number;
-        },
-        [string, string]
-      >(
+    : input.db.query<ReceiptRow, [string, string]>(
         `SELECT scope_session_id, command_id, request_digest, target_session_id,
-          original_receipt_json, committed_revision, committed_at
+          original_receipt_json, committed_revision, committed_at${resourceColumns}
           FROM runtime_command_receipts
           WHERE scope_session_id = ? AND command_id = ? LIMIT 1`,
       );
@@ -222,6 +274,13 @@ export function createSqliteRuntimeCommandReceiptPort(input: {
       }
       const row = find.get(inputReceipt.scopeSessionId, inputReceipt.commandId);
       if (!row) return { status: 'missing' };
+      const resultValues = [row.result_schema, row.result_json, row.result_digest];
+      const resultCount = resultValues.filter((value) => value != null).length;
+      if (resultCount !== 0 && resultCount !== 3) {
+        throw new SqliteRuntimeCommandReceiptValidationError(
+          'Runtime command resource result triple is incomplete.',
+        );
+      }
       const receipt: RuntimeStoredCommandReceipt = Object.freeze({
         scopeSessionId: row.scope_session_id,
         commandId: row.command_id,
@@ -230,8 +289,17 @@ export function createSqliteRuntimeCommandReceiptPort(input: {
         originalReceiptJson: row.original_receipt_json,
         committedRevision: row.committed_revision,
         committedAt: row.committed_at,
+        ...(resultCount === 3
+          ? {
+              resourceResult: Object.freeze({
+                schema: row.result_schema!,
+                json: row.result_json!,
+                digest: row.result_digest!,
+              }),
+            }
+          : {}),
       });
-      assertSqliteRuntimeCommandReceipt(receipt);
+      assertSqliteRuntimeCommandReceipt(receipt, undefined, undefined, input.resourceResults);
       if (input.workspaceBinding) {
         const owner = ownerForTarget(input.db, row.target_session_id);
         const receiptOwner =

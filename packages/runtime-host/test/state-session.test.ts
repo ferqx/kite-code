@@ -8,6 +8,8 @@ import {
 import type {
   CheckpointPort,
   RuntimeCommandCommitEvidence,
+  RuntimeRunStorePort,
+  RuntimeStoredRun,
   RuntimeTransactionInput,
   SessionStore,
 } from '@kite-ai/runtime-host/storage';
@@ -35,21 +37,24 @@ interface Fixture {
   }[];
   readonly acknowledgements: string[];
   readonly leaseCalls: string[];
+  readonly runs: Map<string, RuntimeStoredRun>;
   failCommit: boolean;
   leaseAvailable: boolean;
 }
 
-function fixture(state: AgentState = initialState()): Fixture {
+function fixture(state: AgentState = initialState(), withRunAuthority = false): Fixture {
   const writes: RuntimeTransactionInput<KernelEvent, AgentState>[] = [];
   const acknowledgements: string[] = [];
   const requiredLeases: Fixture['requiredLeases'] = [];
   const leaseCalls: string[] = [];
+  const runs = new Map<string, RuntimeStoredRun>();
   const fixtureState: Fixture = {
     input: undefined as never,
     writes,
     requiredLeases,
     acknowledgements,
     leaseCalls,
+    runs,
     failCommit: false,
     leaseAvailable: true,
   };
@@ -60,12 +65,14 @@ function fixture(state: AgentState = initialState()): Fixture {
       commit: (acknowledgement, input, requiredLease) => {
         if (fixtureState.failCommit) throw new Error('commit refused');
         if (requiredLease && !fixtureState.leaseAvailable) throw new Error('lease lost');
+        applyRunMutation(runs, input);
         acknowledgements.push(acknowledgement);
         writes.push(input);
         if (requiredLease) requiredLeases.push(requiredLease);
       },
       commitCommandDecision: (input) => {
         if (fixtureState.failCommit) throw new Error('commit refused');
+        applyRunMutation(runs, input);
         acknowledgements.push('command_decision');
         writes.push(input);
       },
@@ -87,6 +94,7 @@ function fixture(state: AgentState = initialState()): Fixture {
       getOrCreate: (_sessionId, allocate) => allocate(),
       remove: () => undefined,
     },
+    ...(withRunAuthority ? { runs: runStore(runs) } : {}),
   };
   fixtureState.input = {
     state,
@@ -96,6 +104,41 @@ function fixture(state: AgentState = initialState()): Fixture {
     sandboxAvailable: true,
   };
   return fixtureState;
+}
+
+function runStore(records: Map<string, RuntimeStoredRun>): RuntimeRunStorePort {
+  return {
+    get: (sessionId, runId) => records.get(`${sessionId}\0${runId}`) ?? null,
+    list: (request) => ({
+      entries: [...records.values()].filter((run) => run.sessionId === request.sessionId),
+      hasMore: false,
+    }),
+    insert: (run) => {
+      const key = `${run.sessionId}\0${run.runId}`;
+      if (records.has(key)) throw new Error('duplicate Run');
+      records.set(key, run);
+    },
+    transition: (input) => {
+      const key = `${input.sessionId}\0${input.runId}`;
+      const current = records.get(key);
+      if (!current) return 'missing';
+      if (current.lastRevision !== input.expectedLastRevision) return 'conflict';
+      records.set(key, input.next);
+      return 'applied';
+    },
+  };
+}
+
+function applyRunMutation(
+  records: Map<string, RuntimeStoredRun>,
+  input: RuntimeTransactionInput<KernelEvent, AgentState>,
+): void {
+  if (!input.runMutation) return;
+  const store = runStore(records);
+  if (input.runMutation.type === 'insert') store.insert(input.runMutation.run);
+  else if (store.transition(input.runMutation.transition) !== 'applied') {
+    throw new Error('Run transition failed');
+  }
 }
 
 function sessionStore(): SessionStore<KernelEvent, AgentState> {
@@ -181,6 +224,68 @@ describe('Runtime Host State session', () => {
     expect(f.acknowledgements).toEqual(['command_decision']);
     expect(f.writes[0]?.commandReceipt).toEqual(committed.receipt);
     expect(session.getState().revision).toBe(1);
+  });
+
+  test('commits queued Run/resource, activation, interaction and cancellation from one clock', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    const evidence = {
+      ...commandEvidence(),
+      runStart: { runId: 'run-1', phase: 'building' as const },
+    };
+    const committed = session.commitCommandBatch(
+      [{ type: 'turn.started', turnId: 'run-1' }],
+      evidence,
+    );
+    expect(f.writes[0]?.runMutation).toMatchObject({
+      type: 'insert',
+      run: {
+        runId: 'run-1',
+        status: 'queued',
+        createdRevision: 1,
+        createdAtMs: Date.parse(NOW),
+      },
+    });
+    expect(committed.receipt.resourceResult).toMatchObject({
+      schema: 'kite.runtime.run-resource-result.v1',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
+
+    session.activateRun('run-1');
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({
+      status: 'running',
+      startedAtMs: Date.parse(NOW),
+    });
+
+    session.processEventBatch([
+      { type: 'tool.queued', toolCallId: 'ask-1', name: 'ask_user', args: {} },
+      {
+        type: 'user_input.requested',
+        interactionId: 'input-1',
+        toolCallId: 'ask-1',
+        request: { question: 'Continue?', options: [], allow_free_text: true },
+      },
+    ]);
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'waiting' });
+    session.processEvent({
+      type: 'user_input.answered',
+      interactionId: 'input-1',
+      toolCallId: 'ask-1',
+      answer: 'yes',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'running' });
+
+    session.processEvent({
+      type: 'turn.aborted',
+      turnId: 'run-1',
+      reason: 'Cancelled by user.',
+      cause: 'user',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({
+      status: 'cancelled',
+      finishedAtMs: Date.parse(NOW),
+      terminal: { reasonCode: 'cancelled', recoveryEntry: 'new_run' },
+    });
   });
 
   test('atomically receipts a snapshot-only lifecycle decision without advancing State', () => {

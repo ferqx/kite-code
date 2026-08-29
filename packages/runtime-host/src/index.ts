@@ -78,6 +78,10 @@ export {
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from './host/command-receipt';
+export {
+  parseRuntimeStoredCommandResource,
+  projectRuntimeStoredRun,
+} from './host/run-projection';
 export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
 
 export type {

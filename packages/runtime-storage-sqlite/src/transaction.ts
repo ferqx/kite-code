@@ -1,11 +1,13 @@
 import type { Database } from 'bun:sqlite';
 import type {
   RuntimeEventMetadata,
+  RuntimeRunStorePort,
   RuntimeSnapshotMetadata,
   RuntimeStorage,
   RuntimeStoredCommandReceipt,
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
+import { assertRuntimeRunStartResourceResult } from '@kite-ai/runtime-host/storage';
 import type {
   SqliteWorkspaceControllerOperationResult,
   SqliteWorkspaceInitialControllerInput,
@@ -103,6 +105,8 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   /** Internal Store 7 authority seam; never exposed as a raw DB callback. */
   readonly initialController?: InitialControllerTransactionPort;
   readonly receiptWriter?: SqliteRuntimeCommandReceiptWriter;
+  /** Same-connection Store 8 port. Omit for Store 6/7. */
+  readonly runStore?: RuntimeRunStorePort;
   readonly beforeWrite?: () => void;
 }): RuntimeStorage<Event, State>['transactions'] & {
   readonly createSessionWithInitialController?: SqliteWorkspaceSessionCreationPort<
@@ -182,6 +186,43 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
         encoded.metadata.stateRevision,
         input.readSessionBinding?.(transaction.commandReceipt.targetSessionId) ?? undefined,
       );
+    }
+    if (transaction.runMutation) {
+      if (!input.runStore) {
+        throw new SqliteRuntimeCommandReceiptValidationError(
+          'Runtime Run mutation requires the Store 8 transaction owner.',
+        );
+      }
+      if (transaction.runMutation.type === 'insert') {
+        const run = transaction.runMutation.run;
+        if (run.originSessionId === undefined) {
+          const receipt = transaction.commandReceipt;
+          if (
+            !receipt?.resourceResult ||
+            receipt.scopeSessionId !== run.sessionId ||
+            receipt.commandId !== run.startCommandId ||
+            receipt.targetSessionId !== run.sessionId ||
+            receipt.committedRevision !== run.createdRevision
+          ) {
+            throw new SqliteRuntimeCommandReceiptValidationError(
+              'Runtime Run insert requires its exact Store 8 start resource receipt.',
+            );
+          }
+          try {
+            assertRuntimeRunStartResourceResult(receipt.resourceResult, run);
+          } catch (error) {
+            throw new SqliteRuntimeCommandReceiptValidationError(
+              `Runtime Run start resource receipt is invalid: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+        input.runStore.insert(run);
+      } else {
+        const result = input.runStore.transition(transaction.runMutation.transition);
+        if (result !== 'applied') {
+          throw new Error(`Runtime Run transition was not applied: ${result}.`);
+        }
+      }
     }
     return encoded.metadata;
   };
@@ -304,7 +345,10 @@ function assertSameCommandReceipt(
     actual.targetSessionId !== expected.targetSessionId ||
     actual.originalReceiptJson !== expected.originalReceiptJson ||
     actual.committedRevision !== expected.committedRevision ||
-    actual.committedAt !== expected.committedAt
+    actual.committedAt !== expected.committedAt ||
+    actual.resourceResult?.schema !== expected.resourceResult?.schema ||
+    actual.resourceResult?.json !== expected.resourceResult?.json ||
+    actual.resourceResult?.digest !== expected.resourceResult?.digest
   ) {
     throw new SqliteRuntimeCommandReceiptConflictError(expected.scopeSessionId, expected.commandId);
   }

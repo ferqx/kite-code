@@ -12,7 +12,8 @@
 - KRSRUN-01A另提供未发布的State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29` target profile、exact preflight与
   same-connection `runtime_runs` port。Store 8有11张表/3个named index，Session增加coverage boundary，receipt增加resource-result triple；
   `(session_id, run_id)` PK、同Session start-command unique与`(session_id, created_revision, run_id)` page index均由DDL/owner tests固定。
-  它尚未进入`adapter.ts`、active layout、Worker或release composition，不能作为Store 7 fallback或声明production ready。
+  KRSRUN-01B已让同一connection transaction可选提交Run insert/transition及Store8 receipt result triple；它仍未进入`adapter.ts`、
+  active layout、Worker或release composition，不能作为Store7 fallback或声明production ready。
 - 提供 owner-only generation layout 的 active-layout pointer、manifest、migration journal/fence 与窄回退状态机；离线
   `migrateSqliteRuntimeStoreToWorkspaceLayout` 只从 Service 已停止且 source-bound fence 保护的 Store 6 只读快照复制到
   Store 7，不改写 source、不在线迁移、不双写，也不启动 Worker。迁移不定义或复制 Coordinator Catalog DDL；调用方必须注入
@@ -61,7 +62,11 @@
   table/column/index、binding/coverage drift、malformed terminal与receipt-result digest/schema/JSON drift；反向Store 7 preflight同样拒绝Store 8。
   普通compatibility importer仍只列出两个Store 5 profile；Store 7只由单独的offline Run migration source常量标识，不进入per-Session import。
 - Run list固定`createdRevision ASC + runId ASC`、limit 1～200并走dedicated index；Run ID只在Session内唯一。insert/transition先验证
-  coverage、canonical Session revision、immutable identity、lifecycle与millisecond timestamps；KRSRUN-01B前没有production caller。
+  coverage、canonical Session revision、immutable identity、lifecycle与millisecond timestamps；insert在同一writer transaction内拒绝
+  同Session第二个queued/running/waiting Run。
+- Store8 transaction在一个`BEGIN IMMEDIATE`内提交State/event/snapshot/revision、Run mutation及digest-bound resource receipt，任一
+  receipt/Run/SQLite fault都会完整rollback。Store8-aware receipt lookup返回原result；Store6/7 writer与current Store7 adapter收到
+  resource result或Run mutation时fail closed且不留下Session partial facts。
 - 已发布 generation 的 Store 7 reopen 必须带 active-layout、manifest、migration journal/fence 证据并使用 canonical
   Workspace Store path；纯 reopen 不会标记 generation 已写，首个真实 mutation 在同一 storage write seam 前永久写入
   `targetWriteState=written`，之后 rollback helper 必须拒绝回源。新 target 只能由显式 migration/admission 流程发布；
@@ -89,7 +94,7 @@
 
 ## 测试
 
-`bun test packages/runtime-storage-sqlite/test`（当前77 pass；含Store 8 exact schema/preflight/port negatives）
+`bun test packages/runtime-storage-sqlite/test`（当前80 pass；含Store8 atomic rollback/resource replay/index/reopen与Store7 negatives）
 
 ## 文档影响
 

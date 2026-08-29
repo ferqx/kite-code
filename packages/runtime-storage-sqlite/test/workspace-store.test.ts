@@ -354,6 +354,45 @@ describe('Store 7 Workspace binding', () => {
     }
   });
 
+  test('rolls back and refuses a Run mutation on the current Store 7 writer', () => {
+    const testFixture = fixture();
+    try {
+      const storage = createSqliteRuntimeStorage<Event, State>({
+        databasePath: testFixture.path,
+        codec,
+        workspaceBinding: binding,
+        workspaceLayout: testFixture.layout,
+        options: { journalMode: 'delete' },
+      });
+      expect(() =>
+        storage.transactions.commitDecision({
+          sessionId: 'store-7-run-refused',
+          events: [{ type: 'turn.started' }],
+          snapshot: state('store-7-run-refused'),
+          metadata: [{ eventId: 'store-7-run-event', revision: 1 }],
+          runMutation: {
+            type: 'insert',
+            run: {
+              sessionId: 'store-7-run-refused',
+              runId: 'run-1',
+              startCommandId: 'command-1',
+              phase: 'building',
+              status: 'queued',
+              createdRevision: 1,
+              lastRevision: 1,
+              createdAtMs: 100,
+            },
+          },
+        }),
+      ).toThrow('requires the Store 8 transaction owner');
+      expect(storage.sessions.loadSnapshot('store-7-run-refused')).toBeNull();
+      expect(storage.sessions.loadEventsStrict('store-7-run-refused')).toEqual([]);
+      storage.close();
+    } finally {
+      testFixture.cleanup();
+    }
+  });
+
   test('records create, rename, and delete through the adapter-owned outbox', () => {
     const testFixture = fixture();
     try {

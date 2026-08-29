@@ -213,6 +213,25 @@ describe('Runtime Server', () => {
       result: { status: 'ok', queryType: 'list_sessions' },
     });
     expect(runtime.queries).toHaveLength(1);
+
+    await pair.client.send({
+      jsonrpc: '2.0',
+      id: 'query-runs',
+      method: 'runtime/query',
+      params: {
+        query: {
+          schema: 'kite.runtime-query.v1',
+          type: 'list_runs',
+          sessionId: 'session-1',
+          limit: 10,
+        },
+      },
+    });
+    expect(await next(messages)).toMatchObject({
+      id: 'query-runs',
+      result: { status: 'ok', queryType: 'list_runs', runs: [{ runId: 'run-1' }] },
+    });
+    expect(runtime.queries).toHaveLength(2);
   });
 
   test('pins admission connection and binding reference into the in-process command context', async () => {
@@ -1119,6 +1138,31 @@ class FakeRuntime implements RuntimeAccess {
               },
             },
           };
+    }
+    if (query.type === 'list_runs') {
+      return {
+        status: 'ok' as const,
+        queryType: query.type,
+        runs: [
+          {
+            schema: 'kite.runtime-run.v1' as const,
+            sessionId: query.sessionId,
+            runId: 'run-1',
+            phase: 'building' as const,
+            status: 'queued' as const,
+            createdRevision: 1,
+            lastRevision: 1,
+            createdAtMs: 100,
+          },
+        ],
+      };
+    }
+    if (query.type === 'get_run') {
+      return {
+        status: 'not_found' as const,
+        queryType: query.type,
+        code: 'run_not_found' as const,
+      };
     }
     return { status: 'ok' as const, queryType: query.type, sessions: this.querySessions };
   }

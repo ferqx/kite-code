@@ -14,9 +14,9 @@
 
 ## 1. 执行状态与边界
 
-KRSRUN-00A～01A已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
-offline generation migration已经冻结；neutral Host storage contract及unpublished Store 8 exact schema/preflight/same-connection port也已实现。
-当前执行入口为KRSRUN-01B Host start/lifecycle/resource receipt原子事务。KRSRUN-01B～03B完成前仍不得开放Run route或声明ServerInfo
+KRSRUN-00A～01B已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
+offline generation migration已经冻结；neutral contract、unpublished exact schema/preflight、Host atomic lifecycle/resource replay及private query已实现。
+当前执行入口为KRSRUN-02A delete/rewind/fork/restart recovery。KRSRUN-02A～03B完成前仍不得开放Run route或声明ServerInfo
 `runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
@@ -118,7 +118,15 @@ Store 7以writer打开固定失败。
 
 Rollback：尚未接Host production transaction时可整体删除Store 8 target代码；Store 7 current路径不变。
 
-### KRSRUN-01B：Start、lifecycle与resource receipt原子事务
+### KRSRUN-01B：Start、lifecycle与resource receipt原子事务（已完成）
+
+完成证据：Host transaction input新增Store8-only Run mutation，State session把start queued row、canonical original Run resource receipt与
+State/event/snapshot/revision同一提交；App activation在publish/schedule前写running，interaction request/settlement及terminal/cancel/recovery
+event batch同步写waiting/running/terminal。Private Runtime Contract/Protocol/Client/Server新增closed Run receipt与最多200项get/page；Host query
+不recover。Start receipt replay在lookup命中后直接返回original queued resource，不inspect/recover/prepare/activate/schedule。SQLite Store8
+writer在同一`BEGIN IMMEDIATE`提交Run/result，Run fault与receipt/State fault完整rollback；Store7 adapter明确拒绝Run mutation/resource result，
+同Session第二active Run fail closed，page query plan命中dedicated index。Host 202 pass/1 skip、SQLite 80、Contract 11、Protocol 13、Client 17、
+Server 22及Service 1524/8475 owner suite通过；production adapter/layout/Worker/ServerInfo/Public route未切换。
 
 目标：Host start decision/commit、activation、interaction request/settlement、terminal/cancel/recovery transaction与Runtime private receipt/query
 projection。

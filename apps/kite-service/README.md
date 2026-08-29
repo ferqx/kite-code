@@ -39,6 +39,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   404。每个context拥有一条read-only private Runtime logical connection，每请求重验Trust；Coordinator不代理data plane，Browser/Web
   Gateway不能mint或使用该context。每context最多16个in-flight request；drain/revoke先停止新请求并等待已admit read收敛，再关闭private
   connection。History按1 MiB encoded response上限提前分页，未知SSE/mutation path即使请求非JSON media type也保持404。
+- App Runtime bridge已支持Store8条件路径：start commit提供canonical turn/Run identity，commit成功后在任何publish/schedule前写activation；
+  interaction与terminal仍由同一State transaction owner推进。private Protocol已能传输Run receipt/get/page，但current Worker Store7
+  没有`runs`port，因此该query返回unsupported，Agent API route/capability仍保持关闭。
 - Web Gateway只为Agent API增加release-bundled静态参考：`/api-docs`与尾斜杠映射Web入口，
   `/api-docs/openapi.json`映射candidate内的canonical artifact。该页面不发现Worker、不取得Agent context、不保存credential、
   不提供Try it/execute；API或Worker在线状态只显示为未确认，未知docs deep link保持404。

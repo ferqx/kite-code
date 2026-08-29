@@ -15,6 +15,8 @@
   event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
   opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
+- 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
+  Run resource；这些DTO不代表Public Agent API route已开放。
 - 为已认证的 App admission 定义可选的进程内 `RuntimeCommandContext`（connection/request identity 与 opaque
   Worker binding reference）；它只随 `RuntimeAccess.command()` 在本进程内传递，永不进入 Runtime Protocol、History 或 Browser
   contract。
@@ -38,6 +40,8 @@
 
 - 所有客户端数据保持普通 JSON-safe 数据。
 - command 必须携带唯一 `commandId`；Session mutation 使用 revision fencing。
+- Run query只接受Session-scoped opaque identity和最多200项的ASC keyset cursor；Run resource只出现在创建它的original/replayed
+  applied receipt，不允许Client以当前query结果伪造原始command response。
 - `delete_session` 是 Host-owned mutation：按 scoped command identity 删除 Session durable facts并保留
   receipt；Client/TUI 不能直接调用 Store delete。重放同一 digest 返回原 receipt，不同 digest fail closed。
 - `respond_interaction` 必须携带匹配的 client-safe interaction identity：Session revision，及按 kind

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export const RUNTIME_RUN_PHASES = ['planning', 'building'] as const;
 export type RuntimeRunPhase = (typeof RUNTIME_RUN_PHASES)[number];
 
@@ -70,6 +72,10 @@ export interface RuntimeRunTransition {
   readonly next: RuntimeStoredRun;
 }
 
+export type RuntimeRunTransactionMutation =
+  | { readonly type: 'insert'; readonly run: RuntimeStoredRun }
+  | { readonly type: 'transition'; readonly transition: RuntimeRunTransition };
+
 /** Neutral Store mechanism. The Host remains transaction/lifecycle authority. */
 export interface RuntimeRunStorePort {
   get(sessionId: string, runId: string): RuntimeStoredRun | null;
@@ -83,6 +89,8 @@ export interface RuntimeStoredCommandResourceResult {
   readonly json: string;
   readonly digest: string;
 }
+
+export const RUNTIME_RUN_RESOURCE_RESULT_SCHEMA_ = 'kite.runtime.run-resource-result.v1' as const;
 
 const TERMINAL_STATUSES = new Set<RuntimeRunStatus>([
   'completed',
@@ -197,6 +205,51 @@ export function assertRuntimeStoredCommandResourceResult(
   assertSafeJson(value, 0);
   if (JSON.stringify(value) !== result.json) {
     throw new Error('Runtime command resource result JSON is not canonical.');
+  }
+  if (createHash('sha256').update(result.json).digest('hex') !== result.digest) {
+    throw new Error('Runtime command resource result digest does not match its JSON.');
+  }
+}
+
+/** Original start response derived only from immutable Run creation facts. */
+export function createRuntimeRunStartResourceResult(
+  run: RuntimeStoredRun,
+): RuntimeStoredCommandResourceResult {
+  assertRuntimeStoredRun(run);
+  const json = JSON.stringify({
+    schema: RUNTIME_RUN_RESOURCE_RESULT_SCHEMA_,
+    run: {
+      schema: 'kite.runtime-run.v1',
+      sessionId: run.sessionId,
+      runId: run.runId,
+      ...(run.originSessionId === undefined ? {} : { originSessionId: run.originSessionId }),
+      ...(run.originRunId === undefined ? {} : { originRunId: run.originRunId }),
+      phase: run.phase,
+      status: 'queued',
+      createdRevision: run.createdRevision,
+      lastRevision: run.createdRevision,
+      createdAtMs: run.createdAtMs,
+    },
+  });
+  return Object.freeze({
+    schema: RUNTIME_RUN_RESOURCE_RESULT_SCHEMA_,
+    json,
+    digest: createHash('sha256').update(json).digest('hex'),
+  });
+}
+
+export function assertRuntimeRunStartResourceResult(
+  result: RuntimeStoredCommandResourceResult,
+  run: RuntimeStoredRun,
+): void {
+  assertRuntimeStoredCommandResourceResult(result);
+  const expected = createRuntimeRunStartResourceResult(run);
+  if (
+    result.schema !== expected.schema ||
+    result.json !== expected.json ||
+    result.digest !== expected.digest
+  ) {
+    throw new Error('Runtime Run start resource result does not match its Run creation facts.');
   }
 }
 

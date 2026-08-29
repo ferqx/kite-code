@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { parseRuntimeStoredCommandReceipt } from '../src';
 import {
+  assertRuntimeRunStartResourceResult,
   assertRuntimeStoredCommandResourceResult,
   assertRuntimeStoredRun,
+  createRuntimeRunStartResourceResult,
   createRuntimeStoredCommandReceipt,
   decodeRuntimeRunTerminal,
   encodeRuntimeRunTerminal,
@@ -91,6 +93,39 @@ describe('neutral Runtime Run storage contract', () => {
     expect(() =>
       assertRuntimeStoredCommandResourceResult({ ...resourceResult, digest: 'not-a-digest' }),
     ).toThrow('digest');
+  });
+
+  test('derives the original queued resource only from immutable Run creation facts', () => {
+    const queued = run();
+    const original = createRuntimeRunStartResourceResult({
+      ...queued,
+      status: 'completed',
+      lastRevision: 3,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+    });
+    expect(JSON.parse(original.json)).toMatchObject({
+      run: {
+        runId: 'run-1',
+        status: 'queued',
+        createdRevision: 1,
+        lastRevision: 1,
+      },
+    });
+    expect(() => assertRuntimeRunStartResourceResult(original, queued)).not.toThrow();
+    expect(() =>
+      assertRuntimeRunStartResourceResult(
+        {
+          ...original,
+          json: original.json.replace('run-1', 'run-other'),
+          digest: createHash('sha256')
+            .update(original.json.replace('run-1', 'run-other'))
+            .digest('hex'),
+        },
+        queued,
+      ),
+    ).toThrow('does not match');
   });
 });
 

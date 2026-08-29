@@ -25,10 +25,15 @@ invalidated，不把新History拼到旧watermark。response loss后Client必须�
 History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
 覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；Gateway restart仍由独立process/carrier suite证明且不代理`/v1`。
 
-KRSRUN-01A只建立unpublished Store 8 mechanism contract：Run lifecycle validator固定revision/millisecond timestamp monotonic、terminal closed
-detail、coverage boundary与Session-scoped identity；SQLite preflight固定exact DDL/index/binding及receipt result schema/JSON/SHA-256一致性。
-Host start/activation/interaction/terminal/recovery transaction和crash windows尚未接入，必须由KRSRUN-01B关闭；在此之前Store 8 rows/ports通过
-不构成durable Run、response-loss replay或production recovery evidence，Store 7仍拒绝resource-result write。
+KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和
+digest-bound original resource receipt；Run/receipt任一fault完整rollback。activation、waiting/running与terminal/cancel由deterministic
+commit clock推进，Store writer拒绝同Session第二个active Run。response loss/restart retry从persistent lookup直接返回同一original
+queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
+Run keyset page，SQLite query plan命中专用index且不扫event journal。
+
+这些focused tests不证明Store 8 production restart recovery或generation migration：current Worker仍是Store 7并明确拒绝Run mutation/resource
+result，private Run query为unsupported，Public Run route/ServerInfo capability仍关闭。Delete/rewind/fork以及nonterminal reopen/recovery语义由
+KRSRUN-02A继续完成；02B/03A cutover前不得把本地Store 8 transaction evidence表述为release或三平台qualification。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；

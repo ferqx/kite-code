@@ -305,6 +305,13 @@ function createFakeApplication(config: KiteServiceProcessHarnessChildConfig): {
           checkpoints: [],
         };
       }
+      if (query.type === 'get_run' || query.type === 'list_runs') {
+        return {
+          status: 'unavailable',
+          queryType: query.type,
+          code: 'unsupported',
+        };
+      }
       return {
         status: 'ok',
         queryType: query.type,

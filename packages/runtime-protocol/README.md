@@ -6,6 +6,8 @@
 
 - Defines the exact request/response/notification/result/error DTO codecs, `protocolVersion: 1` and `protocolSchema: 'kite.runtime-protocol.v1'`.
 - Freezes explicit command, query, client-event and session-index vocabularies, and maps only admitted Contract projections to wire values.
+- Admits the private closed `get_run`/bounded `list_runs` queries, Run projection results, and optional original Run resource on applied/replayed
+  command receipts. This remains repo-private Protocol and does not expose an HTTP `/rpc` or Public Agent API route.
 - Supplies browser-safe schema-generation artifacts. Carriers frame complete logical messages; this package does not prescribe JSONL, WebSocket, streams, or sockets.
 
 ## Non-responsibilities
@@ -39,6 +41,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 - Approval interactions admit the same optional, control-filtered command projection in notifications, session projections, and `respond_interaction` commands. The wire value is bounded to 16,384 UTF-16 code units; cwd, sandbox evidence, grant subjects, credentials, and hidden execution arguments remain excluded.
 - Session deletion is admitted only as the explicit `delete_session` V1 command with scoped command identity and revision fencing. It does not expose a Store/SQLite operation or an alternate App delete path.
 - Workspace identity is App-injected at the command mapper and never accepted on the wire.
+- Run pages are capped at 200 entries and use the exact `(createdRevision, runId)` cursor; unknown fields, invalid lifecycle values and
+  resource/result shape drift fail closed in the same codec used by in-process and transport clients.
 
 ## Tests
 

@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import {
+  assertRuntimeRunStartResourceResult,
   assertRuntimeStoredCommandResourceResult,
   assertRuntimeStoredRun,
   decodeRuntimeRunTerminal,
@@ -181,6 +182,9 @@ export function createSqliteRuntimeRunStore(
   const getRun = input.db.query<RunRow, [string, string]>(
     'SELECT session_id, run_id, origin_session_id, origin_run_id, start_command_id, phase, status, created_revision, last_revision, created_at_ms, started_at_ms, finished_at_ms, terminal_json FROM runtime_runs WHERE session_id = ? AND run_id = ? LIMIT 1',
   );
+  const getActiveRun = input.db.query<{ run_id: string }, [string]>(
+    "SELECT run_id FROM runtime_runs WHERE session_id = ? AND status IN ('queued', 'running', 'waiting') LIMIT 1",
+  );
   const insertRun = input.db.query(
     `INSERT INTO runtime_runs (
       session_id, run_id, origin_session_id, origin_run_id, start_command_id,
@@ -254,6 +258,12 @@ export function createSqliteRuntimeRunStore(
       assertOpen(input);
       assertRuntimeStoredRun(run);
       assertRunWithinSession(selectSession.get(run.sessionId), run, input.workspaceBinding);
+      const active = getActiveRun.get(run.sessionId);
+      if (active && active.run_id !== run.runId) {
+        throw new Error(
+          `Runtime Session ${run.sessionId} already has active Run ${active.run_id}.`,
+        );
+      }
       input.beforeWrite?.();
       insertRun.run(
         run.sessionId,
@@ -478,6 +488,8 @@ function assertBoundRows(db: Database, binding: SqliteRuntimeWorkspaceBinding): 
       'SELECT session_id, run_id, origin_session_id, origin_run_id, start_command_id, phase, status, created_revision, last_revision, created_at_ms, started_at_ms, finished_at_ms, terminal_json FROM runtime_runs',
     )
     .all();
+  const currentStartRuns = new Map<string, RuntimeStoredRun>();
+  const activeRunSessions = new Set<string>();
   for (const row of runs) {
     let run: RuntimeStoredRun;
     try {
@@ -495,6 +507,18 @@ function assertBoundRows(db: Database, binding: SqliteRuntimeWorkspaceBinding): 
         SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
         SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
       );
+    }
+    if (run.originSessionId === undefined) {
+      currentStartRuns.set(`${run.sessionId}\0${run.startCommandId}`, run);
+    }
+    if (run.status === 'queued' || run.status === 'running' || run.status === 'waiting') {
+      if (activeRunSessions.has(run.sessionId)) {
+        throw new SqliteRuntimeFormatMismatchError(
+          SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+          SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+        );
+      }
+      activeRunSessions.add(run.sessionId);
     }
   }
   const receipts = db
@@ -560,6 +584,14 @@ function assertBoundRows(db: Database, binding: SqliteRuntimeWorkspaceBinding): 
     try {
       assertRuntimeStoredCommandResourceResult(result);
       decoded = JSON.parse(result.json) as unknown;
+      const currentRun = currentStartRuns.get(`${row.target_session_id}\0${row.command_id}`);
+      if (currentRun) {
+        if (row.scope_session_id !== row.target_session_id) {
+          throw new Error('Runtime Run start receipt scope is invalid.');
+        }
+        assertRuntimeRunStartResourceResult(result, currentRun);
+        currentStartRuns.delete(`${row.target_session_id}\0${row.command_id}`);
+      }
     } catch {
       throw new SqliteRuntimeFormatMismatchError(null, null);
     }
@@ -572,6 +604,12 @@ function assertBoundRows(db: Database, binding: SqliteRuntimeWorkspaceBinding): 
     ) {
       throw new SqliteRuntimeFormatMismatchError(null, null);
     }
+  }
+  if (currentStartRuns.size > 0) {
+    throw new SqliteRuntimeFormatMismatchError(
+      SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+      SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    );
   }
 }
 

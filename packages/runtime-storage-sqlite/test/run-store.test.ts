@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   createRuntimeStoredCommandReceipt,
+  type RuntimeSnapshotMetadata,
   type RuntimeStoredRun,
+  type RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
 import {
   assertSqliteRuntimeRunStoreConnection,
@@ -19,8 +21,12 @@ import {
   SqliteRuntimeCommandReceiptValidationError,
   SqliteRuntimeFormatMismatchError,
 } from '../src';
-import { createSqliteRuntimeCommandReceiptWriter } from '../src/command-receipts';
+import {
+  createSqliteRuntimeCommandReceiptPort,
+  createSqliteRuntimeCommandReceiptWriter,
+} from '../src/command-receipts';
 import { initializeSqliteRuntimeSchema } from '../src/schema';
+import { createSqliteRuntimeTransactionPort } from '../src/transaction';
 
 const binding = {
   layoutGeneration: 'generation-run-store-1',
@@ -102,8 +108,8 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
     try {
       insertSession(db, 'session-1', 10, 0);
       const store = createSqliteRuntimeRunStore({ db, workspaceBinding: binding });
-      store.insert(run('run-1', 1, 'planning'));
-      store.insert(run('run-2', 2, 'building'));
+      store.insert(completedRun(run('run-1', 1, 'planning')));
+      store.insert(completedRun(run('run-2', 2, 'building')));
       store.insert(run('run-3', 3, 'building'));
       insertSession(db, 'session-2', 10, 0);
       store.insert({ ...run('run-1', 1, 'planning'), sessionId: 'session-2' });
@@ -119,9 +125,9 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
         store.list({ sessionId: 'session-1', limit: 2, cursor: first.nextCursor }).entries,
       ).toEqual([run('run-3', 3, 'building')]);
       expect(store.list({ sessionId: 'session-1', phase: 'planning', limit: 10 }).entries).toEqual([
-        run('run-1', 1, 'planning'),
+        completedRun(run('run-1', 1, 'planning')),
       ]);
-      expect(store.get('session-1', 'run-2')).toEqual(run('run-2', 2, 'building'));
+      expect(store.get('session-1', 'run-2')).toEqual(completedRun(run('run-2', 2, 'building')));
 
       const running = {
         ...run('run-3', 3, 'building'),
@@ -175,6 +181,7 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
       ).toThrow('started time');
       const current = run('run-6', 6, 'building');
       store.insert(current);
+      expect(() => store.insert(run('run-7', 7, 'building'))).toThrow('already has active Run');
       expect(() =>
         store.transition({
           sessionId: 'session-1',
@@ -183,6 +190,14 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
           next: { ...current, runId: 'changed', lastRevision: 7 },
         }),
       ).toThrow('identity');
+      expect(
+        store.transition({
+          sessionId: 'session-1',
+          runId: 'run-6',
+          expectedLastRevision: 6,
+          next: completedRun({ ...current, lastRevision: 7 }),
+        }),
+      ).toBe('applied');
       expect(() =>
         store.insert({ ...run('run-7', 7, 'building'), startCommandId: 'command-run-6' }),
       ).toThrow();
@@ -236,31 +251,112 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
     try {
       insertSession(db, 'session-1', 1);
       const resultJson = '{"run_id":"run-1","schema":"kite.runtime.run-result.v1"}';
-      db.run(
-        `INSERT INTO runtime_command_receipts (
-          scope_session_id, command_id, worker_scope_id, project_id, workspace_digest,
-          request_digest, target_session_id, original_receipt_json, committed_revision,
-          committed_at, result_schema, result_json, result_digest
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          'session-1',
-          'command-result',
-          binding.workerScopeId,
-          'project-1',
-          'workspace-digest-1',
-          'a'.repeat(64),
-          'session-1',
-          '{"status":"applied","commandId":"command-result","sessionId":"session-1","revision":1}',
-          1,
-          100,
-          'kite.runtime.run-result.v1',
-          resultJson,
-          createHash('sha256').update(resultJson).digest('hex'),
-        ],
+      const receipt = createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'session-1',
+          commandId: 'command-result',
+          requestDigest: 'a'.repeat(64),
+          targetSessionId: 'session-1',
+          committedAt: 100,
+          resourceResult: {
+            schema: 'kite.runtime.run-result.v1',
+            json: resultJson,
+            digest: createHash('sha256').update(resultJson).digest('hex'),
+          },
+        },
+        1,
       );
+      createSqliteRuntimeCommandReceiptWriter({
+        db,
+        workspaceBinding: binding,
+        resourceResults: true,
+      }).insert(receipt, 'session-1', 1);
+      expect(
+        createSqliteRuntimeCommandReceiptPort({
+          db,
+          isClosed: () => false,
+          workspaceBinding: binding,
+          resourceResults: true,
+        }).lookup({
+          scopeSessionId: 'session-1',
+          commandId: 'command-result',
+          requestDigest: 'a'.repeat(64),
+        }),
+      ).toEqual({ status: 'replay', receipt });
       expect(() => assertSqliteRuntimeRunStoreConnection(db, binding)).not.toThrow();
     } finally {
       db.close();
+    }
+  });
+
+  test('atomically commits and rolls back State, event, snapshot, Run and resource receipt', () => {
+    const success = runDatabase();
+    try {
+      insertSession(success, 'session-1', 0);
+      const harness = transactionHarness(success);
+      harness.transactions.commitDecision(startTransaction(1));
+
+      expect(rowCount(success, 'runtime_events')).toBe(1);
+      expect(rowCount(success, 'runtime_snapshots')).toBe(1);
+      expect(rowCount(success, 'runtime_runs')).toBe(1);
+      expect(rowCount(success, 'runtime_command_receipts')).toBe(1);
+      expect(
+        createSqliteRuntimeCommandReceiptPort({
+          db: success,
+          isClosed: () => false,
+          workspaceBinding: binding,
+          resourceResults: true,
+        }).lookup({
+          scopeSessionId: 'session-1',
+          commandId: 'command-start',
+          requestDigest: 'a'.repeat(64),
+        }),
+      ).toMatchObject({
+        status: 'replay',
+        receipt: {
+          resourceResult: { schema: 'kite.runtime.run-resource-result.v1' },
+        },
+      });
+      expect(() => assertSqliteRuntimeRunStoreConnection(success, binding)).not.toThrow();
+      const mismatchedJson = resultJson('run-other', 1);
+      success.run(
+        `UPDATE runtime_command_receipts
+         SET result_json = ?, result_digest = ?
+         WHERE scope_session_id = ? AND command_id = ?`,
+        [
+          mismatchedJson,
+          createHash('sha256').update(mismatchedJson).digest('hex'),
+          'session-1',
+          'command-start',
+        ],
+      );
+      expect(() => assertSqliteRuntimeRunStoreConnection(success, binding)).toThrow(
+        SqliteRuntimeFormatMismatchError,
+      );
+    } finally {
+      success.close();
+    }
+
+    const rollback = runDatabase();
+    try {
+      insertSession(rollback, 'session-1', 0);
+      const harness = transactionHarness(rollback, true);
+      expect(() => harness.transactions.commitDecision(startTransaction(1))).toThrow(
+        'injected Run write failure',
+      );
+      expect(rowCount(rollback, 'runtime_events')).toBe(0);
+      expect(rowCount(rollback, 'runtime_snapshots')).toBe(0);
+      expect(rowCount(rollback, 'runtime_runs')).toBe(0);
+      expect(rowCount(rollback, 'runtime_command_receipts')).toBe(0);
+      expect(
+        rollback
+          .query<{ revision: number }, [string]>(
+            'SELECT revision FROM runtime_sessions WHERE session_id = ?',
+          )
+          .get('session-1')?.revision,
+      ).toBe(0);
+    } finally {
+      rollback.close();
     }
   });
 
@@ -283,6 +379,28 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
       );
     } finally {
       missing.close();
+    }
+  });
+
+  test('reopen preflight refuses more than one active Run in a Session', () => {
+    const db = runDatabase();
+    try {
+      insertSession(db, 'session-1', 10);
+      insertRawRun(db, {
+        ...run('active-1', 1, 'building'),
+        originSessionId: 'source',
+        originRunId: 'active-1',
+      });
+      insertRawRun(db, {
+        ...run('active-2', 2, 'building'),
+        originSessionId: 'source',
+        originRunId: 'active-2',
+      });
+      expect(() => assertSqliteRuntimeRunStoreConnection(db, binding)).toThrow(
+        SqliteRuntimeFormatMismatchError,
+      );
+    } finally {
+      db.close();
     }
   });
 
@@ -423,6 +541,228 @@ function run(
     lastRevision: createdRevision,
     createdAtMs: 100 + createdRevision * 10,
   };
+}
+
+function completedRun(value: RuntimeStoredRun): RuntimeStoredRun {
+  return {
+    ...value,
+    status: 'completed',
+    startedAtMs: value.createdAtMs + 1,
+    finishedAtMs: value.createdAtMs + 2,
+    terminal: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+  };
+}
+
+function insertRawRun(db: Database, value: RuntimeStoredRun): void {
+  db.run(
+    `INSERT INTO runtime_runs (
+      session_id, run_id, origin_session_id, origin_run_id, start_command_id,
+      phase, status, created_revision, last_revision, created_at_ms,
+      started_at_ms, finished_at_ms, terminal_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      value.sessionId,
+      value.runId,
+      value.originSessionId ?? null,
+      value.originRunId ?? null,
+      value.startCommandId,
+      value.phase,
+      value.status,
+      value.createdRevision,
+      value.lastRevision,
+      value.createdAtMs,
+      value.startedAtMs ?? null,
+      value.finishedAtMs ?? null,
+      null,
+    ],
+  );
+}
+
+function startTransaction(
+  revision: number,
+): RuntimeTransactionInput<{ type: string }, { revision: number }> {
+  const resourceJson = resultJson('run-start', revision);
+  const receipt = createRuntimeStoredCommandReceipt(
+    {
+      scopeSessionId: 'session-1',
+      commandId: 'command-start',
+      requestDigest: 'a'.repeat(64),
+      targetSessionId: 'session-1',
+      committedAt: 100,
+      resourceResult: {
+        schema: 'kite.runtime.run-resource-result.v1',
+        json: resourceJson,
+        digest: createHash('sha256').update(resourceJson).digest('hex'),
+      },
+    },
+    revision,
+  );
+  return {
+    sessionId: 'session-1',
+    events: [{ type: 'turn.started' }],
+    snapshot: { revision },
+    metadata: [
+      {
+        eventId: `event-${revision}`,
+        revision,
+        occurredAt: '2026-08-30T00:00:00.000Z',
+      },
+    ],
+    commandReceipt: receipt,
+    runMutation: {
+      type: 'insert',
+      run: {
+        sessionId: 'session-1',
+        runId: 'run-start',
+        startCommandId: 'command-start',
+        phase: 'building',
+        status: 'queued',
+        createdRevision: revision,
+        lastRevision: revision,
+        createdAtMs: 100,
+      },
+    },
+  };
+}
+
+function resultJson(runId: string, revision: number): string {
+  return JSON.stringify({
+    schema: 'kite.runtime.run-resource-result.v1',
+    run: {
+      schema: 'kite.runtime-run.v1',
+      sessionId: 'session-1',
+      runId,
+      phase: 'building',
+      status: 'queued',
+      createdRevision: revision,
+      lastRevision: revision,
+      createdAtMs: 100,
+    },
+  });
+}
+
+function transactionHarness(db: Database, failRunWrite = false) {
+  const runStore = createSqliteRuntimeRunStore({
+    db,
+    workspaceBinding: binding,
+    beforeWrite: () => {
+      if (failRunWrite) throw new Error('injected Run write failure');
+    },
+  });
+  const receiptWriter = createSqliteRuntimeCommandReceiptWriter({
+    db,
+    workspaceBinding: binding,
+    resourceResults: true,
+  });
+  const lastEventPosition = (sessionId: string): number =>
+    db
+      .query<{ position: number | null }, [string]>(
+        'SELECT MAX(sequence) AS position FROM runtime_events WHERE session_id = ?',
+      )
+      .get(sessionId)?.position ?? 0;
+  const transactions = createSqliteRuntimeTransactionPort<{ type: string }, { revision: number }>({
+    db,
+    isClosed: () => false,
+    hasEffectLease: () => true,
+    readSnapshotBoundary: (sessionId) =>
+      db
+        .query<
+          {
+            event_position: number;
+            state_revision: number;
+            state_checksum: string;
+            schema_version: number;
+          },
+          [string]
+        >(
+          'SELECT event_position, revision AS state_revision, state_checksum, schema_version FROM runtime_snapshots WHERE session_id = ? LIMIT 1',
+        )
+        .get(sessionId) ?? null,
+    readSnapshotRevision: (sessionId) =>
+      db
+        .query<{ revision: number }, [string]>(
+          'SELECT revision FROM runtime_snapshots WHERE session_id = ? LIMIT 1',
+        )
+        .get(sessionId)?.revision ?? null,
+    lastEventPosition,
+    ensureSession: () => undefined,
+    insertEvents: (sessionId, events, metadata = []) => {
+      const insert = db.query(
+        `INSERT INTO runtime_events (
+          session_id, event_id, sequence, schema_version, event_json,
+          causation_id, occurred_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      events.forEach((event, index) => {
+        const entry = metadata[index]!;
+        insert.run(
+          sessionId,
+          entry.eventId,
+          lastEventPosition(sessionId) + 1,
+          SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+          JSON.stringify(event),
+          entry.causationId ?? null,
+          entry.occurredAt ?? null,
+          100,
+        );
+      });
+    },
+    encodeSnapshot: (state, explicit) => ({
+      json: JSON.stringify(state),
+      metadata:
+        explicit ??
+        ({
+          eventPosition: 0,
+          stateRevision: state.revision,
+          stateChecksum: `checksum-${state.revision}`,
+          schemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        } satisfies RuntimeSnapshotMetadata),
+    }),
+    persistSnapshot: (
+      sessionId,
+      json,
+      eventPosition,
+      stateRevision,
+      stateChecksum,
+      schemaVersion,
+    ) => {
+      db.run(
+        `INSERT OR REPLACE INTO runtime_snapshots (
+          session_id, schema_version, format_epoch, revision, state_json,
+          event_position, state_checksum, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          sessionId,
+          schemaVersion,
+          SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+          stateRevision,
+          json,
+          eventPosition,
+          stateChecksum,
+          100,
+        ],
+      );
+      db.run('UPDATE runtime_sessions SET revision = ? WHERE session_id = ?', [
+        stateRevision,
+        sessionId,
+      ]);
+    },
+    readSessionBinding: (sessionId) =>
+      db
+        .query<{ workerScopeId: string; projectId: string; workspaceDigest: string }, [string]>(
+          'SELECT worker_scope_id AS workerScopeId, project_id AS projectId, workspace_digest AS workspaceDigest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+        .get(sessionId) ?? null,
+    receiptWriter,
+    runStore,
+  });
+  return { transactions, runStore };
+}
+
+function rowCount(db: Database, table: string): number {
+  return (
+    db.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0
+  );
 }
 
 function meta(db: Database, key: string): string | undefined {

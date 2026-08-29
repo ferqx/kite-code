@@ -220,7 +220,7 @@ describe('Host persistent receipt command flow', () => {
     });
     expect(second.bridge.inspections).toHaveLength(0);
     expect(second.bridge.commits).toHaveLength(0);
-    expect(second.order).toEqual(['lookup', 'recover']);
+    expect(second.order).toEqual(['lookup']);
     await secondHost[Symbol.asyncDispose]();
   });
 
@@ -334,7 +334,7 @@ describe('Host persistent receipt command flow', () => {
     expect(h.bridge.inspections).toHaveLength(1);
     expect(h.bridge.commits).toHaveLength(1);
     expect(h.order.filter((entry) => entry === 'activate')).toHaveLength(1);
-    expect(restarted.bridge.recoveries).toEqual(['session-1']);
+    expect(restarted.bridge.recoveries).toEqual([]);
     await restartedHost[Symbol.asyncDispose]();
   });
 

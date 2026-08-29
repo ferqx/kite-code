@@ -6,6 +6,9 @@ import type {
 } from '@kite-ai/runtime-contract';
 import {
   assertRuntimeStoredCommandResourceResult,
+  type RuntimeRunPhase,
+  type RuntimeRunStorePort,
+  type RuntimeRunTransactionMutation,
   type RuntimeStoredCommandResourceResult,
 } from './runtime-run';
 
@@ -134,6 +137,10 @@ export interface RuntimeCommandCommitEvidence extends RuntimeCommandReceiptLooku
   readonly targetSessionId: string;
   readonly committedAt: number;
   readonly resourceResult?: RuntimeStoredCommandResourceResult;
+  readonly runStart?: {
+    readonly runId: string;
+    readonly phase: RuntimeRunPhase;
+  };
 }
 
 export function createRuntimeStoredCommandReceipt(
@@ -329,6 +336,8 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly requiredEffectLease?: RuntimeEffectLeaseExpectation;
   /** Only command-decision commits may include this Store 6 record. */
   readonly commandReceipt?: RuntimeStoredCommandReceipt;
+  /** Store 8-only Run row change committed by the same transaction owner. */
+  readonly runMutation?: RuntimeRunTransactionMutation;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
@@ -455,6 +464,8 @@ export interface RuntimeStorage<Event = unknown, State = unknown> extends Runtim
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   /** Store 6 persistent replay authority; no in-memory or optional fallback exists. */
   readonly commandReceipts: RuntimeCommandReceiptPort;
+  /** Present only for a fully preflighted Store 8 owner. */
+  readonly runs?: RuntimeRunStorePort;
   close(): void;
 }
 
