@@ -166,7 +166,6 @@ export function createSqliteRuntimeLogQueryPort<Event = unknown, State = unknown
   } catch (error) {
     throw queryError(error);
   }
-  let closed = false;
   let db: Database;
   let closeDatabase: () => void;
   try {
@@ -187,6 +186,37 @@ export function createSqliteRuntimeLogQueryPort<Event = unknown, State = unknown
   } catch (error) {
     throw queryError(error);
   }
+  return createSqliteRuntimeLogQueryPortFromDatabase_({
+    database: db,
+    codec: input.codec,
+    currentEventTypes: input.currentEventTypes,
+    close: closeDatabase,
+  });
+}
+
+/**
+ * Bind the existing bounded log-query implementation to an already-open Store connection.
+ * This is an internal adapter seam for the Store 7 owner: it opens no second SQLite connection
+ * and its close callback never owns the caller's database unless explicitly supplied.
+ */
+export function createSqliteRuntimeLogQueryPortFromDatabase_<
+  Event = unknown,
+  State = unknown,
+>(input: {
+  readonly database: Database;
+  readonly codec: SqliteRuntimeSnapshotCodec<Event, State> | RuntimeSnapshotCodec<Event, State>;
+  readonly currentEventTypes: readonly string[];
+  readonly close?: () => void;
+}): RuntimeLogQueryPort<Event> {
+  if (input.currentEventTypes.length === 0) {
+    throw new SqliteRuntimeLogQueryError(
+      'session_unavailable',
+      'Runtime log reader requires current event types.',
+    );
+  }
+  const db = input.database;
+  const closeDatabase = input.close ?? (() => undefined);
+  let closed = false;
   const eventTypes = new Set(input.currentEventTypes);
   const assertOpen = (): void => {
     if (closed)

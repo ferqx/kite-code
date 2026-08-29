@@ -535,6 +535,29 @@ describe('Workspace Worker runtime foreground composition', () => {
       async drain() {
         events.push('application-drain');
       },
+      async openAgentApiReadContext() {
+        return {
+          query: async (query) => ({
+            status: 'not_found',
+            queryType: query.type,
+            code: 'session_not_found',
+          }),
+          history: {
+            listSessions: async () => ({ entries: [], hasMore: false }),
+            listEvents: async () => ({
+              entries: [],
+              hasMore: false,
+              observedLastSequence: 0,
+            }),
+          },
+          checkpoints: {
+            list: () => ({ entries: [], hasMore: false }),
+            get: () => undefined,
+          },
+          close: async () => undefined,
+          async [Symbol.asyncDispose]() {},
+        };
+      },
       async [Symbol.asyncDispose]() {
         appDisposeCalls += 1;
       },
@@ -640,8 +663,25 @@ describe('Workspace Worker runtime foreground composition', () => {
         api_version: 'v1',
         server_version: 'kite-workspace-worker-v1',
         build_id: 'build-foreground',
-        capabilities: [],
+        capabilities: ['checkpoints', 'history', 'sessions'],
       });
+      const sessions = await fetch(`${composition.origin}/v1/sessions?limit=1`, {
+        headers: { authorization: `Bearer ${String(context.access_token)}` },
+      });
+      expect(sessions.status).toBe(200);
+      expect(await sessions.json()).toEqual({
+        schema: 'kite.agent-api.session-page.v1',
+        items: [],
+      });
+      const missingSession = await fetch(`${composition.origin}/v1/sessions/missing-session`, {
+        headers: { authorization: `Bearer ${String(context.access_token)}` },
+      });
+      expect(missingSession.status).toBe(404);
+      const mutation = await fetch(`${composition.origin}/v1/sessions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${String(context.access_token)}` },
+      });
+      expect(mutation.status).toBe(404);
       const replay = await fetch(`${composition.origin}${KITE_SERVICE_CONNECT_PATH}`, {
         method: 'POST',
         headers: {

@@ -33,9 +33,11 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   删除整个Workspace。Worker在线时才用authenticated identity补project label、History与live status。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
-- Workspace Worker同一data listener当前增加Agent API `/v1`认证shell：one-shot `agent_api_observer|agent_api_controller`
-  capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；当前只开放ServerInfo/logout，capabilities为空，
-  其他resource/mutation route保持404。Coordinator不代理data plane，Browser/Web Gateway不能mint或使用该context。
+- Workspace Worker同一data listener当前提供Agent API `/v1`认证与bounded read façade：one-shot
+  `agent_api_observer|agent_api_controller` capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；
+  ServerInfo发布`checkpoints/history/sessions`，开放Session list/get、History page与Checkpoint list/preview，其他resource/mutation route保持
+  404。每个context拥有一条read-only private Runtime logical connection，每请求重验Trust；Coordinator不代理data plane，Browser/Web
+  Gateway不能mint或使用该context。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
   才签发instance/Workspace-bound one-shot ticket，Runtime create与persisted Session identity继续交叉校验。
 - 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain，关闭carrier/application后最后
@@ -131,7 +133,7 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
 ## 测试
 
 `bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control、Coordinator/Worker/Web与Native shell/carrier；当前default owner run为1488 tests / 8273 expects，
+History/App Control、Coordinator/Worker/Web与Native shell/carrier；当前default owner run为1519 tests / 8428 expects，
 manager/Coordinator focused evidence位于`packages/kite-local-runtime/test`。完整TUI PTY scenario与
 本机macOS arm64 installed release smoke已经覆盖 Coordinator→Worker ensure/mint/handshake、TUI startup、精确 test-owned companion
 cleanup、upgrade/rollback/uninstall并通过；正式 Linux/Windows hosted process/release qualification 仍 pending。

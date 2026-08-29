@@ -386,6 +386,72 @@ describe('Store 7 Workspace binding', () => {
     }
   });
 
+  test('serves bounded Session, History, and Checkpoint pages on the existing Store connection', () => {
+    const testFixture = fixture();
+    try {
+      const storage = createSqliteRuntimeStorage<Event, State>({
+        databasePath: testFixture.path,
+        codec,
+        workspaceBinding: binding,
+        workspaceLayout: testFixture.layout,
+        options: { journalMode: 'delete' },
+      });
+      for (const sessionId of ['session-page-a', 'session-page-b']) {
+        storage.transactions.commitDecision({
+          sessionId,
+          events: [{ type: 'created' }],
+          snapshot: state(sessionId),
+          metadata: [{ eventId: `event-${sessionId}`, revision: 1 }],
+        });
+      }
+      const logs = storage.openWorkspaceLogQuery?.(['created']);
+      expect(logs).toBeDefined();
+      const sessions = logs!.listSessions({ limit: 1 });
+      expect(sessions.entries).toHaveLength(1);
+      expect(sessions.hasMore).toBe(true);
+      expect(sessions.nextCursor).toBeDefined();
+      const sessionId = sessions.entries[0]!.sessionId;
+      expect(
+        logs!.listEvents({
+          sessionId,
+          afterSequence: 0,
+          beforeSequence: 2,
+          direction: 'forward',
+          limit: 1,
+        }),
+      ).toMatchObject({
+        entries: [{ sessionId, sequence: 1, event: { type: 'created' } }],
+        observedLastSequence: 1,
+      });
+
+      storage.checkpoints.saveNamedSnapshot(sessionId, 'checkpoint-page', state(sessionId, 1), 1);
+      const checkpoints = storage.workspaceCheckpointQuery;
+      expect(checkpoints).toBeDefined();
+      expect(checkpoints!.list({ sessionId, limit: 1 })).toMatchObject({
+        entries: [
+          {
+            checkpointId: 'checkpoint-page',
+            sessionId,
+            revision: 1,
+            eventPosition: 1,
+            affectedFileCount: 0,
+          },
+        ],
+        hasMore: false,
+      });
+      expect(checkpoints!.get(sessionId, 'checkpoint-page')).toMatchObject({
+        checkpointId: 'checkpoint-page',
+        revision: 1,
+      });
+
+      logs!.close();
+      expect(storage.sessions.getLastEventPosition(sessionId)).toBe(1);
+      storage.close();
+    } finally {
+      testFixture.cleanup();
+    }
+  });
+
   test('binds Session/receipt ownership and retains a validated delete tombstone', () => {
     const testFixture = fixture();
     try {

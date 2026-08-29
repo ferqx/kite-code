@@ -12,6 +12,7 @@ import {
   decodeAgentApiRequest,
   encodeAgentApiResponse,
 } from '@kite-ai/agent-api-contract';
+import { type AgentApiReadContext, dispatchAgentApiReadRequest } from './read-adapter';
 
 export const AGENT_API_CONTEXT_TTL_MS = 60 * 60 * 1_000;
 export const AGENT_API_MAX_CONTEXTS = 1_024;
@@ -36,7 +37,7 @@ export interface AgentApiCapabilityBinding {
 export interface AgentApiRouteHandler extends AsyncDisposable {
   handle(request: Request): Response | Promise<Response>;
   revokeClientGeneration(clientId: string, connectionGeneration: number): void;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export interface AgentApiRouteHandlerOptions {
@@ -45,6 +46,8 @@ export interface AgentApiRouteHandlerOptions {
   readonly consumeCapability: (secret: string) => AgentApiCapabilityBinding | undefined;
   readonly admitWorkspace: () => Promise<'admitted' | 'untrusted' | 'unavailable'>;
   readonly isClientGenerationCurrent: (clientId: string, connectionGeneration: number) => boolean;
+  /** KASAPI-02B+ opens one private Runtime logical connection per Public context. */
+  readonly openReadContext?: (binding: AgentApiCapabilityBinding) => Promise<AgentApiReadContext>;
   readonly now?: () => number;
   readonly randomBytes?: (size: number) => Uint8Array;
   readonly contextTtlMs?: number;
@@ -58,6 +61,7 @@ interface ContextRecord {
   readonly binding: AgentApiCapabilityBinding;
   readonly role: 'observer' | 'controller';
   readonly expiresAtMs: number;
+  readonly readContext?: AgentApiReadContext;
 }
 
 /**
@@ -86,7 +90,21 @@ export function createAgentApiRouteHandler(
     capabilities: [...(options.capabilities ?? [])].sort(),
   });
   const contexts = new Map<string, ContextRecord>();
+  const pendingDigests = new Set<string>();
+  const pendingReadContexts = new Set<Promise<void>>();
+  let pendingContexts = 0;
   let closed = false;
+  let closePromise: Promise<void> | undefined;
+
+  const revoke = (digest: string, record: ContextRecord): Promise<void> => {
+    if (contexts.get(digest) !== record) return Promise.resolve();
+    contexts.delete(digest);
+    try {
+      return record.readContext?.close().catch(() => undefined) ?? Promise.resolve();
+    } catch {
+      return Promise.resolve();
+    }
+  };
 
   const prune = (observedAt: number): void => {
     for (const [digest, record] of contexts) {
@@ -97,14 +115,14 @@ export function createAgentApiRouteHandler(
           record.binding.connectionGeneration,
         )
       ) {
-        contexts.delete(digest);
+        void revoke(digest, record);
       }
     }
   };
 
   const handler: AgentApiRouteHandler = {
     async handle(request: Request) {
-      const requestId = randomToken(randomBytes, 16, 'request identity');
+      const requestId = `req_${randomToken(randomBytes, 16, 'request identity')}`;
       try {
         if (closed) {
           return problemResponse(503, 'temporarily_unavailable', requestId, true, {
@@ -123,17 +141,27 @@ export function createAgentApiRouteHandler(
         }
         const context = authenticateContext(request, contexts, now, options, prune);
         if (!context) return problemResponse(401, 'unauthorized', requestId, false);
-        if (url.search.length !== 0) {
-          return problemResponse(400, 'invalid_request', requestId, false);
-        }
         if (url.pathname === '/v1/auth/session') {
+          if (url.search.length !== 0) {
+            return problemResponse(400, 'invalid_request', requestId, false);
+          }
           if (request.method !== 'DELETE') {
             return problemResponse(405, 'method_not_allowed', requestId, false, {
               allow: 'DELETE',
             });
           }
-          contexts.delete(context.digest);
+          await revoke(context.digest, context);
           return emptyResponse(204, requestId);
+        }
+        const admission = await recheckWorkspaceAdmission(options.admitWorkspace);
+        if (admission === 'untrusted') {
+          await revoke(context.digest, context);
+          return problemResponse(403, 'forbidden', requestId, false);
+        }
+        if (admission !== 'admitted') {
+          return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+            retryAfter: 1,
+          });
         }
         if (url.pathname === '/v1') {
           if (request.method !== 'GET') {
@@ -146,6 +174,33 @@ export function createAgentApiRouteHandler(
             return problemResponse(406, 'not_acceptable', requestId, false);
           }
           return jsonResponse(200, serverInfo, requestId);
+        }
+        if (context.readContext) {
+          if (
+            request.headers.get('accept') !== null &&
+            !acceptsJson(request.headers.get('accept'))
+          ) {
+            return problemResponse(406, 'not_acceptable', requestId, false);
+          }
+          const read = await dispatchAgentApiReadRequest({
+            request,
+            url,
+            context: context.readContext,
+          });
+          if (read.matched) {
+            if (!read.result.ok) {
+              return problemResponse(
+                read.result.status,
+                read.result.code,
+                requestId,
+                read.result.retryable,
+                read.result.status === 503 ? { retryAfter: 1 } : {},
+              );
+            }
+            return jsonResponse(200, read.result.body, requestId, {
+              ...(read.result.etag ? { etag: read.result.etag } : {}),
+            });
+          }
         }
         // KASAPI-02A deliberately registers no resource or mutation handler.
         return problemResponse(404, 'not_found', requestId, false);
@@ -161,18 +216,22 @@ export function createAgentApiRouteHandler(
           record.binding.clientId === clientId &&
           record.binding.connectionGeneration === connectionGeneration
         ) {
-          contexts.delete(digest);
+          void revoke(digest, record);
         }
       }
     },
     close() {
-      if (closed) return;
-      closed = true;
-      contexts.clear();
+      closePromise ??= (async () => {
+        if (closed) return;
+        closed = true;
+        const records = [...contexts.entries()];
+        await Promise.all(records.map(([digest, record]) => revoke(digest, record)));
+        await Promise.allSettled([...pendingReadContexts]);
+      })();
+      return closePromise;
     },
     [Symbol.asyncDispose]() {
-      this.close();
-      return Promise.resolve();
+      return this.close();
     },
   };
   return Object.freeze(handler);
@@ -245,32 +304,52 @@ export function createAgentApiRouteHandler(
     }
     const observedAt = safeNow(now);
     prune(observedAt);
-    if (contexts.size >= maxContexts) {
+    if (contexts.size + pendingContexts >= maxContexts) {
       return problemResponse(429, 'overloaded', requestId, true, { retryAfter: 1 });
     }
-    const contextToken = mintUniqueContextToken(randomBytes, contexts);
+    const contextToken = mintUniqueContextToken(randomBytes, contexts, pendingDigests);
     if (!contextToken) {
       return problemResponse(503, 'temporarily_unavailable', requestId, true, {
         retryAfter: 1,
       });
     }
-    const binding = options.consumeCapability(capability);
-    if (!binding) return problemResponse(401, 'unauthorized', requestId, false);
-    const expiresAtMs = observedAt + ttlMs;
-    if (!Number.isSafeInteger(expiresAtMs)) {
-      return problemResponse(503, 'temporarily_unavailable', requestId, true, {
-        retryAfter: 1,
-      });
-    }
-    contexts.set(contextToken.digest, {
-      digest: contextToken.digest,
-      binding,
-      role: binding.purpose === 'agent_api_controller' ? 'controller' : 'observer',
-      expiresAtMs,
+    pendingContexts += 1;
+    pendingDigests.add(contextToken.digest);
+    let finishPendingRead!: () => void;
+    const pendingRead = new Promise<void>((resolve) => {
+      finishPendingRead = resolve;
     });
-    return jsonResponse(
-      201,
-      encodeAgentApiResponse(agentApiContextSchema, {
+    pendingReadContexts.add(pendingRead);
+    try {
+      const binding = options.consumeCapability(capability);
+      if (!binding) return problemResponse(401, 'unauthorized', requestId, false);
+      const expiresAtMs = observedAt + ttlMs;
+      if (!Number.isSafeInteger(expiresAtMs)) {
+        return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+          retryAfter: 1,
+        });
+      }
+      let readContext: AgentApiReadContext | undefined;
+      try {
+        const opening = options.openReadContext?.(binding);
+        if (opening) {
+          readContext = await opening;
+        }
+      } catch {
+        return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+          retryAfter: 1,
+        });
+      }
+      if (
+        closed ||
+        !options.isClientGenerationCurrent(binding.clientId, binding.connectionGeneration)
+      ) {
+        await readContext?.close().catch(() => undefined);
+        return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+          retryAfter: 1,
+        });
+      }
+      const responseBody = encodeAgentApiResponse(agentApiContextSchema, {
         schema: 'kite.agent-api.context.v1',
         access_token: contextToken.token,
         token_type: 'Bearer',
@@ -278,19 +357,32 @@ export function createAgentApiRouteHandler(
         role: binding.purpose === 'agent_api_controller' ? 'controller' : 'observer',
         api_version: AGENT_API_VERSION,
         capabilities: serverInfo.capabilities,
-      }),
-      requestId,
-    );
+      });
+      contexts.set(contextToken.digest, {
+        digest: contextToken.digest,
+        binding,
+        role: binding.purpose === 'agent_api_controller' ? 'controller' : 'observer',
+        expiresAtMs,
+        ...(readContext ? { readContext } : {}),
+      });
+      return jsonResponse(201, responseBody, requestId);
+    } finally {
+      pendingContexts -= 1;
+      pendingDigests.delete(contextToken.digest);
+      finishPendingRead();
+      pendingReadContexts.delete(pendingRead);
+    }
   }
 }
 
 function mintUniqueContextToken(
   randomBytes: (size: number) => Uint8Array,
   contexts: ReadonlyMap<string, ContextRecord>,
+  pendingDigests: ReadonlySet<string>,
 ): { readonly token: string; readonly digest: string } | undefined {
   const token = randomToken(randomBytes, 32, 'context token');
   const digest = digestToken(token);
-  return contexts.has(digest) ? undefined : { token, digest };
+  return contexts.has(digest) || pendingDigests.has(digest) ? undefined : { token, digest };
 }
 
 function authenticateContext(
@@ -359,11 +451,26 @@ function problemResponse(
   });
 }
 
-function jsonResponse(status: number, value: unknown, requestId: string): Response {
+function jsonResponse(
+  status: number,
+  value: unknown,
+  requestId: string,
+  extra: Readonly<Record<string, string>> = {},
+): Response {
   return new Response(JSON.stringify(value), {
     status,
-    headers: responseHeaders(requestId, 'application/json; charset=utf-8'),
+    headers: responseHeaders(requestId, 'application/json; charset=utf-8', extra),
   });
+}
+
+async function recheckWorkspaceAdmission(
+  admitWorkspace: AgentApiRouteHandlerOptions['admitWorkspace'],
+): Promise<'admitted' | 'untrusted' | 'unavailable'> {
+  try {
+    return await admitWorkspace();
+  } catch {
+    return 'unavailable';
+  }
 }
 
 function emptyResponse(status: number, requestId: string): Response {
@@ -453,7 +560,6 @@ function requestWithinLimits(request: Request, url: URL): boolean {
   if (url.username || url.password) return false;
   const target = `${url.pathname}${url.search}`;
   if (utf8Bytes(target) > MAX_REQUEST_TARGET_BYTES) return false;
-  if (utf8Bytes(url.search) > AGENT_API_LIMITS.maxCursorBytes) return false;
   for (const segment of url.pathname.split('/')) {
     let decoded: string;
     try {

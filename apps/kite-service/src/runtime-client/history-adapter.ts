@@ -9,6 +9,7 @@ import type {
   RuntimeLogSessionPage,
 } from '@kite-ai/runtime-contract';
 import { assertListRuntimeLogSessionsRequest } from '@kite-ai/runtime-contract';
+import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
@@ -393,6 +394,39 @@ export function createKiteRuntimeHistoryClient(
       };
     },
   });
+}
+
+/**
+ * Bounded current-format page façade for consumers that must never materialize a complete
+ * Workspace directory or transcript. The injected log port remains the source of keyset and
+ * sequence pagination; no compatibility discovery or smart-name scan is performed.
+ */
+export function createKiteRuntimePagedHistoryClient(
+  logs: RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return Object.freeze({
+    async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
+      assertListRuntimeLogSessionsRequest(request);
+      return withLogs(logs, (reader) => {
+        const page = reader.listSessions(request);
+        return Object.freeze({
+          entries: Object.freeze(page.entries.map(mapLogSession)),
+          ...(page.nextCursor ? { nextCursor: Object.freeze(page.nextCursor) } : {}),
+          hasMore: page.hasMore,
+        });
+      });
+    },
+    async listEvents(request: ListRuntimeLogEventsRequest) {
+      return withLogs(logs, (reader) => projectRuntimeLogEventPage(reader.listEvents(request)));
+    },
+  });
+}
+
+/** Select the current Runtime event table inside the Service History owner, not a Worker root. */
+export function createKiteRuntimePagedHistoryFromWorkspaceStore(
+  openLogs: (currentEventTypes: readonly string[]) => RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return createKiteRuntimePagedHistoryClient(openLogs(runtimeHostCurrentStateEventTypes()));
 }
 
 /**

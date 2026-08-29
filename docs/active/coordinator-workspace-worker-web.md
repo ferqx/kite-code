@@ -172,9 +172,10 @@ canonical Workspace Worker当前在同一data listener拥有`/v1`Agent API认证
 `agent_api_observer|agent_api_controller` one-shot capability并继续只做routing/control plane，不代理HTTP data plane。Web Gateway peer仍只
 能mint`web_observer`，Browser launch token/cookie/Origin不能exchange Agent context。
 
-exchange在消费capability前重验Workspace Trust，context为Worker-local hash-only、60分钟absolute TTL并绑定Client generation。当前只开放
-exchange/logout/ServerInfo，capabilities为空；Controller role不取得或替代Store 7 Session Controller lease。Session/History/Checkpoint/
-Run/mutation/SSE均尚未开放，Web Observer永久只读边界不变。
+exchange在消费capability前重验Workspace Trust，context为Worker-local hash-only、60分钟absolute TTL并绑定Client generation与private
+read logical connection。当前开放exchange/logout/ServerInfo及bounded Session list/get、History page、Checkpoint list/preview，capabilities精确为
+`checkpoints/history/sessions`；每次read再次重验Trust。Controller role不取得或替代Store 7 Session Controller lease，Run/Interaction/
+mutation/SSE仍未开放。Coordinator仍不代理Agent data plane，Web Observer永久只读且不能取得Agent context。
 
 ## Store 7 与 generation cutover
 

@@ -207,6 +207,21 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
   for (const absolute of serviceSourceFiles) {
     const path = relative(root, absolute).replaceAll('\\', '/');
     for (const specifier of imports(readFileSync(absolute, 'utf8'))) {
+      if (
+        path.startsWith('apps/kite-service/src/agent-api/') &&
+        [
+          '@kite-ai/agent-kernel',
+          '@kite-ai/builtin-runtime',
+          '@kite-ai/runtime-host',
+          '@kite-ai/runtime-storage-sqlite',
+        ].some((forbidden) => specifier === forbidden || specifier.startsWith(`${forbidden}/`))
+      ) {
+        add(
+          'SERVICE_AGENT_API_AUTHORITY_IMPORT',
+          path,
+          `Agent API adapter may not import concrete Runtime authority ${specifier}`,
+        );
+      }
       if (!specifier.startsWith('@kite-ai/agent-api-contract')) continue;
       if (
         specifier !== '@kite-ai/agent-api-contract' ||

@@ -1,7 +1,7 @@
 # Service Agent API
 
-本页是`apps/kite-service/src/agent-api/`的owner-local current authority。当前仅完成KASAPI-02A认证context与read-only route shell；
-Session/History/Checkpoint adapter、Run、mutation、SSE与SDK尚未实现。
+本页是`apps/kite-service/src/agent-api/`的owner-local current authority。当前已完成KASAPI-02A～02B认证context与bounded read adapter；
+Run、Interaction完整路由、mutation、SSE、SDK与Web API docs尚未实现。
 
 ## 当前路由
 
@@ -11,8 +11,13 @@ Agent API复用canonical Workspace Worker现有`127.0.0.1:0` data listener，不
 | --- | --- |
 | `POST /v1/auth/exchange` | 消费purpose为`agent_api_observer|agent_api_controller`的one-shot Worker capability，返回60分钟context |
 | `DELETE /v1/auth/session` | 撤销当前Bearer context，固定204 |
-| `GET /v1` | 返回ServerInfo、build/schema digest与当前已实现capabilities；02A固定空capability集合 |
-| 其他`/v1/**` | authenticated后固定404 Problem；不存在隐藏mutation或501 partial route |
+| `GET /v1` | 返回ServerInfo、build/schema digest与`checkpoints/history/sessions`capabilities |
+| `GET /v1/sessions` | bounded live keyset page；可按`lifecycle/status`filter，page内做Runtime projection join |
+| `GET /v1/sessions/{session_id}` | 通过context-owned private Runtime logical connection读取closed Session projection与ETag |
+| `GET /v1/sessions/{session_id}/history` | safe durable History page；首屏固定`through_sequence`，cursor绑定boundary event digest |
+| `GET /v1/sessions/{session_id}/checkpoints` | 按`revision ASC + checkpoint_id ASC`分页的safe metadata |
+| `GET /v1/sessions/{session_id}/checkpoints/{checkpoint_id}/preview` | 只返回变更/冲突/行数计数与Session ETag，不返回path |
+| 其他`/v1/**` | authenticated后固定404 Problem；不存在隐藏Run、Interaction、mutation、SSE或501 partial route |
 
 carrier在完成loopback peer与exact Host校验后把整个`/v1`namespace交给Agent API handler；query、method、media type、Browser signal与
 Bearer由handler按Public contract验证。health/ready、private connect/History/App Control/Controller与`/rpc`继续原路径，不接受Agent
@@ -39,12 +44,16 @@ unavailable返回503，两者都不消耗capability。required capability不满�
 WorkerScope / Worker instance / Workspace digest
 Native Client ID / connection generation
 observer | controller role
+private Runtime logical connection ID
 absolute expiresAt
 ```
 
 TTL固定60分钟且不sliding；最多1024个context。explicit logout、TTL、Client generation supersede、对应Native Runtime connection close、
 Worker drain/replacement/restart都会删除context。每次Bearer request重新验证current Client generation。context不写Store、descriptor、Catalog、
-History、log或DTO，不持有Session Controller lease；`controller`当前只是future endpoint allowlist。
+History、log或DTO，不持有Session Controller lease；`controller`当前只是future endpoint allowlist。02B起每个context还拥有一条只允许
+initialize/query的private in-process Runtime Client/Server logical connection；logout、Trust撤销、TTL/generation fence与drain都会关闭它。
+除logout外，每次Bearer request重新执行canonical Workspace admission：untrusted固定403并撤销context，temporarily unavailable固定503但不把
+旧Trust推断为允许。
 
 Request带Origin、Cookie或任一`Sec-Fetch-*`固定403，CORS/OPTIONS不开放。Exchange拒绝invalid UTF-8、duplicate field、unknown field、oversized
 body与错误media type。request target固定最多4096 UTF-8 bytes、单path segment 128 bytes、单header 8 KiB、全部header 32 KiB且
@@ -54,21 +63,35 @@ admission完成，不消费one-shot capability。所有response使用Problem/DTO
 
 ## 当前非职责
 
-- 不打开Runtime logical connection，不query Session/History/Checkpoint，不触发recovery；
+- 不直接取得RuntimeAccess/Host/Store/Kernel/SQLite concrete；private logical connection只允许Runtime query，不允许command/subscribe；
 - 不开放create/cancel/respond/rewind/fork/delete或Controller request/release/resume；
 - 不向Browser、Gateway cookie或Web launch token签发context；
-- 不让Agent API handler直接取得Store/Host/Kernel/SQLite concrete；
-- 不把ServerInfo存在解释为`runs`、`sessions`或其他capability ready。
+- 不调用complete transcript convenience或先物化全Workspace Session/History/Checkpoint再分页；
+- 不把已发布的三个read capability解释为`runs`、`interactions`、`session_stream`或mutation ready。
+
+## Bounded read与cursor
+
+Session page source在Store 7已打开的同一SQLite connection执行bounded keyset query，不新开reader/writer、不加DDL/index；adapter只对该页最多100个
+ID以并发上限8执行in-process Runtime query join。History page使用同connection的bounded event sequence window，经既有Service safe projector
+投影user/model/tool closed fields；cursor携带public Session scope、固定through sequence、boundary event digest与`sequence + public_ordinal`，
+支持同一durable model event展开reasoning/message后精确续页。rewind/delete导致boundary缺失或替换返回409 `cursor_invalidated`。
+
+Checkpoint metadata port同样绑定现有Store connection，单页最多200项，选中snapshot逐个验证current schema/epoch/checksum；preview再通过
+Runtime query验证checkpoint并只投影计数。cursor是canonical JSON的base64url opaque value并带domain-separated unkeyed checksum；它只发现
+损坏，不授权，每次请求仍重新验证context Workspace/Session scope。missing返回404，checkpoint失效返回409，corrupt/unavailable返回503；
+legacy-only不触发import或fallback。
 
 ## 验证
 
 ```text
 bun test apps/kite-service/test/agent-api/context.test.ts
+bun test apps/kite-service/test/agent-api/read-adapter.test.ts
+bun test apps/kite-service/test/workspace-worker/application.test.ts
 bun test apps/kite-service/test/workspace-worker/process-foreground.test.ts
 bun test apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts
 bun test packages/kite-local-runtime/test/coordinator.test.ts
 bun run check:agent-api-packages
 ```
 
-后续KASAPI-02B只有在bounded read adapter及其route tests完成后才可增加ServerInfo capability。任何mutation仍等待ADR-0150 Store 8与
-KASAPI-03，不得在本shell中用placeholder handler提前开放。
+后续KASAPI-02C只增加immutable static API docs，不改变本data plane。任何Run/mutation仍等待KASAPI-02D read conformance、ADR-0150 Store 8与
+KASAPI-03，不得在read adapter中用placeholder handler提前开放。

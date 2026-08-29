@@ -59,6 +59,11 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
+Workspace Worker另为每个Agent API context打开一条read-only in-process Runtime Client/Server logical connection；admission只允许
+initialize/query，并继续把persisted Session identity与当前Workspace交叉校验。Session page先从同一Store 7 connection取得bounded keyset
+IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
+same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
+subscribe或recovery。
 operation gate的quiesce线性化关闭新mutation admission后立即返回lease与`activeOperations`观察值；普通stop据此
 立即resume并返回`service_busy`，不会先等待active mutation而退化成manager timeout。只有commit drain与signal owner
 shutdown会等待idle后进入draining。

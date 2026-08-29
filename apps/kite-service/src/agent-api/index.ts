@@ -8,3 +8,11 @@ export {
   type AgentApiRouteHandlerOptions,
   createAgentApiRouteHandler,
 } from './context';
+export type {
+  AgentApiCheckpointMetadata,
+  AgentApiCheckpointPageCursor,
+  AgentApiCheckpointReadPort,
+  AgentApiReadContext,
+  AgentApiReadDispatchResult,
+  AgentApiReadErrorCode,
+} from './read-adapter';

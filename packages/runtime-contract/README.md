@@ -51,6 +51,8 @@
   execution mode；Client 不从 raw Plan/Kernel event 推断审核已完成。
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
   不携带 callback、Store handle 或历史 interaction settlement authority。
+- `ListRuntimeLogEventsRequest`允许同时携带exclusive `afterSequence < beforeSequence`，形成有界sequence window；
+  单侧cursor仍保持原语义，等于或反向window fail closed。该窗口只约束只读History，不产生snapshot/receipt或Store authority。
 - `RuntimeSessionProjection.interactionQueue` 是同 revision 的完整、有序替换集；`activeInteractionId` 必须属于该集，
   每个interaction的`sessionRevision`是当前 settlement CAS，必须等于queue/session revision；稳定交互身份由
   `interactionId`与kind-specific generation/plan/provider/verification/input/command字段共同组成。Session revision

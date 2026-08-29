@@ -48,6 +48,13 @@ history projector与三个authenticated exact History HTTP handler。handler只�
 Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
 `apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
 
+active Workspace Worker的Agent API read journey不打开上述offline snapshot或第二SQLite connection。Store 7 adapter在同一writer connection上
+窄提供bounded Session keyset与History sequence-window log port；Service仍通过`RuntimeHistoryClient` safe projector消费，不把raw event交给
+Agent adapter。Public History first page固定`through_sequence`，后续同时使用exclusive after/before window并复核boundary event digest；durable
+`model.responded`最多展开reasoning/message两个`public_ordinal`，cursor可在同sequence内续读。selected Checkpoint metadata按revision/id keyset并
+逐个验证current schema/epoch/checksum，preview只经Runtime query返回计数。不存在全Workspace transcript物化、compatibility import、path投影、
+DDL/index变化或Store writer替代。
+
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不
 终止Session，replacement client可从同一SQLite authority继续读取；Service restart仍由唯一Store恢复。当前这些是本机

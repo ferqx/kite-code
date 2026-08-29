@@ -15,9 +15,9 @@
 ## 当前实现事实
 
 `@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前实现DTO、codec、limits、
-fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；尚无
-Workspace Worker production listener、auth exchange与ServerInfo shell已经实现；Agent API SDK、Session/History/Checkpoint adapter、Store 8
-Run route、mutation、SSE与Web `/api-docs` route尚未实现。package/artifact或ServerInfo存在不表示resource capability ready，也不改变
+fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；
+Workspace Worker production listener、auth exchange、ServerInfo与bounded Session/History/Checkpoint read adapter已经实现；Agent API SDK、
+Store 8 Run route、mutation、SSE与Web `/api-docs` route尚未实现。package/artifact或ServerInfo存在不表示未发布resource capability ready，也不改变
 private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
 
 唯一root export提供snake_case的ServerInfo、Context、Session、Run、Interaction/queue、History、Checkpoint、page、mutation result、Problem
@@ -34,7 +34,7 @@ History，也不把private camelCase DTO透传为Public wire。
 
 - request object及嵌套对象closed；unknown/prototype/accessor/cycle/deep/oversize/unsafe number在schema traversal前fail closed；
 - response新增optional展示field可被旧decoder忽略；Server不能借此发送undeclared field；
-- required field、语义或必须理解的discriminant破坏需要新major；当前path major仍只作为future `/v1` contract metadata；
+- required field、语义或必须理解的discriminant破坏需要新major；当前stable façade的path major精确为`/v1`；
 - timestamp严格为UTC RFC 3339三位毫秒；ID/opaque token为bounded ASCII；text按UTF-8 bytes限制；
 - Interaction response携带完整kind-specific identity并与response kind配对；只传ID的shape不存在；
 - Run lifecycle codec拒绝active Run携带finished/terminal以及terminal Run缺少必要time/detail；
@@ -51,18 +51,20 @@ History，也不把private camelCase DTO透传为Public wire。
 - `digest.json`记录每个non-digest artifact的SHA-256并以domain-separated aggregate绑定完整集合；
 - generator输出canonical key order、无timestamp/absolute path/real endpoint。owner tests逐byte比较committed output并重算digest。
 
-## KASAPI-02A 当前carrier/context
+## KASAPI-02A～02B 当前carrier/read façade
 
 - `/v1`复用canonical Workspace Worker现有loopback data listener；Coordinator/Gateway不代理，未创建第二listener；
 - Native-only Worker capability purpose增加`agent_api_observer|agent_api_controller`，Web Gateway不能mint；
 - exchange重新验证Workspace Trust后，以one-shot capability换取60分钟、最多1024个、hash-only in-memory context；
-- context绑定WorkerScope/instance/Workspace digest/Client/generation/role；TTL、generation drift、Native connection close、Worker drain/restart
-  或logout撤销；
-- role只来自capability purpose；`controller`不授予Session Controller lease，当前所有resource/mutation route固定404；
-- ServerInfo capabilities当前为空；只有KASAPI-02B route/adapter Gate完成后才能增加read capability；
+- context绑定WorkerScope/instance/Workspace digest/Client/generation/role与一条read-only private Runtime logical connection；TTL、Trust撤销、
+  generation drift、Native connection close、Worker drain/restart或logout撤销；
+- role只来自capability purpose；`controller`不授予Session Controller lease，所有command/subscribe/mutation route仍固定404；
+- ServerInfo只发布`checkpoints/history/sessions`；Session list/get、History page与Checkpoint list/preview是当前唯一resource routes；
+- Session list使用same-connection bounded keyset page并仅对page内ID做Runtime projection join；History固定through sequence和boundary digest，
+  Checkpoint metadata按revision keyset且preview不投影path。cursor checksum只发现损坏，每次请求仍做context/Workspace/Session admission；
 - Origin/Cookie/Sec-Fetch、CORS/OPTIONS、duplicate/unknown/oversized body与credential混用fail closed，Problem不泄漏内部binding。
 
 ## 后续Gate
 
-KASAPI-02B及以后接入read adapter/Web/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
-的route提前加入ServerInfo。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。
+KASAPI-02C及以后接入Web docs/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
+的Run/Interaction/SSE/mutation route提前加入ServerInfo。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。

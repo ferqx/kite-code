@@ -81,7 +81,10 @@ describe('Kite Runtime History Client adapter', () => {
         {
           type: 'user.message_appended',
           summary: 'hello',
-          detail: { kind: 'message', fields: { content: 'hello' } },
+          detail: {
+            kind: 'message',
+            fields: { content: 'hello', message_id: 'message-1' },
+          },
         },
       ],
       hasMore: false,

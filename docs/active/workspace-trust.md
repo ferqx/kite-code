@@ -35,7 +35,8 @@ fallback writer，只保存语言、theme等UI-local preference。
 Agent API exchange也是同一门禁的consumer：Native peer mint的Workspace-bound one-shot capability本身不替代当前Trust。Worker在消费
 `Kite-Connection` capability前再次调用canonical Workspace admission；`untrusted`固定403，Trust/store unavailable固定503，二者都不
 消费capability、不创建context。成功context只绑定已验证Workspace digest，不接受request body/path改绑。Browser/Gateway credential不能
-进入该exchange。
+进入该exchange。除logout外的后续Bearer request再次调用同一canonical admission；Trust变为untrusted时返回403、撤销context并关闭private
+read logical connection，Trust/store暂时不可用时返回503且不把旧Trust缓存为放行。Session/History/Checkpoint path/query都不能改绑Workspace。
 
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 

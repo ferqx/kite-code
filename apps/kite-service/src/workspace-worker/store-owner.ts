@@ -1,5 +1,7 @@
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type {
+  SqliteWorkspaceCheckpointQuery,
   SqliteWorkspaceDirectoryOutbox,
   SqliteWorkspaceSessionCreationPort,
 } from '@kite-ai/runtime-storage-sqlite';
@@ -32,6 +34,10 @@ export type {
 /** Store 7 Directory facts stay on the same already-open SQLite connection. */
 export type WorkspaceWorkerStoreOwner = BootstrapWorkspaceWorkerStoreOwner & {
   readonly directoryOutbox: SqliteWorkspaceDirectoryOutbox;
+  readonly openWorkspaceLogQuery: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<import('../bootstrap/runtime/state-runtime').RuntimeEvent>;
+  readonly workspaceCheckpointQuery: SqliteWorkspaceCheckpointQuery;
   readonly workspaceSessionCreation: SqliteWorkspaceSessionCreationPort<
     import('../bootstrap/runtime/state-runtime').RuntimeEvent,
     import('../bootstrap/runtime/state-runtime').RuntimeState
@@ -59,9 +65,16 @@ export function openWorkspaceWorkerStore(
     options,
   ) as BootstrapWorkspaceWorkerStoreOwner & {
     readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
+    readonly openWorkspaceLogQuery?: WorkspaceWorkerStoreOwner['openWorkspaceLogQuery'];
+    readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
     readonly workspaceSessionCreation?: WorkspaceWorkerStoreOwner['workspaceSessionCreation'];
   };
-  if (!storage.directoryOutbox || !storage.workspaceSessionCreation) {
+  if (
+    !storage.directoryOutbox ||
+    !storage.openWorkspaceLogQuery ||
+    !storage.workspaceCheckpointQuery ||
+    !storage.workspaceSessionCreation
+  ) {
     storage.close();
     throw new Error('Workspace Worker Store Directory/session creation is unavailable.');
   }

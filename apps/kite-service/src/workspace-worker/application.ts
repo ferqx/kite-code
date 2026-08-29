@@ -22,18 +22,25 @@ import type {
   WorkerControllerResumeRequest,
   WorkerControllerValidateResumeRequest,
 } from '@kite-ai/kite-app-contract/worker-controller';
+import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-client';
 import {
   type InteractionMode,
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandContext,
+  type RuntimeQuery,
 } from '@kite-ai/runtime-contract';
-import type { RuntimeServerAdmissionInput } from '@kite-ai/runtime-server';
+import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import type {
+  RuntimeServerAdmissionInput,
+  RuntimeServerAdmissionPort,
+} from '@kite-ai/runtime-server';
 import type { ClassifiedInvocation, PreparedToolInvocation } from '@kite-ai/runtime-spi';
 import type {
   SqliteWorkspaceInitialControllerInput,
   SqliteWorkspaceSessionCreationResult,
 } from '@kite-ai/runtime-storage-sqlite';
+import type { AgentApiReadContext } from '../agent-api';
 import {
   createKiteInProcessAppControlComposition,
   type KiteInProcessAppControlComposition,
@@ -52,6 +59,7 @@ import {
   createKiteRuntimeApplication,
   type KiteRuntimeApplication,
 } from '../runtime-application/application';
+import { createKiteRuntimePagedHistoryFromWorkspaceStore } from '../runtime-client/history-adapter';
 import type { SandboxBackend } from '../sandbox/types';
 import { createWorkspaceWorkerControllerAdapter } from './controller-adapter';
 import {
@@ -185,6 +193,9 @@ export async function createWorkspaceWorkerApplication(
       workspaces: [template],
     });
     const history = createKiteRuntimeObserverHistoryFromStorage(input.storage);
+    const agentHistory = createKiteRuntimePagedHistoryFromWorkspaceStore(
+      input.storage.openWorkspaceLogQuery,
+    );
     const application = createKiteRuntimeApplication({
       runtime: runtimeOwner.runtime,
       server: runtimeOwner.server,
@@ -218,6 +229,46 @@ export async function createWorkspaceWorkerApplication(
       application: carrierApplication,
       controller,
       cancelAll: application.cancelAll,
+      openAgentApiReadContext: async () => {
+        const admission: RuntimeServerAdmissionPort = Object.freeze({
+          authorize: async (request: RuntimeServerAdmissionInput) =>
+            request.operation === 'initialize' || request.operation === 'runtime/query'
+              ? { allowed: true as const, workspace: admittedWorkspace.canonicalPath }
+              : { allowed: false as const, reason: 'unauthorized' as const },
+        });
+        const transport: RuntimeClientTransport = Object.freeze({
+          connect: async () => {
+            const pair = runtimeOwner!.open({ admission });
+            return Object.freeze({
+              send: (message: RuntimeProtocolMessage) => pair.client.send(message),
+              messages: () => pair.client.messages(),
+              close: (reason?: string) => pair.client.close(reason),
+            });
+          },
+        });
+        const client = new RuntimeClient({
+          transport,
+          clientInfo: {
+            name: 'kite-agent-api',
+            version: 'v1',
+            instanceId: `agent-api-${randomUUID()}`,
+          },
+        });
+        try {
+          await client.connect();
+        } catch (error) {
+          await client.close().catch(() => undefined);
+          throw error;
+        }
+        const readContext: AgentApiReadContext = Object.freeze({
+          query: (query: RuntimeQuery) => client.query(query),
+          history: agentHistory,
+          checkpoints: input.storage.workspaceCheckpointQuery,
+          close: () => client.close('agent_api_context_closed'),
+          [Symbol.asyncDispose]: () => client.close('agent_api_context_closed'),
+        });
+        return readContext;
+      },
       start: application.start,
       drain: async () => drainApplication(application, runtimeOwner!),
       [Symbol.asyncDispose]: application[Symbol.asyncDispose],

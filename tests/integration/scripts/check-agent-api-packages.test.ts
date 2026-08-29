@@ -58,4 +58,17 @@ describe('Agent API package boundary gate', () => {
       expect.arrayContaining(['DEPENDENCY_BOUNDARY_INVALID', 'WORKSPACE_RUNNER_MISSING']),
     );
   });
+
+  test('rejects concrete Host or Store authority in the Service read adapter', () => {
+    const root = repositoryFixture();
+    writeFileSync(
+      join(root, 'apps/kite-service/src/agent-api/context.ts'),
+      "import '@kite-ai/runtime-storage-sqlite';\nexport {};\n",
+    );
+    expect(analyzeAgentApiPackages(root)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SERVICE_AGENT_API_AUTHORITY_IMPORT' }),
+      ]),
+    );
+  });
 });

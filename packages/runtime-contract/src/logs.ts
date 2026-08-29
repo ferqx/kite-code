@@ -201,10 +201,12 @@ export function assertListRuntimeLogEventsRequest(value: ListRuntimeLogEventsReq
   if (value.direction !== 'forward' && value.direction !== 'backward') {
     throw new RuntimeLogRequestValidationError('direction must be forward or backward.');
   }
-  if (value.afterSequence !== undefined && value.beforeSequence !== undefined) {
-    throw new RuntimeLogRequestValidationError(
-      'afterSequence and beforeSequence are mutually exclusive.',
-    );
+  if (
+    value.afterSequence !== undefined &&
+    value.beforeSequence !== undefined &&
+    value.afterSequence >= value.beforeSequence
+  ) {
+    throw new RuntimeLogRequestValidationError('afterSequence must be lower than beforeSequence.');
   }
   for (const cursor of [value.afterSequence, value.beforeSequence]) {
     if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0)) {

@@ -68,8 +68,9 @@ codec并实现Native connector；package本身仍不实现listener、spawn、Sto
 任一 App source。
 
 `@kite-ai/agent-api-contract`是zero-workspace-dependency的browser-safe Public wire contract；Service只有`src/agent-api/**`可导入其root。
-当前Worker composition复用既有listener注入认证/ServerInfo façade，不创建第二Runtime/Store/listener；Coordinator只mint purpose-bound
-capability，Web App不依赖Agent API contract/client。
+当前Worker composition复用既有listener注入认证与bounded Session/History/Checkpoint read façade，不创建第二Runtime/Store/listener；每个
+Agent context只拥有一条query-only private Runtime logical connection，Store 7 page source复用already-open SQLite connection而不增加DDL/index。
+Coordinator只mint purpose-bound capability且不代理data plane，Web App不依赖Agent API contract/client。
 
 `apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
 SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App

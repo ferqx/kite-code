@@ -168,3 +168,11 @@ export type {
   SqliteWorkspaceSessionCreationPort,
   SqliteWorkspaceSessionCreationResult,
 } from './transaction';
+export {
+  createSqliteWorkspaceCheckpointQuery,
+  SQLITE_WORKSPACE_CHECKPOINT_MAX_PAGE_SIZE,
+  type SqliteWorkspaceCheckpointCursor,
+  type SqliteWorkspaceCheckpointEntry,
+  type SqliteWorkspaceCheckpointPage,
+  type SqliteWorkspaceCheckpointQuery,
+} from './workspace-checkpoint-query';

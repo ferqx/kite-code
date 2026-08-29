@@ -70,10 +70,12 @@ publisher同样受active frame barrier约束；Native TUI在completed reasoning�
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
-Public Agent API当前只增加同一Worker listener内的认证/ServerInfo façade，不增加RuntimeAccess或Store入口。one-shot capability由Worker
-hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；ServerInfo capabilities为空，
-其他Public resource/mutation route不可达。context close/expiry/generation fence不取消Runtime work；controller role不绕过Store 7 Controller
-lease或`bindingReference`。后续adapter只能经in-process Runtime Client/Server与Service-owned History port，不能直接取得Host/SQLite。
+Public Agent API当前在同一Worker listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。one-shot capability由Worker
+hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
+initialize/query-only in-process Runtime Client/Server logical connection。ServerInfo只发布`checkpoints/history/sessions`，Session list/get、
+History page与Checkpoint list/preview经Service-owned safe ports可达，其他resource/mutation仍404。same-connection Store 7 page port只做bounded
+keyset/sequence read，不开放SQLite/State concrete或新connection/DDL。context close/Trust撤销/expiry/generation fence不取消Runtime work；
+controller role不绕过Store 7 Controller lease或`bindingReference`。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

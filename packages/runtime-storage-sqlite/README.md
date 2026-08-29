@@ -25,6 +25,9 @@
 - `createSqliteWorkspaceRuntimeLogQueryPort` 只接受server-owned layout、active generation与opaque Worker scope，canonical Store
   path由layout owner推导。它从Store 7 marker取得内部Workspace digest后在同一隔离只读snapshot复核完整binding，并在每次
   query前后重验active pointer/manifest/journal/fence；不会在live Store旁创建WAL/SHM、schema或第二writer。
+- active Store 7 writer额外窄暴露same-connection bounded read ports：`openWorkspaceLogQuery`对`runtime_sessions/runtime_events`
+  执行keyset/sequence window查询，`workspaceCheckpointQuery`按`revision + checkpointId`分页并逐个验证选中snapshot checksum。
+  两者不打开第二SQLite connection、不创建DDL/index、不返回State JSON/Store path，也不接受compatibility source。
 - 通过 `transaction.ts` 原子提交 Runtime event 与 snapshot。
 
 ## 不拥有职责
@@ -59,6 +62,9 @@
   也不重设或更新该原始digest。`targetWriteState=none`时仍必须精确匹配pre-write digest。
 - offline Store 7 log reader仍要求regular、owner-only、no-follow、nlink=1与exact Store 7 scope/profile；pointer或binding在
   query期间漂移会使本次读取失败，legacy-only/Store 6不能作为silent fallback。
+- live Worker的same-connection Session/History/Checkpoint page source只在already-open Store 7 owner存活时可用；Session按
+  `updatedAt DESC + sessionId DESC`，Checkpoint按`revision ASC + checkpointId ASC`稳定推进，单页最多200项。关闭page reader不关闭
+  writer，关闭writer后新reader fail closed；这些port不执行recovery、mutation或全Workspace正文物化。
 - Store 6 到 Store 7 的 copy-and-switch 必须由调用方提供已验证的 persisted Workspace ownership resolver；缺失/冲突归属、
   orphan retained receipt、损坏或未知 source fact 会整体 blocked，source 保持只读且 active-layout 不切换。迁移逐 Session
   校验 event count/sequence、snapshot checksum/position、receipt digest、recovery evidence 与 content digest，完成所有

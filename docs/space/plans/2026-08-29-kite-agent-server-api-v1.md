@@ -24,14 +24,14 @@ Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read
 
 ## 实施状态（2026-08-30）
 
-KASAPI-00A～02A 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～02B 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
 pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
 fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
-Workspace Worker listener已接入authenticated Agent API context与route shell；当前执行入口为KASAPI-02B read-only
-Session/History/Checkpoint adapter，不创建Run mutation。
+Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；当前执行入口为KASAPI-02C
+release-bundled static `/api-docs`，不创建Run mutation。
 
 ## 1. 执行结论
 
@@ -343,7 +343,16 @@ Browser cookie/launch token/Origin请求不能建立Agent API context。
 
 Rollback：移除route registration，现有 `/rpc`/History/App Control不变。
 
-#### KASAPI-02B：Read-only Session/History/Checkpoint adapter
+#### KASAPI-02B：Read-only Session/History/Checkpoint adapter（已完成）
+
+完成证据：ServerInfo只发布`checkpoints/history/sessions`，同一Worker listener已开放Session list/get、History page与Checkpoint
+list/preview；其他resource/mutation仍404。每个Bearer context拥有一条initialize/query-only private in-process Runtime Client/Server
+logical connection，每次read重验Workspace Trust。Session page从already-open Store 7 connection按`updatedAt/sessionId` bounded keyset取ID，
+只对page内最多100项以并发8做Runtime projection join；History复用safe `RuntimeHistoryClient` projector与exclusive sequence window，cursor
+固定through sequence、boundary event digest及`sequence/public_ordinal`；Checkpoint metadata按revision/id keyset且逐个验证snapshot
+schema/epoch/checksum，preview只返回计数与ETag。没有第二SQLite connection、DDL/index、compatibility import、全量transcript/Session物化、
+Host/Store/Kernel concrete import或Run/mutation path。Service/Runtime Contract/SQLite owner tests覆盖cursor推进/损坏/rewind invalidation、
+cross-scope 404、path non-disclosure、corrupt snapshot、pending connection drain与真实Worker in-process query。
 
 交付：`apps/kite-service/src/agent-api/` read adapter；ServerInfo、Session list/get、History page、Checkpoint list/preview；get projection走
 in-process Runtime Client/Server，History走现有 safe `RuntimeHistoryClient`。Session list必须bounded：使用00B证明的page source，再对page内

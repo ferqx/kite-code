@@ -1,6 +1,10 @@
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import { createLocalRuntimeServiceToken } from '@kite-ai/kite-local-runtime/service';
-import { type AgentApiRouteHandler, createAgentApiRouteHandler } from '../agent-api';
+import {
+  type AgentApiReadContext,
+  type AgentApiRouteHandler,
+  createAgentApiRouteHandler,
+} from '../agent-api';
 import {
   createKiteServiceCarrier,
   KITE_SERVICE_CONNECT_PATH,
@@ -71,6 +75,8 @@ export interface WorkspaceWorkerApplicationOwner extends AsyncDisposable {
   start(): Promise<void>;
   /** Optional owner-level cancellation used by signal shutdown. */
   readonly cancelAll?: (reason: string) => Promise<void>;
+  /** One private read-only Runtime logical connection per Agent API context. */
+  readonly openAgentApiReadContext?: () => Promise<AgentApiReadContext>;
   /** Flush State/receipt/effect evidence before the Store is closed. */
   drain(): Promise<void>;
 }
@@ -183,13 +189,17 @@ export async function createWorkspaceWorkerRuntimeComposition(
     }
     clientActivities.clear();
     try {
+      await agentApi?.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    agentApi = undefined;
+    try {
       await dataCarrier?.close();
     } catch (error) {
       failures.push(error);
     }
     dataCarrier = undefined;
-    agentApi?.close();
-    agentApi = undefined;
     try {
       await controlCarrier?.close();
     } catch (error) {
@@ -300,7 +310,13 @@ export async function createWorkspaceWorkerRuntimeComposition(
       consumeCapability: (secret) => capabilityAuthority!.consumeAgentApiCapability(secret),
       isClientGenerationCurrent: (clientId, connectionGeneration) =>
         capabilityAuthority!.isClientGenerationCurrent(clientId, connectionGeneration),
-      capabilities: [],
+      openReadContext: async () => {
+        if (!applicationOwner?.openAgentApiReadContext) {
+          throw new Error('Workspace Worker Agent API read context is unavailable.');
+        }
+        return applicationOwner.openAgentApiReadContext();
+      },
+      capabilities: ['checkpoints', 'history', 'sessions'],
     });
     dataCarrier = createKiteServiceCarrier({
       application: wrappedApplication,

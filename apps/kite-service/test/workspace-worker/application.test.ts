@@ -151,6 +151,36 @@ test('composes a real Worker Application over one injected Store and query-only 
     });
     expect(created?.sessionRevision).toBeGreaterThanOrEqual(0);
     expect(storage.sessions.loadSnapshot('atomic-session')).not.toBeNull();
+    const checkpointState = storage.sessions.loadSnapshot('atomic-session');
+    if (!checkpointState) throw new Error('Atomic Session state is unavailable.');
+    storage.checkpoints.saveNamedSnapshot(
+      'atomic-session',
+      'checkpoint-agent-read',
+      checkpointState,
+      storage.sessions.getLastEventPosition('atomic-session'),
+    );
+    const beforeAgentRead = owner.application.server.connectionCount;
+    const agentRead = await owner.openAgentApiReadContext?.();
+    expect(agentRead).toBeDefined();
+    expect(owner.application.server.connectionCount).toBe(beforeAgentRead + 1);
+    await expect(
+      agentRead!.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId: 'atomic-session',
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      session: { sessionId: 'atomic-session' },
+    });
+    await expect(agentRead!.history.listSessions({ limit: 1 })).resolves.toMatchObject({
+      entries: [{ sessionId: 'atomic-session' }],
+    });
+    expect(agentRead!.checkpoints.list({ sessionId: 'atomic-session', limit: 1 })).toMatchObject({
+      entries: [{ checkpointId: 'checkpoint-agent-read', sessionId: 'atomic-session' }],
+    });
+    await agentRead!.close();
+    expect(owner.application.server.connectionCount).toBe(beforeAgentRead);
     await expect(
       owner.application.controller?.createSession(controllerRequest, controllerBinding),
     ).resolves.toMatchObject({ status: 'replay', sessionRevision: created?.sessionRevision });

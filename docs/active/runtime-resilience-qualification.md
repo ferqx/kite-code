@@ -14,9 +14,12 @@
 
 Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
 
-Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。capability只在exchange成功时一次性消费；contract incompatibility、
-Workspace untrusted/unavailable与context overload不消费。context TTL、logout、generation supersede、Native connection close或Worker restart只释放
-HTTP admission，不取消Run/Session、不触发recovery、不写Store。response loss后Client必须重新mint/exchange，不从descriptor或旧token恢复。
+Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
+untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
+初始化失败也不恢复或重放该secret，Client必须重新mint。context TTL、logout、generation supersede、Native connection close或Worker restart只释放
+HTTP admission并关闭其private read logical connection，不取消Run/Session、不触发recovery、不写Store。每次read request重验Trust；Trust撤销会
+撤销context，Trust暂时不可用返回503。History cursor把first-page through sequence与boundary event digest固定；boundary被rewind/delete替换时409
+invalidated，不把新History拼到旧watermark。response loss后Client必须重新mint/exchange，不从descriptor或旧token恢复。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；

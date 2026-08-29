@@ -67,7 +67,10 @@ forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync
 byte-exact generation；独立
 `check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`apps/kite-web/test/`验证Browser observer presentation reducer；
 `apps/kite-service/test/agent-api/`验证one-shot capability exchange、Workspace Trust重验、hash-only context、role/TTL/generation/revoke与
-read-only route shell；Worker foreground和isolated carrier tests证明它复用同一listener且private routes不接受Public context。
+bounded Session/History/Checkpoint adapter，包括page-local Runtime join、cursor checksum/filter、History through/boundary invalidation、
+Checkpoint path non-disclosure与pending logical connection drain；Worker application/foreground和isolated carrier tests证明每个context复用private
+in-process Runtime Client/Server、HTTP仍复用同一listener且private routes不接受Public context。SQLite owner tests另验证same-connection
+Session/History/Checkpoint page、advancing keyset与corrupt snapshot fail closed。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
@@ -120,9 +123,9 @@ isolated Workspace admission与nondefault `--checkpoints` path，不能打开man
 
 ## KLSV1-06/07 当前 evidence 边界
 
-KLSV1/KCWW本地cutover Gate已执行：当前default runner的Service owner为1488 tests / 8273 expects，CLI owner为
+KLSV1/KCWW本地cutover Gate已执行：当前default runner的Service owner为1519 tests / 8428 expects，CLI owner为
 704 + 76 sandbox + 1 conformance，共781 tests；Web workspace为17 tests。Runtime transport为3 tests / 852 expects。
-相关package typecheck、Biome与diff-check通过；14-workspace typecheck及runtime package/core/pre-release/test-ownership Gate也通过。
+相关package typecheck、Biome与diff-check通过；15-workspace typecheck及runtime package/core/pre-release/test-ownership Gate也通过。
 
 KLSV1-07当前只登记本地结果：Runtime fault 36/106、CI-profile soak 7/7 cases、carrier 23/129、Service shell
 23/97，以及macOS arm64 candidate build/verify/smoke；smoke覆盖安装、CLI/TUI、Service/Coordinator/Worker/Gateway companion

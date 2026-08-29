@@ -9,6 +9,7 @@ import {
   AGENT_API_CONNECTION_AUTHORIZATION_SCHEME,
   AGENT_API_CONTEXT_TTL_MS,
   type AgentApiCapabilityBinding,
+  type AgentApiReadContext,
   createAgentApiRouteHandler,
 } from '../../src/agent-api';
 
@@ -26,6 +27,8 @@ function fixture(
     readonly maxContexts?: number;
     readonly randomBytes?: (size: number) => Uint8Array;
     readonly admitWorkspace?: () => Promise<'admitted' | 'untrusted' | 'unavailable'>;
+    readonly openReadContext?: (binding: AgentApiCapabilityBinding) => Promise<AgentApiReadContext>;
+    readonly capabilities?: readonly ('checkpoints' | 'history' | 'sessions')[];
   } = {},
 ) {
   let now = Date.parse('2026-08-30T00:00:00.000Z');
@@ -45,7 +48,8 @@ function fixture(
     },
     admitWorkspace: options.admitWorkspace ?? (async () => admission),
     isClientGenerationCurrent: (clientId, generation) => current.has(`${clientId}:${generation}`),
-    capabilities: [],
+    ...(options.openReadContext ? { openReadContext: options.openReadContext } : {}),
+    capabilities: options.capabilities ?? [],
     ...(options.maxContexts === undefined ? {} : { maxContexts: options.maxContexts }),
   });
   return {
@@ -106,6 +110,7 @@ describe('Agent API context and route shell', () => {
     f.issue('A'.repeat(43));
     const created = await exchange(f, 'A'.repeat(43));
     expect(created.response.status).toBe(201);
+    expect(created.response.headers.get('x-request-id')).toMatch(/^req_[A-Za-z0-9_-]{22}$/u);
     expect(created.body.role).toBe('observer');
     expect(created.body.capabilities).toEqual([]);
     expect(created.body.expires_at).toBe('2026-08-30T01:00:00.000Z');
@@ -143,6 +148,14 @@ describe('Agent API context and route shell', () => {
     expect(
       decodeAgentApiResponse(agentApiProblemSchema, await unavailableMutation.json()).code,
     ).toBe('not_found');
+  });
+
+  test('keeps request identity valid when random base64url material starts with underscore', async () => {
+    const f = fixture({ randomBytes: (size) => new Uint8Array(size).fill(255) });
+    f.issue('Q'.repeat(43));
+    const created = await exchange(f, 'Q'.repeat(43));
+    expect(created.response.status).toBe(201);
+    expect(created.response.headers.get('x-request-id')).toMatch(/^req_[A-Za-z0-9_-]{22}$/u);
   });
 
   test('does not consume a capability for incompatibility or overload', async () => {
@@ -262,6 +275,113 @@ describe('Agent API context and route shell', () => {
 
     expect((await pending).status).toBe(503);
     expect(f.hasCapability('K'.repeat(43))).toBeTrue();
+  });
+
+  test('serves the injected read context and revokes it when Workspace Trust changes', async () => {
+    let readCloseCalls = 0;
+    const f = fixture({
+      capabilities: ['checkpoints', 'history', 'sessions'],
+      openReadContext: async () => {
+        const close = async () => {
+          readCloseCalls += 1;
+        };
+        return {
+          query: async (query) =>
+            query.type === 'get_session_projection'
+              ? {
+                  status: 'ok',
+                  queryType: query.type,
+                  revision: 2,
+                  session: {
+                    schema: 'kite.runtime-projection.v1',
+                    sessionId: query.sessionId,
+                    revision: 2,
+                    lifecycle: 'open',
+                    interactionQueue: { revision: 2, interactions: [] },
+                  },
+                }
+              : { status: 'rejected', queryType: query.type, code: 'unsupported' },
+          history: {
+            listSessions: async () => ({ entries: [], hasMore: false }),
+            listEvents: async () => ({
+              entries: [],
+              hasMore: false,
+              observedLastSequence: 0,
+            }),
+          },
+          checkpoints: {
+            list: () => ({ entries: [], hasMore: false }),
+            get: () => undefined,
+          },
+          close,
+          [Symbol.asyncDispose]: close,
+        };
+      },
+    });
+    f.issue('R'.repeat(43));
+    const created = await exchange(f, 'R'.repeat(43));
+    expect(created.body.capabilities).toEqual(['checkpoints', 'history', 'sessions']);
+    const session = await f.handler.handle(
+      bearerRequest('/v1/sessions/session-1', created.body.access_token),
+    );
+    expect(session.status).toBe(200);
+    expect(session.headers.get('etag')).toBe('"session:session-1:rev:2"');
+
+    f.setAdmission('untrusted');
+    expect((await f.handler.handle(bearerRequest('/v1', created.body.access_token))).status).toBe(
+      403,
+    );
+    expect(readCloseCalls).toBe(1);
+    f.setAdmission('admitted');
+    expect((await f.handler.handle(bearerRequest('/v1', created.body.access_token))).status).toBe(
+      401,
+    );
+  });
+
+  test('waits for a pending private read connection and closes it during Worker drain', async () => {
+    let markOpening!: () => void;
+    const opening = new Promise<void>((resolve) => {
+      markOpening = resolve;
+    });
+    let resolveRead!: (value: AgentApiReadContext) => void;
+    const read = new Promise<AgentApiReadContext>((resolve) => {
+      resolveRead = resolve;
+    });
+    let readCloseCalls = 0;
+    const f = fixture({
+      openReadContext: async () => {
+        markOpening();
+        return read;
+      },
+    });
+    f.issue('S'.repeat(43));
+    const exchanging = f.handler.handle(exchangeRequest('S'.repeat(43)));
+    await opening;
+    const closing = f.handler.close();
+    const close = async () => {
+      readCloseCalls += 1;
+    };
+    resolveRead({
+      query: async (query) => ({
+        status: 'rejected',
+        queryType: query.type,
+        code: 'unsupported',
+      }),
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      },
+      checkpoints: {
+        list: () => ({ entries: [], hasMore: false }),
+        get: () => undefined,
+      },
+      close,
+      [Symbol.asyncDispose]: close,
+    });
+
+    expect((await exchanging).status).toBe(503);
+    await closing;
+    expect(readCloseCalls).toBe(1);
   });
 
   test('closes all contexts on Worker drain/replacement', async () => {

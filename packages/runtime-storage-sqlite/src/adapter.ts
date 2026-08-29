@@ -8,6 +8,7 @@ import type {
   RuntimeCommandReceiptPort,
   RuntimeEventMetadata,
   RuntimeFileRestoreMaterial,
+  RuntimeLogQueryPort,
   RuntimeRecoveryIdentityPort,
   RuntimeSessionDeletionInput,
   RuntimeSessionInfo,
@@ -39,6 +40,7 @@ import {
 import { createSqliteEffectLeaseStore } from './effect-leases';
 import { createSqliteEventStore } from './event-store';
 import { assertSqliteWorkspaceStoreActive, markSqliteWorkspaceStoreWritten } from './layout';
+import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import {
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
@@ -69,6 +71,10 @@ import {
   createSqliteRuntimeTransactionPort,
   type SqliteWorkspaceSessionCreationPort,
 } from './transaction';
+import {
+  createSqliteWorkspaceCheckpointQuery,
+  type SqliteWorkspaceCheckpointQuery,
+} from './workspace-checkpoint-query';
 
 class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   implements RuntimeStorage<Event, State>
@@ -90,6 +96,12 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
   /** Store 7-only path-free Session Directory outbox on this same SQLite connection. */
   readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
+  /** Store 7-only bounded log reader factory over this same SQLite connection. */
+  readonly openWorkspaceLogQuery?: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<Event>;
+  /** Store 7-only bounded Checkpoint metadata reader over this same SQLite connection. */
+  readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodec<Event, State>;
   #closed = false;
@@ -167,6 +179,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         beforeWrite: markWorkspaceWritten,
       });
       this.directoryOutbox = createSqliteWorkspaceDirectoryOutbox({
+        db,
+        binding: workspaceBinding,
+      });
+      this.openWorkspaceLogQuery = (currentEventTypes) => {
+        if (this.#closed) {
+          throw new SqliteRuntimeStorageOpenError('SQLite Runtime storage is closed.');
+        }
+        return createSqliteRuntimeLogQueryPortFromDatabase_({
+          database: db,
+          codec: input.codec,
+          currentEventTypes,
+        });
+      };
+      this.workspaceCheckpointQuery = createSqliteWorkspaceCheckpointQuery({
         db,
         binding: workspaceBinding,
       });
@@ -1045,6 +1071,10 @@ export function createSqliteRuntimeStorageAdapter<Event = unknown, State = unkno
 ): RuntimeStorage<Event, State> & {
   readonly workspaceAuthority?: SqliteWorkspaceAuthority;
   readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
+  readonly openWorkspaceLogQuery?: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<Event>;
+  readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
   readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
 } {
   return new SqliteRuntimeStorageAdapter(input);

@@ -635,7 +635,16 @@ describe('runtime contract package boundary', () => {
         afterSequence: 1,
         beforeSequence: 2,
       }),
-    ).toThrow('mutually exclusive');
+    ).not.toThrow();
+    expect(() =>
+      assertListRuntimeLogEventsRequest({
+        sessionId: 'session-1',
+        direction: 'forward',
+        limit: 2,
+        afterSequence: 2,
+        beforeSequence: 2,
+      }),
+    ).toThrow('lower than beforeSequence');
     expect(() =>
       assertListRuntimeLogEventsRequest({
         sessionId: 'session-1',
