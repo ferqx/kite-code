@@ -271,16 +271,22 @@ export function createWebGatewayProcessManager(
         operationTimeoutMs,
         'Gateway instance lock read',
       );
-      if (rawLock === undefined) return { kind: 'corrupt' };
-      const instanceLock = decodeInstanceLock(rawLock);
-      if (
-        instanceLock.pid !== descriptor.pid ||
-        instanceLock.instanceId !== descriptor.identity.instanceId ||
-        instanceLock.startedAt !== descriptor.startedAt ||
-        instanceLock.processStartIdentity !== descriptor.processStartIdentity ||
-        instanceLock.buildId !== descriptor.identity.buildId
-      ) {
-        return { kind: 'corrupt' };
+      if (rawLock === undefined) {
+        // The child releases its instance lock during graceful shutdown before the manager clears
+        // the parent-owned descriptor/credential. A manager crash in that window is recoverable
+        // only after the descriptor's exact PID/start identity is confirmed dead.
+        if ((await inspectDescriptor(descriptor)) !== 'dead') return { kind: 'corrupt' };
+      } else {
+        const instanceLock = decodeInstanceLock(rawLock);
+        if (
+          instanceLock.pid !== descriptor.pid ||
+          instanceLock.instanceId !== descriptor.identity.instanceId ||
+          instanceLock.startedAt !== descriptor.startedAt ||
+          instanceLock.processStartIdentity !== descriptor.processStartIdentity ||
+          instanceLock.buildId !== descriptor.identity.buildId
+        ) {
+          return { kind: 'corrupt' };
+        }
       }
       const credential = await invoke(
         () => options.state.readControlCredential(),
@@ -290,13 +296,14 @@ export function createWebGatewayProcessManager(
       if (credential === undefined || !controlCredential.safeParse(credential).success) {
         return { kind: 'corrupt' };
       }
-      const control = options.controlLinkFor
-        ? await invoke(
-            () => options.controlLinkFor!(descriptor, credential),
-            operationTimeoutMs,
-            'Gateway control reconnect',
-          )
-        : undefined;
+      const control =
+        rawLock !== undefined && options.controlLinkFor
+          ? await invoke(
+              () => options.controlLinkFor!(descriptor, credential),
+              operationTimeoutMs,
+              'Gateway control reconnect',
+            )
+          : undefined;
       const gateway = Object.freeze({ descriptor, ...(control ? { control } : {}) });
       records.set(descriptor.identity.instanceId, gateway);
       return { kind: 'record', gateway };

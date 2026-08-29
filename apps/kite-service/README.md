@@ -88,6 +88,9 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
   PID-reuse uncertain fail closed，不能把数值PID不同进程当成原Worker已死的证据。若新ensure正好撞上旧Worker
   draining/control关闭窗口，同一per-scope operation会有界等待owner-held child exit、完成exact cleanup后直接spawn replacement，
   不把内部drain时长泄漏成用户必须重试的启动失败。
+- Gateway child 在 graceful stop 时先释放自身 instance lock，Coordinator manager 随后才清理parent-owned descriptor/control
+  credential；若manager正好在两步之间退出，新manager只在descriptor的exact PID/start token confirmed dead后恢复并清除该
+  partial state。alive/uncertain descriptor、token-only launch marker或replacement identity仍保持fail closed，不直接删除或spawn。
 - Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
   identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
   scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。

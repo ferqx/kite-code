@@ -247,6 +247,48 @@ describe('Web Gateway process manager', () => {
     expect(fake.spawnCount).toBe(0);
     await expect(state.readControlCredential()).resolves.toBe(credential);
   });
+
+  test('recovers a confirmed-dead Gateway after its child lock was released before parent cleanup', async () => {
+    const root = makeRoot();
+    const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
+    const fake = createFakeRuntime(state, root);
+    const stale = makeDescriptor('stale-gateway-without-child-lock', 42_002);
+    await state.publishDescriptor(stale);
+    await state.publishControlCredential('s'.repeat(43));
+    const manager = createWebGatewayProcessManager({
+      ...fake.options,
+      process: {
+        inspect: async ({ pid }) => (pid === stale.pid ? 'dead' : 'alive'),
+      },
+    });
+
+    await expect(manager.ensure()).resolves.toMatchObject({
+      registration: { identity: { instanceId: 'gateway-process-1' } },
+    });
+    expect(fake.spawnCount).toBe(1);
+    await expect(state.readDescriptor()).resolves.toMatchObject({
+      identity: { instanceId: 'gateway-process-1' },
+    });
+  });
+
+  test('does not recover a missing child lock while its descriptor process is alive or uncertain', async () => {
+    for (const processStatus of ['alive', 'uncertain'] as const) {
+      const root = makeRoot();
+      const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
+      const fake = createFakeRuntime(state, root);
+      const stale = makeDescriptor(`gateway-missing-lock-${processStatus}`, 42_003);
+      await state.publishDescriptor(stale);
+      await state.publishControlCredential('s'.repeat(43));
+      const manager = createWebGatewayProcessManager({
+        ...fake.options,
+        process: { inspect: async () => processStatus },
+      });
+
+      await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'state_corrupt' });
+      expect(fake.spawnCount).toBe(0);
+      await expect(state.readDescriptor()).resolves.toEqual(stale);
+    }
+  });
 });
 
 describe('Web Gateway process main', () => {
