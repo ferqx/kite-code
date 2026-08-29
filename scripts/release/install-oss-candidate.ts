@@ -16,7 +16,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { userInfo } from 'node:os';
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem';
 import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
@@ -327,6 +328,22 @@ function copyRegularFileAtomically(
   mode: number,
 ): void {
   const bytes = readRegularFile(source);
+  if (process.platform === 'win32') {
+    atomicReplaceInLockedWindowsDirectory({
+      ancestorDirectory: dirname(destination),
+      directorySegments: [],
+      targetName: basename(destination),
+      temporaryName: basename(temporary),
+      content: bytes,
+      replaceExisting: false,
+      beforePublish: () => {
+        if (existsSync(destination)) {
+          throw new Error(`Managed launcher appeared during activation: ${destination}`);
+        }
+      },
+    });
+    return;
+  }
   writeFileSync(temporary, bytes, { mode, flag: 'wx' });
   try {
     chmodSync(temporary, mode);
@@ -353,6 +370,23 @@ function writeActiveReleasePointer(root: string, candidateId: string): void {
   }
   const temporary = `${pointer}.next`;
   if (existsSync(temporary)) throw new Error('Active release pointer temporary already exists.');
+  if (process.platform === 'win32') {
+    atomicReplaceInLockedWindowsDirectory({
+      ancestorDirectory: root,
+      directorySegments: [],
+      targetName: basename(pointer),
+      temporaryName: basename(temporary),
+      content: `${candidateId}\n`,
+      beforePublish: () => {
+        if (!existsSync(pointer)) return;
+        const stat = lstatSync(pointer);
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          throw new Error('Active release pointer is unsafe.');
+        }
+      },
+    });
+    return;
+  }
   writeFileSync(temporary, `${candidateId}\n`, { mode: 0o600, flag: 'wx' });
   try {
     syncRegularFile(temporary);
@@ -372,9 +406,7 @@ function readActiveReleasePointer(root: string): string {
 }
 
 function syncRegularFile(path: string): void {
-  // Windows FlushFileBuffers requires a handle opened with write access. Bun
-  // surfaces the read-only-handle rejection as EPERM even for a regular file.
-  const descriptor = openSync(path, process.platform === 'win32' ? 'r+' : 'r');
+  const descriptor = openSync(path, 'r');
   try {
     fsyncSync(descriptor);
   } finally {
@@ -476,7 +508,25 @@ function writeMarker(root: string, marker: InstallMarker): void {
   const parsed = markerSchema.parse(marker);
   const temporary = join(root, `${MARKER_FILE}.next`);
   assertMarkerWriteReady(root);
-  writeFileSync(temporary, `${JSON.stringify(parsed, null, 2)}\n`, {
+  const content = `${JSON.stringify(parsed, null, 2)}\n`;
+  if (process.platform === 'win32') {
+    atomicReplaceInLockedWindowsDirectory({
+      ancestorDirectory: root,
+      directorySegments: [],
+      targetName: MARKER_FILE,
+      temporaryName: basename(temporary),
+      content,
+      beforePublish: () => {
+        if (!existsSync(markerPath(root))) return;
+        const markerStat = lstatSync(markerPath(root));
+        if (markerStat.isSymbolicLink() || !markerStat.isFile()) {
+          throw new Error('Managed marker path is unsafe.');
+        }
+      },
+    });
+    return;
+  }
+  writeFileSync(temporary, content, {
     mode: 0o600,
     flag: 'wx',
   });

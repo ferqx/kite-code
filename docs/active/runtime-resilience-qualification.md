@@ -51,8 +51,8 @@ KRSRUN-03B focused evidence增加formal maintenance CLI parser/blocked exit、Co
 empty process-chain Store 7→8 end-to-end command、持锁后Coordinator absence复核及State convergence negatives。正式入口不接收caller-supplied zero barrier；Gateway/Worker
 state残留、busy activity、PID/start-token/control uncertainty、unknown external effect或source deep-validation失败均保持blocked。当前本机结果仍只
 是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
-`sha256:10a3c8bd419d95c14d741c10c25341cbf9c1b711c0c1b5e5465178a8bbda00d1`）、release 210、最终focused 38及
-candidate `172fcbd79dce619bb82048ec`已通过；完整边界见
+`sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 210、最终focused 38及
+candidate `af43f919f756c276fb945834`已通过；完整边界见
 [03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
 macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
 

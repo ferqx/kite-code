@@ -86,7 +86,8 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
   readonly directorySegments: readonly string[];
   readonly targetName: string;
   readonly temporaryName: string;
-  readonly content: string;
+  readonly content: string | Uint8Array;
+  readonly replaceExisting?: boolean;
   readonly beforePublish: () => void;
 }): void {
   if (process.platform !== 'win32') {
@@ -121,7 +122,8 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
       !api.MoveFileExW(
         widePointer(temporaryPath),
         widePointer(targetPath),
-        WINDOWS_MOVEFILE_REPLACE_EXISTING | WINDOWS_MOVEFILE_WRITE_THROUGH,
+        (input.replaceExisting === false ? 0 : WINDOWS_MOVEFILE_REPLACE_EXISTING) |
+          WINDOWS_MOVEFILE_WRITE_THROUGH,
       )
     ) {
       throw windowsFilesystemError(api, 'publish temporary file');
@@ -347,9 +349,9 @@ function createWindowsTemporaryFile(api: WindowsFilesystemApi, path: string): nu
 function writeWindowsFile(
   api: WindowsFilesystemApi,
   handle: number | bigint,
-  content: string,
+  content: string | Uint8Array,
 ): void {
-  const bytes = Buffer.from(content, 'utf8');
+  const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
   let offset = 0;
   while (offset < bytes.length) {
     const remaining = bytes.subarray(offset);

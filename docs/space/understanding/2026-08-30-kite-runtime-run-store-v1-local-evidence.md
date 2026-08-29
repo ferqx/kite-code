@@ -50,7 +50,7 @@ uncertain/corrupt refusal、Coordinator stop/status 与 acquire 之间的并发 
 | default tests | passed | 359 个 workspace test files、99 个 integration files、61 个 isolated files 全部通过；Web Gateway production fixture 已按 current authority 使用 opaque `workerScopeId` 作为 `workspaceId` |
 | aggregate implementation suite | 3403 pass / 4 skip | 并行资源争用导致 2 个环境性失败；相关 Coordinator fd/readiness 与 POSIX supervisor 文件串行复跑为 22 pass / 1 skip / 0 fail |
 | runtime fault | 36 pass / 0 fail | `bun run test:runtime:fault` |
-| runtime CI-profile soak | 7/7 passed | canonical report digest `sha256:10a3c8bd419d95c14d741c10c25341cbf9c1b711c0c1b5e5465178a8bbda00d1`；不是 formal qualification |
+| runtime CI-profile soak | 7/7 passed | canonical report digest `sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`；不是 formal qualification |
 | release tests | 210 pass / 0 fail | 包含 source entrypoint、manager 与 maintenance composition |
 | final focused regression | 38 pass / 0 fail | migration、Coordinator client/control plane/carrier 与 Service composition |
 | TUI system | shards 0/4、1/4、2/4、3/4 passed | 首次配置、Store5隔离、连续rewind、Controller clean-exit、Session restart与Shell/Thought均通过 |
@@ -64,7 +64,13 @@ release contract tests中因read-only file descriptor执行`fsync`返回`EPERM`�
 `ECONNRESET`、旧Store6/Store5 TUI断言、Store-only Session subscriber未被query projection唤醒、first-run Provider尚未配置时Worker
 提前组合Runtime、以及clean exit把idle Controller错误detach等问题。
 
-本轮已分别收敛为：Windows用write-capable handle flush regular file；Gateway graceful stop刷完已生成response；Host query snapshot经
+第二轮implementation head `8dd77d0d`的Required run `33280371984`在首轮单次TUI PTY排队场景失败后重跑成功；同一场景本地连续
+30次通过，因此未增加推测性Runtime状态。Candidate run `33280372007`的macOS/Linux完整通过，Windows已越过read-only `EPERM`，但
+write-capable Bun `fsync`对每个launcher约长阻塞10秒，使60秒测试超时并触发fixture cleanup级联失败。该run的artifact同样因后续source
+修复作废；installer改为复用Builtin Filesystem现有Windows native locked-directory/write-through publication，一次完成二进制launcher、
+active pointer与marker的flush及atomic replace，不建立第二套Windows I/O owner。
+
+本轮其余问题已分别收敛为：Gateway graceful stop刷完已生成response；Host query snapshot经
 NotificationProjector hydrate pending subscriber；默认Worker保持Store5 source不可见；Worker用lazy Workspace template在first-run完成后才
 组合execution context；TUI按权威projection执行idle release或active/pending/unknown detach。旧run的通过job与artifact均被本轮source变化
 作废，不能登记为最终三平台evidence。

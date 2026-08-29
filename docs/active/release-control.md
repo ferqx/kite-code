@@ -36,8 +36,8 @@ instance lock全部不存在，然后按
 证明Turn/Interaction/effect/external process为零，才建立source-bound fence、复制完整Catalog/Workspace generation并切pointer。任一busy/
 unknown/corrupt保持blocked并非零退出。fresh home由普通ensure直接初始化Store 8，已有Store 7仍不得自动迁移；production Worker只接受
 committed Store 8 pointer，不得fallback启动Store 7 Worker。本机03B dirty-source macOS arm64 candidate
-`172fcbd79dce619bb82048ec`已通过build/verify/install、正式maintenance fail-closed、upgrade/rollback/uninstall；archive digest为
-`sha256:e8931fb83ea576cedf6cb759b724ed96d4045c85a59315e255ffc043e7ab6eab`。这是
+`af43f919f756c276fb945834`已通过build/verify/install、正式maintenance fail-closed、upgrade/rollback/uninstall；archive digest为
+`sha256:53268efa7340d5f223fd3e28c31aab792e85329d31f672e694868b73d550bba0`。这是
 [local evidence](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)，三平台candidate结论继续pending。
 
 ## 候选制品
@@ -164,8 +164,9 @@ installer contract tests的临时Service home也必须由同一state owner primi
 
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
 这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
-flush 父目录；Windows regular-file flush必须用write-capable handle（Bun/Windows对read-only handle的`fsync`返回`EPERM`）后再
-atomic replacement，但 directory write-through、ACL 与
+flush 父目录；Windows launcher、active pointer与marker复用Builtin Filesystem的locked-directory原语，以
+`CreateFileW(FILE_FLAG_WRITE_THROUGH)`写入并`FlushFileBuffers`，再用`MoveFileExW(WRITE_THROUGH)`原子替换，避免Bun `fsync`
+的read-only `EPERM`与逐文件长阻塞。Windows directory write-through、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实
