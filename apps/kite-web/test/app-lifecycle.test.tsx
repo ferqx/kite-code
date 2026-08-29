@@ -115,4 +115,51 @@ describe('Web App lifecycle', () => {
     });
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  test('keeps the HTTP Workspace directory visible when optional live subscription fails', async () => {
+    const subscribe = vi.fn(async () => {
+      throw new Error('live WebSocket unavailable');
+    });
+    const transport: WebObserverTransport = {
+      connect: async () => ({
+        generation: 1,
+        connectionGeneration: 1,
+        tabHandle: 'tab-1',
+        gatewayInstanceId: 'gateway-1',
+      }),
+      listDirectory: async () => ({
+        schema: 'kite.app.web.directory-response.v1',
+        workspaces: [
+          {
+            workspaceId: 'workspace-1',
+            label: 'Workspace from server',
+            sessions: [
+              {
+                sessionId: 'session-1',
+                displayName: 'Server session',
+                updatedAt: 1,
+                lastSequence: 0,
+                status: 'running',
+              },
+            ],
+          },
+        ],
+      }),
+      loadHistory: async () => ({
+        schema: 'kite.app.web.history-response.v1',
+        sessionId: 'session-1',
+        messages: [],
+        hasMore: false,
+        observedLastSequence: 0,
+      }),
+      subscribe,
+      disconnect: async () => undefined,
+    };
+
+    const view = render(<App transport={transport} />);
+    await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+    expect(view.getByText('Workspace from server')).toBeTruthy();
+    expect(view.getAllByText('Server session')).toHaveLength(2);
+    view.unmount();
+  });
 });

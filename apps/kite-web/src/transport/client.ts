@@ -168,14 +168,7 @@ export function createWebObserverTransport(
   }
 
   async function connect(): Promise<WebObserverConnection> {
-    if (
-      connection !== undefined &&
-      socket !== undefined &&
-      socketReady &&
-      socket.readyState === 1
-    ) {
-      return connection;
-    }
+    if (connection !== undefined) return connection;
     explicitlyDisconnected = false;
     await closeSocket(false);
     const bootstrap = await ensureBootstrap();
@@ -187,22 +180,7 @@ export function createWebObserverTransport(
       gatewayInstanceId: bootstrap.gatewayInstanceId,
     };
     connection = nextConnection;
-    try {
-      await openSocket(nextConnection);
-      return nextConnection;
-    } catch (error) {
-      try {
-        await postJson(
-          '/_kite/web/disconnect',
-          { schema: WEB_DISCONNECT_REQUEST_SCHEMA_ },
-          nextConnection.tabHandle,
-        );
-      } catch {
-        // The failed socket/tab is already unusable; cleanup remains best effort.
-      }
-      if (connection === nextConnection) connection = undefined;
-      throw error;
-    }
+    return nextConnection;
   }
 
   async function ensureBootstrap(): Promise<WebBootstrapResponse> {
@@ -359,12 +337,10 @@ export function createWebObserverTransport(
 
   async function subscribe(input: WebObserverSubscribeInput): Promise<WebObserverSubscription> {
     const active = requireConnection();
-    if (!socket || !socketReady || socketGeneration !== active.generation) {
-      throw new WebObserverTransportError('subscription_unavailable');
-    }
     if (activeSubscription !== undefined) {
       throw new WebObserverTransportError('subscription_unavailable');
     }
+    const liveSocket = await ensureLiveSocket(active);
     const request = {
       schema: WEB_SUBSCRIBE_REQUEST_SCHEMA_,
       sessionId: input.sessionId,
@@ -382,7 +358,7 @@ export function createWebObserverTransport(
     let response: WebSubscribeResponse;
     try {
       response = await sendAndWait<WebSubscribeResponse>(
-        socket,
+        liveSocket,
         active.generation,
         request,
         (value) => webSubscribeResponseCodec.decode(value),
@@ -534,6 +510,33 @@ export function createWebObserverTransport(
     }
   }
 
+  async function ensureLiveSocket(active: WebObserverConnection): Promise<WebObserverWebSocket> {
+    if (
+      socket !== undefined &&
+      socketReady &&
+      socketGeneration === active.generation &&
+      socket.readyState === 1
+    ) {
+      return socket;
+    }
+    await closeSocket(false);
+    try {
+      await openSocket(active);
+    } catch (error) {
+      if (error instanceof WebObserverTransportError) throw error;
+      throw new WebObserverTransportError('gateway_unavailable');
+    }
+    if (
+      socket === undefined ||
+      !socketReady ||
+      socketGeneration !== active.generation ||
+      socket.readyState !== 1
+    ) {
+      throw new WebObserverTransportError('subscription_unavailable');
+    }
+    return socket;
+  }
+
   function handleSocketMessage(value: unknown, ws: WebObserverWebSocket, generation: number): void {
     if (pendingResponse !== undefined) {
       const pending = pendingResponse;
@@ -564,6 +567,7 @@ export function createWebObserverTransport(
       if (event.type !== 'message') {
         subscription.closed = true;
         activeSubscription = undefined;
+        if (connection?.generation === generation) connection = undefined;
         void closeSocket(true);
       }
     } catch {

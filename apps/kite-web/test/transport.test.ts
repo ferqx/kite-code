@@ -74,7 +74,12 @@ function messageFixture() {
   };
 }
 
-function harness(options: { readonly historyPages?: readonly WebHistoryResponse[] } = {}): {
+function harness(
+  options: {
+    readonly historyPages?: readonly WebHistoryResponse[];
+    readonly webSocketFailure?: boolean;
+  } = {},
+): {
   readonly transport: WebObserverTransport;
   readonly sockets: MockWebSocket[];
   readonly requests: Array<{ readonly path: string; readonly init: RequestInit | undefined }>;
@@ -144,6 +149,7 @@ function harness(options: { readonly historyPages?: readonly WebHistoryResponse[
     },
     history: { replaceState },
     webSocketFactory: () => {
+      if (options.webSocketFailure) throw new Error('WebSocket unavailable');
       const socket = new MockWebSocket();
       sockets.push(socket);
       return socket;
@@ -169,23 +175,30 @@ async function waitForSocket(sockets: readonly MockWebSocket[]): Promise<MockWeb
 }
 
 describe('Web Observer browser transport', () => {
-  test('coalesces concurrent connect calls into one tab and one socket', async () => {
+  test('coalesces concurrent HTTP connect calls into one tab without opening live WS', async () => {
     const fixture = harness();
     const first = fixture.transport.connect();
     const second = fixture.transport.connect();
-    const socket = await waitForSocket(fixture.sockets);
-    expect(fixture.sockets).toHaveLength(1);
-    socket.open();
     const [firstConnection, secondConnection] = await Promise.all([first, second]);
     expect(secondConnection).toEqual(firstConnection);
     expect(fixture.requests.filter((entry) => entry.path.endsWith('/tabs'))).toHaveLength(1);
+    expect(fixture.sockets).toHaveLength(0);
+  });
+
+  test('keeps Directory readable when the optional live WebSocket cannot open', async () => {
+    const fixture = harness({ webSocketFailure: true });
+    await fixture.transport.connect();
+    await expect(fixture.transport.listDirectory()).resolves.toMatchObject({ workspaces: [] });
+    await expect(
+      fixture.transport.subscribe({ sessionId: 'session-1', onEvent: vi.fn() }),
+    ).rejects.toMatchObject({ reason: 'gateway_unavailable' });
+    await expect(fixture.transport.listDirectory()).resolves.toMatchObject({ workspaces: [] });
+    expect(fixture.requests.filter((entry) => entry.path.endsWith('/directory'))).toHaveLength(2);
   });
 
   test('exchanges launch fragment, creates tab, sends tab header, and speaks closed WS methods', async () => {
     const fixture = harness();
-    const connecting = fixture.transport.connect();
-    (await waitForSocket(fixture.sockets)).open();
-    const connection = await connecting;
+    const connection = await fixture.transport.connect();
     expect(connection).toMatchObject({ tabHandle: 'tab-1', generation: 1 });
     expect(fixture.replaceState).toHaveBeenCalledWith(null, '', '/');
 
@@ -200,6 +213,8 @@ describe('Web Observer browser transport', () => {
       onEvent: (event, generation) => events.push({ event, generation }),
     });
     const socket = await waitForSocket(fixture.sockets);
+    socket.open();
+    await flush();
     socket.receive({
       schema: WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
       subscriptionId: 'subscription-1',
@@ -241,9 +256,7 @@ describe('Web Observer browser transport', () => {
 
   test('does not retain a stale terminal generation and reconnects through a fresh tab', async () => {
     const fixture = harness();
-    const firstConnect = fixture.transport.connect();
-    (await waitForSocket(fixture.sockets)).open();
-    await firstConnect;
+    await fixture.transport.connect();
     await flush();
     const onEvent = vi.fn();
     const subscriptionPromise = fixture.transport.subscribe({
@@ -251,6 +264,8 @@ describe('Web Observer browser transport', () => {
       onEvent,
     });
     const firstSocket = await waitForSocket(fixture.sockets);
+    firstSocket.open();
+    await flush();
     firstSocket.receive({
       schema: WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
       subscriptionId: 'subscription-1',
@@ -266,13 +281,7 @@ describe('Web Observer browser transport', () => {
     });
     expect(onEvent).toHaveBeenCalledTimes(1);
     const secondConnect = fixture.transport.connect();
-    for (let index = 0; index < 20 && fixture.sockets.length < 2; index += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    fixture.sockets[1]?.open();
     await expect(secondConnect).resolves.toMatchObject({ tabHandle: 'tab-2', generation: 2 });
-    const secondSocket = fixture.sockets[1];
-    if (!secondSocket) throw new Error('second mock socket was not created');
     firstSocket.receive({
       schema: WEB_LIVE_EVENT_SCHEMA_,
       type: 'message',
@@ -284,11 +293,16 @@ describe('Web Observer browser transport', () => {
     firstSocket.onerror?.();
     expect(onEvent).toHaveBeenCalledTimes(1);
     const secondEvents = vi.fn();
-    expect(secondSocket.readyState).toBe(1);
     const secondSubscriptionPromise = fixture.transport.subscribe({
       sessionId: 'session-1',
       onEvent: secondEvents,
     });
+    for (let index = 0; index < 20 && fixture.sockets.length < 2; index += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const secondSocket = fixture.sockets[1];
+    if (!secondSocket) throw new Error('second mock socket was not created');
+    secondSocket.open();
     await flush();
     secondSocket.receive({
       schema: WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
@@ -331,9 +345,7 @@ describe('Web Observer browser transport', () => {
       observedLastSequence: 2,
     };
     const fixture = harness({ historyPages: [first, second] });
-    const connecting = fixture.transport.connect();
-    (await waitForSocket(fixture.sockets)).open();
-    await connecting;
+    await fixture.transport.connect();
     const history = await fixture.transport.loadHistory('session-1');
     expect(history.messages.map((message) => message.messageId)).toEqual([
       'message-1',
@@ -347,9 +359,7 @@ describe('Web Observer browser transport', () => {
         { ...first, nextCursor: 1 },
       ],
     });
-    const cyclicConnect = cyclic.transport.connect();
-    (await waitForSocket(cyclic.sockets)).open();
-    await cyclicConnect;
+    await cyclic.transport.connect();
     await expect(cyclic.transport.loadHistory('session-1')).rejects.toMatchObject({
       reason: 'resync_required',
     });
@@ -357,9 +367,7 @@ describe('Web Observer browser transport', () => {
     const changing = harness({
       historyPages: [first, { ...second, observedLastSequence: 3 }],
     });
-    const changingConnect = changing.transport.connect();
-    (await waitForSocket(changing.sockets)).open();
-    await changingConnect;
+    await changing.transport.connect();
     await expect(changing.transport.loadHistory('session-1')).rejects.toMatchObject({
       reason: 'resync_required',
     });
@@ -368,14 +376,15 @@ describe('Web Observer browser transport', () => {
   test('rejects a waiting WS response on timeout instead of leaving a promise pending', async () => {
     try {
       const fixture = harness();
-      const connecting = fixture.transport.connect();
-      const socket = await waitForSocket(fixture.sockets);
-      socket.open();
-      await connecting;
       vi.useFakeTimers();
+      await fixture.transport.connect();
       const pending = fixture.transport.subscribe({ sessionId: 'session-1', onEvent: vi.fn() });
-      await Promise.resolve();
-      vi.advanceTimersByTime(5_001);
+      await vi.advanceTimersByTimeAsync(0);
+      const socket = fixture.sockets[0];
+      if (!socket) throw new Error('mock socket was not created');
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5_001);
       await expect(pending).rejects.toMatchObject({ reason: 'gateway_unavailable' });
       expect(fixture.sockets[0]?.readyState).toBe(3);
     } finally {
@@ -385,27 +394,27 @@ describe('Web Observer browser transport', () => {
 
   test('rejects an invalid initialize receipt immediately', async () => {
     const fixture = harness();
-    const connecting = fixture.transport.connect();
+    await fixture.transport.connect();
+    const subscribing = fixture.transport.subscribe({ sessionId: 'session-1', onEvent: vi.fn() });
     const socket = await waitForSocket(fixture.sockets);
     socket.send = (data: string) => {
       socket.sent.push(data);
     };
     socket.open();
     socket.receive({ type: 'initialized', connectionGeneration: 1, rawRuntime: true });
-    await expect(connecting).rejects.toMatchObject({ reason: 'protocol_error' });
+    await expect(subscribing).rejects.toMatchObject({ reason: 'protocol_error' });
     expect(socket.readyState).toBe(3);
   });
 
-  test('serializes duplicate disconnect calls to one closed WS request', async () => {
+  test('serializes duplicate disconnect calls to one closed HTTP request without live WS', async () => {
     const fixture = harness();
-    const connecting = fixture.transport.connect();
-    (await waitForSocket(fixture.sockets)).open();
-    await connecting;
+    await fixture.transport.connect();
     await Promise.all([fixture.transport.disconnect(), fixture.transport.disconnect()]);
-    const disconnectRequests = fixture.sockets[0]?.sent.filter(
-      (value) => JSON.parse(value).schema === 'kite.app.web.disconnect-request.v1',
+    const disconnectRequests = fixture.requests.filter((entry) =>
+      entry.path.endsWith('/disconnect'),
     );
     expect(disconnectRequests).toHaveLength(1);
+    expect(fixture.sockets).toHaveLength(0);
   });
 
   test('does not poison the operation tail after a rejected History read', async () => {
@@ -418,20 +427,15 @@ describe('Web Observer browser transport', () => {
       observedLastSequence: 1,
     };
     const fixture = harness({ historyPages: [firstPage] });
-    const connected = fixture.transport.connect();
-    (await waitForSocket(fixture.sockets)).open();
-    await connected;
+    await fixture.transport.connect();
     await expect(fixture.transport.loadHistory('session-1')).rejects.toMatchObject({
       reason: 'resync_required',
     });
     await expect(fixture.transport.disconnect()).resolves.toBeUndefined();
 
     const reconnect = fixture.transport.connect();
-    for (let index = 0; index < 20 && fixture.sockets.length < 2; index += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    fixture.sockets[1]?.open();
     await expect(reconnect).resolves.toMatchObject({ generation: 2, tabHandle: 'tab-2' });
+    expect(fixture.sockets).toHaveLength(0);
   });
 
   test('aborts a hung HTTP operation so queued disconnect can complete', async () => {

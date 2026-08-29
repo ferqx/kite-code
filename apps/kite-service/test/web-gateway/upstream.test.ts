@@ -80,7 +80,7 @@ describe('Workspace Worker Web Gateway upstream', () => {
     });
     expect(directory.workspaces).toHaveLength(1);
     expect(directory.workspaces[0]).toMatchObject({
-      workspaceId: workspace.workspaceDigest,
+      workspaceId: fixture.worker.identity.workerScopeId,
       label: workspace.projectId,
     });
     expect(directory.workspaces[0]?.sessions[0]).toMatchObject({
@@ -107,6 +107,45 @@ describe('Workspace Worker Web Gateway upstream', () => {
     expect(fixture.calls.historyLoadSession).toBe(1);
 
     await observer.disconnect({ schema: 'kite.app.web.disconnect-request.v1' });
+  });
+
+  test('keeps Catalog Sessions grouped and unavailable while their Worker is idle', async () => {
+    const fixture = createWorkerFixture();
+    const coordinator = fixture.withWorker(() => {
+      throw new Error('Worker is idle');
+    });
+    const upstream = trackUpstream(
+      createWebGatewayUpstream({
+        coordinator,
+        gatewayInstanceId: 'gateway-idle-worker',
+        contractRevision: 'web-contract-1',
+      }),
+    );
+    const observer = upstream.createObserver({
+      tabHandle: 'tab-idle-worker',
+      connectionGeneration: 1,
+    });
+
+    const directory = await observer.listDirectory({
+      schema: 'kite.app.web.directory-request.v1',
+    });
+    expect(directory.workspaces).toEqual([
+      {
+        workspaceId: fixture.worker.identity.workerScopeId,
+        label: `Workspace ${fixture.worker.identity.workerScopeId.slice(-8)}`,
+        sessions: [
+          {
+            sessionId,
+            displayName: sessionId,
+            updatedAt: Date.parse('2026-08-29T00:00:00.000Z'),
+            lastSequence: 0,
+            status: 'unavailable',
+          },
+        ],
+      },
+    ]);
+    expect(fixture.calls.historyListSessions).toBe(0);
+    expect(fixture.calls.mintPurposes).toEqual([]);
   });
 
   test('maps only durable revision notifications and closes the Observer connection', async () => {

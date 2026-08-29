@@ -13,7 +13,9 @@ SQLite 或 raw Runtime event。
 
 `src/transport/client.ts` 是唯一生产 Browser adapter：它同步捕获 launch URL fragment 并用
 `history.replaceState` 清除 fragment，随后通过 `POST /_kite/web/bootstrap`、`POST /_kite/web/tabs` 和
-`x-kite-web-tab` 访问 closed Gateway routes；running Session 通过 `/_kite/web/client` 的 closed WebSocket
+`x-kite-web-tab` 访问 closed Gateway routes。bootstrap/tab成功后Directory与History立即走HTTP snapshot，不等待或依赖live
+WebSocket；因此live unavailable不能清空server已返回的Workspace/Session列表。只有选中running Session时才懒建立
+`/_kite/web/client` 的 closed WebSocket
 `initialize`、`subscribe`、`unsubscribe`、`disconnect` 帧接入。WebSocket terminal unavailable/resync 会停止旧
 generation 的事件归约，重新建立 tab、读取 bounded History，再恢复 live；不会把 transport error 静默替换为样例数据。
 

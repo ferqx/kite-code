@@ -102,6 +102,9 @@ current-format outbox。`workerScopeId` 是 manager-local routing/response-check
 request 只允许 bounded `cursor` 与 `limit`。manager收到响应后仍逐条校验scope、sequence/cursor推进，再把path-free metadata写入
 Catalog/registry。这样 Browser仍不接触Workspace path、Store或Worker endpoint，同时严格unknown-field拒绝不会把已有Session误显示为
 空Workspace目录。
+Gateway Directory以Catalog中的`workerScopeId`作为稳定opaque `workspaceId`。即使Worker已按idle策略退出、当前无法解析canonical
+Workspace或History，Catalog中的既有Session仍按该scope返回，使用server生成的path-free label并把status标为`unavailable`；不得
+`continue`丢弃整组。Worker在线时才用authenticated Workspace identity补project label、History sequence和running/idle status。
 
 `apps/kite-service/src/web-observer/core.ts` 只读取注入的 Directory、History 与已经投影的 `RuntimeClientEvent` live port。Directory
 结果先经 exact codec round-trip，History 只接受 current-format `WebObserverHistoryPort`，sequence gap、history change、queue
@@ -149,6 +152,9 @@ launch、lock identity mismatch或replacement state仍不得cleanup/spawn。该�
 transport failure 显示 unavailable，不打包或回退本地样例。页面保持 Workspace 分组既有 Session、消息/History、running live state 与主动断连，
 不创建 Session、不发送 prompt、不回复 approval/interaction、不 cancel/interrupt/rewind/fork、不申请 Controller，也不直接访问
 SQLite、Store、Host、Native credential 或 raw Runtime event。
+Browser完成bootstrap/tab后立即通过HTTP读取Directory/History；live WebSocket只在running Session订阅时懒建立。WS initialize或live
+失败只能降级实时状态，不能阻止或清空HTTP已返回的Workspace/Session snapshot；typed terminal resync仍会废弃旧tab generation并按
+bounded History reset规则重建。
 
 ## Store 7 与 generation cutover
 

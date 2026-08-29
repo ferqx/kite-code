@@ -203,14 +203,21 @@ class ObserverAdapter {
     const metadata = await listAllMetadata(this.#options.coordinator);
     const groups = new Map<string, DirectoryGroup>();
     for (const entry of metadata) {
+      const existing = groups.get(entry.workerScopeId);
+      const group = existing ?? {
+        workerScopeId: entry.workerScopeId,
+        entries: [],
+      };
       let resolved: CoordinatorResultByMethod['resolveSessionWorkspace'];
       try {
         resolved = coordinatorResult(
           await this.#options.coordinator.resolveSessionWorkspace({ sessionId: entry.sessionId }),
         );
       } catch {
-        // A session that disappeared during a read cannot be assigned to a
-        // canonical Workspace without guessing; omit it from this snapshot.
+        // Catalog metadata still carries the stable path-free Worker scope. Preserve the
+        // existing Session in an unavailable group instead of making an idle Workspace vanish.
+        group.entries.push({ metadata: entry });
+        groups.set(entry.workerScopeId, group);
         continue;
       }
       if (resolved.workerScopeId !== entry.workerScopeId) {
@@ -218,39 +225,41 @@ class ObserverAdapter {
       }
       const workspace = toWorkspaceIdentity(resolved.workspace);
       if (resolved.worker !== null) assertWorkerReference(resolved.worker, workspace);
-      const key = workspace.workspaceDigest;
-      const existing = groups.get(key);
-      if (existing && !sameWorkspace(existing.workspace, workspace)) {
+      if (group.workspace !== undefined && !sameWorkspace(group.workspace, workspace)) {
         throw unavailable('Coordinator returned conflicting Workspace identities.');
       }
-      const group = existing ?? {
-        workspace,
-        source: resolved.worker,
-        entries: [],
-      };
       if (
+        group.source !== undefined &&
         group.source !== null &&
         resolved.worker !== null &&
         !sameWorkerReference(group.source, resolved.worker)
       ) {
         throw unavailable('Coordinator returned a changing Worker identity.');
       }
-      if ((group.source === null) !== (resolved.worker === null)) {
+      if (group.source !== undefined && (group.source === null) !== (resolved.worker === null)) {
         throw unavailable('Coordinator returned an inconsistent Worker route.');
       }
-      group.entries.push({ metadata: entry, worker: resolved.worker });
-      groups.set(key, group);
+      group.workspace = workspace;
+      group.source = resolved.worker;
+      group.entries.push({ metadata: entry });
+      groups.set(entry.workerScopeId, group);
     }
 
     const output: WebDirectoryEntry[] = [];
     for (const group of groups.values()) {
       let historyEntries: ReadonlyMap<string, RuntimeLogSessionEntry> = new Map();
-      let workerUnavailable = group.source === null;
+      let workerUnavailable = group.workspace === undefined || group.source == null;
       let workerBinding: WorkerBinding | undefined;
       const statuses = new Map<string, WebSessionStatus>();
-      if (!workerUnavailable && this.#binding.connectionGeneration >= 1) {
+      if (
+        !workerUnavailable &&
+        group.workspace !== undefined &&
+        group.source !== undefined &&
+        group.source !== null &&
+        this.#binding.connectionGeneration >= 1
+      ) {
         try {
-          workerBinding = await this.workerFor(group.workspace, group.source!);
+          workerBinding = await this.workerFor(group.workspace, group.source);
           historyEntries = await loadAllWorkerSessions(workerBinding.history);
           await workerBinding.runtime.connect();
           for (const { metadata } of group.entries) {
@@ -284,8 +293,11 @@ class ObserverAdapter {
             right.updatedAt - left.updatedAt || left.sessionId.localeCompare(right.sessionId),
         );
       output.push({
-        workspaceId: group.workspace.workspaceDigest,
-        label: this.labelFor(group.workspace),
+        workspaceId: group.workerScopeId,
+        label:
+          group.workspace === undefined
+            ? unavailableWorkspaceLabel(group.workerScopeId)
+            : this.labelFor(group.workspace),
         sessions,
       });
     }
@@ -622,12 +634,17 @@ interface WorkerBinding {
 }
 
 interface DirectoryGroup {
-  readonly workspace: KiteWorkspaceIdentity;
-  readonly source: CoordinatorWorkerReference | null;
+  readonly workerScopeId: string;
+  workspace?: KiteWorkspaceIdentity;
+  source?: CoordinatorWorkerReference | null;
   readonly entries: Array<{
     readonly metadata: CoordinatorSessionMetadata;
-    readonly worker: CoordinatorWorkerReference | null;
   }>;
+}
+
+function unavailableWorkspaceLabel(workerScopeId: string): string {
+  const suffix = workerScopeId.slice(-8);
+  return `Workspace ${suffix}`;
 }
 
 type WebDirectoryEntry = Awaited<ReturnType<WebObserverDirectoryPort['list']>>[number];

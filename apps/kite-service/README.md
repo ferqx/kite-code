@@ -24,7 +24,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。
 - Coordinator 的 Directory mirror 只通过 authenticated Worker control link 读取 current-format outbox。manager-local
   `workerScopeId` 只用于选择并复核 exact Worker，不进入 strict control request；wire body 只投影 bounded `cursor/limit`，
-  再逐条复核响应 scope 后写入 path-free Catalog，避免 strict codec 把合法目录读取静默降成空目录。
+  再逐条复核响应 scope 后写入 path-free Catalog，避免 strict codec 把合法目录读取静默降成空目录。Gateway始终按该stable
+  path-free scope投影既有Session；Worker idle/unroutable时仍返回同组Session并标记`unavailable`，不因无法取得Runtime/History而
+  删除整个Workspace。Worker在线时才用authenticated identity补project label、History与live status。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
