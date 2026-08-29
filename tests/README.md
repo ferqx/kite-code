@@ -62,7 +62,9 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
-默认 workspace runner 当前覆盖十四个 workspace。`apps/kite-web/test/` 验证Browser observer presentation reducer；
+默认workspace/build runner当前覆盖十五个workspace。`packages/agent-api-contract/test/`验证Public snake_case DTO、closed request、
+forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants；独立
+`check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`apps/kite-web/test/`验证Browser observer presentation reducer；
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact

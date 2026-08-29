@@ -1,0 +1,10 @@
+{
+  "schema": "kite.agent-api.problem.v1",
+  "type": "urn:kite:agent-api:problem:revision_conflict",
+  "title": "Session revision changed",
+  "status": 412,
+  "code": "revision_conflict",
+  "request_id": "request-1",
+  "retryable": false,
+  "current_revision": 42
+}

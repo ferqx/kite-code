@@ -1,0 +1,13 @@
+{
+  "schema": "kite.agent-api.create-run.v1",
+  "input": "Implement the approved change",
+  "phase": "building",
+  "initial_skills": [
+    {
+      "skill_id": "document-before-commit",
+      "input": {
+        "action": "stage"
+      }
+    }
+  ]
+}

@@ -24,12 +24,12 @@ Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read
 
 ## 实施状态（2026-08-29）
 
-KASAPI-00A～00C 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～01A 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
-pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。当前执行入口为KASAPI-01A `agent-api-contract` package；不创建Run
-mutation listener。
+pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
+fixtures与独立package Gate；当前执行入口为KASAPI-01B同源OpenAPI/Schema generation，不创建production listener或Run mutation。
 
 ## 1. 执行结论
 
@@ -276,7 +276,12 @@ Rollback：仍无listener/Store变化；contract freeze可由新ADR修订。
 
 ### Phase KASAPI-01：Agent API Contract 与 OpenAPI
 
-#### KASAPI-01A：`agent-api-contract` package
+#### KASAPI-01A：`agent-api-contract` package（已完成）
+
+完成证据：`packages/agent-api-contract`已包含唯一root browser export、snake_case DTO/schema、strict request与forward-compatible response
+codec、bounded JSON/UTF-8 limits、fixtures和owner tests；`check:agent-api-packages`固定zero workspace dependency/禁止private Runtime与Node/Bun/
+React import。root workspace build/typecheck/default discovery、documentation map与
+[`Agent API current authority`](../../active/agent-api-contract.md)已同步；零listener/Service consumer。
 
 目标文件：
 

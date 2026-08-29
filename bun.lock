@@ -32,6 +32,7 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.5.0",
+        "@kite-ai/agent-api-contract": "workspace:*",
         "@kite-ai/agent-kernel": "workspace:*",
         "@kite-ai/builtin-runtime": "workspace:*",
         "@kite-ai/kite-app-contract": "workspace:*",
@@ -112,6 +113,13 @@
         "typescript": "^5.9.3",
         "vite": "^7.1.7",
         "vitest": "^3.2.4",
+      },
+    },
+    "packages/agent-api-contract": {
+      "name": "@kite-ai/agent-api-contract",
+      "version": "0.0.0",
+      "dependencies": {
+        "zod": "^4.3.6",
       },
     },
     "packages/agent-kernel": {
@@ -377,6 +385,8 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
+
+    "@kite-ai/agent-api-contract": ["@kite-ai/agent-api-contract@workspace:packages/agent-api-contract"],
 
     "@kite-ai/agent-kernel": ["@kite-ai/agent-kernel@workspace:packages/agent-kernel"],
 

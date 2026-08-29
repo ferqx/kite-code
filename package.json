@@ -45,6 +45,7 @@
     "lint": "biome lint .",
     "check:core-boundary": "bun run scripts/check-core-boundary.ts",
     "check:runtime-packages": "bun run scripts/check-runtime-packages.ts",
+    "check:agent-api-packages": "bun run scripts/check-agent-api-packages.ts",
     "check:test-ownership": "bun run scripts/check-test-ownership.ts",
     "check:pre-release-architecture": "bun run scripts/check-pre-release-architecture.ts",
     "check:compaction-legacy": "bun run scripts/check-compaction-legacy.ts",
@@ -80,6 +81,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
+    "@kite-ai/agent-api-contract": "workspace:*",
     "@kite-ai/agent-kernel": "workspace:*",
     "@kite-ai/builtin-runtime": "workspace:*",
     "@kite-ai/kite-app-contract": "workspace:*",

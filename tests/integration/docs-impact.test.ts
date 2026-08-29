@@ -164,6 +164,12 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/agent-kernel/src/reducer.ts')).toEqual([
       'agent-kernel',
     ]);
+    expect(triggeredRepositoryRules('packages/agent-api-contract/src/schemas.ts')).toEqual([
+      'agent-api-contract',
+    ]);
+    expect(triggeredRepositoryRules('scripts/check-agent-api-packages.ts')).toEqual([
+      'agent-api-contract',
+    ]);
     expect(
       triggeredRepositoryRules('packages/agent-kernel/src/core/authorization/reducer.ts'),
     ).toEqual(['agent-kernel-authorization']);

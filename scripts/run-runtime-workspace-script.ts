@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const WORKSPACES = [
+  'packages/agent-api-contract',
   'packages/runtime-contract',
   'packages/runtime-protocol',
   'packages/runtime-server',
