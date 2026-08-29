@@ -43,8 +43,9 @@ fixture。后续新增 Service 或 package 时，只有在 source 与 owner READ
 只消费 browser-safe `@kite-ai/kite-app-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
 Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
 KASAPI-01A后，根build、test、typecheck discovery覆盖15个实际workspace；新增的
-`packages/agent-api-contract`是zero-workspace-dependency、browser-safe Public wire contract，当前没有listener或consumer。既有Runtime
-package owner gate继续覆盖其14个Runtime/App workspace，独立`check:agent-api-packages`覆盖Public contract；`apps/kite-web`仍不成为Runtime
+`packages/agent-api-contract`是zero-workspace-dependency、browser-safe Public wire contract，当前由Service Agent API façade消费。Runtime
+package owner gate当前覆盖15个workspace并检查Service→contract唯一依赖边，独立`check:agent-api-packages`继续强化Public contract/consumer
+边界；`apps/kite-web`仍不成为Runtime
 composition owner。KASAPI-01B后，该owner rule同时覆盖package-local generator script与committed `generated/**`，确保artifact变化命中同一
 current authority；generator不成为runtime export。Agent API跨包当前边界见
 [`active/agent-api-contract.md`](active/agent-api-contract.md)。

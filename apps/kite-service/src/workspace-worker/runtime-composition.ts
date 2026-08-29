@@ -1,5 +1,6 @@
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import { createLocalRuntimeServiceToken } from '@kite-ai/kite-local-runtime/service';
+import { type AgentApiRouteHandler, createAgentApiRouteHandler } from '../agent-api';
 import {
   createKiteServiceCarrier,
   KITE_SERVICE_CONNECT_PATH,
@@ -14,6 +15,7 @@ import {
   KITE_SERVICE_CONTROLLER_GENERATION_HEADER,
   KITE_SERVICE_CONTROLLER_SESSION_HEADER,
 } from '../carrier/native-loopback-carrier';
+import type { ServiceRuntimeConnectionBinding } from '../carrier/ports';
 import {
   createWorkspaceWorkerCapabilityAuthority,
   createWorkspaceWorkerControlCarrier,
@@ -156,6 +158,7 @@ export async function createWorkspaceWorkerRuntimeComposition(
   let dataCarrier: KiteServiceCarrier | undefined;
   let controlCarrier: WorkspaceWorkerControlCarrier | undefined;
   let capabilityAuthority: WorkspaceWorkerCapabilityAuthority | undefined;
+  let agentApi: AgentApiRouteHandler | undefined;
   let ready = false;
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -185,6 +188,8 @@ export async function createWorkspaceWorkerRuntimeComposition(
       failures.push(error);
     }
     dataCarrier = undefined;
+    agentApi?.close();
+    agentApi = undefined;
     try {
       await controlCarrier?.close();
     } catch (error) {
@@ -253,13 +258,22 @@ export async function createWorkspaceWorkerRuntimeComposition(
         clientActivities.set(connectionId, activity);
         applicationOwner?.application.onConnectionBound?.(connectionId, admittedWorkspace);
       },
-      onConnectionClosed: (connectionId: string) => {
+      onConnectionClosed: (
+        connectionId: string,
+        connectionBinding?: ServiceRuntimeConnectionBinding,
+      ) => {
         const activity = clientActivities.get(connectionId);
         if (activity) {
           clientActivities.delete(connectionId);
           void Promise.resolve(activity[Symbol.asyncDispose]()).catch(() => undefined);
         }
-        applicationOwner?.application.onConnectionClosed?.(connectionId);
+        if (connectionBinding) {
+          agentApi?.revokeClientGeneration(
+            connectionBinding.clientId,
+            connectionBinding.connectionGeneration,
+          );
+        }
+        applicationOwner?.application.onConnectionClosed?.(connectionId, connectionBinding);
       },
     });
     capabilityAuthority = createWorkspaceWorkerCapabilityAuthority({
@@ -273,13 +287,29 @@ export async function createWorkspaceWorkerRuntimeComposition(
     // request is checked through the Worker capability verifier below.
     const accessToken = createLocalRuntimeServiceToken();
     const dataControlToken = createLocalRuntimeServiceToken();
+    const serverVersion = options.serverVersion ?? 'kite-workspace-worker-v1';
+    agentApi = createAgentApiRouteHandler({
+      serverVersion,
+      buildId: options.buildId,
+      admitWorkspace: async () => {
+        const result = await wrappedApplication.workspaceAdmission.admitForConnect(
+          options.workspace.canonicalPath,
+        );
+        return result.outcome;
+      },
+      consumeCapability: (secret) => capabilityAuthority!.consumeAgentApiCapability(secret),
+      isClientGenerationCurrent: (clientId, connectionGeneration) =>
+        capabilityAuthority!.isClientGenerationCurrent(clientId, connectionGeneration),
+      capabilities: [],
+    });
     dataCarrier = createKiteServiceCarrier({
       application: wrappedApplication,
       instanceId: options.workerInstanceId,
-      serverVersion: options.serverVersion ?? 'kite-workspace-worker-v1',
+      serverVersion,
       buildId: options.buildId,
       accessToken,
       controlToken: dataControlToken,
+      agentApi,
       accessTokenVerifier: ({ token, request, pathname }) => {
         const clientId = request.headers.get(KITE_WORKER_CLIENT_ID_HEADER);
         const generationValue = request.headers.get(KITE_WORKER_CONNECTION_GENERATION_HEADER);

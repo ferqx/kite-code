@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyzeAgentApiPackages } from '../../../scripts/check-agent-api-packages';
@@ -28,6 +28,15 @@ function repositoryFixture(): string {
   ]) {
     cpSync(join(repositoryRoot, path), join(root, path), { recursive: true });
   }
+  mkdirSync(join(root, 'apps/kite-service/src/agent-api'), { recursive: true });
+  cpSync(
+    join(repositoryRoot, 'apps/kite-service/package.json'),
+    join(root, 'apps/kite-service/package.json'),
+  );
+  writeFileSync(
+    join(root, 'apps/kite-service/src/agent-api/context.ts'),
+    "import { AGENT_API_VERSION } from '@kite-ai/agent-api-contract';\nexport const version = AGENT_API_VERSION;\n",
+  );
   return root;
 }
 

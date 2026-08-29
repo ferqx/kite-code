@@ -22,15 +22,16 @@
 [`Runtime Run Store V1子计划`](2026-08-29-kite-runtime-run-store-v1.md)，固定State 27 / Store 8 canonical Run authority与migration。
 Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read-only façade可以继续。
 
-## 实施状态（2026-08-29）
+## 实施状态（2026-08-30）
 
-KASAPI-00A～01B 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～02A 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
 pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
-fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。当前执行
-入口为KASAPI-02A authenticated read-only route shell；不创建Run mutation。
+fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
+Workspace Worker listener已接入authenticated Agent API context与route shell；当前执行入口为KASAPI-02B read-only
+Session/History/Checkpoint adapter，不创建Run mutation。
 
 ## 1. 执行结论
 
@@ -323,7 +324,15 @@ Rollback：删除generated artifacts，不影响Runtime。
 
 ### Phase KASAPI-02：Read-only Worker façade 与 API docs
 
-#### KASAPI-02A：Authenticated Agent API context 与 Worker route shell
+#### KASAPI-02A：Authenticated Agent API context 与 Worker route shell（已完成）
+
+完成证据：现有Workspace Worker listener通过注入式Agent API façade承载`/v1`与`/v1/auth/*`，没有第二listener、Runtime或Store；
+Coordinator只允许Native peer mint `agent_api_observer|agent_api_controller` one-shot capability，Web peer保持`web_observer`且不能mint Agent API
+purpose。exchange在消费capability前重新执行Workspace Trust admission，并建立60分钟、仅保存SHA-256 token digest且按
+Worker/Workspace/Client/generation绑定的内存context；每请求检查generation，logout、connection close、drain/restart均撤销context。
+`GET /v1`只发布空capability集合，未注册任何资源或mutation route；Browser `Origin`、Cookie、Fetch Metadata及不兼容contract均fail
+closed。Service/context、carrier、Worker composition与Coordinator owner tests覆盖one-shot、role derivation、Trust不消费、TTL/generation、
+overload、Browser signal、同listener dispatch与controller mutation仍404。
 
 交付：在现有 Workspace Worker data listener中注册exact `/v1` routes，不创建第二listener；实现00C冻结的 capability exchange/context、
 observer/controller role admission、request ID、body/header/query limits、drain与低信息auth failure。route shell只开放ServerInfo和read-only

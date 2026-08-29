@@ -41,6 +41,16 @@ export const COORDINATOR_METHODS = Object.freeze([
 
 export type CoordinatorMethod = (typeof COORDINATOR_METHODS)[number];
 
+export const COORDINATOR_WORKER_CAPABILITY_PURPOSES = Object.freeze([
+  'native_client',
+  'web_observer',
+  'agent_api_observer',
+  'agent_api_controller',
+] as const);
+export type CoordinatorWorkerCapabilityPurpose =
+  (typeof COORDINATOR_WORKER_CAPABILITY_PURPOSES)[number];
+const workerCapabilityPurpose = z.enum(COORDINATOR_WORKER_CAPABILITY_PURPOSES);
+
 export class CoordinatorValidationError extends TypeError {
   constructor(message: string) {
     super(message);
@@ -292,7 +302,7 @@ const mintWorkerConnectionCapabilityParams = z
     workerScopeId: boundedText,
     clientId: boundedText,
     connectionGeneration: generation,
-    purpose: z.enum(['native_client', 'web_observer']),
+    purpose: workerCapabilityPurpose,
   })
   .strict();
 const subscribeDirectoryChangesParams = z
@@ -466,7 +476,7 @@ const mintWorkerConnectionCapabilityResultSchema = z
     worker: workerReferenceSchema,
     clientId: boundedText,
     connectionGeneration: generation,
-    purpose: z.enum(['native_client', 'web_observer']),
+    purpose: workerCapabilityPurpose,
     workerConnectionCapability: capability,
     expiresAt: z.iso.datetime({ offset: true }),
   })

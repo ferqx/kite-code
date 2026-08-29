@@ -384,6 +384,28 @@ describe('Coordinator dispatcher and request client', () => {
       webGateway,
     );
     expect(observerCapability).toMatchObject({ outcome: 'ok' });
+    const forbiddenAgentApiCapability = await dispatcher.dispatch(
+      request('mintWorkerConnectionCapability', {
+        workspace,
+        workerScopeId: worker.identity.workerScopeId,
+        clientId: webGateway.instanceId,
+        connectionGeneration: 1,
+        purpose: 'agent_api_observer',
+      }),
+      webGateway,
+    );
+    expect(forbiddenAgentApiCapability).toMatchObject({ outcome: 'error' });
+    const agentApiCapability = await dispatcher.dispatch(
+      request('mintWorkerConnectionCapability', {
+        workspace,
+        workerScopeId: worker.identity.workerScopeId,
+        clientId: client.instanceId,
+        connectionGeneration: 1,
+        purpose: 'agent_api_controller',
+      }),
+      client,
+    );
+    expect(agentApiCapability).toMatchObject({ outcome: 'ok' });
   });
 });
 

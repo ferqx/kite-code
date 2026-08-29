@@ -8,6 +8,7 @@ import type {
   CoordinatorIdentity,
   CoordinatorSessionMetadata,
   CoordinatorWebGatewayIdentity,
+  CoordinatorWorkerCapabilityPurpose,
   CoordinatorWorkerReference,
   CoordinatorWorkspaceIdentity,
 } from './codecs';
@@ -31,7 +32,7 @@ export interface CoordinatorWorkerControlPort {
     readonly worker: CoordinatorWorkerReference;
     readonly clientId: string;
     readonly connectionGeneration: number;
-    readonly purpose: 'native_client' | 'web_observer';
+    readonly purpose: CoordinatorWorkerCapabilityPurpose;
   }): Promise<{ readonly capability: string; readonly expiresAt: string }>;
 }
 

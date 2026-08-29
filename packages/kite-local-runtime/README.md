@@ -34,6 +34,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   完成FIN并幂等释放connection；client `transport.close()`不会留下永久half-open socket，因此`kite web/status`等短命令打印结果后
   能正常退出。client cleanup会在inbox close callback清除外层binding前保留并half-close exact socket；该socket close不等于停止
   Coordinator、Worker或Gateway owner。
+- Coordinator capability purpose当前封闭为`native_client`、`web_observer`、`agent_api_observer`、`agent_api_controller`。
+  Web Gateway peer只能请求`web_observer`；authenticated Native peer可请求native/Agent API purpose。control plane只转发一次性
+  capability与binding metadata，不代理Agent `/v1` data plane，也不保存context token。
 - 固定client contract revision、Protocol V1 identity与loopback endpoint shape；拒绝unknown field、non-loopback endpoint、
   secret-bearing descriptor与unsafe JSON。
 

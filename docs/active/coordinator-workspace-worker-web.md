@@ -166,6 +166,16 @@ Browser完成bootstrap/tab后立即通过HTTP读取Directory/History；live WebS
 失败只能降级实时状态，不能阻止或清空HTTP已返回的Workspace/Session snapshot；typed terminal resync仍会废弃旧tab generation并按
 bounded History reset规则重建。
 
+## Agent API认证shell
+
+canonical Workspace Worker当前在同一data listener拥有`/v1`Agent API认证shell；Coordinator只允许authenticated Native peer mint
+`agent_api_observer|agent_api_controller` one-shot capability并继续只做routing/control plane，不代理HTTP data plane。Web Gateway peer仍只
+能mint`web_observer`，Browser launch token/cookie/Origin不能exchange Agent context。
+
+exchange在消费capability前重验Workspace Trust，context为Worker-local hash-only、60分钟absolute TTL并绑定Client generation。当前只开放
+exchange/logout/ServerInfo，capabilities为空；Controller role不取得或替代Store 7 Session Controller lease。Session/History/Checkpoint/
+Run/mutation/SSE均尚未开放，Web Observer永久只读边界不变。
+
 ## Store 7 与 generation cutover
 
 `apps/kite-service/src/bootstrap.ts` 的显式 legacy composition仍只打开 State 27 / Store 6 /

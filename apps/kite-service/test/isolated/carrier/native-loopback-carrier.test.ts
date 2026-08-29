@@ -77,6 +77,29 @@ afterEach(async () => {
 });
 
 describe('Kite Service Native loopback carrier', () => {
+  test('dispatches /v1 only to the injected Agent API façade on the existing listener', async () => {
+    const requests: string[] = [];
+    const fixture = createFixture({
+      agentApi: {
+        handle(request) {
+          requests.push(new URL(request.url).pathname + new URL(request.url).search);
+          return new Response('agent-api', { status: 200 });
+        },
+      },
+    });
+    const carrier = track(fixture.carrier);
+    expect(await fetch(`${carrier.origin}/v1`).then((response) => response.text())).toBe(
+      'agent-api',
+    );
+    expect(
+      await fetch(`${carrier.origin}/v1/sessions?limit=1`).then((response) => response.text()),
+    ).toBe('agent-api');
+    expect(requests).toEqual(['/v1', '/v1/sessions?limit=1']);
+
+    const unavailable = track(createFixture().carrier);
+    expect(await fetch(`${unavailable.origin}/v1`).then((response) => response.status)).toBe(404);
+  });
+
   test('serves fixed health/readiness and separates access/control credentials', async () => {
     const fixture = createFixture();
     const carrier = track(fixture.carrier);
@@ -917,6 +940,7 @@ function createFixture(
     readonly now?: () => number;
     readonly randomBytes?: (size: number) => Uint8Array;
     readonly limits?: KiteServiceCarrierLimits;
+    readonly agentApi?: { handle(request: Request): Response | Promise<Response> };
   } = {},
 ): {
   readonly carrier: KiteServiceCarrier;
@@ -1044,6 +1068,7 @@ function createFixture(
     buildId: 'dev:0123456789012345678901234567890123456789',
     accessToken: ACCESS_TOKEN,
     controlToken: CONTROL_TOKEN,
+    ...(input.agentApi ? { agentApi: input.agentApi } : {}),
     ...(input.isReady ? { isReady: input.isReady } : {}),
     requestIp: input.requestIp,
     limits: {

@@ -16,8 +16,9 @@
 
 `@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前实现DTO、codec、limits、
 fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；尚无
-production HTTP listener、auth exchange、Agent API SDK、Store 8 Run route或Web `/api-docs` route。package/artifact存在不表示Agent API ready，
-也不改变private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
+Workspace Worker production listener、auth exchange与ServerInfo shell已经实现；Agent API SDK、Session/History/Checkpoint adapter、Store 8
+Run route、mutation、SSE与Web `/api-docs` route尚未实现。package/artifact或ServerInfo存在不表示resource capability ready，也不改变
+private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
 
 唯一root export提供snake_case的ServerInfo、Context、Session、Run、Interaction/queue、History、Checkpoint、page、mutation result、Problem
 Details、SSE event/resync与request/query schemas。Request decoder先做bounded JSON admission，再递归拒绝unknown field；response decoder允许旧
@@ -50,7 +51,18 @@ History，也不把private camelCase DTO透传为Public wire。
 - `digest.json`记录每个non-digest artifact的SHA-256并以domain-separated aggregate绑定完整集合；
 - generator输出canonical key order、无timestamp/absolute path/real endpoint。owner tests逐byte比较committed output并重算digest。
 
+## KASAPI-02A 当前carrier/context
+
+- `/v1`复用canonical Workspace Worker现有loopback data listener；Coordinator/Gateway不代理，未创建第二listener；
+- Native-only Worker capability purpose增加`agent_api_observer|agent_api_controller`，Web Gateway不能mint；
+- exchange重新验证Workspace Trust后，以one-shot capability换取60分钟、最多1024个、hash-only in-memory context；
+- context绑定WorkerScope/instance/Workspace digest/Client/generation/role；TTL、generation drift、Native connection close、Worker drain/restart
+  或logout撤销；
+- role只来自capability purpose；`controller`不授予Session Controller lease，当前所有resource/mutation route固定404；
+- ServerInfo capabilities当前为空；只有KASAPI-02B route/adapter Gate完成后才能增加read capability；
+- Origin/Cookie/Sec-Fetch、CORS/OPTIONS、duplicate/unknown/oversized body与credential混用fail closed，Problem不泄漏内部binding。
+
 ## 后续Gate
 
-KASAPI-02及以后接入Service/Web/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；在listener实际接入前不得把
-本文扩写成运行中endpoint。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。
+KASAPI-02B及以后接入read adapter/Web/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
+的route提前加入ServerInfo。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。

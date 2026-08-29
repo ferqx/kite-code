@@ -200,6 +200,9 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-service/src/shell.ts')).toEqual([
       'kite-service-application',
     ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/agent-api/context.ts')).toEqual([
+      'kite-service-agent-api',
+    ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/carrier/native-loopback-carrier.ts'),
     ).toEqual(['kite-service-carrier']);

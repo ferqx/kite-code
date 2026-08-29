@@ -33,6 +33,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   删除整个Workspace。Worker在线时才用authenticated identity补project label、History与live status。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
+- Workspace Worker同一data listener当前增加Agent API `/v1`认证shell：one-shot `agent_api_observer|agent_api_controller`
+  capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；当前只开放ServerInfo/logout，capabilities为空，
+  其他resource/mutation route保持404。Coordinator不代理data plane，Browser/Web Gateway不能mint或使用该context。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
   才签发instance/Workspace-bound one-shot ticket，Runtime create与persisted Session identity继续交叉校验。
 - 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain，关闭carrier/application后最后
@@ -43,15 +46,15 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
 - 不拥有 terminal CLI/TUI、Ink/React、presentation reducer或client preference；不导入 `apps/kite-cli`。
 - 不提供第二默认Store、embedded fallback、app-to-app import、dual write、try-new-catch-old、通用多Store或OS Service。
 - 不把development WebSocket reference、parent-owned stdio test carrier或KLSV1-05 fake process harness描述为额外
-  production listener。Web 仅通过 private loopback Gateway 提供永久只读 Observer；remote/LAN、多租户、Desktop/public SDK
-  仍不在V1支持面。
+  production listener。Web 仅通过 private loopback Gateway 提供永久只读 Observer；Agent API当前也不提供remote/LAN、多租户、
+  Browser data plane、Desktop integration或SDK。
 - manager lifecycle/state/process primitive由 `@kite-ai/kite-local-runtime/manager` 提供，release composition选择
   explicit source/installed companion与Kite home；Service process不自行扮演client manager。
 
 ## 允许依赖
 
 允许依赖唯一 backend composition所需的 Builtin Runtime、Runtime Host/Server/SPI/Contract/Protocol、SQLite adapter、
-browser-safe App Contract与Native-only local-runtime substrate。禁止依赖 CLI/TUI或另一个App source。
+browser-safe App Contract、browser-safe Agent API Contract与Native-only local-runtime substrate。禁止依赖 CLI/TUI或另一个App source。
 
 ## 公开入口
 
@@ -108,6 +111,9 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
   drift返回`incompatible + build_mismatch`，任一结果都不授权清理alive/uncertain state或spawn replacement。
 - access/control token独立且restart-scoped；ticket为32-byte base64url、hash-only、30秒TTL、一次性、instance与
   Workspace bound。credential、token、raw Provider body与diagnostic secret不跨client seam。
+- Agent API connection capability同样为30秒hash-only one-shot，但只用于exchange；context token为32-byte base64url、hash-only、
+  60分钟absolute TTL，绑定Worker/Workspace/Client generation/role。generation drift、Native connection close与Worker drain清除context；
+  role不授予Session Controller lease。
 - Windows filesystem state通过current-user SID、protected owner-only DACL与non-reparse verifier保护；ACL drift
   fail closed。hosted Windows lifecycle/release job通过前，本地POSIX/focused tests与candidate layout仍不构成
   KLSV1-07三平台或全部PTY通过。
@@ -116,6 +122,7 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
 
 - [Runtime Application 与 App Control](docs/runtime-application.md)
 - [Native/stdio/development carrier](docs/runtime-server-carrier.md)
+- [Agent API context 与 route shell](docs/agent-api.md)
 - [Service state 与锁](docs/service-state.md)
 - [Service auth boundary](docs/service-auth.md)
 - [Service lifecycle 与恢复](docs/service-resilience.md)

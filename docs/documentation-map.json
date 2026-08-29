@@ -140,6 +140,19 @@
       ]
     },
     {
+      "id": "kite-service-agent-api",
+      "sources": ["apps/kite-service/src/agent-api/**"],
+      "authorities": [
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/agent-api.md",
+        "docs/active/agent-api-contract.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/coordinator-workspace-worker-web.md"
+      ]
+    },
+    {
       "id": "kite-service-application",
       "sources": [
         "apps/kite-service/package.json",

@@ -485,7 +485,11 @@ function createFakeCoordinator(input: {
   readonly mint?: (params: {
     readonly clientId: string;
     readonly connectionGeneration: number;
-    readonly purpose: 'native_client' | 'web_observer';
+    readonly purpose:
+      | 'native_client'
+      | 'web_observer'
+      | 'agent_api_observer'
+      | 'agent_api_controller';
     readonly workspace: CoordinatorWorkspaceIdentity;
     readonly workerScopeId: string;
   }) => Promise<{ readonly capability: string; readonly expiresAt: string }>;

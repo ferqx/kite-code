@@ -30,7 +30,8 @@ production HTTP listener、认证exchange、Run endpoint、SDK或Web API docs ro
 
 ## 公开入口
 
-唯一package export是`@kite-ai/agent-api-contract`根入口；deep import不是受支持contract。根入口只导出DTO/schema、codec、scalar与limits。
+唯一package export是`@kite-ai/agent-api-contract`根入口；deep import不是受支持contract。根入口只导出DTO/schema、codec、scalar、limits与
+generated aggregate artifact digest常量；不导出generator I/O。
 generator是package-local build tool，不从root runtime export导出；consumer读取`generated/` committed artifact。
 
 ## 关键不变量

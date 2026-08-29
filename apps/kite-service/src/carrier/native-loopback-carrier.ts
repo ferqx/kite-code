@@ -129,6 +129,10 @@ export interface KiteServiceCarrierOptions {
   /** Access and control material are supplied by the Service state owner. */
   readonly accessToken: string;
   readonly controlToken: string;
+  /** Stable Public Agent API façade; the carrier owns only loopback dispatch and drain framing. */
+  readonly agentApi?: {
+    handle(request: Request): Response | Promise<Response>;
+  };
   /** Optional Worker capability verifier; fixed access-token comparison remains the default. */
   readonly accessTokenVerifier?: (input: {
     readonly token: string;
@@ -232,6 +236,13 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         return fixedResponse(403, 'forbidden');
       }
       const url = new URL(request.url);
+      if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
+        if (!(options.isReady?.() ?? true) || !options.agentApi) {
+          emitDiagnostic(options.onDiagnostic, 'route_unavailable');
+          return fixedResponse(404, 'not_found');
+        }
+        return afterDispatchCloseBarrier(options.agentApi.handle(request), () => closed);
+      }
       if (url.search.length !== 0) {
         emitDiagnostic(options.onDiagnostic, 'route_rejected');
         return fixedResponse(403, 'forbidden');
@@ -1297,7 +1308,7 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
       onClose: (connectionId) => {
         this.#admission?.close();
         this.#sessions.delete(this);
-        this.#application.onConnectionClosed?.(connectionId);
+        this.#application.onConnectionClosed?.(connectionId, this.#connectionBinding);
       },
     });
     if (this.#connection.state === 'closed') this.forceClose(1013, 'server_unavailable');

@@ -67,6 +67,7 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
     'scripts/generate.ts',
     'generated/openapi.json',
     'generated/digest.json',
+    'generated/artifact-digest.ts',
     'generated/wire.d.ts',
   ];
   for (const path of required) {
@@ -179,6 +180,44 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
   for (const path of ['scripts/run-default-tests.ts', 'scripts/run-runtime-workspace-script.ts']) {
     if (!readFileSync(join(root, path), 'utf8').includes("'packages/agent-api-contract'")) {
       add('WORKSPACE_RUNNER_MISSING', path, 'contract workspace must be in the root runner');
+    }
+  }
+
+  const serviceManifest = JSON.parse(
+    readFileSync(join(root, 'apps/kite-service/package.json'), 'utf8'),
+  ) as PackageManifest;
+  if (serviceManifest.dependencies?.['@kite-ai/agent-api-contract'] !== 'workspace:*') {
+    add(
+      'SERVICE_CONTRACT_DEPENDENCY_MISSING',
+      'apps/kite-service/package.json',
+      'Service Agent API adapter must declare the Public contract dependency',
+    );
+  }
+  const serviceSourceFiles = files(join(root, 'apps/kite-service/src'), /\.ts$/u);
+  const agentApiSourceFiles = serviceSourceFiles.filter((path) =>
+    path.replaceAll('\\', '/').includes('/src/agent-api/'),
+  );
+  if (agentApiSourceFiles.length === 0) {
+    add(
+      'SERVICE_AGENT_API_SOURCE_MISSING',
+      'apps/kite-service/src/agent-api',
+      'Service Agent API adapter source is required after route integration',
+    );
+  }
+  for (const absolute of serviceSourceFiles) {
+    const path = relative(root, absolute).replaceAll('\\', '/');
+    for (const specifier of imports(readFileSync(absolute, 'utf8'))) {
+      if (!specifier.startsWith('@kite-ai/agent-api-contract')) continue;
+      if (
+        specifier !== '@kite-ai/agent-api-contract' ||
+        !path.startsWith('apps/kite-service/src/agent-api/')
+      ) {
+        add(
+          'SERVICE_CONTRACT_IMPORT_INVALID',
+          path,
+          'only the Service agent-api adapter may import the contract root',
+        );
+      }
     }
   }
 

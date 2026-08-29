@@ -147,5 +147,8 @@ export interface KiteServiceApplicationPort {
   readonly controller?: ServiceControllerPort;
   readonly control?: ServiceControlPort;
   readonly onConnectionBound?: (connectionId: string, workspace: KiteWorkspaceIdentity) => void;
-  readonly onConnectionClosed?: (connectionId: string) => void;
+  readonly onConnectionClosed?: (
+    connectionId: string,
+    binding?: ServiceRuntimeConnectionBinding,
+  ) => void;
 }

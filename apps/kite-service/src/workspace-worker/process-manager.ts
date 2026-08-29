@@ -31,7 +31,10 @@ import {
   WORKSPACE_OWNER_COORDINATION_HOME_ENV,
   WORKSPACE_OWNER_RESERVATION_NONCE_ENV,
 } from './reservation';
-import type { WorkerConnectionCapabilityRequest } from './worker';
+import {
+  isWorkerConnectionCapabilityPurpose,
+  type WorkerConnectionCapabilityRequest,
+} from './worker';
 
 export type { WorkspaceWorkerControlIdentity } from './process-host';
 
@@ -1471,7 +1474,7 @@ function assertCapabilityRequest(request: WorkspaceWorkerCapabilityRequest): voi
     !safeText(request.clientId, 512) ||
     !Number.isSafeInteger(request.connectionGeneration) ||
     request.connectionGeneration < 1 ||
-    (request.purpose !== 'native_client' && request.purpose !== 'web_observer')
+    !isWorkerConnectionCapabilityPurpose(request.purpose)
   ) {
     throw new TypeError('Worker capability request is invalid.');
   }

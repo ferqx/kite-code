@@ -237,7 +237,11 @@ function peerMayCall(peer: CoordinatorPeerIdentity, request: CoordinatorRequestF
     );
   }
   if (request.method === 'mintWorkerConnectionCapability') {
-    return request.params.purpose === 'native_client';
+    return (
+      request.params.purpose === 'native_client' ||
+      request.params.purpose === 'agent_api_observer' ||
+      request.params.purpose === 'agent_api_controller'
+    );
   }
   return true;
 }

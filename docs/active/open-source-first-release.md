@@ -53,6 +53,8 @@ GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime
 该 SHA 完全一致；不得把临时 merge ref 登记为最终候选提交。fork PR 只以只读权限构建其自身 head repository。
 归档 writer 会规范化 tar entry 时间戳并重算 header checksum；相同 target、manifest 和文件内容
 必须生成字节一致的 `.tar.gz`，不能让构建墙钟改变候选 SHA-256。
+Standalone build resolver机械覆盖十五个workspace package的全部public export，包括Service当前消费的browser-safe
+`agent-api-contract`；resolver直接指向repository source，不能经`node_modules/@kite-ai/*` workspace symlink解析。
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在

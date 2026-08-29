@@ -32,6 +32,7 @@ describe('ordinary open-source candidate archive', () => {
     const packageRoots = [
       'apps/kite-cli',
       'apps/kite-service',
+      'packages/agent-api-contract',
       'packages/agent-kernel',
       'packages/builtin-runtime',
       'packages/kite-app-contract',

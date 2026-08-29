@@ -32,6 +32,11 @@ identity不产生外部授权，也不读取repository正文、config、objects�
 decision/connect body、cwd、clientInfo与display name本身都不提升authority。`apps/kite-cli`没有trust repository或
 fallback writer，只保存语言、theme等UI-local preference。
 
+Agent API exchange也是同一门禁的consumer：Native peer mint的Workspace-bound one-shot capability本身不替代当前Trust。Worker在消费
+`Kite-Connection` capability前再次调用canonical Workspace admission；`untrusted`固定403，Trust/store unavailable固定503，二者都不
+消费capability、不创建context。成功context只绑定已验证Workspace digest，不接受request body/path改绑。Browser/Gateway credential不能
+进入该exchange。
+
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. canonicalize Workspace并解析关联external-read roots，形成`externalReadScopeDigest`。

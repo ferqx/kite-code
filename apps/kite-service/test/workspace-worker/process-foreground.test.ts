@@ -318,10 +318,14 @@ describe('Workspace Worker authenticated control carrier', () => {
   test('bounds outstanding capabilities, overwrites the same binding safely, and rejects old credentials', async () => {
     const workspace = makeWorkspace('/workspace/control-capacity');
     const identity = makeControlIdentity(workspace);
-    let nextByte = 1;
+    let nextValue = 1;
     const authority = createWorkspaceWorkerCapabilityAuthority({
       identity,
-      randomBytes: (size) => new Uint8Array(size).fill(nextByte++),
+      randomBytes: (size) => {
+        const bytes = new Uint8Array(size);
+        new DataView(bytes.buffer).setUint32(0, nextValue++);
+        return bytes;
+      },
     });
     try {
       const first = await authority.mintConnectionCapability({
@@ -376,6 +380,107 @@ describe('Workspace Worker authenticated control carrier', () => {
           purpose: 'web_observer',
         }),
       ).resolves.toMatchObject({ outcome: 'unavailable' });
+    } finally {
+      authority.close();
+    }
+  });
+
+  test('consumes Agent API capabilities without caller binding headers and fences stale generations', async () => {
+    const workspace = makeWorkspace('/workspace/agent-api-capability');
+    const identity = makeControlIdentity(workspace);
+    let nextByte = 21;
+    const authority = createWorkspaceWorkerCapabilityAuthority({
+      identity,
+      randomBytes: (size) => new Uint8Array(size).fill(nextByte++),
+    });
+    try {
+      const first = await authority.mintConnectionCapability({
+        clientId: 'agent-client',
+        connectionGeneration: 1,
+        purpose: 'agent_api_controller',
+      });
+      expect(first.outcome).toBe('applied');
+      if (first.outcome !== 'applied') throw new Error('Agent API capability mint failed.');
+      expect(authority.consumeAgentApiCapability('x'.repeat(43))).toBeUndefined();
+      expect(authority.consumeAgentApiCapability(first.capability)).toEqual({
+        workerScopeId: identity.workerScopeId,
+        workerInstanceId: identity.workerInstanceId,
+        workspaceDigest: identity.workspace.workspaceDigest,
+        clientId: 'agent-client',
+        connectionGeneration: 1,
+        purpose: 'agent_api_controller',
+      });
+      expect(authority.consumeAgentApiCapability(first.capability)).toBeUndefined();
+      expect(authority.isClientGenerationCurrent('agent-client', 1)).toBeTrue();
+
+      const second = await authority.mintConnectionCapability({
+        clientId: 'agent-client',
+        connectionGeneration: 2,
+        purpose: 'agent_api_observer',
+      });
+      expect(second.outcome).toBe('applied');
+      expect(authority.isClientGenerationCurrent('agent-client', 1)).toBeFalse();
+      expect(authority.isClientGenerationCurrent('agent-client', 2)).toBeTrue();
+      await expect(
+        authority.mintConnectionCapability({
+          clientId: 'agent-client',
+          connectionGeneration: 1,
+          purpose: 'agent_api_observer',
+        }),
+      ).resolves.toMatchObject({ outcome: 'unavailable' });
+
+      const privateCapability = await authority.mintConnectionCapability({
+        clientId: 'native-client',
+        connectionGeneration: 1,
+        purpose: 'native_client',
+      });
+      expect(privateCapability.outcome).toBe('applied');
+      if (privateCapability.outcome !== 'applied') {
+        throw new Error('Native capability mint failed.');
+      }
+      expect(authority.consumeAgentApiCapability(privateCapability.capability)).toBeUndefined();
+      expect(
+        authority.verifyConnectionCapability({
+          workerScopeId: identity.workerScopeId,
+          workerInstanceId: identity.workerInstanceId,
+          workspaceDigest: identity.workspace.workspaceDigest,
+          clientId: 'native-client',
+          connectionGeneration: 1,
+          purpose: 'native_client',
+          secret: privateCapability.capability,
+        }),
+      ).toBeTrue();
+    } finally {
+      authority.close();
+    }
+  });
+
+  test('does not alias capabilities when the random source repeats across bindings', async () => {
+    const workspace = makeWorkspace('/workspace/agent-api-capability-collision');
+    const identity = makeControlIdentity(workspace);
+    const authority = createWorkspaceWorkerCapabilityAuthority({
+      identity,
+      randomBytes: (size) => new Uint8Array(size).fill(23),
+    });
+    try {
+      const first = await authority.mintConnectionCapability({
+        clientId: 'agent-client-a',
+        connectionGeneration: 1,
+        purpose: 'agent_api_observer',
+      });
+      expect(first.outcome).toBe('applied');
+      if (first.outcome !== 'applied') throw new Error('Agent API capability mint failed.');
+      await expect(
+        authority.mintConnectionCapability({
+          clientId: 'agent-client-b',
+          connectionGeneration: 1,
+          purpose: 'agent_api_controller',
+        }),
+      ).resolves.toMatchObject({ outcome: 'outcome_unknown' });
+      expect(authority.consumeAgentApiCapability(first.capability)).toMatchObject({
+        clientId: 'agent-client-a',
+        purpose: 'agent_api_observer',
+      });
     } finally {
       authority.close();
     }
@@ -502,6 +607,41 @@ describe('Workspace Worker runtime foreground composition', () => {
       );
       expect(history.status).toBe(200);
       expect(await history.json()).toEqual({ entries: [], hasMore: false });
+      const agentCapability = await link.mintConnectionCapability({
+        clientId: 'foreground-agent-api-client',
+        connectionGeneration: 1,
+        purpose: 'agent_api_observer',
+      });
+      expect(agentCapability.outcome).toBe('applied');
+      if (agentCapability.outcome !== 'applied') {
+        throw new Error('Agent API capability mint failed.');
+      }
+      const exchange = await fetch(`${composition.origin}/v1/auth/exchange`, {
+        method: 'POST',
+        headers: {
+          authorization: `Kite-Connection ${agentCapability.capability}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          schema: 'kite.agent-api.exchange.v1',
+          api_version: 'v1',
+          required_capabilities: [],
+        }),
+      });
+      expect(exchange.status).toBe(201);
+      const context = (await exchange.json()) as { readonly access_token?: unknown };
+      expect(context.access_token).toEqual(expect.any(String));
+      const serverInfo = await fetch(`${composition.origin}/v1`, {
+        headers: { authorization: `Bearer ${String(context.access_token)}` },
+      });
+      expect(serverInfo.status).toBe(200);
+      expect(await serverInfo.json()).toMatchObject({
+        schema: 'kite.agent-api.server-info.v1',
+        api_version: 'v1',
+        server_version: 'kite-workspace-worker-v1',
+        build_id: 'build-foreground',
+        capabilities: [],
+      });
       const replay = await fetch(`${composition.origin}${KITE_SERVICE_CONNECT_PATH}`, {
         method: 'POST',
         headers: {

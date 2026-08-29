@@ -9,7 +9,7 @@ import {
   canonicalAgentApiJson,
   generateAgentApiArtifacts,
 } from '../src/generation';
-import { AGENT_API_LIMITS } from '../src/index';
+import { AGENT_API_ARTIFACT_DIGEST, AGENT_API_LIMITS } from '../src/index';
 
 const packageRoot = join(import.meta.dir, '..');
 const generatedRoot = join(packageRoot, 'generated');
@@ -49,9 +49,11 @@ describe('Agent API generated artifacts', () => {
     for (const [path, contents] of generated.files) {
       expect(committed.get(path), path).toBe(contents);
     }
-    expect([...committed.keys()].filter((path) => path !== 'digest.json').sort()).toEqual(
-      [...generated.files.keys()].sort(),
-    );
+    expect(
+      [...committed.keys()]
+        .filter((path) => path !== 'digest.json' && path !== 'artifact-digest.ts')
+        .sort(),
+    ).toEqual([...generated.files.keys()].sort());
   });
 
   test('binds the digest to every non-digest artifact', () => {
@@ -83,6 +85,7 @@ describe('Agent API generated artifacts', () => {
     }
     if (!digest.digest) throw new Error('Generated digest is missing.');
     expect(aggregate.digest('hex')).toBe(digest.digest);
+    expect(digest.digest).toBe(AGENT_API_ARTIFACT_DIGEST);
   });
 
   test('publishes the exact stable route/status/security surface without live secrets', () => {

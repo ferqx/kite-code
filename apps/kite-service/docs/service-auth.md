@@ -10,10 +10,17 @@
 | Runtime WebSocket | one-shot `Kite-Local-Ticket` | 无cookie/subprotocol；Origin absent或exact；instance+Workspace bound |
 | History/App | `Kite-Local-Access` | 无cookie；Origin absent或exact；exact route codec |
 | control stop | `Kite-Local-Control` | Origin/cookie缺失；body exact `{}` |
+| Agent API exchange | one-shot `Kite-Connection` | Native-only purpose；Workspace Trust重验；无Origin/Cookie/Sec-Fetch；strict body |
+| Agent API shell | hash-only `Bearer` context | 60分钟absolute TTL；Worker/Workspace/Client generation/role bound；Browser拒绝 |
 
 access/control token采用constant-time compare且不能相等。ticket只保存hash，不写descriptor、Store、history、log或
 observability；replay、expiry、wrong instance与unknown ticket统一unauthorized。control拒绝access token，普通connector
 不读取control token。
+
+Agent API capability与private access/ticket/control token不互换。Web Gateway peer只能mint`web_observer`；Native peer才可mint
+`agent_api_observer|agent_api_controller`。Exchange通过hash匹配恢复已签发binding，不接受caller提供的Client/generation header；成功后
+原capability立即删除。context只保存digest，explicit logout、TTL、generation supersede、Native connection close或Worker close撤销。
+`controller` role不等于Controller lease，当前02A没有mutation route。
 
 manager不能只信PID、`/readyz`或磁盘descriptor。它必须用access token请求`POST /_kite/instance`，严格解码schema、
 instance、Protocol、client-contract、server version与build identity；response缺失content-type、unknown key、超限、

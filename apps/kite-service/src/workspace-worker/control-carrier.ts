@@ -12,7 +12,11 @@ import type {
   WorkspaceWorkerDirectoryOutboxRequest,
   WorkspaceWorkerProcessStopRequestResult,
 } from './process-host';
-import type { WorkerConnectionCapabilityProof, WorkerConnectionCapabilityRequest } from './worker';
+import {
+  isWorkerConnectionCapabilityPurpose,
+  type WorkerConnectionCapabilityProof,
+  type WorkerConnectionCapabilityRequest,
+} from './worker';
 
 export const KITE_WORKER_CONTROL_HOST = '127.0.0.1' as const;
 export const KITE_WORKER_CONTROL_AUTHORIZATION_SCHEME = 'Kite-Worker-Control' as const;
@@ -122,6 +126,17 @@ export interface WorkspaceWorkerCapabilityVerifier {
     input: WorkerConnectionCapabilityProof,
     options?: { readonly consume?: boolean },
   ): boolean;
+  consumeAgentApiCapability(secret: string): AgentApiCapabilityBinding | undefined;
+  isClientGenerationCurrent(clientId: string, connectionGeneration: number): boolean;
+}
+
+export interface AgentApiCapabilityBinding {
+  readonly workerScopeId: string;
+  readonly workerInstanceId: string;
+  readonly workspaceDigest: `sha256:${string}`;
+  readonly clientId: string;
+  readonly connectionGeneration: number;
+  readonly purpose: 'agent_api_observer' | 'agent_api_controller';
 }
 
 export type WorkspaceWorkerCapabilityAuthority = WorkspaceWorkerControlLink &
@@ -460,7 +475,7 @@ function decodeCapabilityRequest(value: unknown): WorkerConnectionCapabilityRequ
     record.clientId.length > 512 ||
     !Number.isSafeInteger(record.connectionGeneration) ||
     (record.connectionGeneration as number) < 1 ||
-    (record.purpose !== 'native_client' && record.purpose !== 'web_observer')
+    !isWorkerConnectionCapabilityPurpose(record.purpose)
   ) {
     return undefined;
   }
@@ -687,8 +702,14 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
   }
   const issued = new Map<
     string,
-    { readonly hash: Buffer; readonly expiresAtMs: number; connectConsumed: boolean }
+    {
+      readonly hash: Buffer;
+      readonly expiresAtMs: number;
+      readonly request: WorkerConnectionCapabilityRequest;
+      connectConsumed: boolean;
+    }
   >();
+  const latestGeneration = new Map<string, number>();
   let closed = false;
   const keyFor = (request: WorkerConnectionCapabilityRequest) =>
     `${request.clientId}\0${request.connectionGeneration}\0${request.purpose}`;
@@ -702,7 +723,7 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
         !safeText(request.clientId) ||
         !Number.isSafeInteger(request.connectionGeneration) ||
         request.connectionGeneration < 1 ||
-        (request.purpose !== 'native_client' && request.purpose !== 'web_observer')
+        !isWorkerConnectionCapabilityPurpose(request.purpose)
       ) {
         return { outcome: 'unavailable' as const };
       }
@@ -714,6 +735,25 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
         if (currentTime >= record.expiresAtMs) {
           record.hash.fill(0);
           issued.delete(key);
+        }
+      }
+      const latest = latestGeneration.get(request.clientId);
+      if (latest !== undefined && request.connectionGeneration < latest) {
+        return { outcome: 'unavailable' as const };
+      }
+      if (latest === undefined && latestGeneration.size >= MAX_WORKSPACE_WORKER_CAPABILITIES) {
+        return { outcome: 'unavailable' as const };
+      }
+      if (latest === undefined || request.connectionGeneration > latest) {
+        latestGeneration.set(request.clientId, request.connectionGeneration);
+        for (const [key, record] of issued) {
+          if (
+            record.request.clientId === request.clientId &&
+            record.request.connectionGeneration < request.connectionGeneration
+          ) {
+            record.hash.fill(0);
+            issued.delete(key);
+          }
         }
       }
       const key = keyFor(request);
@@ -729,9 +769,15 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
       const expiresAtMs = currentTime + ttlMs;
       if (!Number.isSafeInteger(expiresAtMs)) return { outcome: 'outcome_unknown' as const };
       const hash = createHash('sha256').update(capability).digest();
+      for (const record of issued.values()) {
+        if (hash.byteLength === record.hash.byteLength && timingSafeEqual(hash, record.hash)) {
+          hash.fill(0);
+          return { outcome: 'outcome_unknown' as const };
+        }
+      }
       const previous = issued.get(key);
       previous?.hash.fill(0);
-      issued.set(key, { hash, expiresAtMs, connectConsumed: false });
+      issued.set(key, { hash, expiresAtMs, request: { ...request }, connectConsumed: false });
       return {
         outcome: 'applied' as const,
         capability,
@@ -750,7 +796,7 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
         !safeText(input.clientId) ||
         !Number.isSafeInteger(input.connectionGeneration) ||
         input.connectionGeneration < 1 ||
-        (input.purpose !== 'native_client' && input.purpose !== 'web_observer') ||
+        !isWorkerConnectionCapabilityPurpose(input.purpose) ||
         !/^[A-Za-z0-9_-]{32,512}$/u.test(input.secret)
       ) {
         return false;
@@ -774,11 +820,61 @@ export function createWorkspaceWorkerCapabilityAuthority(options: {
       }
       return valid;
     },
+    consumeAgentApiCapability(secret: string) {
+      if (closed || !/^[A-Za-z0-9_-]{43}$/u.test(secret)) return undefined;
+      const currentTime = now();
+      if (!Number.isSafeInteger(currentTime) || currentTime < 0) return undefined;
+      const actual = createHash('sha256').update(secret, 'utf8').digest();
+      try {
+        for (const [key, record] of issued) {
+          if (currentTime >= record.expiresAtMs) {
+            record.hash.fill(0);
+            issued.delete(key);
+            continue;
+          }
+          if (
+            record.request.purpose !== 'agent_api_observer' &&
+            record.request.purpose !== 'agent_api_controller'
+          ) {
+            continue;
+          }
+          if (
+            actual.byteLength !== record.hash.byteLength ||
+            !timingSafeEqual(actual, record.hash)
+          ) {
+            continue;
+          }
+          issued.delete(key);
+          record.hash.fill(0);
+          return Object.freeze({
+            workerScopeId: options.identity.workerScopeId,
+            workerInstanceId: options.identity.workerInstanceId,
+            workspaceDigest: options.identity.workspace.workspaceDigest,
+            clientId: record.request.clientId,
+            connectionGeneration: record.request.connectionGeneration,
+            purpose: record.request.purpose,
+          });
+        }
+        return undefined;
+      } finally {
+        actual.fill(0);
+      }
+    },
+    isClientGenerationCurrent(clientId: string, connectionGeneration: number) {
+      return (
+        !closed &&
+        safeText(clientId) &&
+        Number.isSafeInteger(connectionGeneration) &&
+        connectionGeneration >= 1 &&
+        latestGeneration.get(clientId) === connectionGeneration
+      );
+    },
     close() {
       if (closed) return;
       closed = true;
       for (const record of issued.values()) record.hash.fill(0);
       issued.clear();
+      latestGeneration.clear();
     },
     async requestIdleStop() {
       if (closed) return 'unavailable' as const;

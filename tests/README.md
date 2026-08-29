@@ -66,6 +66,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants，以及OpenAPI/JSON Schema/wire/example/digest
 byte-exact generation；独立
 `check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`apps/kite-web/test/`验证Browser observer presentation reducer；
+`apps/kite-service/test/agent-api/`验证one-shot capability exchange、Workspace Trust重验、hash-only context、role/TTL/generation/revoke与
+read-only route shell；Worker foreground和isolated carrier tests证明它复用同一listener且private routes不接受Public context。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact

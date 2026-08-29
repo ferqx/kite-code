@@ -3,6 +3,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node
 import ts from 'typescript';
 
 export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
+  ['@kite-ai/agent-api-contract', 'packages/agent-api-contract'],
   ['@kite-ai/runtime-contract', 'packages/runtime-contract'],
   ['@kite-ai/runtime-protocol', 'packages/runtime-protocol'],
   ['@kite-ai/runtime-server', 'packages/runtime-server'],
@@ -22,6 +23,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
 
 const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  '@kite-ai/agent-api-contract': [],
   '@kite-ai/runtime-contract': [],
   '@kite-ai/runtime-protocol': ['@kite-ai/runtime-contract'],
   '@kite-ai/runtime-server': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
@@ -48,6 +50,7 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-contract',
   ],
   '@kite-ai/kite-service': [
+    '@kite-ai/agent-api-contract',
     '@kite-ai/builtin-runtime',
     '@kite-ai/kite-app-contract',
     '@kite-ai/kite-local-runtime',
@@ -68,6 +71,14 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
 const NON_EXPORTING_PRIVATE_APPS: ReadonlySet<string> = new Set(['@kite-ai/kite-web']);
 
 const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
+  '@kite-ai/agent-api-contract': [
+    /RuntimeHost/,
+    /RuntimeServer/,
+    /Sqlite/,
+    /WorkspacePath/,
+    /ControllerGeneration/,
+    /BindingReference/,
+  ],
   '@kite-ai/runtime-contract': [
     /AgentState/,
     /KernelEvent/,

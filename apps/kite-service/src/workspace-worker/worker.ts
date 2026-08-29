@@ -35,10 +35,16 @@ export interface WorkspaceWorkerOptions {
   readonly capabilityTtlMs?: number;
 }
 
+export type WorkerConnectionCapabilityPurpose =
+  | 'native_client'
+  | 'web_observer'
+  | 'agent_api_observer'
+  | 'agent_api_controller';
+
 export interface WorkerConnectionCapabilityRequest {
   readonly clientId: string;
   readonly connectionGeneration: number;
-  readonly purpose: 'native_client' | 'web_observer';
+  readonly purpose: WorkerConnectionCapabilityPurpose;
 }
 
 export interface WorkerConnectionCapability {
@@ -198,10 +204,21 @@ function assertCapabilityRequest(request: WorkerConnectionCapabilityRequest): vo
     !safeId(request.clientId) ||
     !Number.isSafeInteger(request.connectionGeneration) ||
     request.connectionGeneration < 1 ||
-    (request.purpose !== 'native_client' && request.purpose !== 'web_observer')
+    !isWorkerConnectionCapabilityPurpose(request.purpose)
   ) {
     throw new TypeError('Worker capability request is invalid.');
   }
+}
+
+export function isWorkerConnectionCapabilityPurpose(
+  value: unknown,
+): value is WorkerConnectionCapabilityPurpose {
+  return (
+    value === 'native_client' ||
+    value === 'web_observer' ||
+    value === 'agent_api_observer' ||
+    value === 'agent_api_controller'
+  );
 }
 
 function assertWorkerIdentity(identity: WorkspaceWorkerIdentity): void {
