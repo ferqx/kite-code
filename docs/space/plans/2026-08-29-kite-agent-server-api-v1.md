@@ -18,14 +18,15 @@
 [`Kite Code 六概念 Runtime 架构`](../../active/six-concept-runtime-architecture.md) 与各 owner workspace README/本地文档。
 
 架构前置：ADR-0149 已接受稳定本机 Public Agent API 对 ADR-0142 repo-private Protocol、ADR-0147 Worker/Controller/Web
-边界的局部扩展。若 Run evidence audit 判定 Store需要变化，还必须先接受独立 Store migration ADR。在00B/00C Gate关闭前，只允许
-文档、只读 evidence 与 contract fixture工作，不创建production listener。
+边界的局部扩展。KASAPI-00B 已判定first-class Run需要新的Store profile/index，KASAPI-00C必须创建并接受独立Store migration ADR与
+subplan。在00C Gate关闭前，只允许文档、只读 evidence 与 contract fixture工作，不创建production listener。
 
 ## 实施状态（2026-08-29）
 
-KASAPI-00A 已完成：ADR-0149 接受stable local REST/SSE façade、现有Runtime/Store/Controller/receipt/History单一authority、
-applied-only durable receipt replay、条件化Run Store裁决与永久只读Web API docs边界。该完成只关闭架构方向Gate，不表示contract、
-listener、Run resource、SSE或SDK已实现。当前执行入口为KASAPI-00B evidence matrix，随后是KASAPI-00C contract/integration freeze。
+KASAPI-00A～00B 已完成：ADR-0149 接受stable local façade；
+[`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
+Store 7缺少first-class Run index/resource receipt，必须新增Store migration ADR；revision与durable sequence可支撑无需Store变化的SSE
+cursor设计。当前执行入口为KASAPI-00C contract/integration freeze；在00C与Run Store ADR关闭前不创建production listener或Run mutation。
 
 ## 1. 执行结论
 
@@ -236,7 +237,11 @@ Gate：ADR accepted；`docs/active/coordinator-workspace-worker-web.md` 仍是�
 
 Rollback：保持 RFC/plan draft，删除未接受 ADR草稿，不触碰实现。
 
-#### KASAPI-00B：Runtime/Run/receipt/stream evidence matrix
+#### KASAPI-00B：Runtime/Run/receipt/stream evidence matrix（已完成）
+
+完成证据：[`Kite Agent Server API V1 当前证据矩阵`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md)已逐项链接
+command、receipt、State/event、History、Controller/capability与restart源码/tests；裁决Run需要新Store migration ADR，SSE cursor本身不需要
+Store变化，public idempotency不得依赖transient Client principal。
 
 交付：`docs/space/understanding/` evidence文档，逐项链接 command、receipt、State/event、History、Controller/capability、restart tests；
 记录所有“不足以实现”的缺口，不提出 sidecar workaround。
@@ -253,7 +258,7 @@ Rollback：只读文档可整体删除，不改变current behavior。
 - stable idempotency mapper与pre-application rejection语义；
 - Controller binding与SSE resync conceptual schema；
 - workspace/package/exports/test/build/release/SBOM/documentation-map representative path manifest；
-- 若Run需要Store变化，创建独立 migration ADR与subplan并把KASAPI-03A标为blocked。
+- 根据00B裁决创建独立Run Store migration ADR与subplan，并把KASAPI-03A标为blocked直至migration完成。
 
 Gate：不存在`200|202`、`426|409`等未裁决stable response；OpenAPI输入已冻结；所有新增owner有唯一文档路径。
 
@@ -338,20 +343,18 @@ Gate：read-only façade完全通过后才能开始Run mutation；任何route di
 
 ### Phase KASAPI-03：First-class Run 与 mutation receipt
 
-#### KASAPI-03A：Canonical Run authority（条件 Store tranche）
+#### KASAPI-03A：Canonical Run authority（Store migration tranche）
 
-根据KASAPI-00B/00C ADR执行唯一批准路径：
-
-- 若当前Store事实足够：新增Host-owned bounded Run query/index projection与receipt resource result，不改schema，并以reopen/list/get证据证明；
-- 若不足：先执行独立migration ADR/subplan，升级exact Store profile、Run index/tombstone/receipt retention与copy-and-switch；在migration
-  completion前本Task保持blocked。
+KASAPI-00B已证明current Store 7不足以提供bounded、无歧义的Run list/get、historical phase/status/timestamp与delete/fork/rewind/late
+retry语义。本Task只执行00C接受的migration ADR/subplan：升级exact Store profile、Run index/tombstone/receipt resource retention与
+copy-and-switch；在migration completion前保持blocked。evidence不预设最终Store版本号或表名，具体DDL由migration ADR冻结。
 
 无论哪条路径，start applied transaction必须持久确定`run_id`并让original/replayed receipt返回同一resource；Session delete/fork/rewind/
 retention与unknown recovery全部有闭集语义。
 
 Gate：禁止unbounded log scan、Session Logger推断、adapter Map、sidecar DB、hidden DDL、dual read/write或兼容fallback。
 
-Rollback：无schema变化时整体回滚Run projection；有schema变化时只按migration ADR回滚，target新写后不自动切回source。
+Rollback：只按migration ADR回滚，target新写后不自动切回source。
 
 #### KASAPI-03B：Public mutation mapper、idempotency 与 Controller gate
 
@@ -468,7 +471,7 @@ Gate：对应平台真实evidence通过前不得升级支持结论；remote/LAN/
 | KASAPI-02B | 02A | read adapter、Session/History/Checkpoint routes | pagination/non-disclosure/History tests | 删除adapter/routes，无Store变化 |
 | KASAPI-02C | 01B、02A | Web/Gateway static api-docs assets/routes | Web build/CSP/deep-link/no-network tests | 删除static assets/routes |
 | KASAPI-02D | 02B～C | read conformance/fault suite | Worker/Gateway restart、role、limits | 失败则不进入mutation |
-| KASAPI-03A | 00B～C、02D、条件migration ADR | Host/Store canonical Run authority | reopen/list/get/retention/migration/fault | 按Run ADR；target新写后不自动回退 |
+| KASAPI-03A | 00B～C、02D、Run migration ADR/subplan | Host/Store canonical Run authority | reopen/list/get/retention/migration/fault | 按Run ADR；target新写后不自动回退 |
 | KASAPI-03B | 03A | idempotency/fence/Controller binding mapper | lost response、refresh/restart、stale binding | 关闭mutation admission，保留receipt |
 | KASAPI-03C | 03B | Run REST endpoints | concurrency/cancel/wait/identity tests | 已applied Run继续执行 |
 | KASAPI-03D | 03C | Run crash/restart qualification | crash-window/Store reopen/retention | 未通过不进入SSE/SDK |
@@ -547,8 +550,8 @@ KASAPI-01/02在无mutation情况下可以整体删除。不得让read-only faça
 
 ### 9.2 Run Store条件迁移
 
-只有KASAPI-00B证明需要schema变化时才创建migration ADR。ADR必须冻结source/target profile、DDL/index、Run/receipt/tombstone retention、
-maintenance barrier、copy-and-switch、journal/fence、rollback与platform qualification。禁止：
+KASAPI-00B已证明需要新的Run persistence/index；KASAPI-00C必须创建migration ADR与subplan。ADR必须冻结source/target profile、
+DDL/index、Run/receipt/tombstone retention、maintenance barrier、copy-and-switch、journal/fence、rollback与platform qualification。禁止：
 
 - hidden DDL或复用旧Store版本号；
 - sidecar Run database；
