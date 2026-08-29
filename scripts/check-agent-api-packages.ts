@@ -57,7 +57,18 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
   const add = (code: string, path: string, message: string): void => {
     violations.push({ code, path, message });
   };
-  const required = ['package.json', 'README.md', 'tsconfig.json', 'src/index.ts'];
+  const required = [
+    'package.json',
+    'biome.json',
+    'README.md',
+    'tsconfig.json',
+    'src/index.ts',
+    'src/generation.ts',
+    'scripts/generate.ts',
+    'generated/openapi.json',
+    'generated/digest.json',
+    'generated/wire.d.ts',
+  ];
   for (const path of required) {
     if (!existsSync(join(packageRoot, path))) {
       add('REQUIRED_FILE_MISSING', `packages/agent-api-contract/${path}`, `${path} is required`);
@@ -87,7 +98,7 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
       'only the root source entry may be exported',
     );
   }
-  for (const script of ['build', 'typecheck', 'test']) {
+  for (const script of ['build', 'check:generated', 'generate', 'typecheck', 'test']) {
     if (!manifest.scripts?.[script]) {
       add('SCRIPT_MISSING', 'packages/agent-api-contract/package.json', `${script} is required`);
     }
@@ -104,12 +115,20 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
   const sourceFiles = files(join(packageRoot, 'src'), /\.ts$/u);
   const testFiles = files(join(packageRoot, 'test'), /\.(?:test|spec)\.ts$/u);
   const fixtureFiles = files(join(packageRoot, 'fixtures'), /\.json$/u);
+  const generatedSchemaFiles = files(join(packageRoot, 'generated', 'schema'), /\.json$/u);
   if (sourceFiles.length === 0)
     add('SOURCE_MISSING', 'packages/agent-api-contract/src', 'source is required');
   if (testFiles.length === 0)
     add('TEST_MISSING', 'packages/agent-api-contract/test', 'owner tests are required');
   if (fixtureFiles.length === 0)
     add('FIXTURE_MISSING', 'packages/agent-api-contract/fixtures', 'fixtures are required');
+  if (generatedSchemaFiles.length === 0) {
+    add(
+      'GENERATED_SCHEMA_MISSING',
+      'packages/agent-api-contract/generated/schema',
+      'generated JSON Schemas are required',
+    );
+  }
 
   for (const absolute of sourceFiles) {
     const path = relative(root, absolute).replaceAll('\\', '/');

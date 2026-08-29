@@ -14,16 +14,18 @@
 
 ## 当前实现事实
 
-`@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前只实现DTO、codec、
-limits、fixtures与package/static Gate；尚无production HTTP listener、auth exchange、OpenAPI artifact、Agent API SDK、Store 8 Run route或Web
-`/api-docs` route。package存在不表示Agent API ready，也不改变private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
+`@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前实现DTO、codec、limits、
+fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；尚无
+production HTTP listener、auth exchange、Agent API SDK、Store 8 Run route或Web `/api-docs` route。package/artifact存在不表示Agent API ready，
+也不改变private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
 
 唯一root export提供snake_case的ServerInfo、Context、Session、Run、Interaction/queue、History、Checkpoint、page、mutation result、Problem
 Details、SSE event/resync与request/query schemas。Request decoder先做bounded JSON admission，再递归拒绝unknown field；response decoder允许旧
 Client忽略新增optional field，而Server encoder递归拒绝未声明field。schema tag、discriminant、ID、timestamp、text、page、cursor、array、
 depth、object key与UTF-8 byte上限均由同一package拥有。
 
-package source只允许browser-safe `zod`，workspace dependency为零。它不导入Runtime Contract/Protocol/Client、Kernel、Host、Store、Service、
+package runtime/schema/generation source只允许browser-safe `zod`，workspace dependency为零；filesystem/crypto write只在不导出的package-local
+generator script。它不导入Runtime Contract/Protocol/Client、Kernel、Host、Store、Service、
 Native、React、Bun或Node，不执行I/O、不持有credential、不决定Controller/Workspace admission、不派生command ID、不恢复Session、不查询
 History，也不把private camelCase DTO透传为Public wire。
 
@@ -38,8 +40,17 @@ History，也不把private camelCase DTO透传为Public wire。
 - resync codec要求Session、Interaction queue与snapshot revision共享identity/revision；
 - Public DTO不包含Workspace/Store path、Worker/Controller/binding reference、credential、Provider正文或raw Runtime event。
 
+## Generated artifact当前规则
+
+- `generated/openapi.json`只包含contract freeze的20条Worker `/v1` path；不包含health/readiness/Web `/api-docs` carrier route；
+- server URL固定为loopback port 0 placeholder，不携带live endpoint/token；security scheme只描述one-shot exchange和context bearer；
+- 每条mutation success status、If-Match/Idempotency-Key、SSE media type与Problem response由同一operation registry生成；
+- JSON Schema保留closed shape，并以`x-kite-contract-limits`/`x-kite-text-length-unit = utf8-bytes`绑定codec hard limits；
+- `wire.d.ts`从generated JSON Schema转换，不维护手写Public type副本；examples逐byte复制validated fixtures；
+- `digest.json`记录每个non-digest artifact的SHA-256并以domain-separated aggregate绑定完整集合；
+- generator输出canonical key order、无timestamp/absolute path/real endpoint。owner tests逐byte比较committed output并重算digest。
+
 ## 后续Gate
 
-KASAPI-01B只能从当前schema source生成OpenAPI/JSON Schema/types/examples/digest，不能维护第二份手写contract。KASAPI-02及以后接入Service/
-Web/SDK时，必须同步本记录与对应owner current authority；在listener实际接入前不得把本文扩写成运行中endpoint。Run route仍被ADR-0150 Store 8
-implementation与KASAPI-02D阻断。
+KASAPI-02及以后接入Service/Web/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；在listener实际接入前不得把
+本文扩写成运行中endpoint。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。

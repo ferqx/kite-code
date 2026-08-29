@@ -45,7 +45,9 @@ Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解�
 KASAPI-01A后，根build、test、typecheck discovery覆盖15个实际workspace；新增的
 `packages/agent-api-contract`是zero-workspace-dependency、browser-safe Public wire contract，当前没有listener或consumer。既有Runtime
 package owner gate继续覆盖其14个Runtime/App workspace，独立`check:agent-api-packages`覆盖Public contract；`apps/kite-web`仍不成为Runtime
-composition owner。Agent API跨包当前边界见[`active/agent-api-contract.md`](active/agent-api-contract.md)。
+composition owner。KASAPI-01B后，该owner rule同时覆盖package-local generator script与committed `generated/**`，确保artifact变化命中同一
+current authority；generator不成为runtime export。Agent API跨包当前边界见
+[`active/agent-api-contract.md`](active/agent-api-contract.md)。
 
 Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
 `kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive

@@ -24,12 +24,13 @@ Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read
 
 ## 实施状态（2026-08-29）
 
-KASAPI-00A～01A 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～01B 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
 pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
-fixtures与独立package Gate；当前执行入口为KASAPI-01B同源OpenAPI/Schema generation，不创建production listener或Run mutation。
+fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。当前执行
+入口为KASAPI-02A authenticated read-only route shell；不创建Run mutation。
 
 ## 1. 执行结论
 
@@ -306,7 +307,12 @@ unknown discriminator negative corpus通过。
 
 Rollback：尚无consumer，可整体删除package及graph登记。
 
-#### KASAPI-01B：OpenAPI/Schema/fixture generation
+#### KASAPI-01B：OpenAPI/Schema/fixture generation（已完成）
+
+完成证据：`packages/agent-api-contract/generated/`包含canonical OpenAPI 3.1、33份JSON Schema、standalone `wire.d.ts`、4份fixture
+examples与domain-separated digest manifest；package-local generator由同一Zod schema/operation registry派生全部artifact。owner tests逐byte
+比较、重算每文件/aggregate SHA-256、验证20条stable path/success status/security/无live secret，并解析wire declarations；
+`check:generated`与package boundary Gate已接入。
 
 交付：从同一codec source生成OpenAPI 3.1、JSON Schema、wire TypeScript declarations、examples与digest；固定security scheme placeholder、
 request/response status与SSE media type；加入generated artifact drift test。

@@ -31,6 +31,8 @@
       "sources": [
         "packages/agent-api-contract/src/**",
         "packages/agent-api-contract/package.json",
+        "packages/agent-api-contract/scripts/**",
+        "packages/agent-api-contract/generated/**",
         "scripts/check-agent-api-packages.ts"
       ],
       "authorities": ["packages/agent-api-contract/README.md", "docs/active/agent-api-contract.md"]

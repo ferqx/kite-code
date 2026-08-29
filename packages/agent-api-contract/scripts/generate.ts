@@ -1,0 +1,84 @@
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import {
+  type AgentApiArtifactJson,
+  canonicalAgentApiJson,
+  generateAgentApiArtifacts,
+} from '../src/generation';
+
+const packageRoot = resolve(import.meta.dir, '..');
+const generatedRoot = join(packageRoot, 'generated');
+const checkOnly = process.argv.includes('--check');
+
+const examples = Object.fromEntries(
+  readdirSync(join(packageRoot, 'fixtures'))
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .map((name) => [
+      name.slice(0, -'.json'.length),
+      JSON.parse(readFileSync(join(packageRoot, 'fixtures', name), 'utf8')) as AgentApiArtifactJson,
+    ]),
+);
+
+const generated = generateAgentApiArtifacts({ examples });
+const files = new Map(generated.files);
+const fileDigests = [...files]
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([path, contents]) => ({ path, sha256: sha256(contents) }));
+const aggregate = createHash('sha256');
+aggregate.update('kite.agent-api.artifacts.v1\0');
+for (const { path, sha256: digest } of fileDigests) {
+  aggregate.update(path);
+  aggregate.update('\0');
+  aggregate.update(digest);
+  aggregate.update('\0');
+}
+files.set(
+  'digest.json',
+  `${canonicalAgentApiJson({
+    schema: 'kite.agent-api.artifact-digest.v1',
+    api_version: 'v1',
+    algorithm: 'sha256',
+    digest: aggregate.digest('hex'),
+    files: fileDigests,
+  })}\n`,
+);
+
+if (checkOnly) {
+  const actualPaths = collectFiles(generatedRoot)
+    .map((path) => relative(generatedRoot, path).replaceAll('\\', '/'))
+    .sort();
+  const expectedPaths = [...files.keys()].sort();
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error(
+      'Agent API generated artifact path set drifted. Run the package generate script.',
+    );
+  }
+  for (const [path, contents] of files) {
+    if (readFileSync(join(generatedRoot, path), 'utf8') !== contents) {
+      throw new Error(`Agent API generated artifact drifted: ${path}`);
+    }
+  }
+  console.log(`Agent API generated artifacts are current (${files.size} files).`);
+} else {
+  rmSync(generatedRoot, { recursive: true, force: true });
+  for (const [path, contents] of files) {
+    const target = join(generatedRoot, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, contents, { encoding: 'utf8', mode: 0o644 });
+  }
+  console.log(`Generated ${files.size} Agent API artifacts.`);
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function collectFiles(path: string): string[] {
+  if (!existsSync(path)) return [];
+  return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+    const child = join(path, entry.name);
+    return entry.isDirectory() ? collectFiles(child) : entry.isFile() ? [child] : [];
+  });
+}

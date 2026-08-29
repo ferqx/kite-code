@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target browser",
+    "check:generated": "bun run ./scripts/generate.ts --check",
+    "generate": "bun run ./scripts/generate.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

@@ -12,7 +12,8 @@ production HTTP listener、认证exchange、Run endpoint、SDK或Web API docs ro
 - 定义strict mutation/exchange request schema与JSON/text/identifier/page/stream hard limits；
 - 在Zod遍历前拒绝non-JSON、cycle、accessor、prototype-shaped、unsafe-number、deep、oversized与forbidden-key input；
 - Client response decoder忽略未知optional field；`encodeAgentApiResponse`递归拒绝Server projector的undeclared field；
-- 暂存KASAPI-01B同源生成OpenAPI、JSON Schema、wire declarations、examples与release digest所需的唯一schema source。
+- 从同一schema source确定性生成OpenAPI 3.1、JSON Schema、standalone wire declarations、examples与release digest；
+- 以byte-exact drift test、route/status/security断言、digest重算和TypeScript parse Gate保护committed artifacts。
 
 ## 不拥有职责
 
@@ -30,6 +31,7 @@ production HTTP listener、认证exchange、Run endpoint、SDK或Web API docs ro
 ## 公开入口
 
 唯一package export是`@kite-ai/agent-api-contract`根入口；deep import不是受支持contract。根入口只导出DTO/schema、codec、scalar与limits。
+generator是package-local build tool，不从root runtime export导出；consumer读取`generated/` committed artifact。
 
 ## 关键不变量
 
@@ -49,6 +51,7 @@ production HTTP listener、认证exchange、Run endpoint、SDK或Web API docs ro
 bun run --cwd packages/agent-api-contract test
 bun run --cwd packages/agent-api-contract typecheck
 bun run --cwd packages/agent-api-contract build
+bun run --cwd packages/agent-api-contract check:generated
 bun run check:agent-api-packages
 ```
 
