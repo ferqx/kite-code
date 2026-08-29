@@ -4,7 +4,7 @@
 
 日期：2026-08-30
 
-实现基线：`d5e7f81cbf95d4852bdfc6dd906c0c5f13fb71d4`
+实现基线：本分支待提交 reviewed head；GitHub-hosted evidence 以最终 commit SHA 绑定
 
 相关：[`Runtime Run Store V1 子计划`](../plans/2026-08-29-kite-runtime-run-store-v1.md)、
 [`release authority`](../../active/release-control.md)、
@@ -53,16 +53,30 @@ uncertain/corrupt refusal、Coordinator stop/status 与 acquire 之间的并发 
 | runtime CI-profile soak | 7/7 passed | canonical report digest `sha256:10a3c8bd419d95c14d741c10c25341cbf9c1b711c0c1b5e5465178a8bbda00d1`；不是 formal qualification |
 | release tests | 210 pass / 0 fail | 包含 source entrypoint、manager 与 maintenance composition |
 | final focused regression | 38 pass / 0 fail | migration、Coordinator client/control plane/carrier 与 Service composition |
+| TUI system | shards 0/4、1/4、2/4、3/4 passed | 首次配置、Store5隔离、连续rewind、Controller clean-exit、Session restart与Shell/Thought均通过 |
+| Web Gateway close race | 600 pass / 0 fail | `carrier.test.ts --rerun-each 50`；in-flight bootstrap不再被forced listener stop reset |
 | format | passed with baseline warnings | 无本 diff format error；Biome 只报告仓库既有 warning/info |
 
-## 4. 本地候选包
+## 4. GitHub 首轮反馈与本地收敛
+
+PR首轮 Required run `33277355089` 与 Candidate run `33277355078` 不是最终证据：macOS/Linux candidate job通过，Windows在
+release contract tests中因read-only file descriptor执行`fsync`返回`EPERM`而失败；Required同时暴露Web Gateway forced stop的
+`ECONNRESET`、旧Store6/Store5 TUI断言、Store-only Session subscriber未被query projection唤醒、first-run Provider尚未配置时Worker
+提前组合Runtime、以及clean exit把idle Controller错误detach等问题。
+
+本轮已分别收敛为：Windows用write-capable handle flush regular file；Gateway graceful stop刷完已生成response；Host query snapshot经
+NotificationProjector hydrate pending subscriber；默认Worker保持Store5 source不可见；Worker用lazy Workspace template在first-run完成后才
+组合execution context；TUI按权威projection执行idle release或active/pending/unknown detach。旧run的通过job与artifact均被本轮source变化
+作废，不能登记为最终三平台evidence。
+
+## 5. 本地候选包
 
 最终本地候选：
 
 ```text
 target: macos-arm64
-candidateId: 172fcbd79dce619bb82048ec
-archiveSha256: sha256:e8931fb83ea576cedf6cb759b724ed96d4045c85a59315e255ffc043e7ab6eab
+candidateId: af43f919f756c276fb945834
+archiveSha256: sha256:53268efa7340d5f223fd3e28c31aab792e85329d31f672e694868b73d550bba0
 sourceDirty: true
 ```
 
@@ -88,7 +102,7 @@ uninstall
 其中 `run-store-maintenance-fail-closed` 在 fresh home 上显式运行 installed CLI，要求返回 exact
 `blocked/maintenance_required` 且进程非零退出，证明候选包没有把空源或不满足 barrier 的场景误判成成功。
 
-## 5. 未关闭 Gate
+## 6. 未关闭 Gate
 
 仍需把同一 reviewed implementation head 放到 GitHub-hosted macOS、Ubuntu 与 Windows runner，分别完成 native candidate build、verify、
 install、正式 maintenance command、process/lock/ACL/atomic replace negatives、upgrade/rollback/uninstall，并登记 run、attempt、artifact 与

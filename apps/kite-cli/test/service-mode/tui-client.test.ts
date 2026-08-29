@@ -347,7 +347,7 @@ test('Native TUI opens an existing Session as Observer, then acquires its lease 
   expect(remote.commands).not.toContain('cancel_turn');
 });
 
-test('Native TUI detaches every tracked Session lease on dispose without cancelling Turns', async () => {
+test('Native TUI releases every confirmed-idle Session lease on dispose without cancelling Turns', async () => {
   const remote = new FakeRuntimeConnection();
   const controllerCalls: string[] = [];
   const controller = createControllerClient('service-tui-test', controllerCalls);
@@ -359,15 +359,35 @@ test('Native TUI detaches every tracked Session lease on dispose without cancell
 
   await facade.dispose();
 
-  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([
-    `detach:${first}`,
-    `detach:${second}`,
+  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([
+    `release:${first}`,
+    `release:${second}`,
   ]);
+  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([]);
   expect(controllerCalls.filter((call) => call.startsWith('create:'))).toEqual([
     `create:${first}`,
     `create:${second}`,
   ]);
   expect(remote.commands).not.toContain('create_session');
+  expect(remote.commands).not.toContain('cancel_turn');
+  expect(remote.closeCalls).toBe(1);
+});
+
+test('Native TUI detaches an active Session lease on dispose without cancelling its Turn', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  const facade = facadeFor(remote, { controller });
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.dispose();
+
+  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([
+    `detach:${sessionId}`,
+  ]);
+  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([]);
   expect(remote.commands).not.toContain('cancel_turn');
   expect(remote.closeCalls).toBe(1);
 });
@@ -1182,8 +1202,17 @@ function createControllerClient(workerInstanceId: string, calls: string[]): Work
       states.set(request.sessionId, active);
       return operation(request, 'request_control', active);
     },
-    async releaseControl() {
-      throw new Error('unused');
+    async releaseControl(request) {
+      calls.push(`release:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      states.set(request.sessionId, {
+        ...state,
+        status: 'idle',
+        controllerGeneration: state.controllerGeneration + 1,
+        clientId: null,
+        workerInstanceId: null,
+      });
+      return operation(request, 'release_control', state);
     },
     async detach(request) {
       calls.push(`detach:${request.sessionId}`);

@@ -26,6 +26,8 @@ TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Wo
 reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
 再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
 snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
+TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
+Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。
 
 Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后必须
 等待注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。这个
@@ -51,5 +53,9 @@ pending interaction期间若无关durable event推进Host revision，后续snaps
 核对当前State。只有command admission与最新snapshot竞态产生的revision conflict才用新的command ID和
 `currentRevision`有界重试；不等待Service重发未改变的interaction。durable settlement在async提交期间
 清除Footer时属于该用户动作，React cleanup不得补发cancel。
+
+checkpoint list/preview是同一Runtime query surface上的只读操作，不等待目标Session的long-lived subscription ready；目标bridge可由
+query权威投影独立hydrate。rewind mutation、Controller命令与普通turn仍必须等待Session readiness。TUI调用时以Reducer当前
+`activeSessionId`为准，mutable ref只作尚未建立Reducer identity时的fallback。
 
 验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。

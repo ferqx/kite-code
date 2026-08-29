@@ -75,8 +75,13 @@ capability TTL，也不重放已dispatch mutation；response丢失、5xx、第�
 
 `controller.ts` 的 Controller authority 以注入 Store 为最终事实源，按 Session 串行化操作并用 request digest、expected generation
 与 lease identity 做幂等/CAS 检查。`tui` 与 `desktop` 才能得到 `applied` lease；`web_observer` 的 request-control/release-control
-始终返回 observer 状态，不会取得或改变 Controller lease。断连只标记对应 client/connection generation detached；没有 Web takeover、
-自动 approval/input 转移或 mutation fallback。
+始终返回 observer 状态，不会取得或改变 Controller lease。Native client干净退出时先查询exact Runtime projection：durable idle且无
+pending interaction则release自己的lease；active/pending或query不确定才把对应client/connection generation标记detached。没有Web takeover、
+自动 approval/input 转移、TTL猜测死亡或mutation fallback。
+
+Worker readiness不要求Provider已经配置。Store 8/Host/Server与neutral App Control先由同一Worker ready；first-run credential/model
+mutation完成后，首个Runtime context才通过lazy Workspace template组合Provider/MCP/Skill/Sandbox。配置缺失不能触发第二Worker、
+placeholder execution backend或legacy Service fallback，Runtime execution保持unavailable。
 
 `effect-gate.ts` 与 `effect-adapter.ts` 当前把同一 Workspace 的 mutation attempt 串行化，并依次要求 Store 8 durable evidence port 的
 prepare、OS-user resource lease、dispatch acknowledgement、terminal 或 `outcome_unknown`；Runtime admission 的 authenticated

@@ -111,6 +111,10 @@ Host Run query都验证同一committed active-layout/manifest/journal/fence。St
 profile/binding且不读取Store 7 fallback。start decision原子提交queued Run后，调度前的same-phase activation在同一revision改为running；其余
 Run transition仍必须随State revision前进。ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
 
+Host query命中Store-authoritative Session projection时，经同一NotificationProjector发布event-free durable snapshot以hydrate process-local
+registry/history和已等待subscriber；该动作不写Store。这样订阅先注册、query后加载且Session未出现在本进程notification history时仍能
+完成ready。
+
 KRSRUN-03B新增正式offline入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI不拥有barrier；release owner先以
 Coordinator protocol/client revision v2的authenticated `stopCoordinator`关闭admission并由manager确认exact process exit，再依据持久descriptor、
 control credential、PID/start-token与Worker idle holds停止Gateway/全部Worker。持有Coordinator lifecycle lock后还必须直接复核descriptor、
@@ -213,6 +217,7 @@ facts，但保留 receipt；Host 随后移除 registry projection，且不会再
 State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都是
 explicit source-only compatibility profile，不是writer。用户选中的exact session只能经no-follow isolated copy atomic import到显式legacy
 Store 6；unknown source静默忽略，corrupt source只隔离该session。source bytes永不写回、checkpoint、rename或作为fallback执行。
+默认Coordinator/Workspace Worker不发现、列出或lazy import这些Store 5 source；即使Workspace identity匹配也保持隔离。
 
 不匹配 current marker 的 database 直接 fail closed。production package 不导出 old constructor/path，也不存在 Store 5 current writer、sidecar receipt database、hidden DDL drift、ignored receipt table、try-new-catch-old、dual write 或 mixed-format normalization。
 

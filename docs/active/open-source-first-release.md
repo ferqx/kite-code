@@ -77,7 +77,8 @@ stop、确认 state absent 并取得 Native lifecycle fence；busy、unknown、�
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；这些
 independent asset identities 不等于三平台 process/runtime qualification。Windows resolver 只接受 v2 marker、唯一 `active` regular-file
 pointer、immutable candidate 与 exact identity，并对 runner/marker/pointer/runtime 执行 no-follow 校验。POSIX rename
-后会 flush 父目录；Windows regular-file/write-through、ACL 与三平台安装/运行 qualification 仍须 hosted/真实证据，
+后会 flush 父目录；Windows regular-file flush以write-capable handle执行，避免Bun对read-only handle返回`EPERM`；其
+directory write-through、ACL 与三平台安装/运行 qualification 仍须 hosted/真实证据，
 不能以本地结果代替。
 
 首发预构建架构为 macOS arm64、Linux x64 与 Windows x64；其他架构可以从源码运行 Bun，但没有首发

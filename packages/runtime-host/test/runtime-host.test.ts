@@ -607,6 +607,42 @@ describe('runtime host package boundary', () => {
 });
 
 describe('runtime host command and projection authority', () => {
+  test('hydrates a pending session subscription from an authoritative query projection', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-query-hydration', projection('session-query-hydration', 3));
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.start();
+    const iterator = host
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-query-hydration' } })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_session_projection',
+        sessionId: 'session-query-hydration',
+      }),
+    ).resolves.toMatchObject({ status: 'ok', revision: 3 });
+    await expect(pending).resolves.toMatchObject({
+      done: false,
+      value: {
+        durability: 'durable',
+        sessionId: 'session-query-hydration',
+        revision: 3,
+        projection: {
+          kind: 'snapshot',
+          session: { sessionId: 'session-query-hydration', revision: 3 },
+        },
+      },
+    });
+    await iterator.return?.();
+    await host[Symbol.asyncDispose]();
+  });
+
   test('atomically deletes the durable Session, retains its receipt, and never recovers it on replay', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-1', projection('session-1', 3));

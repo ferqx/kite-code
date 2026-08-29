@@ -597,7 +597,10 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
     auth.close();
     let listenerSettled = false;
     let listenerFailure: unknown;
-    const listenerStop = Promise.resolve(bunServer.stop(true)).then(
+    // Graceful stop owns the transport flush after the handler has returned its
+    // fail-closed response. A forced stop here can reset the client before that
+    // already-produced response reaches the loopback socket.
+    const listenerStop = Promise.resolve(bunServer.stop(false)).then(
       () => {
         listenerSettled = true;
       },

@@ -157,21 +157,6 @@ export async function createWorkspaceWorkerApplication(
   try {
     const admittedWorkspace = appControl.admitWorkspace(input.workspace.canonicalPath);
     assertSameWorkspace(admittedWorkspace, input.workspace);
-    const runtimeInputs = appControl.runtimeInputsFor(admittedWorkspace);
-    const template = {
-      userId: options.userId ?? `workspace-worker:${input.workerIdentity.workerScopeId}`,
-      workspace: admittedWorkspace.canonicalPath,
-      config: runtimeInputs.config,
-      shellExecutor: runtimeInputs.shellExecutor,
-      interactionMode:
-        options.interactionMode ?? runtimeInputs.config.interactionMode ?? ('auto' as const),
-      sandboxBackend: options.sandboxBackend ?? discoverSandboxBackendCandidate(),
-      mcpManager: runtimeInputs.mcpManager,
-      skillManifests: runtimeInputs.skillManifests,
-      skillOptions: runtimeInputs.skillOptions,
-      initialSkillActivations: options.initialSkillActivations ?? [],
-      workspaceEffectCompositionFactory: commandContexts.compositionFor,
-    };
     const storageOwner: KiteRuntimeStorageOwner = Object.freeze({
       storage: commandContexts.bindStorage(input.storage),
       listCurrentSessions: (query = '', limit = 50) =>
@@ -190,7 +175,28 @@ export async function createWorkspaceWorkerApplication(
       serverInstanceId: input.workerIdentity.workerInstanceId,
       operationGate,
       storageOwner,
-      workspaces: [template],
+      // App Control must be available before a Provider is configured. Runtime execution
+      // composition is therefore created only when an admitted Runtime request first needs this
+      // Workspace; by then first-run credential/model selection has produced a complete config.
+      workspaceTemplateFor: async (workspace) => {
+        assertSameWorkspace(workspace, admittedWorkspace);
+        const runtimeInputs = appControl.runtimeInputsFor(admittedWorkspace);
+        await runtimeInputs.workspaceReady;
+        return {
+          userId: options.userId ?? `workspace-worker:${input.workerIdentity.workerScopeId}`,
+          workspace: admittedWorkspace.canonicalPath,
+          config: runtimeInputs.config,
+          shellExecutor: runtimeInputs.shellExecutor,
+          interactionMode:
+            options.interactionMode ?? runtimeInputs.config.interactionMode ?? ('auto' as const),
+          sandboxBackend: options.sandboxBackend ?? discoverSandboxBackendCandidate(),
+          mcpManager: runtimeInputs.mcpManager,
+          skillManifests: runtimeInputs.skillManifests,
+          skillOptions: runtimeInputs.skillOptions,
+          initialSkillActivations: options.initialSkillActivations ?? [],
+          workspaceEffectCompositionFactory: commandContexts.compositionFor,
+        };
+      },
     });
     const history = createKiteRuntimeObserverHistoryFromStorage(input.storage);
     const agentHistory = createKiteRuntimePagedHistoryFromWorkspaceStore(
@@ -202,10 +208,7 @@ export async function createWorkspaceWorkerApplication(
       history,
       appControl: appControl.gateway.forWorkspace(admittedWorkspace),
       operationGate,
-      start: async () => {
-        await runtimeInputs.workspaceReady;
-        await runtimeOwner!.host.start();
-      },
+      start: () => runtimeOwner!.host.start(),
       cancelAll: runtimeOwner.cancelAllSessions,
       dispose: async () => {
         try {

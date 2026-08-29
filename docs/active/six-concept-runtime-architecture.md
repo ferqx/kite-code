@@ -85,6 +85,10 @@ Service-owned interaction broker持有durable generation/revision waiter；conne
 execution/release和Native first-run credential由Service的exact App Control/credential owner提供；config、actual Skill、
 MCP runtime provider、shell/sandbox、observability与History projector也都按canonical Workspace在Service内组合。
 
+Workspace Worker可在Provider尚未配置时先ready同一个Store 8/Host/Server与neutral App Control；execution dependency context只在
+first-run完成、首个Runtime context请求到达时由lazy Workspace template创建。它不是第二Runtime或configuration daemon，配置仍未ready
+时execution fail closed。
+
 `apps/kite-cli`只拥有CLI/TUI/presentation、UI-local preferences与Native client composition。CLI/TUI先通过
 authenticated App Control完成Workspace Trust query/decision，再建立one-shot ticket Runtime connection；之后只消费
 Runtime/History/App Control/credential client。client close只关闭本connection/subscription/snapshot state，不取消
@@ -190,7 +194,8 @@ Ctrl+C通过Native TUI client提交durable`cancel_turn`；若notification在读�
 committed revision，Client使用conflict回执中的最新revision和新command ID有界重试。terminal App不持有Service
 进程内AbortController、第二mailbox、receipt cache或root-controller authority，Host lifecycle仍只在applied receipt后
 执行自己的abort。不可重试的拒绝必须进入client错误/终态投影，不能静默改写为本地取消。TUI exit与Ctrl+C不同：exit
-只关闭client connection，不隐式调用`abortAll()`或dispose Service Host。
+先按exact projection对本client Controller执行idle release或active/pending/unknown detach，再关闭client connection；不隐式调用
+`abortAll()`或dispose Service Host。
 
 历史 Session 的 `resume_session` 还是 presentation admission barrier：先在唯一 Coordinator 中提交通用 restart facts，
 再完成 Subagent Provider/sandbox process authority cleanup，随后 TUI await readiness、重读 Store head，最后才提交前台
@@ -229,6 +234,8 @@ Service maintenance仍使用State 27 / Store 6 / `kite-runtime-server-v1-2026-08
 - Store 8在Store 7 Workspace binding上增加canonical Run index、receipt resource result与coverage boundary；normal ensure只初始化fresh
   Store 8，existing Store 7只通过formal offline whole-generation command copy-and-switch；
 - Store 5 只可作为 explicit readonly source：State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都经 no-follow isolated copy、selected-session atomic import 进入显式Store 6 legacy target。source 不写回、checkpoint、rename 或 fallback 执行；未知/损坏 source 只隔离该 Session；
+- 默认Coordinator/Worker的Session selector与normal ensure不发现、列出或lazy import Store 5；即使source Workspace identity匹配也保持
+  byte-for-byte隔离。Store 5兼容只存在于显式legacy Service path；
 - 不存在平面 bridge、alternate current-writer constructor、format selector、sidecar receipt database、dual write、Store 5 current writer、try-new-catch-old、alternate-driver retry 或 execution fallback。
 
 Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle 与 effect lease 仍保持原有事务顺序。拆分不允许复制 transaction、Store、reducer 或 recovery identity owner。

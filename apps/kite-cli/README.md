@@ -25,7 +25,8 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
   得到 Service-owned canonical identity；只有 trusted 后才 `connect()` 并取得 Workspace-bound one-shot Runtime ticket。
   untrusted/conflict/connection failure 均 fail closed，不打开 Runtime，也不回退 embedded。
 - TUI exit 只关闭本 client connection、subscription 与 presentation resource；不 `abortAll()`、不 dispose Service Host。
-  Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
+  退出前按 exact Session projection确认Controller disposition：idle且无pending interaction时release，active/pending或query不确定时
+  detach；Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
 
 ## 不拥有职责
 
@@ -61,6 +62,8 @@ Service companion。
   提升 Workspace authority。
 - connection close 与 Worker owner shutdown分离。exit/reconnect只处理本 client generation；Session、Turn、interaction、Controller
   与 Store lifecycle仍由所属 Worker决定。
+- first-run仍连接同一个Workspace Worker，但Provider未配置时只使用其neutral App Control/credential surface；CLI不创建bootstrap
+  Host、第二Runtime或本地config authority。配置完成后的首个Runtime请求才触发Worker内的Workspace execution composition。
 - release/source Worker connector 在同一 canonical Workspace 的 ensure、capability mint 或 instance handshake 返回短暂
   recovery-pending/unavailable 时，只在一次 `connect()` 内执行总计不超过 1.6 秒的有界全链重试，以闭合 dead/draining
   Worker descriptor 回收窗口；Manager 对 uncertain identity 不清理、不二次 spawn，Coordinator transport、protocol 或

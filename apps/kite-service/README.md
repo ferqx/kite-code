@@ -19,6 +19,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   Coordinator control plane、单 Workspace Worker Store 8/Host/Application 与只读 Web Gateway BFF。release entrypoint 只把
   显式 source/installed executable、neutral environment、layout generation 与 readiness fd 注入这些 owner；不从 cwd、PATH、
   ambient home 或 legacy Service fallback 推导运行时。
+- Workspace Worker先启动唯一Store 8/Host/Server与neutral App Control；Provider尚未配置时仍可完成first-run credential/model mutation，
+  但不创建execution context。`workspaceTemplateFor`只在配置ready后的首个Runtime context请求中组合Provider/MCP/Skill/Sandbox，
+  失败保持该Workspace Runtime unavailable，不增加bootstrap Worker、第二Host或legacy Service fallback。
 - `src/coordinator/catalog-builder.ts`为显式offline maintenance同时提供Store6→Store7 Catalog builder和Store7→Store8 exact Catalog
   generation copy adapter；`scripts/release/local-layout-migration.ts`只在manager注入完整停止/收敛barrier后建立source-bound fence并调用
   whole-generation migrator。normal start/ensure不迁移已有Store7；fresh home直接建立Store8，legacy home仍要求显式maintenance。
@@ -40,6 +43,8 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   删除整个Workspace。Worker在线时才用authenticated identity补project label、History与live status。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
+- Web Gateway shutdown先停止新admission并等待in-flight handler返回fail-closed response，再使用Bun graceful listener stop让已生成的
+  HTTP响应刷到loopback socket；deadline仍有界诊断。不得以forced listener stop在响应发送前制造`ECONNRESET`。
 - Workspace Worker同一data listener当前提供Agent API `/v1`认证与bounded read façade：one-shot
   `agent_api_observer|agent_api_controller` capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；
   ServerInfo发布`checkpoints/history/sessions`，开放Session list/get、History page与Checkpoint list/preview，其他resource/mutation route保持

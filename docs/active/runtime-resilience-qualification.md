@@ -311,6 +311,10 @@ mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 sou
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于
 `apps/kite-service/test/state-store-project-identity-compatibility.test.ts`。
 
+Store-only Session可能在subscriber先注册后才由query加载；qualification要求query projection经NotificationProjector唤醒该pending
+subscriber且仍保持Store read non-mutating。TUI shutdown另以权威projection区分idle release与active/pending/unknown detach；重启后已完成
+Session必须可重新取得Controller，未完成Turn不得被clean exit误释放。
+
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault
 suite 证明 attempt ack 失败为零 dispatch、stale/renew-lost lease 不能 dispatch/commit、lease loss 中止 lifecycle、

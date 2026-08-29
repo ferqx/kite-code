@@ -42,6 +42,7 @@ import {
 
 const CANCEL_RETRY_LIMIT = 8;
 const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
+const CONTROLLER_DISPOSITION_DEADLINE_MS = 1_000;
 
 interface NativeSessionRecord {
   readonly threadId: string;
@@ -1013,7 +1014,7 @@ class NativeTuiRuntimeClient {
   }
 
   async #listRewindCheckpoints(sessionId: string): Promise<readonly RuntimeCheckpointProjection[]> {
-    await this.#waitForSessionReady(sessionId);
+    this.#assertOpen();
     const result = await this.#runtime.query({
       schema: RUNTIME_QUERY_SCHEMA_,
       type: 'list_checkpoints',
@@ -1028,7 +1029,7 @@ class NativeTuiRuntimeClient {
     sessionId: string,
     checkpointId: string,
   ): Promise<RuntimeRewindPreviewProjection | null> {
-    await this.#waitForSessionReady(sessionId);
+    this.#assertOpen();
     const result = await this.#runtime.query({
       schema: RUNTIME_QUERY_SCHEMA_,
       type: 'get_rewind_preview',
@@ -1198,6 +1199,13 @@ class NativeTuiRuntimeClient {
 
   async #dispose(): Promise<void> {
     if (this.#closed) return;
+    const detachBySession = new Map<string, boolean>();
+    await Promise.all(
+      [...this.#sessions.values()].map(async (record) => {
+        if (!record.controllerLease) return;
+        detachBySession.set(record.threadId, await this.#controllerRequiresDetach(record));
+      }),
+    );
     this.#closed = true;
     this.#unsubscribeSnapshot();
     // RuntimeClient.close() closes all local subscription queues as part of
@@ -1210,13 +1218,16 @@ class NativeTuiRuntimeClient {
       for (const waiter of record.rewindWaiters.values()) waiter.reject(closedError);
       record.rewindWaiters.clear();
     }
-    // Detach only leases acquired by this client. Closing the transport must
-    // never cancel a Turn, release another client's lease, or invoke a
-    // Runtime Controller command outside this exact native boundary.
+    // Release an authoritatively idle Controller; detach only when active work,
+    // pending interaction, or an uncertain projection requires recovery. Closing
+    // the transport never cancels a Turn or releases another client's lease.
     for (const record of this.#sessions.values()) {
       const lease = record.controllerLease;
       if (!lease) continue;
-      await detachKiteServiceModeController(this.#connection, lease).catch(() => undefined);
+      const operation = detachBySession.get(record.threadId)
+        ? detachKiteServiceModeController(this.#connection, lease)
+        : releaseKiteServiceModeController(this.#connection, lease);
+      await operation.catch(() => undefined);
       record.controllerLease = undefined;
     }
     this.#sessions.clear();
@@ -1224,6 +1235,42 @@ class NativeTuiRuntimeClient {
     // This is intentionally the Runtime Client connection close only. It
     // cannot call a Service Host/Store dispose or an implicit cancel-all.
     await this.#connection.close('tui_client_closed');
+  }
+
+  async #controllerRequiresDetach(record: NativeSessionRecord): Promise<boolean> {
+    if (
+      record.agentLoopActive ||
+      isActiveWork(record.projection?.activeWork) ||
+      record.interactions.size > 0
+    ) {
+      return true;
+    }
+    try {
+      const result = await withDeadline(
+        this.#runtime.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId: record.threadId,
+        }),
+        CONTROLLER_DISPOSITION_DEADLINE_MS,
+        'Runtime Controller disposition query',
+      );
+      if (
+        result.status !== 'ok' ||
+        result.queryType !== 'get_session_projection' ||
+        !result.session
+      ) {
+        return true;
+      }
+      record.projection = result.session;
+      record.revision = Math.max(record.revision, result.session.revision);
+      return (
+        isActiveWork(result.session.activeWork) ||
+        result.session.interactionQueue.interactions.length > 0
+      );
+    } catch {
+      return true;
+    }
   }
 
   #assertWorkspace(workspace: string): void {

@@ -3,6 +3,7 @@ import { authorizeEffect } from '@kite-ai/agent-kernel';
 import {
   assertRuntimeCommand,
   freezeRuntimeCommandContext,
+  RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
@@ -624,8 +625,16 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   #commitQueryProjection(result: RuntimeQueryResult): void {
     if (result.status !== 'ok') return;
-    if (result.session) this.#registry.commitProjection(result.session);
-    for (const projection of result.sessions ?? []) this.#registry.commitProjection(projection);
+    const publish = (projection: RuntimeSessionProjection): void =>
+      this.#notifications.publish({
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
+        durability: 'durable',
+        sessionId: projection.sessionId,
+        revision: projection.revision,
+        projection: { kind: 'snapshot', session: projection },
+      });
+    if (result.session) publish(result.session);
+    for (const projection of result.sessions ?? []) publish(projection);
   }
 
   #assertOpen(): void {

@@ -164,7 +164,8 @@ installer contract tests的临时Service home也必须由同一state owner primi
 
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
 这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
-flush 父目录；Windows 使用已实现的 regular-file flush 与 atomic replacement，但 directory write-through、ACL 与
+flush 父目录；Windows regular-file flush必须用write-capable handle（Bun/Windows对read-only handle的`fsync`返回`EPERM`）后再
+atomic replacement，但 directory write-through、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实

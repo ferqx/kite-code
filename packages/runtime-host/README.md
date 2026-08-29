@@ -18,6 +18,9 @@
 - 接收 Runtime Server 的进程内 `RuntimeCommandContext`，在 Host inspect/commit 到 prepared execution bridge 时保持同一冻结
   connection/request/binding identity；Host 不把它序列化、不从 Session 反查 Worker binding，也不持有 Worker credential。
 - 启动一个 frozen RuntimeModule snapshot，关闭 bridge 后逆序释放 module。
+- Store-authoritative query返回Session projection时通过同一NotificationProjector发布event-free durable snapshot；这只hydrate
+  process-local registry/history与已等待的subscriber，不写Store。订阅先于query建立且Session仅存在于Store时，pending subscriber也会
+  收到该snapshot并完成ready，不能只更新registry后永久等待。
 
 ## 不拥有职责
 

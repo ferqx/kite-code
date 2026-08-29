@@ -372,7 +372,9 @@ function readActiveReleasePointer(root: string): string {
 }
 
 function syncRegularFile(path: string): void {
-  const descriptor = openSync(path, 'r');
+  // Windows FlushFileBuffers requires a handle opened with write access. Bun
+  // surfaces the read-only-handle rejection as EPERM even for a regular file.
+  const descriptor = openSync(path, process.platform === 'win32' ? 'r+' : 'r');
   try {
     fsyncSync(descriptor);
   } finally {
