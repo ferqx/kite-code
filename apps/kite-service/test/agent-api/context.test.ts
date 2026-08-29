@@ -8,6 +8,7 @@ import {
 import {
   AGENT_API_CONNECTION_AUTHORIZATION_SCHEME,
   AGENT_API_CONTEXT_TTL_MS,
+  AGENT_API_MAX_IN_FLIGHT_REQUESTS,
   type AgentApiCapabilityBinding,
   type AgentApiReadContext,
   createAgentApiRouteHandler,
@@ -233,6 +234,13 @@ describe('Agent API context and route shell', () => {
     const unacceptable = bearerRequest('/v1', created.body.access_token);
     unacceptable.headers.set('accept', 'text/html');
     expect((await f.handler.handle(unacceptable)).status).toBe(406);
+
+    const unavailableStream = bearerRequest(
+      '/v1/sessions/session-1/events',
+      created.body.access_token,
+    );
+    unavailableStream.headers.set('accept', 'text/event-stream');
+    expect((await f.handler.handle(unavailableStream)).status).toBe(404);
   });
 
   test('fails closed for oversized request metadata and duplicate context token material', async () => {
@@ -392,5 +400,72 @@ describe('Agent API context and route shell', () => {
     const unavailable = await f.handler.handle(bearerRequest('/v1', created.body.access_token));
     expect(unavailable.status).toBe(503);
     expect(unavailable.headers.get('retry-after')).toBe('1');
+  });
+
+  test('bounds per-context concurrency and drains admitted reads before closing their connection', async () => {
+    let admissionCalls = 0;
+    let releaseReads!: () => void;
+    const readsBlocked = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let readCloseCalls = 0;
+    const f = fixture({
+      admitWorkspace: async () => {
+        admissionCalls += 1;
+        if (admissionCalls > 1) await readsBlocked;
+        return 'admitted';
+      },
+      openReadContext: async () => {
+        const close = async () => {
+          readCloseCalls += 1;
+        };
+        return {
+          query: async (query) => ({
+            status: 'not_found',
+            queryType: query.type,
+            code: 'session_not_found',
+          }),
+          history: {
+            listSessions: async () => ({ entries: [], hasMore: false }),
+            listEvents: async () => ({
+              entries: [],
+              hasMore: false,
+              observedLastSequence: 0,
+            }),
+          },
+          checkpoints: {
+            list: () => ({ entries: [], hasMore: false }),
+            get: () => undefined,
+          },
+          close,
+          [Symbol.asyncDispose]: close,
+        };
+      },
+    });
+    f.issue('U'.repeat(43));
+    const created = await exchange(f, 'U'.repeat(43));
+    const pending = Array.from({ length: AGENT_API_MAX_IN_FLIGHT_REQUESTS }, () =>
+      f.handler.handle(bearerRequest('/v1', created.body.access_token)),
+    );
+    while (admissionCalls < AGENT_API_MAX_IN_FLIGHT_REQUESTS + 1) await Promise.resolve();
+
+    const overloaded = await f.handler.handle(bearerRequest('/v1', created.body.access_token));
+    expect(overloaded.status).toBe(429);
+    expect(overloaded.headers.get('retry-after')).toBe('1');
+
+    let closeSettled = false;
+    const closing = f.handler.close().then(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBeFalse();
+    expect(readCloseCalls).toBe(0);
+
+    releaseReads();
+    expect((await Promise.all(pending)).map((response) => response.status)).toEqual(
+      Array.from({ length: AGENT_API_MAX_IN_FLIGHT_REQUESTS }, () => 503),
+    );
+    await closing;
+    expect(readCloseCalls).toBe(1);
   });
 });

@@ -12,10 +12,15 @@ import {
   decodeAgentApiRequest,
   encodeAgentApiResponse,
 } from '@kite-ai/agent-api-contract';
-import { type AgentApiReadContext, dispatchAgentApiReadRequest } from './read-adapter';
+import {
+  type AgentApiReadContext,
+  dispatchAgentApiReadRequest,
+  isAgentApiReadRequest,
+} from './read-adapter';
 
 export const AGENT_API_CONTEXT_TTL_MS = 60 * 60 * 1_000;
 export const AGENT_API_MAX_CONTEXTS = 1_024;
+export const AGENT_API_MAX_IN_FLIGHT_REQUESTS = 16;
 export const AGENT_API_CONNECTION_AUTHORIZATION_SCHEME = 'Kite-Connection' as const;
 export const AGENT_API_CONTEXT_AUTHORIZATION_SCHEME = 'Bearer' as const;
 
@@ -62,6 +67,9 @@ interface ContextRecord {
   readonly role: 'observer' | 'controller';
   readonly expiresAtMs: number;
   readonly readContext?: AgentApiReadContext;
+  activeRequests: number;
+  revoked: boolean;
+  closePromise?: Promise<void>;
 }
 
 /**
@@ -92,15 +100,29 @@ export function createAgentApiRouteHandler(
   const contexts = new Map<string, ContextRecord>();
   const pendingDigests = new Set<string>();
   const pendingReadContexts = new Set<Promise<void>>();
+  const pendingRequests = new Set<Promise<void>>();
   let pendingContexts = 0;
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
+  const closeReadContext = (record: ContextRecord): Promise<void> => {
+    record.closePromise ??= (async () => {
+      try {
+        await record.readContext?.close();
+      } catch {
+        // Revocation is fail-closed even when private connection cleanup reports an error.
+      }
+    })();
+    return record.closePromise;
+  };
+
   const revoke = (digest: string, record: ContextRecord): Promise<void> => {
-    if (contexts.get(digest) !== record) return Promise.resolve();
-    contexts.delete(digest);
+    if (contexts.get(digest) === record) contexts.delete(digest);
+    if (record.revoked) return record.closePromise ?? Promise.resolve();
+    record.revoked = true;
+    if (record.activeRequests > 0) return Promise.resolve();
     try {
-      return record.readContext?.close().catch(() => undefined) ?? Promise.resolve();
+      return closeReadContext(record);
     } catch {
       return Promise.resolve();
     }
@@ -141,69 +163,96 @@ export function createAgentApiRouteHandler(
         }
         const context = authenticateContext(request, contexts, now, options, prune);
         if (!context) return problemResponse(401, 'unauthorized', requestId, false);
-        if (url.pathname === '/v1/auth/session') {
-          if (url.search.length !== 0) {
-            return problemResponse(400, 'invalid_request', requestId, false);
-          }
-          if (request.method !== 'DELETE') {
-            return problemResponse(405, 'method_not_allowed', requestId, false, {
-              allow: 'DELETE',
-            });
-          }
-          await revoke(context.digest, context);
-          return emptyResponse(204, requestId);
+        if (context.activeRequests >= AGENT_API_MAX_IN_FLIGHT_REQUESTS) {
+          return problemResponse(429, 'overloaded', requestId, true, { retryAfter: 1 });
         }
-        const admission = await recheckWorkspaceAdmission(options.admitWorkspace);
-        if (admission === 'untrusted') {
-          await revoke(context.digest, context);
-          return problemResponse(403, 'forbidden', requestId, false);
-        }
-        if (admission !== 'admitted') {
-          return problemResponse(503, 'temporarily_unavailable', requestId, true, {
-            retryAfter: 1,
-          });
-        }
-        if (url.pathname === '/v1') {
-          if (request.method !== 'GET') {
-            return problemResponse(405, 'method_not_allowed', requestId, false, { allow: 'GET' });
-          }
-          if (
-            request.headers.get('accept') !== null &&
-            !acceptsJson(request.headers.get('accept'))
-          ) {
-            return problemResponse(406, 'not_acceptable', requestId, false);
-          }
-          return jsonResponse(200, serverInfo, requestId);
-        }
-        if (context.readContext) {
-          if (
-            request.headers.get('accept') !== null &&
-            !acceptsJson(request.headers.get('accept'))
-          ) {
-            return problemResponse(406, 'not_acceptable', requestId, false);
-          }
-          const read = await dispatchAgentApiReadRequest({
-            request,
-            url,
-            context: context.readContext,
-          });
-          if (read.matched) {
-            if (!read.result.ok) {
-              return problemResponse(
-                read.result.status,
-                read.result.code,
-                requestId,
-                read.result.retryable,
-                read.result.status === 503 ? { retryAfter: 1 } : {},
-              );
+        context.activeRequests += 1;
+        let finishPendingRequest!: () => void;
+        const pendingRequest = new Promise<void>((resolve) => {
+          finishPendingRequest = resolve;
+        });
+        pendingRequests.add(pendingRequest);
+        try {
+          if (url.pathname === '/v1/auth/session') {
+            if (url.search.length !== 0) {
+              return problemResponse(400, 'invalid_request', requestId, false);
             }
-            return jsonResponse(200, read.result.body, requestId, {
-              ...(read.result.etag ? { etag: read.result.etag } : {}),
+            if (request.method !== 'DELETE') {
+              return problemResponse(405, 'method_not_allowed', requestId, false, {
+                allow: 'DELETE',
+              });
+            }
+            void revoke(context.digest, context);
+            return emptyResponse(204, requestId);
+          }
+          const admission = await recheckWorkspaceAdmission(options.admitWorkspace);
+          if (admission === 'untrusted') {
+            void revoke(context.digest, context);
+            return problemResponse(403, 'forbidden', requestId, false);
+          }
+          if (admission !== 'admitted') {
+            return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+              retryAfter: 1,
             });
           }
+          if (closed) {
+            return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+              retryAfter: 1,
+            });
+          }
+          if (context.revoked || contexts.get(context.digest) !== context) {
+            return problemResponse(401, 'unauthorized', requestId, false);
+          }
+          if (url.pathname === '/v1') {
+            if (request.method !== 'GET') {
+              return problemResponse(405, 'method_not_allowed', requestId, false, {
+                allow: 'GET',
+              });
+            }
+            if (
+              request.headers.get('accept') !== null &&
+              !acceptsJson(request.headers.get('accept'))
+            ) {
+              return problemResponse(406, 'not_acceptable', requestId, false);
+            }
+            return jsonResponse(200, serverInfo, requestId);
+          }
+          if (context.readContext && isAgentApiReadRequest(request, url)) {
+            if (
+              request.headers.get('accept') !== null &&
+              !acceptsJson(request.headers.get('accept'))
+            ) {
+              return problemResponse(406, 'not_acceptable', requestId, false);
+            }
+            const read = await dispatchAgentApiReadRequest({
+              request,
+              url,
+              context: context.readContext,
+            });
+            if (read.matched) {
+              if (!read.result.ok) {
+                return problemResponse(
+                  read.result.status,
+                  read.result.code,
+                  requestId,
+                  read.result.retryable,
+                  read.result.status === 503 ? { retryAfter: 1 } : {},
+                );
+              }
+              return jsonResponse(200, read.result.body, requestId, {
+                ...(read.result.etag ? { etag: read.result.etag } : {}),
+              });
+            }
+          }
+          return problemResponse(404, 'not_found', requestId, false);
+        } finally {
+          context.activeRequests -= 1;
+          if (context.revoked && context.activeRequests === 0) {
+            await closeReadContext(context);
+          }
+          finishPendingRequest();
+          pendingRequests.delete(pendingRequest);
         }
-        // KASAPI-02A deliberately registers no resource or mutation handler.
-        return problemResponse(404, 'not_found', requestId, false);
       } catch {
         return problemResponse(503, 'temporarily_unavailable', requestId, true, {
           retryAfter: 1,
@@ -225,8 +274,10 @@ export function createAgentApiRouteHandler(
         if (closed) return;
         closed = true;
         const records = [...contexts.entries()];
-        await Promise.all(records.map(([digest, record]) => revoke(digest, record)));
+        for (const [digest, record] of records) void revoke(digest, record);
         await Promise.allSettled([...pendingReadContexts]);
+        await Promise.allSettled([...pendingRequests]);
+        await Promise.allSettled(records.map(([, record]) => closeReadContext(record)));
       })();
       return closePromise;
     },
@@ -363,6 +414,8 @@ export function createAgentApiRouteHandler(
         binding,
         role: binding.purpose === 'agent_api_controller' ? 'controller' : 'observer',
         expiresAtMs,
+        activeRequests: 0,
+        revoked: false,
         ...(readContext ? { readContext } : {}),
       });
       return jsonResponse(201, responseBody, requestId);

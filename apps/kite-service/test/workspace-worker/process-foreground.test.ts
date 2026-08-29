@@ -50,6 +50,7 @@ import {
 } from '../../src/workspace-worker/store-owner';
 import type { WorkspaceWorkerOwnerLockPort } from '../../src/workspace-worker/worker';
 import { workspaceIdentityDigest } from '../../src/workspace-worker/workspace-identity';
+import { AgentApiReferenceClient } from '../agent-api/reference-client';
 
 const roots: string[] = [];
 const LAYOUT = 'generation-foreground-1';
@@ -639,49 +640,29 @@ describe('Workspace Worker runtime foreground composition', () => {
       if (agentCapability.outcome !== 'applied') {
         throw new Error('Agent API capability mint failed.');
       }
-      const exchange = await fetch(`${composition.origin}/v1/auth/exchange`, {
-        method: 'POST',
-        headers: {
-          authorization: `Kite-Connection ${agentCapability.capability}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          schema: 'kite.agent-api.exchange.v1',
-          api_version: 'v1',
-          required_capabilities: [],
-        }),
+      const agentClient = new AgentApiReferenceClient((request) => {
+        const url = new URL(request.url);
+        return fetch(new Request(`${composition.origin}${url.pathname}${url.search}`, request));
       });
-      expect(exchange.status).toBe(201);
-      const context = (await exchange.json()) as { readonly access_token?: unknown };
+      const context = await agentClient.exchange(agentCapability.capability);
       expect(context.access_token).toEqual(expect.any(String));
-      const serverInfo = await fetch(`${composition.origin}/v1`, {
-        headers: { authorization: `Bearer ${String(context.access_token)}` },
-      });
-      expect(serverInfo.status).toBe(200);
-      expect(await serverInfo.json()).toMatchObject({
+      expect(await agentClient.serverInfo()).toMatchObject({
         schema: 'kite.agent-api.server-info.v1',
         api_version: 'v1',
         server_version: 'kite-workspace-worker-v1',
         build_id: 'build-foreground',
         capabilities: ['checkpoints', 'history', 'sessions'],
       });
-      const sessions = await fetch(`${composition.origin}/v1/sessions?limit=1`, {
-        headers: { authorization: `Bearer ${String(context.access_token)}` },
-      });
-      expect(sessions.status).toBe(200);
-      expect(await sessions.json()).toEqual({
+      expect(await agentClient.listSessions('?limit=1')).toEqual({
         schema: 'kite.agent-api.session-page.v1',
         items: [],
       });
-      const missingSession = await fetch(`${composition.origin}/v1/sessions/missing-session`, {
-        headers: { authorization: `Bearer ${String(context.access_token)}` },
-      });
-      expect(missingSession.status).toBe(404);
-      const mutation = await fetch(`${composition.origin}/v1/sessions`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${String(context.access_token)}` },
-      });
-      expect(mutation.status).toBe(404);
+      expect((await agentClient.problem('/v1/sessions/missing-session', {}, 404)).code).toBe(
+        'not_found',
+      );
+      expect((await agentClient.problem('/v1/sessions', { method: 'POST' }, 404)).code).toBe(
+        'not_found',
+      );
       const replay = await fetch(`${composition.origin}${KITE_SERVICE_CONNECT_PATH}`, {
         method: 'POST',
         headers: {

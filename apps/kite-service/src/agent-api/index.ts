@@ -3,6 +3,7 @@ export {
   AGENT_API_CONTEXT_AUTHORIZATION_SCHEME,
   AGENT_API_CONTEXT_TTL_MS,
   AGENT_API_MAX_CONTEXTS,
+  AGENT_API_MAX_IN_FLIGHT_REQUESTS,
   type AgentApiCapabilityBinding,
   type AgentApiRouteHandler,
   type AgentApiRouteHandlerOptions,

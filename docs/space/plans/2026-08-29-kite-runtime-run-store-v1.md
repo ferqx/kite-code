@@ -1,6 +1,6 @@
 # Kite Runtime Run Store V1 子计划
 
-状态：active（implementation blocked until KASAPI-02D）
+状态：active
 
 日期：2026-08-29
 
@@ -15,8 +15,8 @@
 ## 1. 执行状态与边界
 
 KRSRUN-00A随KASAPI-00C完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
-offline generation migration已经冻结。KRSRUN-01A～03B尚未实现，并被父计划KASAPI-02D read-only conformance Gate阻断；在解除前不得修改
-production Store、开放Run route或声明ServerInfo `runs`capability。
+offline generation migration已经冻结。父计划KASAPI-02D read-only conformance Gate已关闭；当前执行入口为KRSRUN-01A neutral Run storage
+contract与Store 8 schema。KRSRUN-01A～03B完成前仍不得开放Run route或声明ServerInfo `runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
 Run routes与crash qualification。

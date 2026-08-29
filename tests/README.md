@@ -73,6 +73,9 @@ Checkpoint path non-disclosure与pending logical connection drain；Worker appli
 in-process Runtime Client/Server、HTTP仍复用同一listener且private routes不接受Public context。SQLite owner tests另验证same-connection
 Session/History/Checkpoint page、advancing keyset与corrupt snapshot fail closed。Web Gateway isolated carrier test另固定验证
 `/api-docs` HTML deep link、精确OpenAPI JSON allowlist、CSP/no-store/content-type与未知deep link 404；release tests拒绝缺少该contract asset的候选包。
+KASAPI-02D的`apps/kite-service/test/agent-api/reference-client.ts`是test-only Public codec client；conformance suite用它同时驱动handler与真实
+Worker HTTP listener，验证两种role、capability incompatibility/replay、concurrent keyset page、fixed-through History、1 MiB body/response、
+16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；Gateway restart继续由独立process/carrier tests拥有。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact

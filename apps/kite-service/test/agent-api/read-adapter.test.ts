@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AGENT_API_LIMITS } from '@kite-ai/agent-api-contract';
 import type { RuntimeLogEventEntry, RuntimeQuery } from '@kite-ai/runtime-contract';
 import {
   type AgentApiReadContext,
@@ -17,12 +18,17 @@ const sessionProjection = {
   activeWork: { workId: 'work-1', phase: 'building', status: 'running' },
 } as const;
 
-function fixture(options: { readonly boundaryEventId?: string } = {}) {
+function fixture(
+  options: {
+    readonly boundaryEventId?: string;
+    readonly events?: readonly RuntimeLogEventEntry[];
+  } = {},
+) {
   const queries: RuntimeQuery[] = [];
   const sessionPages: unknown[] = [];
   const eventPages: unknown[] = [];
   let closed = 0;
-  const events: RuntimeLogEventEntry[] = [
+  const events: readonly RuntimeLogEventEntry[] = options.events ?? [
     {
       sessionId: 'session-1',
       sequence: 1,
@@ -124,7 +130,7 @@ function fixture(options: { readonly boundaryEventId?: string } = {}) {
           entries: selected,
           ...(candidates.length > selected.length ? { nextCursor: selected.at(-1)!.sequence } : {}),
           hasMore: candidates.length > selected.length,
-          observedLastSequence: 2,
+          observedLastSequence: events.at(-1)?.sequence ?? 0,
         };
       },
     },
@@ -321,5 +327,45 @@ describe('Agent API bounded read adapter', () => {
       matched: true,
       result: { ok: false, status: 404, code: 'not_found' },
     });
+  });
+
+  test('ends a large History page before the encoded response exceeds one MiB', async () => {
+    const text = 'x'.repeat(65_536);
+    const events: RuntimeLogEventEntry[] = Array.from({ length: 24 }, (_, index) => ({
+      sessionId: 'session-1',
+      sequence: index + 1,
+      eventId: `large-event-${index + 1}`,
+      occurredAt: '2026-08-30T01:00:00.000Z',
+      createdAt: 1_777_680_000 + index,
+      type: 'user.message_appended',
+      category: 'turn',
+      status: 'unknown',
+      detail: {
+        kind: 'message',
+        fields: { message_id: `large-message-${index + 1}`, content: text },
+      },
+    }));
+    const f = fixture({ events });
+    let path = '/v1/sessions/session-1/history?limit=200';
+    const sequences: number[] = [];
+    let pages = 0;
+    for (;;) {
+      const result = await dispatch(f.context, path);
+      if (!result.matched || !result.result.ok) throw new Error('History page was unavailable.');
+      const body = result.result.body as {
+        readonly items: readonly { readonly sequence: number }[];
+        readonly next_cursor?: string;
+      };
+      expect(new TextEncoder().encode(JSON.stringify(body)).byteLength).toBeLessThanOrEqual(
+        AGENT_API_LIMITS.maxMessageBytes,
+      );
+      sequences.push(...body.items.map((item) => item.sequence));
+      pages += 1;
+      if (!body.next_cursor) break;
+      path = `/v1/sessions/session-1/history?limit=200&cursor=${body.next_cursor}`;
+    }
+
+    expect(pages).toBeGreaterThan(1);
+    expect(sequences).toEqual(Array.from({ length: 24 }, (_, index) => index + 1));
   });
 });

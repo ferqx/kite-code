@@ -181,6 +181,9 @@ exchange在消费capability前重验Workspace Trust，context为Worker-local has
 read logical connection。当前开放exchange/logout/ServerInfo及bounded Session list/get、History page、Checkpoint list/preview，capabilities精确为
 `checkpoints/history/sessions`；每次read再次重验Trust。Controller role不取得或替代Store 7 Session Controller lease，Run/Interaction/
 mutation/SSE仍未开放。Coordinator仍不代理Agent data plane，Web Observer永久只读且不能取得Agent context。
+KASAPI-02D reference client已在handler seam与真实Worker listener上验证两种role的read、capability replay、pagination/limits、drain、replacement
+与non-disclosure；旧Worker token在replacement上固定401，draining handler固定503且不恢复context。Gateway restart继续只轮换browser cookie/tab
+generation，由独立Gateway process/carrier suite覆盖；Gateway前后都不代理`/v1`，也不影响Worker context/Runtime work。
 
 ## Store 7 与 generation cutover
 

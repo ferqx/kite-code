@@ -20,6 +20,10 @@ untrusted/unavailable与context overload在认证前拒绝且不消费capability
 HTTP admission并关闭其private read logical connection，不取消Run/Session、不触发recovery、不写Store。每次read request重验Trust；Trust撤销会
 撤销context，Trust暂时不可用返回503。History cursor把first-page through sequence与boundary event digest固定；boundary被rewind/delete替换时409
 invalidated，不把新History拼到旧watermark。response loss后Client必须重新mint/exchange，不从descriptor或旧token恢复。
+每context最多16个in-flight request；第17个返回retryable 429。logout、Trust撤销、generation fence、drain与replacement先阻止新admission，
+等待已认证read（包括pending Trust重验）收敛后关闭一次private connection；迟到admission复核closed/revoked事实并返回503/401，不能进入owner。
+History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
+覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；Gateway restart仍由独立process/carrier suite证明且不代理`/v1`。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；

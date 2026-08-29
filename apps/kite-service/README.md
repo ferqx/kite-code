@@ -37,7 +37,8 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   `agent_api_observer|agent_api_controller` capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；
   ServerInfo发布`checkpoints/history/sessions`，开放Session list/get、History page与Checkpoint list/preview，其他resource/mutation route保持
   404。每个context拥有一条read-only private Runtime logical connection，每请求重验Trust；Coordinator不代理data plane，Browser/Web
-  Gateway不能mint或使用该context。
+  Gateway不能mint或使用该context。每context最多16个in-flight request；drain/revoke先停止新请求并等待已admit read收敛，再关闭private
+  connection。History按1 MiB encoded response上限提前分页，未知SSE/mutation path即使请求非JSON media type也保持404。
 - Web Gateway只为Agent API增加release-bundled静态参考：`/api-docs`与尾斜杠映射Web入口，
   `/api-docs/openapi.json`映射candidate内的canonical artifact。该页面不发现Worker、不取得Agent context、不保存credential、
   不提供Try it/execute；API或Worker在线状态只显示为未确认，未知docs deep link保持404。
@@ -119,7 +120,8 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
   Workspace bound。credential、token、raw Provider body与diagnostic secret不跨client seam。
 - Agent API connection capability同样为30秒hash-only one-shot，但只用于exchange；context token为32-byte base64url、hash-only、
   60分钟absolute TTL，绑定Worker/Workspace/Client generation/role。generation drift、Native connection close与Worker drain清除context；
-  role不授予Session Controller lease。
+  role不授予Session Controller lease。KASAPI-02D Public-codec reference client同时覆盖in-memory handler与真实Worker listener；read adapter
+  static Gate拒绝direct `RuntimeAccess`及Host/Store/Kernel concrete import。
 - Windows filesystem state通过current-user SID、protected owner-only DACL与non-reparse verifier保护；ACL drift
   fail closed。hosted Windows lifecycle/release job通过前，本地POSIX/focused tests与candidate layout仍不构成
   KLSV1-07三平台或全部PTY通过。
@@ -137,7 +139,7 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
 ## 测试
 
 `bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control、Coordinator/Worker/Web与Native shell/carrier；当前default owner run为1519 tests / 8428 expects，
+History/App Control、Coordinator/Worker/Web与Native shell/carrier；当前default owner run为1524 tests / 8475 expects，
 manager/Coordinator focused evidence位于`packages/kite-local-runtime/test`。完整TUI PTY scenario与
 本机macOS arm64 installed release smoke已经覆盖 Coordinator→Worker ensure/mint/handshake、TUI startup、精确 test-owned companion
 cleanup、upgrade/rollback/uninstall并通过；正式 Linux/Windows hosted process/release qualification 仍 pending。

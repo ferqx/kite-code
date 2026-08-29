@@ -1,7 +1,7 @@
 # Service Agent API
 
-本页是`apps/kite-service/src/agent-api/`的owner-local current authority。当前已完成KASAPI-02A～02B认证context与bounded read adapter；
-Run、Interaction完整路由、mutation、SSE、SDK与Web API docs尚未实现。
+本页是`apps/kite-service/src/agent-api/`的owner-local current authority。当前已完成KASAPI-02A～02D认证context、bounded read adapter、
+release-bundled Web API docs及read-only conformance/fault Gate；Run、Interaction完整路由、mutation、SSE与SDK尚未实现。
 
 ## 当前路由
 
@@ -55,6 +55,11 @@ initialize/query的private in-process Runtime Client/Server logical connection�
 除logout外，每次Bearer request重新执行canonical Workspace admission：untrusted固定403并撤销context，temporarily unavailable固定503但不把
 旧Trust推断为允许。
 
+每context最多16个in-flight非SSE request；第17个固定429/Retry-After。logout、Trust撤销、generation fence与Worker drain先从admission map删除
+context、拒绝新请求，等待已经认证且正在重验Trust/读取的请求收敛后只关闭一次private Runtime connection。异步Trust admission返回时还会复核
+handler/context仍current；因此drain或replacement不能让迟到admission继续读取。close等待pending connection open与全部in-flight request，
+不把正在执行的read遗留给replacement。
+
 Request带Origin、Cookie或任一`Sec-Fetch-*`固定403，CORS/OPTIONS不开放。Exchange拒绝invalid UTF-8、duplicate field、unknown field、oversized
 body与错误media type。request target固定最多4096 UTF-8 bytes、单path segment 128 bytes、单header 8 KiB、全部header 32 KiB且
 Authorization最多512 bytes；越界在owner执行前fail closed。随机源重复不能覆盖或alias既有capability/context；Worker drain若先于异步Trust
@@ -75,17 +80,29 @@ Session page source在Store 7已打开的同一SQLite connection执行bounded ke
 ID以并发上限8执行in-process Runtime query join。History page使用同connection的bounded event sequence window，经既有Service safe projector
 投影user/model/tool closed fields；cursor携带public Session scope、固定through sequence、boundary event digest与`sequence + public_ordinal`，
 支持同一durable model event展开reasoning/message后精确续页。rewind/delete导致boundary缺失或替换返回409 `cursor_invalidated`。
+History projector按Public codec的1 MiB encoded message上限逐项计算；达到上限时保留最后已返回`sequence/public_ordinal`并提前生成next cursor，
+而不是构造超限body后返回503。单个bounded Public item若仍无法容纳才视为temporarily unavailable。
 
 Checkpoint metadata port同样绑定现有Store connection，单页最多200项，选中snapshot逐个验证current schema/epoch/checksum；preview再通过
 Runtime query验证checkpoint并只投影计数。cursor是canonical JSON的base64url opaque value并带domain-separated unkeyed checksum；它只发现
 损坏，不授权，每次请求仍重新验证context Workspace/Session scope。missing返回404，checkpoint失效返回409，corrupt/unavailable返回503；
 legacy-only不触发import或fallback。
 
+## KASAPI-02D conformance Gate
+
+`test/agent-api/reference-client.ts`是test-only contract-driven client：每个success/Problem都经
+`@kite-ai/agent-api-contract` response decoder，并复核API version、artifact digest、request ID、no-store、nosniff与media type。它同时驱动
+in-memory handler与真实Workspace Worker HTTP listener，覆盖observer/controller read等价、mutation/SSE固定404、capability缺失/重放、
+Session/Checkpoint keyset pagination、并发新Session、History固定through sequence、1 MiB body/response、Worker close/replacement、16-request
+overload/drain及path/token/Workspace/binding non-disclosure。static assertion继续禁止Agent adapter导入direct `RuntimeAccess`、Agent Kernel、
+Runtime Host或SQLite concrete。Gateway restart由独立Gateway process/carrier suite验证，且Gateway从不代理`/v1`。
+
 ## 验证
 
 ```text
 bun test apps/kite-service/test/agent-api/context.test.ts
 bun test apps/kite-service/test/agent-api/read-adapter.test.ts
+bun test apps/kite-service/test/agent-api/conformance.test.ts
 bun test apps/kite-service/test/workspace-worker/application.test.ts
 bun test apps/kite-service/test/workspace-worker/process-foreground.test.ts
 bun test apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts
@@ -93,5 +110,5 @@ bun test packages/kite-local-runtime/test/coordinator.test.ts
 bun run check:agent-api-packages
 ```
 
-后续KASAPI-02C只增加immutable static API docs，不改变本data plane。任何Run/mutation仍等待KASAPI-02D read conformance、ADR-0150 Store 8与
-KASAPI-03，不得在read adapter中用placeholder handler提前开放。
+KASAPI-02D已关闭read-only Gate，但不会自动发布`runs`。任何Run/mutation仍等待ADR-0150 Store 8子计划与KASAPI-03，
+不得在Store 7或read adapter中用placeholder、event scan或sidecar事实提前开放。

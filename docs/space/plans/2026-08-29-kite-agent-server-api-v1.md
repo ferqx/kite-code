@@ -20,19 +20,20 @@
 架构前置：ADR-0149 已接受稳定本机 Public Agent API 对 ADR-0142 repo-private Protocol、ADR-0147 Worker/Controller/Web
 边界的局部扩展。KASAPI-00C已接受ADR-0150与
 [`Runtime Run Store V1子计划`](2026-08-29-kite-runtime-run-store-v1.md)，固定State 27 / Store 8 canonical Run authority与migration。
-Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read-only façade可以继续。
+KASAPI-02D read-only Gate已关闭；Run mutation仍在该Store 8子计划完成前保持blocked。
 
 ## 实施状态（2026-08-30）
 
-KASAPI-00A～02C 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～02D 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
 pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
 fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
 Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；Web release已逐字节装入
-canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。当前执行入口为KASAPI-02D read-only conformance/fault Gate，
-仍不创建Run mutation。
+canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。Public-codec reference client已在handler及真实Worker listener上关闭
+auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。当前执行入口为KASAPI-03A子计划KRSRUN-01A neutral Run
+storage contract与Store 8 schema；仍不创建Run mutation或发布`runs`capability。
 
 ## 1. 执行结论
 
@@ -380,7 +381,13 @@ Worker离线时只显示availability未确认。
 
 Rollback：删除static routes/assets，不影响Browser Observer data plane。
 
-#### KASAPI-02D：Read-only conformance 与 fault Gate
+#### KASAPI-02D：Read-only conformance 与 fault Gate（已完成）
+
+完成证据：test-only reference client对每个success/Problem运行Public response codec并复核version/artifact digest/request ID/security headers，
+同时驱动in-memory handler和真实Workspace Worker listener。suite覆盖capability incompatibility/replay、observer/controller read与mutation 404、
+Session/Checkpoint keyset及并发新Session、History concurrent append下固定through sequence、1 MiB request/response、未知SSE route 404、
+每context 16-request overload、pending Trust/read drain、Worker close/replacement与path/token/Workspace/binding non-disclosure；static assertion
+禁止direct RuntimeAccess或Host/Store/Kernel concrete import。Gateway restart仍由既有独立process/carrier suite覆盖，且Gateway不代理`/v1`。
 
 交付：contract-driven reference client；覆盖auth、pagination、concurrent Session update、Worker/Gateway restart、body/frame limits、drain、
 observer/controller role与non-disclosure。

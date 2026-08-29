@@ -17,6 +17,7 @@ import {
   agentApiSessionSchema,
   agentApiTimestampSchema,
   encodeAgentApiResponse,
+  utf8ByteLength,
 } from '@kite-ai/agent-api-contract';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import type {
@@ -173,6 +174,10 @@ export async function dispatchAgentApiReadRequest(input: {
   }
 }
 
+export function isAgentApiReadRequest(request: Request, url: URL): boolean {
+  return request.method === 'GET' && parseReadRoute(url.pathname) !== undefined;
+}
+
 function matched(
   result: Extract<AgentApiReadDispatchResult, { matched: true }>['result'],
 ): AgentApiReadDispatchResult {
@@ -309,40 +314,61 @@ async function listHistory(
     );
   });
   const selected = afterFiltered.slice(0, limit);
-  const sourceLast = page.entries.at(-1);
-  const hasUnreturnedPublicItem = afterFiltered.length > selected.length;
-  const hasMore = hasUnreturnedPublicItem || page.hasMore;
-  let nextCursor: string | undefined;
-  if (hasMore) {
-    const lastPublic = selected.at(-1)?.item;
-    const partialSource = hasUnreturnedPublicItem && lastPublic !== undefined;
-    const scanSequence = partialSource
-      ? lastPublic!.sequence
-      : (sourceLast?.sequence ?? cursor?.scan_sequence ?? 0);
-    const publicOrdinal = partialSource ? lastPublic!.public_ordinal : null;
-    const boundaryDigest =
-      cursor?.through_event_digest ??
-      (await historyBoundaryDigest(context, sessionId, throughSequence));
-    nextCursor = encodeCursor({
-      schema: 'kite.agent-api.cursor.history.v1',
-      collection: 'history',
+  let boundaryDigest = cursor?.through_event_digest;
+  const buildCandidate = async (itemCount: number) => {
+    const candidateItems = selected.slice(0, itemCount);
+    const hasUnreturnedPublicItem = afterFiltered.length > candidateItems.length;
+    const hasMore = hasUnreturnedPublicItem || page.hasMore;
+    let nextCursor: string | undefined;
+    if (hasMore) {
+      const lastPublic = candidateItems.at(-1)?.item;
+      const partialSource = hasUnreturnedPublicItem && lastPublic !== undefined;
+      const scanSequence = partialSource
+        ? lastPublic.sequence
+        : (page.entries.at(-1)?.sequence ?? cursor?.scan_sequence ?? 0);
+      const publicOrdinal = partialSource ? lastPublic.public_ordinal : null;
+      boundaryDigest ??= await historyBoundaryDigest(context, sessionId, throughSequence);
+      nextCursor = encodeCursor({
+        schema: 'kite.agent-api.cursor.history.v1',
+        collection: 'history',
+        session_id: sessionId,
+        through_sequence: throughSequence,
+        through_event_digest: boundaryDigest,
+        scan_sequence: scanSequence,
+        public_ordinal: publicOrdinal,
+      } satisfies HistoryCursorPayload);
+    }
+    const candidate = {
+      schema: 'kite.agent-api.history-page.v1' as const,
       session_id: sessionId,
       through_sequence: throughSequence,
-      through_event_digest: boundaryDigest,
-      scan_sequence: scanSequence,
-      public_ordinal: publicOrdinal,
-    } satisfies HistoryCursorPayload);
-  }
-  return {
-    ok: true,
-    body: encodeAgentApiResponse(agentApiHistoryPageSchema, {
-      schema: 'kite.agent-api.history-page.v1',
-      session_id: sessionId,
-      through_sequence: throughSequence,
-      items: selected.map(({ item }) => item),
+      items: candidateItems.map(({ item }) => item),
       ...(nextCursor ? { next_cursor: nextCursor } : {}),
-    }),
+    };
+    return {
+      body: candidate,
+      bytes: utf8ByteLength(JSON.stringify(candidate)),
+    };
   };
+  const full = await buildCandidate(selected.length);
+  if (full.bytes <= AGENT_API_LIMITS.maxMessageBytes) {
+    return { ok: true, body: encodeAgentApiResponse(agentApiHistoryPageSchema, full.body) };
+  }
+  let lower = 1;
+  let upper = selected.length - 1;
+  let bounded: Awaited<ReturnType<typeof buildCandidate>> | undefined;
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    const candidate = await buildCandidate(middle);
+    if (candidate.bytes <= AGENT_API_LIMITS.maxMessageBytes) {
+      bounded = candidate;
+      lower = middle + 1;
+    } else {
+      upper = middle - 1;
+    }
+  }
+  if (!bounded) throw new ReadFailure(503, 'temporarily_unavailable');
+  return { ok: true, body: encodeAgentApiResponse(agentApiHistoryPageSchema, bounded.body) };
 }
 
 async function listCheckpoints(

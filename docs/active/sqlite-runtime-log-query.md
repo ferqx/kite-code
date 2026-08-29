@@ -54,6 +54,9 @@ Agent adapter。Public History first page固定`through_sequence`，后续同时
 `model.responded`最多展开reasoning/message两个`public_ordinal`，cursor可在同sequence内续读。selected Checkpoint metadata按revision/id keyset并
 逐个验证current schema/epoch/checksum，preview只经Runtime query返回计数。不存在全Workspace transcript物化、compatibility import、path投影、
 DDL/index变化或Store writer替代。
+Public History page还受1 MiB encoded response上限：adapter只在已取得的bounded source page内逐项计算Public body，达到上限即以最后
+`sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
+或把超限安全前缀整体降成503。
 
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不

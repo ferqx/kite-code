@@ -7,6 +7,7 @@
 
 验证：`bun run check:agent-api-packages`、`bun run --cwd packages/agent-api-contract test`、
 `bun run --cwd packages/agent-api-contract typecheck`、`bun run --cwd packages/agent-api-contract build`、
+`bun test apps/kite-service/test/agent-api/conformance.test.ts`、
 `bun run check:docs-impact`。
 
 相关：ADR-0149、ADR-0150，KASAPI-01A；模块局部边界见
@@ -54,7 +55,7 @@ History，也不把private camelCase DTO透传为Public wire。
 - Web Vite build通过asset emission逐字节生成固定`api-docs/openapi.json`；candidate verifier、installer preflight与smoke要求
   `payload/web/api-docs/openapi.json`存在并由manifest checksum绑定，不能从CDN、live endpoint或另一schema source生成。
 
-## KASAPI-02A～02C 当前carrier/read façade与静态参考
+## KASAPI-02A～02D 当前carrier/read façade、静态参考与conformance
 
 - `/v1`复用canonical Workspace Worker现有loopback data listener；Coordinator/Gateway不代理，未创建第二listener；
 - Native-only Worker capability purpose增加`agent_api_observer|agent_api_controller`，Web Gateway不能mint；
@@ -66,11 +67,17 @@ History，也不把private camelCase DTO透传为Public wire。
 - Session list使用same-connection bounded keyset page并仅对page内ID做Runtime projection join；History固定through sequence和boundary digest，
   Checkpoint metadata按revision keyset且preview不投影path。cursor checksum只发现损坏，每次请求仍做context/Workspace/Session admission；
 - Origin/Cookie/Sec-Fetch、CORS/OPTIONS、duplicate/unknown/oversized body与credential混用fail closed，Problem不泄漏内部binding。
+- 每context最多16个in-flight request；overload返回429。revoke/drain从map移除context后等待已认证read收敛，再且仅再关闭一次private
+  connection；迟到Trust admission会复核context/handler current，不能越过replacement。History达到1 MiB encoded body上限时按最后
+  `sequence/public_ordinal`提前分页；未知SSE/mutation route不因`Accept`协商泄漏为已注册route。
+- test-only reference client对所有success/Problem执行Public response codec与artifact header检查，并同时覆盖handler seam及真实Worker HTTP
+  listener；fault matrix包含capability incompatibility/replay、keyset及concurrent update、fixed-through History、body/response limits、
+  observer/controller、Worker replacement、drain与non-disclosure。static Gate拒绝direct RuntimeAccess和Host/Store/Kernel concrete import。
 - Web Gateway固定`/api-docs`及尾斜杠为静态HTML deep link，并只允许精确`/api-docs/openapi.json` artifact；renderer不启动
   Observer/Worker discovery、不保存credential、不发送Agent API request，也没有form、Try it或execute control。CSP为self-only、cache为
   `no-store`，placeholder endpoint不代表live endpoint；API或Worker状态只标记availability未确认。
 
 ## 后续Gate
 
-KASAPI-02D及以后接入read conformance/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
-的Run/Interaction/SSE/mutation route提前加入ServerInfo。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。
+KASAPI-03A及以后接入Store 8/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
+的Run/Interaction/SSE/mutation route提前加入ServerInfo。Read-only Gate已关闭，但Run route仍被ADR-0150 Store 8 implementation阻断。
