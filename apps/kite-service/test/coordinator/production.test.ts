@@ -101,6 +101,8 @@ describe('production Coordinator composition', () => {
     expect(gatewayRegistration).toBeGreaterThan(workerRegistration);
     expect(compositionRegistry).toBeGreaterThan(gatewayRegistration);
     expect(source.match(/createCoordinatorRegistry\(/gu)).toHaveLength(1);
+    expect(source).toContain('if (registry.discoverWebGateway() === null) return;');
+    expect(source).toContain('registry.stopWebGateway(instanceId);');
   });
 
   test('release Coordinator entrypoint injects the production factory explicitly', () => {

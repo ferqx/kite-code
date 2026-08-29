@@ -136,8 +136,10 @@ directory/history/disconnect。`apps/kite-service/src/web-gateway/production.ts`
 
 Gateway正常停止存在一个有序cleanup window：child先释放自身instance lock，manager收到退出后再清parent-owned descriptor与control
 credential。Coordinator/manager若在该窗口退出，restart只可在descriptor的PID + OS start token再次confirmed dead后把“descriptor/
-credential存在、child lock缺失”作为可恢复partial state并执行exact cleanup；alive/uncertain、descriptor缺失的token-only launch、
-lock identity mismatch或replacement state仍不得cleanup/spawn。该恢复不把manager变成PID kill owner，也不停止Worker、Turn或Controller。
+credential存在、child lock缺失”作为可恢复partial state并执行exact cleanup；新Coordinator的in-memory Gateway registry为空时，清理
+同一confirmed-dead instance按幂等absence处理，而不同已注册instance仍identity mismatch。alive/uncertain、descriptor缺失的token-only
+launch、lock identity mismatch或replacement state仍不得cleanup/spawn。该恢复不把manager变成PID kill owner，也不停止Worker、Turn
+或Controller。
 
 `apps/kite-web` 是独立 private static React workspace。其 development 与 production transport 都只消费 `kite-app-contract`，
 transport failure 显示 unavailable，不打包或回退本地样例。页面保持 Workspace 分组既有 Session、消息/History、running live state 与主动断连，

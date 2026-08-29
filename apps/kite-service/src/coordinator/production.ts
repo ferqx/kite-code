@@ -153,6 +153,10 @@ export const createProductionKiteCoordinatorComposition: NonNullable<
         registry.ensureWebGateway(value);
       },
       unregister(instanceId) {
+        // A restarted Coordinator begins with an empty in-memory registry even when it is
+        // recovering confirmed-dead Gateway process state. Treat that absence as idempotent;
+        // `stopWebGateway` still rejects a different registered instance.
+        if (registry.discoverWebGateway() === null) return;
         registry.stopWebGateway(instanceId);
       },
     },
