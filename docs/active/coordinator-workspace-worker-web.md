@@ -157,6 +157,9 @@ no silent rollback；Linux/Windows hosted filesystem/process evidence仍不能�
 Worker restart对已写Store的re-admission必须复用no-follow只读snapshot preflight，重新验证Store 7 profile与完整Workspace
 binding；manifest/journal保留的是first-write前admission digest，只要求两者一致，不与`targetWriteState=written`后的live文件字节
 比较或重定基线。未写target仍必须匹配该digest，任一header/binding/evidence drift继续fail closed。
+Coordinator从持久Worker descriptor恢复时必须先比较PID与OS start token；confirmed dead在尝试旧control endpoint handshake前
+清除exact descriptor/control credential并允许replacement，alive才恢复authenticated control/reservation。uncertain或PID reuse
+不清理、不spawn，不能让已死亡loopback endpoint被误报为identity drift而永久阻塞正常restart。
 
 ## Fault、release 与平台 evidence 边界
 

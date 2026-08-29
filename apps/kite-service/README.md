@@ -73,6 +73,9 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
   Service重启后从durable State重建pending effect与active Turn continuation；结算receipt applied后由Host重新调度原Turn，
   不依赖旧进程的waiter/closure，也不重复提交approval或dispatch工具。旧generation/digest/provider/verification/input/command
   内容仍fail closed。
+- Coordinator重启加载Worker process state时先以PID + OS start token判定进程身份：confirmed dead才清除exact
+  descriptor/control credential并允许replacement；alive才进入authenticated Worker handshake与reservation recovery；
+  uncertain或PID reuse保持fail closed，不用已死亡endpoint阻断后续restart。
 - Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
   identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
   scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。

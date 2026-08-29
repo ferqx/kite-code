@@ -383,6 +383,20 @@ export function createWorkspaceWorkerProcessManager(
     try {
       const descriptor = decodeWorkspaceWorkerProcessDescriptor(raw);
       if (descriptor.identity.workerScopeId !== workerScopeId) return { kind: 'corrupt' };
+      const status = await inspect(descriptor);
+      if (status === 'uncertain') {
+        return { kind: 'blocked', diagnostic: 'identity_uncertain' };
+      }
+      if (status === 'dead') {
+        const dead = makeManagedWorker({
+          descriptor,
+          registryRegistered: false,
+          statePublished: true,
+        });
+        return (await cleanupDead(dead))
+          ? { kind: 'none' }
+          : { kind: 'blocked', diagnostic: 'identity_uncertain' };
+      }
       const control = await createAuthenticatedControlLink(descriptor, credential);
       if (!control) return { kind: 'blocked', diagnostic: 'identity_uncertain' };
       const identity = await invoke(() => control.describeIdentity(), operationTimeoutMs);

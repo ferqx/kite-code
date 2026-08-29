@@ -675,6 +675,32 @@ describe('Workspace Worker process manager', () => {
     expect(capability).toMatchObject({ outcome: 'applied', capability: 'cap-secret' });
   });
 
+  test('cleans confirmed-dead persisted state before authenticating a replacement Worker', async () => {
+    const owner = createOwnerReservationPort();
+    const harness = createHarness({ ownerReservation: owner });
+    const workspace = makeWorkspace('restart-dead', '8');
+    await harness.manager.ensure(ensureRequest('scope-restart-dead', workspace));
+    const staleDescriptor = harness.state.published[0];
+    expect(staleDescriptor).toBeDefined();
+    harness.setStatus('scope-restart-dead', 'dead');
+    owner.held.delete(workspace.workspaceDigest);
+
+    let staleHandshakeCalls = 0;
+    const restarted = harness.restart(async (descriptor) => {
+      if (descriptor.identity.instanceId === staleDescriptor!.identity.instanceId) {
+        staleHandshakeCalls += 1;
+        return undefined;
+      }
+      return harness.controlLinks.get('scope-restart-dead');
+    });
+    const replacement = await restarted.ensure(ensureRequest('scope-restart-dead', workspace));
+
+    expect(replacement).toMatchObject({ outcome: 'applied', state: 'ready' });
+    expect(staleHandshakeCalls).toBe(0);
+    expect(harness.state.cleared).toContainEqual(staleDescriptor!);
+    expect(harness.spawnCount()).toBe(2);
+  });
+
   test('does not route a restarted Worker when the authenticated identity handshake mismatches', async () => {
     const harness = createHarness();
     const workspace = makeWorkspace('restart-mismatch', '7');
