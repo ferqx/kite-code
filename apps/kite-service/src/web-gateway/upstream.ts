@@ -8,7 +8,9 @@ import {
   type NativeRuntimeWebSocketFactory,
 } from '@kite-ai/kite-local-runtime/client';
 import {
+  COORDINATOR_CLIENT_CONTRACT_REVISION_,
   COORDINATOR_LIMITS,
+  COORDINATOR_PROTOCOL_REVISION_,
   type CoordinatorListSessionMetadataResult,
   type CoordinatorMethod,
   type CoordinatorRequestClient,
@@ -956,8 +958,8 @@ function assertWorkerReference(
     !/^[A-Za-z0-9._:-]{1,512}$/u.test(reference.identity.instanceId) ||
     !/^[A-Za-z0-9._:-]{1,512}$/u.test(reference.identity.buildId) ||
     reference.identity.protocolVersion !== 1 ||
-    reference.identity.protocolRevision !== 'kite-local-coordinator-protocol-v1' ||
-    reference.identity.clientContractRevision !== 'kite-local-coordinator-client-v1' ||
+    reference.identity.protocolRevision !== COORDINATOR_PROTOCOL_REVISION_ ||
+    reference.identity.clientContractRevision !== COORDINATOR_CLIENT_CONTRACT_REVISION_ ||
     reference.workspace.canonicalPath !== workspace.canonicalPath ||
     reference.workspace.projectId !== workspace.projectId ||
     reference.workspace.workspaceDigest !== workspace.workspaceDigest ||

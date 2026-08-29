@@ -208,8 +208,8 @@ const value = {
   identity: {
     role: 'worker', workerScopeId: 'scope-empty-env', instanceId: 'instance-empty-env',
     buildId, protocolVersion: 1,
-    protocolRevision: 'kite-local-coordinator-protocol-v1',
-    clientContractRevision: 'kite-local-coordinator-client-v1'
+    protocolRevision: 'kite-local-coordinator-protocol-v2',
+    clientContractRevision: 'kite-local-coordinator-client-v2'
   },
   workspace: {
     canonicalPath: ${JSON.stringify(workspaceRoot)},

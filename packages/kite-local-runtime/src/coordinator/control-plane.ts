@@ -197,6 +197,11 @@ export function createCoordinatorControlPlane(
         await options.gateway.stop();
         return { gateway: null };
       }),
+    stopCoordinator: async () => {
+      requireReady();
+      lifecycle = 'draining';
+      return { state: 'draining' };
+    },
     subscribeDirectoryChanges: async ({ cursor }, context) => {
       requireReady();
       await options.beforeDirectoryRead?.();

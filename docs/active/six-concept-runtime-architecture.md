@@ -214,7 +214,9 @@ turn identity，否则同一 Task 的旧 rejection 会错误终止 successor tur
 
 ## SQLite storage
 
-`@kite-ai/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter。current target 精确为 **State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`**，并固定为 8 tables / 2 non-primary-key indexes：
+`@kite-ai/runtime-storage-sqlite`是Host storage port的唯一concrete adapter。当前production Workspace Worker target精确为
+**State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`**，固定为11 tables / 3 named non-primary-key indexes；显式legacy
+Service maintenance仍使用State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`的8 tables / 2 indexes，Store 7只作offline generation source：
 
 - `adapter.ts` 单独拥有当前数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；`compatibility.ts` 只拥有历史 source 的 readonly discovery、atomic target import ledger 与 tombstone；
 - SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；
@@ -224,7 +226,9 @@ turn identity，否则同一 Task 的旧 rejection 会错误终止 successor tur
 - `transaction.ts` 是 Runtime event+snapshot 原子提交唯一 owner；一个 applied command 的 State/event/snapshot/revision decision 与 scoped receipt 在同一 transaction 提交；
 - App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；
 - `runtime_command_receipts` 的唯一主键是 `(scope_session_id, command_id)`，并绑定 request digest、target session、original receipt、committed revision/time；同 scope/key 的不同 digest fail closed。close、Session delete、target delete 都保留 receipt，fork 不复制 source receipt；不设 TTL/容量裁剪，只有删除整个 Store 才删除 receipt metadata；
-- Store 5 只可作为 explicit readonly source：State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都经 no-follow isolated copy、selected-session atomic import 进入 Store 6。source 不写回、checkpoint、rename 或 fallback 执行；未知/损坏 source 只隔离该 Session；
+- Store 8在Store 7 Workspace binding上增加canonical Run index、receipt resource result与coverage boundary；normal ensure只初始化fresh
+  Store 8，existing Store 7只通过formal offline whole-generation command copy-and-switch；
+- Store 5 只可作为 explicit readonly source：State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都经 no-follow isolated copy、selected-session atomic import 进入显式Store 6 legacy target。source 不写回、checkpoint、rename 或 fallback 执行；未知/损坏 source 只隔离该 Session；
 - 不存在平面 bridge、alternate current-writer constructor、format selector、sidecar receipt database、dual write、Store 5 current writer、try-new-catch-old、alternate-driver retry 或 execution fallback。
 
 Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle 与 effect lease 仍保持原有事务顺序。拆分不允许复制 transaction、Store、reducer 或 recovery identity owner。

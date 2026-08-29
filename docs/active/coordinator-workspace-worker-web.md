@@ -34,9 +34,9 @@ composition仍作为显式 `kite service *` maintenance/compatibility owner存�
 `packages/kite-local-runtime/src/coordinator/` 的 boundary constant 明确 `nativeOnly=true`、`ownsControlPlane=true`，并且
 不拥有 Runtime execution、Store、Host 或 Web Gateway。codec 的 method allowlist 目前是 `status`、Workspace Worker resolve/
 ensure、Session Workspace resolve、path-free Session metadata list、Worker capability mint、Web Gateway ensure/discover/stop
-与 directory-change subscription；它不是 generic RPC，也没有 Runtime command/event/model/tool/interaction/credential payload。
+、Native-client-only Coordinator stop与 directory-change subscription；它不是 generic RPC，也没有 Runtime command/event/model/tool/interaction/credential payload。
 
-Coordinator frame 使用 exact schema、固定 protocol/client revision、bounded request/idempotency/deadline/identifier/size/depth，
+Coordinator frame使用wire version 1、current protocol/client revision v2、bounded request/idempotency/deadline/identifier/size/depth，
 并拒绝 `event`、`runtimeevent`、`model`、`tool`、`interaction`、`credential`、`secret`、`token`、`stdout`、`stderr` 等 payload key。
 POSIX carrier 从已校验的 Kite home 派生 owner-only Unix socket；Windows carrier 派生 current-user SID-bound named pipe。descriptor
 不携带 socket/pipe path，平台不可用时返回 typed `unsupported`，不会退回 TCP。carrier 只负责本地 peer identity、length-prefixed
@@ -78,10 +78,10 @@ capability TTL，也不重放已dispatch mutation；response丢失、5xx、第�
 始终返回 observer 状态，不会取得或改变 Controller lease。断连只标记对应 client/connection generation detached；没有 Web takeover、
 自动 approval/input 转移或 mutation fallback。
 
-`effect-gate.ts` 与 `effect-adapter.ts` 当前把同一 Workspace 的 mutation attempt 串行化，并依次要求 Store 7 durable evidence port 的
+`effect-gate.ts` 与 `effect-adapter.ts` 当前把同一 Workspace 的 mutation attempt 串行化，并依次要求 Store 8 durable evidence port 的
 prepare、OS-user resource lease、dispatch acknowledgement、terminal 或 `outcome_unknown`；Runtime admission 的 authenticated
 `RuntimeCommandContext`（connectionId/requestId/bindingReference）固定进入 prepared execution closure，不能按 Session 反查旧
-Controller。该 gate 不自行持 signing key，也不绕过 Store authority；默认 release terminal mutation 进入 Worker Store 7 authority；
+Controller。该 gate 不自行持 signing key，也不绕过 Store authority；默认 release terminal mutation 进入 Worker Store 8 authority；
 显式 legacy Service Store 6 journey保留自身 owner，但 committed layout fence 禁止与 Worker topology并存写入。
 
 ## Web Observer、Directory 与 History
@@ -108,7 +108,7 @@ Workspace或History，Catalog中的既有Session仍按该scope返回，使用ser
 Session History与live status分离：`status=unavailable`表示没有可订阅的live Worker，并不删除durable History。用户选择Session时，
 Gateway先以Catalog metadata确定exact opaque scope；在线Worker继续走Coordinator resolve/mint后的Worker query-only History，
 idle Worker则进入Service-owned offline History facade。offline facade只消费manager提供的显式Kite home与server-owned active-layout，
-canonical Store路径在storage boundary内部按generation/scope推导，并以隔离只读snapshot复核pointer/manifest/journal/fence、Store 7
+canonical Store路径在storage boundary内部按generation/scope推导，并以隔离只读snapshot复核pointer/manifest/journal/fence、Store 8
 profile、owner/no-follow/nlink和完整Workspace binding。它不启动Worker、不打开writer、不接收Browser path、不触发compatibility
 list/import，也不把raw Runtime event加入Coordinator control protocol；missing、legacy-only、corrupt或layout drift固定映射typed
 `history_unavailable`。
@@ -179,24 +179,24 @@ canonical Workspace Worker当前在同一data listener拥有`/v1`Agent API认证
 
 exchange在消费capability前重验Workspace Trust，context为Worker-local hash-only、60分钟absolute TTL并绑定Client generation与private
 read logical connection。当前开放exchange/logout/ServerInfo及bounded Session list/get、History page、Checkpoint list/preview，capabilities精确为
-`checkpoints/history/sessions`；每次read再次重验Trust。Controller role不取得或替代Store 7 Session Controller lease，Run/Interaction/
+`checkpoints/history/sessions`；每次read再次重验Trust。Controller role不取得或替代Store 8 Session Controller lease，Run/Interaction/
 mutation/SSE仍未开放。Coordinator仍不代理Agent data plane，Web Observer永久只读且不能取得Agent context。
 KASAPI-02D reference client已在handler seam与真实Worker listener上验证两种role的read、capability replay、pagination/limits、drain、replacement
 与non-disclosure；旧Worker token在replacement上固定401，draining handler固定503且不恢复context。Gateway restart继续只轮换browser cookie/tab
 generation，由独立Gateway process/carrier suite覆盖；Gateway前后都不代理`/v1`，也不影响Worker context/Runtime work。
 
-## Store 7 与 generation cutover
+## Store 8 current authority 与 Store 7 migration source
 
 `apps/kite-service/src/bootstrap.ts` 的显式 legacy composition仍只打开 State 27 / Store 6 /
-`kite-runtime-server-v1-2026-08-26` profile；它不再是 release CLI/TUI 的默认 path。`runtime-storage-sqlite` 已提供 Store 7 profile、
+`kite-runtime-server-v1-2026-08-26` profile；它不再是 release CLI/TUI 的默认 path。`runtime-storage-sqlite` 已提供 Store 7 source与Store 8 current profile、
 global metadata Catalog/layout primitives、per-Workspace Store writer、
 `active-layout` pointer、generation manifest、migration journal、post-switch/first-write fence、
 `session_workspace_tombstone` 与 old-binary fence；Coordinator production composition 负责 active generation/catalog 检查，Worker
-production composition 只打开已 materialize/admit 的 Store 7 target。现有 compatibility writer/import 仍只属于 terminal 显式历史
+production composition 只打开已 materialize/admit 的 Store 8 target。现有 compatibility writer/import 仍只属于 terminal 显式历史
 journey，不能被 Web Observer 或目录查询复用。
 
-ADR-0148 接受且当前 Worker 使用的 profile 是 State 27 / Store 7 /
-`kite-coordinator-workspace-worker-web-v1-2026-08-28`。Store 6只属于显式 legacy Service maintenance path。必须保持：
+ADR-0150 接受且当前 Worker 使用的 profile 是 State 27 / Store 8 /
+`kite-agent-server-api-v1-2026-08-29`。Store 7只属于whole-generation offline source，Store 6只属于显式legacy Service maintenance path。必须保持：
 
 - Store header、Session row、receipt 与 tombstone 绑定 WorkerScope、完整 Workspace identity digest 与 LayoutGeneration；Browser、
   Coordinator、History reader 永不直接成为 Store writer；
@@ -207,8 +207,8 @@ ADR-0148 接受且当前 Worker 使用的 profile 是 State 27 / Store 7 /
 - `active-layout` 切换前可丢弃未写 target；任一 target/Catalog 新写入后禁止自动回退，pointer/target/fence 不确定时不同时启动 legacy
   与 Worker writer；旧 binary 必须在 legacy Store open/write 前 fail closed。
 
-Store 7 DDL、逐 Session full validation、journal/pointer crash windows、target-first-write rollback fence、new Workspace admission 与
-旧 binary fence已有实现和 focused tests；默认 release terminal path 已切到 Store 7 Worker。旧 Service source/explicit lifecycle 仍保留，
+Store 7/8 DDL、逐 Session full validation、journal/pointer crash windows、target-first-write rollback fence、new Workspace admission 与
+旧 binary fence已有实现和 focused tests；默认 release terminal path 已切到 Store 8 Worker。旧 Service source/explicit lifecycle 仍保留，
 但不是 fallback，不能绕过 committed layout。Worker production path继续保持 explicit admission、single writer、source immutable 与
 no silent rollback；Linux/Windows hosted filesystem/process evidence仍不能由本机结果替代。
 
@@ -221,6 +221,12 @@ preflight或copy fault都使整个generation blocked；新fence同时阻断旧St
 KRSRUN-03A已把normal Coordinator/Worker composition切到Store 8-only。fresh layout与新Workspace直接创建exact Store 8；已有Store 7仍必须显式
 maintenance，普通ensure不自动迁移。Worker readiness固定Store 8 epoch，Controller/effect/Directory/History/Checkpoint与private Run port都来自
 同一already-open connection；Store 7 manifest或旧process descriptor整体拒绝，不以catch/retry恢复旧writer。Agent ServerInfo/Public route继续不发布`runs`。
+
+KRSRUN-03B提供正式offline命令`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI只把exact target交给release owner；
+owner通过Coordinator revision v2 authenticated stop先进入draining并确认process exit，再复用Gateway/Worker manager按持久descriptor、control
+identity、PID/start-token与idle activity逐个停止child。owner在持有Coordinator lifecycle lock后复核descriptor、endpoint、launch intent与
+instance lock全部absent，阻断并发ensure窗口。Host State predicate和SQLite deep validation共同确认Turn/Interaction/effect/external
+process为零；任一busy、unknown、corrupt或response loss保持blocked且不切pointer。normal ensure仍不自动迁移existing Store 7。
 
 Worker restart对已写Store的re-admission当前必须复用no-follow只读snapshot preflight，重新验证Store 8 profile与完整Workspace
 binding；manifest/journal保留的是first-write前admission digest，只要求两者一致，不与`targetWriteState=written`后的live文件字节
@@ -249,7 +255,7 @@ outcome-unknown且不清理、不spawn；该等待不改变Coordinator restart�
 ## Fault、release 与平台 evidence 边界
 
 当前 Coordinator/Worker/Web tests 是 local focused/conformance evidence。它们证明 codec、bounded queue、observer-only method
-surface、production composition、本地 process/Store 7/Gateway carrier，以及macOS arm64 installed TUI 经 Coordinator→Worker
+surface、production composition、本地 process/Store 8/Gateway carrier，以及macOS arm64 installed TUI 经 Coordinator→Worker
 ensure/mint/handshake 的真实启动与 test-owned exact cleanup；release tests还覆盖 companion assets、stable launcher、upgrade/
 rollback/uninstall。这些结果不证明 Windows/Linux hosted process、跨平台 ACL/write-through 或完整三平台 qualification。
 

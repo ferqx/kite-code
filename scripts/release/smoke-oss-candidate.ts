@@ -91,6 +91,7 @@ try {
         'verify',
         'install',
         'cli-help-version',
+        'run-store-maintenance-fail-closed',
         'tui-version-pty-startup',
         'service-companion',
         'coordinator-worker-gateway-companion-assets',
@@ -152,8 +153,44 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
   if (tuiVersion.exitCode !== 0 || !tuiVersion.stdout.toString().startsWith('Kite Code TUI ')) {
     throw installedSmokeError('TUI version', tuiVersion);
   }
+  runInstalledRunStoreMaintenanceSmoke(cli);
   await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
+}
+
+function runInstalledRunStoreMaintenanceSmoke(cli: string): void {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-run-store-maintenance-smoke-')));
+  try {
+    const result = Bun.spawnSync(
+      [
+        cli,
+        'maintenance',
+        'migrate-run-store',
+        '--target-generation',
+        'generation-smoke-store-8',
+        '--kite-home',
+        join(root, '.kite-code'),
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    let output: unknown;
+    try {
+      output = JSON.parse(result.stdout.toString().trim()) as unknown;
+    } catch {
+      throw installedSmokeError('Run Store maintenance result', result);
+    }
+    if (
+      result.exitCode === 0 ||
+      !output ||
+      typeof output !== 'object' ||
+      (output as { readonly status?: unknown }).status !== 'blocked' ||
+      (output as { readonly reason?: unknown }).reason !== 'maintenance_required'
+    ) {
+      throw installedSmokeError('Run Store maintenance fail-closed boundary', result);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function assertInstalledCompanionAssets(prefix: string, manifest: OssCandidateManifest): void {

@@ -517,7 +517,7 @@ describe('Workspace Worker process manager', () => {
     expect(owner.held.get(workspace.workspaceDigest)).toBe('scope-first');
   });
 
-  test('requires Store 7 admission while the reservation is held and never spawns on admission failure', async () => {
+  test('requires Workspace Store admission while the reservation is held and never spawns on admission failure', async () => {
     const owner = createOwnerReservationPort();
     const harness = createHarness({ ownerReservation: owner, admissionFailure: true });
     const workspace = makeWorkspace('admission-failure', '8');

@@ -129,6 +129,7 @@ function handlers(): CoordinatorDispatcherHandlers {
     ensureWebGateway: () => ({ gateway: null }),
     discoverWebGateway: () => ({ gateway: null }),
     stopWebGateway: () => ({ gateway: null }),
+    stopCoordinator: () => ({ state: 'draining' }),
     subscribeDirectoryChanges: () => ({
       subscriptionId: 'subscription-1',
       directoryRevision: 'revision-1',
@@ -346,6 +347,10 @@ describe('Coordinator dispatcher and request client', () => {
     expect((await clientApi.status()).outcome).toBe('ok');
     expect((await clientApi.resolveWorkspaceWorker({ workspace })).outcome).toBe('ok');
     expect((await clientApi.discoverWebGateway()).outcome).toBe('ok');
+    expect(await clientApi.stopCoordinator()).toMatchObject({
+      outcome: 'ok',
+      result: { state: 'draining' },
+    });
   });
 
   test('binds the authenticated peer role to method and capability purpose', async () => {

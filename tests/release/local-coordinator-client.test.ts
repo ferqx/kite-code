@@ -94,6 +94,32 @@ describe('managed local Coordinator release composition', () => {
     ).toBeUndefined();
   });
 
+  test('starts and gracefully stops a real Coordinator through the authenticated v2 lifecycle', async () => {
+    const systemHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-coordinator-stop-system-')));
+    const explicitHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-coordinator-stop-home-')));
+    roots.push(systemHome, explicitHome);
+    const composition = createManagedLocalCoordinatorClientComposition({
+      argv: ['kite', '--kite-home', explicitHome],
+      systemHome,
+    });
+    let started = false;
+    try {
+      const ensured = await composition.lifecycle.ensure({ requestId: 'coordinator-v2-ensure' });
+      expect(ensured).toMatchObject({ outcome: 'applied', state: 'ready' });
+      started = ensured.outcome === 'applied';
+      await expect(
+        composition.lifecycle.stop({ requestId: 'coordinator-v2-stop' }),
+      ).resolves.toMatchObject({
+        operation: 'stop',
+        outcome: 'applied',
+        state: 'absent',
+      });
+      started = false;
+    } finally {
+      if (started) await composition.lifecycle.stop().catch(() => undefined);
+    }
+  });
+
   test('uses the native Windows SID seam only for a Windows platform', () => {
     let sidReads = 0;
     expect(

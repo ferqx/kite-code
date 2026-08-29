@@ -37,6 +37,7 @@ export type CoordinatorParamsByMethod = {
   readonly ensureWebGateway: Record<never, never>;
   readonly discoverWebGateway: Record<never, never>;
   readonly stopWebGateway: Record<never, never>;
+  readonly stopCoordinator: Record<never, never>;
   readonly subscribeDirectoryChanges: CoordinatorSubscribeDirectoryChangesParams;
 };
 
@@ -344,6 +345,7 @@ export interface CoordinatorRequestClient {
   ensureWebGateway(): Promise<CoordinatorResponseFor<'ensureWebGateway'>>;
   discoverWebGateway(): Promise<CoordinatorResponseFor<'discoverWebGateway'>>;
   stopWebGateway(): Promise<CoordinatorResponseFor<'stopWebGateway'>>;
+  stopCoordinator(): Promise<CoordinatorResponseFor<'stopCoordinator'>>;
   subscribeDirectoryChanges(
     params: CoordinatorSubscribeDirectoryChangesParams,
   ): Promise<CoordinatorResponseFor<'subscribeDirectoryChanges'>>;
@@ -424,6 +426,7 @@ export function createCoordinatorRequestClient(
     ensureWebGateway: () => call('ensureWebGateway', {}),
     discoverWebGateway: () => call('discoverWebGateway', {}),
     stopWebGateway: () => call('stopWebGateway', {}),
+    stopCoordinator: () => call('stopCoordinator', {}),
     subscribeDirectoryChanges: (params: CoordinatorSubscribeDirectoryChangesParams) =>
       call('subscribeDirectoryChanges', params),
   });

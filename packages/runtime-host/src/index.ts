@@ -71,7 +71,10 @@ export type {
 } from './format/restore';
 export { restoreRuntimeHostStateSession } from './format/restore';
 export type { RuntimeHostStateStorageBinding } from './format/storage-binding';
-export { createRuntimeHostStateStorageBinding } from './format/storage-binding';
+export {
+  createRuntimeHostStateStorageBinding,
+  isRuntimeHostStateSettledForMigration,
+} from './format/storage-binding';
 export {
   createRuntimeCommandCommitEvidence,
   digestRuntimeCommand,

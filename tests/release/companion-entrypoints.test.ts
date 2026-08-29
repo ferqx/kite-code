@@ -30,4 +30,11 @@ describe('managed companion release entrypoints', () => {
       expect(source).not.toContain("throw new Error('not implemented')");
     });
   }
+
+  test('CLI binds the formal migration command only to the release maintenance owner', () => {
+    const source = readFileSync('scripts/release/entrypoints/cli.ts', 'utf8');
+    expect(source).toContain("command === 'maintenance-migrate-run-store'");
+    expect(source).toContain('runStoreMaintenance: localCoordinator.maintenance');
+    expect(source).not.toContain('inspectMaintenanceBarrier');
+  });
 });

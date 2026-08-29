@@ -90,6 +90,7 @@ export function createKiteCoordinatorComposition(
   let stopPromise: Promise<KiteCoordinatorLifecycleResult> | undefined;
   let shutdownPromise: Promise<KiteCoordinatorLifecycleResult> | undefined;
   let shutdownResolve: ((result: KiteCoordinatorLifecycleResult) => void) | undefined;
+  let shutdownResult: KiteCoordinatorLifecycleResult | undefined;
   let pendingStop = false;
   let signalUnsubscribe: (() => void) | undefined;
   let disposed = false;
@@ -196,6 +197,15 @@ export function createKiteCoordinatorComposition(
         endpoint,
         dispatcher,
         peerOsIdentity,
+        onResponseFlushed: (response) => {
+          if (
+            response.method === 'stopCoordinator' &&
+            response.outcome === 'ok' &&
+            response.result.state === 'draining'
+          ) {
+            void stop().catch(() => undefined);
+          }
+        },
         ...(options.carrierAdapter ? { adapter: options.carrierAdapter } : {}),
       });
       await carrier.start();
@@ -331,6 +341,7 @@ export function createKiteCoordinatorComposition(
   }
 
   function waitForShutdown(): Promise<KiteCoordinatorLifecycleResult> {
+    if (shutdownResult) return Promise.resolve(shutdownResult);
     if (!shutdownPromise) {
       shutdownPromise = new Promise<KiteCoordinatorLifecycleResult>((resolve) => {
         shutdownResolve = resolve;
@@ -353,6 +364,7 @@ export function createKiteCoordinatorComposition(
   }
 
   function resolveShutdown(result: KiteCoordinatorLifecycleResult): void {
+    shutdownResult = result;
     shutdownResolve?.(result);
     shutdownResolve = undefined;
   }

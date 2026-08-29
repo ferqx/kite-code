@@ -58,8 +58,8 @@ Public History page还受1 MiB encoded response上限：adapter只在已取得�
 `sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
 或把超限安全前缀整体降成503。
 
-KRSRUN-01A的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或现有
-Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在Store 8尚未cutover前，Web/Agent History
+KRSRUN-01A当时的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或当时的
+Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在当时Store 8尚未cutover前，Web/Agent History
 仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
 KRSRUN-02A的显式unpublished Run target与delete/rewind/fork maintenance同样不改变该边界：Run rewind随既有Session transaction删除较新
 row，但History仍只按event/snapshot的原子结果和既有cursor invalidation判断；fork的Run coverage/origin也不成为History内容或完整性来源。

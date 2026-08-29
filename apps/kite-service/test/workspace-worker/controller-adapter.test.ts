@@ -145,8 +145,8 @@ function request() {
   };
 }
 
-describe('Store 7 Worker Controller adapter', () => {
-  test('uses the real Store 7 controller for durable replay and exact mutation fencing', () => {
+describe('Workspace Store Worker Controller adapter', () => {
+  test('uses the real Workspace Store controller for durable replay and exact mutation fencing', () => {
     const database = new Database(':memory:');
     const binding = {
       layoutGeneration: 'generation-controller-adapter',

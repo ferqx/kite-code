@@ -8,6 +8,7 @@ import {
   type CoordinatorEndpointDescriptor,
   type CoordinatorOsIdentity,
   type CoordinatorPeerIdentity,
+  type CoordinatorResponseFrame,
 } from './codecs';
 import type { CoordinatorDispatcher } from './dispatcher';
 import {
@@ -251,6 +252,8 @@ export interface CoordinatorCarrierOptions {
   readonly maxQueuedMessages?: number;
   readonly maxQueuedBytes?: number;
   readonly onDiagnostic?: (code: CoordinatorCarrierDiagnosticCode) => void;
+  /** Server lifecycle hook invoked only after an exact response write callback completes. */
+  readonly onResponseFlushed?: (response: CoordinatorResponseFrame) => void | Promise<void>;
 }
 
 export interface CoordinatorCarrier {
@@ -316,6 +319,7 @@ export function createCoordinatorCarrier(options: CoordinatorCarrierOptions): Co
           maxQueuedMessages,
           maxQueuedBytes,
           onDiagnostic: options.onDiagnostic,
+          onResponseFlushed: options.onResponseFlushed,
           onClose: () => connections.delete(connection),
         });
         connections.add(connection);
@@ -416,8 +420,14 @@ class CoordinatorCarrierConnection {
   readonly #maxQueuedMessages: number;
   readonly #maxQueuedBytes: number;
   readonly #onDiagnostic: ((code: CoordinatorCarrierDiagnosticCode) => void) | undefined;
+  readonly #onResponseFlushed:
+    | ((response: CoordinatorResponseFrame) => void | Promise<void>)
+    | undefined;
   readonly #onClose: () => void;
-  readonly #outbound: Uint8Array[] = [];
+  readonly #outbound: {
+    readonly bytes: Uint8Array;
+    readonly onFlushed?: () => void | Promise<void>;
+  }[] = [];
   #outboundBytes = 0;
   #writing = false;
   #inboundCount = 0;
@@ -436,6 +446,7 @@ class CoordinatorCarrierConnection {
     readonly maxQueuedMessages: number;
     readonly maxQueuedBytes: number;
     readonly onDiagnostic?: (code: CoordinatorCarrierDiagnosticCode) => void;
+    readonly onResponseFlushed?: (response: CoordinatorResponseFrame) => void | Promise<void>;
     readonly onClose: () => void;
   }) {
     this.#socket = options.socket;
@@ -446,6 +457,7 @@ class CoordinatorCarrierConnection {
     this.#maxQueuedMessages = options.maxQueuedMessages;
     this.#maxQueuedBytes = options.maxQueuedBytes;
     this.#onDiagnostic = options.onDiagnostic;
+    this.#onResponseFlushed = options.onResponseFlushed;
     this.#onClose = options.onClose;
     this.#socket.onData((chunk) => this.#receive(chunk));
     this.#socket.onEnd(() => this.#end());
@@ -522,10 +534,10 @@ class CoordinatorCarrierConnection {
       return;
     }
     const response = await this.#dispatcher.dispatch(frame, peer);
-    this.#enqueue(response);
+    this.#enqueue(response, () => this.#onResponseFlushed?.(response));
   }
 
-  #enqueue(frame: CoordinatorWireFrame): void {
+  #enqueue(frame: CoordinatorWireFrame, onFlushed?: () => void | Promise<void>): void {
     if (this.#closed) return;
     let encoded: Uint8Array;
     try {
@@ -541,7 +553,7 @@ class CoordinatorCarrierConnection {
       this.#fail('queue_overflow');
       return;
     }
-    this.#outbound.push(encoded);
+    this.#outbound.push({ bytes: encoded, ...(onFlushed ? { onFlushed } : {}) });
     this.#outboundBytes += encoded.byteLength;
     this.#drainOutbound();
   }
@@ -559,10 +571,11 @@ class CoordinatorCarrierConnection {
       }
       return;
     }
-    this.#outboundBytes -= next.byteLength;
+    this.#outboundBytes -= next.bytes.byteLength;
     this.#writing = true;
     void this.#socket
-      .write(next)
+      .write(next.bytes)
+      .then(() => next.onFlushed?.())
       .catch(() => this.#fail('unavailable'))
       .finally(() => {
         this.#writing = false;

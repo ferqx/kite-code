@@ -11,8 +11,8 @@ export const COORDINATOR_PROTOCOL_VERSION = 1 as const;
 export const COORDINATOR_PROTOCOL_SCHEMA_ = 'kite.local-coordinator-frame.v1' as const;
 export const COORDINATOR_HANDSHAKE_SCHEMA_ = 'kite.local-coordinator-handshake.v1' as const;
 export const COORDINATOR_ENDPOINT_SCHEMA_ = 'kite.local-coordinator-endpoint.v1' as const;
-export const COORDINATOR_PROTOCOL_REVISION_ = 'kite-local-coordinator-protocol-v1' as const;
-export const COORDINATOR_CLIENT_CONTRACT_REVISION_ = 'kite-local-coordinator-client-v1' as const;
+export const COORDINATOR_PROTOCOL_REVISION_ = 'kite-local-coordinator-protocol-v2' as const;
+export const COORDINATOR_CLIENT_CONTRACT_REVISION_ = 'kite-local-coordinator-client-v2' as const;
 
 export const COORDINATOR_LIMITS = Object.freeze({
   maxFrameBytes: 64 * 1024,
@@ -36,6 +36,7 @@ export const COORDINATOR_METHODS = Object.freeze([
   'ensureWebGateway',
   'discoverWebGateway',
   'stopWebGateway',
+  'stopCoordinator',
   'subscribeDirectoryChanges',
 ] as const);
 
@@ -429,6 +430,18 @@ const coordinatorRequestFrameSchema = z.discriminatedUnion('method', [
       requestId,
       idempotencyKey,
       deadlineMs,
+      method: z.literal('stopCoordinator'),
+      params: emptyParams,
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal(COORDINATOR_PROTOCOL_SCHEMA_),
+      kind: z.literal('request'),
+      protocolVersion: z.literal(COORDINATOR_PROTOCOL_VERSION),
+      requestId,
+      idempotencyKey,
+      deadlineMs,
       method: z.literal('subscribeDirectoryChanges'),
       params: subscribeDirectoryChangesParams,
     })
@@ -507,6 +520,7 @@ const subscribeDirectoryChangesResultSchema = z
     directoryRevision: revision,
   })
   .strict();
+const coordinatorStopResultSchema = z.object({ state: z.literal('draining') }).strict();
 
 export type CoordinatorStatusResult = z.infer<typeof coordinatorStatusResultSchema>;
 export type CoordinatorWorkerResult = z.infer<typeof workerResultSchema>;
@@ -516,6 +530,7 @@ export type CoordinatorMintWorkerConnectionCapabilityResult = z.infer<
   typeof mintWorkerConnectionCapabilityResultSchema
 >;
 export type CoordinatorWebGatewayResult = z.infer<typeof webGatewayResultSchema>;
+export type CoordinatorStopResult = z.infer<typeof coordinatorStopResultSchema>;
 export type CoordinatorSubscribeDirectoryChangesResult = z.infer<
   typeof subscribeDirectoryChangesResultSchema
 >;
@@ -530,6 +545,7 @@ const coordinatorResultSchemas = {
   ensureWebGateway: webGatewayResultSchema,
   discoverWebGateway: webGatewayResultSchema,
   stopWebGateway: webGatewayResultSchema,
+  stopCoordinator: coordinatorStopResultSchema,
   subscribeDirectoryChanges: subscribeDirectoryChangesResultSchema,
 } as const;
 
@@ -819,6 +835,7 @@ export type CoordinatorResultByMethod = {
   readonly ensureWebGateway: CoordinatorWebGatewayResult;
   readonly discoverWebGateway: CoordinatorWebGatewayResult;
   readonly stopWebGateway: CoordinatorWebGatewayResult;
+  readonly stopCoordinator: CoordinatorStopResult;
   readonly subscribeDirectoryChanges: CoordinatorSubscribeDirectoryChangesResult;
 };
 

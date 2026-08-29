@@ -44,6 +44,8 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
   'packages',
   'scripts/release/entrypoints',
   'scripts/release/local-coordinator-client.ts',
+  'scripts/release/local-layout-migration.ts',
+  'scripts/release/local-run-store-maintenance.ts',
   'scripts/release/local-service-client.ts',
   'package.json',
   'bun.lock',

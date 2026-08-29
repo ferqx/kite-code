@@ -216,6 +216,15 @@ Rollback：quiesce writer；按journal决定blocked或允许pre-write rollback�
 
 ### KRSRUN-03B：Current authority、release migration与父计划handoff
 
+实施进度（本地Gate已完成，三平台Gate尚未完成）：formal CLI、Coordinator revision v2 stop/draining、manager-owned Gateway/Worker
+quiescence、Host State settlement predicate与empty-generation Store 7→8 command E2E已实现；owner/active docs及book runbook已同步。
+`documentation-map.json`现有
+`kite-local-runtime-client`、`kite-service-runtime-owner`、`runtime-host`、`kite-cli-command-runtime`与`release-candidate`规则已精确覆盖新路径，
+无需扩大或重叠mapping。15-workspace typecheck/build、docs/static Gate、Runtime fault 36、CI soak 7/7、release 210、focused 38与
+macOS arm64 dirty-source candidate `172fcbd79dce619bb82048ec` 的build/verify/install/maintenance fail-closed/upgrade/rollback/uninstall
+smoke已通过，详见[03B本地实施证据](../understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
+macOS/Linux/Windows evidence仍pending；完成记录、本计划归档及父KASAPI-03A关闭在这些evidence之前保持blocked。
+
 交付：更新Host/SQLite/Service README和local docs；`docs/active/runtime-authority-boundary.md`、
 `runtime-resilience-qualification.md`、`coordinator-workspace-worker-web.md`及相关book/runbook；documentation map、release manifest/migration command、
 SBOM/candidate evidence；本计划completion record。父KASAPI-03A在evidence commit后关闭，KASAPI-03B才可开放mutation mapper。

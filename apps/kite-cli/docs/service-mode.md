@@ -14,6 +14,11 @@ Web Gateway lifecycle 不属于该 Service adapter。CLI 的 `kite web [--json]`
 Coordinator 或 Gateway 不可用时明确返回 unavailable。该 parser/adapter contract 与 tests 不代表 hosted Web qualification；
 candidate `releaseSlots` 已绑定 Coordinator、Worker、Gateway、Web entrypoint/identity。
 
+Store generation maintenance也不属于Service-mode adapter。`kite maintenance migrate-run-store --target-generation <fresh-generation>`
+只接受release entrypoint注入的offline owner：owner关闭Coordinator admission、验证并停止Gateway/idle Worker、深检State与SQLite authority后
+才执行whole-generation copy-and-switch。CLI不构造maintenance barrier；busy/unknown/corrupt返回closed blocked JSON与非零退出。
+普通`run/resume`、TUI、`web`和`service ensure`均不会隐式调用该命令。
+
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
 TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败
 都原样reject，不silent fallback到embedded/InProcess。

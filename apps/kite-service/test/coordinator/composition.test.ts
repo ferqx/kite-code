@@ -210,8 +210,12 @@ describe('Kite Coordinator Service composition', () => {
       outcome: 'ok',
       result: { state: 'ready' },
     });
+    await expect(client.stopCoordinator()).resolves.toMatchObject({
+      outcome: 'ok',
+      result: { state: 'draining' },
+    });
     await transport.close?.();
-    await expect(composition.server.stop()).resolves.toMatchObject({
+    await expect(composition.server.waitForShutdown()).resolves.toMatchObject({
       operation: 'stop',
       outcome: 'applied',
       state: 'absent',

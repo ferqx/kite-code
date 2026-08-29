@@ -21,6 +21,73 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
   });
 
+  test('recognizes only the explicit Run Store maintenance command shape', () => {
+    expect(
+      parseArgs(['maintenance', 'migrate-run-store', '--target-generation', 'generation-store-8']),
+    ).toMatchObject({
+      command: 'maintenance-migrate-run-store',
+      targetLayoutGeneration: 'generation-store-8',
+    });
+    expect(
+      parseArgs([
+        'maintenance',
+        'migrate-run-store',
+        '--target-generation',
+        'generation-store-8',
+        '--kite-home',
+        '/tmp/kite-home',
+      ]).command,
+    ).toBe('maintenance-migrate-run-store');
+    expect(() => parseArgs(['maintenance', 'migrate-run-store'])).toThrow(
+      'requires exactly --target-generation',
+    );
+    expect(() =>
+      parseArgs([
+        'maintenance',
+        'migrate-run-store',
+        '--target-generation',
+        'generation-store-8',
+        'unexpected',
+      ]),
+    ).toThrow('requires exactly --target-generation');
+    expect(() => parseArgs(['run', '--target-generation', 'generation-store-8'])).toThrow(
+      "Unsupported CLI option '--target-generation'",
+    );
+  });
+
+  test('runs offline Run Store maintenance and fails closed on a blocked result', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const targets: string[] = [];
+    process.argv = [
+      'bun',
+      'kite',
+      'maintenance',
+      'migrate-run-store',
+      '--target-generation',
+      'generation-store-8',
+    ];
+    try {
+      await expect(
+        main({
+          runStoreMaintenance: {
+            async migrate({ targetLayoutGeneration }) {
+              targets.push(targetLayoutGeneration);
+              return { status: 'blocked', reason: 'active_work' };
+            },
+          },
+        }),
+      ).rejects.toThrow('Run Store migration blocked: active_work');
+      expect(targets).toEqual(['generation-store-8']);
+      expect(output.mock.calls).toEqual([
+        [JSON.stringify({ status: 'blocked', reason: 'active_work' })],
+      ]);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
   test('recognizes only the closed Web Gateway lifecycle commands', () => {
     expect(parseArgs(['web']).command).toBe('web-ensure');
     expect(parseArgs(['web', '--json'])).toMatchObject({ command: 'web-ensure', webJson: true });
@@ -390,8 +457,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
           instanceId: 'coordinator-1',
           buildId: 'build-1',
           protocolVersion: 1,
-          protocolRevision: 'kite-local-coordinator-protocol-v1',
-          clientContractRevision: 'kite-local-coordinator-client-v1',
+          protocolRevision: 'kite-local-coordinator-protocol-v2',
+          clientContractRevision: 'kite-local-coordinator-client-v2',
         },
       };
     },
@@ -413,8 +480,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
               instanceId: 'gateway-1',
               buildId: 'build-1',
               protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v1',
-              clientContractRevision: 'kite-local-coordinator-client-v1',
+              protocolRevision: 'kite-local-coordinator-protocol-v2',
+              clientContractRevision: 'kite-local-coordinator-client-v2',
             },
             endpoint: { origin: 'http://127.0.0.1:43124' },
           },
@@ -446,8 +513,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
               instanceId: 'gateway-1',
               buildId: 'build-1',
               protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v1',
-              clientContractRevision: 'kite-local-coordinator-client-v1',
+              protocolRevision: 'kite-local-coordinator-protocol-v2',
+              clientContractRevision: 'kite-local-coordinator-client-v2',
             },
             endpoint: { origin: 'http://127.0.0.1:43124' },
           },
@@ -456,6 +523,7 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
       };
     },
     stopWebGateway: unused,
+    stopCoordinator: unused,
     subscribeDirectoryChanges: unused,
   } as CoordinatorRequestClient;
 }

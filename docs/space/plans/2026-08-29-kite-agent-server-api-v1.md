@@ -35,6 +35,8 @@ canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`�
 auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。KRSRUN-01A～02A已完成neutral Run contract、unpublished
 Store8 schema/preflight、Host atomic lifecycle/original resource replay、private Run query、delete/rewind/fork/restart、whole-generation migration及
 production Worker cutover；当前执行入口为KASAPI-03A子计划KRSRUN-03B current/release handoff。production Worker已持Run authority，Public handler仍不创建Run mutation或发布`runs`capability。
+KRSRUN-03B已实现local formal migration command与current authority/runbook，但其完整candidate及GitHub-hosted三平台evidence尚未登记；因此
+KASAPI-03A仍保持blocked，KASAPI-03B mutation mapper尚未开放。
 
 ## 1. 执行结论
 
@@ -402,8 +404,8 @@ Gate：read-only façade完全通过后才能开始Run mutation；任何route di
 KASAPI-00B已证明current Store 7不足以提供bounded、无歧义的Run list/get、historical phase/status/timestamp与delete/fork/rewind/late
 retry语义。本Task只执行ADR-0150与[`Runtime Run Store V1子计划`](2026-08-29-kite-runtime-run-store-v1.md)：升级State 27 / Store 8、
 canonical Run index、receipt resource result、coverage boundary与whole-generation copy-and-switch；KRSRUN-01A～01B已关闭mechanism/
-transaction/private query Gate，KRSRUN-02A已关闭delete/rewind/fork/restart Gate，02B已关闭generation migration Gate；在
-KRSRUN-03A～03B完成前仍保持blocked。
+transaction/private query Gate，KRSRUN-02A已关闭delete/rewind/fork/restart Gate，02B已关闭generation migration Gate，03A已关闭production
+cutover Gate。03B formal maintenance与current docs已实现，但完整candidate及GitHub-hosted三平台evidence未登记前，本Task仍保持blocked。
 
 无论哪条路径，start applied transaction必须持久确定`run_id`并让original/replayed receipt返回同一resource；Session delete/fork/rewind/
 retention与unknown recovery全部有闭集语义。

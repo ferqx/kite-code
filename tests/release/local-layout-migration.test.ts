@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openCoordinatorCatalog } from '@kite-ai/kite-local-runtime/coordinator';
 import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 import {
   createSqliteRuntimeStorage,
   ensureSqliteRuntimeLayoutRoot,
@@ -35,6 +36,7 @@ import {
   runLocalLayoutMigration,
   runLocalRunStoreMigration,
 } from '../../scripts/release/local-layout-migration';
+import { createLocalRunStoreMaintenance } from '../../scripts/release/local-run-store-maintenance';
 
 type Event = { readonly type: string; readonly content?: string };
 type State = {
@@ -332,6 +334,169 @@ describe('explicit local Store layout maintenance', () => {
       expect(
         readSqliteRuntimeLayoutManifest(layout, 'generation-run-store')?.profile,
       ).toMatchObject({ storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION });
+    } finally {
+      rmSync(data.root, { recursive: true, force: true });
+    }
+  });
+
+  test('runs the formal command owner only after the managed process chain is absent', async () => {
+    const data = fixture();
+    try {
+      const currentCodec = createRuntimeHostStateStorageBinding().codec;
+      createSqliteRuntimeStorage({
+        databasePath: data.source,
+        codec: currentCodec,
+        options: { journalMode: 'delete' },
+      }).close();
+      const layout = resolveSqliteRuntimeLayoutPaths(data.home);
+      sourceGuard(data.source, layout, 'generation-command-source');
+      const sourceMigration = await runLocalLayoutMigration({
+        home: data.home,
+        sourceStorePath: data.source,
+        allowLegacyMigration: true,
+        targetLayoutGeneration: 'generation-command-source',
+        codec: currentCodec,
+        catalogBuilder: createSqliteRuntimeMigrationCatalogBuilder({
+          canonicalKiteHomeRoot: realpathSync(data.home),
+        }),
+        resolveWorkspaceBinding: () => {
+          throw new Error('Empty source must not request a Workspace binding.');
+        },
+      });
+      expect(sourceMigration.status).toBe('migrated');
+
+      const home = createKiteHomeIdentity(realpathSync(data.home));
+      const result = await createLocalRunStoreMaintenance({
+        home,
+        coordinationHome: home,
+        coordinator: {
+          stop: async () => ({
+            requestId: 'maintenance-stop',
+            operation: 'stop',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          status: async () => ({
+            requestId: 'maintenance-status',
+            operation: 'status',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          acquireMaintenanceLock: async () => ({
+            kind: 'lifecycle',
+            identity: {
+              schema: 'kite.local-coordinator-lock.v1',
+              kind: 'lifecycle',
+              nonce: 'maintenance-test-lock',
+              pid: process.pid,
+              instanceId: 'maintenance-test',
+              startedAt: '2026-08-30T00:00:00.000Z',
+              processStartIdentity: 'maintenance-test-start',
+              buildId: 'maintenance-test-build',
+              operation: 'stop',
+              createdAt: '2026-08-30T00:00:00.000Z',
+            },
+            release: async () => undefined,
+          }),
+          confirmAbsentWhileLocked: async () => true,
+        },
+      }).migrate({ targetLayoutGeneration: 'generation-command-target' });
+      if (result.status !== 'committed') {
+        throw new Error(`Formal migration unexpectedly blocked: ${JSON.stringify(result)}`);
+      }
+      expect(result.status).toBe('committed');
+      expect(readSqliteActiveLayoutPointer(layout)?.generation).toBe('generation-command-target');
+    } finally {
+      rmSync(data.root, { recursive: true, force: true });
+    }
+  });
+
+  test('blocks the formal command when it cannot hold the Coordinator lifecycle lock', async () => {
+    const data = fixture();
+    try {
+      const home = createKiteHomeIdentity(data.home);
+      const result = await createLocalRunStoreMaintenance({
+        home,
+        coordinationHome: home,
+        coordinator: {
+          stop: async () => ({
+            requestId: 'maintenance-stop-without-lock',
+            operation: 'stop',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          status: async () => ({
+            requestId: 'maintenance-status-without-lock',
+            operation: 'status',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          acquireMaintenanceLock: async () => undefined,
+          confirmAbsentWhileLocked: async () => true,
+        },
+      }).migrate({ targetLayoutGeneration: 'generation-without-lock' });
+      expect(result).toEqual({ status: 'blocked', reason: 'maintenance_required' });
+      expect(
+        readSqliteActiveLayoutPointer(resolveSqliteRuntimeLayoutPaths(data.home)),
+      ).toBeUndefined();
+    } finally {
+      rmSync(data.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rechecks Coordinator absence under the held lifecycle lock', async () => {
+    const data = fixture();
+    let released = false;
+    try {
+      const home = createKiteHomeIdentity(data.home);
+      const result = await createLocalRunStoreMaintenance({
+        home,
+        coordinationHome: home,
+        coordinator: {
+          stop: async () => ({
+            requestId: 'maintenance-stop-before-race',
+            operation: 'stop',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          status: async () => ({
+            requestId: 'maintenance-status-before-race',
+            operation: 'status',
+            outcome: 'applied',
+            state: 'absent',
+            diagnostic: 'not_running',
+          }),
+          acquireMaintenanceLock: async () => ({
+            kind: 'lifecycle',
+            identity: {
+              schema: 'kite.local-coordinator-lock.v1',
+              kind: 'lifecycle',
+              nonce: 'maintenance-race-lock',
+              pid: process.pid,
+              instanceId: 'maintenance-race-test',
+              startedAt: '2026-08-30T00:00:00.000Z',
+              processStartIdentity: 'maintenance-race-start',
+              buildId: 'maintenance-race-build',
+              operation: 'stop',
+              createdAt: '2026-08-30T00:00:00.000Z',
+            },
+            release: async () => {
+              released = true;
+            },
+          }),
+          confirmAbsentWhileLocked: async () => false,
+        },
+      }).migrate({ targetLayoutGeneration: 'generation-race-target' });
+      expect(result).toEqual({ status: 'blocked', reason: 'maintenance_required' });
+      expect(released).toBe(true);
+      expect(
+        readSqliteActiveLayoutPointer(resolveSqliteRuntimeLayoutPaths(data.home)),
+      ).toBeUndefined();
     } finally {
       rmSync(data.root, { recursive: true, force: true });
     }

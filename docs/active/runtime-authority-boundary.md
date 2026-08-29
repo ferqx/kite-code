@@ -111,6 +111,13 @@ Host Run query都验证同一committed active-layout/manifest/journal/fence。St
 profile/binding且不读取Store 7 fallback。start decision原子提交queued Run后，调度前的same-phase activation在同一revision改为running；其余
 Run transition仍必须随State revision前进。ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
 
+KRSRUN-03B新增正式offline入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI不拥有barrier；release owner先以
+Coordinator protocol/client revision v2的authenticated `stopCoordinator`关闭admission并由manager确认exact process exit，再依据持久descriptor、
+control credential、PID/start-token与Worker idle holds停止Gateway/全部Worker。持有Coordinator lifecycle lock后还必须直接复核descriptor、
+endpoint、launch intent与instance lock全部absent，关闭stop/status与并发ensure之间的窗口。Host pure State predicate验证terminal Turn、idle Interaction、已知
+external outcome及无cleanup/recovery authority；SQLite owner继续深检effect lease、Controller/recovery/resource authority、WAL与source digest。
+任一busy、unknown、corrupt或response-loss均返回blocked且不切pointer。normal ensure只初始化fresh Store 8，不自动迁移existing Store 7。
+
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
 instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
@@ -184,15 +191,28 @@ executable argv不能因`slice(2)`为空而落入普通Service命令解析或静
 
 ## SQLite Store 与 Artifact
 
-新 Session 只使用 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26` 与 epoch 派生的 `.runtime-state-store-{generation}.db` current target。SQLite Store 当前 exact schema 是 **8 tables / 2 non-primary-key indexes**；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。历史 source 只要存在 WAL/SHM sidecar 就必须在隔离副本中读取；`SQLITE_OPEN_READONLY` 不足以保证 SHM 不被更新，真实 source 的 identity、mtime 与字节不得变化。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
+新production Session只使用State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`的active Workspace generation target，exact schema为
+**11 tables / 3 named non-primary-key indexes**。显式legacy Service maintenance仍使用State 27 / Store 6 /
+`kite-runtime-server-v1-2026-08-26`的8 tables / 2 indexes；Store 7只作whole-generation offline migration source。不存在persisted
+authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event是strict canonical JSON，Snapshot以SHA-256
+checksum检测损坏。写入/恢复Store时会校验目标会话的当前Event/Snapshot；SessionStore的会话发现只按序解码到第一条命名候选后停止，不以全日志
+解码阻塞TUI启动，具体会话恢复仍走session-scoped完整校验。历史source只要存在WAL/SHM sidecar就必须在隔离副本中读取；
+`SQLITE_OPEN_READONLY`不足以保证SHM不被更新，真实source的identity、mtime与字节不得变化。只读日志reader打开时只校验数据库marker与表结构，
+并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
 
-`runtime_command_receipts` 是第八张表。它的唯一 key 是 `(scope_session_id, command_id)`；存储的 request digest、target Session、canonical original applied receipt 与 committed revision/time 把 replay 绑定到一个 exact command decision。同 scope/key 的不同 digest fail closed。State/event/snapshot/revision decision 与 receipt 在同一 Store transaction 提交；所以 commit 后、response 前的 crash 只能让同 ID retry 返回原事实，绝不再次 prepare 或 dispatch effect。parse/codec/auth/overload/transport failure 不创建 receipt。receipt retention 是刻意的：close、Session delete、target delete 保留 receipt；fork 绝不复制 source receipt；不设 TTL 或 capacity pruning；只有删除整个 Store 才会移除 metadata。
+`runtime_command_receipts`的唯一key是`(scope_session_id, command_id)`；Store 8还保存digest-bound original resource result。存储的request
+digest、target Session、canonical original applied receipt与committed revision/time把replay绑定到一个exact command decision。同scope/key的不同
+digest fail closed。State/event/snapshot/revision decision与receipt在同一Store transaction提交；所以commit后、response前的crash只能让同ID
+retry返回原事实，绝不再次prepare或dispatch effect。parse/codec/auth/overload/transport failure不创建receipt。receipt retention是刻意的：
+close、Session delete、target delete保留receipt；fork绝不复制source receipt；不设TTL或capacity pruning；只有删除整个Store才会移除metadata。
 
 Session delete 同样是显式 Runtime command，不是 App/TUI 的 SQLite helper。Host 在 Session mailbox/lifecycle
 边界串行化删除，Store 在一个 `BEGIN IMMEDIATE` 中写入 scoped applied receipt 并删除该 Session 的 durable
 facts，但保留 receipt；Host 随后移除 registry projection，且不会再以 close snapshot 重建已删 Session。
 
-State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都是 explicit source-only compatibility profile，不是 writer。用户选中的 exact session 可以经 no-follow isolated copy atomic import 到 Store 6；unknown source 静默忽略，corrupt source 只隔离该 session。source bytes 永不写回、checkpoint、rename 或作为 fallback 执行。
+State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都是
+explicit source-only compatibility profile，不是writer。用户选中的exact session只能经no-follow isolated copy atomic import到显式legacy
+Store 6；unknown source静默忽略，corrupt source只隔离该session。source bytes永不写回、checkpoint、rename或作为fallback执行。
 
 不匹配 current marker 的 database 直接 fail closed。production package 不导出 old constructor/path，也不存在 Store 5 current writer、sidecar receipt database、hidden DDL drift、ignored receipt table、try-new-catch-old、dual write 或 mixed-format normalization。
 

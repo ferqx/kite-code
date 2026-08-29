@@ -256,6 +256,58 @@ describe('Coordinator durable control-plane composition', () => {
     expect(JSON.stringify(response)).not.toContain('session-deleted');
     catalog.close();
   });
+
+  test('enters draining before the carrier flushes lifecycle stop', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-control-stop-')));
+    roots.push(root);
+    const catalog = openCatalog(root);
+    const plane = createCoordinatorControlPlane({
+      identity: coordinator,
+      catalog,
+      registry: createCoordinatorRegistry(),
+      workers: {
+        resolveWorkspace: async () => null,
+        ensureWorkspace: async () => worker,
+        describeScope: async () => null,
+        mintCapability: async () => {
+          throw new Error('unexpected capability mint');
+        },
+      },
+      gateway: {
+        ensure: async () => ({
+          registration: gateway(),
+          launchUrl: launchUrl(),
+        }),
+        discover: async () => null,
+        stop: async () => undefined,
+      },
+    });
+    plane.completeReconcile();
+    const dispatcher = createCoordinatorDispatcher({
+      identity: coordinator,
+      peerOsIdentity: { kind: 'posix_uid', uid: 501 },
+      handlers: plane.handlers,
+    });
+    const stopped = await dispatcher.dispatch(request('stopCoordinator', {}), client);
+    expect(stopped).toMatchObject({
+      outcome: 'ok',
+      result: { state: 'draining' },
+    });
+    expect(await dispatcher.dispatch(request('status', {}), client)).toMatchObject({
+      outcome: 'ok',
+      result: { state: 'draining' },
+    });
+    expect(
+      await dispatcher.dispatch(
+        request('resolveWorkspaceWorker', { workspace: worker.workspace }),
+        client,
+      ),
+    ).toMatchObject({
+      outcome: 'error',
+      error: { code: 'unavailable' },
+    });
+    catalog.close();
+  });
 });
 
 function gateway() {

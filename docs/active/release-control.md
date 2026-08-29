@@ -27,10 +27,18 @@ rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows
 matrix尚未取得，必须保持pending，不能以workflow定义、本地通过或artifact上传取代真实三平台结果；Windows
 ACL/write-through与非 Windows 本地环境的 no-follow 断言也不能互相替代。
 
-`scripts/release/local-layout-migration.ts`包含显式offline Store layout maintenance，不属于normal build/install/start或自动upgrade。
-Store 7→Store 8入口要求manager注入Coordinator/Worker/Gateway已停止及全部Runtime/external effect收敛的exact barrier，随后才建立
-source-bound fence、复制完整Catalog/Workspace generation并切pointer；任一unknown保持blocked。fresh home由普通ensure直接初始化Store 8，
-已有Store 7仍不得自动迁移；production Worker只接受committed Store 8 pointer，不得fallback启动Store 7 Worker。三平台candidate结论继续pending。
+`scripts/release/local-layout-migration.ts`包含显式offline Store layout primitive，不属于normal build/install/start或自动upgrade。
+正式operator入口是`kite maintenance migrate-run-store --target-generation <fresh-generation> [--kite-home <absolute>]`，由
+`local-run-store-maintenance.ts`而非CLI构造exact barrier：先用Coordinator revision v2的authenticated stop关闭admission并确认进程退出，
+再持有同一Coordinator lifecycle lock直到migration结束以阻断并发ensure/第二maintenance，并在锁内复核descriptor、endpoint、launch intent与
+instance lock全部不存在，然后按
+持久descriptor、PID/start-token、control identity与idle hold停止Gateway/Worker；Host State与SQLite authority/effect/WAL deep validation随后共同
+证明Turn/Interaction/effect/external process为零，才建立source-bound fence、复制完整Catalog/Workspace generation并切pointer。任一busy/
+unknown/corrupt保持blocked并非零退出。fresh home由普通ensure直接初始化Store 8，已有Store 7仍不得自动迁移；production Worker只接受
+committed Store 8 pointer，不得fallback启动Store 7 Worker。本机03B dirty-source macOS arm64 candidate
+`172fcbd79dce619bb82048ec`已通过build/verify/install、正式maintenance fail-closed、upgrade/rollback/uninstall；archive digest为
+`sha256:e8931fb83ea576cedf6cb759b724ed96d4045c85a59315e255ffc043e7ab6eab`。这是
+[local evidence](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)，三平台candidate结论继续pending。
 
 ## 候选制品
 
@@ -44,8 +52,8 @@ source-bound fence、复制完整Catalog/Workspace generation并切pointer；任
 - release notes、known limitations 与普通维护者检查清单。
 
 候选中的`kite`与`kite-tui`由release entrypoint注入managed Coordinator/Worker connector；前台`run/resume`与TUI默认
-ensure Coordinator/Workspace Worker，CLI另为显式 maintenance 注入`kite service ensure/status/stop/restart` legacy manager，并提供
-`kite web*` Coordinator surface。Web
+ensure Coordinator/Workspace Worker，CLI另为显式 maintenance 注入`kite service ensure/status/stop/restart` legacy manager、offline
+Run Store migration owner，并提供`kite web*` Coordinator surface。Web
 命令只通过 Coordinator client ensure/discover/stop Gateway，TUI `/web` 只 discovery；connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
 source/installed Worker connector仅对同一canonical Workspace的typed Worker recovery-pending/unavailable执行一次connect内
@@ -159,7 +167,7 @@ installer contract tests的临时Service home也必须由同一state owner primi
 flush 父目录；Windows 使用已实现的 regular-file flush 与 atomic replacement，但 directory write-through、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 
-`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、TUI version、真实
+`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实
 Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uninstall。
 任一步非零都使smoke失败；该本机
 smoke不替代KLSV1-07三平台companion lifecycle qualification。
@@ -169,7 +177,7 @@ standalone中的`import.meta.main`判断启动，
 因为其平台差异会让Windows companion在未发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
 POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。
 长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
-这不是产品manager的PID kill或新增Coordinator stop surface。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
+这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。

@@ -47,6 +47,15 @@ new Workspace直接物化Store 8、Catalog first-write fence、idle History sour
 不再返回unsupported。Service 1525、SQLite 90、Runtime fault 36与CI soak 7/7通过；本机dirty-source macOS arm64 candidate完成
 build/verify/install/upgrade/rollback/uninstall smoke。Public Run route/ServerInfo capability继续关闭，GitHub-hosted三平台candidate evidence仍不能由本机结果替代。
 
+KRSRUN-03B focused evidence增加formal maintenance CLI parser/blocked exit、Coordinator v2 authenticated stop/draining、manager exact-exit确认、
+empty process-chain Store 7→8 end-to-end command、持锁后Coordinator absence复核及State convergence negatives。正式入口不接收caller-supplied zero barrier；Gateway/Worker
+state残留、busy activity、PID/start-token/control uncertainty、unknown external effect或source deep-validation失败均保持blocked。当前本机结果仍只
+是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
+`sha256:10a3c8bd419d95c14d741c10c25341cbf9c1b711c0c1b5e5465178a8bbda00d1`）、release 210、最终focused 38及
+candidate `172fcbd79dce619bb82048ec`已通过；完整边界见
+[03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
+macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
+
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
 远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。
@@ -270,7 +279,10 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都只属于 explicit readonly historical source profile，不能进入当前执行路径。
+strict mismatch 与 no-fallback contract。production缺省仍使用加密随机identity与系统时钟；默认Workspace Worker writer精确为
+State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`，显式legacy Service maintenance仍为State 27 / Store 6 /
+`kite-runtime-server-v1-2026-08-26`，Store 7只作offline migration source。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`
+与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都只属于explicit readonly historical source profile，不能进入当前Worker执行路径。
 
 RM-04 production Store 由 Service 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与

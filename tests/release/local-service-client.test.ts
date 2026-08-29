@@ -65,6 +65,14 @@ test('source release build identity includes terminal, Service, Worker, Gateway,
     const committedClientChange = sourceServiceBuildIdentity(root);
     expect(committedClientChange).not.toBe(clean);
 
+    const maintenanceOwner = join(root, 'scripts', 'release', 'local-run-store-maintenance.ts');
+    mkdirSync(join(root, 'scripts', 'release'), { recursive: true });
+    writeFileSync(maintenanceOwner, 'export const maintenanceRevision = 1;\n');
+    runGit(root, ['add', '.']);
+    runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'maintenance owner change']);
+    const committedMaintenanceChange = sourceServiceBuildIdentity(root);
+    expect(committedMaintenanceChange).not.toBe(committedClientChange);
+
     writeFileSync(tracked, 'export const value = 2;\n');
     runGit(root, ['add', '.']);
     runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'service change']);

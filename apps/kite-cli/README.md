@@ -17,6 +17,8 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
 - CLI parser/main 已实现封闭的 Web Gateway lifecycle surface：`kite web [--json]` 请求 ensure 并打印 Coordinator
   返回的一次性 launch URL，`kite web status [--json]` 只 discovery 已有 Gateway，`kite web stop` 请求显式 stop。
   这些命令只接受注入的 `CoordinatorRequestClient`，CLI 不自行发现、spawn、访问 Gateway 或取得 Controller。
+- CLI另提供唯一显式Store迁移入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`；parser只接受该exact
+  shape与可选absolute`--kite-home`。CLI只输出release owner返回的closed JSON结果；blocked为非零退出，normal run/resume/ensure永不调用迁移。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
@@ -33,6 +35,7 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
   fallback。managed Service 不可用时直接失败。
 - 不拥有 Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart` 只把显式 maintenance 命令转交 legacy
   Service manager；默认 run/resume/TUI 使用 Coordinator + Worker connector。CLI 不自行 discover、spawn、kill 或清理 owner state。
+  Store迁移命令同样只调用release注入的maintenance owner，不接收barrier boolean、不打开SQLite或解释State。
 - `scripts/release/entrypoints/cli.ts` 按命令注入 legacy Service manager、production `CoordinatorRequestClient` 或 Worker connector；
   layout、Coordinator、Worker 或 Gateway 不可用时均 fail closed。parser/main contract 与本地 tests 不等于三平台 qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于

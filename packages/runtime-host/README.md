@@ -13,6 +13,8 @@
   receipt resource result。Store 8 capability存在时，State session把start queued row、original Run resource receipt与
   State/event/snapshot放入同一transaction，activation写running，interaction/terminal/cancel/recovery event batch同步推进同一Run。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
+- 根入口导出纯函数`isRuntimeHostStateSettledForMigration`，保守验证terminal Turn、idle Interaction、已知external effect、
+  terminal Tool/Capability/Model/approval、无cleanup/subagent/recovery authority；SQLite owner仍独立验证effect lease与durable authority row。
 - 接收 Runtime Server 的进程内 `RuntimeCommandContext`，在 Host inspect/commit 到 prepared execution bridge 时保持同一冻结
   connection/request/binding identity；Host 不把它序列化、不从 Session 反查 Worker binding，也不持有 Worker credential。
 - 启动一个 frozen RuntimeModule snapshot，关闭 bridge 后逆序释放 module。
@@ -49,7 +51,8 @@
 - Host restart后、Session尚未admit/recover时，private Run get/list把唯一nonterminal行只读投影为`unknown/recovery_required`；投影复用最后
   一个durable Run clock值，不读取HTTP/Logger wall clock，也不写Store或触发recovery。显式resume完成existing Host recovery后恢复canonical
   active/terminal投影；真实unknown只允许由reconciliation原子细化为更精确terminal，并保留原`finishedAtMs`。
-- 上述是unpublished Store8 Host机制。current Worker仍打开Store7，private Run query返回unsupported，Agent ServerInfo和Public handler仍不发布`runs`。
+- current production Workspace Worker已打开committed Store 8并消费上述Host Run机制；Store 7只保留为显式offline migration source。
+  Agent ServerInfo和Public handler仍不发布`runs`，所以Store authority cutover不等于Public mutation开放。
 
 ## 测试
 

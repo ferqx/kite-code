@@ -24,27 +24,39 @@ if (process.argv.includes('--version')) {
             });
             return runCliMain({ serviceManager: localService.lifecycle });
           })()
-        : command.startsWith('web-')
+        : command === 'maintenance-migrate-run-store'
           ? (() => {
               const localCoordinator = createManagedLocalCoordinatorClientComposition({
                 argv: process.argv,
                 executableMode,
               });
-              return runCliMain({ coordinatorClient: localCoordinator.client });
-            })()
-          : (() => {
-              const localCoordinator = createManagedLocalCoordinatorClientComposition({
-                argv: process.argv,
-                executableMode,
-              });
-              const workerConnector = createManagedLocalWorkspaceWorkerConnector({
-                coordinatorClient: localCoordinator.client,
-              });
               return runCliMain({
-                serviceConnector: workerConnector,
-                coordinatorClient: localCoordinator.client,
+                runStoreMaintenance: localCoordinator.maintenance,
               });
-            })();
+            })()
+          : command.startsWith('web-')
+            ? (() => {
+                const localCoordinator = createManagedLocalCoordinatorClientComposition({
+                  argv: process.argv,
+                  executableMode,
+                });
+                return runCliMain({
+                  coordinatorClient: localCoordinator.client,
+                });
+              })()
+            : (() => {
+                const localCoordinator = createManagedLocalCoordinatorClientComposition({
+                  argv: process.argv,
+                  executableMode,
+                });
+                const workerConnector = createManagedLocalWorkspaceWorkerConnector({
+                  coordinatorClient: localCoordinator.client,
+                });
+                return runCliMain({
+                  serviceConnector: workerConnector,
+                  coordinatorClient: localCoordinator.client,
+                });
+              })();
   run.catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

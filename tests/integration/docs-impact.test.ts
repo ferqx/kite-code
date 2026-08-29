@@ -191,6 +191,12 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/runtime-client/src/client.ts')).toEqual([
       'runtime-client',
     ]);
+    expect(
+      triggeredRepositoryRules('packages/kite-local-runtime/src/coordinator/control-plane.ts'),
+    ).toEqual(['kite-local-runtime-client']);
+    expect(triggeredRepositoryRules('packages/runtime-host/src/format/storage-binding.ts')).toEqual(
+      ['runtime-host'],
+    );
     expect(triggeredRepositoryRules('packages/runtime-host/src/host/command-receipt.ts')).toEqual([
       'runtime-host-command-receipts',
     ]);
@@ -221,6 +227,9 @@ describe('documentation impact gate V2', () => {
     }
     expect(
       triggeredRepositoryRules('apps/kite-service/src/bootstrap/runtime/CliRuntimeBridge.ts'),
+    ).toEqual(['kite-service-runtime-owner']);
+    expect(
+      triggeredRepositoryRules('apps/kite-service/src/coordinator/run-store-maintenance.ts'),
     ).toEqual(['kite-service-runtime-owner']);
     expect(triggeredRepositoryRules('apps/kite-service/src/app-control/service.ts')).toEqual([
       'kite-service-runtime-owner',
@@ -260,6 +269,9 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-cli/src/service-mode/adapter.ts')).toEqual([
       'kite-service-mode-adapter',
     ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/cli/index.ts')).toEqual([
+      'kite-cli-command-runtime',
+    ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/runtime-client/presentation-history.ts'),
     ).toEqual(['kite-runtime-history']);
@@ -283,6 +295,9 @@ describe('documentation impact gate V2', () => {
     ]);
     expect(triggeredRepositoryRules('scripts/release/session-log-acl-smoke.ts')).toEqual([
       'observability-and-session-logging',
+    ]);
+    expect(triggeredRepositoryRules('scripts/release/local-run-store-maintenance.ts')).toEqual([
+      'release-candidate',
     ]);
     expect(triggeredRepositoryRules('scripts/run-default-tests.ts')).toEqual(['test-system']);
   });

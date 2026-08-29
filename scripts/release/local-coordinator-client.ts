@@ -21,6 +21,7 @@ import {
   coordinatorManagedConnection,
   createCoordinatorProcessExecutableResolver,
   createCoordinatorProcessHost,
+  createCoordinatorProcessLockIdentity,
   createCoordinatorProcessManager,
   createCoordinatorProcessPort,
   createCoordinatorProcessStatePort,
@@ -46,6 +47,10 @@ import {
   sqliteCurrentRuntimeStorePath,
 } from '@kite-ai/runtime-storage-sqlite';
 import { runLocalLayoutMigration } from './local-layout-migration';
+import {
+  createLocalRunStoreMaintenance,
+  type LocalRunStoreMaintenance,
+} from './local-run-store-maintenance';
 import { installedBuildIdentity, sourceServiceBuildIdentity } from './local-service-client';
 
 const COORDINATOR_NEUTRAL_DIRECTORY = 'neutral-cwd';
@@ -62,6 +67,7 @@ export interface ManagedLocalCoordinatorClientComposition {
   readonly lifecycle: ManagedLocalCoordinatorLifecycle;
   /** Resolve the existing Gateway URL; this never starts a Gateway. */
   readonly discoverWebGateway: () => Promise<string | undefined>;
+  readonly maintenance: LocalRunStoreMaintenance;
   readonly executableMode: 'source' | 'installed';
 }
 
@@ -142,10 +148,50 @@ export function createManagedLocalCoordinatorClientComposition(
   });
 
   const client = createManagedRequestClient();
+  const maintenance = createLocalRunStoreMaintenance({
+    home,
+    coordinationHome: createKiteHomeIdentity(coordinationHome, 'os_user_home'),
+    coordinator: {
+      stop: () => lifecycle.stop(),
+      status: () => lifecycle.status(),
+      async acquireMaintenanceLock() {
+        const processStartIdentity = await managerProcessStartIdentityPromise;
+        if (!processStartIdentity) return undefined;
+        const startedAt = new Date().toISOString();
+        return state.acquireLock(
+          'lifecycle',
+          createCoordinatorProcessLockIdentity({
+            kind: 'lifecycle',
+            pid: process.pid,
+            instanceId: `run-store-maintenance-${randomUUID()}`,
+            startedAt,
+            processStartIdentity,
+            buildId: expectedBuildId,
+            operation: 'stop',
+          }),
+        );
+      },
+      async confirmAbsentWhileLocked() {
+        const [descriptor, endpoint, launchIntent, instanceLock] = await Promise.all([
+          state.readDescriptor(),
+          state.readEndpoint(),
+          state.readLaunchIntent(),
+          state.readInstanceLock(),
+        ]);
+        return (
+          descriptor === undefined &&
+          endpoint === undefined &&
+          launchIntent === undefined &&
+          instanceLock === undefined
+        );
+      },
+    },
+  });
 
   return Object.freeze({
     client,
     lifecycle,
+    maintenance,
     discoverWebGateway: async () => {
       const response = await client.discoverWebGateway();
       if (response.outcome !== 'ok' || response.result.gateway === null) return undefined;
@@ -214,6 +260,39 @@ export function createManagedLocalCoordinatorClientComposition(
           }
         },
       },
+      stop: {
+        async stop({ descriptor }) {
+          const transport = createCoordinatorSocketRequestTransport({
+            home,
+            endpoint: descriptor.endpoint,
+            operationDeadlineMs: DEFAULT_OPERATION_DEADLINE_MS,
+          });
+          const requestClient = createCoordinatorRequestClient({
+            transport,
+            identity: clientIdentity(expectedBuildId),
+            expectedCoordinator: descriptor.endpoint.coordinator,
+            peerOsIdentity,
+            deadlineMs: DEFAULT_OPERATION_DEADLINE_MS,
+          });
+          try {
+            const handshake = await requestClient.handshake();
+            if (!handshake.accepted) {
+              return {
+                outcome: 'unavailable',
+                diagnostic: 'identity_uncertain' as const,
+              };
+            }
+            const response = await requestClient.stopCoordinator();
+            return response.outcome === 'ok' && response.result.state === 'draining'
+              ? { outcome: 'applied' as const }
+              : { outcome: 'outcome_unknown' as const };
+          } catch {
+            return { outcome: 'outcome_unknown' as const };
+          } finally {
+            await Promise.resolve(transport.close?.()).catch(() => undefined);
+          }
+        },
+      },
       expectedBuildId,
       managerProcessStartIdentity,
       operationTimeoutMs: DEFAULT_OPERATION_DEADLINE_MS,
@@ -228,8 +307,10 @@ export function createManagedLocalCoordinatorClientComposition(
   ): Promise<CoordinatorManagerResult> {
     const id = request?.requestId ?? `release-coordinator-${randomUUID()}`;
     try {
-      if (operation === 'ensure') await initializeFreshLayoutIfNeeded();
-      resolveCommittedCoordinatorLayout(home);
+      if (operation === 'ensure') {
+        await initializeFreshLayoutIfNeeded();
+        resolveCommittedCoordinatorLayout(home);
+      }
     } catch {
       return unavailableLifecycleResult(operation, id);
     }
@@ -351,6 +432,8 @@ export function createManagedLocalCoordinatorClientComposition(
         withRequest((requestClient) => requestClient.discoverWebGateway()),
       stopWebGateway: (): Promise<CoordinatorResponseFor<'stopWebGateway'>> =>
         withRequest((requestClient) => requestClient.stopWebGateway()),
+      stopCoordinator: (): Promise<CoordinatorResponseFor<'stopCoordinator'>> =>
+        withRequest((requestClient) => requestClient.stopCoordinator()),
       subscribeDirectoryChanges: (
         params: CoordinatorSubscribeDirectoryChangesParams,
       ): Promise<CoordinatorResponseFor<'subscribeDirectoryChanges'>> =>

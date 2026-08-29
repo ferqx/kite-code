@@ -26,6 +26,9 @@
   Session/event/snapshot/preimage/receipt/tombstone/outbox/private meta，把每个`run_index_from_revision`设为source head且不生成历史Run。
   logical digest/count/binding/Store8 preflight全部通过后才复用原journal/fence/pointer状态机切换；任一active/corrupt/unowned/partial/fault
   整体blocked，旧Store7 writer在新fence写入后即fail closed。
+- KRSRUN-03B由release owner提供正式命令`kite maintenance migrate-run-store --target-generation <fresh-generation>`。
+  命令先通过Manager关闭Coordinator admission，按exact PID/start-token和authenticated control逐个停止Gateway与idle Worker，
+  再由Host State predicate及本owner的authority/effect/WAL深检共同证明closed barrier；busy、unknown或corrupt均不建立target pointer。
 - Store 7/8 共用 `workspaceAuthority` durable facade：Controller operation receipt/idempotency、Controller generation/lease、
   hash-only resume/DetachedRecovery rotation、detached/recovery state、effect prepare/inspect/terminal 与 resource
   attempt evidence。capability secret 只在调用者内存中出现，Store 仅保留 SHA-256 hash；resource surface 只记录外部
@@ -62,7 +65,8 @@
 ## 关键不变量
 
 - `adapter.ts` 是唯一 current database lifecycle owner。
-- current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`；`adapter.ts` 是唯一 current database lifecycle owner。
+- current production Workspace Worker writer精确为State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`；显式legacy Service
+  writer仍为State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。两者都只由`adapter.ts`拥有database lifecycle，layout fence禁止并行双写。
 - Store 7 target 精确为 State 27 / Store 7 / `kite-coordinator-workspace-worker-web-v1-2026-08-28`；必须携带显式
   `layoutGeneration`、`workerScopeId`、`workspaceIdentityDigest` binding，header/session/receipt/tombstone 任一 ownership
   drift 都在 reopen/preflight 时 fail closed。

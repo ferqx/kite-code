@@ -46,7 +46,28 @@ export interface CliMainDependencies {
   readonly serviceManager?: KiteServiceManager;
   /** Coordinator lifecycle surface used only by explicit `web` commands. */
   readonly coordinatorClient?: CoordinatorRequestClient;
+  /** Release-owned offline Store maintenance; never used by run/resume startup. */
+  readonly runStoreMaintenance?: RunStoreMaintenance;
   readonly commandIds?: RuntimeCommandIdAllocator;
+}
+
+export interface RunStoreMaintenance {
+  migrate(input: { readonly targetLayoutGeneration: string }): Promise<
+    | {
+        readonly status: 'committed';
+        readonly sourceLayoutGeneration: string;
+        readonly targetLayoutGeneration: string;
+        readonly catalogDigest: string;
+        readonly workspaceStoreDigests: readonly {
+          readonly workerScopeId: string;
+          readonly digest: string;
+        }[];
+      }
+    | {
+        readonly status: 'blocked';
+        readonly reason: string;
+      }
+  >;
 }
 
 export interface ParsedArgs {
@@ -62,6 +83,7 @@ export interface ParsedArgs {
     | 'service-status'
     | 'service-stop'
     | 'service-restart'
+    | 'maintenance-migrate-run-store'
     | 'web-ensure'
     | 'web-status'
     | 'web-stop';
@@ -90,6 +112,7 @@ export interface ParsedArgs {
   telemetryStatus: boolean;
   serviceJson: boolean;
   webJson: boolean;
+  targetLayoutGeneration?: string;
 }
 
 export async function main(dependencies: CliMainDependencies): Promise<void> {
@@ -119,6 +142,22 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   }
   if (isServiceLifecycleCommand(args.command)) {
     await runServiceLifecycleCommand(dependencies.serviceManager, args.command, args.serviceJson);
+    return;
+  }
+  if (args.command === 'maintenance-migrate-run-store') {
+    if (!dependencies.runStoreMaintenance) {
+      throw new Error('Run Store maintenance owner is unavailable.');
+    }
+    if (!args.targetLayoutGeneration) {
+      throw new Error('maintenance migrate-run-store requires --target-generation.');
+    }
+    const result = await dependencies.runStoreMaintenance.migrate({
+      targetLayoutGeneration: args.targetLayoutGeneration,
+    });
+    console.log(JSON.stringify(result));
+    if (result.status !== 'committed') {
+      throw new Error(`Run Store migration blocked: ${result.reason}.`);
+    }
     return;
   }
   if (
@@ -690,38 +729,43 @@ async function runWebLifecycleCommand(
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const commandArgv = withoutKiteHome(argv);
-  const command =
-    commandArgv[0] === 'web' &&
-    (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
-      ? 'web-ensure'
+  const command: ParsedArgs['command'] =
+    commandArgv[0] === 'maintenance' && commandArgv[1] === 'migrate-run-store'
+      ? 'maintenance-migrate-run-store'
       : commandArgv[0] === 'web' &&
-          commandArgv[1] === 'status' &&
-          (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
-        ? 'web-status'
-        : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
-          ? 'web-stop'
-          : argv[0] === 'service' && argv[1] === 'ensure'
-            ? 'service-ensure'
-            : argv[0] === 'service' && argv[1] === 'status'
-              ? 'service-status'
-              : argv[0] === 'service' && argv[1] === 'stop'
-                ? 'service-stop'
-                : argv[0] === 'service' && argv[1] === 'restart'
-                  ? 'service-restart'
-                  : argv[0] === 'sandbox' && argv[1] === 'setup'
-                    ? 'sandbox-setup'
-                    : argv[0] === 'sandbox' && argv[1] === 'status'
-                      ? 'sandbox-status'
-                      : argv[0] === 'server' && argv[1] === '--stdio'
-                        ? 'server-stdio'
-                        : argv[0] === 'resume'
-                          ? 'resume'
-                          : argv[0] === 'run'
-                            ? 'run'
-                            : argv[0] === 'trace'
-                              ? 'trace'
-                              : 'help';
+          (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
+        ? 'web-ensure'
+        : commandArgv[0] === 'web' &&
+            commandArgv[1] === 'status' &&
+            (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
+          ? 'web-status'
+          : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
+            ? 'web-stop'
+            : argv[0] === 'service' && argv[1] === 'ensure'
+              ? 'service-ensure'
+              : argv[0] === 'service' && argv[1] === 'status'
+                ? 'service-status'
+                : argv[0] === 'service' && argv[1] === 'stop'
+                  ? 'service-stop'
+                  : argv[0] === 'service' && argv[1] === 'restart'
+                    ? 'service-restart'
+                    : argv[0] === 'sandbox' && argv[1] === 'setup'
+                      ? 'sandbox-setup'
+                      : argv[0] === 'sandbox' && argv[1] === 'status'
+                        ? 'sandbox-status'
+                        : argv[0] === 'server' && argv[1] === '--stdio'
+                          ? 'server-stdio'
+                          : argv[0] === 'resume'
+                            ? 'resume'
+                            : argv[0] === 'run'
+                              ? 'run'
+                              : argv[0] === 'trace'
+                                ? 'trace'
+                                : 'help';
   rejectUnsupportedOptions(argv, command);
+  if (command === 'maintenance-migrate-run-store') {
+    assertRunStoreMaintenanceArguments(commandArgv);
+  }
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
@@ -823,7 +867,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
     telemetryStatus: argv.includes('--telemetry-status'),
     serviceJson: command === 'service-status' && argv.includes('--json'),
     webJson: (command === 'web-ensure' || command === 'web-status') && argv.includes('--json'),
+    targetLayoutGeneration:
+      command === 'maintenance-migrate-run-store'
+        ? optionalValue('--target-generation')
+        : undefined,
   };
+}
+
+function assertRunStoreMaintenanceArguments(argv: readonly string[]): void {
+  if (
+    argv.length !== 4 ||
+    argv[0] !== 'maintenance' ||
+    argv[1] !== 'migrate-run-store' ||
+    argv[2] !== '--target-generation' ||
+    !argv[3]
+  ) {
+    throw new Error(
+      'maintenance migrate-run-store requires exactly --target-generation <generation>.',
+    );
+  }
 }
 
 function withoutKiteHome(argv: readonly string[]): string[] {
@@ -845,6 +907,9 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['command']): void {
+  if (argv.includes('--target-generation') && command !== 'maintenance-migrate-run-store') {
+    throw new Error("Unsupported CLI option '--target-generation' outside Store maintenance.");
+  }
   const unsupported = [
     '--checkpoints',
     '--no-sandbox',
@@ -920,6 +985,7 @@ function printHelp(): void {
   bun run agent service status [--json]
   bun run agent service stop
   bun run agent service restart
+  bun run agent maintenance migrate-run-store --target-generation <generation>
   bun run agent web [--json]
   bun run agent web status [--json]
   bun run agent web stop
@@ -933,6 +999,7 @@ Options:
   --thread <id>          LangGraph thread id
   --workspace <path>     Tool workspace
   --kite-home <path>     Advanced: explicit managed Service home (validated by release composition)
+  --target-generation    Fresh Store 8 generation for explicit offline migration
   --skill <name>         Activate a skill (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit

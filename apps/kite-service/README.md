@@ -22,6 +22,10 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
 - `src/coordinator/catalog-builder.ts`为显式offline maintenance同时提供Store6→Store7 Catalog builder和Store7→Store8 exact Catalog
   generation copy adapter；`scripts/release/local-layout-migration.ts`只在manager注入完整停止/收敛barrier后建立source-bound fence并调用
   whole-generation migrator。normal start/ensure不迁移已有Store7；fresh home直接建立Store8，legacy home仍要求显式maintenance。
+- `src/coordinator/run-store-maintenance.ts`把Host的pure State settlement规则投影给release maintenance；
+  `scripts/release/local-run-store-maintenance.ts`先用authenticated Coordinator stop封住新admission并持有lifecycle lock，在锁内复核
+  descriptor/endpoint/launch-intent/instance-lock全部absent，再复用Gateway/Worker process manager
+  按PID/start-token、control identity与idle hold逐个收敛child。任一busy/unknown/corrupt状态返回blocked，不伪造zero barrier。
 - Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 8 writer、Controller/effect authority 与
   Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。
