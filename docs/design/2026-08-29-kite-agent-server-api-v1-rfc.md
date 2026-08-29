@@ -14,7 +14,9 @@
 [`Runtime Contract`](../../packages/runtime-contract/README.md)、
 [`Service Runtime carriers`](../../apps/kite-service/docs/runtime-server-carrier.md)、
 [`Runtime Authority Boundary`](../active/runtime-authority-boundary.md)、
+[`Coordinator、Workspace Worker 与 Web Observer 当前边界`](../active/coordinator-workspace-worker-web.md)、
 [`Kite Code 六概念 Runtime 架构`](../active/six-concept-runtime-architecture.md)、
+[`Kite Agent Server API V1 实施方案`](../space/plans/2026-08-29-kite-agent-server-api-v1.md)、
 [`ADR-0142`](../adr/0142-runtime-server-client-protocol-boundary.md)、
 [`ADR-0144`](../adr/0144-local-runtime-service-and-multi-workspace-admission.md)、
 [`ADR-0147`](../adr/0147-kite-coordinator-workspace-worker-read-only-web.md)、
@@ -224,11 +226,16 @@ Agent API adapter 只允许：
 V1 每个 Agent API client context 精确绑定一个 admitted Workspace Worker：
 
 1. Native client 通过 Coordinator/manager 完成 Workspace canonicalization、Trust 与 Worker resolve；
-2. Worker 签发短期、hash-only、一次性或 session-bound API capability；
-3. REST/SSE request 只能命中 capability 绑定的 Worker/Workspace；
-4. Session create 不接受 Workspace path；
-5. Session resume/query/run/history/checkpoint 必须把持久 Session identity 与 capability Workspace 交叉校验；
-6. capability、Worker endpoint、Workspace path、Store path 不出现在 public DTO。
+2. Worker 继续签发短期、hash-only、一次性 connection capability；它只用于建立 authenticated Agent API client
+   context，不能直接作为可被每个 REST/SSE request 重放的长期 bearer。connection exchange 与后续 session-bound context 的
+   exact carrier 机制由 KASAPI-00 冻结；
+3. REST/SSE request 只能命中该 client context 绑定的 Worker/Workspace、client identity 与 connection generation；
+4. `controller` role 只表示 public endpoint allowlist，不替代 Store 7 的 Session Controller lease。所有 effectful mutation
+   必须复用现有 Native Controller acquisition/resume、exact Controller session/generation 与 authenticated
+   `bindingReference`；V1 Agent API 不新增 request/release/resume/detach Controller endpoint；
+5. Session create 不接受 Workspace path；
+6. Session resume/query/run/history/checkpoint 必须把持久 Session identity 与 capability Workspace 交叉校验；
+7. capability、Worker endpoint、Workspace path、Store path、Controller lease 或 binding reference 不出现在 public DTO。
 
 Remote gateway、browser cookie、API key 与多租户 subject 不属于 V1。未来引入时必须保持同一 Workspace binding，不得把 bearer token
 本身解释为 filesystem authority。
@@ -237,11 +244,17 @@ Remote gateway、browser cookie、API key 与多租户 subject 不属于 V1。�
 
 所有产生 Runtime mutation 的 `POST`/`DELETE` 必须携带 `Idempotency-Key`：
 
-- adapter 将其映射为现有 scoped `commandId` 或由新 public command identity mapper 产生稳定等价值；
-- key 的 scope 至少包含 authenticated client principal、operation、Session scope 与 canonical request digest；
-- 同 key + 同 digest 返回 original applied/rejected receipt；
-- 同 key + 不同 digest 返回 `409 idempotency_conflict`；
-- parse/auth/admission/overload 在进入 Runtime command 前失败时不得制造 applied receipt；
+- adapter 将其映射为现有 scoped `commandId` 或由新 public command identity mapper 产生稳定等价值；该映射不能依赖短期
+  capability、connection generation、Worker instance 或进程内随机 secret，必须在 capability refresh、reconnect 与 Worker restart
+  后命中同一 canonical command identity；
+- key 的 scope 至少包含稳定的 authenticated client identity、operation、Session scope 与 canonical request digest；具体编码由
+  KASAPI-00 冻结，但不能把瞬时 credential identity 当成 client principal；
+- 对已经进入 canonical Runtime transaction 并持久化的 mutation，同 key + 同 digest 返回 original applied receipt；
+- 对已持久占用的同 key 使用不同 digest 返回 `409 idempotency_conflict`；
+- parse/auth/admission/overload、revision conflict、session busy、interaction mismatch 等 applied transaction 前失败不产生 durable
+  receipt，也不承诺重放 original rejected response；后续同 key 请求可以在重新通过前置条件后再次评估；
+- 若未来要求某类 rejected outcome 具有 sticky replay 语义，必须先扩展 canonical Host/Store receipt authority 并完成相应
+  migration/retention ADR；adapter 不得以内存 Map 或 sidecar 保存第二份 rejected receipt；
 - client/SDK 不得为一次 retry 自动生成新 key。
 
 Create Session、Fork 与 Delete 同样受该规则约束。不得用 HTTP retry middleware 隐式重放 mutation。
@@ -254,7 +267,9 @@ Session response 返回：
 ETag: "session:<opaque-session-id>:rev:<revision>"
 ```
 
-修改现有 Session 的请求必须携带 exact `If-Match`。adapter 将 revision 映射到现有 `expectedRevision`。不匹配返回：
+除 `resume` recovery barrier 外，修改现有 Session 的请求必须携带 exact `If-Match`。`start`、`cancel`、interaction
+response、`close`、`delete` 与 `rewind` 将 revision 映射到现有 `expectedRevision`；`fork` 映射为
+`sourceRevision`。缺少必需 `If-Match` 的固定状态码由 KASAPI-00 在 OpenAPI freeze 前裁决。不匹配返回：
 
 ```http
 HTTP/1.1 412 Precondition Failed
@@ -263,6 +278,10 @@ Content-Type: application/problem+json
 
 body 中携带 stable `code = "revision_conflict"` 与可安全公开的 `current_revision`。Server 不自动替换为最新 revision并重放；SDK
 只有在操作本身定义为 safe reconcile 时才能先 query 再由调用方显式决定。
+
+`POST /v1/sessions/{session_id}/resume` 继续映射当前 `resume_session.afterRevision` 语义：它是 recovery/presentation
+admission barrier，可能在恢复过程中推进 revision，不伪装成现有 `expectedRevision` command。若未来要求 resume 使用新的 CAS，必须先
+修改 Runtime Contract/Host authority，而不是由 HTTP adapter 本地比较后放行。
 
 ### 5.5 请求严格，响应可前向读取
 
@@ -273,6 +292,9 @@ body 中携带 stable `code = "revision_conflict"` 与可安全公开的 `curren
 - 新增可选展示字段可在 V1 内演进，但 schema/client compatibility tests 必须证明旧 client 仍安全；
 - Runtime Protocol 的 exact decoder 策略保持不变，不能以 Public API 的兼容策略放宽内部 wire。
 
+Public JSON wire field V1 统一使用 `snake_case`。本 RFC 中 DTO 示例均表示 wire shape；TypeScript SDK 可以提供显式、可测试的
+camelCase convenience mapping，但 OpenAPI、runtime codec、JSON Schema 与原始 HTTP/SSE body 不得混用两种 casing。
+
 ## 6. Public 资源模型
 
 ### 6.1 ServerInfo
@@ -282,9 +304,9 @@ body 中携带 stable `code = "revision_conflict"` 与可安全公开的 `curren
 ```ts
 interface AgentApiServerInfoV1 {
   readonly schema: 'kite.agent-api.server-info.v1';
-  readonly apiVersion: 'v1';
-  readonly serverVersion: string;
-  readonly buildId: string;
+  readonly api_version: 'v1';
+  readonly server_version: string;
+  readonly build_id: string;
   readonly capabilities: readonly (
     | 'sessions'
     | 'runs'
@@ -296,7 +318,9 @@ interface AgentApiServerInfoV1 {
 }
 ```
 
-该对象不是 authentication proof；Native manager 仍负责 exact instance/build/descriptor handshake。
+该对象不是 authentication proof；Native manager 仍负责 exact instance/build/descriptor handshake。Native companion 的 exact build
+matching 与 Public API compatibility 是两个边界：Public client 以 `/v1`、schema 与 capabilities 判断兼容，普通 `build_id`
+差异不使一个满足 V1 contract 的第三方 SDK 自动 incompatible；`build_id` 只承担 instance/release/diagnostic identity。
 
 ### 6.2 Session
 
@@ -305,20 +329,20 @@ interface AgentApiServerInfoV1 {
 ```ts
 interface AgentApiSessionV1 {
   readonly schema: 'kite.agent-api.session.v1';
-  readonly sessionId: string;
+  readonly session_id: string;
   readonly revision: number;
-  readonly displayName?: string;
+  readonly display_name?: string;
   readonly lifecycle: 'open' | 'closed' | 'unavailable';
   readonly status: 'idle' | 'queued' | 'running' | 'waiting' | 'error' | 'unavailable';
-  readonly activeRunId?: string;
-  readonly activeInteraction?: AgentApiInteractionSummaryV1;
+  readonly active_run_id?: string;
+  readonly active_interaction?: AgentApiInteractionSummaryV1;
   readonly model?: {
     readonly provider: string;
     readonly name: string;
-    readonly reasoningEnabled?: boolean;
+    readonly reasoning_enabled?: boolean;
   };
-  readonly createdAt?: string;
-  readonly updatedAt?: string;
+  readonly created_at?: string;
+  readonly updated_at?: string;
 }
 ```
 
@@ -332,8 +356,8 @@ interface AgentApiSessionV1 {
 ```ts
 interface AgentApiRunV1 {
   readonly schema: 'kite.agent-api.run.v1';
-  readonly runId: string;
-  readonly sessionId: string;
+  readonly run_id: string;
+  readonly session_id: string;
   readonly status:
     | 'queued'
     | 'running'
@@ -343,13 +367,13 @@ interface AgentApiRunV1 {
     | 'cancelled'
     | 'unknown';
   readonly phase: 'planning' | 'building';
-  readonly createdAt: string;
-  readonly startedAt?: string;
-  readonly finishedAt?: string;
+  readonly created_at: string;
+  readonly started_at?: string;
+  readonly finished_at?: string;
   readonly terminal?: {
-    readonly reasonCode: string;
-    readonly safeRetry: boolean;
-    readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
+    readonly reason_code: string;
+    readonly safe_retry: boolean;
+    readonly recovery_entry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
   };
 }
 ```
@@ -412,9 +436,9 @@ LangGraph introspection；Profile create/update/version、credential binding 与
 | `POST` | `/v1/sessions` | `201` | 创建 Session；不接受 Workspace path；必须有 `Idempotency-Key` |
 | `GET` | `/v1/sessions` | `200` | cursor 分页列出 capability Workspace 内 Session |
 | `GET` | `/v1/sessions/{session_id}` | `200` | 获取 closed Session projection 与 `ETag` |
-| `POST` | `/v1/sessions/{session_id}/resume` | `200|202` | 显式 recovery/presentation admission barrier |
+| `POST` | `/v1/sessions/{session_id}/resume` | `200|202` | 显式 recovery/presentation admission barrier；需要 idempotency key，不使用 `If-Match` |
 | `POST` | `/v1/sessions/{session_id}/close` | `200` | 关闭 Session；需要 `If-Match` 与 idempotency key |
-| `DELETE` | `/v1/sessions/{session_id}` | `204` | 永久删除已允许删除的 Session；保留 receipt 语义 |
+| `DELETE` | `/v1/sessions/{session_id}` | `204` | 永久删除已允许删除的 Session；需要 `If-Match` 与 idempotency key，保留 receipt 语义 |
 
 `GET /v1/sessions` 只接受 closed filters，例如 `lifecycle`、`status`、`limit` 与 opaque `cursor`。V1 不允许任意 metadata/value
 JSON query，不允许按 Workspace path 或 Store field 检索。
@@ -423,10 +447,10 @@ JSON query，不允许按 Workspace path 或 Store field 检索。
 
 | Method | Path | 成功 | 语义 |
 | --- | --- | --- | --- |
-| `POST` | `/v1/sessions/{session_id}/runs` | `202` | 创建后台 Run，立即返回 durable Run projection |
+| `POST` | `/v1/sessions/{session_id}/runs` | `202` | 创建后台 Run；需要 `If-Match` 与 idempotency key，立即返回 durable Run projection |
 | `GET` | `/v1/sessions/{session_id}/runs` | `200` | cursor 分页列出 Run |
 | `GET` | `/v1/sessions/{session_id}/runs/{run_id}` | `200` | 查询状态/terminal outcome |
-| `POST` | `/v1/sessions/{session_id}/runs/{run_id}/cancel` | `202|200` | 提交 durable cancel command，不等待进程内 AbortController |
+| `POST` | `/v1/sessions/{session_id}/runs/{run_id}/cancel` | `202|200` | 需要 `If-Match` 与 idempotency key；提交 durable cancel command，不等待进程内 AbortController |
 | `GET` | `/v1/sessions/{session_id}/runs/{run_id}/wait` | `200|202` | 有界等待；超时返回当前 Run，不取消执行 |
 | `GET` | `/v1/sessions/{session_id}/runs/{run_id}/events` | `200` SSE | 同一 Session stream 的 run-filtered view |
 
@@ -466,8 +490,8 @@ provider action 与 verification 使用各自 closed response discriminant。
 | `GET` | `/v1/sessions/{session_id}/history` | `200` | cursor 分页的 durable client-safe transcript |
 | `GET` | `/v1/sessions/{session_id}/checkpoints` | `200` | safe checkpoint metadata |
 | `GET` | `/v1/sessions/{session_id}/checkpoints/{checkpoint_id}/preview` | `200` | bounded rewind preview |
-| `POST` | `/v1/sessions/{session_id}/rewinds` | `202|200` | receipt-bearing rewind |
-| `POST` | `/v1/sessions/{session_id}/forks` | `201|202` | receipt-bearing fork，返回新 Session |
+| `POST` | `/v1/sessions/{session_id}/rewinds` | `202|200` | 需要 `If-Match` 与 idempotency key；receipt-bearing rewind |
+| `POST` | `/v1/sessions/{session_id}/forks` | `201|202` | 需要 source `If-Match` 与 idempotency key；receipt-bearing fork，返回新 Session |
 
 History 始终来自现有 exhaustive safe projector + readonly Store query。SSE buffer、Session Logger、trace、JSONL、Catalog 与
 compatibility source 都不能补写或取代 History。
@@ -489,7 +513,7 @@ compatibility source 都不能补写或取代 History。
    `<AGENT_API_URL>`、`<API_CAPABILITY>` 等 placeholder；
 3. 默认且 V1 固定关闭 Swagger/Scalar 等 renderer 的 “Try it”/execute 功能，不创建可写表单，不把 Browser request 转发到
    Worker，不把 launch token、cookie、Native access token 或 controller capability 注入页面；
-4. 页面可显示 release-bundled `apiVersion`、`serverVersion`、`buildId` 与 schema digest，但不得显示 Worker endpoint、Workspace
+4. 页面可显示 release-bundled `api_version`、`server_version`、`build_id` 与 schema digest，但不得显示 Worker endpoint、Workspace
    path、Store path、descriptor、capability、credential 或 raw diagnostic；
 5. 页面资源必须随现有 immutable Web assets 打包，遵守 loopback、CSP、no remote CDN/script、Fetch Metadata、cache identity 与
    build mismatch fail-closed 规则；深链接刷新 `/api-docs` 仍由 Gateway 返回同一 release 的文档入口；
@@ -533,27 +557,37 @@ data: {
   "session_revision": 42,
   "event": {
     "type": "model.responded",
-    "requestId": "req_opaque",
-    "messageId": "msg_opaque",
-    "toolCallCount": 0
+    "request_id": "req_opaque",
+    "message_id": "msg_opaque",
+    "tool_call_count": 0
   }
 }
 ```
 
-外层 ID、Session/Run identity、channel、durability 与 revision 由 Agent API adapter 添加；内层 event 必须来自现有 closed
-`RuntimeClientEvent` 或另一个同等严格、可穷举验证的 public projector。
+外层 ID、Session identity、channel、durability 与 revision 由 Agent API adapter 添加；`run_id` 是可选字段，只有 canonical
+Runtime notification/projection 能证明事件归属某一 Run 时才能添加。Session snapshot、reset、resync、create/close 等无 Run 事实的
+事件必须省略该字段，adapter 不得用当前 active Run 猜测。run-specific endpoint 过滤掉无归属的 data event，但仍可发送不携带
+`run_id` 的 transport/resync control boundary。内层 event 必须来自现有 closed `RuntimeClientEvent` 或另一个同等严格、可穷举验证的
+public projector；若复用 `RuntimeClientEvent`，必须通过 exhaustive public mapper 转为 V1 `snake_case` wire DTO，不能 raw passthrough
+其 repo-private camelCase shape。
 
 ### 8.3 Replay 与 gap
 
 1. `Last-Event-ID` 是 opaque exclusive cursor：恢复时只返回其后的事件；
 2. durable event 在现有 Runtime replay window 内重放；完整历史仍走 History endpoint；
 3. ephemeral token/progress 只保证当前 stream generation，除非未来明确持久化 bounded stream buffer；
-4. cursor 过旧、Worker replacement、buffer gap、codec evolution 或无法证明连续性时，Server 先发送
-   `kite.stream.resync_required`，再发送 authoritative Session snapshot boundary；
-5. Client 收到 resync 必须清理旧 ephemeral stream，并按返回的 History cursor/Session revision 重建；
-6. Server 不制造空 History 或把当前 snapshot 冒充缺失的 durable events；
-7. slow consumer 只关闭该 SSE connection，不取消 Run/Session；Client 可以 reconnect/resync；
-8. heartbeat 只维持 transport，不推进 event cursor 或 Session revision。
+4. cursor 过旧、Worker replacement、buffer gap、codec evolution、filter/channel 改变、`Last-Event-ID` 只指向无法恢复的
+   ephemeral event，或任何无法证明连续性的情况，都进入 `kite.stream.resync_required` semantic boundary；
+5. resync boundary 必须携带或原子绑定 authoritative Session snapshot，并提供 `stream_generation`、
+   `history_through_sequence`、`snapshot_revision`、`resume_after_event_id` 或等价的完整重建证据。exact DTO 与编码由
+   KASAPI-00 冻结，但在该裁决完成前不得冻结 SSE/OpenAPI contract；
+6. 若 carrier 把 resync control 与 snapshot 分成多个 frame，而连接在完整 boundary 交付前中断，下次连接必须重新 resync，不能把
+   已送达的半个 boundary 当成合法 `Last-Event-ID`；
+7. Client 收到完整 resync 后清理旧 ephemeral stream，只读取 boundary 指定范围的 History、应用 exact snapshot，再从返回的 live
+   event boundary 继续；
+8. Server 不制造空 History 或把当前 snapshot 冒充缺失的 durable events；
+9. slow consumer 只关闭该 SSE connection，不取消 Run/Session；Client 可以 reconnect/resync；
+10. heartbeat 只维持 transport，不推进 event cursor 或 Session revision。
 
 Run-specific events endpoint 是相同 Session event sequence 的 filter，不建立第二套 sequence、buffer 或 History authority。
 
@@ -591,9 +625,9 @@ interface AgentApiProblemV1 {
     | 'temporarily_unavailable'
     | 'outcome_unknown'
     | 'incompatible';
-  readonly requestId: string;
+  readonly request_id: string;
   readonly retryable: boolean;
-  readonly currentRevision?: number;
+  readonly current_revision?: number;
 }
 ```
 
@@ -610,7 +644,7 @@ interface AgentApiProblemV1 {
 | `413` | `invalid_request` | body/message 超限 |
 | `429` | `overloaded` | 有界 admission/backpressure 拒绝 |
 | `503` | `temporarily_unavailable`、`outcome_unknown` | Worker/Runtime/Store 无法证明结果 |
-| `426` 或 `409` | `incompatible` | API/client/server build 不兼容；最终状态码由 ADR 冻结 |
+| `426` 或 `409` | `incompatible` | API major/schema/capability 不兼容；普通 `build_id` 差异不单独触发，最终状态码由 ADR 冻结 |
 
 错误 detail 不包含 Workspace/Store path、token、credential、raw request body、Provider body、sandbox evidence 或内部 diagnostic。
 `retryable=true` 只表示 transport/application 可以重新尝试同一 idempotency key，绝不授权生成新 mutation identity。
@@ -680,13 +714,19 @@ connection、不证明 Worker/API readiness，也不授予 observer 或 controll
 
 V1 最少区分：
 
-- `controller`：可以在 capability Workspace 内创建/恢复 Session、创建/取消 Run、响应 Interaction、rewind/fork；
+- `controller`：在 capability Workspace 与 exact Session Controller lease/generation 同时有效时，可以创建/恢复 Session、创建/取消
+  Run、响应 Interaction、rewind/fork；role 本身不授予、恢复或接管 Controller lease；
 - `observer`：只可 list/get/history/stream；
 - `lifecycle`：仅 Native manager 的 Worker/Service lifecycle，不进入 Agent API；
 - `credential`：Provider credential write 的独立 capability，不进入 Agent API。
 
 Web Observer 永远只取得 observer-safe companion contract，不因 Agent API 存在而获得 controller token。隐藏按钮、CORS 或 cookie
 不是 role enforcement；Worker API admission 必须按 endpoint 和 operation closed allowlist 拒绝。
+
+V1 Agent API 不提供 Controller request/release/resume/detach endpoint。Native SDK、Desktop backend 与用户在场的 headless
+automation 必须先经现有 Native App Control journey 取得或恢复 Controller binding，再建立 controller Agent API context；binding
+缺失、detached 或 generation 漂移时 mutation fail closed。若未来要让纯 Agent API client 自主取得 Controller，必须新增
+superseding RFC/ADR，而不是扩大 `controller` role 的解释。
 
 ## 12. 持久化与恢复影响
 
@@ -753,6 +793,10 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 - 接受/修订本 RFC；
 - 新增 ADR，明确它局部替代 `repo-private/public SDK No-Go` 的范围，但不替代 remote/multi-user/Web Observer No-Go；
 - 完成 current command/query/event/receipt/Run identity evidence matrix；
+- 冻结 Agent API context 与现有 Controller lease/generation/bindingReference 的组合方式，不新增隐式 Controller authority；
+- 冻结不依赖短期 capability/connection/Worker instance 的 public idempotency identity mapper，并明确 applied receipt 与
+  pre-application rejection 的不同 replay 语义；
+- 冻结 History sequence、Session snapshot revision、SSE event ID/generation 与 partial-resync recovery 的单一重建边界；
 - 冻结资源、endpoint、error、version、role 与 compatibility policy；
 - 决定是否需要 Store migration ADR；
 - 建立 documentation-map owner 与 representative path tests。
@@ -770,7 +814,8 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 - Worker 内建立 authenticated loopback Agent API carrier；
 - 实现 ServerInfo、Session list/get、History、Checkpoint list/preview；
 - Web Gateway/Web App 增加 `/api-docs` deep-link route 与 `/api-docs/openapi.json` 静态 artifact route；
-- 验证 observer/controller role、Workspace binding、pagination、identity/build drift；
+- 验证 observer/controller role、Workspace/Controller binding、pagination、Native identity/build drift 与 Public API
+  schema/capability compatibility；
 - 不实现 Run mutation或Interaction response。
 
 ### KASAPI-03：一等 Run 与 mutation receipt
@@ -815,6 +860,7 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 - Session create body 无 Workspace path；
 - capability Workspace 与 persisted Session identity drift fail closed；
 - observer 对全部 mutation endpoint 被 Worker 拒绝；
+- controller role 不能替代 Store 7 Controller lease；binding 缺失、detached 或 generation drift 的 mutation fail closed；
 - Browser cookie/launch token不能调用 controller endpoint；
 - `/api-docs` 无 “Try it”/execute、无真实 endpoint/token注入、无 Worker proxy 或 mutation network request；
 - DTO/diagnostic 无 credential、token、Store path、Worker endpoint、binding reference、raw Provider/Runtime payload；
@@ -823,8 +869,10 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 
 ### 15.3 Idempotency/Concurrency
 
-- response 丢失后同 key + 同 digest 返回 original receipt/Run；
-- 同 key + 不同 digest 固定冲突；
+- applied response 丢失后，同 key + 同 digest 跨 capability refresh/reconnect/Worker restart 返回 original receipt/Run；
+- 已持久占用的同 key + 不同 digest 固定冲突；
+- applied transaction 前的 auth/admission/revision/busy/interaction rejection 不制造 durable rejected receipt，后续同 key 按当前
+  precondition 重新评估；
 - revision conflict 不自动换 revision重放；
 - 同 Session 并发 create Run 只有一个 applied；
 - 跨 Session/Workspace 的 key、revision、Run/Interaction identity 不能互相命中；
@@ -834,6 +882,7 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 
 - HTTP response 与 SSE notification ordering 有可证明 boundary；
 - Last-Event-ID exclusive resume 无重复/遗漏，或明确触发 resync；
+- resync control/snapshot partial delivery 后重连必定重新建立完整 History/snapshot/live boundary；
 - ephemeral gap 不伪装成 durable completeness；
 - slow consumer 只关闭连接，不取消 Run；
 - Worker restart/replacement 使旧 generation/cursor/capability fail closed；
@@ -864,6 +913,8 @@ read-only extraction/research use case，应建立受限 capability profile 和�
 | Public façade 形成第二 Runtime path | SDK 与 TUI 行为漂移 | 默认经 in-process Client/Server；必要的共用 service port 必须先 ADR |
 | Run 一等化建立 sidecar authority | crash 后状态分裂 | canonical Store evidence audit；schema 变化先 migration ADR |
 | REST 重试重复 effect | 文件/命令重复执行 | required Idempotency-Key + persistent receipt + exact digest |
+| controller role 被误作 Controller authority | 绕过 lease/generation 或 effect gate 全部拒绝 | role 只做 endpoint allowlist；mutation 必须携带现有 exact Controller binding |
+| transient rejected response 被伪装成 durable receipt | 重试结果与 Store 事实漂移 | 只承诺 applied receipt replay；sticky rejection 必须先扩展 canonical Host/Store authority |
 | SSE 被误认为完整历史 | 断线后消息缺失 | explicit durability、gap/resync、History authority分离 |
 | Public兼容放宽 internal codec | 未知字段进入 Host | internal protocol保持 exact；只在public response parser前向兼容 |
 | Assistant/config surface扩大权限 | 绕过模型/MCP/Skill policy | V1无可写Assistant和arbitrary config |
@@ -897,11 +948,15 @@ production 接入后回滚必须满足：
 4. Public adapter 默认经 in-process Runtime Client/Server，不能直接建立第二 RuntimeAccess path；
 5. Run 成为 durable first-class resource；
 6. V1 固定同 Session 单 active Run、disconnect continue、显式 cancel；
-7. Idempotency-Key 和 If-Match 是 mutation contract 的必需部分；
-8. V1 无可写 Assistant、raw State/Debug/Store、stateless Run、Browser mutation 或 remote support；
-9. SSE 以 opaque Last-Event-ID + bounded replay + explicit resync 提供恢复；
-10. Web Observer 增加只读 `/api-docs` 与 `/api-docs/openapi.json`，文档随 release 打包且 V1 固定无 “Try it”/execute；
-11. Store 是否变化必须由 evidence audit决定，任何变化先新增 migration ADR。
+7. Idempotency-Key 是 mutation contract 的必需部分，只承诺 canonical applied receipt 的 durable replay；pre-application rejection
+   不伪装成 durable receipt；
+8. 除 resume recovery barrier 外，现有 Session mutation 使用 If-Match/revision fence；resume 继续使用当前 afterRevision 语义；
+9. controller role 不替代现有 Store 7 Controller lease/generation，V1 不新增 Controller lifecycle endpoint；
+10. V1 无可写 Assistant、raw State/Debug/Store、stateless Run、Browser mutation 或 remote support；
+11. SSE 以 opaque Last-Event-ID + bounded replay + explicit resync 提供恢复，exact History/snapshot/live reconstruction boundary
+    由 KASAPI-00 在 contract freeze 前裁决；
+12. Web Observer 增加只读 `/api-docs` 与 `/api-docs/openapi.json`，文档随 release 打包且 V1 固定无 “Try it”/execute；
+13. Store 是否变化必须由 evidence audit决定，任何变化先新增 migration ADR。
 
 通过本文不等于开始实现。接受后首先进入 KASAPI-00：形成 superseding/extension ADR、current evidence matrix、Store impact
 裁决与可验证实施计划；在这些门禁完成前，现有 Runtime/Service/Web current authority 不变。

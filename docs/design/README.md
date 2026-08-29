@@ -7,5 +7,6 @@
 - [`Kite Agent Server API V1 RFC`](2026-08-29-kite-agent-server-api-v1-rfc.md) — `draft`；提出在现有私有 Runtime
   Protocol/Server 之上增加本机稳定 REST/SSE façade，以 Session、Run、Interaction、Checkpoint 为资源，复用现有
   admission、receipt、revision 与 History authority，并为只读 Web 页面增加无执行能力的 `/api-docs` 文档路由；当前不代表
-  已实现行为，接受后仍需 ADR、Store impact 裁决与实施计划。
+  已实现行为；具体 [`实施方案`](../space/plans/2026-08-29-kite-agent-server-api-v1.md) 仍为 `draft`，ADR、Run Store impact 与
+  History/snapshot/live 重建边界未裁决前不创建 production listener。
 - [`Kite Runtime Modularization V1 RFC`](2026-08-19-kite-runtime-modularization-v1-rfc.md) — `accepted`；ADR-0123 建立最终目标权威，ADR-0124 将实施拆为保持 State 25/Store 4 的 [`Runtime Modularization V1`](../space/plans/2026-08-19-kite-runtime-modularization-v1-implementation.md) 与后续 [`Runtime Authority & Format V1`](../space/plans/2026-08-20-kite-runtime-authority-format-v1-implementation.md)，ADR-0125 已把分期、包名、Host 上限、信任模型和格式切换事实同步回 RFC 正文。
