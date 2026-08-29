@@ -168,6 +168,42 @@ describe('cross-home Workspace reservation', () => {
     expect(next).not.toBeUndefined();
     if (next && !('outcome' in next)) await next.release();
   });
+
+  test('accepts an exact owner-held child exit proof even after its PID is reused', async () => {
+    const root = makeRoot('kite-reservation-exact-exit-');
+    const coordinationHome = createKiteHomeIdentity(join(root, 'coordination'));
+    const port = reservationPort(coordinationHome, 'manager-one', () => 'uncertain');
+    const workspace = workspaceIdentity('/workspace/exact-exit');
+    const reservation = await port.acquire({ workerScopeId: 'scope-exit', workspace });
+    if (!reservation || 'outcome' in reservation) throw new Error('reservation was not acquired');
+    await reservation.prepare({ workerInstanceId: 'worker-exit' });
+    const child = claimWorkspaceReservation({
+      coordinationHome,
+      workerScopeId: 'scope-exit',
+      workspaceDigest: WORKSPACE_DIGEST,
+      workerInstanceId: 'worker-exit',
+      nonce: reservation.nonce,
+      workerPid: 1234,
+      workerProcessStartIdentity: 'worker-start-exit',
+    });
+    await reservation.handoff({
+      workerInstanceId: 'worker-exit',
+      workerPid: 1234,
+      workerProcessStartIdentity: 'worker-start-exit',
+    });
+    await child.release();
+
+    await expect(
+      reservation.release({
+        workerInstanceId: 'worker-exit',
+        workerPid: 1234,
+        workerProcessStartIdentity: 'worker-start-exit',
+      }),
+    ).resolves.toBeUndefined();
+    const next = await port.acquire({ workerScopeId: 'scope-exit-next', workspace });
+    expect(next).not.toBeUndefined();
+    if (next && !('outcome' in next)) await next.release();
+  });
 });
 
 function reservationPort(

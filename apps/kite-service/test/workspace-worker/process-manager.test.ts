@@ -86,6 +86,7 @@ interface Harness {
     controlLinkFor: NonNullable<WorkspaceWorkerProcessManagerOptions['controlLinkFor']>,
   ) => ReturnType<typeof createWorkspaceWorkerProcessManager>;
   readonly resolveReady: (scope: string) => void;
+  readonly resolveExit: (scope: string) => void;
 }
 
 function makeWorkspace(scope: string, marker: string): KiteWorkspaceIdentity {
@@ -192,6 +193,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
   let clearCredentialFailures = options.clearCredentialFailures ?? 0;
   let clearDescriptorFailures = options.clearDescriptorFailures ?? 0;
   const readyGates = new Map<string, ReturnType<typeof deferred<WorkspaceWorkerReadySignal>>>();
+  const exitGates = new Map<string, ReturnType<typeof deferred<void>>>();
 
   const managerOptions: WorkspaceWorkerProcessManagerOptions = {
     executableResolver: {
@@ -237,6 +239,8 @@ function createHarness(options: HarnessOptions = {}): Harness {
         };
         const gate = deferred<WorkspaceWorkerReadySignal>();
         readyGates.set(scope, gate);
+        const exitGate = deferred<void>();
+        exitGates.set(scope, exitGate);
         const controlsForScope = {
           mintCalls: 0,
           mintRequests: [] as unknown[],
@@ -306,6 +310,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
             const resolved = await gate.promise;
             return options.readyOverride ? options.readyOverride(resolved) : resolved;
           },
+          waitForExit: () => exitGate.promise,
         };
         children.push(child);
         queueMicrotask(() => gate.resolve(ready));
@@ -419,6 +424,11 @@ function createHarness(options: HarnessOptions = {}): Harness {
         endpoint: makeEndpoint(identity.pid),
         controlOrigin: `http://127.0.0.1:${portForControl(identity.pid)}`,
       });
+    },
+    resolveExit(scope) {
+      const gate = exitGates.get(scope);
+      if (!gate) throw new Error(`no exit gate for ${scope}`);
+      gate.resolve(undefined);
     },
   };
 }
@@ -543,6 +553,31 @@ describe('Workspace Worker process manager', () => {
 
     const replacement = await harness.manager.ensure(ensureRequest('scope-dead', workspace));
     expect(replacement).toMatchObject({ outcome: 'applied', state: 'ready' });
+    expect(harness.spawnCount()).toBe(2);
+  });
+
+  test('reconciles an exact child exit before PID reuse can poison the next ensure', async () => {
+    const owner = createOwnerReservationPort();
+    const harness = createHarness({ ownerReservation: owner });
+    const scope = 'scope-exit-observer';
+    const workspace = makeWorkspace('exit-observer', '9');
+    await expect(harness.manager.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+
+    owner.held.delete(workspace.workspaceDigest);
+    harness.setStatus(scope, 'uncertain');
+    harness.resolveExit(scope);
+    await flush();
+    await flush();
+    expect(harness.state.values.has(scope)).toBe(false);
+    expect(harness.registry.unregistered).toHaveLength(1);
+
+    await expect(harness.manager.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
     expect(harness.spawnCount()).toBe(2);
   });
 

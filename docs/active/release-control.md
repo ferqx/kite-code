@@ -48,6 +48,10 @@ dead/draining Worker descriptor刚进入可清理状态的窗口。Manager的spa
 spawn；Coordinator transport、protocol与exact identity mismatch立即fail closed。每个默认logical connection使用独立client
 identity，避免并发generation覆盖capability。该机制不是legacy Service/embedded fallback，也不改变单Worker、单Store writer
 或Coordinator identity边界。
+source/installed POSIX Worker由Coordinator保留owner-held child-exit handle；正常idle exit一经确认就按exact
+instance/PID/start-token在同一scope串行清理reservation、registry与process state，避免stale descriptor存活到数值PID被复用。
+这不放宽restart恢复：Coordinator进程重启后若没有原child handle，PID reuse仍是identity uncertain，禁止cleanup/spawn。
+Windows runner必须提供等价native handle evidence且通过hosted qualification后才能宣称相同行为。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一immutable companion bundle所需的CLI/TUI/Service/Coordinator/Worker/Gateway/Web、

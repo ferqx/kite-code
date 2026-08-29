@@ -118,8 +118,14 @@ export interface WorkspaceOwnerReservation {
     readonly workerPid?: number;
     readonly workerProcessStartIdentity?: string;
   }): Promise<void>;
-  /** Release only while the Coordinator still owns the reservation. */
-  release(): Promise<void>;
+  /** Release only while the Coordinator still owns the reservation or proves its exact child exited. */
+  release(proof?: WorkspaceWorkerConfirmedExitProof): Promise<void>;
+}
+
+export interface WorkspaceWorkerConfirmedExitProof {
+  readonly workerInstanceId: string;
+  readonly workerPid: number;
+  readonly workerProcessStartIdentity: string;
 }
 
 export type WorkspaceOwnerReservationAcquireResult =
@@ -282,6 +288,7 @@ interface ManagedWorker {
   readonly registryRegistered: boolean;
   readonly statePublished: boolean;
   readonly reservation?: WorkspaceOwnerReservation;
+  readonly confirmedExit?: WorkspaceWorkerConfirmedExitProof;
 }
 
 type ScopeLoad =
@@ -478,10 +485,13 @@ export function createWorkspaceWorkerProcessManager(
     }
   };
 
-  const cleanupDead = async (record: ManagedWorker): Promise<boolean> => {
+  const cleanupDead = async (
+    record: ManagedWorker,
+    confirmedExit?: WorkspaceWorkerConfirmedExitProof,
+  ): Promise<boolean> => {
     try {
       if (record.reservation) {
-        await invoke(() => record.reservation!.release(), operationTimeoutMs);
+        await invoke(() => record.reservation!.release(confirmedExit), operationTimeoutMs);
       }
       if (record.registryRegistered) {
         await invoke(
@@ -531,6 +541,36 @@ export function createWorkspaceWorkerProcessManager(
     }
   };
 
+  const observeChildExit = (child: WorkspaceWorkerProcessChild, record: ManagedWorker): void => {
+    if (!child.waitForExit) return;
+    const workerScopeId = record.descriptor.identity.workerScopeId;
+    const workerInstanceId = record.descriptor.identity.instanceId;
+    void child
+      .waitForExit()
+      .then(() =>
+        serial(workerScopeId, async () => {
+          const current = records.get(workerScopeId);
+          if (
+            !current ||
+            current.descriptor.identity.instanceId !== workerInstanceId ||
+            current.descriptor.pid !== child.pid ||
+            current.descriptor.processStartIdentity !== record.descriptor.processStartIdentity
+          ) {
+            return;
+          }
+          const confirmedExit = {
+            workerInstanceId,
+            workerPid: child.pid,
+            workerProcessStartIdentity: record.descriptor.processStartIdentity,
+          } satisfies WorkspaceWorkerConfirmedExitProof;
+          const exitedRecord = Object.freeze({ ...current, confirmedExit });
+          records.set(workerScopeId, exitedRecord);
+          await cleanupDead(exitedRecord, confirmedExit);
+        }),
+      )
+      .catch(() => preserveFailure());
+  };
+
   const clearLaunchCredential = async (
     workerScopeId: string,
     credential: string,
@@ -567,61 +607,67 @@ export function createWorkspaceWorkerProcessManager(
       return result('ensure', 'unavailable', 'absent', undefined, 'layout_mismatch');
     }
     if (existing.kind === 'record') {
-      const status = await inspect(existing.record.descriptor);
-      if (status === 'alive') {
-        if (stopUnknown.has(request.workerScopeId)) {
-          return result(
-            'ensure',
-            'outcome_unknown',
-            'draining',
-            existing.record.registration,
-            'outcome_unknown',
-          );
+      if (existing.record.confirmedExit) {
+        if (!(await cleanupDead(existing.record, existing.record.confirmedExit))) {
+          return result('ensure', 'outcome_unknown', 'starting', undefined, 'identity_uncertain');
         }
-        if (!existing.record.control) {
+      } else {
+        const status = await inspect(existing.record.descriptor);
+        if (status === 'alive') {
+          if (stopUnknown.has(request.workerScopeId)) {
+            return result(
+              'ensure',
+              'outcome_unknown',
+              'draining',
+              existing.record.registration,
+              'outcome_unknown',
+            );
+          }
+          if (!existing.record.control) {
+            return result(
+              'ensure',
+              'outcome_unknown',
+              'starting',
+              existing.record.registration,
+              'outcome_unknown',
+            );
+          }
+          const identity = await invoke(
+            () => existing.record.control!.describeIdentity(),
+            operationTimeoutMs,
+          ).catch(() => undefined);
+          if (!identity) {
+            return result(
+              'ensure',
+              'outcome_unknown',
+              'starting',
+              existing.record.registration,
+              'outcome_unknown',
+            );
+          }
+          if (!controlIdentityMatches(existing.record.descriptor, identity)) {
+            return result(
+              'ensure',
+              'unavailable',
+              'ready',
+              existing.record.registration,
+              'identity_uncertain',
+            );
+          }
+          return existingWorkerResult(existing.record, request, activeLayout, 'ensure');
+        }
+        if (status === 'uncertain') {
           return result(
             'ensure',
             'outcome_unknown',
             'starting',
-            existing.record.registration,
-            'outcome_unknown',
-          );
-        }
-        const identity = await invoke(
-          () => existing.record.control!.describeIdentity(),
-          operationTimeoutMs,
-        ).catch(() => undefined);
-        if (!identity) {
-          return result(
-            'ensure',
-            'outcome_unknown',
-            'starting',
-            existing.record.registration,
-            'outcome_unknown',
-          );
-        }
-        if (!controlIdentityMatches(existing.record.descriptor, identity)) {
-          return result(
-            'ensure',
-            'unavailable',
-            'ready',
             existing.record.registration,
             'identity_uncertain',
           );
         }
-        return existingWorkerResult(existing.record, request, activeLayout, 'ensure');
-      }
-      if (status === 'uncertain') {
-        return result(
-          'ensure',
-          'outcome_unknown',
-          'starting',
-          existing.record.registration,
-          'identity_uncertain',
-        );
-      }
-      if (!(await cleanupDead(existing.record))) {
-        return result('ensure', 'outcome_unknown', 'starting', undefined, 'identity_uncertain');
+        if (!(await cleanupDead(existing.record))) {
+          return result('ensure', 'outcome_unknown', 'starting', undefined, 'identity_uncertain');
+        }
       }
     }
 
@@ -887,6 +933,7 @@ export function createWorkspaceWorkerProcessManager(
         reservation,
       });
       records.set(request.workerScopeId, record);
+      observeChildExit(child, record);
       await preserveFailure();
       return result('ensure', 'outcome_unknown', 'starting', registration, 'outcome_unknown');
     }
@@ -908,6 +955,7 @@ export function createWorkspaceWorkerProcessManager(
           reservation,
         });
         records.set(request.workerScopeId, record);
+        observeChildExit(child, record);
         await preserveFailure();
         return result('ensure', 'outcome_unknown', 'ready', registration, 'outcome_unknown');
       }
@@ -922,6 +970,7 @@ export function createWorkspaceWorkerProcessManager(
       reservation,
     });
     records.set(request.workerScopeId, record);
+    observeChildExit(child, record);
     return result('ensure', 'applied', 'ready', registration);
   };
 
@@ -1213,6 +1262,7 @@ function makeManagedWorker(input: {
   readonly registryRegistered: boolean;
   readonly statePublished: boolean;
   readonly reservation?: WorkspaceOwnerReservation;
+  readonly confirmedExit?: WorkspaceWorkerConfirmedExitProof;
 }): ManagedWorker {
   return Object.freeze({
     descriptor: input.descriptor,
@@ -1222,6 +1272,7 @@ function makeManagedWorker(input: {
     registryRegistered: input.registryRegistered,
     statePublished: input.statePublished,
     ...(input.reservation ? { reservation: input.reservation } : {}),
+    ...(input.confirmedExit ? { confirmedExit: input.confirmedExit } : {}),
   });
 }
 

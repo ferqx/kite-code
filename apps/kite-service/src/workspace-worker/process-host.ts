@@ -200,6 +200,8 @@ export interface WorkspaceWorkerProcessChild {
   /** Legacy child-local seam; the Manager rebuilds an authenticated link after readiness. */
   readonly control?: WorkspaceWorkerControlLink;
   waitForReady(): Promise<WorkspaceWorkerReadySignal>;
+  /** Exact owner-held child handle; resolution proves this spawned process exited. */
+  readonly waitForExit?: () => Promise<void>;
 }
 
 export interface WorkspaceWorkerProcessSpawnPort {
@@ -499,6 +501,12 @@ function nativeSpawn(
     );
   }
   const childPid = pid;
+  const exitPromise =
+    child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolvePromise) => {
+          child.once('exit', () => resolvePromise());
+        });
   child.unref();
   let released = false;
   const readinessPromise = readReady(readinessStream);
@@ -516,6 +524,7 @@ function nativeSpawn(
     }),
     control,
     waitForReady: () => readinessPromise,
+    waitForExit: () => exitPromise,
   });
 }
 

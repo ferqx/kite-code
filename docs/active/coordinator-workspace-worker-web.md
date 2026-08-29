@@ -169,6 +169,11 @@ credential先于descriptor清理，若descriptor清理失败，restart只能在e
 descriptor。Connector只重试Worker unavailable/capability unavailable/transport handshake failure；Coordinator transport、
 protocol或exact identity mismatch仍立即fail closed，也不会切换到legacy Service、embedded backend或另一Workspace。
 每个默认logical connection分配独立client identity，避免并发generation/capability键互相覆盖。
+Coordinator对自己spawn的native Worker保留exact child-exit handle；exit resolution携带同一instance/PID/start-token proof，
+在per-scope manager串行区内立即回收reservation、registry、credential与descriptor。因此正常idle exit不会把stale PID留到
+下一次TUI，也不会因数值PID随后被无关进程复用而永久blocked。该proof只来自owner-held child handle且必须与当前内存record
+完全一致；Coordinator重启后没有该handle时，PID reuse/unknown仍保持fail closed，不据此清理或spawn。Windows runner只有在
+提供等价native process-handle exit proof时才能取得该行为，hosted Windows qualification仍pending。
 
 ## Fault、release 与平台 evidence 边界
 

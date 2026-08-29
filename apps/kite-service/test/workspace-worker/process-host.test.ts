@@ -241,6 +241,8 @@ closeSync(3);
         identity: { buildId: 'empty-env-build' },
       });
       await child.readiness.release();
+      expect(child.waitForExit).toBeDefined();
+      await child.waitForExit?.();
       rmSync(root, { recursive: true, force: true });
     },
   );

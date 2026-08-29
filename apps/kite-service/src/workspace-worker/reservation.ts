@@ -24,6 +24,7 @@ import {
   verifyWindowsStatePath,
 } from '@kite-ai/kite-local-runtime/service';
 import { z } from 'zod';
+import type { WorkspaceWorkerConfirmedExitProof } from './process-manager';
 
 export const WORKSPACE_OWNER_RESERVATION_SCHEMA_ = 'kite.workspace-owner-reservation.v1' as const;
 export const WORKSPACE_OWNER_RESERVATION_NONCE_ENV = 'KITE_WORKER_OWNER_RESERVATION_NONCE' as const;
@@ -78,7 +79,7 @@ export interface WorkspaceReservation {
     readonly workerPid?: number;
     readonly workerProcessStartIdentity?: string;
   }): Promise<void>;
-  release(): Promise<void>;
+  release(proof?: WorkspaceWorkerConfirmedExitProof): Promise<void>;
 }
 
 export interface WorkspaceReservationPort {
@@ -351,18 +352,20 @@ function reservationHandle(
       managerRecord = { ...current, state: 'worker_owned' };
       transition(path, current, managerRecord);
     },
-    async release() {
+    async release(proof?: WorkspaceWorkerConfirmedExitProof) {
       if (released) return;
+      const exactExit = matchesConfirmedExit(managerRecord, proof);
       const current = readReservation(path);
       if (!current) {
         if (
           (managerRecord.state === 'claimed' || managerRecord.state === 'worker_owned') &&
           managerRecord.workerPid !== undefined &&
           managerRecord.workerProcessStartIdentity !== undefined &&
-          (await processState(
-            managerRecord.workerPid,
-            managerRecord.workerProcessStartIdentity,
-          )) === 'dead'
+          (exactExit ||
+            (await processState(
+              managerRecord.workerPid,
+              managerRecord.workerProcessStartIdentity,
+            )) === 'dead')
         ) {
           released = true;
           return;
@@ -380,7 +383,8 @@ function reservationHandle(
         if (
           current.workerPid === undefined ||
           current.workerProcessStartIdentity === undefined ||
-          (await processState(current.workerPid, current.workerProcessStartIdentity)) !== 'dead'
+          (!matchesConfirmedExit(current, proof) &&
+            (await processState(current.workerPid, current.workerProcessStartIdentity)) !== 'dead')
         ) {
           throw new Error('Workspace reservation Worker identity is not confirmed dead.');
         }
@@ -389,6 +393,19 @@ function reservationHandle(
       released = true;
     },
   });
+}
+
+function matchesConfirmedExit(
+  record: ReservationRecord,
+  proof: WorkspaceWorkerConfirmedExitProof | undefined,
+): boolean {
+  return (
+    proof !== undefined &&
+    (record.state === 'claimed' || record.state === 'worker_owned') &&
+    record.workerInstanceId === proof.workerInstanceId &&
+    record.workerPid === proof.workerPid &&
+    record.workerProcessStartIdentity === proof.workerProcessStartIdentity
+  );
 }
 
 function assertOwned(path: string, expected: ReservationRecord): ReservationRecord {
