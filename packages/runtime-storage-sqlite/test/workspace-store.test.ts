@@ -246,6 +246,26 @@ describe('Store 7 Workspace binding', () => {
         readSqliteRuntimeLayoutManifest(layout, binding.layoutGeneration)?.workspaceStores,
       ).toEqual([{ workerScopeId: binding.workerScopeId, digest: admission.digest }]);
       expect(readSqliteRuntimeMigrationJournal(layout)?.targetWriteState).toBe('written');
+      const writer = createSqliteRuntimeStorage<Event, State>({
+        databasePath: path,
+        codec,
+        workspaceBinding: binding,
+        workspaceLayout: layout,
+        options: { journalMode: 'delete' },
+      });
+      writer.transactions.commitDecision({
+        sessionId: 'written-store-reopen',
+        events: [{ type: 'created' }],
+        snapshot: state('written-store-reopen'),
+        metadata: [{ eventId: 'written-store-event', revision: 1 }],
+      });
+      writer.close();
+      expect(sqliteRuntimeStoreDigest(path)).not.toBe(admission.digest);
+      expect(materializeAndAdmitNewWorkspaceStore(layout, binding)).toEqual({
+        databasePath: path,
+        workerScopeId: admission.workerScopeId,
+        digest: admission.digest,
+      });
       writeSqliteRuntimeLayoutManifest(layout, {
         schema: 'kite.runtime-layout-manifest.v1',
         generation: binding.layoutGeneration,

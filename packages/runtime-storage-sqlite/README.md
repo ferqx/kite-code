@@ -51,6 +51,9 @@
   `targetWriteState=written`，之后 rollback helper 必须拒绝回源。新 target 只能由显式 migration/admission 流程发布；
   `admitNewWorkspaceStore` 只在已 committed 的 active generation 中登记已 materialize 且 header 已由 Store owner 验证的
   canonical file，并先将 generation 标记为 written，绝不自动推断 Workspace ownership。
+- `targetWriteState=written` 后的 Worker restart/re-admission重新验证owner/no-follow、Store 7 profile与完整 Workspace
+  binding，并要求manifest/journal中的原始admission digest彼此一致；它不再把已写live Store字节与first-write前digest比较，
+  也不重设或更新该原始digest。`targetWriteState=none`时仍必须精确匹配pre-write digest。
 - Store 6 到 Store 7 的 copy-and-switch 必须由调用方提供已验证的 persisted Workspace ownership resolver；缺失/冲突归属、
   orphan retained receipt、损坏或未知 source fact 会整体 blocked，source 保持只读且 active-layout 不切换。迁移逐 Session
   校验 event count/sequence、snapshot checksum/position、receipt digest、recovery evidence 与 content digest，完成所有

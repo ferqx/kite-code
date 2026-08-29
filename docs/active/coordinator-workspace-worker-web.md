@@ -154,6 +154,10 @@ Store 7 DDL、逐 Session full validation、journal/pointer crash windows、targ
 但不是 fallback，不能绕过 committed layout。Worker production path继续保持 explicit admission、single writer、source immutable 与
 no silent rollback；Linux/Windows hosted filesystem/process evidence仍不能由本机结果替代。
 
+Worker restart对已写Store的re-admission必须复用no-follow只读snapshot preflight，重新验证Store 7 profile与完整Workspace
+binding；manifest/journal保留的是first-write前admission digest，只要求两者一致，不与`targetWriteState=written`后的live文件字节
+比较或重定基线。未写target仍必须匹配该digest，任一header/binding/evidence drift继续fail closed。
+
 ## Fault、release 与平台 evidence 边界
 
 当前 Coordinator/Worker/Web tests 是 local focused/conformance evidence。它们证明 codec、bounded queue、observer-only method

@@ -20,6 +20,7 @@ import {
   assertNoFollowDatabasePath,
   assertSqliteRuntimeWorkspaceBinding,
   assertWorkspaceSqliteRuntimeStoreConnection,
+  openSqliteReadonlySnapshotView,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
@@ -248,6 +249,7 @@ export function materializeAndAdmitNewWorkspaceStore(
         throw error;
       }
     }
+    assertAdmissibleWorkspaceStore(paths, binding, databasePath);
     const admission = admitNewWorkspaceStoreLocked(paths, binding, databasePath);
     return Object.freeze({ ...admission, databasePath });
   } catch (error) {
@@ -294,6 +296,20 @@ export function admitNewWorkspaceStore(
   binding: SqliteRuntimeWorkspaceBinding,
   databasePath: string,
 ): SqliteRuntimeWorkspaceStoreAdmission {
+  assertAdmissibleWorkspaceStore(paths, binding, databasePath);
+  const admissionLease = acquireLayoutAdmissionLease(paths);
+  try {
+    return admitNewWorkspaceStoreLocked(paths, binding, databasePath);
+  } finally {
+    admissionLease.release();
+  }
+}
+
+function assertAdmissibleWorkspaceStore(
+  paths: SqliteRuntimeLayoutPaths,
+  binding: SqliteRuntimeWorkspaceBinding,
+  databasePath: string,
+): void {
   assertSqliteRuntimeWorkspaceBinding(binding);
   assertNoFollowDatabasePath(databasePath);
   const expectedPath = resolveSqliteWorkspaceStorePath(
@@ -330,23 +346,17 @@ export function admitNewWorkspaceStore(
       'New Workspace Store owner is not the current user.',
     );
   }
-  let database: Database | undefined;
+  let view: ReturnType<typeof openSqliteReadonlySnapshotView> | undefined;
   try {
-    database = new Database(databasePath, { readonly: true, strict: true });
-    assertWorkspaceSqliteRuntimeStoreConnection(database, binding);
+    view = openSqliteReadonlySnapshotView(databasePath);
+    assertWorkspaceSqliteRuntimeStoreConnection(view.database, binding);
   } catch {
     throw new SqliteRuntimeLayoutError(
       'blocked',
       'New Workspace Store profile or Workspace binding is invalid.',
     );
   } finally {
-    database?.close(false);
-  }
-  const admissionLease = acquireLayoutAdmissionLease(paths);
-  try {
-    return admitNewWorkspaceStoreLocked(paths, binding, databasePath);
-  } finally {
-    admissionLease.release();
+    view?.close();
   }
 }
 
@@ -379,7 +389,7 @@ function admitNewWorkspaceStoreLocked(
       'New Workspace Store admission evidence is incomplete or stale.',
     );
   }
-  const digest = createHash('sha256').update(readFileSync(databasePath)).digest('hex');
+  const currentDigest = createHash('sha256').update(readFileSync(databasePath)).digest('hex');
   const manifestEntry = manifest.workspaceStores.find(
     (entry) => entry.workerScopeId === binding.workerScopeId,
   );
@@ -387,9 +397,20 @@ function admitNewWorkspaceStoreLocked(
     (entry) => entry.workerScopeId === binding.workerScopeId,
   );
   if (manifestEntry || journalEntry) {
+    const evidenceDigest = manifestEntry?.digest ?? journalEntry?.digest;
+    if (evidenceDigest === undefined) {
+      throw new SqliteRuntimeLayoutError(
+        'blocked',
+        'New Workspace Store admission evidence is unavailable.',
+      );
+    }
     if (
-      (manifestEntry !== undefined && manifestEntry.digest !== digest) ||
-      (journalEntry !== undefined && journalEntry.digest !== digest)
+      (manifestEntry !== undefined && journalEntry !== undefined
+        ? manifestEntry.digest !== journalEntry.digest
+        : false) ||
+      (journal.targetWriteState === 'none' &&
+        ((manifestEntry !== undefined && manifestEntry.digest !== currentDigest) ||
+          (journalEntry !== undefined && journalEntry.digest !== currentDigest)))
     ) {
       throw new SqliteRuntimeLayoutError(
         'blocked',
@@ -409,26 +430,29 @@ function admitNewWorkspaceStoreLocked(
         'New Workspace Store admission evidence is one-sided.',
       );
     }
-    return Object.freeze({ workerScopeId: binding.workerScopeId, digest });
+    return Object.freeze({
+      workerScopeId: binding.workerScopeId,
+      digest: evidenceDigest,
+    });
   }
   const nextManifest: SqliteRuntimeLayoutManifest = {
     ...manifest,
     workspaceStores: [
       ...manifest.workspaceStores,
-      { workerScopeId: binding.workerScopeId, digest },
+      { workerScopeId: binding.workerScopeId, digest: currentDigest },
     ].sort((left, right) => left.workerScopeId.localeCompare(right.workerScopeId)),
   };
   const nextJournal: SqliteRuntimeMigrationJournal = {
     ...journal,
     workspaceStoreDigests: [
       ...journal.workspaceStoreDigests,
-      { workerScopeId: binding.workerScopeId, digest },
+      { workerScopeId: binding.workerScopeId, digest: currentDigest },
     ].sort((left, right) => left.workerScopeId.localeCompare(right.workerScopeId)),
     targetWriteState: 'written',
   };
   writeSqliteRuntimeMigrationJournal(paths, nextJournal);
   writeSqliteRuntimeLayoutManifest(paths, nextManifest);
-  return Object.freeze({ workerScopeId: binding.workerScopeId, digest });
+  return Object.freeze({ workerScopeId: binding.workerScopeId, digest: currentDigest });
 }
 
 export function resolveSqliteCatalogPath(
