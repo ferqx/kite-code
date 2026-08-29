@@ -61,6 +61,7 @@ const DEFAULT_SERVER_VERSION = 'kite-workspace-worker-v1';
 const MAX_HANDSHAKE_BYTES = 16 * 1024;
 const MAX_CLIENT_ID_LENGTH = 512;
 const MAX_WORKSPACE_PATH_LENGTH = 4_096;
+const WORKER_RECOVERY_RETRY_DELAYS_MS = [50, 150, 400, 1_000] as const;
 const timestamp = z.iso.datetime({ offset: true });
 
 const handshakeSchema = z
@@ -228,7 +229,7 @@ export function createManagedLocalWorkspaceWorkerConnector(
     clientInfo: RuntimeClientInfo,
   ): Promise<LocalRuntimeServiceDescriptor> {
     const nextGeneration = state.generation + 1;
-    const worker = await ensureCoordinatorWorker(coordinator, workspace);
+    const worker = await ensureCoordinatorWorkerAfterRecovery(coordinator, workspace);
     const capability = await mintWorkerCapability(
       coordinator,
       worker,
@@ -356,6 +357,16 @@ async function ensureCoordinatorWorker(
         'Workspace Worker identity is unavailable.',
       );
     }
+    if (
+      response.outcome === 'error' &&
+      response.error.code !== 'unavailable' &&
+      response.error.code !== 'outcome_unknown'
+    ) {
+      throw new LocalWorkspaceWorkerClientError(
+        'coordinator_unavailable',
+        'Coordinator rejected the Workspace Worker ensure request.',
+      );
+    }
     throw new LocalWorkspaceWorkerClientError(
       'worker_unavailable',
       response.outcome === 'error' && response.error.code === 'outcome_unknown'
@@ -364,6 +375,36 @@ async function ensureCoordinatorWorker(
     );
   }
   return validateWorkerReference(response.result.worker, workspace);
+}
+
+async function ensureCoordinatorWorkerAfterRecovery(
+  coordinator: CoordinatorClient,
+  workspace: KiteWorkspaceIdentity,
+): Promise<CoordinatorWorkerReference> {
+  let lastUnavailable: LocalWorkspaceWorkerClientError | undefined;
+  for (let attempt = 0; attempt <= WORKER_RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      await waitForWorkerRecovery(WORKER_RECOVERY_RETRY_DELAYS_MS[attempt - 1]!);
+    }
+    try {
+      return await ensureCoordinatorWorker(coordinator, workspace);
+    } catch (error) {
+      if (
+        !(error instanceof LocalWorkspaceWorkerClientError) ||
+        error.code !== 'worker_unavailable'
+      ) {
+        throw error;
+      }
+      lastUnavailable = error;
+    }
+  }
+  throw lastUnavailable!;
+}
+
+async function waitForWorkerRecovery(delayMs: number): Promise<void> {
+  await new Promise<void>((resolvePromise) => {
+    setTimeout(resolvePromise, delayMs);
+  });
 }
 
 async function mintWorkerCapability(

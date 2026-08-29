@@ -162,6 +162,10 @@ Coordinator从持久Worker descriptor恢复时必须先比较PID与OS start toke
 不清理、不spawn，不能让已死亡loopback endpoint被误报为identity drift而永久阻塞正常restart。若Worker在正常退出时已删除
 同一handed-off reservation，manager只在该Worker PID/start token confirmed dead时将缺失文件视为幂等release；reserved/launching、
 alive/uncertain或replacement identity仍fail closed。
+release/source Worker connector还会把Coordinator对同一canonical Workspace的短暂Worker `unavailable`恢复闭合在一次
+`connect()`内：最多按50/150/400/1000毫秒等待后重试ensure。该重试只覆盖dead Worker descriptor/进程退出交界的typed
+unavailable；Coordinator transport failure、protocol/identity mismatch、capability或instance handshake failure不会被重试，
+也不会切换到legacy Service、embedded backend或另一Workspace。
 
 ## Fault、release 与平台 evidence 边界
 

@@ -361,6 +361,67 @@ function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity
 }
 
 describe('release Workspace Worker connector', () => {
+  test('closes a transient dead-Worker recovery window inside one connect', async () => {
+    const fixture = createFixture();
+    let ensureAttempts = 0;
+    const coordinator = {
+      ...fixture.coordinator,
+      async ensureWorkspaceWorker(
+        input: Parameters<CoordinatorRequestClient['ensureWorkspaceWorker']>[0],
+      ) {
+        ensureAttempts += 1;
+        if (ensureAttempts === 1) {
+          return {
+            outcome: 'error' as const,
+            error: { code: 'unavailable' as const, diagnostic: 'handler_rejected' as const },
+          } as Awaited<ReturnType<CoordinatorRequestClient['ensureWorkspaceWorker']>>;
+        }
+        return fixture.coordinator.ensureWorkspaceWorker(input);
+      },
+    };
+    const connector = createManagedLocalWorkspaceWorkerConnector({
+      coordinatorClient: coordinator,
+      fetch: fixtureFetch(fixture),
+      clientInfo: { name: 'release-test', version: '1', instanceId: 'release-client-recovery' },
+    });
+
+    const connection = await connector.connect({ workspace: fixture.workspace.canonicalPath });
+    try {
+      expect(ensureAttempts).toBe(2);
+      expect(connection.service.instanceId).toBe(fixture.reference.identity.instanceId);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('does not retry a non-recoverable Coordinator rejection', async () => {
+    const fixture = createFixture();
+    let ensureAttempts = 0;
+    const coordinator = {
+      ...fixture.coordinator,
+      async ensureWorkspaceWorker() {
+        ensureAttempts += 1;
+        return {
+          outcome: 'error' as const,
+          error: {
+            code: 'protocol_incompatible' as const,
+            diagnostic: 'wrong_protocol' as const,
+          },
+        } as Awaited<ReturnType<CoordinatorRequestClient['ensureWorkspaceWorker']>>;
+      },
+    };
+    const connector = createManagedLocalWorkspaceWorkerConnector({
+      coordinatorClient: coordinator,
+      fetch: fixtureFetch(fixture),
+      clientInfo: { name: 'release-test', version: '1', instanceId: 'release-client-rejected' },
+    });
+
+    await expect(
+      connector.connect({ workspace: fixture.workspace.canonicalPath }),
+    ).rejects.toMatchObject({ code: 'service_unavailable' });
+    expect(ensureAttempts).toBe(1);
+  });
+
   test('canonicalizes, ensures, mints, handshakes, and prepares trust/history over closed bindings', async () => {
     const fixture = createFixture();
     const connector = createManagedLocalWorkspaceWorkerConnector({

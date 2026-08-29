@@ -58,6 +58,9 @@ Service companion。
   提升 Workspace authority。
 - connection close 与 Worker owner shutdown分离。exit/reconnect只处理本 client generation；Session、Turn、interaction、Controller
   与 Store lifecycle仍由所属 Worker决定。
+- release/source Worker connector 在同一 canonical Workspace ensure 返回短暂 `unavailable` 时，只在一次
+  `connect()` 内执行总计不超过 1.6 秒的有界恢复重试，以闭合 dead Worker descriptor 回收窗口；Coordinator transport、
+  protocol/identity mismatch 与其他错误仍立即 fail closed，且不会回退 legacy Service 或 embedded backend。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
 - TUI `/web` 是 discovery-only：只调用可选的 `discoverWebGateway` callback；没有已有 Gateway 时显示

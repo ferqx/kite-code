@@ -42,6 +42,10 @@ ensure Coordinator/Workspace Worker，CLI另为显式 maintenance 注入`kite se
 `kite web*` Coordinator surface。Web
 命令只通过 Coordinator client ensure/discover/stop Gateway，TUI `/web` 只 discovery；connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
+source/installed Worker connector仅对同一canonical Workspace的typed Worker `unavailable`执行一次connect内的有界恢复：
+50/150/400/1000毫秒后重试ensure，总等待不超过1.6秒，用于收敛dead Worker descriptor刚进入可清理状态的窗口。
+Coordinator transport、protocol/identity、capability和Worker instance handshake错误仍立即fail closed；该机制不是legacy
+Service/embedded fallback，也不改变单Worker、单Store writer或Coordinator identity边界。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一immutable companion bundle所需的CLI/TUI/Service/Coordinator/Worker/Gateway/Web、
