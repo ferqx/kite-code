@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -8,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { verifyWindowsStatePath } from '../service/windows-state-security';
@@ -64,6 +66,111 @@ export interface CoordinatorCatalogStorageIdentity {
   readonly mode: 'open_active' | 'initialize_target';
   /** Active-layout owner callback; invoked before every steady-state write. */
   readonly beforeWrite?: () => void;
+}
+
+export interface CoordinatorCatalogGenerationCopyInput {
+  readonly canonicalKiteHomeRoot: string;
+  readonly sourceLayoutGeneration: string;
+  readonly targetLayoutGeneration: string;
+  readonly sourceCatalogPath: string;
+  readonly targetCatalogPath: string;
+  readonly expectedWorkerScopeIds: readonly string[];
+}
+
+/** Offline exact Catalog copy used only while the whole Runtime layout is fenced and stopped. */
+export function copyCoordinatorCatalogGeneration(
+  input: CoordinatorCatalogGenerationCopyInput,
+): string {
+  const sourcePath = validateCatalogStorageIdentity({
+    canonicalKiteHomeRoot: input.canonicalKiteHomeRoot,
+    layoutGeneration: input.sourceLayoutGeneration,
+    catalogPath: input.sourceCatalogPath,
+    mode: 'open_active',
+  });
+  const targetPath = validateCatalogStorageIdentity({
+    canonicalKiteHomeRoot: input.canonicalKiteHomeRoot,
+    layoutGeneration: input.targetLayoutGeneration,
+    catalogPath: input.targetCatalogPath,
+    mode: 'initialize_target',
+  });
+  if (
+    sourcePath === targetPath ||
+    CLAIMED_CATALOGS.has(sourcePath) ||
+    CLAIMED_CATALOGS.has(targetPath)
+  ) {
+    throw new Error('Coordinator Catalog generation copy conflicts with an active owner.');
+  }
+  assertNoCatalogSidecarEntries(sourcePath);
+  assertNoCatalogSidecarEntries(targetPath);
+  const sourceBytesBefore = readFileSync(sourcePath);
+  const source = new Database(sourcePath, { readonly: true, strict: true });
+  let target: Database | undefined;
+  let ownedTarget: CatalogFileIdentity | undefined;
+  try {
+    verify(source, input.sourceLayoutGeneration);
+    assertCatalogReadyForGenerationCopy(source, input.expectedWorkerScopeIds);
+    writeFileSync(targetPath, source.serialize(), { flag: 'wx', mode: 0o600 });
+    ownedTarget = readCatalogFileIdentity(targetPath);
+    target = new Database(targetPath, { strict: true });
+    target.run('PRAGMA journal_mode = DELETE');
+    target
+      .query<void, [string]>(
+        'UPDATE coordinator_catalog_metadata SET layout_generation = ? WHERE catalog_id = 1',
+      )
+      .run(input.targetLayoutGeneration);
+    verify(target, input.targetLayoutGeneration);
+    target.run('PRAGMA wal_checkpoint(TRUNCATE)');
+    target.close(false);
+    target = undefined;
+    assertCatalogPath(targetPath);
+    assertNoCatalogSidecarEntries(targetPath);
+    fsyncFile(targetPath);
+    fsyncDirectory(resolve(targetPath, '..'));
+    if (!readFileSync(sourcePath).equals(sourceBytesBefore)) {
+      throw new Error('Coordinator Catalog source changed during generation copy.');
+    }
+    return createHash('sha256').update(readFileSync(targetPath)).digest('hex');
+  } catch (error) {
+    target?.close(false);
+    if (ownedTarget) removeOwnedCatalogTarget(targetPath, ownedTarget);
+    throw error;
+  } finally {
+    source.close(false);
+  }
+}
+
+function assertCatalogReadyForGenerationCopy(
+  database: Database,
+  expectedWorkerScopeIds: readonly string[],
+): void {
+  if (!Array.isArray(expectedWorkerScopeIds) || expectedWorkerScopeIds.length > 10_000) {
+    throw new Error('Coordinator Catalog migration Workspace set is invalid.');
+  }
+  const expected = new Set<string>();
+  for (const workerScopeId of expectedWorkerScopeIds) {
+    safeIdentifier(workerScopeId);
+    if (expected.has(workerScopeId)) {
+      throw new Error('Coordinator Catalog migration Workspace set is duplicated.');
+    }
+    expected.add(workerScopeId);
+  }
+  const catalogScopes = database
+    .query<{ worker_scope_id: string }, []>(
+      `SELECT worker_scope_id FROM coordinator_session_metadata
+       UNION SELECT worker_scope_id FROM coordinator_worker_outbox_cursor`,
+    )
+    .all();
+  if (catalogScopes.some((row) => !expected.has(row.worker_scope_id))) {
+    throw new Error('Coordinator Catalog contains an unowned Workspace route.');
+  }
+  const activeOperations = database
+    .query<{ count: number }, []>(
+      "SELECT COUNT(*) AS count FROM coordinator_operation_receipt WHERE state = 'in_progress'",
+    )
+    .get()?.count;
+  if (activeOperations !== 0) {
+    throw new Error('Coordinator Catalog contains an unsettled operation receipt.');
+  }
 }
 
 const CLAIMED_CATALOGS = new Set<string>();

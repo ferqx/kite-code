@@ -81,4 +81,5 @@ History，也不把private camelCase DTO透传为Public wire。
 
 KASAPI-03A及以后接入Store 8/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
 的Run/Interaction/SSE/mutation route提前加入ServerInfo。KRSRUN-02A已关闭Run delete/rewind/fork/restart语义，但Run route仍被
-Store 7→Store 8 generation migration、production composition与后续Public mapper Gate阻断。
+KRSRUN-02B已关闭Store 7→Store 8 generation migration mechanism；Run route仍被production Worker composition/reopen/cutover与后续
+Public mapper Gate阻断。显式migration存在不等于ServerInfo可以发布`runs`。

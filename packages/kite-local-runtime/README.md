@@ -34,6 +34,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   完成FIN并幂等释放connection；client `transport.close()`不会留下永久half-open socket，因此`kite web/status`等短命令打印结果后
   能正常退出。client cleanup会在inbox close callback清除外层binding前保留并half-close exact socket；该socket close不等于停止
   Coordinator、Worker或Gateway owner。
+- `./coordinator`还拥有offline Catalog generation copy primitive：在无active Catalog writer、source/target owner路径与schema精确验证后，
+  逐字节保留Session metadata、outbox cursor和terminal operation receipt，只重绑target layout generation；Catalog存在未结算operation或
+  未登记Workspace scope时不创建target。它不复制Runtime data plane，也不自行触发Store migration。
 - Coordinator capability purpose当前封闭为`native_client`、`web_observer`、`agent_api_observer`、`agent_api_controller`。
   Web Gateway peer只能请求`web_observer`；authenticated Native peer可请求native/Agent API purpose。control plane只转发一次性
   capability与binding metadata，不代理Agent `/v1` data plane，也不保存context token。

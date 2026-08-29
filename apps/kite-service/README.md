@@ -19,6 +19,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   Coordinator control plane、单 Workspace Worker Store 7/Host/Application 与只读 Web Gateway BFF。release entrypoint 只把
   显式 source/installed executable、neutral environment、layout generation 与 readiness fd 注入这些 owner；不从 cwd、PATH、
   ambient home 或 legacy Service fallback 推导运行时。
+- `src/coordinator/catalog-builder.ts`为显式offline maintenance同时提供Store6→Store7 Catalog builder和Store7→Store8 exact Catalog
+  generation copy adapter；`scripts/release/local-layout-migration.ts`只在manager注入完整停止/收敛barrier后建立source-bound fence并调用
+  whole-generation migrator。normal start/ensure不运行该路径；current Worker opener仍是Store7，待KRSRUN-03A再消费Store8 active target。
 - Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 7 writer、Controller/effect authority 与
   Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。

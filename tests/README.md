@@ -106,6 +106,11 @@ KRSRUN-02A再由`packages/runtime-storage-sqlite/test/run-recovery.test.ts`、`r
 no-receipt copy、reopen/Workspace isolation、pre-resume unknown投影、显式resume与unknown terminal refinement。它仍是unpublished Store8
 mechanism evidence，不替代02B migration、03A production composition或release三平台qualification。
 
+KRSRUN-02B由`packages/runtime-storage-sqlite/test/run-migration.test.ts`、
+`packages/kite-local-runtime/test/coordinator-catalog.test.ts`与`tests/release/local-layout-migration.test.ts`固定whole-generation
+Store7→Store8 copy、Catalog全fact保留、coverage/no-backfill、WAL snapshot、active/corrupt/unowned/partial/fault阻断、old-writer fence与
+显式manager barrier orchestration。它不证明03A Worker opener/reopen、Public `runs`或三平台candidate qualification。
+
 这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
 replay 与 Store 5 source-only import；完整 durable history由SQLite log-query、
 `apps/kite-service/test/runtime-history-client.test.ts`和Session persistence/format PTY journeys验证全量分页、已选

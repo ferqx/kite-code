@@ -71,6 +71,7 @@ export {
 export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,
+  assertSqliteRuntimeRunStoreActive,
   assertSqliteWorkspaceStoreActive,
   canRollbackSqliteRuntimeLayout,
   createSqliteRuntimeLayoutCutover,
@@ -78,6 +79,7 @@ export {
   ensureSqliteRuntimeLayoutRoot,
   ensureSqliteWorkspaceStoreDirectory,
   markSqliteCoordinatorCatalogWritten,
+  markSqliteRuntimeRunStoreWritten,
   markSqliteWorkspaceStoreWritten,
   materializeAndAdmitNewWorkspaceStore,
   readSqliteActiveLayoutPointer,
@@ -145,6 +147,18 @@ export {
   type SqliteRuntimeStorageOptions,
   type SqliteRuntimeWorkspaceBinding,
 } from './preflight.js';
+export {
+  inspectSqliteRuntimeRunMigrationSource,
+  migrateSqliteRuntimeLayoutToRunStore,
+  type SqliteRuntimeRunMigrationBlockedReason,
+  type SqliteRuntimeRunMigrationCatalogPort,
+  SqliteRuntimeRunMigrationError,
+  type SqliteRuntimeRunMigrationMaintenanceBarrier,
+  type SqliteRuntimeRunMigrationOptions,
+  type SqliteRuntimeRunMigrationResult,
+  type SqliteRuntimeRunMigrationSourceEvidence,
+  type SqliteRuntimeRunMigrationSourceGuard,
+} from './run-migration';
 export {
   assertSqliteRuntimeRunStoreConnection,
   createSqliteRuntimeRunStore,

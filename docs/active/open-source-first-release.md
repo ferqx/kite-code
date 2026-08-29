@@ -32,6 +32,10 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
+Store generation migration不是安装器或候选自动upgrade步骤。源码中的显式Store 7→Store 8 maintenance只证明本地copy/fence mechanism；
+在Store 8 Worker/reopen/candidate Gate和三平台filesystem evidence完成前，不计入G1，release smoke不得隐式运行。用户显式执行后若pointer已切换，
+旧candidate/Store 7 Worker必须fail closed，不能由installer rollback或runtime fallback绕过data-generation write fence。
+
 首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，
 默认唯一Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web Observer 由独立
 Gateway companion、Coordinator 与 Workspace Worker 组合；Service-owned internal stdio、development loopback WebSocket、

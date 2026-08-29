@@ -21,6 +21,7 @@ import {
   resolveSqliteCatalogPath,
   resolveSqliteRuntimeLayoutPaths,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   type SqliteRuntimeMigrationSourceGuard,
@@ -29,7 +30,10 @@ import {
   writeSqliteRuntimeMigrationFence,
 } from '@kite-ai/runtime-storage-sqlite';
 import { createSqliteRuntimeMigrationCatalogBuilder } from '../../apps/kite-service/src/coordinator/catalog-builder';
-import { runLocalLayoutMigration } from '../../scripts/release/local-layout-migration';
+import {
+  runLocalLayoutMigration,
+  runLocalRunStoreMigration,
+} from '../../scripts/release/local-layout-migration';
 
 type Event = { readonly type: string; readonly content?: string };
 type State = {
@@ -301,6 +305,28 @@ describe('explicit local Store layout maintenance', () => {
         catalogDigest: result.catalogDigest,
         workspaceStores: [{ workerScopeId: 'worker-scope-real' }],
       });
+
+      const runMigration = await runLocalRunStoreMigration({
+        home: data.home,
+        targetLayoutGeneration: 'generation-run-store',
+        codec,
+        isSessionSettled: () => true,
+        inspectMaintenanceBarrier: () => ({
+          coordinatorStopped: true,
+          workspaceWorkersStopped: true,
+          gatewayStopped: true,
+          activeTurns: 0,
+          pendingInteractions: 0,
+          activeEffects: 0,
+          externalProcesses: 0,
+        }),
+        createMigrationNonce: () => 'run-store-layout-migration-test',
+      });
+      expect(runMigration.status).toBe('committed');
+      expect(readSqliteActiveLayoutPointer(layout)?.generation).toBe('generation-run-store');
+      expect(
+        readSqliteRuntimeLayoutManifest(layout, 'generation-run-store')?.profile,
+      ).toMatchObject({ storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION });
     } finally {
       rmSync(data.root, { recursive: true, force: true });
     }

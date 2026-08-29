@@ -473,6 +473,168 @@ interface PersistedEffectEvidence extends SqliteWorkspaceEffectEvidence {}
 
 interface PersistedResourceLease extends SqliteWorkspaceResourceLease {}
 
+export interface SqliteWorkspaceAuthorityGenerationCopyRow {
+  readonly key: string;
+  readonly value: string;
+}
+
+export interface SqliteWorkspaceAuthorityGenerationInspection {
+  readonly rows: readonly SqliteWorkspaceAuthorityGenerationCopyRow[];
+  readonly settled: boolean;
+}
+
+/**
+ * Validate every Store-owned authority row and rewrite only its generation
+ * binding for an offline whole-generation copy. This deliberately remains a
+ * package-internal export: migration code may preserve authority facts, while
+ * callers outside the SQLite owner must use the public authority ports.
+ */
+export function inspectSqliteWorkspaceAuthorityGenerationCopy(input: {
+  readonly db: Database;
+  readonly sourceBinding: SqliteRuntimeWorkspaceBinding;
+  readonly targetBinding: SqliteRuntimeWorkspaceBinding;
+}): SqliteWorkspaceAuthorityGenerationInspection {
+  assertSqliteRuntimeWorkspaceBinding(input.sourceBinding);
+  assertSqliteRuntimeWorkspaceBinding(input.targetBinding);
+  if (
+    input.sourceBinding.workerScopeId !== input.targetBinding.workerScopeId ||
+    input.sourceBinding.workspaceIdentityDigest !== input.targetBinding.workspaceIdentityDigest
+  ) {
+    throw new SqliteWorkspaceAuthorityError(
+      'ownership_mismatch',
+      'Workspace authority generation copy may not change Workspace ownership.',
+    );
+  }
+  const ownedSessions = new Set(
+    input.db
+      .query<{ session_id: string }, []>(
+        `SELECT session_id FROM runtime_sessions
+         UNION
+         SELECT session_id FROM session_workspace_tombstone`,
+      )
+      .all()
+      .map((row) => row.session_id),
+  );
+  const rows: SqliteWorkspaceAuthorityGenerationCopyRow[] = [];
+  let settled = true;
+  for (const row of input.db
+    .query<{ key: string; value: string }, [number, string]>(
+      'SELECT key, value FROM runtime_store_meta WHERE substr(key, 1, ?) = ? ORDER BY key',
+    )
+    .iterate(AUTHORITY_META_PREFIX.length, AUTHORITY_META_PREFIX)) {
+    const key = parseAuthorityMetadataKey(row.key);
+    if (!ownedSessions.has(key.sessionId)) {
+      throw new SqliteWorkspaceAuthorityError(
+        'ownership_mismatch',
+        'Workspace authority metadata has no owned Session or tombstone.',
+      );
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(row.value) as unknown;
+    } catch {
+      throw new SqliteWorkspaceAuthorityError(
+        'corrupt',
+        'Workspace authority metadata is malformed.',
+      );
+    }
+    let record:
+      | PersistedControllerState
+      | PersistedRecoveryState
+      | PersistedDetachedRecoveryCapability
+      | PersistedOperationReceipt
+      | PersistedEffectEvidence
+      | PersistedResourceLease;
+    switch (key.kind) {
+      case 'controller':
+        record = parseControllerState(value, input.sourceBinding, key.sessionId);
+        settled &&= record.status === 'idle';
+        break;
+      case 'recovery':
+        record = parseRecoveryState(value, input.sourceBinding, key.sessionId);
+        settled &&= record.status === 'normal';
+        break;
+      case 'detached-recovery':
+        record = parseDetachedRecoveryCapability(value, input.sourceBinding, key.sessionId);
+        settled &&= record.state === 'consumed';
+        break;
+      case 'operation':
+        record = parseOperationReceipt(value, input.sourceBinding, key.sessionId, key.identity);
+        break;
+      case 'effect':
+        record = parseEffectEvidence(value, input.sourceBinding, key.sessionId, key.identity);
+        settled &&= record.state === 'terminal';
+        break;
+      case 'resource':
+        record = parseResourceLease(value, input.sourceBinding, key.sessionId, key.identity);
+        settled &&= record.state === 'released' || record.state === 'expired';
+        break;
+    }
+    rows.push({
+      key: row.key,
+      value: JSON.stringify({
+        ...record,
+        layoutGeneration: input.targetBinding.layoutGeneration,
+      }),
+    });
+  }
+  return Object.freeze({ rows: Object.freeze(rows), settled });
+}
+
+type ParsedAuthorityMetadataKey =
+  | {
+      readonly kind: 'controller' | 'recovery' | 'detached-recovery';
+      readonly sessionId: string;
+    }
+  | {
+      readonly kind: 'operation' | 'effect' | 'resource';
+      readonly sessionId: string;
+      readonly identity: string;
+    };
+
+function parseAuthorityMetadataKey(key: string): ParsedAuthorityMetadataKey {
+  const parts = key.slice(AUTHORITY_META_PREFIX.length).split(':');
+  const kind = parts.shift();
+  const expectedParts =
+    kind === 'controller' || kind === 'recovery' || kind === 'detached-recovery'
+      ? 1
+      : kind === 'operation' || kind === 'effect' || kind === 'resource'
+        ? 2
+        : 0;
+  if (!kind || expectedParts === 0 || parts.length !== expectedParts) {
+    throw new SqliteWorkspaceAuthorityError(
+      'corrupt',
+      'Workspace authority metadata key is unknown.',
+    );
+  }
+  let decoded: string[];
+  try {
+    decoded = parts.map((part) => decodeURIComponent(part));
+  } catch {
+    throw new SqliteWorkspaceAuthorityError(
+      'corrupt',
+      'Workspace authority metadata key is malformed.',
+    );
+  }
+  if (decoded.some((part) => !isNonEmptyText(part)) || authorityKey(kind, ...decoded) !== key) {
+    throw new SqliteWorkspaceAuthorityError(
+      'corrupt',
+      'Workspace authority metadata key is not canonical.',
+    );
+  }
+  if (expectedParts === 1) {
+    return {
+      kind: kind as 'controller' | 'recovery' | 'detached-recovery',
+      sessionId: decoded[0]!,
+    };
+  }
+  return {
+    kind: kind as 'operation' | 'effect' | 'resource',
+    sessionId: decoded[0]!,
+    identity: decoded[1]!,
+  };
+}
+
 export function createSqliteWorkspaceAuthority(input: {
   readonly db: Database;
   readonly binding: SqliteRuntimeWorkspaceBinding;

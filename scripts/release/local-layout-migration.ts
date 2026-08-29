@@ -14,6 +14,8 @@ import {
   createSqliteRuntimeLayoutCutover,
   ensureSqliteRuntimeGenerationRoot,
   ensureSqliteRuntimeLayoutRoot,
+  inspectSqliteRuntimeRunMigrationSource,
+  migrateSqliteRuntimeLayoutToRunStore,
   migrateSqliteRuntimeStoreToWorkspaceLayout,
   readSqliteActiveLayoutPointer,
   readSqliteRuntimeMigrationFence,
@@ -31,13 +33,19 @@ import {
   type SqliteRuntimeMigrationSessionIdentity,
   type SqliteRuntimeMigrationSourceGuard,
   type SqliteRuntimeMigrationWorkspaceBinding,
+  type SqliteRuntimeRunMigrationCatalogPort,
+  type SqliteRuntimeRunMigrationMaintenanceBarrier,
+  type SqliteRuntimeRunMigrationResult,
   type SqliteRuntimeSnapshotCodec,
   sqliteRuntimeStoreDigest,
   sqliteRuntimeStoreFingerprint,
   writeSqliteRuntimeMigrationFence,
   writeSqliteRuntimeMigrationJournal,
 } from '@kite-ai/runtime-storage-sqlite';
-import { createSqliteRuntimeMigrationCatalogBuilder } from '../../apps/kite-service/src/coordinator/catalog-builder';
+import {
+  createSqliteRuntimeMigrationCatalogBuilder,
+  createSqliteRuntimeRunMigrationCatalogPort,
+} from '../../apps/kite-service/src/coordinator/catalog-builder';
 
 const DEFAULT_FRESH_LAYOUT_GENERATION = 'generation-initial';
 const FRESH_SOURCE_IDENTITY = 'kite-fresh-home-no-source-v1';
@@ -108,6 +116,69 @@ export type LocalLayoutMigrationResult =
         | 'layout_invalid';
       readonly journal?: SqliteRuntimeMigrationJournal;
     };
+
+export interface LocalRunStoreMigrationOptions<Event = unknown, State = unknown> {
+  readonly home: string | KiteHomeIdentity;
+  readonly targetLayoutGeneration: string;
+  readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
+  readonly isSessionSettled: (state: Readonly<State>) => boolean;
+  /** Manager-owned proof after admission is closed and every process/effect has converged. */
+  readonly inspectMaintenanceBarrier: () =>
+    | SqliteRuntimeRunMigrationMaintenanceBarrier
+    | 'uncertain'
+    | Promise<SqliteRuntimeRunMigrationMaintenanceBarrier | 'uncertain'>;
+  readonly catalog?: SqliteRuntimeRunMigrationCatalogPort;
+  readonly createMigrationNonce?: () => string;
+  readonly faultAfterWorkspaceCopies?: number;
+}
+
+/** Explicit offline Store 7 → Store 8 maintenance orchestration; never runs during normal start. */
+export async function runLocalRunStoreMigration<Event = unknown, State = unknown>(
+  options: LocalRunStoreMigrationOptions<Event, State>,
+): Promise<SqliteRuntimeRunMigrationResult> {
+  const home = validateHome(options.home);
+  const targetLayoutGeneration = validateGeneration(options.targetLayoutGeneration);
+  const maintenanceBarrier = await options.inspectMaintenanceBarrier();
+  if (maintenanceBarrier === 'uncertain') {
+    return { status: 'blocked', reason: 'maintenance_required' };
+  }
+  const layout = resolveSqliteRuntimeLayoutPaths(home.root);
+  let evidence: ReturnType<typeof inspectSqliteRuntimeRunMigrationSource>;
+  try {
+    evidence = inspectSqliteRuntimeRunMigrationSource(layout);
+  } catch {
+    return { status: 'blocked', reason: 'source_corrupt' };
+  }
+  const migrationNonce = options.createMigrationNonce?.() ?? `store-8-${randomUUID()}`;
+  if (!/^[\x21-\x7e]{1,512}$/u.test(migrationNonce)) {
+    throw new TypeError('Store 8 migration nonce is invalid.');
+  }
+  return migrateSqliteRuntimeLayoutToRunStore({
+    layout,
+    targetLayoutGeneration,
+    sourceGuard: {
+      ...evidence,
+      maintenanceBarrier,
+      fence: {
+        schema: 'kite.runtime-migration-fence.v1',
+        sourceStoreIdentity: evidence.sourceStoreIdentity,
+        sourceStoreDigest: evidence.sourceStoreDigest,
+        sourceProfile: evidence.sourceProfile,
+        targetLayoutGeneration,
+        migrationNonce,
+        state: 'active',
+      },
+    },
+    codec: options.codec,
+    isSessionSettled: options.isSessionSettled,
+    catalog:
+      options.catalog ??
+      createSqliteRuntimeRunMigrationCatalogPort({ canonicalKiteHomeRoot: home.root }),
+    ...(options.faultAfterWorkspaceCopies === undefined
+      ? {}
+      : { faultAfterWorkspaceCopies: options.faultAfterWorkspaceCopies }),
+  });
+}
 
 /**
  * Execute the explicit offline Store 6 → Store 7 maintenance boundary, or initialize a truly

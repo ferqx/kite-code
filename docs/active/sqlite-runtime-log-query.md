@@ -63,6 +63,9 @@ Store 7 read journey。Run port只在调用方提供的same connection上查询�
 仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
 KRSRUN-02A的显式unpublished Run target与delete/rewind/fork maintenance同样不改变该边界：Run rewind随既有Session transaction删除较新
 row，但History仍只按event/snapshot的原子结果和既有cursor invalidation判断；fork的Run coverage/origin也不成为History内容或完整性来源。
+KRSRUN-02B迁移逐字节保留event/snapshot/History逻辑事实并仅增加coverage/空Run index；source/target logical digest必须一致。当前offline
+Web History reader和same-connection Worker page port仍只承认Store 7，显式Store 8 pointer切换后会fail closed；03A前不得以Store 7 reader
+fallback读取新generation，也不得用空Run index截断coverage以前的History。
 
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不

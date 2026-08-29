@@ -212,14 +212,17 @@ Store 7 DDL、逐 Session full validation、journal/pointer crash windows、targ
 但不是 fallback，不能绕过 committed layout。Worker production path继续保持 explicit admission、single writer、source immutable 与
 no silent rollback；Linux/Windows hosted filesystem/process evidence仍不能由本机结果替代。
 
-KRSRUN-02A已让Host/App与private Runtime Protocol理解Store 8 Run transaction/resource/get/page及delete/rewind/fork/restart机制，但没有改变
-Coordinator或Worker composition。显式unpublished target不接受Store 7 active-layout evidence，也不暴露Store 7 Controller/read façade；
-Store 8 profile/Run port仍未进入layout manifest、migration journal、Worker opener或Catalog。Store 7只是未来whole-generation
-migration的exact source constant，不进入ordinary compatibility importer。Coordinator继续不保存Run row/status/receipt，Worker继续只打开
-active Store 7，Agent ServerInfo/Public route继续不发布`runs`。KRSRUN-02B/03A完成offline generation cutover与reopen Gate前不得由ensure/
-admission选择Store 8 target，也不得从Runtime activeWork、Catalog或event journal补写partial Run。
+KRSRUN-02B现已让layout manifest/journal/fence接受exact Store 8 target，并提供显式offline whole-generation migrator与
+`runLocalRunStoreMigration` orchestration。调用方必须先关闭Coordinator/Worker/Gateway admission并证明Turn/Interaction/effect/external
+process收敛；Coordinator Catalog owner复制全部Session/outbox/terminal operation事实且只重绑generation，Runtime Store owner逐Workspace
+隔离复制并把coverage设为source head，不生成历史Run。任一未结算Catalog operation、未登记Workspace、unsafe WAL/SHM、binding/digest/
+preflight或copy fault都使整个generation blocked；新fence同时阻断旧Store 7 binary。
 
-Worker restart对已写Store的re-admission必须复用no-follow只读snapshot preflight，重新验证Store 7 profile与完整Workspace
+该mechanism没有改变normal Coordinator/Worker composition：Worker仍只打开active Store 7，Agent ServerInfo/Public route继续不发布`runs`。
+显式maintenance若已把pointer切到Store 8，normal Worker会因profile/opener不兼容而blocked，不能回Store 7；KRSRUN-03A完成Store 8
+Controller/read facade、Worker opener/reopen与release Gate前不得由普通ensure/admission自动发起迁移或运行target。
+
+Worker restart对已写Store的re-admission当前必须复用no-follow只读snapshot preflight，重新验证Store 7 profile与完整Workspace
 binding；manifest/journal保留的是first-write前admission digest，只要求两者一致，不与`targetWriteState=written`后的live文件字节
 比较或重定基线。未写target仍必须匹配该digest，任一header/binding/evidence drift继续fail closed。
 Coordinator从持久Worker descriptor恢复时必须先比较PID与OS start token；confirmed dead在尝试旧control endpoint handshake前

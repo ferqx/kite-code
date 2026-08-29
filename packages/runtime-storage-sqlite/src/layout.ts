@@ -21,6 +21,8 @@ import {
   assertSqliteRuntimeWorkspaceBinding,
   assertWorkspaceSqliteRuntimeStoreConnection,
   openSqliteReadonlySnapshotView,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
@@ -42,13 +44,22 @@ const boundedText = z
   .max(512)
   .refine((value) => !value.includes('\0') && !/\p{Cc}/u.test(value), 'invalid layout text');
 const digest = z.string().regex(/^[a-f0-9]{16,128}$/u, 'invalid layout digest');
-const profileSchema = z
-  .object({
-    stateSchemaVersion: z.literal(SQLITE_RUNTIME_STATE_SCHEMA_VERSION),
-    storeSchemaVersion: z.literal(SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION),
-    formatEpoch: z.literal(SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH),
-  })
-  .strict();
+const profileSchema = z.union([
+  z
+    .object({
+      stateSchemaVersion: z.literal(SQLITE_RUNTIME_STATE_SCHEMA_VERSION),
+      storeSchemaVersion: z.literal(SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION),
+      formatEpoch: z.literal(SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH),
+    })
+    .strict(),
+  z
+    .object({
+      stateSchemaVersion: z.literal(SQLITE_RUNTIME_STATE_SCHEMA_VERSION),
+      storeSchemaVersion: z.literal(SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION),
+      formatEpoch: z.literal(SQLITE_RUNTIME_RUN_FORMAT_EPOCH),
+    })
+    .strict(),
+]);
 const workspaceStoreDigestSchema = z.object({ workerScopeId: boundedText, digest }).strict();
 
 const activeLayoutPointerSchema = z
@@ -377,7 +388,7 @@ function admitNewWorkspaceStoreLocked(
     !journal ||
     !fence ||
     journal.targetLayoutGeneration !== binding.layoutGeneration ||
-    journal.pointerPhase !== 'committed' ||
+    !['pointer_switched', 'target_ready', 'committed'].includes(journal.pointerPhase) ||
     fence.targetLayoutGeneration !== binding.layoutGeneration ||
     fence.migrationNonce !== journal.migrationNonce ||
     manifest.profile.storeSchemaVersion !== SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION ||
@@ -730,7 +741,7 @@ export function assertSqliteWorkspaceStoreActive(
   if (
     !journal ||
     journal.targetLayoutGeneration !== binding.layoutGeneration ||
-    !['pointer_switched', 'target_ready', 'committed'].includes(journal.pointerPhase) ||
+    journal.pointerPhase !== 'committed' ||
     fence?.targetLayoutGeneration !== binding.layoutGeneration ||
     fence?.migrationNonce !== journal.migrationNonce ||
     !journalEntry ||
@@ -751,6 +762,109 @@ export function assertSqliteWorkspaceStoreActive(
     );
   }
   return journal;
+}
+
+/** Verify that a Store 8 writer belongs to the one active, fully switched generation. */
+export function assertSqliteRuntimeRunStoreActive(
+  paths: SqliteRuntimeLayoutPaths,
+  binding: SqliteRuntimeWorkspaceBinding,
+  databasePath: string,
+): SqliteRuntimeMigrationJournal {
+  assertSqliteRuntimeWorkspaceBinding(binding);
+  assertNoFollowDatabasePath(databasePath);
+  const expectedPath = resolveSqliteWorkspaceStorePath(
+    paths,
+    binding.layoutGeneration,
+    binding.workerScopeId,
+  );
+  if (resolve(databasePath) !== resolve(expectedPath)) {
+    throw new SqliteRuntimeLayoutError(
+      'blocked',
+      'Store 8 writer path does not match its active Workspace generation.',
+    );
+  }
+  let storeStat: ReturnType<typeof lstatSync>;
+  try {
+    storeStat = lstatSync(databasePath);
+  } catch {
+    throw new SqliteRuntimeLayoutError('blocked', 'Store 8 writer file is missing.');
+  }
+  if (
+    storeStat.isSymbolicLink() ||
+    !storeStat.isFile() ||
+    storeStat.nlink !== 1 ||
+    (process.platform !== 'win32' &&
+      ((storeStat.mode & 0o077) !== 0 ||
+        (typeof process.getuid === 'function' && storeStat.uid !== process.getuid())))
+  ) {
+    throw new SqliteRuntimeLayoutError(
+      'permission',
+      'Store 8 writer is not a private owner-only regular file.',
+    );
+  }
+  const pointer = readSqliteActiveLayoutPointer(paths);
+  if (!pointer || pointer.generation !== binding.layoutGeneration) {
+    throw new SqliteRuntimeLayoutError(
+      'blocked',
+      'Store 8 writer generation is not the active layout.',
+    );
+  }
+  const manifest = readSqliteRuntimeLayoutManifest(paths, binding.layoutGeneration);
+  const manifestEntry = manifest?.workspaceStores.find(
+    (entry) => entry.workerScopeId === binding.workerScopeId,
+  );
+  if (
+    !manifest ||
+    manifest.profile.storeSchemaVersion !== SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION ||
+    manifest.profile.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+    manifest.profile.formatEpoch !== SQLITE_RUNTIME_RUN_FORMAT_EPOCH ||
+    !manifestEntry
+  ) {
+    throw new SqliteRuntimeLayoutError(
+      'blocked',
+      'Store 8 writer manifest does not contain its active Workspace store.',
+    );
+  }
+  const journal = readSqliteRuntimeMigrationJournal(paths);
+  const fence = readSqliteRuntimeMigrationFence(paths);
+  const journalEntry = journal?.workspaceStoreDigests.find(
+    (entry) => entry.workerScopeId === binding.workerScopeId,
+  );
+  if (
+    !journal ||
+    journal.targetLayoutGeneration !== binding.layoutGeneration ||
+    journal.pointerPhase !== 'committed' ||
+    fence?.targetLayoutGeneration !== binding.layoutGeneration ||
+    fence.migrationNonce !== journal.migrationNonce ||
+    !journalEntry ||
+    journalEntry.digest !== manifestEntry.digest
+  ) {
+    throw new SqliteRuntimeLayoutError(
+      'blocked',
+      'Store 8 writer transition evidence is incomplete or stale.',
+    );
+  }
+  if (
+    journal.targetWriteState === 'none' &&
+    createHash('sha256').update(readFileSync(databasePath)).digest('hex') !== manifestEntry.digest
+  ) {
+    throw new SqliteRuntimeLayoutError(
+      'blocked',
+      'Store 8 writer does not match its pre-write manifest digest.',
+    );
+  }
+  return journal;
+}
+
+/** Mark the generation written before the first Store 8 mutation. */
+export function markSqliteRuntimeRunStoreWritten(
+  paths: SqliteRuntimeLayoutPaths,
+  binding: SqliteRuntimeWorkspaceBinding,
+  databasePath: string,
+): void {
+  const journal = assertSqliteRuntimeRunStoreActive(paths, binding, databasePath);
+  if (journal.targetWriteState === 'written') return;
+  writeSqliteRuntimeMigrationJournal(paths, { ...journal, targetWriteState: 'written' });
 }
 
 /** Mark the generation written before the first Store 7 mutation. */
@@ -890,6 +1004,7 @@ export function createSqliteRuntimeLayoutCutover(
 
 export function canRollbackSqliteRuntimeLayout(journal: SqliteRuntimeMigrationJournal): boolean {
   return (
+    (journal.pointerPhase === 'source_active' && journal.targetWriteState === 'none') ||
     (journal.pointerPhase === 'target_prepared' && journal.targetWriteState === 'none') ||
     (journal.pointerPhase === 'pointer_switched' && journal.targetWriteState === 'none')
   );

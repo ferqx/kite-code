@@ -3,11 +3,13 @@ import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import {
   COORDINATOR_SESSION_METADATA_SCHEMA,
   type CoordinatorCatalogStorageIdentity,
+  copyCoordinatorCatalogGeneration,
   openCoordinatorCatalog,
 } from '@kite-ai/kite-local-runtime/coordinator';
 import type {
   SqliteRuntimeMigrationCatalogBuilder,
   SqliteRuntimeMigrationCatalogSession,
+  SqliteRuntimeRunMigrationCatalogPort,
 } from '@kite-ai/runtime-storage-sqlite';
 
 /**
@@ -17,6 +19,35 @@ import type {
  */
 export interface KiteCoordinatorMigrationCatalogBuilderOptions {
   readonly canonicalKiteHomeRoot: string;
+}
+
+/** Preserve every Catalog fact while rebinding only the target layout generation. */
+export function createSqliteRuntimeRunMigrationCatalogPort(
+  options: KiteCoordinatorMigrationCatalogBuilderOptions,
+): SqliteRuntimeRunMigrationCatalogPort {
+  assertExactObject(options, ['canonicalKiteHomeRoot']);
+  if (typeof options.canonicalKiteHomeRoot !== 'string') {
+    throw new TypeError('Coordinator migration Catalog home must be explicit.');
+  }
+  return Object.freeze({
+    copy(input: Parameters<SqliteRuntimeRunMigrationCatalogPort['copy']>[0]) {
+      assertExactObject(input, [
+        'sourceCatalogPath',
+        'targetCatalogPath',
+        'sourceLayoutGeneration',
+        'targetLayoutGeneration',
+        'expectedWorkerScopeIds',
+      ]);
+      return copyCoordinatorCatalogGeneration({
+        canonicalKiteHomeRoot: options.canonicalKiteHomeRoot,
+        sourceLayoutGeneration: input.sourceLayoutGeneration,
+        targetLayoutGeneration: input.targetLayoutGeneration,
+        sourceCatalogPath: input.sourceCatalogPath,
+        targetCatalogPath: input.targetCatalogPath,
+        expectedWorkerScopeIds: input.expectedWorkerScopeIds,
+      });
+    },
+  });
 }
 
 /**

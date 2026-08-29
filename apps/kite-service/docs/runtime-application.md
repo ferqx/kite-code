@@ -97,6 +97,9 @@ Web Observer/Gateway 是独立的只读 companion，不把 Browser 变成 Contro
 Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
 Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
 schema fallback。
+Store 7→Store 8同样只存在于显式offline maintenance：调用方先关闭所有Coordinator/Worker/Gateway admission并证明
+Turn/Interaction/effect/external process已收敛，再由source-bound journal/fence、Coordinator-owned Catalog copy与Runtime Store
+whole-generation migrator共同切换。普通Runtime Application不调用该入口；KRSRUN-03A前Worker仍不打开Store 8。
 
 ## 验证
 

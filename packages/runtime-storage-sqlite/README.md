@@ -21,6 +21,12 @@
   Store 7，不改写 source、不在线迁移、不双写，也不启动 Worker。迁移不定义或复制 Coordinator Catalog DDL；调用方必须注入
   `catalogBuilder`，由 Coordinator/Service owner 用 exact target `catalogPath` 和 path-free Session routing metadata 建立唯一
   Catalog，返回的 digest 由 migration 在 pointer switch 前复核。
+- KRSRUN-02B新增显式offline `migrateSqliteRuntimeLayoutToRunStore`：只有manager提供Coordinator/Worker/Gateway停止且
+  Turn/Interaction/effect/external process全部收敛的closed barrier后，才从active Store 7 generation的Catalog与每个Workspace
+  no-follow隔离snapshot复制到fresh Store 8 generation。Catalog正文由Coordinator-owned copy port完整保留；Workspace逐表保留
+  Session/event/snapshot/preimage/receipt/tombstone/outbox/private meta，把每个`run_index_from_revision`设为source head且不生成历史Run。
+  logical digest/count/binding/Store8 preflight全部通过后才复用原journal/fence/pointer状态机切换；任一active/corrupt/unowned/partial/fault
+  整体blocked，旧Store7 writer在新fence写入后即fail closed。
 - Store 7 暴露 `workspaceAuthority` durable facade：Controller operation receipt/idempotency、Controller generation/lease、
   hash-only resume/DetachedRecovery rotation、detached/recovery state、effect prepare/inspect/terminal 与 resource
   attempt evidence。capability secret 只在调用者内存中出现，Store 仅保留 SHA-256 hash；resource surface 只记录外部
@@ -90,6 +96,12 @@
   orphan retained receipt、损坏或未知 source fact 会整体 blocked，source 保持只读且 active-layout 不切换。迁移逐 Session
   校验 event count/sequence、snapshot checksum/position、receipt digest、recovery evidence 与 content digest，完成所有
   Worker Store、metadata-only Catalog、immutable manifest 和 journal 后才原子切换 pointer。
+- Store 7到Store 8只允许whole-generation copy-and-switch；source manifest/journal/fence、Catalog、全部manifested Workspace与安全WAL/SHM
+  必须共同稳定。Catalog不能丢失outbox cursor或operation receipt，存在`in_progress`operation或未登记Worker scope时拒绝；Store8 target
+  receipt result固定为空、Run表为空、coverage固定source Session revision。Controller/recovery/effect/resource authority与recovery identity
+  先按owner codec完整校验；任何未收敛或损坏事实整体阻断，合法记录只重绑target LayoutGeneration后复制。target首次写通过
+  `markSqliteRuntimeRunStoreWritten`把generation永久标记written；Store7/Store8 active helper按manifest profile双向阻断错误binary，Store8
+  writer还必须等journal达到`committed`。
 - `runtime_command_receipts` 的主键精确为 `(scope_session_id, command_id)`；applied receipt 与 event/snapshot 同一 `BEGIN IMMEDIATE` 原子提交。
   rewind后receipt的`committed_revision`可以高于current Session head，这是保留original applied decision的预期语义，reopen按owner/digest/
   canonical receipt验证而不把它误判为未来伪造事实。不会建立额外 receipt 索引、TTL 或裁剪。
@@ -102,7 +114,7 @@
 
 ## 测试
 
-`bun test packages/runtime-storage-sqlite/test`（当前84 pass；含Store8 delete/rewind/fork fault/reopen/isolation、atomic resource replay/index与Store7 negatives）
+`bun test packages/runtime-storage-sqlite/test`（当前89 pass；含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8 recovery与Store7 negatives）
 
 ## 文档影响
 

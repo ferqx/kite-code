@@ -97,9 +97,18 @@ Worker restart后、Session尚未admit/recover时，private Run GET/list不调�
 `unknown/recovery_required`，并以最后durable Run clock作为确定projection boundary。显式resume执行existing Host recovery一次，recovery event与
 Run transition仍在canonical State transaction；persisted unknown只允许细化为更精确terminal并保留原finish clock，不自动重放external effect。
 
-这仍不是production cutover：active layout、Worker opener与release继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run mutation，
+KRSRUN-02B已实现显式offline whole-generation迁移mechanism：manager必须先提供Coordinator/Worker/Gateway停止及
+Turn/Interaction/effect/external process全收敛的closed barrier；storage再绑定active Store 7 generation的pointer/manifest/journal/fence、
+Catalog和每个Workspace snapshot identity/digest。Coordinator-owned port精确保留Catalog Session/outbox/terminal operation facts；Store owner
+把每个Session coverage设为source head、receipt result设空、Run表保持空，不从event补造历史；Controller/recovery/effect/resource authority
+必须由其owner codec确认终态并只重绑target generation，recovery identity也必须有canonical且owned的Session/tombstone。全部logical digest/
+binding/Store 8 preflight通过后才原子切pointer；active/corrupt/unowned/partial/WAL drift或copy fault整体blocked，新fence写入后旧Store 7 writer
+立即fail closed。
+
+这仍不是production composition cutover：Worker opener与release正常启动继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run mutation，
 private Run query返回unsupported，ServerInfo/Public handler仍无`runs`。Store 7与Store 8 preflight继续双向拒绝，Coordinator/Catalog/Agent
-adapter不持Run事实；因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
+adapter不持Run事实；显式02B maintenance一旦切到Store 8，会保持normal Worker blocked直到03A opener/reopen Gate完成，不以Store 7 fallback
+继续执行。因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

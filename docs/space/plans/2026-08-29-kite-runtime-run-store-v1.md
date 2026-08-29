@@ -14,9 +14,9 @@
 
 ## 1. 执行状态与边界
 
-KRSRUN-00A～02A已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
+KRSRUN-00A～02B已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
 offline generation migration已经冻结；neutral contract、unpublished exact schema/preflight、Host atomic lifecycle/resource replay、private query及
-maintenance/restart semantics已实现。当前执行入口为KRSRUN-02B Store 7→Store 8 generation migration。KRSRUN-02B～03B完成前仍不得开放Run route或声明ServerInfo
+maintenance/restart semantics和whole-generation migration已实现。当前执行入口为KRSRUN-03A Worker composition、reopen与cutover。KRSRUN-03A～03B完成前仍不得开放Run route或声明ServerInfo
 `runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
@@ -168,7 +168,16 @@ Gate：delete/fork/rewind/reopen/fault matrix；cross-Session/Workspace isolatio
 
 Rollback：仍在unpublished target上可重建target；任何target写后不回Store 7。
 
-### KRSRUN-02B：Store 7→Store 8 generation migration
+### KRSRUN-02B：Store 7→Store 8 generation migration（已完成）
+
+完成证据：layout manifest接受exact Store 7/8 profile但各active helper仍按profile双向fence；新增read-only source evidence、完整
+maintenance barrier、source-bound fence/journal及whole-generation migrator。Coordinator Catalog copy保留Session/outbox/terminal operation
+receipt并拒绝`in_progress`或unowned scope；每个Workspace经isolated WAL snapshot流式复制全部logical facts，把coverage设为source head、
+receipt result置空、Run表保持空；Controller/recovery/effect/resource与recovery identity先按owner codec验证收敛/归属，并只重绑target
+generation，逐Session codec与Store8 exact preflight后才switch pointer。active work、corrupt event/authority、partial Workspace、Catalog/copy
+fault均保持source pointer且新fence阻断Store7 writer；Store8只在journal `committed`后可打开，target first-write helper永久标记written。显式
+`runLocalRunStoreMigration`只接受manager-owned closed barrier，normal start/ensure不调用。15-workspace typecheck、SQLite 89、Catalog 10及
+release maintenance 6项通过；current Worker opener/Public capability仍为Store7/closed，留给03A/03B。
 
 目标文件在existing layout migration owner内确定，必须包含migration journal schema、fence、target builder/verifier、pointer switch与CLI/manager
 orchestration；不新增独立migration daemon。

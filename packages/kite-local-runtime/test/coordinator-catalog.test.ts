@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type CoordinatorCatalogStorageIdentity,
+  copyCoordinatorCatalogGeneration,
   openCoordinatorCatalog,
 } from '@kite-ai/kite-local-runtime/coordinator';
 
@@ -195,6 +196,130 @@ describe('Coordinator durable routing Catalog', () => {
         beforeWrite: () => undefined,
       }),
     ).toThrow('metadata');
+  });
+
+  test('copies every Catalog fact while rebinding only the layout generation', () => {
+    const sourceIdentity = storage();
+    const source = openCoordinatorCatalog(sourceIdentity);
+    source.upsertSession({
+      sessionId: 'session-copy',
+      workerScopeId: 'worker-copy',
+      directoryRevision: 'revision-copy',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      tombstone: false,
+    });
+    expect(source.advanceOutboxCursor('worker-copy', undefined, 'cursor-copy')).toBe(true);
+    const operation = {
+      idempotencyKey: 'operation-copy',
+      method: 'ensureWorkspaceWorker',
+      requestDigest: 'c'.repeat(64),
+    } as const;
+    expect(source.admitOperation(operation)).toEqual({ status: 'new' });
+    source.settleOperation(operation, 'committed');
+    source.close();
+    const sourceBytes = readFileSync(sourceIdentity.catalogPath);
+
+    const targetGeneration = 'generation-2';
+    const targetPath = join(
+      sourceIdentity.canonicalKiteHomeRoot,
+      'layouts',
+      targetGeneration,
+      'catalog.sqlite',
+    );
+    mkdirSync(join(sourceIdentity.canonicalKiteHomeRoot, 'layouts', targetGeneration), {
+      mode: 0o700,
+    });
+    const digest = copyCoordinatorCatalogGeneration({
+      canonicalKiteHomeRoot: sourceIdentity.canonicalKiteHomeRoot,
+      sourceLayoutGeneration: sourceIdentity.layoutGeneration,
+      targetLayoutGeneration: targetGeneration,
+      sourceCatalogPath: sourceIdentity.catalogPath,
+      targetCatalogPath: targetPath,
+      expectedWorkerScopeIds: ['worker-copy'],
+    });
+    expect(createHash('sha256').update(readFileSync(targetPath)).digest('hex')).toBe(digest);
+    expect(readFileSync(sourceIdentity.catalogPath)).toEqual(sourceBytes);
+
+    const target = openCoordinatorCatalog({
+      canonicalKiteHomeRoot: sourceIdentity.canonicalKiteHomeRoot,
+      layoutGeneration: targetGeneration,
+      catalogPath: targetPath,
+      mode: 'open_active',
+      beforeWrite: () => undefined,
+    });
+    expect(target.listSessions()).toEqual([
+      {
+        sessionId: 'session-copy',
+        workerScopeId: 'worker-copy',
+        directoryRevision: 'revision-copy',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        tombstone: false,
+      },
+    ]);
+    expect(target.outboxCursor('worker-copy')).toBe('cursor-copy');
+    expect(target.admitOperation(operation)).toEqual({ status: 'committed' });
+    target.close();
+  });
+
+  test('refuses generation copy with an unsettled operation or unowned Workspace route', () => {
+    const sourceIdentity = storage();
+    const source = openCoordinatorCatalog(sourceIdentity);
+    source.upsertSession({
+      sessionId: 'session-unowned',
+      workerScopeId: 'worker-unowned',
+      directoryRevision: 'revision-1',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      tombstone: false,
+    });
+    source.admitOperation({
+      idempotencyKey: 'operation-pending',
+      method: 'ensureWorkspaceWorker',
+      requestDigest: 'd'.repeat(64),
+    });
+    source.close();
+    const targetGeneration = 'generation-blocked';
+    const targetPath = join(
+      sourceIdentity.canonicalKiteHomeRoot,
+      'layouts',
+      targetGeneration,
+      'catalog.sqlite',
+    );
+    mkdirSync(join(sourceIdentity.canonicalKiteHomeRoot, 'layouts', targetGeneration), {
+      mode: 0o700,
+    });
+    expect(() =>
+      copyCoordinatorCatalogGeneration({
+        canonicalKiteHomeRoot: sourceIdentity.canonicalKiteHomeRoot,
+        sourceLayoutGeneration: sourceIdentity.layoutGeneration,
+        targetLayoutGeneration: targetGeneration,
+        sourceCatalogPath: sourceIdentity.catalogPath,
+        targetCatalogPath: targetPath,
+        expectedWorkerScopeIds: ['another-worker'],
+      }),
+    ).toThrow(/unowned Workspace|unsettled operation/u);
+    expect(() => readFileSync(targetPath)).toThrow();
+
+    const pendingGeneration = 'generation-pending';
+    const pendingPath = join(
+      sourceIdentity.canonicalKiteHomeRoot,
+      'layouts',
+      pendingGeneration,
+      'catalog.sqlite',
+    );
+    mkdirSync(join(sourceIdentity.canonicalKiteHomeRoot, 'layouts', pendingGeneration), {
+      mode: 0o700,
+    });
+    expect(() =>
+      copyCoordinatorCatalogGeneration({
+        canonicalKiteHomeRoot: sourceIdentity.canonicalKiteHomeRoot,
+        sourceLayoutGeneration: sourceIdentity.layoutGeneration,
+        targetLayoutGeneration: pendingGeneration,
+        sourceCatalogPath: sourceIdentity.catalogPath,
+        targetCatalogPath: pendingPath,
+        expectedWorkerScopeIds: ['worker-unowned'],
+      }),
+    ).toThrow('unsettled operation');
+    expect(() => readFileSync(pendingPath)).toThrow();
   });
 
   test('rejects an active target generation before creating a new Catalog', () => {

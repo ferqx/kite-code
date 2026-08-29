@@ -27,6 +27,11 @@ rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows
 matrix尚未取得，必须保持pending，不能以workflow定义、本地通过或artifact上传取代真实三平台结果；Windows
 ACL/write-through与非 Windows 本地环境的 no-follow 断言也不能互相替代。
 
+`scripts/release/local-layout-migration.ts`包含显式offline Store layout maintenance，不属于normal build/install/start或自动upgrade。
+Store 7→Store 8入口要求manager注入Coordinator/Worker/Gateway已停止及全部Runtime/external effect收敛的exact barrier，随后才建立
+source-bound fence、复制完整Catalog/Workspace generation并切pointer；任一unknown保持blocked。03A Worker opener完成前，候选smoke和普通
+ensure不得调用该入口，也不得在显式Store 8 pointer后fallback启动Store 7 Worker。
+
 ## 候选制品
 
 `bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite`、`kite-tui`、`kite-service`、
