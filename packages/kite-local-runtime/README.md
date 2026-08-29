@@ -10,7 +10,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
 
 - `./client`：strict descriptor/access discovery、两阶段App Control/Runtime connection、one-shot ticket WebSocket、
   三个History route、exact App Control/Native credential client与`LocalKiteConnection`。`prepareAppControl()`只准备
-  authenticated control plane；caller确认Workspace trusted后才显式`connect()`。
+  authenticated control plane；caller确认Workspace trusted后才显式`connect()`。用户可在Trust页面停留超过Worker
+  capability TTL：Runtime尚未连接时，HTTP 401只在carrier dispatch前产生，connector会重新ensure/discover exact
+  Worker identity并把同一App Control request重发一次；第二次401、identity drift或Runtime已连接时不自动重试。
 - `./manager`：单一ensure/status/stop/restart state machine、native process/spawn/PID probe、cross-process lifecycle lock、
   neutral environment与explicit executable resolver composition。manager拥有control token；普通connection不取得它。
 - source mode在POSIX直接执行repo-owned shebang entry（Service、Coordinator、Worker、Gateway各自的 exact entry）；Windows没有
@@ -43,8 +45,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
 - status对完整absent返回`applied + absent + not_running`；若只剩descriptor/instance-lock stale evidence，必须先由process
   probe确认PID dead并完成exact stale cleanup，才能返回同一canonical absence。alive/uncertain不清理且不伪造absence。
 - 不依赖 Runtime Host/Server/Builtin/SQLite、React、Ink或任何`apps/*`。
-- 不自动retry/replay Runtime或App Control mutation；response丢失必须按
-  `outcome_unknown → exact state query → explicit decision`处理。
+- 不自动retry/replay Runtime mutation或已进入dispatch的App Control mutation。唯一自动重发是Runtime连接前收到carrier
+  pre-dispatch 401后，refresh exact Worker capability并重发同一HTTP request一次；response丢失、5xx、第二次401或任何
+  identity drift仍必须按`outcome_unknown → exact state query → explicit decision`处理。
 - 不定义generic RPC、Browser transport、Desktop IPC、public SDK、OS Service或默认Store path。
 
 ## 允许依赖

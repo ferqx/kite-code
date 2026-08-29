@@ -944,6 +944,7 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
     body: unknown,
     signal?: AbortSignal,
     maxResponseBytes?: number,
+    refreshOnUnauthorized = true,
   ): Promise<unknown> {
     if (this.#closed) throw closedError();
     const service = this.#requireService();
@@ -976,6 +977,18 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
       );
     }
     this.#assertHttpIdentity(service.instanceId, identityGeneration);
+    if (
+      response.status === 401 &&
+      refreshOnUnauthorized &&
+      this.#runtime.snapshotStore.getSnapshot().connectionGeneration === 0
+    ) {
+      // Pre-Runtime App Control can legitimately wait on an in-person Trust decision longer than
+      // a one-shot Worker capability TTL. A 401 is produced before route parsing or dispatch, so
+      // refreshing the exact Coordinator/Worker identity and retrying once cannot replay a
+      // mutation. Once Runtime is connected, callers must use explicit reconnect instead.
+      await this.#prepareIdentity(true);
+      return this.#post(path, body, signal, maxResponseBytes, false);
+    }
     if (response.status !== 200) {
       throw new LocalRuntimeConnectionError(
         response.status === 400

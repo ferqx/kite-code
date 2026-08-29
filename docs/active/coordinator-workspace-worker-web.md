@@ -62,6 +62,9 @@ Worker capability 绑定 `workerInstanceId`、`workerScopeId`、Workspace digest
 TTL 为 30 秒且只消费一次 connect；同一 connection 的后续 query 使用已绑定的 capability，reconnect 必须由 Coordinator mint 新
 generation/capability。credential 只在 Worker/Gateway 内部 carrier seam 出现，不进入 Coordinator catalog、descriptor、readiness、
 Browser DTO 或日志。
+Native Trust barrier允许用户停留超过30秒：Runtime尚未连接时，过期capability只会在carrier route dispatch前得到401；
+Native connector随后重新ensure exact Worker、mint新generation/capability并把同一App Control request重发一次。该边界不延长
+capability TTL，也不重放已dispatch mutation；response丢失、5xx、第二次401、identity mismatch或Runtime active后仍fail closed。
 
 `controller.ts` 的 Controller authority 以注入 Store 为最终事实源，按 Session 串行化操作并用 request digest、expected generation
 与 lease identity 做幂等/CAS 检查。`tui` 与 `desktop` 才能得到 `applied` lease；`web_observer` 的 request-control/release-control

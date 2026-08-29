@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type {
   KiteWorkspaceIdentity,
+  WorkspaceTrustDecisionResponse,
   WorkspaceTrustQueryResponse,
 } from '@kite-ai/kite-app-contract';
 import {
+  WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+  WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
@@ -16,6 +19,7 @@ import type { LocalRuntimeClientOptions } from '../src/client/connection';
 import {
   createLocalKiteConnection,
   LOCAL_RUNTIME_ACCESS_AUTHORIZATION_SCHEME,
+  LOCAL_RUNTIME_APP_WORKSPACE_TRUST_DECIDE_PATH,
   LOCAL_RUNTIME_APP_WORKSPACE_TRUST_QUERY_PATH,
   LOCAL_RUNTIME_CONNECT_PATH,
   LOCAL_RUNTIME_TICKET_AUTHORIZATION_SCHEME,
@@ -70,6 +74,50 @@ describe('Native Local Runtime connector', () => {
     expect(
       fixture.requests.filter((request) => request.path === LOCAL_RUNTIME_CONNECT_PATH),
     ).toHaveLength(1);
+  });
+
+  test('refreshes an expired pre-Runtime capability once before a Trust decision', async () => {
+    let unauthorized = true;
+    let decisionDispatches = 0;
+    const fixture = createFixture({
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === LOCAL_RUNTIME_APP_WORKSPACE_TRUST_DECIDE_PATH) {
+          if (unauthorized) {
+            unauthorized = false;
+            return new Response('unauthorized', { status: 401 });
+          }
+          decisionDispatches += 1;
+          return Response.json({
+            schema: WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
+            workspace,
+            status: 'trusted',
+            outcome: 'recorded',
+            revision: 'trust-revision-2',
+            externalReadScope: { roots: [], digest: `sha256:${'0'.repeat(64)}` },
+          } satisfies WorkspaceTrustDecisionResponse);
+        }
+        return fixtureFetch(input, init, fixture.descriptorProvider());
+      },
+    });
+    const connection = createLocalKiteConnection(fixture.options);
+    clients.push(connection);
+    await connection.prepareAppControl();
+
+    await expect(
+      connection.app.decideWorkspaceTrust({
+        schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+        workspace,
+        observedStatus: 'unknown',
+        expectedRevision: 'trust-revision-1',
+        decision: 'trust',
+        externalReadScopeDigest: `sha256:${'0'.repeat(64)}`,
+      }),
+    ).resolves.toMatchObject({ status: 'trusted', outcome: 'recorded' });
+    expect(fixture.managerCalls).toHaveLength(2);
+    expect(fixture.tokenKinds).toEqual(['access', 'access']);
+    expect(decisionDispatches).toBe(1);
+    expect(fixture.webSockets).toHaveLength(0);
   });
 
   test('strictly discovers descriptor/access, issues a ticket, and routes exact History/App calls', async () => {

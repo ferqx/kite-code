@@ -44,6 +44,9 @@ readonly reader`。`apps/kite-cli`不依赖Host、Server、Builtin、SQLite或Ru
 
 Native connector只读取exact descriptor与access token，先准备authenticated no-secret App Control，再在Trust通过后取得
 Workspace-bound one-shot ticket并组合Runtime WebSocket、三个History HTTP route与exact App Control/credential client；
+Trust是用户在场的两阶段barrier，不能要求用户在Worker capability TTL内决定。Runtime尚未连接时若carrier以pre-dispatch
+401拒绝App Control request，connector只重新ensure/discover exact Worker identity并重发同一request一次；401在body decode/
+mutation gate前返回，因此不是mutation replay。response丢失、5xx、第二次401、identity drift或Runtime active后仍不自动重发。
 connection从不取得control token。每个HTTP请求绑定发起时的Service instance与connector identity generation，旧instance
 迟到响应在reconnect后拒绝；Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History
 transcript逐条复用closed`RuntimeClientEvent`validator，unknown或带额外字段的event不能跨Native边界。client close只
