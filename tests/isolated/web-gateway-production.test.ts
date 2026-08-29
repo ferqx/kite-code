@@ -118,7 +118,7 @@ describe('production Web Gateway composition', () => {
     const directory = await transport.listDirectory();
     expect(directory.workspaces).toEqual([
       {
-        workspaceId: workspace.workspaceDigest,
+        workspaceId: 'worker-scope-production',
         label: workspace.projectId,
         sessions: [
           {

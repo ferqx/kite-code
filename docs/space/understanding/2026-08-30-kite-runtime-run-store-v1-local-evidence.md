@@ -47,7 +47,7 @@ uncertain/corrupt refusal、Coordinator stop/status 与 acquire 之间的并发 
 | 15-workspace typecheck | passed | root 与 15 个 workspace 全部通过 |
 | 15-workspace build | passed | 全部 workspace 通过；最终候选构建再次编译 release production entrypoints |
 | runtime package/static/docs gates | passed | runtime packages、pre-release architecture、core boundary、test ownership、Agent API packages、docs impact 与 docs |
-| default tests | baseline exception | 本任务相关 target 通过；只复现既有 `web-gateway-production.test.ts` 的 `workspaceId` 期望差异，本任务未吸收该无关改动 |
+| default tests | passed | 359 个 workspace test files、99 个 integration files、61 个 isolated files 全部通过；Web Gateway production fixture 已按 current authority 使用 opaque `workerScopeId` 作为 `workspaceId` |
 | aggregate implementation suite | 3403 pass / 4 skip | 并行资源争用导致 2 个环境性失败；相关 Coordinator fd/readiness 与 POSIX supervisor 文件串行复跑为 22 pass / 1 skip / 0 fail |
 | runtime fault | 36 pass / 0 fail | `bun run test:runtime:fault` |
 | runtime CI-profile soak | 7/7 passed | canonical report digest `sha256:10a3c8bd419d95c14d741c10c25341cbf9c1b711c0c1b5e5465178a8bbda00d1`；不是 formal qualification |
