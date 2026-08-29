@@ -58,6 +58,10 @@ Public History page还受1 MiB encoded response上限：adapter只在已取得�
 `sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
 或把超限安全前缀整体降成503。
 
+KRSRUN-01A的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或现有
+Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在Store 8尚未cutover前，Web/Agent History
+仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
+
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不
 终止Session，replacement client可从同一SQLite authority继续读取；Service restart仍由唯一Store恢复。当前这些是本机

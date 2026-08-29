@@ -44,6 +44,7 @@ export {
   createSqliteRuntimeCompatibilityWriter,
   discoverSqliteRuntimeCompatibilitySource,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
+  SQLITE_RUNTIME_RUN_MIGRATION_SOURCE_PROFILE,
   type SqliteRuntimeCompatibilityEvent,
   type SqliteRuntimeCompatibilityFilePreimage,
   type SqliteRuntimeCompatibilityImportResult,
@@ -125,6 +126,8 @@ export {
   assertWorkspaceSqliteRuntimeStoreConnection,
   defaultSqliteRuntimeJournalMode,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
@@ -143,16 +146,23 @@ export {
   type SqliteRuntimeWorkspaceBinding,
 } from './preflight.js';
 export {
+  assertSqliteRuntimeRunStoreConnection,
+  createSqliteRuntimeRunStore,
+  type SqliteRuntimeRunStoreInput,
+} from './run-store';
+export {
   assertSqliteSessionMetadataCanOpen,
   createSqliteSessionTokenStats,
   type SessionTokenStats,
   type SqliteSessionMetadataInput,
 } from './session-metadata.js';
 export {
+  createSqliteRuntimeRunProfile,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
   createSqliteWorkspaceRuntimeProfile,
   SQLITE_RUNTIME_DDL,
+  SQLITE_RUNTIME_RUN_DDL,
   SQLITE_WORKSPACE_RUNTIME_DDL,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,

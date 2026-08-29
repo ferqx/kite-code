@@ -29,6 +29,9 @@ export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-server-v1-2026-08-26' a
 export const SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION = 7;
 export const SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH =
   'kite-coordinator-workspace-worker-web-v1-2026-08-28' as const;
+/** Store 8 is an unpublished Run-authority target until generation migration completes. */
+export const SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION = 8;
+export const SQLITE_RUNTIME_RUN_FORMAT_EPOCH = 'kite-agent-server-api-v1-2026-08-29' as const;
 export type SqliteRuntimeJournalMode = 'wal' | 'delete';
 
 export interface SqliteRuntimeWorkspaceBinding {
@@ -138,7 +141,7 @@ export interface SqliteRuntimeStorageInput<Event = unknown, State = unknown> {
   readonly options?: SqliteRuntimeStorageOptions;
   /** Optional session boundary to check before the write connection is opened. */
   readonly sessionId?: string;
-  /** Store 7 opt-in binding. Omit to retain the current Store 6 authority. */
+  /** Store 7/8 opt-in binding. Omit to retain the current Store 6 authority. */
   readonly workspaceBinding?: SqliteRuntimeWorkspaceBinding;
   /** Active generation authority required when reopening an existing Store 7 writer. */
   readonly workspaceLayout?: SqliteRuntimeLayoutPaths;

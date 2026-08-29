@@ -6,6 +6,7 @@ import type {
   RuntimeCommandCommitEvidence,
   RuntimeStoredCommandReceipt,
 } from '../storage';
+import { assertRuntimeStoredCommandResourceResult } from '../storage';
 
 const APPLIED_RECEIPT_KEYS = ['commandId', 'revision', 'sessionId', 'status'] as const;
 
@@ -174,6 +175,9 @@ function assertReceiptRecord(record: RuntimeStoredCommandReceipt): void {
   }
   if (!Number.isSafeInteger(record.committedAt) || record.committedAt < 0) {
     throw new Error('Runtime command receipt committed time is invalid.');
+  }
+  if (record.resourceResult !== undefined) {
+    assertRuntimeStoredCommandResourceResult(record.resourceResult);
   }
 }
 

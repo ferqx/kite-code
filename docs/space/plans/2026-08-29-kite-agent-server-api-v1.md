@@ -32,8 +32,9 @@ pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/ag
 fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
 Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；Web release已逐字节装入
 canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。Public-codec reference client已在handler及真实Worker listener上关闭
-auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。当前执行入口为KASAPI-03A子计划KRSRUN-01A neutral Run
-storage contract与Store 8 schema；仍不创建Run mutation或发布`runs`capability。
+auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。KRSRUN-01A neutral Run storage contract与unpublished Store 8
+schema/preflight已经完成；当前执行入口为KASAPI-03A子计划KRSRUN-01B Host start/lifecycle/resource receipt原子事务。仍不创建Run mutation或
+发布`runs`capability。
 
 ## 1. 执行结论
 

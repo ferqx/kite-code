@@ -4,12 +4,17 @@ import type {
   ListRuntimeLogSessionsRequest,
   RuntimeLogErrorCode,
 } from '@kite-ai/runtime-contract';
+import {
+  assertRuntimeStoredCommandResourceResult,
+  type RuntimeStoredCommandResourceResult,
+} from './runtime-run';
 
 export {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
   RuntimeLogRequestValidationError,
 } from '@kite-ai/runtime-contract';
+export * from './runtime-run';
 
 /**
  * Persistence contracts owned by Runtime Host.
@@ -107,6 +112,7 @@ export interface RuntimeStoredCommandReceipt extends RuntimeCommandReceiptLookup
   readonly originalReceiptJson: string;
   readonly committedRevision: number;
   readonly committedAt: number;
+  readonly resourceResult?: RuntimeStoredCommandResourceResult;
 }
 
 export type RuntimeCommandReceiptLookup =
@@ -127,6 +133,7 @@ export interface RuntimeCommandReceiptPort {
 export interface RuntimeCommandCommitEvidence extends RuntimeCommandReceiptLookupInput {
   readonly targetSessionId: string;
   readonly committedAt: number;
+  readonly resourceResult?: RuntimeStoredCommandResourceResult;
 }
 
 export function createRuntimeStoredCommandReceipt(
@@ -145,6 +152,9 @@ export function createRuntimeStoredCommandReceipt(
   if (!Number.isSafeInteger(committedRevision) || committedRevision < 0) {
     throw new Error('Runtime command receipt committed revision is invalid.');
   }
+  if (evidence.resourceResult !== undefined) {
+    assertRuntimeStoredCommandResourceResult(evidence.resourceResult);
+  }
   const originalReceipt: RuntimeAppliedCommandReceipt = Object.freeze({
     status: 'applied',
     commandId: evidence.commandId,
@@ -159,6 +169,9 @@ export function createRuntimeStoredCommandReceipt(
     originalReceiptJson: JSON.stringify(originalReceipt),
     committedRevision,
     committedAt: evidence.committedAt,
+    ...(evidence.resourceResult === undefined
+      ? {}
+      : { resourceResult: Object.freeze({ ...evidence.resourceResult }) }),
   });
 }
 

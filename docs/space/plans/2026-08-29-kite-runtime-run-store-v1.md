@@ -14,9 +14,10 @@
 
 ## 1. 执行状态与边界
 
-KRSRUN-00A随KASAPI-00C完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
-offline generation migration已经冻结。父计划KASAPI-02D read-only conformance Gate已关闭；当前执行入口为KRSRUN-01A neutral Run storage
-contract与Store 8 schema。KRSRUN-01A～03B完成前仍不得开放Run route或声明ServerInfo `runs`capability，也不得在Store 7做partial实现。
+KRSRUN-00A～01A已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
+offline generation migration已经冻结；neutral Host storage contract及unpublished Store 8 exact schema/preflight/same-connection port也已实现。
+当前执行入口为KRSRUN-01B Host start/lifecycle/resource receipt原子事务。KRSRUN-01B～03B完成前仍不得开放Run route或声明ServerInfo
+`runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
 Run routes与crash qualification。
@@ -90,7 +91,13 @@ Gate：docs/plan matrix通过；零production source/Store变化；current Store
 
 Rollback：删除未接受文档并保持KASAPI-03 blocked。
 
-### KRSRUN-01A：Neutral Run storage contract与Store 8 schema
+### KRSRUN-01A：Neutral Run storage contract与Store 8 schema（已完成）
+
+完成证据：`runtime-host/storage`新增Session-scoped Run row、ASC keyset page、insert/transition、closed terminal与canonical receipt resource-result
+contract，Host仍无SQLite/Bun import。SQLite新增unpublished State 27 / Store 8 exact profile、11-table/3-index DDL、coverage boundary、
+resource-result triple、foreign key与same-connection Run port；preflight逐row验证binding/lifecycle/terminal/result digest并双向拒绝Store 7/8。
+普通compatibility importer仍只有两个Store 5 source，Store 7仅由offline Run migration source常量标识。Host 197 pass/1 skip、SQLite 76 pass；
+未改`adapter.ts` production profile、active layout/Worker/ServerInfo或Public route。
 
 目标文件：
 

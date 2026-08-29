@@ -9,6 +9,9 @@
 - 是唯一 Runtime execution owner：管理每个 Session mailbox、revision conflict、scoped idempotent command replay 与 durable notification。
 - 管理 attempt acknowledgement、effect lease、cancellation、cleanup 和 restart recovery。
 - 拥有 persistent scoped command receipt 的验证与 replay decision；Store 负责持久记录的原子落盘，bridge/Server/Client 不得推断或另建 receipt authority。
+- `/storage`已定义SQLite-neutral `RuntimeStoredRun`、ASC keyset query/page、insert/transition port、closed terminal detail与可选
+  receipt resource result。该contract只冻结Store 8 mechanism shape；Host start/activation/interaction/terminal transaction尚未接入，
+  不能据此发布Run query/mutation或建立第二lifecycle owner。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
 - 接收 Runtime Server 的进程内 `RuntimeCommandContext`，在 Host inspect/commit 到 prepared execution bridge 时保持同一冻结
   connection/request/binding identity；Host 不把它序列化、不从 Session 反查 Worker binding，也不持有 Worker credential。
@@ -39,10 +42,12 @@
   删除后 registry/lifecycle 不得再 flush snapshot 重建该 Session。
 - command context 不是新的 Runtime authority：只有 App-owned admission 可以提供 opaque binding reference；Worker effect composition
   必须按该 reference 与当前 Controller/resource authority 验证，缺失或漂移时 fail closed。
+- Run neutral validator固定phase/status、Session-scoped identity、origin pair、revision/time monotonic与terminal closed shape；resource result固定
+  schema/canonical JSON/digest triple。现有Store 6/7 receipt writer会拒绝携带resource result，直到Store 8 Host transaction在KRSRUN-01B接入。
 
 ## 测试
 
-`bun test packages/runtime-host/test`
+`bun test packages/runtime-host/test`（当前197 pass、1 skip；含neutral Run/receipt-result contract）
 
 ## 文档影响
 

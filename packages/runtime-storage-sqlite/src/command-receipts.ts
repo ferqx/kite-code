@@ -29,6 +29,11 @@ export function assertSqliteRuntimeCommandReceipt(
   transactionSessionId?: string,
   committedRevision?: number,
 ): void {
+  if (receipt.resourceResult !== undefined) {
+    throw new SqliteRuntimeCommandReceiptValidationError(
+      'Runtime command resource result requires the Store 8 receipt writer.',
+    );
+  }
   assertReceiptText(receipt.scopeSessionId, 'scope session identity');
   assertReceiptText(receipt.commandId, 'command identity');
   assertReceiptText(receipt.targetSessionId, 'target session identity');

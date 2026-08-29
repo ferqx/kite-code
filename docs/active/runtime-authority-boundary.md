@@ -82,6 +82,11 @@ revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-
 Web Gateway的`/api-docs`只读取candidate内固定OpenAPI静态资产，不建立Agent context、Runtime logical connection、Coordinator/Worker
 discovery或Store query，也不提供execute control；因此该参考页不是新的RuntimeAccess、data plane或Browser Controller surface。
 
+KRSRUN-01A已在`runtime-host/storage`冻结neutral Run row/query/page/insert/transition及receipt resource-result contract，并在SQLite owner内实现
+未发布的State 27 / Store 8 exact schema/preflight/same-connection Run port。它尚未接入Host transaction、`RuntimeStorage` production
+composition、active layout或Worker：current writer仍是Store 7，ServerInfo仍不含`runs`。Store 6/7 receipt writer明确拒绝resource result，
+Store 7与Store 8 preflight双向拒绝；因此该target不是第二RuntimeAccess、optional Store 7 DDL或fallback。
+
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
 instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、

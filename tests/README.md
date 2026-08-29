@@ -96,6 +96,11 @@ KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 - `packages/runtime-host/test/command-receipt.test.ts`、`persistent-command-host.test.ts`、`persistent-command-crash-windows.test.ts`
 - `packages/runtime-storage-sqlite/test/compatibility-store.test.ts`、`store-conformance.test.ts`
 
+KRSRUN-01A另由`packages/runtime-host/test/runtime-run-store.test.ts`与
+`packages/runtime-storage-sqlite/test/run-store.test.ts`固定neutral Run/receipt-result contract、Store 8 exact marker/11-table/3-index/foreign-key
+shape、coverage/lifecycle/keyset/query-plan、Store 7双向拒绝及unknown/missing DDL、terminal/result drift negatives。该suite只证明unpublished
+mechanism target；不证明Host atomic lifecycle、migration、Worker reopen或Public `runs` capability，后者仍由KRSRUN-01B～03B拥有。
+
 这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
 replay 与 Store 5 source-only import；完整 durable history由SQLite log-query、
 `apps/kite-service/test/runtime-history-client.test.ts`和Session persistence/format PTY journeys验证全量分页、已选
