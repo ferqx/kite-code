@@ -52,6 +52,9 @@ source/installed POSIX Worker由Coordinator保留owner-held child-exit handle；
 instance/PID/start-token在同一scope串行清理reservation、registry与process state，避免stale descriptor存活到数值PID被复用。
 这不放宽restart恢复：Coordinator进程重启后若没有原child handle，PID reuse仍是identity uncertain，禁止cleanup/spawn。
 Windows runner必须提供等价native handle evidence且通过hosted qualification后才能宣称相同行为。
+source/installed client的ensure若撞上同一Coordinator内旧Worker正在drain，会在manager的per-scope operation deadline内等待
+exact child exit，完成cleanup后直接启动replacement；不会要求用户重复运行CLI/TUI。超时或proof不匹配仍fail closed，且不
+重复spawn。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一immutable companion bundle所需的CLI/TUI/Service/Coordinator/Worker/Gateway/Web、

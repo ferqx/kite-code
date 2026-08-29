@@ -177,6 +177,9 @@ Coordinator对自己spawn的native Worker保留exact child-exit handle；exit re
 下一次TUI，也不会因数值PID随后被无关进程复用而永久blocked。该proof只来自owner-held child handle且必须与当前内存record
 完全一致；Coordinator重启后没有该handle时，PID reuse/unknown仍保持fail closed，不据此清理或spawn。Windows runner只有在
 提供等价native process-handle exit proof时才能取得该行为，hosted Windows qualification仍pending。
+新ensure若与旧Worker的idle drain并发，manager不会立刻返回transient failure：在同一scope串行区内最多等待既有operation
+deadline，让owner-held exit promise收敛，随后用exact proof cleanup并直接spawn replacement。deadline内未取得proof仍返回
+outcome-unknown且不清理、不spawn；该等待不改变Coordinator restart后无handle时的PID-reuse fail-closed边界。
 
 ## Fault、release 与平台 evidence 边界
 

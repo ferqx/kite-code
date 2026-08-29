@@ -289,6 +289,10 @@ interface ManagedWorker {
   readonly statePublished: boolean;
   readonly reservation?: WorkspaceOwnerReservation;
   readonly confirmedExit?: WorkspaceWorkerConfirmedExitProof;
+  readonly exitObservation?: Readonly<{
+    promise: Promise<void>;
+    proof: WorkspaceWorkerConfirmedExitProof;
+  }>;
 }
 
 type ScopeLoad =
@@ -541,34 +545,52 @@ export function createWorkspaceWorkerProcessManager(
     }
   };
 
-  const observeChildExit = (child: WorkspaceWorkerProcessChild, record: ManagedWorker): void => {
-    if (!child.waitForExit) return;
+  const observeChildExit = (record: ManagedWorker): void => {
+    const observation = record.exitObservation;
+    if (!observation) return;
     const workerScopeId = record.descriptor.identity.workerScopeId;
     const workerInstanceId = record.descriptor.identity.instanceId;
-    void child
-      .waitForExit()
+    void observation.promise
       .then(() =>
         serial(workerScopeId, async () => {
           const current = records.get(workerScopeId);
           if (
             !current ||
             current.descriptor.identity.instanceId !== workerInstanceId ||
-            current.descriptor.pid !== child.pid ||
+            current.descriptor.pid !== observation.proof.workerPid ||
             current.descriptor.processStartIdentity !== record.descriptor.processStartIdentity
           ) {
             return;
           }
-          const confirmedExit = {
-            workerInstanceId,
-            workerPid: child.pid,
-            workerProcessStartIdentity: record.descriptor.processStartIdentity,
-          } satisfies WorkspaceWorkerConfirmedExitProof;
+          const confirmedExit = observation.proof;
           const exitedRecord = Object.freeze({ ...current, confirmedExit });
           records.set(workerScopeId, exitedRecord);
           await cleanupDead(exitedRecord, confirmedExit);
         }),
       )
       .catch(() => preserveFailure());
+  };
+
+  const reconcileChildExit = async (record: ManagedWorker): Promise<boolean> => {
+    const observation = record.exitObservation;
+    if (!observation) return false;
+    try {
+      await invoke(() => observation.promise, operationTimeoutMs);
+    } catch {
+      return false;
+    }
+    const current = records.get(record.descriptor.identity.workerScopeId);
+    if (
+      !current ||
+      current.descriptor.identity.instanceId !== observation.proof.workerInstanceId ||
+      current.descriptor.pid !== observation.proof.workerPid ||
+      current.descriptor.processStartIdentity !== observation.proof.workerProcessStartIdentity
+    ) {
+      return false;
+    }
+    const exitedRecord = Object.freeze({ ...current, confirmedExit: observation.proof });
+    records.set(record.descriptor.identity.workerScopeId, exitedRecord);
+    return cleanupDead(exitedRecord, observation.proof);
   };
 
   const clearLaunchCredential = async (
@@ -637,15 +659,16 @@ export function createWorkspaceWorkerProcessManager(
             operationTimeoutMs,
           ).catch(() => undefined);
           if (!identity) {
-            return result(
-              'ensure',
-              'outcome_unknown',
-              'starting',
-              existing.record.registration,
-              'outcome_unknown',
-            );
-          }
-          if (!controlIdentityMatches(existing.record.descriptor, identity)) {
+            if (!(await reconcileChildExit(existing.record))) {
+              return result(
+                'ensure',
+                'outcome_unknown',
+                'starting',
+                existing.record.registration,
+                'outcome_unknown',
+              );
+            }
+          } else if (!controlIdentityMatches(existing.record.descriptor, identity)) {
             return result(
               'ensure',
               'unavailable',
@@ -653,19 +676,22 @@ export function createWorkspaceWorkerProcessManager(
               existing.record.registration,
               'identity_uncertain',
             );
+          } else {
+            return existingWorkerResult(existing.record, request, activeLayout, 'ensure');
           }
-          return existingWorkerResult(existing.record, request, activeLayout, 'ensure');
-        }
-        if (status === 'uncertain') {
-          return result(
-            'ensure',
-            'outcome_unknown',
-            'starting',
-            existing.record.registration,
-            'identity_uncertain',
-          );
-        }
-        if (!(await cleanupDead(existing.record))) {
+        } else if (status === 'uncertain') {
+          if (await reconcileChildExit(existing.record)) {
+            // The owner-held child handle proves exit even though the numeric PID was reused.
+          } else {
+            return result(
+              'ensure',
+              'outcome_unknown',
+              'starting',
+              existing.record.registration,
+              'identity_uncertain',
+            );
+          }
+        } else if (!(await cleanupDead(existing.record))) {
           return result('ensure', 'outcome_unknown', 'starting', undefined, 'identity_uncertain');
         }
       }
@@ -931,9 +957,10 @@ export function createWorkspaceWorkerProcessManager(
         registryRegistered: true,
         statePublished: false,
         reservation,
+        exitObservation: childExitObservation(child, descriptor),
       });
       records.set(request.workerScopeId, record);
-      observeChildExit(child, record);
+      observeChildExit(record);
       await preserveFailure();
       return result('ensure', 'outcome_unknown', 'starting', registration, 'outcome_unknown');
     }
@@ -953,9 +980,10 @@ export function createWorkspaceWorkerProcessManager(
           registryRegistered: true,
           statePublished: false,
           reservation,
+          exitObservation: childExitObservation(child, descriptor),
         });
         records.set(request.workerScopeId, record);
-        observeChildExit(child, record);
+        observeChildExit(record);
         await preserveFailure();
         return result('ensure', 'outcome_unknown', 'ready', registration, 'outcome_unknown');
       }
@@ -968,9 +996,10 @@ export function createWorkspaceWorkerProcessManager(
       registryRegistered: true,
       statePublished,
       reservation,
+      exitObservation: childExitObservation(child, descriptor),
     });
     records.set(request.workerScopeId, record);
-    observeChildExit(child, record);
+    observeChildExit(record);
     return result('ensure', 'applied', 'ready', registration);
   };
 
@@ -1263,6 +1292,7 @@ function makeManagedWorker(input: {
   readonly statePublished: boolean;
   readonly reservation?: WorkspaceOwnerReservation;
   readonly confirmedExit?: WorkspaceWorkerConfirmedExitProof;
+  readonly exitObservation?: ManagedWorker['exitObservation'];
 }): ManagedWorker {
   return Object.freeze({
     descriptor: input.descriptor,
@@ -1273,6 +1303,22 @@ function makeManagedWorker(input: {
     statePublished: input.statePublished,
     ...(input.reservation ? { reservation: input.reservation } : {}),
     ...(input.confirmedExit ? { confirmedExit: input.confirmedExit } : {}),
+    ...(input.exitObservation ? { exitObservation: input.exitObservation } : {}),
+  });
+}
+
+function childExitObservation(
+  child: WorkspaceWorkerProcessChild,
+  descriptor: WorkspaceWorkerProcessDescriptor,
+): ManagedWorker['exitObservation'] {
+  if (!child.waitForExit) return undefined;
+  return Object.freeze({
+    promise: child.waitForExit(),
+    proof: Object.freeze({
+      workerInstanceId: descriptor.identity.instanceId,
+      workerPid: descriptor.pid,
+      workerProcessStartIdentity: descriptor.processStartIdentity,
+    }),
   });
 }
 

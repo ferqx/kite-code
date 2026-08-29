@@ -581,6 +581,26 @@ describe('Workspace Worker process manager', () => {
     expect(harness.spawnCount()).toBe(2);
   });
 
+  test('waits for an in-flight exact child drain and replaces it in the same ensure', async () => {
+    const owner = createOwnerReservationPort();
+    const harness = createHarness({ ownerReservation: owner });
+    const scope = 'scope-drain-wait';
+    const workspace = makeWorkspace('drain-wait', '7');
+    await expect(harness.manager.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+
+    harness.setDescribeIdentityFailures(1);
+    owner.held.delete(workspace.workspaceDigest);
+    setTimeout(() => harness.resolveExit(scope), 10);
+    await expect(harness.manager.ensure(ensureRequest(scope, workspace))).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(harness.spawnCount()).toBe(2);
+  });
+
   test('keeps uncertain and transient control identity recovery pending without a second spawn', async () => {
     const owner = createOwnerReservationPort();
     const harness = createHarness({ ownerReservation: owner });
