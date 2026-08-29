@@ -1,6 +1,6 @@
 # Kite Agent Server API V1 实施方案
 
-状态：draft
+状态：active
 
 日期：2026-08-29
 
@@ -17,9 +17,15 @@
 [`Coordinator、Workspace Worker 与 Web Observer 当前边界`](../../active/coordinator-workspace-worker-web.md)、
 [`Kite Code 六概念 Runtime 架构`](../../active/six-concept-runtime-architecture.md) 与各 owner workspace README/本地文档。
 
-架构前置：本计划被接受不等于授权生产实现。KASAPI-00A 必须新增并接受一份 extension/superseding ADR，明确稳定本机 Public
-Agent API 对 ADR-0142 repo-private Protocol、ADR-0147 Worker/Controller/Web 边界的局部扩展；若 Run evidence audit 判定 Store
-需要变化，还必须先接受独立 Store migration ADR。上述 Gate 未关闭前，只允许文档、只读 evidence 与 contract fixture 工作。
+架构前置：ADR-0149 已接受稳定本机 Public Agent API 对 ADR-0142 repo-private Protocol、ADR-0147 Worker/Controller/Web
+边界的局部扩展。若 Run evidence audit 判定 Store需要变化，还必须先接受独立 Store migration ADR。在00B/00C Gate关闭前，只允许
+文档、只读 evidence 与 contract fixture工作，不创建production listener。
+
+## 实施状态（2026-08-29）
+
+KASAPI-00A 已完成：ADR-0149 接受stable local REST/SSE façade、现有Runtime/Store/Controller/receipt/History单一authority、
+applied-only durable receipt replay、条件化Run Store裁决与永久只读Web API docs边界。该完成只关闭架构方向Gate，不表示contract、
+listener、Run resource、SSE或SDK已实现。当前执行入口为KASAPI-00B evidence matrix，随后是KASAPI-00C contract/integration freeze。
 
 ## 1. 执行结论
 
@@ -214,7 +220,10 @@ contract。
 
 ### Phase KASAPI-00：决策、证据与实施边界
 
-#### KASAPI-00A：ADR 与 authority freeze
+#### KASAPI-00A：ADR 与 authority freeze（已完成）
+
+完成证据：ADR-0149 已接受；RFC状态已同步为accepted，本计划进入active；current `docs/active/`未被改写为future behavior，零
+production code/listener/Store变化。
 
 交付：
 

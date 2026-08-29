@@ -1,6 +1,6 @@
 # Kite Agent Server API V1 RFC
 
-状态：draft（仅设计提案，不代表当前行为；实施前必须新增/接受 ADR，并形成 `docs/space/plans/` 可验证计划）
+状态：accepted（方向已由 ADR-0149 接受，不代表当前行为；实施以 KASAPI plan Gate 与 current authority 为准）
 
 日期：2026-08-29
 
@@ -17,6 +17,7 @@
 [`Coordinator、Workspace Worker 与 Web Observer 当前边界`](../active/coordinator-workspace-worker-web.md)、
 [`Kite Code 六概念 Runtime 架构`](../active/six-concept-runtime-architecture.md)、
 [`Kite Agent Server API V1 实施方案`](../space/plans/2026-08-29-kite-agent-server-api-v1.md)、
+[`ADR-0149`](../adr/0149-stable-local-agent-api-facade.md)、
 [`ADR-0142`](../adr/0142-runtime-server-client-protocol-boundary.md)、
 [`ADR-0144`](../adr/0144-local-runtime-service-and-multi-workspace-admission.md)、
 [`ADR-0147`](../adr/0147-kite-coordinator-workspace-worker-read-only-web.md)、
@@ -938,9 +939,9 @@ production 接入后回滚必须满足：
 5. 若发生 Store schema migration，只能按对应 migration ADR 回滚；target 出现新写入后不得自动切回 source；
 6. 不以恢复直接公开 `/rpc`、embedded Runtime fallback、第二 Store owner 或 Web mutation 作为回滚手段。
 
-## 18. 待接受决策
+## 18. 已接受方向
 
-本 RFC 建议接受以下方向，但在 ADR 前仍是 draft：
+ADR-0149 已接受以下方向；这些是后续实施边界，不表示对应production behavior已经落地：
 
 1. Kite 建立稳定的本机 Agent Server API V1；
 2. 资源名使用 `Session`/`Run`，不复制 `/threads`；
@@ -958,5 +959,5 @@ production 接入后回滚必须满足：
 12. Web Observer 增加只读 `/api-docs` 与 `/api-docs/openapi.json`，文档随 release 打包且 V1 固定无 “Try it”/execute；
 13. Store 是否变化必须由 evidence audit决定，任何变化先新增 migration ADR。
 
-通过本文不等于开始实现。接受后首先进入 KASAPI-00：形成 superseding/extension ADR、current evidence matrix、Store impact
-裁决与可验证实施计划；在这些门禁完成前，现有 Runtime/Service/Web current authority 不变。
+接受本文不等于完成实现。KASAPI-00A 已由 ADR-0149 关闭架构方向Gate；下一步是 KASAPI-00B current evidence matrix与
+KASAPI-00C Store/contract freeze。在这些门禁及后续Task完成前，现有 Runtime/Service/Web current authority 不变。
