@@ -196,6 +196,24 @@ describe('Coordinator process executable and host', () => {
       await child.readiness.release();
       const start = await readCoordinatorProcessStartIdentity(child.pid);
       expect(start).toBeString();
+      if (process.platform === 'darwin') {
+        const localizedProbe = Bun.spawn(
+          [
+            process.execPath,
+            '-e',
+            `import { readCoordinatorProcessStartIdentity } from '@kite-ai/kite-local-runtime/coordinator'; process.stdout.write(JSON.stringify(await readCoordinatorProcessStartIdentity(${child.pid})));`,
+          ],
+          {
+            cwd: process.cwd(),
+            env: { ...process.env, LC_ALL: 'zh_CN.UTF-8', LANG: 'zh_CN.UTF-8' },
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
+        const localizedOutput = await new Response(localizedProbe.stdout).text();
+        expect(await localizedProbe.exited).toBe(0);
+        expect(JSON.parse(localizedOutput)).toBe(start);
+      }
       expect(
         await createCoordinatorProcessPort().inspect({
           pid: child.pid,

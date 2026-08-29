@@ -42,6 +42,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   transport、OS peer verification与process lifecycle仍由上层 owner 注入。
 - manager只在PID明确dead且exact identity仍匹配时cleanup；alive/uncertain、malformed state、handshake mismatch与unknown stop
   outcome均fail closed，不kill、不spawn replacement、不回显descriptor identity。
+- macOS PID/start identity使用fixed `/bin/ps -o lstart=`并由primitive强制`LC_ALL=C`/`LANG=C`；不能继承调用方
+  interactive shell locale。否则同一进程在中文locale会投影不同字符串并被误判为identity uncertain。Linux继续使用
+  boot ID + `/proc` start ticks，Windows继续使用native process creation time。
 - status对完整absent返回`applied + absent + not_running`；若只剩descriptor/instance-lock stale evidence，必须先由process
   probe确认PID dead并完成exact stale cleanup，才能返回同一canonical absence。alive/uncertain不清理且不伪造absence。
 - 不依赖 Runtime Host/Server/Builtin/SQLite、React、Ink或任何`apps/*`。

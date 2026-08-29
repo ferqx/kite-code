@@ -42,6 +42,9 @@ POSIX carrier 从已校验的 Kite home 派生 owner-only Unix socket；Windows 
 不携带 socket/pipe path，平台不可用时返回 typed `unsupported`，不会退回 TCP。carrier 只负责本地 peer identity、length-prefixed
 bounded frame、handshake deadline、单连接队列和 partial/malformed/oversized/overflow fail-closed；registry 只保存 Worker
 identity、path-free Session metadata、directory revision 与 Gateway singleton。
+macOS Coordinator/Worker process identity的`ps lstart`读取固定使用`LC_ALL=C`与`LANG=C`，不继承TUI/CLI shell locale；
+`zh_CN.UTF-8`等本地化输出不能使同一PID/start token在descriptor writer与client probe之间漂移。该规范化只稳定OS
+identity读取，不把PID数值本身升级为cleanup authority；token不匹配、读取失败或PID reuse仍保持uncertain/fail closed。
 
 这些仍由 `kite-local-runtime` 作为 Native-only primitive 提供；`apps/kite-service/src/coordinator/production.ts` 现在把它们与
 Coordinator process main、Worker/Gateway process manager、Catalog active-layout admission、共享 registry 和 release entrypoint

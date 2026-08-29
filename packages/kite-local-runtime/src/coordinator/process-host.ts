@@ -434,6 +434,9 @@ async function readDarwinProcessStartIdentity(pid: number): Promise<string | und
       timeout: 1_000,
       maxBuffer: 4_096,
       windowsHide: true,
+      // `ps lstart` is localized on macOS. Process identity must be stable across the user's
+      // interactive shell locale and the neutral Coordinator child environment.
+      env: { LC_ALL: 'C', LANG: 'C' },
     });
     const value = result.stdout.trim();
     return value.length === 0 ? undefined : `darwin:${value}`;
