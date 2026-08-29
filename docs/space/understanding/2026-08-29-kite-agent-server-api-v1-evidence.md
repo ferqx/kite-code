@@ -10,6 +10,10 @@
 [`Kite Agent Server API V1 RFC`](../../design/2026-08-29-kite-agent-server-api-v1-rfc.md)、
 [`Kite Agent Server API V1 实施方案`](../plans/2026-08-29-kite-agent-server-api-v1.md)。
 
+后续裁决：KASAPI-00C已由[`Public contract freeze`](2026-08-29-kite-agent-server-api-v1-contract-freeze.md)关闭exact Public选择，并由
+[`ADR-0150`](../../adr/0150-store-8-canonical-runtime-run-index.md)与
+[`Runtime Run Store V1子计划`](../plans/2026-08-29-kite-runtime-run-store-v1.md)接受State 27 / Store 8迁移；本文仍保留00B源码证据。
+
 ## 1. 审计结论
 
 KASAPI-00B 对 current command、State/event、receipt、Store 7、History、subscription、Worker capability 与 Controller/effect chain

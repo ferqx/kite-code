@@ -17,7 +17,9 @@
 [`Coordinator、Workspace Worker 与 Web Observer 当前边界`](../active/coordinator-workspace-worker-web.md)、
 [`Kite Code 六概念 Runtime 架构`](../active/six-concept-runtime-architecture.md)、
 [`Kite Agent Server API V1 实施方案`](../space/plans/2026-08-29-kite-agent-server-api-v1.md)、
+[`Public contract freeze`](../space/understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)、
 [`ADR-0149`](../adr/0149-stable-local-agent-api-facade.md)、
+[`ADR-0150`](../adr/0150-store-8-canonical-runtime-run-index.md)、
 [`ADR-0142`](../adr/0142-runtime-server-client-protocol-boundary.md)、
 [`ADR-0144`](../adr/0144-local-runtime-service-and-multi-workspace-admission.md)、
 [`ADR-0147`](../adr/0147-kite-coordinator-workspace-worker-read-only-web.md)、
@@ -33,6 +35,9 @@
 > 本 RFC 只提出未来稳定 Agent API 的产品和架构方向。当前生产事实仍是 repo-private Runtime Protocol、Native
 > client/carrier、Coordinator/Workspace Worker 与只读 Web Observer。本文不授权公网监听、多用户托管、Browser mutation、
 > 第二 Runtime/Store owner、raw Runtime/SQLite 访问或绕过现有 Native admission。
+
+> 本文第7～11节保留accepted design草案与当时待裁决项。KASAPI-00C之后，exact status/header/auth/pagination/error/SSE/compatibility以
+> [`Public contract freeze`](../space/understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)为实现输入；冲突处以后者为准。
 
 ## 1. 执行摘要
 

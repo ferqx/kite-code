@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-29（新增 Kite Agent Server API V1 draft 实施方案）
+最后更新：2026-08-29（Kite Agent Server API V1 完成00C contract freeze并登记Run Store子计划）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,7 +19,8 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
-| [`2026-08-29-kite-agent-server-api-v1.md`](2026-08-29-kite-agent-server-api-v1.md) | active | P1 | ADR-0149、KRSV1/KCWW 与当前 Runtime/Store/Controller/Web authority | 在 private Runtime Protocol 之上新增 stable local REST/SSE façade；不开放 remote、Browser mutation、public `/rpc` 或第二 Runtime/Store | KASAPI-00A～00B已完成；evidence裁决first-class Run需要新Store migration ADR，SSE cursor可复用revision/sequence。当前执行00C contract/integration freeze，后续实现Task继续受Gate约束 |
+| [`2026-08-29-kite-agent-server-api-v1.md`](2026-08-29-kite-agent-server-api-v1.md) | active | P1 | ADR-0149/0150、KRSV1/KCWW 与当前 Runtime/Store/Controller/Web authority | 在 private Runtime Protocol 之上新增 stable local REST/SSE façade；不开放 remote、Browser mutation、public `/rpc` 或第二 Runtime/Store | KASAPI-00A～00C已完成；exact Public contract/integration manifest已冻结。当前执行01A contract package；Run mutation继续被Store 8子计划与02D Gate阻断 |
+| [`2026-08-29-kite-runtime-run-store-v1.md`](2026-08-29-kite-runtime-run-store-v1.md) | active（implementation blocked until KASAPI-02D） | P1 | ADR-0150、KASAPI-00C/02D、Store 7 current authority | KASAPI-03A子计划：State 27 / Store 8 canonical Run index、receipt resource result、coverage boundary与offline generation migration | KRSRUN-00A文档freeze已完成；01A～03B等待父计划read-only Gate，不开放Store 7 partial Run或历史event推断回填 |
 | [`2026-08-28-kite-coordinator-workspace-worker-web-v1.md`](2026-08-28-kite-coordinator-workspace-worker-web-v1.md) | active | P1 | KLSV1/KRSV1、ADR-0147/0148、当前 Runtime/Store/Workspace Trust/Release/TUI authority | Coordinator control plane、per-Workspace Store7 Worker/Controller/effect authority、atomic Session create、默认 CLI/TUI cutover与永久只读 Web Observer/Gateway 已实现；macOS arm64 installed candidate smoke通过 | KCWW-01～08实现与本地Gate已闭合；Web无任何mutation/Controller surface。Linux/Windows hosted process/filesystem/release qualification仍待远端证据，不能用本机结果替代 |
 | [`2026-08-27-kite-local-runtime-service-v1.md`](2026-08-27-kite-local-runtime-service-v1.md) | active | P1 | KRSV1 completion、ADR-0053/0129/0139/0140/0141/0142/0143/0144、当前 Runtime/Workspace Trust/Log Query/Release authority | 将 `apps/kite` 拆为 terminal-only `kite-cli` 与唯一 Runtime root `kite-service`，新增 browser-safe App contract 和 Native local-runtime substrate；不实现 Browser/Desktop、通用多 Store 或 OS Service | KLSV1-00～06 已完成至唯一owner/default Store clean cutover；KLSV1-07本地fault/soak/PTY/macOS arm64 release Gate已通过，等待当前实现head的GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025真实evidence；KLSV1-08未开始 |
 | [`2026-08-26-kite-runtime-server-v1.md`](2026-08-26-kite-runtime-server-v1.md) | archived | P1 | ADR-0142、ADR-0053/0129/0137/0138/0140/0141、当前 Runtime/Store/Log Query authority | 接管 LOGWEB-05～09 的 listener/auth/App carrier authority 并关闭旧任务；保留 LOGWEB-00～04 query-only 产出，HTTP/SSE/Web UI 不迁入 | KRSV1-00～10 全部完成；封闭 Protocol、transport-neutral Server/Client、TUI/CLI InProcess 单路径、原子持久 receipt、stdio 与 development-only WebSocket qualification；[完成记录](../execution/completed/2026-08-26-kite-runtime-server-v1.md) |
