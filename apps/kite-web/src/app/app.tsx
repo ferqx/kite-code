@@ -1,4 +1,4 @@
-import { Circle, Menu, PlugZap, Radio, Unplug } from 'lucide-react';
+import { BookOpen, Circle, Menu, PlugZap, Radio, Unplug } from 'lucide-react';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { SessionSidebar } from '@/components/session/session-sidebar';
 import { MessageList } from '@/components/timeline/message-list';
@@ -261,6 +261,13 @@ export function App(props: AppProps = {}) {
             />
             <span className="hidden sm:inline">{state.connection.status.replace('_', ' ')}</span>
           </div>
+          <a
+            href="/api-docs"
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-surface hover:text-foreground"
+          >
+            <BookOpen className="size-3.5" />
+            <span className="max-sm:hidden">API docs</span>
+          </a>
           <Separator className="h-6 w-px" />
           <Button
             onClick={() => void disconnect()}

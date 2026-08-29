@@ -70,7 +70,8 @@ describe('ordinary open-source candidate archive', () => {
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     });
-    expect(verified.files.size).toBe(18);
+    expect(verified.files.size).toBe(19);
+    expect(verified.files.has('payload/web/api-docs/openapi.json')).toBe(true);
     expect(verified.manifest.releaseSlots).toEqual(
       expect.objectContaining({
         coordinator: {
@@ -154,6 +155,22 @@ describe('ordinary open-source candidate archive', () => {
     });
     await expect(verifyOssCandidate(`${fixture.root}/aliased-web.tar.gz`)).rejects.toThrow(
       'fixed payload path',
+    );
+  });
+
+  test('rejects a Web payload without the bundled Agent API contract', async () => {
+    const fixture = await createFixture('0.1.0');
+    const manifest = structuredClone(fixture.manifest);
+    manifest.files = manifest.files.filter(
+      (entry) => entry.path !== 'payload/web/api-docs/openapi.json',
+    );
+    const files = new Map(fixture.files);
+    files.delete('payload/web/api-docs/openapi.json');
+    const archivePath = `${fixture.root}/missing-agent-api-contract.tar.gz`;
+    await writeOssCandidateArchive({ archivePath, manifest, files });
+
+    await expect(verifyOssCandidate(archivePath)).rejects.toThrow(
+      'missing its bundled Agent API contract',
     );
   });
 

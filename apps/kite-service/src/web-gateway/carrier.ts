@@ -1205,9 +1205,13 @@ function safeAssetPath(root: string, pathname: string): string | undefined {
     return undefined;
   }
   if (decoded.includes('\0') || decoded.includes('\\')) return undefined;
-  const relativeName = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/u, '');
+  const relativeName =
+    decoded === '/' || decoded === '/api-docs' || decoded === '/api-docs/'
+      ? 'index.html'
+      : decoded.replace(/^\/+/u, '');
   if (
     relativeName !== 'index.html' &&
+    relativeName !== 'api-docs/openapi.json' &&
     !/^assets\/[A-Za-z0-9_-]+\.(?:css|ico|js|mjs|png|svg|woff2)$/u.test(relativeName)
   ) {
     return undefined;

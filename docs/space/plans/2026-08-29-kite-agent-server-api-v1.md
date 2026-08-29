@@ -24,14 +24,15 @@ Run mutation在该子计划和KASAPI-02D关闭前保持blocked；contract与read
 
 ## 实施状态（2026-08-30）
 
-KASAPI-00A～02B 已完成：ADR-0149 接受stable local façade；
+KASAPI-00A～02C 已完成：ADR-0149 接受stable local façade；
 [`current evidence matrix`](../understanding/2026-08-29-kite-agent-server-api-v1-evidence.md) 证明`turnId`是唯一Run identity候选，但current
 Store 7缺少first-class Run index/resource receipt；
 [`Public contract freeze`](../understanding/2026-08-29-kite-agent-server-api-v1-contract-freeze.md)已关闭auth/idempotency/Controller/
 pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/agent-api-contract`已实现browser-safe closed DTO/codec/limits/
 fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
-Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；当前执行入口为KASAPI-02C
-release-bundled static `/api-docs`，不创建Run mutation。
+Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；Web release已逐字节装入
+canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。当前执行入口为KASAPI-02D read-only conformance/fault Gate，
+仍不创建Run mutation。
 
 ## 1. 执行结论
 
@@ -363,7 +364,13 @@ projector负向语料保持一致。
 
 Rollback：删除read routes/adapter，不改变Store/Runtime。
 
-#### KASAPI-02C：Release-bundled `/api-docs`
+#### KASAPI-02C：Release-bundled `/api-docs`（已完成）
+
+完成证据：Vite build从committed canonical OpenAPI以asset emission逐字节生成固定`api-docs/openapi.json`，因此本地`dist`与release覆盖
+output directory使用同一路径；Gateway只允许`/api-docs`、尾斜杠、精确OpenAPI JSON及原有hashed assets，未知deep link保持404。
+入口在Observer App bootstrap前选择reference renderer；页面不发现Worker、不保存credential、不发送Agent API request，也没有form、Try it或
+execute control，只显示placeholder endpoint和availability未确认。Gateway测试覆盖CSP/no-store/content type/deep-link，Web测试覆盖routing、
+no-control与same-origin `credentials: omit`加载；candidate builder/verifier/installer/smoke共同要求manifest绑定的contract asset。
 
 交付：构建时把KASAPI-01B OpenAPI artifact复制到immutable Web assets；Gateway新增`/api-docs` deep link与
 `/api-docs/openapi.json` static route；renderer关闭execute/Try it，使用placeholder endpoint/capability，无remote CDN/script。

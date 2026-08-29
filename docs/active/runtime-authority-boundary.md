@@ -76,6 +76,8 @@ initialize/query-only in-process Runtime Client/Server logical connection。Serv
 History page与Checkpoint list/preview经Service-owned safe ports可达，其他resource/mutation仍404。same-connection Store 7 page port只做bounded
 keyset/sequence read，不开放SQLite/State concrete或新connection/DDL。context close/Trust撤销/expiry/generation fence不取消Runtime work；
 controller role不绕过Store 7 Controller lease或`bindingReference`。
+Web Gateway的`/api-docs`只读取candidate内固定OpenAPI静态资产，不建立Agent context、Runtime logical connection、Coordinator/Worker
+discovery或Store query，也不提供execute control；因此该参考页不是新的RuntimeAccess、data plane或Browser Controller surface。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

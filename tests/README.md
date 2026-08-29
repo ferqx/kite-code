@@ -16,8 +16,9 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
   sandbox/session logging、Service shell与carriers；Coordinator/Worker/Web Gateway/Web Observer production composition、
   idle Worker的active Store 7 query-only History（含source字节/sidecar不变与wrong-scope负测）、
   process、Store 7、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
-- `apps/kite-web/test/`：Browser observer presentation/reducer 与 browser-safe DTO consumer；不得引入 Native、Host、
-  Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
+- `apps/kite-web/test/`：Browser observer presentation/reducer、browser-safe DTO consumer与静态Agent API reference；后者固定验证
+  `/api-docs` routing、无form/execute control、same-origin no-credential artifact读取及availability未确认状态。该workspace不得引入
+  Native、Host、Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
 - `packages/kite-local-runtime/test/manager/`：manager lifecycle、Native process/state/lock/environment与authenticated
   instance handshake；manager不再以App-private source留在Service workspace。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
@@ -70,7 +71,8 @@ byte-exact generation；独立
 bounded Session/History/Checkpoint adapter，包括page-local Runtime join、cursor checksum/filter、History through/boundary invalidation、
 Checkpoint path non-disclosure与pending logical connection drain；Worker application/foreground和isolated carrier tests证明每个context复用private
 in-process Runtime Client/Server、HTTP仍复用同一listener且private routes不接受Public context。SQLite owner tests另验证same-connection
-Session/History/Checkpoint page、advancing keyset与corrupt snapshot fail closed。
+Session/History/Checkpoint page、advancing keyset与corrupt snapshot fail closed。Web Gateway isolated carrier test另固定验证
+`/api-docs` HTML deep link、精确OpenAPI JSON allowlist、CSP/no-store/content-type与未知deep link 404；release tests拒绝缺少该contract asset的候选包。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact

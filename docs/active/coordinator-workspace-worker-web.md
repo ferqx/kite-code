@@ -151,6 +151,11 @@ directory/history/disconnect。`apps/kite-service/src/web-gateway/production.ts`
 `scripts/release/local-coordinator-client.ts` 与 CLI/TUI entrypoints 提供显式 lifecycle/discovery client。plain loopback 也不等同
 于 TLS、remote/LAN、hosted 或 public Web 支持，后者仍保持不支持/待 qualification。
 
+固定`/api-docs`与尾斜杠是同一Web bundle的静态deep link，`/api-docs/openapi.json`是唯一新增allowlisted docs asset；两者不连接
+Web Observer core、Coordinator或Worker。Web入口在渲染Observer App前选择只读reference renderer，因此不会bootstrap browser session、
+discover Worker、mint capability或发送Agent API data-plane request。renderer无form/Try it/execute与remote CDN/script，只展示
+release-bundled canonical OpenAPI、placeholder endpoint及availability未确认；Gateway对这些响应继续使用self-only CSP、`no-store`与固定content type。
+
 Gateway正常停止存在一个有序cleanup window：child先释放自身instance lock，manager收到退出后再清parent-owned descriptor与control
 credential。Coordinator/manager若在该窗口退出，restart只可在descriptor的PID + OS start token再次confirmed dead后把“descriptor/
 credential存在、child lock缺失”作为可恢复partial state并执行exact cleanup；新Coordinator的in-memory Gateway registry为空时，清理

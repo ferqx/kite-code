@@ -16,8 +16,9 @@
 
 `@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前实现DTO、codec、limits、
 fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；
-Workspace Worker production listener、auth exchange、ServerInfo与bounded Session/History/Checkpoint read adapter已经实现；Agent API SDK、
-Store 8 Run route、mutation、SSE与Web `/api-docs` route尚未实现。package/artifact或ServerInfo存在不表示未发布resource capability ready，也不改变
+Workspace Worker production listener、auth exchange、ServerInfo与bounded Session/History/Checkpoint read adapter已经实现；canonical OpenAPI
+也已逐字节进入release Web asset并由静态`/api-docs`参考页展示。Agent API SDK、Store 8 Run route、mutation与SSE尚未实现。
+package/artifact、静态参考或ServerInfo存在不表示未发布resource capability ready，也不改变
 private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
 
 唯一root export提供snake_case的ServerInfo、Context、Session、Run、Interaction/queue、History、Checkpoint、page、mutation result、Problem
@@ -50,8 +51,10 @@ History，也不把private camelCase DTO透传为Public wire。
 - `wire.d.ts`从generated JSON Schema转换，不维护手写Public type副本；examples逐byte复制validated fixtures；
 - `digest.json`记录每个non-digest artifact的SHA-256并以domain-separated aggregate绑定完整集合；
 - generator输出canonical key order、无timestamp/absolute path/real endpoint。owner tests逐byte比较committed output并重算digest。
+- Web Vite build通过asset emission逐字节生成固定`api-docs/openapi.json`；candidate verifier、installer preflight与smoke要求
+  `payload/web/api-docs/openapi.json`存在并由manifest checksum绑定，不能从CDN、live endpoint或另一schema source生成。
 
-## KASAPI-02A～02B 当前carrier/read façade
+## KASAPI-02A～02C 当前carrier/read façade与静态参考
 
 - `/v1`复用canonical Workspace Worker现有loopback data listener；Coordinator/Gateway不代理，未创建第二listener；
 - Native-only Worker capability purpose增加`agent_api_observer|agent_api_controller`，Web Gateway不能mint；
@@ -63,8 +66,11 @@ History，也不把private camelCase DTO透传为Public wire。
 - Session list使用same-connection bounded keyset page并仅对page内ID做Runtime projection join；History固定through sequence和boundary digest，
   Checkpoint metadata按revision keyset且preview不投影path。cursor checksum只发现损坏，每次请求仍做context/Workspace/Session admission；
 - Origin/Cookie/Sec-Fetch、CORS/OPTIONS、duplicate/unknown/oversized body与credential混用fail closed，Problem不泄漏内部binding。
+- Web Gateway固定`/api-docs`及尾斜杠为静态HTML deep link，并只允许精确`/api-docs/openapi.json` artifact；renderer不启动
+  Observer/Worker discovery、不保存credential、不发送Agent API request，也没有form、Try it或execute control。CSP为self-only、cache为
+  `no-store`，placeholder endpoint不代表live endpoint；API或Worker状态只标记availability未确认。
 
 ## 后续Gate
 
-KASAPI-02C及以后接入Web docs/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
+KASAPI-02D及以后接入read conformance/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
 的Run/Interaction/SSE/mutation route提前加入ServerInfo。Run route仍被ADR-0150 Store 8 implementation与KASAPI-02D阻断。

@@ -38,6 +38,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   ServerInfo发布`checkpoints/history/sessions`，开放Session list/get、History page与Checkpoint list/preview，其他resource/mutation route保持
   404。每个context拥有一条read-only private Runtime logical connection，每请求重验Trust；Coordinator不代理data plane，Browser/Web
   Gateway不能mint或使用该context。
+- Web Gateway只为Agent API增加release-bundled静态参考：`/api-docs`与尾斜杠映射Web入口，
+  `/api-docs/openapi.json`映射candidate内的canonical artifact。该页面不发现Worker、不取得Agent context、不保存credential、
+  不提供Try it/execute；API或Worker在线状态只显示为未确认，未知docs deep link保持404。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
   才签发instance/Workspace-bound one-shot ticket，Runtime create与persisted Session identity继续交叉校验。
 - 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain，关闭carrier/application后最后
@@ -65,7 +68,8 @@ managed manager以显式absolute executable、neutral cwd、allowlisted env和de
 `kite service ensure/status/stop/restart` 控制窄lifecycle surface。
 
 OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bin/kite-coordinator`、`bin/kite-worker`、
-`bin/kite-web-gateway`（Windows为`.exe`）及 `payload/web` 静态资产；manifest、install preflight与active launcher验证都
+`bin/kite-web-gateway`（Windows为`.exe`）及 `payload/web` 静态资产；其中
+`payload/web/api-docs/openapi.json`是必需的Agent API contract asset。manifest、install preflight与active launcher验证都
 把这些 independent companion assets 绑定到 candidate identity。source mode固定解析repo内各自 entry，installed mode固定解析
 当前 candidate 的相邻 companion，不从 cwd 或 PATH 猜测。
 

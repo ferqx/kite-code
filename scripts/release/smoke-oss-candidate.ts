@@ -196,6 +196,7 @@ function assertInstalledCompanionAssets(prefix: string, manifest: OssCandidateMa
   const webFiles = manifest.files.filter((entry) => entry.path.startsWith('payload/web/'));
   if (
     !webFiles.some((entry) => entry.path === web.entrypoint) ||
+    !webFiles.some((entry) => entry.path === 'payload/web/api-docs/openapi.json') ||
     !webFiles.some((entry) => /^payload\/web\/assets\/[A-Za-z0-9_-]+\.js$/u.test(entry.path)) ||
     webFiles.some((entry) => entry.path.endsWith('.map'))
   ) {

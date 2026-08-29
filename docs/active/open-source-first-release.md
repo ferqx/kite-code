@@ -45,7 +45,8 @@ Windows ACL/write-through与三平台 qualification 仍未取得。
 ## 制品与安装
 
 `bun run release:build`为当前平台编译`kite` CLI、`kite-tui`、`kite-service`、`kite-coordinator`、`kite-worker`、
-`kite-web-gateway` companions，并生成 `payload/web` 静态资产；它们共享 candidate identity，另生成 gzip tar、严格 manifest、
+`kite-web-gateway` companions，并生成 `payload/web` 静态资产；其中固定`api-docs/openapi.json`逐字节来自canonical Agent API OpenAPI，
+是verifier、installer preflight与smoke共同要求且由manifest checksum绑定的必需asset。所有制品共享 candidate identity，另生成 gzip tar、严格 manifest、
 逐文件 SHA-256 和 archive SHA-256。checksum 是完整性信息，不是签名、notarization、provenance 或
 attestation。构建只允许当前 OS/architecture 的 native target；macOS、Linux、Windows 各自由对应
 GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime 下载替代真实平台验证。PR workflow

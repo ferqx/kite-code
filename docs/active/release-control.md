@@ -30,7 +30,8 @@ ACL/write-through与非 Windows 本地环境的 no-follow 断言也不能互相�
 ## 候选制品
 
 `bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite`、`kite-tui`、`kite-service`、
-`kite-coordinator`、`kite-worker` 与 `kite-web-gateway`，并构建 `payload/web` 静态资产，输出：
+`kite-coordinator`、`kite-worker` 与 `kite-web-gateway`，并构建 `payload/web` 静态资产；Web build从canonical contract逐字节生成必需的
+`payload/web/api-docs/openapi.json`，输出：
 
 - gzip tar 候选包；
 - exact-key JSON manifest，绑定产品版本、Git commit、Bun、target 和逐文件 SHA-256；
@@ -110,7 +111,9 @@ source entry。
 
 `bun run release:verify` 在执行任何 binary 前解析 archive，拒绝未知/缺失/重复路径、绝对路径、父目录
 跳转、link、schema 漂移、target 不匹配和任一 checksum 不一致。只有 verifier 通过后 smoke 才可以
-启动 payload。GitHub-hosted candidate job 额外使用 `--require-clean-source`，dirty-source manifest
+启动 payload。Web固定allowlist只接受`index.html`、hashed CSS/JS与`api-docs/openapi.json`；verifier、installer preflight与smoke
+都拒绝缺少该Agent API contract asset的candidate，manifest逐文件SHA-256绑定其identity。GitHub-hosted candidate job 额外使用
+`--require-clean-source`，dirty-source manifest
 不得上传为候选 artifact。
 
 旧 Linux full-chain evaluation diagnostic 及其 workflow job 已删除，不属于当前候选包或 release gate。Platform

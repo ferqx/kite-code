@@ -648,8 +648,10 @@ describe('Web Gateway loopback carrier', () => {
     const root = join(temporary, 'dist');
     const outside = join(temporary, 'outside.js');
     await mkdir(join(root, 'assets'), { recursive: true });
+    await mkdir(join(root, 'api-docs'), { recursive: true });
     await writeFile(join(root, 'index.html'), '<!doctype html><title>Kite</title>');
     await writeFile(join(root, 'assets', 'app.js'), 'globalThis.kite = true;');
+    await writeFile(join(root, 'api-docs', 'openapi.json'), '{"openapi":"3.1.0"}\n');
     await writeFile(outside, 'globalThis.secret = true;');
     await symlink(outside, join(root, 'assets', 'escape.js'));
     const carrier = createWebGatewayCarrier({
@@ -662,6 +664,28 @@ describe('Web Gateway loopback carrier', () => {
         headers: { host: new URL(carrier.origin).host },
       });
       expect(index.status).toBe(200);
+      const docs = await fetch(`${carrier.origin}/api-docs`, {
+        headers: { host: new URL(carrier.origin).host },
+      });
+      expect(docs.status).toBe(200);
+      expect(await docs.text()).toBe('<!doctype html><title>Kite</title>');
+      expect(docs.headers.get('content-security-policy')).toContain("default-src 'self'");
+      expect(docs.headers.get('cache-control')).toBe('no-store');
+      const docsWithSlash = await fetch(`${carrier.origin}/api-docs/`, {
+        headers: { host: new URL(carrier.origin).host },
+      });
+      expect(docsWithSlash.status).toBe(200);
+      const openApi = await fetch(`${carrier.origin}/api-docs/openapi.json`, {
+        headers: { host: new URL(carrier.origin).host },
+      });
+      expect(openApi.status).toBe(200);
+      expect(openApi.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(openApi.headers.get('cache-control')).toBe('no-store');
+      expect(await openApi.text()).toBe('{"openapi":"3.1.0"}\n');
+      const docsDeepLink = await fetch(`${carrier.origin}/api-docs/anything`, {
+        headers: { host: new URL(carrier.origin).host },
+      });
+      expect(docsDeepLink.status).toBe(404);
       const script = await fetch(`${carrier.origin}/assets/app.js`, {
         headers: { host: new URL(carrier.origin).host },
       });

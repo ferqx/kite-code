@@ -283,6 +283,9 @@ function assertInstallableRelease(manifest: z.infer<typeof ossCandidateManifestS
   if (!files.has(web.entrypoint)) {
     throw new Error(`Candidate release slot web is not archived: ${web.entrypoint}`);
   }
+  if (!files.has('payload/web/api-docs/openapi.json')) {
+    throw new Error('Candidate Web payload is missing its bundled Agent API contract.');
+  }
   const launchers = releaseLauncherArchivePaths(manifest);
   for (const path of Object.values(launchers)) {
     if (!files.has(path)) throw new Error(`Candidate stable launcher is not archived: ${path}`);

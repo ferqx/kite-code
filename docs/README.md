@@ -47,7 +47,8 @@ KASAPI-01A后，根build、test、typecheck discovery覆盖15个实际workspace�
 package owner gate当前覆盖15个workspace并检查Service→contract唯一依赖边，独立`check:agent-api-packages`继续强化Public contract/consumer
 边界；`apps/kite-web`仍不成为Runtime
 composition owner。KASAPI-01B后，该owner rule同时覆盖package-local generator script与committed `generated/**`，确保artifact变化命中同一
-current authority；generator不成为runtime export。Agent API跨包当前边界见
+current authority；generator不成为runtime export。KASAPI-02C后，Web build逐字节把canonical OpenAPI装入固定
+`payload/web/api-docs/openapi.json`，只读`/api-docs` renderer不发现Worker、不保存credential也不提供在线执行。Agent API跨包当前边界见
 [`active/agent-api-contract.md`](active/agent-api-contract.md)。
 
 Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only

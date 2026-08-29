@@ -435,7 +435,11 @@ async function buildWebReleaseAssets(outputDirectory: string): Promise<Map<strin
         throw new Error('Web release assets contain an unsupported entry.');
       }
       const path = relative(root, absolute).replaceAll('\\', '/');
-      if (path !== 'index.html' && !/^assets\/[A-Za-z0-9_-]+\.(?:css|js)$/u.test(path)) {
+      if (
+        path !== 'index.html' &&
+        path !== 'api-docs/openapi.json' &&
+        !/^assets\/[A-Za-z0-9_-]+\.(?:css|js)$/u.test(path)
+      ) {
         throw new Error(`Web release asset is outside the fixed allowlist: ${path}`);
       }
       assets.set(path, readBytes(absolute));
@@ -521,6 +525,9 @@ function validateReleaseSlots(
   const web = manifest.releaseSlots.web;
   if (web.entrypoint !== 'payload/web/index.html' || web.identity === null) {
     throw new Error('Release slot web is not bound to its fixed payload path.');
+  }
+  if (!files.has('payload/web/api-docs/openapi.json')) {
+    throw new Error('Release slot web is missing its bundled Agent API contract.');
   }
   for (const [name, slot] of Object.entries(manifest.releaseSlots)) {
     if (slot.entrypoint === null || slot.identity === null) continue;

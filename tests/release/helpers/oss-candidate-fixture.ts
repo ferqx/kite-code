@@ -24,6 +24,7 @@ export async function createOssCandidateFixture(
   const worker = bytes('#!/bin/sh\nexit 1\n');
   const gateway = bytes('#!/bin/sh\nexit 1\n');
   const web = bytes('<!doctype html><html><body><div id="root"></div></body></html>\n');
+  const agentApi = bytes('{"openapi":"3.1.0"}\n');
   const files = new Map<string, Uint8Array>([
     [`bin/kite${suffix}`, cli],
     [`bin/kite-tui${suffix}`, bytes('#!/bin/sh\necho Kite TUI\n')],
@@ -32,6 +33,7 @@ export async function createOssCandidateFixture(
     [`bin/kite-worker${suffix}`, worker],
     [`bin/kite-web-gateway${suffix}`, gateway],
     ['payload/web/index.html', web],
+    ['payload/web/api-docs/openapi.json', agentApi],
     [`release/launchers/kite${suffix}`, launcher],
     [`release/launchers/kite-tui${suffix}`, launcher],
     [`release/launchers/kite-service${suffix}`, launcher],
