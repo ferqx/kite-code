@@ -32,9 +32,10 @@ pagination/status/SSE/compatibility，ADR-0150固定Store 8迁移。`@kite-ai/ag
 fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSON Schema、wire declarations、examples与SHA-256 digest。现有
 Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；Web release已逐字节装入
 canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。Public-codec reference client已在handler及真实Worker listener上关闭
-auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。KRSRUN-01A～01B已完成neutral Run contract、unpublished
-Store8 schema/preflight、Host atomic lifecycle/original resource replay与private Run query；当前执行入口为KASAPI-03A子计划KRSRUN-02A
-delete/rewind/fork/restart recovery。production Store/Worker/Public handler仍不创建Run mutation或发布`runs`capability。
+auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。KRSRUN-01A～02A已完成neutral Run contract、unpublished
+Store8 schema/preflight、Host atomic lifecycle/original resource replay、private Run query及delete/rewind/fork/restart recovery；当前执行入口为
+KASAPI-03A子计划KRSRUN-02B Store7→Store8 generation migration。production Store/Worker/Public handler仍不创建Run mutation或发布
+`runs`capability。
 
 ## 1. 执行结论
 
@@ -402,7 +403,7 @@ Gate：read-only façade完全通过后才能开始Run mutation；任何route di
 KASAPI-00B已证明current Store 7不足以提供bounded、无歧义的Run list/get、historical phase/status/timestamp与delete/fork/rewind/late
 retry语义。本Task只执行ADR-0150与[`Runtime Run Store V1子计划`](2026-08-29-kite-runtime-run-store-v1.md)：升级State 27 / Store 8、
 canonical Run index、receipt resource result、coverage boundary与whole-generation copy-and-switch；KRSRUN-01A～01B已关闭mechanism/
-transaction/private query Gate，在KRSRUN-02A～03B完成前仍保持blocked。
+transaction/private query Gate，KRSRUN-02A已关闭delete/rewind/fork/restart Gate；在KRSRUN-02B～03B完成前仍保持blocked。
 
 无论哪条路径，start applied transaction必须持久确定`run_id`并让original/replayed receipt返回同一resource；Session delete/fork/rewind/
 retention与unknown recovery全部有闭集语义。

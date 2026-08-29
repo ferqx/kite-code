@@ -212,8 +212,9 @@ Store 7 DDL、逐 Session full validation、journal/pointer crash windows、targ
 但不是 fallback，不能绕过 committed layout。Worker production path继续保持 explicit admission、single writer、source immutable 与
 no silent rollback；Linux/Windows hosted filesystem/process evidence仍不能由本机结果替代。
 
-KRSRUN-01B已让Host/App与private Runtime Protocol理解Store 8 Run transaction/resource/get/page机制，但没有改变Coordinator或Worker
-composition。Store 8 profile/Run port仍未进入layout manifest、migration journal、Worker opener或Catalog；Store 7只是未来whole-generation
+KRSRUN-02A已让Host/App与private Runtime Protocol理解Store 8 Run transaction/resource/get/page及delete/rewind/fork/restart机制，但没有改变
+Coordinator或Worker composition。显式unpublished target不接受Store 7 active-layout evidence，也不暴露Store 7 Controller/read façade；
+Store 8 profile/Run port仍未进入layout manifest、migration journal、Worker opener或Catalog。Store 7只是未来whole-generation
 migration的exact source constant，不进入ordinary compatibility importer。Coordinator继续不保存Run row/status/receipt，Worker继续只打开
 active Store 7，Agent ServerInfo/Public route继续不发布`runs`。KRSRUN-02B/03A完成offline generation cutover与reopen Gate前不得由ensure/
 admission选择Store 8 target，也不得从Runtime activeWork、Catalog或event journal补写partial Run。

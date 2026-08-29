@@ -190,12 +190,47 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
           next: { ...current, runId: 'changed', lastRevision: 7 },
         }),
       ).toThrow('identity');
+      expect(() =>
+        store.transition({
+          sessionId: 'session-1',
+          runId: 'run-6',
+          expectedLastRevision: 6,
+          next: completedRun(current),
+        }),
+      ).toThrow('revision');
+      const running = {
+        ...current,
+        status: 'running' as const,
+        lastRevision: 7,
+        startedAtMs: current.createdAtMs + 1,
+      };
       expect(
         store.transition({
           sessionId: 'session-1',
           runId: 'run-6',
           expectedLastRevision: 6,
-          next: completedRun({ ...current, lastRevision: 7 }),
+          next: running,
+        }),
+      ).toBe('applied');
+      expect(() =>
+        store.transition({
+          sessionId: 'session-1',
+          runId: 'run-6',
+          expectedLastRevision: 7,
+          next: {
+            ...running,
+            status: 'waiting',
+            lastRevision: 8,
+            startedAtMs: running.startedAtMs + 1,
+          },
+        }),
+      ).toThrow('durable timestamp');
+      expect(
+        store.transition({
+          sessionId: 'session-1',
+          runId: 'run-6',
+          expectedLastRevision: 7,
+          next: completedRun({ ...running, lastRevision: 8 }),
         }),
       ).toBe('applied');
       expect(() =>
@@ -399,6 +434,122 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
       expect(() => assertSqliteRuntimeRunStoreConnection(db, binding)).toThrow(
         SqliteRuntimeFormatMismatchError,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  test('maintains only complete Run boundaries for rewind and fork', () => {
+    const db = runDatabase();
+    try {
+      insertSession(db, 'source', 10, 5);
+      insertSession(db, 'target', 7, 0);
+      const store = createSqliteRuntimeRunStore({ db, workspaceBinding: binding });
+      const sourceRun = completedRun({
+        ...run('run-6', 6, 'building'),
+        sessionId: 'source',
+        lastRevision: 7,
+      });
+      store.insert(sourceRun);
+
+      expect(
+        store.forkSession({
+          sourceSessionId: 'source',
+          targetSessionId: 'target',
+          throughRevision: 7,
+        }),
+      ).toEqual({ status: 'applied', copiedCount: 1 });
+      expect(store.get('target', 'run-6')).toMatchObject({
+        sessionId: 'target',
+        originSessionId: 'source',
+        originRunId: 'run-6',
+      });
+      expect(
+        db
+          .query<{ boundary: number }, [string]>(
+            'SELECT run_index_from_revision AS boundary FROM runtime_sessions WHERE session_id = ?',
+          )
+          .get('target')?.boundary,
+      ).toBe(5);
+
+      const unknown: RuntimeStoredRun = {
+        ...run('run-8', 8, 'building'),
+        sessionId: 'source',
+        status: 'unknown',
+        startedAtMs: 181,
+        finishedAtMs: 182,
+        terminal: {
+          reasonCode: 'outcome_unknown',
+          safeRetry: false,
+          recoveryEntry: 'reconcile',
+        },
+      };
+      store.insert(unknown);
+      insertSession(db, 'unknown-target', 8, 0);
+      expect(
+        store.forkSession({
+          sourceSessionId: 'source',
+          targetSessionId: 'unknown-target',
+          throughRevision: 8,
+        }),
+      ).toEqual({ status: 'invalid_boundary' });
+      expect(store.rewindSession('source', 8)).toEqual({ status: 'invalid_boundary' });
+      expect(store.rewindSession('source', 7)).toEqual({ status: 'applied', deletedCount: 1 });
+      expect(store.get('source', 'run-8')).toBeNull();
+
+      insertSession(db, 'partial', 10, 5);
+      store.insert(
+        completedRun({
+          ...run('partial-run', 6, 'planning'),
+          sessionId: 'partial',
+          lastRevision: 8,
+        }),
+      );
+      expect(store.rewindSession('partial', 7)).toEqual({ status: 'invalid_boundary' });
+      expect(store.rewindSession('partial', 4)).toEqual({ status: 'invalid_boundary' });
+    } finally {
+      db.close();
+    }
+  });
+
+  test('leaves no target facts when Store 8 fork maintenance faults', () => {
+    const db = runDatabase();
+    try {
+      insertSession(db, 'source', 7, 5);
+      insertSession(db, 'target', 7, 0);
+      const writer = createSqliteRuntimeRunStore({ db, workspaceBinding: binding });
+      writer.insert(
+        completedRun({
+          ...run('run-6', 6, 'building'),
+          sessionId: 'source',
+          originSessionId: 'history',
+          originRunId: 'run-6',
+          lastRevision: 7,
+        }),
+      );
+      const faulting = createSqliteRuntimeRunStore({
+        db,
+        workspaceBinding: binding,
+        beforeWrite: () => {
+          throw new Error('injected maintenance failure');
+        },
+      });
+
+      db.run('BEGIN IMMEDIATE');
+      try {
+        db.run("UPDATE runtime_sessions SET name = 'partial' WHERE session_id = 'target'");
+        faulting.forkSession({
+          sourceSessionId: 'source',
+          targetSessionId: 'target',
+          throughRevision: 7,
+        });
+        throw new Error('expected maintenance fault');
+      } catch (error) {
+        db.run('ROLLBACK');
+        expect(String(error)).toContain('injected maintenance failure');
+      }
+      expect(storeSession(db, 'target')).toEqual({ name: '', boundary: 0 });
+      expect(writer.list({ sessionId: 'target', limit: 10 }).entries).toEqual([]);
     } finally {
       db.close();
     }
@@ -763,6 +914,17 @@ function rowCount(db: Database, table: string): number {
   return (
     db.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0
   );
+}
+
+function storeSession(
+  db: Database,
+  sessionId: string,
+): { readonly name: string; readonly boundary: number } | null {
+  return db
+    .query<{ name: string; boundary: number }, [string]>(
+      'SELECT name, run_index_from_revision AS boundary FROM runtime_sessions WHERE session_id = ?',
+    )
+    .get(sessionId);
 }
 
 function meta(db: Database, key: string): string | undefined {

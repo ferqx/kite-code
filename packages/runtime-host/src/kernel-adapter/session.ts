@@ -877,9 +877,10 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const runId = previousState.turn.turnId;
     if (!runs || !runId) return undefined;
     const current = runs.get(this.sessionId, runId);
-    if (!current || isTerminalRunStatus(current.status)) return undefined;
+    if (!current || isFinalRunStatus(current.status)) return undefined;
     const status = projectRunStatus(previousState, nextState, current.status);
     if (!status || status === current.status) return undefined;
+    if (current.status === 'unknown' && !isPreciseTerminalRunStatus(status)) return undefined;
     const occurredAtMs = Math.max(
       current.startedAtMs ?? current.createdAtMs,
       timestampMilliseconds(metadata.at(-1)?.occurredAt),
@@ -889,7 +890,14 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       ...current,
       status,
       lastRevision: nextState.revision,
-      ...(terminal ? { finishedAtMs: occurredAtMs } : {}),
+      ...(terminal
+        ? {
+            finishedAtMs:
+              current.status === 'unknown' && current.finishedAtMs !== undefined
+                ? current.finishedAtMs
+                : occurredAtMs,
+          }
+        : {}),
       ...(terminal
         ? {
             terminal: projectRunTerminal(nextState, status),
@@ -1000,6 +1008,14 @@ function isTerminalRunStatus(status: RuntimeRunStatus): boolean {
   return (
     status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'unknown'
   );
+}
+
+function isPreciseTerminalRunStatus(status: RuntimeRunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+function isFinalRunStatus(status: RuntimeRunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 function timestampMilliseconds(value: string | undefined): number {

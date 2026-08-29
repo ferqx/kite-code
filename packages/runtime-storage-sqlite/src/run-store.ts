@@ -6,6 +6,7 @@ import {
   assertRuntimeStoredRun,
   decodeRuntimeRunTerminal,
   encodeRuntimeRunTerminal,
+  type RuntimeRunForkInput,
   type RuntimeRunPageRequest,
   type RuntimeRunStorePort,
   type RuntimeRunTransition,
@@ -182,8 +183,12 @@ export function createSqliteRuntimeRunStore(
   const getRun = input.db.query<RunRow, [string, string]>(
     'SELECT session_id, run_id, origin_session_id, origin_run_id, start_command_id, phase, status, created_revision, last_revision, created_at_ms, started_at_ms, finished_at_ms, terminal_json FROM runtime_runs WHERE session_id = ? AND run_id = ? LIMIT 1',
   );
-  const getActiveRun = input.db.query<{ run_id: string }, [string]>(
-    "SELECT run_id FROM runtime_runs WHERE session_id = ? AND status IN ('queued', 'running', 'waiting') LIMIT 1",
+  const getActiveRun = input.db.query<RunRow, [string]>(
+    `SELECT session_id, run_id, origin_session_id, origin_run_id, start_command_id,
+      phase, status, created_revision, last_revision, created_at_ms,
+      started_at_ms, finished_at_ms, terminal_json
+     FROM runtime_runs WHERE session_id = ?
+       AND status IN ('queued', 'running', 'waiting') LIMIT 1`,
   );
   const insertRun = input.db.query(
     `INSERT INTO runtime_runs (
@@ -197,12 +202,37 @@ export function createSqliteRuntimeRunStore(
       finished_at_ms = ?, terminal_json = ?
       WHERE session_id = ? AND run_id = ? AND last_revision = ?`,
   );
+  const selectRunsThrough = input.db.query<RunRow, [string, number]>(
+    `SELECT session_id, run_id, origin_session_id, origin_run_id, start_command_id,
+      phase, status, created_revision, last_revision, created_at_ms,
+      started_at_ms, finished_at_ms, terminal_json
+     FROM runtime_runs WHERE session_id = ? AND created_revision <= ?
+     ORDER BY created_revision ASC, run_id ASC`,
+  );
+  const countRuns = input.db.query<{ count: number }, [string]>(
+    'SELECT COUNT(*) AS count FROM runtime_runs WHERE session_id = ?',
+  );
+  const deleteRunsAfter = input.db.query(
+    'DELETE FROM runtime_runs WHERE session_id = ? AND created_revision > ?',
+  );
+  const updateCoverageBoundary = input.db.query(
+    'UPDATE runtime_sessions SET run_index_from_revision = ? WHERE session_id = ?',
+  );
   const port: RuntimeRunStorePort = {
     get(sessionId, runId) {
       assertOpen(input);
       assertIdentity(sessionId, 'Session');
       assertIdentity(runId, 'Run');
       const row = getRun.get(sessionId, runId);
+      if (!row) return null;
+      const run = runFromRow(row);
+      assertRunWithinSession(selectSession.get(sessionId), run, input.workspaceBinding);
+      return run;
+    },
+    getActive(sessionId) {
+      assertOpen(input);
+      assertIdentity(sessionId, 'Session');
+      const row = getActiveRun.get(sessionId);
       if (!row) return null;
       const run = runFromRow(row);
       assertRunWithinSession(selectSession.get(sessionId), run, input.workspaceBinding);
@@ -289,6 +319,7 @@ export function createSqliteRuntimeRunStore(
       if (current.last_revision !== transition.expectedLastRevision) return 'conflict';
       const existing = runFromRow(current);
       assertImmutableRunIdentity(existing, transition.next);
+      assertLifecycleTransition(existing, transition.next);
       assertRunWithinSession(
         selectSession.get(transition.sessionId),
         transition.next,
@@ -306,6 +337,73 @@ export function createSqliteRuntimeRunStore(
         transition.expectedLastRevision,
       );
       return result.changes === 1 ? 'applied' : 'conflict';
+    },
+    rewindSession(sessionId, targetRevision) {
+      assertOpen(input);
+      assertIdentity(sessionId, 'Session');
+      assertRevision(targetRevision, 'rewind target');
+      const session = selectSession.get(sessionId);
+      if (
+        !maintenanceSessionMatches(session, input.workspaceBinding) ||
+        targetRevision < session.run_index_from_revision ||
+        targetRevision > session.revision
+      ) {
+        return { status: 'invalid_boundary' };
+      }
+      const retained = selectRunsThrough.all(sessionId, targetRevision).map(runFromRow);
+      if (retained.some((run) => !isSettledRunThrough(run, targetRevision))) {
+        return { status: 'invalid_boundary' };
+      }
+      input.beforeWrite?.();
+      const result = deleteRunsAfter.run(sessionId, targetRevision);
+      return { status: 'applied', deletedCount: result.changes };
+    },
+    forkSession(forkInput) {
+      assertOpen(input);
+      assertForkInput(forkInput);
+      const source = selectSession.get(forkInput.sourceSessionId);
+      const target = selectSession.get(forkInput.targetSessionId);
+      if (
+        forkInput.sourceSessionId === forkInput.targetSessionId ||
+        !maintenanceSessionMatches(source, input.workspaceBinding) ||
+        !maintenanceSessionMatches(target, input.workspaceBinding) ||
+        forkInput.throughRevision < source.run_index_from_revision ||
+        forkInput.throughRevision > source.revision ||
+        target.revision !== forkInput.throughRevision ||
+        (countRuns.get(forkInput.targetSessionId)?.count ?? 0) !== 0
+      ) {
+        return { status: 'invalid_boundary' };
+      }
+      const sourceRuns = selectRunsThrough
+        .all(forkInput.sourceSessionId, forkInput.throughRevision)
+        .map(runFromRow);
+      if (sourceRuns.some((run) => !isSettledRunThrough(run, forkInput.throughRevision))) {
+        return { status: 'invalid_boundary' };
+      }
+      input.beforeWrite?.();
+      const boundaryUpdate = updateCoverageBoundary.run(
+        source.run_index_from_revision,
+        forkInput.targetSessionId,
+      );
+      if (boundaryUpdate.changes !== 1) return { status: 'invalid_boundary' };
+      for (const run of sourceRuns) {
+        insertRun.run(
+          forkInput.targetSessionId,
+          run.runId,
+          forkInput.sourceSessionId,
+          run.runId,
+          run.startCommandId,
+          run.phase,
+          run.status,
+          run.createdRevision,
+          run.lastRevision,
+          run.createdAtMs,
+          run.startedAtMs ?? null,
+          run.finishedAtMs ?? null,
+          run.terminal ? encodeRuntimeRunTerminal(run.terminal) : null,
+        );
+      }
+      return { status: 'applied', copiedCount: sourceRuns.length };
     },
   };
   return Object.freeze(port);
@@ -564,9 +662,7 @@ function assertBoundRows(db: Database, binding: SqliteRuntimeWorkspaceBinding): 
       row.committed_revision < 0 ||
       !Number.isSafeInteger(row.committed_at) ||
       row.committed_at < 0 ||
-      row.original_receipt_json !== canonicalReceipt ||
-      ('revision' in owner && row.committed_revision > owner.revision) ||
-      ('deleted_revision' in owner && row.committed_revision > owner.deleted_revision)
+      row.original_receipt_json !== canonicalReceipt
     ) {
       throw new SqliteRuntimeFormatMismatchError(null, null);
     }
@@ -664,10 +760,46 @@ function assertTransition(transition: RuntimeRunTransition): void {
   if (
     transition.next.sessionId !== transition.sessionId ||
     transition.next.runId !== transition.runId ||
-    transition.next.lastRevision < transition.expectedLastRevision
+    transition.next.lastRevision <= transition.expectedLastRevision
   ) {
     throw new Error('Runtime Run transition identity or revision is invalid.');
   }
+}
+
+function assertForkInput(input: RuntimeRunForkInput): void {
+  assertIdentity(input.sourceSessionId, 'source Session');
+  assertIdentity(input.targetSessionId, 'target Session');
+  assertRevision(input.throughRevision, 'fork revision');
+}
+
+function assertRevision(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Runtime Run ${label} is invalid.`);
+  }
+}
+
+function maintenanceSessionMatches(
+  session: RunSessionRow | null,
+  binding: SqliteRuntimeWorkspaceBinding,
+): session is RunSessionRow {
+  return Boolean(
+    session &&
+      session.worker_scope_id === binding.workerScopeId &&
+      session.workspace_identity_digest === binding.workspaceIdentityDigest &&
+      session.state_schema === SQLITE_RUNTIME_STATE_SCHEMA_VERSION &&
+      session.format_epoch === SQLITE_RUNTIME_RUN_FORMAT_EPOCH &&
+      Number.isSafeInteger(session.revision) &&
+      Number.isSafeInteger(session.run_index_from_revision) &&
+      session.run_index_from_revision >= 0 &&
+      session.run_index_from_revision <= session.revision,
+  );
+}
+
+function isSettledRunThrough(run: RuntimeStoredRun, revision: number): boolean {
+  return (
+    run.lastRevision <= revision &&
+    (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled')
+  );
 }
 
 function assertImmutableRunIdentity(current: RuntimeStoredRun, next: RuntimeStoredRun): void {
@@ -682,6 +814,31 @@ function assertImmutableRunIdentity(current: RuntimeStoredRun, next: RuntimeStor
     current.createdAtMs !== next.createdAtMs
   ) {
     throw new Error('Runtime Run transition changed immutable identity.');
+  }
+}
+
+function assertLifecycleTransition(current: RuntimeStoredRun, next: RuntimeStoredRun): void {
+  const allowed: Readonly<
+    Record<RuntimeStoredRun['status'], readonly RuntimeStoredRun['status'][]>
+  > = {
+    queued: ['running', 'completed', 'failed', 'cancelled', 'unknown'],
+    running: ['waiting', 'completed', 'failed', 'cancelled', 'unknown'],
+    waiting: ['running', 'completed', 'failed', 'cancelled', 'unknown'],
+    unknown: ['completed', 'failed', 'cancelled'],
+    completed: [],
+    failed: [],
+    cancelled: [],
+  };
+  if (!allowed[current.status].includes(next.status)) {
+    throw new Error(
+      `Runtime Run lifecycle transition is invalid: ${current.status} -> ${next.status}.`,
+    );
+  }
+  if (
+    (current.startedAtMs !== undefined && current.startedAtMs !== next.startedAtMs) ||
+    (current.finishedAtMs !== undefined && current.finishedAtMs !== next.finishedAtMs)
+  ) {
+    throw new Error('Runtime Run lifecycle transition changed a durable timestamp.');
   }
 }
 

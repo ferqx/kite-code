@@ -44,6 +44,7 @@ import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import {
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
+  assertSqliteRuntimeStorageTargetCanOpen_,
   assertSqliteRuntimeWorkspaceBinding,
   checksum,
   defaultSqliteRuntimeJournalMode,
@@ -51,6 +52,8 @@ import {
   type NamedSnapshotRow,
   type SnapshotRow,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
@@ -63,6 +66,7 @@ import {
   type SqliteRuntimeStorageInput,
   SqliteRuntimeStorageOpenError,
 } from './preflight';
+import { assertSqliteRuntimeRunStoreConnection, createSqliteRuntimeRunStore } from './run-store';
 import { initializeSqliteRuntimeSchema } from './schema';
 import { createSqliteSessionMetadataStore } from './session-store';
 import { createSqliteSnapshotStore } from './snapshot-store';
@@ -90,9 +94,9 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   readonly commandReceipts: RuntimeCommandReceiptPort;
-  /** Store 7-only durable Worker authority facade; absent for legacy Store 6. */
+  /** Current Store 7 durable Worker authority facade; absent for Store 6 and unpublished Store 8. */
   readonly workspaceAuthority?: SqliteWorkspaceAuthority;
-  /** Store 7-only atomic Runtime-session + initial Controller create port. */
+  /** Current Store 7 atomic Runtime-session + initial Controller create port. */
   readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
   /** Store 7-only path-free Session Directory outbox on this same SQLite connection. */
   readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
@@ -102,6 +106,8 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   ) => RuntimeLogQueryPort<Event>;
   /** Store 7-only bounded Checkpoint metadata reader over this same SQLite connection. */
   readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
+  /** Present only for the explicit, unpublished Store 8 target. */
+  readonly runs?: RuntimeStorage<Event, State>['runs'];
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodec<Event, State>;
   #closed = false;
@@ -113,26 +119,44 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       );
     }
     const workspaceBinding = input.workspaceBinding;
+    const runStoreTarget = input.targetStore === 'run';
     if (workspaceBinding) assertSqliteRuntimeWorkspaceBinding(workspaceBinding);
-    const profile = workspaceBinding
+    if (runStoreTarget && !workspaceBinding) {
+      throw new SqliteRuntimeStorageOpenError(
+        'Store 8 target requires an explicit Workspace binding.',
+      );
+    }
+    if (runStoreTarget && input.workspaceLayout) {
+      throw new SqliteRuntimeStorageOpenError(
+        'Unpublished Store 8 target cannot claim Store 7 active-layout authority.',
+      );
+    }
+    const profile = runStoreTarget
       ? {
           stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-          storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-          formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
-          workspaceBinding,
+          storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+          workspaceBinding: workspaceBinding!,
         }
-      : {
-          stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-          storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-          formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
-        };
+      : workspaceBinding
+        ? {
+            stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+            storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+            formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+            workspaceBinding,
+          }
+        : {
+            stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+            storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+            formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+          };
     this.stateSchemaVersion = profile.stateSchemaVersion;
     this.storeSchemaVersion = profile.storeSchemaVersion;
     this.formatEpoch = profile.formatEpoch;
     this.#codec = input.codec;
     const baseArtifacts = resolveSqliteArtifactStore(input.artifacts);
     assertNoFollowDatabasePath(input.databasePath);
-    if (workspaceBinding) {
+    if (workspaceBinding && !runStoreTarget) {
       if (!input.workspaceLayout) {
         throw new SqliteRuntimeStorageOpenError(
           'Store 7 writer requires active layout authority evidence.',
@@ -141,7 +165,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       assertSqliteWorkspaceStoreActive(input.workspaceLayout, workspaceBinding, input.databasePath);
     }
     const markWorkspaceWritten =
-      workspaceBinding && input.workspaceLayout
+      workspaceBinding && input.workspaceLayout && !runStoreTarget
         ? () =>
             markSqliteWorkspaceStoreWritten(
               input.workspaceLayout!,
@@ -149,12 +173,26 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
               input.databasePath,
             )
         : undefined;
-    assertSqliteRuntimeStorageCanOpen(
-      input.databasePath,
-      input.codec,
-      input.sessionId,
-      workspaceBinding,
-    );
+    if (runStoreTarget) {
+      assertSqliteRuntimeStorageTargetCanOpen_(
+        input.databasePath,
+        input.codec,
+        input.sessionId,
+        workspaceBinding!,
+        {
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+          assertConnection: (database) =>
+            assertSqliteRuntimeRunStoreConnection(database, workspaceBinding!),
+        },
+      );
+    } else {
+      assertSqliteRuntimeStorageCanOpen(
+        input.databasePath,
+        input.codec,
+        input.sessionId,
+        workspaceBinding,
+      );
+    }
     const journalMode = input.options?.journalMode ?? defaultSqliteRuntimeJournalMode();
     const db = openSqliteRuntimeConnection(input.databasePath, journalMode);
     try {
@@ -172,7 +210,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       throw error;
     }
     this.#db = db;
-    if (workspaceBinding) {
+    if (workspaceBinding && !runStoreTarget) {
       this.workspaceAuthority = createSqliteWorkspaceAuthority({
         db,
         binding: workspaceBinding,
@@ -228,12 +266,23 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       db,
       isClosed: () => this.#closed,
       workspaceBinding,
+      resourceResults: runStoreTarget,
     });
     const commandReceiptWriter = createSqliteRuntimeCommandReceiptWriter({
       db,
       workspaceBinding,
       beforeWrite: markWorkspaceWritten,
+      resourceResults: runStoreTarget,
     });
+    const runStore = runStoreTarget
+      ? createSqliteRuntimeRunStore({
+          db,
+          workspaceBinding: workspaceBinding!,
+          isClosed: () => this.#closed,
+          beforeWrite: markWorkspaceWritten,
+        })
+      : undefined;
+    this.runs = runStore;
     this.artifacts = baseArtifacts;
     const eventStore = createSqliteEventStore<Event>({
       db,
@@ -616,18 +665,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       readSessionBinding: (sessionId) => selectSessionBinding?.get(sessionId) ?? null,
       readCommandReceipt,
       assertSessionAbsent,
-      initialController: workspaceBinding
-        ? {
-            create: (request, mode) =>
-              createSqliteWorkspaceInitialControllerTransaction({
-                db,
-                binding: workspaceBinding,
-                request,
-                mode,
-              }),
-          }
-        : undefined,
+      initialController:
+        workspaceBinding && !runStoreTarget
+          ? {
+              create: (request, mode) =>
+                createSqliteWorkspaceInitialControllerTransaction({
+                  db,
+                  binding: workspaceBinding,
+                  request,
+                  mode,
+                }),
+            }
+          : undefined,
       beforeWrite: markWorkspaceWritten,
+      runStore,
     });
     this.transactions = transactionPort;
     this.workspaceSessionCreation = transactionPort.createSessionWithInitialController
@@ -825,6 +876,15 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           encodedFork.metadata.stateChecksum,
           encodedFork.metadata.schemaVersion,
         );
+        const runFork = runStore?.forkSession({
+          sourceSessionId,
+          targetSessionId,
+          throughRevision: sourceRow.state_revision,
+        });
+        if (runFork?.status === 'invalid_boundary') {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
         for (const snapshot of sourceNamed) {
           try {
             if (checksum(snapshot.state_json) !== snapshot.state_checksum) continue;
@@ -955,7 +1015,9 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           return false;
         }
         markWorkspaceWritten?.();
-        db.transaction(() => {
+        return db.transaction(() => {
+          const runRewind = runStore?.rewindSession(sessionId, row.state_revision);
+          if (runRewind?.status === 'invalid_boundary') return false;
           eventStore.deleteAfter(sessionId, row.event_position);
           deleteNamedSnapshotsAfter.run(sessionId, row.event_position);
           deleteFilePreimagesAfter.run(sessionId, row.event_position);
@@ -969,8 +1031,8 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             encoded.metadata.schemaVersion,
           );
           ensureSession(sessionId, state);
+          return true;
         })();
-        return true;
       },
       forkSession: (
         sourceSessionId: string,

@@ -109,6 +109,12 @@ function fixture(state: AgentState = initialState(), withRunAuthority = false): 
 function runStore(records: Map<string, RuntimeStoredRun>): RuntimeRunStorePort {
   return {
     get: (sessionId, runId) => records.get(`${sessionId}\0${runId}`) ?? null,
+    getActive: (sessionId) =>
+      [...records.values()].find(
+        (run) =>
+          run.sessionId === sessionId &&
+          (run.status === 'queued' || run.status === 'running' || run.status === 'waiting'),
+      ) ?? null,
     list: (request) => ({
       entries: [...records.values()].filter((run) => run.sessionId === request.sessionId),
       hasMore: false,
@@ -126,6 +132,8 @@ function runStore(records: Map<string, RuntimeStoredRun>): RuntimeRunStorePort {
       records.set(key, input.next);
       return 'applied';
     },
+    rewindSession: () => ({ status: 'applied', deletedCount: 0 }),
+    forkSession: () => ({ status: 'applied', copiedCount: 0 }),
   };
 }
 
@@ -285,6 +293,41 @@ describe('Runtime Host State session', () => {
       status: 'cancelled',
       finishedAtMs: Date.parse(NOW),
       terminal: { reasonCode: 'cancelled', recoveryEntry: 'new_run' },
+    });
+  });
+
+  test('refines a recovered unknown Run only to a precise terminal without moving its finish clock', () => {
+    const f = fixture(initialState(), true);
+    f.runs.set('state-session-test\0turn-1', {
+      sessionId: 'state-session-test',
+      runId: 'turn-1',
+      startCommandId: 'start-turn-1',
+      phase: 'building',
+      status: 'unknown',
+      createdRevision: 0,
+      lastRevision: 0,
+      createdAtMs: 100,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: {
+        reasonCode: 'outcome_unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      },
+    });
+    const session = createRuntimeHostStateSession(f.input);
+
+    session.processEventBatch([{ type: 'turn.completed', turnId: 'turn-1' }], {
+      acknowledgement: 'terminal_recovery',
+      source: 'host_fact',
+    });
+
+    expect(f.acknowledgements).toEqual(['terminal_recovery']);
+    expect(f.runs.get('state-session-test\0turn-1')).toMatchObject({
+      status: 'completed',
+      lastRevision: 1,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'completed', recoveryEntry: 'none' },
     });
   });
 

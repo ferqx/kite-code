@@ -12,8 +12,10 @@
 - KRSRUN-01A另提供未发布的State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29` target profile、exact preflight与
   same-connection `runtime_runs` port。Store 8有11张表/3个named index，Session增加coverage boundary，receipt增加resource-result triple；
   `(session_id, run_id)` PK、同Session start-command unique与`(session_id, created_revision, run_id)` page index均由DDL/owner tests固定。
-  KRSRUN-01B已让同一connection transaction可选提交Run insert/transition及Store8 receipt result triple；它仍未进入`adapter.ts`、
-  active layout、Worker或release composition，不能作为Store7 fallback或声明production ready。
+  KRSRUN-01B已让同一connection transaction可选提交Run insert/transition及Store8 receipt result triple；KRSRUN-02A进一步让
+  `adapter.ts`仅在显式`targetStore: 'run'`时组合该未发布target，用于同一owner上的delete/rewind/fork/reopen验证。该选择拒绝
+  Store7 active-layout evidence，不暴露Store7 Controller/read facades，也未进入Worker或release composition，不能作为Store7 fallback
+  或声明production ready。
 - 提供 owner-only generation layout 的 active-layout pointer、manifest、migration journal/fence 与窄回退状态机；离线
   `migrateSqliteRuntimeStoreToWorkspaceLayout` 只从 Service 已停止且 source-bound fence 保护的 Store 6 只读快照复制到
   Store 7，不改写 source、不在线迁移、不双写，也不启动 Worker。迁移不定义或复制 Coordinator Catalog DDL；调用方必须注入
@@ -67,6 +69,10 @@
 - Store8 transaction在一个`BEGIN IMMEDIATE`内提交State/event/snapshot/revision、Run mutation及digest-bound resource receipt，任一
   receipt/Run/SQLite fault都会完整rollback。Store8-aware receipt lookup返回原result；Store6/7 writer与current Store7 adapter收到
   resource result或Run mutation时fail closed且不留下Session partial facts。
+- Store8 delete依赖已验证的`runtime_runs -> runtime_sessions ON DELETE CASCADE`在现有delete transaction内移除Run，并保留tombstone和
+  全部receipt。rewind只在coverage内的between-turn边界删除较新Run；若会保留active/unknown或截断`lastRevision`则整笔拒绝。fork只复制
+  checkpoint以前的`completed|failed|cancelled`行，保留时间/phase/status，重绑target并记录直接origin，同时继承source coverage boundary；
+  任一Run maintenance、snapshot或receipt fault都会回滚全部Session target事实。
 - 已发布 generation 的 Store 7 reopen 必须带 active-layout、manifest、migration journal/fence 证据并使用 canonical
   Workspace Store path；纯 reopen 不会标记 generation 已写，首个真实 mutation 在同一 storage write seam 前永久写入
   `targetWriteState=written`，之后 rollback helper 必须拒绝回源。新 target 只能由显式 migration/admission 流程发布；
@@ -84,7 +90,9 @@
   orphan retained receipt、损坏或未知 source fact 会整体 blocked，source 保持只读且 active-layout 不切换。迁移逐 Session
   校验 event count/sequence、snapshot checksum/position、receipt digest、recovery evidence 与 content digest，完成所有
   Worker Store、metadata-only Catalog、immutable manifest 和 journal 后才原子切换 pointer。
-- `runtime_command_receipts` 的主键精确为 `(scope_session_id, command_id)`；applied receipt 与 event/snapshot 同一 `BEGIN IMMEDIATE` 原子提交。不会建立额外 receipt 索引、TTL 或裁剪。
+- `runtime_command_receipts` 的主键精确为 `(scope_session_id, command_id)`；applied receipt 与 event/snapshot 同一 `BEGIN IMMEDIATE` 原子提交。
+  rewind后receipt的`committed_revision`可以高于current Session head，这是保留original applied decision的预期语义，reopen按owner/digest/
+  canonical receipt验证而不把它误判为未来伪造事实。不会建立额外 receipt 索引、TTL 或裁剪。
 - command fork 在同一 `BEGIN IMMEDIATE` 中精确验证 source checkpoint、克隆/rebind target 并写 scoped applied receipt；普通 fork 不写 receipt。
 - State 26/Store 5 与 State 27/Store 5 (`kite-runtime-saq-v1-2026-08-25`) 都只读、no-follow、隔离复制并单向导入到 Store 6；Store 5 永远只是 source，不会被写回、checkpoint、rename 或作为 execution fallback。source 不改写，导入目标的 receipt 为空。
 - 删除/close 保留 receipt，fork 不复制 receipt；只有删除整个 Store 才会移除它们。
@@ -94,7 +102,7 @@
 
 ## 测试
 
-`bun test packages/runtime-storage-sqlite/test`（当前80 pass；含Store8 atomic rollback/resource replay/index/reopen与Store7 negatives）
+`bun test packages/runtime-storage-sqlite/test`（当前84 pass；含Store8 delete/rewind/fork fault/reopen/isolation、atomic resource replay/index与Store7 negatives）
 
 ## 文档影响
 

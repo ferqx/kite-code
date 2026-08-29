@@ -14,9 +14,9 @@
 
 ## 1. 执行状态与边界
 
-KRSRUN-00A～01B已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
-offline generation migration已经冻结；neutral contract、unpublished exact schema/preflight、Host atomic lifecycle/resource replay及private query已实现。
-当前执行入口为KRSRUN-02A delete/rewind/fork/restart recovery。KRSRUN-02A～03B完成前仍不得开放Run route或声明ServerInfo
+KRSRUN-00A～02A已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
+offline generation migration已经冻结；neutral contract、unpublished exact schema/preflight、Host atomic lifecycle/resource replay、private query及
+maintenance/restart semantics已实现。当前执行入口为KRSRUN-02B Store 7→Store 8 generation migration。KRSRUN-02B～03B完成前仍不得开放Run route或声明ServerInfo
 `runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
@@ -144,7 +144,17 @@ digest conflict；同Session单active Run；query走index query plan。
 
 Rollback：未cutover时移除Host Store 8 composition；不得对已写Store 8 target用Store 7 Host打开。
 
-### KRSRUN-02A：Delete、rewind、fork与restart recovery
+### KRSRUN-02A：Delete、rewind、fork与restart recovery（已完成）
+
+完成证据：neutral Run port新增active lookup与same-transaction rewind/fork maintenance；SQLite adapter仅由显式unpublished
+`targetStore: 'run'`组合Store8 owner，未接active layout/Controller/Worker。delete通过validated FK cascade与retained tombstone/receipt同事务；
+rewind拒绝coverage外、active/unknown retained或partial Run边界并在snapshot fault时完整rollback；fork只复制checkpoint前完整
+`completed|failed|cancelled`行、记录直接origin并继承coverage，不复制source receipt。rewind/delete后的late start retry仍返回original queued
+resource，而current Run可以missing，reopen允许retained receipt revision高于rewound head。Host pre-resume get/list不recover，把nonterminal只读
+投影为`unknown/recovery_required`并保持status filter；resume只执行一次existing recovery，canonical unknown可原子细化为更精确terminal且保留
+原finish clock。Host 203 pass/1 skip、SQLite 84 pass及15-workspace typecheck通过；production Store7/Worker/Public route仍未切换。
+15-workspace build、Runtime fault 36项及Service 1524/Web 33项通过；default suite只复现任务基线已有、与本Task无关的Web Gateway
+`workspaceId`期望差异，未作为Store 8改动吸收。
 
 交付：
 

@@ -36,8 +36,11 @@ import { EffectSupervisor } from '../lifecycle/effect-supervisor';
 import { SessionLifecycleSupervisor } from '../lifecycle/session-lifecycle-supervisor';
 import {
   createRuntimeStoredCommandReceipt,
+  type RuntimeRunPage,
+  type RuntimeRunStorePort,
   type RuntimeStorage,
   type RuntimeStoredCommandReceipt,
+  type RuntimeStoredRun,
 } from '../storage';
 import {
   createRuntimeCommandCommitEvidence,
@@ -414,7 +417,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               status: 'ok',
               queryType: query.type,
               revision: run.lastRevision,
-              run: projectRuntimeStoredRun(run),
+              run: projectRuntimeStoredRun(run, {
+                recoveryRequired: !this.#recoveredSessions.has(query.sessionId),
+              }),
             }
           : {
               status: 'not_found',
@@ -422,17 +427,27 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               code: 'run_not_found',
             };
       }
-      const page = runs.list({
-        sessionId: query.sessionId,
-        limit: query.limit,
-        ...(query.status === undefined ? {} : { status: query.status }),
-        ...(query.phase === undefined ? {} : { phase: query.phase }),
-        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
-      });
+      const recoveryRequired = !this.#recoveredSessions.has(query.sessionId);
+      const page =
+        recoveryRequired && query.status === 'unknown'
+          ? listRecoveryRequiredUnknownRuns(runs, query)
+          : runs.list({
+              sessionId: query.sessionId,
+              limit: query.limit,
+              ...(query.status === undefined ? {} : { status: query.status }),
+              ...(query.phase === undefined ? {} : { phase: query.phase }),
+              ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+            });
       return {
         status: 'ok',
         queryType: query.type,
-        runs: page.entries.map(projectRuntimeStoredRun),
+        runs: page.entries
+          .map((run) =>
+            projectRuntimeStoredRun(run, {
+              recoveryRequired,
+            }),
+          )
+          .filter((run) => query.status === undefined || run.status === query.status),
         ...(page.nextCursor === undefined ? {} : { nextRunCursor: page.nextCursor }),
       };
     }
@@ -806,6 +821,67 @@ function assertRuntimeHostExecutionBridge(
       throw new Error(`Runtime Host execution adapter bridge is missing ${method}`);
     }
   }
+}
+
+function listRecoveryRequiredUnknownRuns(
+  runs: RuntimeRunStorePort,
+  query: Extract<RuntimeQuery, { readonly type: 'list_runs' }>,
+): RuntimeRunPage {
+  const stored = runs.list({
+    sessionId: query.sessionId,
+    status: 'unknown',
+    limit: query.limit,
+    ...(query.phase === undefined ? {} : { phase: query.phase }),
+    ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+  });
+  const active = runs.getActive(query.sessionId);
+  const candidates: RuntimeStoredRun[] = [...stored.entries];
+  if (
+    active &&
+    (query.phase === undefined || active.phase === query.phase) &&
+    runIsAfterCursor(active, query.cursor)
+  ) {
+    candidates.push(active);
+  }
+  candidates.sort(
+    (left, right) =>
+      left.createdRevision - right.createdRevision ||
+      compareSqliteBinaryText(left.runId, right.runId),
+  );
+  const entries = candidates.slice(0, query.limit);
+  const hasMore = stored.hasMore || candidates.length > query.limit;
+  const last = entries.at(-1);
+  return {
+    entries,
+    hasMore,
+    ...(hasMore && last
+      ? { nextCursor: { createdRevision: last.createdRevision, runId: last.runId } }
+      : {}),
+  };
+}
+
+function runIsAfterCursor(
+  run: RuntimeStoredRun,
+  cursor: Extract<RuntimeQuery, { readonly type: 'list_runs' }>['cursor'],
+): boolean {
+  return (
+    cursor === undefined ||
+    run.createdRevision > cursor.createdRevision ||
+    (run.createdRevision === cursor.createdRevision &&
+      compareSqliteBinaryText(run.runId, cursor.runId) > 0)
+  );
+}
+
+function compareSqliteBinaryText(left: string, right: string): number {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftBytes[index]! - rightBytes[index]!;
+    if (difference !== 0) return difference;
+  }
+  return leftBytes.length - rightBytes.length;
 }
 
 function targetSessionIdFor(command: RuntimeCommand): string {

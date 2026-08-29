@@ -9,7 +9,7 @@
 - 是唯一 Runtime execution owner：管理每个 Session mailbox、revision conflict、scoped idempotent command replay 与 durable notification。
 - 管理 attempt acknowledgement、effect lease、cancellation、cleanup 和 restart recovery。
 - 拥有 persistent scoped command receipt 的验证与 replay decision；Store 负责持久记录的原子落盘，bridge/Server/Client 不得推断或另建 receipt authority。
-- `/storage`定义SQLite-neutral `RuntimeStoredRun`、ASC keyset query/page、insert/transition port、closed terminal detail与可选
+- `/storage`定义SQLite-neutral `RuntimeStoredRun`、ASC keyset query/page、active lookup、insert/transition/rewind/fork maintenance port、closed terminal detail与可选
   receipt resource result。Store 8 capability存在时，State session把start queued row、original Run resource receipt与
   State/event/snapshot放入同一transaction，activation写running，interaction/terminal/cancel/recovery event batch同步推进同一Run。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
@@ -46,11 +46,14 @@
   schema/canonical JSON/SHA-256。Host只在preflighted `storage.runs`存在时创建Run mutation；Store 6/7路径明确拒绝，不做partial fallback。
 - Start receipt lookup发生在recovery/inspect/prepare之前。Store8 response loss或retry返回持久original queued Run resource，不重新recover、
   activate、prepare或schedule；current Run状态另由private `get_run`/bounded `list_runs`读取，query本身不触发recovery。
+- Host restart后、Session尚未admit/recover时，private Run get/list把唯一nonterminal行只读投影为`unknown/recovery_required`；投影复用最后
+  一个durable Run clock值，不读取HTTP/Logger wall clock，也不写Store或触发recovery。显式resume完成existing Host recovery后恢复canonical
+  active/terminal投影；真实unknown只允许由reconciliation原子细化为更精确terminal，并保留原`finishedAtMs`。
 - 上述是unpublished Store8 Host机制。current Worker仍打开Store7，private Run query返回unsupported，Agent ServerInfo和Public handler仍不发布`runs`。
 
 ## 测试
 
-`bun test packages/runtime-host/test`（当前202 pass、1 skip；含Run lifecycle/resource replay/private query与Store7 fail-closed）
+`bun test packages/runtime-host/test`（当前203 pass、1 skip；含Run restart projection/recovery refinement、lifecycle/resource replay/private query与Store7 fail-closed）
 
 ## 文档影响
 

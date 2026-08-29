@@ -72,6 +72,20 @@ export interface RuntimeRunTransition {
   readonly next: RuntimeStoredRun;
 }
 
+export type RuntimeRunRewindResult =
+  | { readonly status: 'applied'; readonly deletedCount: number }
+  | { readonly status: 'invalid_boundary' };
+
+export interface RuntimeRunForkInput {
+  readonly sourceSessionId: string;
+  readonly targetSessionId: string;
+  readonly throughRevision: number;
+}
+
+export type RuntimeRunForkResult =
+  | { readonly status: 'applied'; readonly copiedCount: number }
+  | { readonly status: 'invalid_boundary' };
+
 export type RuntimeRunTransactionMutation =
   | { readonly type: 'insert'; readonly run: RuntimeStoredRun }
   | { readonly type: 'transition'; readonly transition: RuntimeRunTransition };
@@ -79,9 +93,15 @@ export type RuntimeRunTransactionMutation =
 /** Neutral Store mechanism. The Host remains transaction/lifecycle authority. */
 export interface RuntimeRunStorePort {
   get(sessionId: string, runId: string): RuntimeStoredRun | null;
+  /** At most one row by the Store 8 active-Run invariant. */
+  getActive(sessionId: string): RuntimeStoredRun | null;
   list(request: RuntimeRunPageRequest): RuntimeRunPage;
   insert(run: RuntimeStoredRun): void;
   transition(input: RuntimeRunTransition): 'applied' | 'conflict' | 'missing';
+  /** Same-transaction checkpoint maintenance; the concrete Store owns BEGIN/COMMIT. */
+  rewindSession(sessionId: string, targetRevision: number): RuntimeRunRewindResult;
+  /** Copy only complete, settled history and preserve the source coverage boundary. */
+  forkSession(input: RuntimeRunForkInput): RuntimeRunForkResult;
 }
 
 export interface RuntimeStoredCommandResourceResult {

@@ -87,9 +87,19 @@ resource receipt同一commit；activation在publish/schedule前推进running，i
 running/terminal。Private Runtime Contract/Protocol只新增closed Run receipt与bounded get/page；Host query直接消费neutral port且不触发
 recovery。Start receipt replay在lookup命中后直接返回original queued resource，不recover、inspect、activate、prepare或schedule。
 
-这仍不是production cutover：`adapter.ts`、active layout、Worker opener与release继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run
-mutation，private Run query返回unsupported，ServerInfo/Public handler仍无`runs`。Store 7与Store 8 preflight继续双向拒绝，Coordinator/Catalog/
-Agent adapter不持Run事实；因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
+KRSRUN-02A已把delete/rewind/fork与restart语义接到同一owner：`adapter.ts`只有在显式unpublished`targetStore: 'run'`时组合Store 8
+Run/receipt transaction，且该target拒绝Store 7 active-layout evidence、不暴露Store 7 Controller/read façade。delete在原transaction内级联删除Run并
+保留tombstone/receipt；rewind只接受coverage内between-turn边界并删除较新Run，partial/active/unknown retained边界整笔拒绝；fork只复制
+checkpoint前完整`completed|failed|cancelled`行、记录直接origin并继承coverage，不复制source receipt。rewind/delete后的original receipt仍可
+replay，即使current Run已不存在或其committed revision高于rewound Session head。任一Run、snapshot、receipt或SQLite fault回滚全部target事实。
+
+Worker restart后、Session尚未admit/recover时，private Run GET/list不调用Host recovery；nonterminal只读投影为
+`unknown/recovery_required`，并以最后durable Run clock作为确定projection boundary。显式resume执行existing Host recovery一次，recovery event与
+Run transition仍在canonical State transaction；persisted unknown只允许细化为更精确terminal并保留原finish clock，不自动重放external effect。
+
+这仍不是production cutover：active layout、Worker opener与release继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run mutation，
+private Run query返回unsupported，ServerInfo/Public handler仍无`runs`。Store 7与Store 8 preflight继续双向拒绝，Coordinator/Catalog/Agent
+adapter不持Run事实；因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

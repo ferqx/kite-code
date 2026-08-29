@@ -143,8 +143,15 @@ export interface SqliteRuntimeStorageInput<Event = unknown, State = unknown> {
   readonly sessionId?: string;
   /** Store 7/8 opt-in binding. Omit to retain the current Store 6 authority. */
   readonly workspaceBinding?: SqliteRuntimeWorkspaceBinding;
+  /** Explicit unpublished Store 8 target. Omit to keep Store 6/7 selection unchanged. */
+  readonly targetStore?: 'run';
   /** Active generation authority required when reopening an existing Store 7 writer. */
   readonly workspaceLayout?: SqliteRuntimeLayoutPaths;
+}
+
+interface SqliteRuntimeStoragePreflightTarget {
+  readonly formatEpoch: string;
+  readonly assertConnection: (database: Database) => ReadonlyMap<string, string>;
 }
 
 export interface EventRow {
@@ -745,9 +752,7 @@ function assertWorkspaceStoreOwnershipRows(
       receipt.project_id !== owner.project_id ||
       receipt.workspace_digest !== owner.workspace_digest ||
       !Number.isSafeInteger(receipt.committed_revision) ||
-      receipt.committed_revision < 0 ||
-      ('revision' in owner && receipt.committed_revision > owner.revision) ||
-      ('deleted_revision' in owner && receipt.committed_revision > owner.deleted_revision)
+      receipt.committed_revision < 0
     ) {
       throw new SqliteRuntimeFormatMismatchError(
         SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
@@ -809,12 +814,33 @@ export function openSqliteReadonlySnapshotView(dbPath: string): {
   }
 }
 
-/** Read-only Store 5 preflight. Existing files are never migrated or rewritten. */
+/** Read-only current Store preflight. Existing files are never migrated or rewritten. */
 export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unknown>(
   dbPath: string,
   codec?: SqliteRuntimeSnapshotCodec<Event, State>,
   sessionId?: string,
   workspaceBinding?: SqliteRuntimeWorkspaceBinding,
+): void {
+  assertSqliteRuntimeStorageCanOpen_(dbPath, codec, sessionId, workspaceBinding);
+}
+
+/** Package-internal target preflight; callers cannot replace the target validator. */
+export function assertSqliteRuntimeStorageTargetCanOpen_<Event = unknown, State = unknown>(
+  dbPath: string,
+  codec: SqliteRuntimeSnapshotCodec<Event, State>,
+  sessionId: string | undefined,
+  workspaceBinding: SqliteRuntimeWorkspaceBinding,
+  target?: SqliteRuntimeStoragePreflightTarget,
+): void {
+  assertSqliteRuntimeStorageCanOpen_(dbPath, codec, sessionId, workspaceBinding, target);
+}
+
+function assertSqliteRuntimeStorageCanOpen_<Event = unknown, State = unknown>(
+  dbPath: string,
+  codec?: SqliteRuntimeSnapshotCodec<Event, State>,
+  sessionId?: string,
+  workspaceBinding?: SqliteRuntimeWorkspaceBinding,
+  target?: SqliteRuntimeStoragePreflightTarget,
 ): void {
   if (dbPath === ':memory:') return;
   assertNoFollowDatabasePath(dbPath);
@@ -831,9 +857,11 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
       if (hasData) throw new SqliteRuntimeFormatMismatchError(null, null);
       return;
     }
-    const values = workspaceBinding
-      ? assertWorkspaceSqliteRuntimeStoreConnection(database, workspaceBinding)
-      : assertCurrentSqliteRuntimeStoreConnection(database);
+    const values = target
+      ? target.assertConnection(database)
+      : workspaceBinding
+        ? assertWorkspaceSqliteRuntimeStoreConnection(database, workspaceBinding)
+        : assertCurrentSqliteRuntimeStoreConnection(database);
     // A database-wide owner is used for session discovery and must not let one
     // damaged historical session block every healthy session. Deep event and
     // snapshot validation belongs to a session-scoped open.
@@ -928,9 +956,10 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
         if (
           row.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
           row.format_epoch !==
-            (workspaceBinding
-              ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
-              : SQLITE_RUNTIME_FORMAT_EPOCH) ||
+            (target?.formatEpoch ??
+              (workspaceBinding
+                ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+                : SQLITE_RUNTIME_FORMAT_EPOCH)) ||
           metadata.schemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
           metadata.stateRevision !== row.revision ||
           row.revision !== eventRevision ||
@@ -943,9 +972,10 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
               session.workspace_identity_digest !== workspaceBinding.workspaceIdentityDigest)) ||
           session.state_schema !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
           session.format_epoch !==
-            (workspaceBinding
-              ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
-              : SQLITE_RUNTIME_FORMAT_EPOCH) ||
+            (target?.formatEpoch ??
+              (workspaceBinding
+                ? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+                : SQLITE_RUNTIME_FORMAT_EPOCH)) ||
           session.revision !== row.revision
         ) {
           throw new SqliteRuntimeFormatMismatchError(

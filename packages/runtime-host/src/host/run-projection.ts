@@ -13,8 +13,36 @@ import {
   type RuntimeStoredRun,
 } from '../storage';
 
-export function projectRuntimeStoredRun(run: RuntimeStoredRun): RuntimeRunProjection {
+export function projectRuntimeStoredRun(
+  run: RuntimeStoredRun,
+  options: { readonly recoveryRequired?: boolean } = {},
+): RuntimeRunProjection {
   assertRuntimeStoredRun(run);
+  if (options.recoveryRequired && isNonterminal(run.status)) {
+    // This is a read-only restart projection, not a persisted lifecycle
+    // transition. Reuse the last durable Run clock value so GET cannot invent
+    // a wall-clock fact or mutate/recover the Session merely to render it.
+    const recoveryBoundaryMs = run.startedAtMs ?? run.createdAtMs;
+    return Object.freeze({
+      schema: 'kite.runtime-run.v1',
+      sessionId: run.sessionId,
+      runId: run.runId,
+      ...(run.originSessionId === undefined ? {} : { originSessionId: run.originSessionId }),
+      ...(run.originRunId === undefined ? {} : { originRunId: run.originRunId }),
+      phase: run.phase,
+      status: 'unknown',
+      createdRevision: run.createdRevision,
+      lastRevision: run.lastRevision,
+      createdAtMs: run.createdAtMs,
+      startedAtMs: recoveryBoundaryMs,
+      finishedAtMs: recoveryBoundaryMs,
+      terminal: Object.freeze({
+        reasonCode: 'recovery_required',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      }),
+    });
+  }
   return Object.freeze({
     schema: 'kite.runtime-run.v1',
     sessionId: run.sessionId,
@@ -30,6 +58,10 @@ export function projectRuntimeStoredRun(run: RuntimeStoredRun): RuntimeRunProjec
     ...(run.finishedAtMs === undefined ? {} : { finishedAtMs: run.finishedAtMs }),
     ...(run.terminal === undefined ? {} : { terminal: Object.freeze({ ...run.terminal }) }),
   });
+}
+
+function isNonterminal(status: RuntimeRunStatus): boolean {
+  return status === 'queued' || status === 'running' || status === 'waiting';
 }
 
 export function parseRuntimeStoredCommandResource(

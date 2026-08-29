@@ -97,6 +97,8 @@ describe('runtime host package boundary', () => {
 
   test('serves bounded Store 8 Run queries without App recovery or event scans', async () => {
     const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 3));
+    bridge.commandImplementation = async (command) => applied(command.commandId, 'session-1', 3);
     const run: RuntimeStoredRun = {
       sessionId: 'session-1',
       runId: 'run-1',
@@ -129,9 +131,19 @@ describe('runtime host package boundary', () => {
       runs: {
         get: (sessionId: string, runId: string) =>
           sessionId === run.sessionId && runId === run.runId ? run : null,
-        list: () => ({ entries: [run], hasMore: false }),
+        getActive: (sessionId: string) => (sessionId === run.sessionId ? run : null),
+        list: (request) => ({
+          entries:
+            (request.status === undefined || request.status === run.status) &&
+            (request.phase === undefined || request.phase === run.phase)
+              ? [run]
+              : [],
+          hasMore: false,
+        }),
         insert: () => undefined,
         transition: () => 'applied' as const,
+        rewindSession: () => ({ status: 'applied', deletedCount: 0 }) as const,
+        forkSession: () => ({ status: 'applied', copiedCount: 0 }) as const,
       },
     } as RuntimeStorage;
     const host = createRuntimeHost({
@@ -150,7 +162,14 @@ describe('runtime host package boundary', () => {
       status: 'ok',
       queryType: 'get_run',
       revision: 3,
-      run: { schema: 'kite.runtime-run.v1', runId: 'run-1', status: 'running' },
+      run: {
+        schema: 'kite.runtime-run.v1',
+        runId: 'run-1',
+        status: 'unknown',
+        startedAtMs: 110,
+        finishedAtMs: 110,
+        terminal: { reasonCode: 'recovery_required', recoveryEntry: 'reconcile' },
+      },
     });
     await expect(
       host.query({
@@ -162,9 +181,50 @@ describe('runtime host package boundary', () => {
     ).resolves.toMatchObject({
       status: 'ok',
       queryType: 'list_runs',
-      runs: [{ runId: 'run-1' }],
+      runs: [{ runId: 'run-1', status: 'unknown' }],
     });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'running',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [] });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'unknown',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [{ runId: 'run-1', status: 'unknown' }] });
     expect(bridge.recoveries).toEqual([]);
+
+    await expect(
+      host.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session',
+        commandId: 'resume-1',
+        sessionId: 'session-1',
+      }),
+    ).resolves.toMatchObject({ status: 'applied', sessionId: 'session-1', revision: 3 });
+    const recovered = await host.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_run',
+      sessionId: 'session-1',
+      runId: 'run-1',
+    });
+    expect(recovered).toMatchObject({
+      status: 'ok',
+      run: { runId: 'run-1', status: 'running' },
+    });
+    expect(recovered.status === 'ok' && recovered.run && 'finishedAtMs' in recovered.run).toBe(
+      false,
+    );
+    expect(bridge.recoveries).toEqual(['session-1']);
     await host[Symbol.asyncDispose]();
   });
 

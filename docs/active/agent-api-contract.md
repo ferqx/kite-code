@@ -80,4 +80,5 @@ History，也不把private camelCase DTO透传为Public wire。
 ## 后续Gate
 
 KASAPI-03A及以后接入Store 8/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
-的Run/Interaction/SSE/mutation route提前加入ServerInfo。Read-only Gate已关闭，但Run route仍被ADR-0150 Store 8 implementation阻断。
+的Run/Interaction/SSE/mutation route提前加入ServerInfo。KRSRUN-02A已关闭Run delete/rewind/fork/restart语义，但Run route仍被
+Store 7→Store 8 generation migration、production composition与后续Public mapper Gate阻断。

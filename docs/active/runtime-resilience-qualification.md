@@ -31,9 +31,14 @@ commit clock推进，Store writer拒绝同Session第二个active Run。response 
 queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
 Run keyset page，SQLite query plan命中专用index且不扫event journal。
 
-这些focused tests不证明Store 8 production restart recovery或generation migration：current Worker仍是Store 7并明确拒绝Run mutation/resource
-result，private Run query为unsupported，Public Run route/ServerInfo capability仍关闭。Delete/rewind/fork以及nonterminal reopen/recovery语义由
-KRSRUN-02A继续完成；02B/03A cutover前不得把本地Store 8 transaction evidence表述为release或三平台qualification。
+KRSRUN-02A focused matrix现已证明unpublished Store 8 owner上的delete FK cascade/retained receipt、rewind partial-boundary refusal与fault
+rollback、fork settled-terminal copy/origin/coverage/no-source-receipt、reopen及cross-Workspace binding isolation。Host GET/list在resume前只做
+`unknown/recovery_required`投影且不recover，resume只运行一次existing recovery；unknown refinement保留原finish clock，既有recovery suite继续
+证明不重复external dispatch。late retry与current Run missing是两个独立事实，retained receipt revision可高于rewound Session head。
+
+这些focused tests仍不证明Store 8 generation migration或production restart/candidate qualification：current Worker仍是Store 7并明确拒绝
+Run mutation/resource result，private Run query为unsupported，Public Run route/ServerInfo capability仍关闭。02B/03A cutover前不得把本地
+Store 8 transaction evidence表述为release或三平台qualification。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；

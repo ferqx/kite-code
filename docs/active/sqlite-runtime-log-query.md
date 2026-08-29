@@ -61,6 +61,8 @@ Public History page还受1 MiB encoded response上限：adapter只在已取得�
 KRSRUN-01A的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或现有
 Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在Store 8尚未cutover前，Web/Agent History
 仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
+KRSRUN-02A的显式unpublished Run target与delete/rewind/fork maintenance同样不改变该边界：Run rewind随既有Session transaction删除较新
+row，但History仍只按event/snapshot的原子结果和既有cursor invalidation判断；fork的Run coverage/origin也不成为History内容或完整性来源。
 
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不
