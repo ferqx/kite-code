@@ -337,6 +337,8 @@ function copyRegularFileAtomically(
       content: bytes,
       replaceExisting: false,
       flushFileBuffers: false,
+      writeThroughFile: false,
+      writeThroughMove: false,
       beforePublish: () => {
         if (existsSync(destination)) {
           throw new Error(`Managed launcher appeared during activation: ${destination}`);
@@ -379,6 +381,8 @@ function writeActiveReleasePointer(root: string, candidateId: string): void {
       temporaryName: basename(temporary),
       content: `${candidateId}\n`,
       flushFileBuffers: false,
+      writeThroughFile: false,
+      writeThroughMove: false,
       beforePublish: () => {
         if (!existsSync(pointer)) return;
         const stat = lstatSync(pointer);

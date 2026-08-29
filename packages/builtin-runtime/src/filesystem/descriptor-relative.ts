@@ -89,6 +89,8 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
   readonly content: string | Uint8Array;
   readonly replaceExisting?: boolean;
   readonly flushFileBuffers?: boolean;
+  readonly writeThroughFile?: boolean;
+  readonly writeThroughMove?: boolean;
   readonly beforePublish: () => void;
 }): void {
   if (process.platform !== 'win32') {
@@ -112,7 +114,11 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
     }
     temporaryPath = join(directoryPath, input.temporaryName);
     const targetPath = join(directoryPath, input.targetName);
-    temporaryHandle = createWindowsTemporaryFile(api, temporaryPath);
+    temporaryHandle = createWindowsTemporaryFile(
+      api,
+      temporaryPath,
+      input.writeThroughFile !== false,
+    );
     writeWindowsFile(api, temporaryHandle, input.content);
     if (input.flushFileBuffers !== false && !api.FlushFileBuffers(temporaryHandle))
       throw windowsFilesystemError(api, 'flush temporary file');
@@ -124,7 +130,7 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
         widePointer(temporaryPath),
         widePointer(targetPath),
         (input.replaceExisting === false ? 0 : WINDOWS_MOVEFILE_REPLACE_EXISTING) |
-          WINDOWS_MOVEFILE_WRITE_THROUGH,
+          (input.writeThroughMove === false ? 0 : WINDOWS_MOVEFILE_WRITE_THROUGH),
       )
     ) {
       throw windowsFilesystemError(api, 'publish temporary file');
@@ -331,14 +337,18 @@ function openLockedWindowsDirectory(api: WindowsFilesystemApi, path: string): nu
   }
 }
 
-function createWindowsTemporaryFile(api: WindowsFilesystemApi, path: string): number | bigint {
+function createWindowsTemporaryFile(
+  api: WindowsFilesystemApi,
+  path: string,
+  writeThrough: boolean,
+): number | bigint {
   const handle = api.CreateFileW(
     widePointer(path),
     WINDOWS_GENERIC_WRITE,
     WINDOWS_FILE_SHARE_READ | WINDOWS_FILE_SHARE_WRITE,
     null,
     WINDOWS_CREATE_NEW,
-    WINDOWS_FILE_ATTRIBUTE_NORMAL | WINDOWS_FILE_FLAG_WRITE_THROUGH,
+    WINDOWS_FILE_ATTRIBUTE_NORMAL | (writeThrough ? WINDOWS_FILE_FLAG_WRITE_THROUGH : 0),
     0,
   );
   if (invalidWindowsHandle(handle)) {

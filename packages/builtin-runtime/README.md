@@ -46,9 +46,10 @@
   完整candidate identity（marker、pointer、`.candidate-id`、manifest digest必须一致）。Runner、Shell runtime与
   Coreutils均须是no-follow regular files；running process固定stable launcher显式pin的candidate，不从cwd、PATH或
   ambient home fallback。Windows ACL/write-through与三平台安装证据仍由release qualification负责，不能由本地测试代替。
-- Windows locked-directory publication接受UTF-8文本或原始bytes，在pinned non-reparse目录内以write-through handle写入，
-  可按owner要求执行显式`FlushFileBuffers`，再用write-through atomic replace发布。Workspace写入保留显式flush；release installer的
-  launcher/pointer/marker使用write-through write + write-through move，不重复慢flush；Bun `fsync`不是Windows发布owner。
+- Windows locked-directory publication接受UTF-8文本或原始bytes，在pinned non-reparse目录内写入，可按owner分别要求
+  write-through handle、显式`FlushFileBuffers`与write-through atomic replace。Workspace写入保留完整durability；release installer先以
+  ordinary atomic publish写launcher/pointer，最终marker才执行单次write-through commit，任一部分发布由marker/pointer/checksum交叉验证
+  fail closed；Bun `fsync`不是Windows发布owner。
 
 ## 测试
 

@@ -77,8 +77,9 @@ stop、确认 state absent 并取得 Native lifecycle fence；busy、unknown、�
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；这些
 independent asset identities 不等于三平台 process/runtime qualification。Windows resolver 只接受 v2 marker、唯一 `active` regular-file
 pointer、immutable candidate 与 exact identity，并对 runner/marker/pointer/runtime 执行 no-follow 校验。POSIX rename
-后会 flush 父目录；Windows launcher、active pointer与marker通过locked-directory native publication执行
-write-through write与write-through atomic replace，不重复hosted磁盘的高延迟flush，也不依赖Bun `fsync`；其directory write-through、ACL 与
+后会 flush 父目录；Windows launcher与active pointer通过locked-directory ordinary atomic publish先落盘，最终marker执行每次操作唯一的
+write-through write + move。partial publish会因marker/pointer/checksum不一致fail closed；installer不重复hosted磁盘的逐文件高延迟flush，
+也不依赖Bun `fsync`；其directory write-through、ACL 与
 三平台安装/运行 qualification 仍须 hosted/真实证据，
 不能以本地结果代替。
 

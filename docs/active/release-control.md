@@ -164,9 +164,10 @@ installer contract tests的临时Service home也必须由同一state owner primi
 
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
 这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
-flush 父目录；Windows launcher、active pointer与marker复用Builtin Filesystem的locked-directory原语，以
-`CreateFileW(FILE_FLAG_WRITE_THROUGH)`写入，再用`MoveFileExW(WRITE_THROUGH)`原子替换；release不重复调用hosted磁盘上高延迟的
-`FlushFileBuffers`，避免Bun `fsync`的read-only `EPERM`与逐文件长阻塞。Windows directory write-through、ACL 与
+flush 父目录；Windows launcher与active pointer复用Builtin Filesystem的locked-directory ordinary atomic publish，最终marker才以
+`CreateFileW(FILE_FLAG_WRITE_THROUGH)`与`MoveFileExW(WRITE_THROUGH)`形成每次install/upgrade/rollback唯一durable commit。partial publish
+由marker、pointer、manifest/checksum交叉验证fail closed；release不逐文件调用hosted磁盘高延迟的`FlushFileBuffers`或write-through move，
+也不依赖Bun `fsync`。Windows directory write-through、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实

@@ -27,6 +27,8 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
 - TUI exit 只关闭本 client connection、subscription 与 presentation resource；不 `abortAll()`、不 dispose Service Host。
   退出前按 exact Session projection确认Controller disposition：idle且无pending interaction时release，active/pending或query不确定时
   detach；Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
+- 连续普通prompt使用client-local FIFO；terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
+  前一轮尚在finally的waiter不能遮蔽后继轮，也不能清除后继轮的presentation flush责任。
 
 ## 不拥有职责
 

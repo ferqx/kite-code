@@ -58,7 +58,8 @@ macOS/Linux/Windows command/candidate结果未登记前，三平台qualification
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
-远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。
+远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。terminal先于idle projection时，
+每轮remote-idle waiter必须绑定该轮completion callback；前轮waiter的迟到finally不能遮蔽后继轮terminal/query或其presentation flush。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
 失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live

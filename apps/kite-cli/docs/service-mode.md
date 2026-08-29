@@ -44,6 +44,9 @@ Host idle，再取得唯一prompt reservation并发送`start_turn`；连续输�
 cleanup barrier idle后才放行下一条消息。等待或command失败必须返回TUI可见的“未发送”错误，不能只清空输入框。
 若terminal projection与下一条`start_turn`交叉而返回明确未执行的`revision_conflict`，client只可使用原command ID与
 Service返回的`currentRevision`有界重试；重复冲突必须失败可见，不能无限重放或创建第二Turn。
+terminal event若先于event-free idle projection到达，adapter会为当前`resolveRun`建立remote-idle waiter；waiter identity与该轮
+completion callback绑定，旧轮waiter的迟到finally不能占用或清除后继轮waiter。这样第二轮的terminal/query仍会结束自己的run promise并
+触发Ink presentation flush，不能出现模型请求已发出但回答停留在未提交React frame中的状态。
 
 Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉
 transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。

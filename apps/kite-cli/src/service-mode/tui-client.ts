@@ -82,7 +82,7 @@ interface NativeSessionRecord {
   resolveReady: () => void;
   rejectReady: (error: unknown) => void;
   runPromise: Promise<void> | undefined;
-  runIdlePromise: Promise<void> | undefined;
+  runIdleResolution: { readonly resolveRun: () => void } | undefined;
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
   controllerLease: KiteServiceModeControllerLease | undefined;
@@ -290,7 +290,7 @@ class NativeTuiRuntimeClient {
       resolveReady,
       rejectReady,
       runPromise: undefined,
-      runIdlePromise: undefined,
+      runIdleResolution: undefined,
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
       controllerLease: undefined,
@@ -472,9 +472,14 @@ class NativeTuiRuntimeClient {
     }
     if (isTerminalEvent(event)) {
       if (isActiveWork(record.projection?.activeWork)) {
-        record.runIdlePromise ??= this.#resolveRunAfterRemoteIdle(record).finally(() => {
-          record.runIdlePromise = undefined;
-        });
+        const resolveRun = record.resolveRun;
+        if (resolveRun && record.runIdleResolution?.resolveRun !== resolveRun) {
+          const resolution = Object.freeze({ resolveRun });
+          record.runIdleResolution = resolution;
+          void this.#resolveRunAfterRemoteIdle(record).finally(() => {
+            if (record.runIdleResolution === resolution) record.runIdleResolution = undefined;
+          });
+        }
       } else {
         record.agentLoopActive = false;
         record.resolveRun?.();

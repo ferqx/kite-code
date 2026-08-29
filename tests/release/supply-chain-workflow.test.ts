@@ -104,11 +104,13 @@ describe('ordinary open-source release candidate workflow', () => {
     }
   });
 
-  test('publishes Windows install metadata through the native double write-through path', () => {
+  test('publishes Windows install metadata through one native durable marker commit', () => {
     expect(candidateInstaller).toContain(
       "import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem'",
     );
     expect(candidateInstaller.match(/flushFileBuffers: false/g)).toHaveLength(3);
+    expect(candidateInstaller.match(/writeThroughFile: false/g)).toHaveLength(2);
+    expect(candidateInstaller.match(/writeThroughMove: false/g)).toHaveLength(2);
     expect(windowsPublication).toContain('WINDOWS_FILE_FLAG_WRITE_THROUGH');
     expect(windowsPublication).toContain('WINDOWS_MOVEFILE_WRITE_THROUGH');
     expect(windowsPublication).toContain('input.flushFileBuffers !== false');

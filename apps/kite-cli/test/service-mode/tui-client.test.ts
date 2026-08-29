@@ -219,6 +219,26 @@ test('Native TUI facade completes an active run from an idle snapshot after a su
   await facade.dispose();
 });
 
+test('Native TUI facade gives each consecutive turn its own remote-idle waiter', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.overlapIdleWaitersOnConsecutiveTurns();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+
+  await session.runTask('first turn with delayed idle query', { dispatch: () => {} });
+  await Promise.race([
+    session.runTask('second turn after event-free idle', { dispatch: () => {} }),
+    Bun.sleep(500).then(() => {
+      throw new Error('Consecutive Runtime turn did not acquire its own idle waiter.');
+    }),
+  ]);
+
+  expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+  await facade.dispose();
+});
+
 test('Native TUI facade ignores an idle snapshot older than the accepted turn receipt', async () => {
   const remote = new FakeRuntimeConnection();
   remote.finishNextTurnAfterStaleSnapshot();
@@ -414,6 +434,9 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #nextStartTurnConflictRevision: number | undefined;
   #advanceRevisionOnEveryStart = false;
   #deferNextStartTurnReceipt = false;
+  #overlapIdleWaiters = false;
+  #delayedIdleQueries = 0;
+  #startTurnOrdinal = 0;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -455,6 +478,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   deliverNextStartTurnReceiptAfterTerminalProjection(): void {
     this.#deferNextStartTurnReceipt = true;
+  }
+
+  overlapIdleWaitersOnConsecutiveTurns(): void {
+    this.#overlapIdleWaiters = true;
+    this.#delayedIdleQueries = 1;
   }
 
   #emitApproval(sessionId: string): void {
@@ -518,8 +546,13 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       if (message.method === 'runtime/query') {
         const query = message.params.query;
         if (query.type === 'get_session_projection') {
-          const session =
-            this.#restoreActiveTurn && !this.#restoredTurnReleased
+          if (this.#delayedIdleQueries > 0) {
+            this.#delayedIdleQueries -= 1;
+            await Bun.sleep(50);
+          }
+          const session = this.#overlapIdleWaiters
+            ? idleProjection(query.sessionId, this.#authoritativeRevision)
+            : this.#restoreActiveTurn && !this.#restoredTurnReleased
               ? projection(query.sessionId, 1, 'running')
               : idleProjection(query.sessionId, 2);
           this.push(
@@ -664,6 +697,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         return;
       }
       if (command.type === 'start_turn') {
+        this.#startTurnOrdinal += 1;
         this.startTurnExpectedRevisions.push(command.expectedRevision);
         this.startTurnCommandIds.push(command.commandId);
         if (this.#nextStartTurnConflictRevision !== undefined) {
@@ -888,7 +922,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             durability: 'durable',
             sessionId: command.sessionId,
             revision: terminalRevision,
-            session: projection(command.sessionId, terminalRevision, 'completed'),
+            session: projection(
+              command.sessionId,
+              terminalRevision,
+              this.#overlapIdleWaiters ? 'running' : 'completed',
+            ),
             event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
           }),
         );
@@ -896,7 +934,23 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           this.deferredTurnDeliveryOrder.push('command_receipt');
           this.push(commandReceipt);
         }
-        this.#authoritativeRevision = terminalRevision;
+        if (this.#overlapIdleWaiters) {
+          const idleRevision = terminalRevision + 1;
+          this.#authoritativeRevision = idleRevision;
+          if (this.#startTurnOrdinal === 1) {
+            this.push(
+              subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+                type: 'notification',
+                durability: 'durable',
+                sessionId: command.sessionId,
+                revision: idleRevision,
+                session: idleProjection(command.sessionId, idleRevision),
+              }),
+            );
+          }
+        } else {
+          this.#authoritativeRevision = terminalRevision;
+        }
         return;
       }
       const revision = ('expectedRevision' in command ? command.expectedRevision : 0) + 1;
