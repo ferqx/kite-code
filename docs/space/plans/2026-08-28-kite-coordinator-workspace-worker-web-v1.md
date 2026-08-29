@@ -22,6 +22,11 @@ canonical Workspace Worker；Worker独占admitted Store 7、Session Controller�
 唯一Web Gateway/`apps/kite-web` 永久只读，只提供 path-free Directory、History/live presentation与主动断连。显式 `kite service *`
 仍保留 legacy Store 6 maintenance surface，但 committed layout/fence 阻止它成为 fallback或与Worker双写。
 
+2026-08-29 Web follow-up固定了idle History owner：Gateway不隐式启动Worker，也不把History data plane加入Coordinator；它通过
+Service-owned query-only facade从server-owned active layout读取exact Store 7 snapshot。Browser仍只提交Session id并消费closed
+presentation DTO，canonical path、Store binding与raw Runtime event不会跨Browser seam；legacy-only/missing/corrupt保持typed
+unavailable。Session点击、迟到请求隔离与最多三次terminal resync重连已由Web tests和真实Gateway页面验证。
+
 本地macOS arm64 candidate已完成 build/verify/install、真实 Coordinator→Worker ensure/mint/handshake、TUI启动、Web payload、
 companion identity、upgrade/rollback/uninstall与精确test-owned cleanup。KCWW-09仍保持 active，仅因为GitHub-hosted Linux/Windows
 process/filesystem/ACL/release qualification尚无远端证据；本机macOS结果不得冒充这些平台结果。下文KCWW-00 baseline是计划制定时
@@ -35,8 +40,8 @@ process/filesystem/ACL/release qualification尚无远端证据；本机macOS结�
 2. 全系统最多一个Web Gateway，只能通过`kite-code web`启动或返回已有实例；Web不内嵌到每个Runtime Worker。
 3. Runtime authority按canonical Workspace分片：一个Workspace同时最多一个active Worker、一个Runtime Host与一个Store writer。
 4. TUI与Desktop Client是可申请Controller的交互Client；Web Browser固定为只读Observer。Web可以定位已有Workspace/Session并订阅
-   展示投影，但不能创建Session、触发Runtime执行或复制Session authority；是否需要启动只读查询owner由后续lifecycle设计决定，不能
-   隐式启动Turn或取得writer authority。
+   展示投影，但不能创建Session、触发Runtime执行或复制Session authority。Worker idle时由Gateway内Service-owned query-only facade
+   读取active Store 7 snapshot；它不启动Worker/Turn、不取得writer authority，也不使Gateway成为Store authority。
 5. 同一个Session同时只有一个Controller。Controller lease的最终authority位于Session所属Worker/Store；只有TUI或Desktop可以申请
    Controller。Web始终是Observer，只能读取、订阅和主动断开，不能发送prompt、回复approval/interaction、cancel或rewind。
 6. Client共享Session的方式是连接Session所属的同一个Workspace Worker，不是多个Server之间同步状态。

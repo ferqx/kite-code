@@ -111,6 +111,7 @@ describe('Workspace Worker Web Gateway upstream', () => {
 
   test('keeps Catalog Sessions grouped and unavailable while their Worker is idle', async () => {
     const fixture = createWorkerFixture();
+    const offlineRequests: Array<{ workerScopeId: string; sessionId: string }> = [];
     const coordinator = fixture.withWorker(() => {
       throw new Error('Worker is idle');
     });
@@ -119,6 +120,16 @@ describe('Workspace Worker Web Gateway upstream', () => {
         coordinator,
         gatewayInstanceId: 'gateway-idle-worker',
         contractRevision: 'web-contract-1',
+        offlineHistory: {
+          loadSession: async (request) => {
+            offlineRequests.push(request);
+            return {
+              sessionId: request.sessionId,
+              lastSequence: 1,
+              records: [{ sequence: 1, events: [historyEvent] }],
+            };
+          },
+        },
       }),
     );
     const observer = upstream.createObserver({
@@ -145,6 +156,20 @@ describe('Workspace Worker Web Gateway upstream', () => {
       },
     ]);
     expect(fixture.calls.historyListSessions).toBe(0);
+    expect(fixture.calls.mintPurposes).toEqual([]);
+
+    const history = await observer.loadHistory({
+      schema: 'kite.app.web.history-request.v1',
+      sessionId,
+      limit: 200,
+    });
+    expect(history.messages[0]?.blocks).toEqual([
+      { kind: 'text', text: 'History from the native Worker.' },
+    ]);
+    expect(offlineRequests).toEqual([
+      { workerScopeId: fixture.worker.identity.workerScopeId, sessionId },
+    ]);
+    expect(fixture.calls.historyLoadSession).toBe(0);
     expect(fixture.calls.mintPurposes).toEqual([]);
   });
 

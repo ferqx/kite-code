@@ -15,11 +15,19 @@ import {
 } from '@kite-ai/runtime-host/storage';
 import { openSqliteRuntimeLogConnection } from './connection';
 import {
+  assertSqliteWorkspaceStoreActive,
+  resolveSqliteWorkspaceStorePath,
+  type SqliteRuntimeLayoutPaths,
+} from './layout';
+import {
   assertCurrentSqliteRuntimeStoreConnection,
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
+  assertWorkspaceSqliteRuntimeStoreConnection,
+  openSqliteReadonlySnapshotView,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   type SqliteRuntimeSnapshotCodec,
+  type SqliteRuntimeWorkspaceBinding,
 } from './preflight';
 
 export class SqliteRuntimeLogQueryError extends Error {
@@ -37,6 +45,16 @@ export interface SqliteRuntimeLogQueryInput<Event = unknown, State = unknown> {
   /** The current Host-owned event/state codec; no compatibility decoder is accepted. */
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State> | RuntimeSnapshotCodec<Event, State>;
   /** The current RuntimeEvent discriminant set, supplied by the composition boundary. */
+  readonly currentEventTypes: readonly string[];
+  /** Optional Store 7 scope proof required by an offline Workspace History reader. */
+  readonly workspace?: SqliteRuntimeWorkspaceBinding;
+}
+
+export interface SqliteWorkspaceRuntimeLogQueryInput<Event = unknown, State = unknown> {
+  readonly layout: SqliteRuntimeLayoutPaths;
+  readonly layoutGeneration: string;
+  readonly workerScopeId: string;
+  readonly codec: SqliteRuntimeSnapshotCodec<Event, State> | RuntimeSnapshotCodec<Event, State>;
   readonly currentEventTypes: readonly string[];
 }
 
@@ -144,21 +162,28 @@ export function createSqliteRuntimeLogQueryPort<Event = unknown, State = unknown
   }
   try {
     assertNoFollowDatabasePath(input.databasePath);
-    assertSqliteRuntimeStorageCanOpen(input.databasePath);
+    assertSqliteRuntimeStorageCanOpen(input.databasePath, undefined, undefined, input.workspace);
   } catch (error) {
     throw queryError(error);
   }
   let closed = false;
   let db: Database;
+  let closeDatabase: () => void;
   try {
-    const opened = openSqliteRuntimeLogConnection(input.databasePath);
+    const snapshot = input.workspace
+      ? openSqliteReadonlySnapshotView(input.databasePath)
+      : undefined;
+    const opened = snapshot?.database ?? openSqliteRuntimeLogConnection(input.databasePath);
     try {
-      assertCurrentSqliteRuntimeStoreConnection(opened);
+      if (input.workspace === undefined) assertCurrentSqliteRuntimeStoreConnection(opened);
+      else assertWorkspaceSqliteRuntimeStoreConnection(opened, input.workspace);
     } catch (error) {
-      opened.close();
+      if (snapshot) snapshot.close();
+      else opened.close();
       throw error;
     }
     db = opened;
+    closeDatabase = snapshot?.close ?? (() => opened.close());
   } catch (error) {
     throw queryError(error);
   }
@@ -284,7 +309,75 @@ export function createSqliteRuntimeLogQueryPort<Event = unknown, State = unknown
     close(): void {
       if (closed) return;
       closed = true;
-      db.close();
+      closeDatabase();
     },
+  });
+}
+
+/**
+ * Resolve and pin a query-only Store 7 reader from active-layout authority.
+ * The caller supplies only the opaque Worker scope and the already selected
+ * generation; the canonical path and persisted Workspace digest never cross
+ * this storage boundary.
+ */
+export function createSqliteWorkspaceRuntimeLogQueryPort<Event = unknown, State = unknown>(
+  input: SqliteWorkspaceRuntimeLogQueryInput<Event, State>,
+): RuntimeLogQueryPort<Event> {
+  const databasePath = resolveSqliteWorkspaceStorePath(
+    input.layout,
+    input.layoutGeneration,
+    input.workerScopeId,
+  );
+  let binding: SqliteRuntimeWorkspaceBinding;
+  const snapshot = openSqliteReadonlySnapshotView(databasePath);
+  try {
+    const marker = snapshot.database
+      .query<{ value: string }, []>(
+        "SELECT value FROM runtime_store_meta WHERE key = 'workspace_identity_digest' LIMIT 1",
+      )
+      .get();
+    if (!marker) {
+      throw new SqliteRuntimeLogQueryError(
+        'session_unavailable',
+        'Runtime log Workspace identity is unavailable.',
+      );
+    }
+    binding = Object.freeze({
+      layoutGeneration: input.layoutGeneration,
+      workerScopeId: input.workerScopeId,
+      workspaceIdentityDigest: marker.value,
+    });
+    assertWorkspaceSqliteRuntimeStoreConnection(snapshot.database, binding);
+  } catch (error) {
+    throw queryError(error);
+  } finally {
+    snapshot.close();
+  }
+  try {
+    assertSqliteWorkspaceStoreActive(input.layout, binding, databasePath);
+  } catch (error) {
+    throw queryError(error);
+  }
+  const reader = createSqliteRuntimeLogQueryPort({
+    databasePath,
+    codec: input.codec,
+    currentEventTypes: input.currentEventTypes,
+    workspace: binding,
+  });
+  const verifyActive = <Result>(read: () => Result): Result => {
+    try {
+      assertSqliteWorkspaceStoreActive(input.layout, binding, databasePath);
+      const result = read();
+      assertSqliteWorkspaceStoreActive(input.layout, binding, databasePath);
+      return result;
+    } catch (error) {
+      throw queryError(error);
+    }
+  };
+  return Object.freeze({
+    listSessions: (request: RuntimeLogSessionQuery) =>
+      verifyActive(() => reader.listSessions(request)),
+    listEvents: (request: RuntimeLogEventQuery) => verifyActive(() => reader.listEvents(request)),
+    close: () => reader.close(),
   });
 }

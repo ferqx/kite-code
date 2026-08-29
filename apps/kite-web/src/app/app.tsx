@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import {
   initialWebPresentationState,
   selectedSession,
+  type WebHistoryState,
   webPresentationReducer,
 } from '@/presentation/reducer';
 import type { WebObserverTransport } from '@/transport/client';
@@ -17,6 +18,8 @@ export interface AppProps {
   /** Test/composition seam; production creates the closed browser transport. */
   readonly transport?: WebObserverTransport;
 }
+
+const MAX_RESYNC_RECONNECT_ATTEMPTS = 3;
 
 export function App(props: AppProps = {}) {
   const [state, dispatch] = useReducer(webPresentationReducer, initialWebPresentationState);
@@ -78,11 +81,34 @@ export function App(props: AppProps = {}) {
     let active = true;
     let subscription: Awaited<ReturnType<typeof transport.subscribe>> | undefined;
     dispatch({ type: 'connection', connection: { status: 'loading' }, generation });
+    dispatch({
+      type: 'history_loading',
+      generation,
+      requestToken: state.historyReloadToken,
+    });
     const load = async () => {
+      let history: Awaited<ReturnType<typeof transport.loadHistory>>;
       try {
-        const history = await transport.loadHistory(sessionId, undefined, 200);
+        history = await transport.loadHistory(sessionId, undefined, 200);
         if (!active) return;
         dispatch({ type: 'history_loaded', history, reset: true, generation });
+      } catch (error) {
+        if (!active) return;
+        dispatch({
+          type: 'history_failed',
+          status: historyFailureStatus(error),
+          reason: historyFailureReason(error),
+          generation,
+        });
+        dispatch({
+          type: 'connection',
+          connection: { status: 'unavailable', reason: failureReason(error) },
+          generation,
+        });
+        return;
+      }
+      if (!active) return;
+      try {
         if (selectedStatus !== 'running') return;
         const nextSubscription = await transport.subscribe({
           sessionId,
@@ -123,7 +149,13 @@ export function App(props: AppProps = {}) {
       active = false;
       void subscription?.unsubscribe().catch(() => undefined);
     };
-  }, [session?.status, state.generation, state.selectedSessionId, transport]);
+  }, [
+    session?.status,
+    state.generation,
+    state.historyReloadToken,
+    state.selectedSessionId,
+    transport,
+  ]);
 
   useEffect(() => {
     const terminalStream =
@@ -134,23 +166,25 @@ export function App(props: AppProps = {}) {
     }
     let active = true;
     const reconnect = async () => {
-      try {
-        const connection = await transport.connect();
-        if (!active) return;
-        dispatch({ type: 'transport_connected', generation: connection.generation });
-        const directory = await transport.listDirectory();
-        if (active) {
-          dispatch({ type: 'directory_loaded', directory, generation: connection.generation });
-        }
-      } catch (error) {
-        if (active) {
-          dispatch({
-            type: 'connection',
-            connection: { status: 'unavailable', reason: failureReason(error) },
-            generation: state.generation,
-          });
+      for (let attempt = 0; attempt < MAX_RESYNC_RECONNECT_ATTEMPTS; attempt += 1) {
+        try {
+          const connection = await transport.connect();
+          if (!active) return;
+          dispatch({ type: 'transport_connected', generation: connection.generation });
+          const directory = await transport.listDirectory();
+          if (active) {
+            dispatch({ type: 'directory_loaded', directory, generation: connection.generation });
+          }
+          return;
+        } catch {
+          if (!active) return;
         }
       }
+      dispatch({
+        type: 'resync_stopped',
+        generation: state.generation,
+        reason: 'resync_retry_limit',
+      });
     };
     void reconnect();
     return () => {
@@ -240,24 +274,95 @@ export function App(props: AppProps = {}) {
             <span className="max-sm:hidden">Disconnect</span>
           </Button>
         </header>
-        {state.connection.status === 'unavailable' && state.messages.length === 0 ? (
-          <div className="grid flex-1 place-items-center p-8 text-center">
-            <div>
-              <Radio className="mx-auto mb-4 size-8 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Observer unavailable</h2>
-              <p className="mt-2 max-w-sm text-xs leading-6 text-muted-foreground">
-                Start the local Kite Web Gateway, then reopen its one-shot launch URL.
-              </p>
-            </div>
+        {state.connection.status === 'unavailable' &&
+        (state.historyState === 'content' || state.historyState === 'empty') ? (
+          <div
+            role="status"
+            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+          >
+            <Radio className="size-4 shrink-0 text-muted-foreground" />
+            <span>Live updates are unavailable. Showing the latest History snapshot.</span>
           </div>
+        ) : null}
+        {state.connection.status === 'resync_required' &&
+        (state.historyState === 'content' || state.historyState === 'empty') ? (
+          <div
+            role="status"
+            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+          >
+            <Radio className="size-4 shrink-0 animate-pulse text-running" />
+            <span>Refreshing this session before live updates resume.</span>
+          </div>
+        ) : null}
+        {state.selectedSessionId === null ? (
+          <DirectoryState
+            sessionCount={state.workspaces.reduce(
+              (total, workspace) => total + workspace.sessions.length,
+              0,
+            )}
+            connection={state.connection.status}
+          />
         ) : (
-          <MessageList messages={state.messages} />
+          <MessageList
+            messages={state.messages}
+            status={state.historyState}
+            reason={state.historyReason}
+            sessionName={session?.displayName}
+            onRetry={() => dispatch({ type: 'history_retry', generation: state.generation })}
+          />
         )}
       </section>
     </main>
   );
 }
 
+function DirectoryState({
+  sessionCount,
+  connection,
+}: {
+  readonly sessionCount: number;
+  readonly connection: string;
+}) {
+  const unavailable = connection === 'unavailable';
+  const loading = connection === 'loading' || connection === 'reconnecting';
+  return (
+    <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
+      <div className="max-w-sm">
+        <Radio className="mx-auto mb-4 size-8 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">
+          {loading
+            ? 'Connecting to Kite Observer'
+            : unavailable
+              ? 'Observer unavailable'
+              : sessionCount === 0
+                ? 'No sessions available'
+                : 'Select a session'}
+        </h2>
+        <p className="mt-2 text-xs leading-6 text-muted-foreground">
+          {loading
+            ? 'Loading the read-only Workspace directory…'
+            : unavailable
+              ? 'Start the local Kite Web Gateway, then reopen its one-shot launch URL.'
+              : sessionCount === 0
+                ? 'Existing Workspace sessions will appear here when the server publishes them.'
+                : 'Choose an existing Session from the Workspace list to view its History.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function failureReason(error: unknown): string {
   return error instanceof WebObserverTransportError ? error.reason : 'gateway_unavailable';
+}
+
+function historyFailureStatus(error: unknown): Extract<WebHistoryState, 'unavailable' | 'error'> {
+  if (!(error instanceof WebObserverTransportError)) return 'error';
+  return error.reason === 'protocol_error' || error.reason === 'resync_required'
+    ? 'error'
+    : 'unavailable';
+}
+
+function historyFailureReason(error: unknown): string {
+  return error instanceof WebObserverTransportError ? error.reason : 'history_error';
 }

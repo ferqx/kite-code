@@ -22,6 +22,10 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
 - Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 7 writer、Controller/effect authority 与
   Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。
+- Worker idle 时，Gateway 可按 Catalog 的 `sessionId → workerScopeId` 调用 Service-owned offline History facade。该 facade只从
+  显式Kite home的active-layout推导Store 7路径，在隔离只读snapshot上复核pointer/manifest/journal/fence、owner/no-follow/file与
+  Workspace binding，并在读取前后重验active generation；它不是Store authority，不创建writer、不启动Worker、不接受Browser path，
+  也不调用compatibility importer。missing/legacy/corrupt/drift一律返回typed unavailable。
 - Coordinator 的 Directory mirror 只通过 authenticated Worker control link 读取 current-format outbox。manager-local
   `workerScopeId` 只用于选择并复核 exact Worker，不进入 strict control request；wire body 只投影 bounded `cursor/limit`，
   再逐条复核响应 scope 后写入 path-free Catalog，避免 strict codec 把合法目录读取静默降成空目录。Gateway始终按该stable

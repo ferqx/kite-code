@@ -22,6 +22,9 @@
   materialize/admit 与 active-generation 校验，Worker 再以已打开的唯一 Store owner 组合 Host/Application。默认 Service 仍是
   Store 6；Store 7 不会因 Web query、legacy reader 或 open failure 被隐式启用。
 - 执行只读 format preflight、current log query 和已知历史 source 的隔离导入。
+- `createSqliteWorkspaceRuntimeLogQueryPort` 只接受server-owned layout、active generation与opaque Worker scope，canonical Store
+  path由layout owner推导。它从Store 7 marker取得内部Workspace digest后在同一隔离只读snapshot复核完整binding，并在每次
+  query前后重验active pointer/manifest/journal/fence；不会在live Store旁创建WAL/SHM、schema或第二writer。
 - 通过 `transaction.ts` 原子提交 Runtime event 与 snapshot。
 
 ## 不拥有职责
@@ -54,6 +57,8 @@
 - `targetWriteState=written` 后的 Worker restart/re-admission重新验证owner/no-follow、Store 7 profile与完整 Workspace
   binding，并要求manifest/journal中的原始admission digest彼此一致；它不再把已写live Store字节与first-write前digest比较，
   也不重设或更新该原始digest。`targetWriteState=none`时仍必须精确匹配pre-write digest。
+- offline Store 7 log reader仍要求regular、owner-only、no-follow、nlink=1与exact Store 7 scope/profile；pointer或binding在
+  query期间漂移会使本次读取失败，legacy-only/Store 6不能作为silent fallback。
 - Store 6 到 Store 7 的 copy-and-switch 必须由调用方提供已验证的 persisted Workspace ownership resolver；缺失/冲突归属、
   orphan retained receipt、损坏或未知 source fact 会整体 blocked，source 保持只读且 active-layout 不切换。迁移逐 Session
   校验 event count/sequence、snapshot checksum/position、receipt digest、recovery evidence 与 content digest，完成所有

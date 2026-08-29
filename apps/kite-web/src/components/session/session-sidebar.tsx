@@ -40,62 +40,69 @@ export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: Sess
         </p>
       </div>
       <ScrollArea className="min-h-0 flex-1 px-3 pb-5">
-        <nav aria-label="Workspace sessions" className="space-y-2">
-          {workspaces.map((workspace) => (
-            <CollapsiblePrimitive.Root key={workspace.workspaceId} defaultOpen>
-              <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-surface">
-                <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
-                <FolderKanban className="size-3.5" />
-                <span className="min-w-0 flex-1 truncate">{workspace.label}</span>
-                <span className="text-[10px] tabular-nums">{workspace.sessions.length}</span>
-              </CollapsiblePrimitive.Trigger>
-              <CollapsiblePrimitive.Content className="mt-1 space-y-1">
-                {workspace.sessions.map((session) => {
-                  const selected = session.sessionId === selectedSessionId;
-                  return (
-                    <button
-                      key={session.sessionId}
-                      type="button"
-                      onClick={() => onSelect(session.sessionId)}
-                      aria-current={selected ? 'page' : undefined}
-                      className={cn(
-                        'group relative w-full rounded-xl border px-3 py-3 text-left transition-colors',
-                        selected
-                          ? 'border-border-strong bg-surface-raised shadow-soft'
-                          : 'border-transparent hover:border-border hover:bg-surface',
-                      )}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <CircleDot
-                          className={cn(
-                            'mt-0.5 size-3.5 shrink-0',
-                            session.status === 'running'
-                              ? 'text-running'
-                              : 'text-muted-foreground/60',
-                          )}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p
+        {workspaces.length === 0 ? (
+          <div className="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">
+            No Workspace sessions are available.
+          </div>
+        ) : (
+          <nav aria-label="Workspace sessions" className="space-y-2">
+            {workspaces.map((workspace) => (
+              <CollapsiblePrimitive.Root key={workspace.workspaceId} defaultOpen>
+                <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-surface">
+                  <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
+                  <FolderKanban className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate">{workspace.label}</span>
+                  <span className="text-[10px] tabular-nums">{workspace.sessions.length}</span>
+                </CollapsiblePrimitive.Trigger>
+                <CollapsiblePrimitive.Content className="mt-1 space-y-1">
+                  {workspace.sessions.map((session) => {
+                    const selected = session.sessionId === selectedSessionId;
+                    return (
+                      <button
+                        key={session.sessionId}
+                        type="button"
+                        onClick={() => onSelect(session.sessionId)}
+                        aria-current={selected ? 'page' : undefined}
+                        aria-label={`View ${session.displayName}`}
+                        className={cn(
+                          'group relative w-full rounded-xl border px-3 py-3 text-left transition-colors',
+                          selected
+                            ? 'border-border-strong bg-surface-raised shadow-soft'
+                            : 'border-transparent hover:border-border hover:bg-surface',
+                        )}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <CircleDot
                             className={cn(
-                              'truncate text-xs font-medium',
-                              selected && 'text-foreground',
+                              'mt-0.5 size-3.5 shrink-0',
+                              session.status === 'running'
+                                ? 'text-running'
+                                : 'text-muted-foreground/60',
                             )}
-                          >
-                            {session.displayName}
-                          </p>
-                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
-                            <span className="capitalize">{session.status}</span>
-                            <time>{relativeTime(session.updatedAt)}</time>
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className={cn(
+                                'truncate text-xs font-medium',
+                                selected && 'text-foreground',
+                              )}
+                            >
+                              {session.displayName}
+                            </p>
+                            <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                              <span className="capitalize">{session.status}</span>
+                              <time>{relativeTime(session.updatedAt)}</time>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </CollapsiblePrimitive.Content>
-            </CollapsiblePrimitive.Root>
-          ))}
-        </nav>
+                      </button>
+                    );
+                  })}
+                </CollapsiblePrimitive.Content>
+              </CollapsiblePrimitive.Root>
+            ))}
+          </nav>
+        )}
       </ScrollArea>
     </aside>
   );

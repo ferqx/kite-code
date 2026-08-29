@@ -101,8 +101,10 @@ export {
 } from './layout';
 export {
   createSqliteRuntimeLogQueryPort,
+  createSqliteWorkspaceRuntimeLogQueryPort,
   SqliteRuntimeLogQueryError,
   type SqliteRuntimeLogQueryInput,
+  type SqliteWorkspaceRuntimeLogQueryInput,
 } from './log-query';
 export {
   migrateSqliteRuntimeStoreToWorkspaceLayout,

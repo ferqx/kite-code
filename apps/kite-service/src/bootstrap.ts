@@ -65,7 +65,9 @@ import {
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
+  createSqliteWorkspaceRuntimeLogQueryPort,
   discoverSqliteRuntimeCompatibilitySource,
+  readSqliteActiveLayoutPointer,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
@@ -693,6 +695,42 @@ export function createKiteRuntimeObserverHistory(
       currentEventTypes: runtimeHostCurrentStateEventTypes(),
     }),
   );
+}
+
+/**
+ * Query-only Observer History for an active Store 7 Workspace. The caller
+ * supplies server-owned layout authority and an opaque Worker scope; no
+ * Browser path or compatibility importer is accepted.
+ */
+export function createKiteRuntimeObserverHistoryFromWorkspaceLayout(input: {
+  readonly layout: SqliteRuntimeLayoutPaths;
+  readonly layoutGeneration: string;
+  readonly workerScopeId: string;
+}): import('./web-observer').WebObserverHistoryPort {
+  return createKiteRuntimeObserverHistoryPort(() =>
+    createSqliteWorkspaceRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
+      layout: input.layout,
+      layoutGeneration: input.layoutGeneration,
+      workerScopeId: input.workerScopeId,
+      codec: STATE_STORAGE_BINDING_.codec,
+      currentEventTypes: runtimeHostCurrentStateEventTypes(),
+    }),
+  );
+}
+
+/** Resolve the active Store 7 generation inside the Service composition root. */
+export function createKiteRuntimeObserverHistoryFromActiveWorkspace(input: {
+  readonly kiteHomeRoot: string;
+  readonly workerScopeId: string;
+}): import('./web-observer').WebObserverHistoryPort {
+  const layout = resolveSqliteRuntimeLayoutPaths(input.kiteHomeRoot);
+  const pointer = readSqliteActiveLayoutPointer(layout);
+  if (!pointer) throw new Error('Active Workspace layout is unavailable.');
+  return createKiteRuntimeObserverHistoryFromWorkspaceLayout({
+    layout,
+    layoutGeneration: pointer.generation,
+    workerScopeId: input.workerScopeId,
+  });
 }
 
 const MAX_INJECTED_STORE_SESSION_SCAN = 100_000;

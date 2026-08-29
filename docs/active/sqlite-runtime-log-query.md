@@ -12,6 +12,13 @@ SQLite Runtime Store 是可回放会话日志的唯一事实源。`runtime_event
 
 `@kite-ai/runtime-contract` 仅定义 storage-neutral DTO 和 validator；`@kite-ai/runtime-host/storage` 的 `RuntimeLogQueryPort` 是受信任 App 进程内部使用的原始事件只读 port，绝不混入可写 `SessionStore`，也不能直接作为 HTTP 或 RPC 返回类型。SQLite adapter 先做 no-follow preflight，再在实际用于查询的只读连接上重新验证 current Store marker 与表结构；有界、参数化 cursor 查询和本页 current-codec 解码都使用这条连接。它不创建 schema、不写库、不返回 raw `event_json`，也不接受旧 epoch/兼容 decoder。busy/locked 归为 temporary unavailable，未知或损坏 current event 只让所在查询失败，不扫描或拖垮其他会话。不同分页允许观察到并发 writer 的新提交，因此结果只报告该次查询观察到的最后序号，不宣称跨页快照一致，也不宣称未读取事件或 snapshot 已通过全会话完整性验证；恢复完整性仍由 session-scoped Store 打开边界负责。
 
+Store 7 offline Web History是显式例外的pinned snapshot journey：`createSqliteWorkspaceRuntimeLogQueryPort`只接受server-owned
+layout、active generation与opaque Worker scope，路径由layout内部推导；它在隔离只读snapshot上读取内部Workspace digest并复核
+exact Store 7 header/DDL/所有ownership rows，query前后再次验证active pointer/manifest/journal/fence与owner/no-follow/nlink。
+因此不会在source旁创建WAL/SHM或第二writer。Service Web adapter的一次`loadSession`只创建一个reader并在同一snapshot分页，
+`observedLastSequence`变化、超过4096 records、binding/layout drift、Store 6/legacy-only或损坏内容都fail closed为unavailable；
+compatibility import不参与该journey。
+
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留

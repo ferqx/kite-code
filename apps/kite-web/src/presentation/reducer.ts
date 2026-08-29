@@ -15,6 +15,8 @@ export type WebConnectionState =
   | { readonly status: 'resync_required'; readonly reason: string }
   | { readonly status: 'unavailable'; readonly reason: string };
 
+export type WebHistoryState = 'idle' | 'loading' | 'content' | 'empty' | 'unavailable' | 'error';
+
 export interface WebPresentationState {
   readonly generation: number;
   readonly workspaces: readonly WebWorkspaceSummary[];
@@ -24,6 +26,9 @@ export interface WebPresentationState {
   readonly observedLastSequence: number | null;
   readonly liveSequence: number | null;
   readonly historyResetRequired: boolean;
+  readonly historyState: WebHistoryState;
+  readonly historyReason: string | null;
+  readonly historyReloadToken: number;
   readonly connection: WebConnectionState;
 }
 
@@ -36,11 +41,23 @@ export type WebPresentationAction =
     }
   | { readonly type: 'select_session'; readonly sessionId: string }
   | {
+      readonly type: 'history_loading';
+      readonly generation?: number;
+      readonly requestToken?: number;
+    }
+  | {
       readonly type: 'history_loaded';
       readonly history: WebHistoryResponse;
       readonly reset?: boolean;
       readonly generation?: number;
     }
+  | {
+      readonly type: 'history_failed';
+      readonly status: Extract<WebHistoryState, 'unavailable' | 'error'>;
+      readonly reason: string;
+      readonly generation?: number;
+    }
+  | { readonly type: 'history_retry'; readonly generation?: number }
   | {
       readonly type: 'live_event';
       readonly event: WebObserverStreamEvent;
@@ -51,6 +68,7 @@ export type WebPresentationAction =
       readonly connection: WebConnectionState;
       readonly generation?: number;
     }
+  | { readonly type: 'resync_stopped'; readonly generation: number; readonly reason: string }
   | { readonly type: 'disconnect' };
 
 export const initialWebPresentationState: WebPresentationState = Object.freeze({
@@ -62,6 +80,9 @@ export const initialWebPresentationState: WebPresentationState = Object.freeze({
   observedLastSequence: null,
   liveSequence: null,
   historyResetRequired: false,
+  historyState: 'idle',
+  historyReason: null,
+  historyReloadToken: 0,
   connection: { status: 'loading' as const },
 });
 
@@ -98,16 +119,34 @@ export function webPresentationReducer(
         observedLastSequence: null,
         liveSequence: null,
         historyResetRequired: false,
+        historyState: state.selectedSessionId === null ? 'idle' : 'loading',
+        historyReason: null,
         connection: { status: 'connected' },
       };
     }
-    case 'directory_loaded':
+    case 'directory_loaded': {
       if (!matchesGeneration(state, action.generation)) return state;
+      const nextSelectedSessionId = selectedIdForDirectory(
+        state.selectedSessionId,
+        action.directory,
+      );
+      if (nextSelectedSessionId === state.selectedSessionId) {
+        return { ...state, workspaces: action.directory.workspaces };
+      }
       return {
         ...state,
         workspaces: action.directory.workspaces,
-        selectedSessionId: selectedIdForDirectory(state.selectedSessionId, action.directory),
+        selectedSessionId: nextSelectedSessionId,
+        messages: [],
+        historyCursor: null,
+        observedLastSequence: null,
+        liveSequence: null,
+        historyResetRequired: false,
+        historyState: nextSelectedSessionId === null ? 'idle' : 'loading',
+        historyReason: null,
+        connection: nextSelectedSessionId === null ? state.connection : { status: 'loading' },
       };
+    }
     case 'select_session':
       return {
         ...state,
@@ -117,24 +156,70 @@ export function webPresentationReducer(
         observedLastSequence: null,
         liveSequence: null,
         historyResetRequired: false,
+        historyState: 'loading',
+        historyReason: null,
         connection: { status: 'loading' },
       };
+    case 'history_loading': {
+      if (!matchesGeneration(state, action.generation)) return state;
+      return {
+        ...state,
+        messages: [],
+        historyCursor: null,
+        observedLastSequence: null,
+        liveSequence: null,
+        historyResetRequired: false,
+        historyState: 'loading',
+        historyReason: null,
+        historyReloadToken: action.requestToken ?? state.historyReloadToken,
+      };
+    }
     case 'history_loaded': {
       if (!matchesGeneration(state, action.generation)) return state;
       if (action.history.sessionId !== state.selectedSessionId) return state;
       const reset = action.reset === true;
+      const messages = orderedMessages(reset ? [] : state.messages, action.history.messages);
       return {
         ...state,
-        messages: orderedMessages(reset ? [] : state.messages, action.history.messages),
+        messages,
         historyCursor: action.history.nextCursor ?? null,
         observedLastSequence: action.history.observedLastSequence,
         liveSequence: reset
           ? action.history.observedLastSequence
           : Math.max(state.liveSequence ?? 0, action.history.observedLastSequence),
         historyResetRequired: false,
+        historyState: messages.length > 0 ? 'content' : 'empty',
+        historyReason: null,
         connection: { status: 'connected' },
       };
     }
+    case 'history_failed':
+      return matchesGeneration(state, action.generation)
+        ? {
+            ...state,
+            messages: [],
+            historyCursor: null,
+            observedLastSequence: null,
+            liveSequence: null,
+            historyState: action.status,
+            historyReason: action.reason,
+          }
+        : state;
+    case 'history_retry':
+      return matchesGeneration(state, action.generation)
+        ? {
+            ...state,
+            messages: [],
+            historyCursor: null,
+            observedLastSequence: null,
+            liveSequence: null,
+            historyResetRequired: false,
+            historyState: 'loading',
+            historyReason: null,
+            historyReloadToken: state.historyReloadToken + 1,
+            connection: { status: 'loading' },
+          }
+        : state;
     case 'live_event': {
       if (!matchesGeneration(state, action.generation)) return state;
       if (action.event.sessionId !== state.selectedSessionId) return state;
@@ -142,6 +227,8 @@ export function webPresentationReducer(
         return {
           ...state,
           historyResetRequired: true,
+          historyState: state.messages.length > 0 ? 'content' : 'unavailable',
+          historyReason: action.event.reason,
           connection: { status: 'unavailable', reason: action.event.reason },
         };
       }
@@ -149,6 +236,8 @@ export function webPresentationReducer(
         return {
           ...state,
           historyResetRequired: true,
+          historyState: state.messages.length > 0 ? 'content' : 'unavailable',
+          historyReason: action.event.reason,
           connection: { status: 'resync_required', reason: action.event.reason },
         };
       }
@@ -164,6 +253,8 @@ export function webPresentationReducer(
         return {
           ...state,
           historyResetRequired: true,
+          historyState: state.messages.length > 0 ? 'content' : 'unavailable',
+          historyReason: 'sequence_gap',
           connection: { status: 'resync_required', reason: 'sequence_gap' },
         };
       }
@@ -178,6 +269,14 @@ export function webPresentationReducer(
     case 'connection':
       return matchesGeneration(state, action.generation)
         ? { ...state, connection: action.connection }
+        : state;
+    case 'resync_stopped':
+      return matchesGeneration(state, action.generation)
+        ? {
+            ...state,
+            historyResetRequired: false,
+            connection: { status: 'unavailable', reason: action.reason },
+          }
         : state;
     case 'disconnect':
       return {

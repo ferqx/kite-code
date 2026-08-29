@@ -20,6 +20,8 @@ type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
   | (() => RuntimeLogQueryPort<RuntimeEvent>);
 
+const MAX_OBSERVER_HISTORY_RECORDS = 4_096;
+
 export interface KiteRuntimeHistoryCompatibilitySession {
   readonly threadId: string;
   readonly name: string;
@@ -277,14 +279,13 @@ export function createKiteRuntimeObserverHistoryPort(
 ): WebObserverHistoryPort {
   return Object.freeze({
     async loadSession(sessionId: string) {
-      const session = findCurrentSession(logs, sessionId);
-      if (!session) throw new Error(`Runtime session was not found: ${sessionId}`);
-      const records = withLogs(logs, (reader) => {
+      return withLogs(logs, (reader) => {
         const all: Array<{
           readonly sequence: number;
           readonly events: readonly RuntimeClientEvent[];
         }> = [];
         let afterSequence: number | undefined;
+        let observedLastSequence: number | undefined;
         for (;;) {
           const page = reader.listEvents({
             sessionId,
@@ -292,6 +293,13 @@ export function createKiteRuntimeObserverHistoryPort(
             direction: 'forward',
             limit: 200,
           });
+          if (
+            observedLastSequence !== undefined &&
+            page.observedLastSequence !== observedLastSequence
+          ) {
+            throw new Error('Runtime observer history changed during the pinned read.');
+          }
+          observedLastSequence = page.observedLastSequence;
           for (const record of page.entries) {
             if (afterSequence !== undefined && record.sequence <= afterSequence) {
               throw new Error('Runtime observer history pagination did not advance.');
@@ -301,17 +309,21 @@ export function createKiteRuntimeObserverHistoryPort(
               sequence: record.sequence,
               events: projectRuntimeHistoryEvents(record.event, record.sequence),
             });
+            if (all.length > MAX_OBSERVER_HISTORY_RECORDS) {
+              throw new Error('Runtime observer History exceeds its bounded record limit.');
+            }
           }
-          if (!page.hasMore) return all;
+          if (!page.hasMore) {
+            return Object.freeze({
+              sessionId,
+              lastSequence: observedLastSequence,
+              records: Object.freeze(all),
+            });
+          }
           if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
             throw new Error('Runtime observer history pagination cursor is invalid.');
           }
         }
-      });
-      return Object.freeze({
-        sessionId,
-        lastSequence: session.lastSequence,
-        records: Object.freeze(records),
       });
     },
   });

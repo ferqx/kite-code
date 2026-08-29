@@ -1,5 +1,6 @@
 import type { CoordinatorRequestClient } from '@kite-ai/kite-local-runtime/coordinator';
 import { createWebGatewayCarrier, type WebGatewayCarrier } from './carrier';
+import { createOfflineWebHistoryPort } from './offline-history';
 import type { WebGatewayMainEnvironment } from './process-main';
 import { createWorkspaceWorkerWebGatewayUpstream } from './upstream';
 
@@ -18,6 +19,7 @@ export function createProductionWebGatewayCarrier(
     coordinator,
     gatewayInstanceId: environment.instanceId,
     contractRevision: WEB_GATEWAY_CONTRACT_REVISION_,
+    offlineHistory: createOfflineWebHistoryPort(environment.home),
   });
   let closePromise: Promise<void> | undefined;
   let carrier: WebGatewayCarrier;

@@ -38,6 +38,11 @@ export {
   type WebGatewayControlLink,
   type WebGatewayControlLinkOptions,
 } from './control';
+export {
+  createOfflineWebHistoryPort,
+  type OfflineWebHistoryPort,
+  type OfflineWebHistoryRequest,
+} from './offline-history';
 export * from './process-host';
 export * from './process-main';
 export * from './process-manager';

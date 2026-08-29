@@ -14,6 +14,7 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
   创建default Host/Store composition。
 - `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
   sandbox/session logging、Service shell与carriers；Coordinator/Worker/Web Gateway/Web Observer production composition、
+  idle Worker的active Store 7 query-only History（含source字节/sidecar不变与wrong-scope负测）、
   process、Store 7、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
 - `apps/kite-web/test/`：Browser observer presentation/reducer 与 browser-safe DTO consumer；不得引入 Native、Host、
   Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。

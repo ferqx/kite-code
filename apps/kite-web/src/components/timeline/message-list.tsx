@@ -1,15 +1,20 @@
 import type { WebPresentationBlock, WebPresentationMessage } from '@kite-ai/kite-app-contract/web';
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
+import type { LucideIcon } from 'lucide-react';
 import {
   Bot,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  CloudOff,
   LoaderCircle,
+  MessageSquareText,
   Terminal,
   User,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { WebHistoryState } from '@/presentation/reducer';
 
 function Block({ block }: { readonly block: WebPresentationBlock }) {
   switch (block.kind) {
@@ -104,9 +109,27 @@ function Message({ message }: { readonly message: WebPresentationMessage }) {
 
 export function MessageList({
   messages,
+  status,
+  reason,
+  sessionName,
+  onRetry,
 }: {
   readonly messages: readonly WebPresentationMessage[];
+  readonly status: WebHistoryState;
+  readonly reason: string | null;
+  readonly sessionName?: string;
+  readonly onRetry?: () => void;
 }) {
+  if (status !== 'content' || messages.length === 0) {
+    return (
+      <HistoryStatePanel
+        status={status}
+        reason={reason}
+        sessionName={sessionName}
+        onRetry={onRetry}
+      />
+    );
+  }
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto w-full max-w-3xl px-6 pb-16 pt-5">
@@ -116,4 +139,103 @@ export function MessageList({
       </div>
     </ScrollArea>
   );
+}
+
+function HistoryStatePanel({
+  status,
+  reason,
+  sessionName,
+  onRetry,
+}: {
+  readonly status: WebHistoryState;
+  readonly reason: string | null;
+  readonly sessionName?: string;
+  readonly onRetry?: () => void;
+}) {
+  const copy = historyStateCopy(status, reason, sessionName);
+  return (
+    <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
+      <div className="max-w-md">
+        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground">
+          <copy.Icon className={copy.iconClassName} />
+        </div>
+        <h2 className="text-sm font-semibold">{copy.title}</h2>
+        <p className="mt-2 text-xs leading-6 text-muted-foreground">{copy.description}</p>
+        {copy.canRetry && onRetry ? (
+          <Button className="mt-5" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function historyStateCopy(
+  status: WebHistoryState,
+  reason: string | null,
+  sessionName: string | undefined,
+): {
+  readonly Icon: LucideIcon;
+  readonly iconClassName: string;
+  readonly title: string;
+  readonly description: string;
+  readonly canRetry: boolean;
+} {
+  switch (status) {
+    case 'loading':
+      return {
+        Icon: LoaderCircle,
+        iconClassName: 'size-5 animate-spin text-running',
+        title: sessionName ? `Loading ${sessionName}` : 'Loading session History',
+        description: 'Fetching the read-only conversation from the local server…',
+        canRetry: false,
+      };
+    case 'empty':
+      return {
+        Icon: MessageSquareText,
+        iconClassName: 'size-5',
+        title: 'No messages yet',
+        description: 'This Session has no recorded messages to display.',
+        canRetry: false,
+      };
+    case 'unavailable':
+      return {
+        Icon: CloudOff,
+        iconClassName: 'size-5',
+        title: 'History unavailable',
+        description:
+          reason === 'session_unavailable'
+            ? 'This Session is not currently available from its Workspace Worker.'
+            : 'The local server could not read this Session right now.',
+        canRetry: true,
+      };
+    case 'error':
+      return {
+        Icon: CircleAlert,
+        iconClassName: 'size-5 text-danger',
+        title: 'Could not load History',
+        description:
+          reason === 'resync_required'
+            ? 'The History changed while it was being read. Reload to request a consistent snapshot.'
+            : 'The local server returned an invalid or incomplete History response.',
+        canRetry: true,
+      };
+    case 'idle':
+      return {
+        Icon: MessageSquareText,
+        iconClassName: 'size-5',
+        title: 'Select a session',
+        description: 'Choose an existing Session from the Workspace list to view its History.',
+        canRetry: false,
+      };
+    case 'content':
+      return {
+        Icon: MessageSquareText,
+        iconClassName: 'size-5',
+        title: 'No messages to display',
+        description: 'This Session has no displayable messages in the current snapshot.',
+        canRetry: false,
+      };
+  }
 }

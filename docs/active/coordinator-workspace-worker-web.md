@@ -105,6 +105,13 @@ Catalog/registry。这样 Browser仍不接触Workspace path、Store或Worker end
 Gateway Directory以Catalog中的`workerScopeId`作为稳定opaque `workspaceId`。即使Worker已按idle策略退出、当前无法解析canonical
 Workspace或History，Catalog中的既有Session仍按该scope返回，使用server生成的path-free label并把status标为`unavailable`；不得
 `continue`丢弃整组。Worker在线时才用authenticated Workspace identity补project label、History sequence和running/idle status。
+Session History与live status分离：`status=unavailable`表示没有可订阅的live Worker，并不删除durable History。用户选择Session时，
+Gateway先以Catalog metadata确定exact opaque scope；在线Worker继续走Coordinator resolve/mint后的Worker query-only History，
+idle Worker则进入Service-owned offline History facade。offline facade只消费manager提供的显式Kite home与server-owned active-layout，
+canonical Store路径在storage boundary内部按generation/scope推导，并以隔离只读snapshot复核pointer/manifest/journal/fence、Store 7
+profile、owner/no-follow/nlink和完整Workspace binding。它不启动Worker、不打开writer、不接收Browser path、不触发compatibility
+list/import，也不把raw Runtime event加入Coordinator control protocol；missing、legacy-only、corrupt或layout drift固定映射typed
+`history_unavailable`。
 
 `apps/kite-service/src/web-observer/core.ts` 只读取注入的 Directory、History 与已经投影的 `RuntimeClientEvent` live port。Directory
 结果先经 exact codec round-trip，History 只接受 current-format `WebObserverHistoryPort`，sequence gap、history change、queue
@@ -117,6 +124,9 @@ subscription；它们不调用 Runtime mutation、Controller 或 Store writer。
 - Web `createKiteRuntimeObserverHistoryPort`/`createKiteRuntimeObserverHistoryClient` 不接收 compatibility source，只打开当前 SQLite
   `RuntimeLogQueryPort`，按 current event page 投影 `RuntimeClientEvent`，legacy-only Session 保持 unavailable，不会因 list/load
   副作用导入或写入。
+
+Web Observer的单次`loadSession`固定复用一个pinned reader，`observedLastSequence`跨页必须一致且record总数有固定上限；不能用
+两个独立SQLite view拼出一个伪一致transcript。Browser切换Session后旧请求结果不再fold，terminal resync自动重连最多三次。
 
 History 与 live 都必须经过 browser-safe presentation projection；service-side projector/reducer 位于
 `apps/kite-service/src/web-observer/presentation.ts`，Browser bundle 的 `apps/kite-web/src/presentation/reducer.ts` 与

@@ -46,6 +46,7 @@ import {
   KITE_WORKER_CONNECTION_GENERATION_HEADER,
   KITE_WORKER_PURPOSE_HEADER,
 } from '../workspace-worker/control-carrier';
+import type { OfflineWebHistoryPort } from './offline-history';
 
 const WORKER_CAPABILITY_PURPOSE = 'web_observer' as const;
 const MAX_LABEL_LENGTH = 256;
@@ -70,6 +71,8 @@ export interface WorkspaceWorkerWebGatewayUpstreamOptions {
   readonly workspaceLabel?: (workspace: CoordinatorWorkspaceIdentity) => string;
   readonly fetch?: LocalRuntimeFetch;
   readonly webSocketFactory?: NativeRuntimeWebSocketFactory;
+  /** Service-owned Store 7 query facade used only when no Worker route is available. */
+  readonly offlineHistory?: OfflineWebHistoryPort;
   readonly now?: () => number;
 }
 
@@ -310,28 +313,51 @@ class ObserverAdapter {
   private async loadHistory(sessionId: string): Promise<WebObserverHistoryTranscript> {
     this.ensureOpen();
     assertSessionId(sessionId);
-    const resolved = coordinatorResult(
-      await this.#options.coordinator.resolveSessionWorkspace({ sessionId }),
-    );
-    const workspace = toWorkspaceIdentity(resolved.workspace);
-    if (resolved.worker === null) throw unavailable('Worker route is unavailable.');
-    assertWorkerReference(resolved.worker, workspace);
     if (this.#binding.connectionGeneration < 1) throw unavailable('Observer tab is unavailable.');
-    const worker = await this.workerFor(workspace, resolved.worker);
-    let transcript: RuntimeHistorySessionTranscript;
+    const metadata = (await listAllMetadata(this.#options.coordinator)).find(
+      (entry) => entry.sessionId === sessionId,
+    );
+    if (!metadata || metadata.tombstone) throw unavailable('Session History is unavailable.');
+    let resolved: CoordinatorResultByMethod['resolveSessionWorkspace'] | undefined;
     try {
-      transcript = await worker.history.loadSession(sessionId);
+      resolved = coordinatorResult(
+        await this.#options.coordinator.resolveSessionWorkspace({ sessionId }),
+      );
     } catch {
-      throw unavailable('Worker History is unavailable.');
+      resolved = undefined;
     }
-    if (transcript.session.sessionId !== sessionId) {
-      throw unavailable('Worker History returned a mismatched Session.');
+    if (resolved && resolved.workerScopeId !== metadata.workerScopeId) {
+      throw unavailable('Coordinator returned a mismatched Worker scope.');
     }
-    return Object.freeze({
-      sessionId,
-      lastSequence: transcript.session.lastSequence,
-      records: transcript.records,
-    });
+    if (resolved?.worker) {
+      try {
+        const workspace = toWorkspaceIdentity(resolved.workspace);
+        assertWorkerReference(resolved.worker, workspace);
+        const worker = await this.workerFor(workspace, resolved.worker);
+        const transcript = await worker.history.loadSession(sessionId);
+        if (transcript.session.sessionId !== sessionId) {
+          throw new Error('Worker History returned a mismatched Session.');
+        }
+        return historyTranscript(sessionId, transcript);
+      } catch {
+        // The current-format Store reader below remains available when a
+        // routed Worker exits between resolve and History load.
+      }
+    }
+    const offline = this.#options.offlineHistory;
+    if (!offline) throw unavailable('Worker History is unavailable.');
+    try {
+      const transcript = await offline.loadSession({
+        workerScopeId: metadata.workerScopeId,
+        sessionId,
+      });
+      if (transcript.sessionId !== sessionId) {
+        throw new Error('Offline History returned a mismatched Session.');
+      }
+      return transcript;
+    } catch {
+      throw unavailable('Session History is unavailable.');
+    }
   }
 
   private subscribeLive(input: {
@@ -1011,6 +1037,17 @@ function safeTimestamp(value: string): boolean {
 function parseTimestamp(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function historyTranscript(
+  sessionId: string,
+  transcript: RuntimeHistorySessionTranscript,
+): WebObserverHistoryTranscript {
+  return Object.freeze({
+    sessionId,
+    lastSequence: transcript.session.lastSequence,
+    records: transcript.records,
+  });
 }
 
 function displayNameFor(value: string | undefined, fallback: string): string {
