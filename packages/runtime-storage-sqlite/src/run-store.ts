@@ -320,6 +320,16 @@ export function createSqliteRuntimeRunStore(
       const existing = runFromRow(current);
       assertImmutableRunIdentity(existing, transition.next);
       assertLifecycleTransition(existing, transition.next);
+      if (
+        transition.next.lastRevision === transition.expectedLastRevision &&
+        !(
+          existing.status === 'queued' &&
+          transition.next.status === 'running' &&
+          existing.phase === transition.next.phase
+        )
+      ) {
+        throw new Error('Runtime Run may reuse a revision only for same-phase queued activation.');
+      }
       assertRunWithinSession(
         selectSession.get(transition.sessionId),
         transition.next,
@@ -760,7 +770,7 @@ function assertTransition(transition: RuntimeRunTransition): void {
   if (
     transition.next.sessionId !== transition.sessionId ||
     transition.next.runId !== transition.runId ||
-    transition.next.lastRevision <= transition.expectedLastRevision
+    transition.next.lastRevision < transition.expectedLastRevision
   ) {
     throw new Error('Runtime Run transition identity or revision is invalid.');
   }

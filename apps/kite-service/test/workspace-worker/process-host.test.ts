@@ -218,7 +218,7 @@ const value = {
   },
   pid: process.pid, startedAt: '2026-08-29T00:00:00.000Z',
   processStartIdentity: 'empty-env-start',
-  storeProfile: 'kite-coordinator-workspace-worker-web-v1-2026-08-28',
+  storeProfile: 'kite-agent-server-api-v1-2026-08-29',
   layoutGeneration: 'layout-1',
   endpoint: { origin: 'http://127.0.0.1:43143', websocketUrl: 'ws://127.0.0.1:43143/rpc' },
   controlOrigin: 'http://127.0.0.1:43145'

@@ -29,8 +29,8 @@ ACL/write-through与非 Windows 本地环境的 no-follow 断言也不能互相�
 
 `scripts/release/local-layout-migration.ts`包含显式offline Store layout maintenance，不属于normal build/install/start或自动upgrade。
 Store 7→Store 8入口要求manager注入Coordinator/Worker/Gateway已停止及全部Runtime/external effect收敛的exact barrier，随后才建立
-source-bound fence、复制完整Catalog/Workspace generation并切pointer；任一unknown保持blocked。03A Worker opener完成前，候选smoke和普通
-ensure不得调用该入口，也不得在显式Store 8 pointer后fallback启动Store 7 Worker。
+source-bound fence、复制完整Catalog/Workspace generation并切pointer；任一unknown保持blocked。fresh home由普通ensure直接初始化Store 8，
+已有Store 7仍不得自动迁移；production Worker只接受committed Store 8 pointer，不得fallback启动Store 7 Worker。三平台candidate结论继续pending。
 
 ## 候选制品
 

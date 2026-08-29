@@ -58,7 +58,7 @@ export interface WorkspaceWorkerApplicationFactoryInput {
   readonly storeContext: WorkspaceWorkerStoreContext;
   readonly storage: WorkspaceWorkerStoreOwner;
   readonly authority: WorkspaceWorkerStoreAuthority;
-  /** Store 7 Controller adapter created by this Worker composition. */
+  /** Store 8 Controller adapter created by this Worker composition. */
   readonly controller?: WorkspaceWorkerControllerAdapter;
   readonly lifecycle: WorkspaceWorkerIdleLifecycle;
 }
@@ -108,7 +108,7 @@ export interface WorkspaceWorkerRuntimeComposition extends AsyncDisposable {
   readonly storeContext: WorkspaceWorkerStoreContext;
   readonly storage: WorkspaceWorkerStoreOwner;
   readonly authority: WorkspaceWorkerStoreAuthority;
-  /** The Worker-owned Controller adapter over the injected Store 7 authority. */
+  /** The Worker-owned Controller adapter over the injected Store 8 authority. */
   readonly controller: WorkspaceWorkerControllerAdapter;
   readonly lifecycle: WorkspaceWorkerIdleLifecycle;
   readonly origin: string;
@@ -126,7 +126,7 @@ export interface WorkspaceWorkerRuntimeComposition extends AsyncDisposable {
 }
 
 /**
- * Compose one foreground Worker around one exact Store 7 binding and one application owner.
+ * Compose one foreground Worker around one exact Store 8 binding and one application owner.
  * Owner-lock acquisition is deliberately the first side effect before Store open or Runtime
  * composition. Store admission is read-only here; layout migration/materialization belongs to the
  * Coordinator/layout owner and missing evidence fails closed.

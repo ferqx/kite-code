@@ -48,7 +48,7 @@ export interface NativeWorkspaceOwnerLockOptions {
   readonly processState?: (pid: number, processStartIdentity: string) => WorkspaceOwnerProcessState;
   readonly currentProcessIdentity?: () => string | undefined;
   readonly randomBytes?: (size: number) => Uint8Array;
-  /** Manager-issued reservation proof consumed before Store 7 opens. */
+  /** Manager-issued reservation proof consumed before Store 8 opens. */
   readonly childReservation?: Omit<
     WorkspaceReservationChildClaim,
     'workerPid' | 'workerProcessStartIdentity'

@@ -23,9 +23,9 @@ import {
   resolveSqliteCatalogPath,
   resolveSqliteRuntimeLayoutPaths,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-  SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
-  SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
   type SqliteRuntimeLayoutManifest,
   type SqliteRuntimeLayoutPaths,
   type SqliteRuntimeMigrationCatalogBuilder,
@@ -182,7 +182,7 @@ export async function runLocalRunStoreMigration<Event = unknown, State = unknown
 
 /**
  * Execute the explicit offline Store 6 → Store 7 maintenance boundary, or initialize a truly
- * empty home. A legacy source without a caller-supplied persisted Workspace resolver returns a
+ * empty home directly at Store 8. A legacy source without a caller-supplied persisted Workspace resolver returns a
  * typed migration_required result; it is never silently imported or assigned to the current cwd.
  */
 export async function runLocalLayoutMigration<Event = unknown, State = unknown>(
@@ -312,8 +312,8 @@ async function initializeFreshLayout(
     generation: targetLayoutGeneration,
     profile: {
       stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     },
     catalogDigest,
     workspaceStores: [],

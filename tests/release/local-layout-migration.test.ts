@@ -21,6 +21,7 @@ import {
   resolveSqliteCatalogPath,
   resolveSqliteRuntimeLayoutPaths,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
   SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
@@ -138,6 +139,10 @@ describe('explicit local Store layout maintenance', () => {
       });
       expect(readSqliteRuntimeLayoutManifest(layout, 'generation-initial')).toMatchObject({
         generation: 'generation-initial',
+        profile: {
+          storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+        },
         workspaceStores: [],
         catalogDigest: result.catalogDigest,
       });

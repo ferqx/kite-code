@@ -29,6 +29,7 @@ import {
   SqliteRuntimeStorageOpenError,
   type SqliteRuntimeWorkspaceBinding,
 } from './preflight';
+import { assertSqliteRuntimeRunStoreConnection } from './run-store';
 import { initializeSqliteRuntimeSchema } from './schema';
 
 export const SQLITE_RUNTIME_ACTIVE_LAYOUT_SCHEMA_ = 'kite.runtime-active-layout.v1' as const;
@@ -209,13 +210,14 @@ export interface SqliteRuntimeWorkspaceStoreAdmission {
 }
 
 /**
- * Materialize one empty, exactly-bound Store 7 file and admit it under the same global layout
+ * Materialize one empty, exactly-bound Workspace file and admit it under the same global layout
  * lease. Existing exact files are verified and resume the journal→manifest crash window; an
  * existing different file is never truncated or replaced.
  */
 export function materializeAndAdmitNewWorkspaceStore(
   paths: SqliteRuntimeLayoutPaths,
   binding: SqliteRuntimeWorkspaceBinding,
+  targetStore?: 'run',
 ): SqliteRuntimeWorkspaceStoreAdmission & { readonly databasePath: string } {
   assertSqliteRuntimeWorkspaceBinding(binding);
   const databasePath = ensureSqliteWorkspaceStoreDirectory(
@@ -237,8 +239,14 @@ export function materializeAndAdmitNewWorkspaceStore(
         database = new Database(databasePath, { create: true, strict: true });
         initializeSqliteRuntimeSchema(database, {
           stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-          storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-          formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+          storeSchemaVersion:
+            targetStore === 'run'
+              ? SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION
+              : SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+          formatEpoch:
+            targetStore === 'run'
+              ? SQLITE_RUNTIME_RUN_FORMAT_EPOCH
+              : SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
           workspaceBinding: binding,
         });
         database.run('PRAGMA journal_mode = DELETE');
@@ -260,8 +268,8 @@ export function materializeAndAdmitNewWorkspaceStore(
         throw error;
       }
     }
-    assertAdmissibleWorkspaceStore(paths, binding, databasePath);
-    const admission = admitNewWorkspaceStoreLocked(paths, binding, databasePath);
+    assertAdmissibleWorkspaceStore(paths, binding, databasePath, targetStore);
+    const admission = admitNewWorkspaceStoreLocked(paths, binding, databasePath, targetStore);
     return Object.freeze({ ...admission, databasePath });
   } catch (error) {
     if (createdIdentity !== undefined) {
@@ -294,7 +302,7 @@ export function materializeAndAdmitNewWorkspaceStore(
 }
 
 /**
- * Admit a newly materialized Store 7 file into the already-active generation.
+ * Admit a newly materialized Workspace file into the already-active generation.
  *
  * The caller owns Store header validation and Coordinator Catalog publication;
  * this narrow layout operation only verifies the canonical file and records
@@ -306,11 +314,12 @@ export function admitNewWorkspaceStore(
   paths: SqliteRuntimeLayoutPaths,
   binding: SqliteRuntimeWorkspaceBinding,
   databasePath: string,
+  targetStore?: 'run',
 ): SqliteRuntimeWorkspaceStoreAdmission {
-  assertAdmissibleWorkspaceStore(paths, binding, databasePath);
+  assertAdmissibleWorkspaceStore(paths, binding, databasePath, targetStore);
   const admissionLease = acquireLayoutAdmissionLease(paths);
   try {
-    return admitNewWorkspaceStoreLocked(paths, binding, databasePath);
+    return admitNewWorkspaceStoreLocked(paths, binding, databasePath, targetStore);
   } finally {
     admissionLease.release();
   }
@@ -320,6 +329,7 @@ function assertAdmissibleWorkspaceStore(
   paths: SqliteRuntimeLayoutPaths,
   binding: SqliteRuntimeWorkspaceBinding,
   databasePath: string,
+  targetStore?: 'run',
 ): void {
   assertSqliteRuntimeWorkspaceBinding(binding);
   assertNoFollowDatabasePath(databasePath);
@@ -360,7 +370,11 @@ function assertAdmissibleWorkspaceStore(
   let view: ReturnType<typeof openSqliteReadonlySnapshotView> | undefined;
   try {
     view = openSqliteReadonlySnapshotView(databasePath);
-    assertWorkspaceSqliteRuntimeStoreConnection(view.database, binding);
+    if (targetStore === 'run') {
+      assertSqliteRuntimeRunStoreConnection(view.database, binding);
+    } else {
+      assertWorkspaceSqliteRuntimeStoreConnection(view.database, binding);
+    }
   } catch {
     throw new SqliteRuntimeLayoutError(
       'blocked',
@@ -375,6 +389,7 @@ function admitNewWorkspaceStoreLocked(
   paths: SqliteRuntimeLayoutPaths,
   binding: SqliteRuntimeWorkspaceBinding,
   databasePath: string,
+  targetStore?: 'run',
 ): SqliteRuntimeWorkspaceStoreAdmission {
   const pointer = readSqliteActiveLayoutPointer(paths);
   if (!pointer || pointer.generation !== binding.layoutGeneration) {
@@ -391,9 +406,15 @@ function admitNewWorkspaceStoreLocked(
     !['pointer_switched', 'target_ready', 'committed'].includes(journal.pointerPhase) ||
     fence.targetLayoutGeneration !== binding.layoutGeneration ||
     fence.migrationNonce !== journal.migrationNonce ||
-    manifest.profile.storeSchemaVersion !== SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION ||
+    manifest.profile.storeSchemaVersion !==
+      (targetStore === 'run'
+        ? SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION
+        : SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION) ||
     manifest.profile.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-    manifest.profile.formatEpoch !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+    manifest.profile.formatEpoch !==
+      (targetStore === 'run'
+        ? SQLITE_RUNTIME_RUN_FORMAT_EPOCH
+        : SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH)
   ) {
     throw new SqliteRuntimeLayoutError(
       'blocked',
@@ -497,6 +518,7 @@ export function assertSqliteCoordinatorCatalogActive(
   paths: SqliteRuntimeLayoutPaths,
   layoutGeneration: string,
   catalogPath: string,
+  targetStore?: 'run',
 ): SqliteRuntimeMigrationJournal {
   assertGeneration(layoutGeneration);
   const expectedPath = resolveSqliteCatalogPath(paths, layoutGeneration);
@@ -530,8 +552,14 @@ export function assertSqliteCoordinatorCatalogActive(
     !manifest ||
     manifest.generation !== layoutGeneration ||
     manifest.profile.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-    manifest.profile.storeSchemaVersion !== SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION ||
-    manifest.profile.formatEpoch !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH ||
+    manifest.profile.storeSchemaVersion !==
+      (targetStore === 'run'
+        ? SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION
+        : SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION) ||
+    manifest.profile.formatEpoch !==
+      (targetStore === 'run'
+        ? SQLITE_RUNTIME_RUN_FORMAT_EPOCH
+        : SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH) ||
     !journal ||
     journal.pointerPhase !== 'committed' ||
     journal.targetLayoutGeneration !== layoutGeneration ||
@@ -560,8 +588,14 @@ export function markSqliteCoordinatorCatalogWritten(
   paths: SqliteRuntimeLayoutPaths,
   layoutGeneration: string,
   catalogPath: string,
+  targetStore?: 'run',
 ): void {
-  const journal = assertSqliteCoordinatorCatalogActive(paths, layoutGeneration, catalogPath);
+  const journal = assertSqliteCoordinatorCatalogActive(
+    paths,
+    layoutGeneration,
+    catalogPath,
+    targetStore,
+  );
   if (journal.targetWriteState === 'written') return;
   writeSqliteRuntimeMigrationJournal(paths, { ...journal, targetWriteState: 'written' });
 }

@@ -98,7 +98,7 @@ export interface WorkspaceWorkerApplicationOptions {
  * `createWorkspaceWorkerRuntimeComposition`.
  *
  * This factory deliberately has no Store/SQLite constructor and no compatibility source.  The
- * Runtime Host and its query-only History both consume the exact injected Store 7 owner; the
+ * Runtime Host and its query-only History both consume the exact injected Store 8 owner; the
  * App Control composition owns only Workspace configuration/providers and never opens Runtime
  * State storage.
  */

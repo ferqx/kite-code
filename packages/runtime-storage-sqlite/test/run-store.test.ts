@@ -197,11 +197,10 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
           expectedLastRevision: 6,
           next: completedRun(current),
         }),
-      ).toThrow('revision');
+      ).toThrow('reuse a revision');
       const running = {
         ...current,
         status: 'running' as const,
-        lastRevision: 7,
         startedAtMs: current.createdAtMs + 1,
       };
       expect(
@@ -216,7 +215,7 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
         store.transition({
           sessionId: 'session-1',
           runId: 'run-6',
-          expectedLastRevision: 7,
+          expectedLastRevision: 6,
           next: {
             ...running,
             status: 'waiting',
@@ -229,7 +228,7 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
         store.transition({
           sessionId: 'session-1',
           runId: 'run-6',
-          expectedLastRevision: 7,
+          expectedLastRevision: 6,
           next: completedRun({ ...running, lastRevision: 8 }),
         }),
       ).toBe('applied');

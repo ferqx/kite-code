@@ -155,7 +155,7 @@ export interface WorkspaceWorkerControlCarrierOptions {
   readonly identity: WorkspaceWorkerControlIdentity;
   readonly authority: WorkspaceWorkerControlLink;
   readonly credential?: string;
-  /** Current Store 7 outbox reader on the Worker's already-open connection. */
+  /** Current Store 8 outbox reader on the Worker's already-open connection. */
   readonly directoryOutbox?: {
     list(request: WorkspaceWorkerDirectoryOutboxRequest): WorkspaceWorkerDirectoryOutboxPage;
   };

@@ -26,9 +26,9 @@ export type WorkspaceEffectControllerAuthorizer = (
 ) => boolean | Promise<boolean>;
 
 export interface WorkspaceStoreEffectAdapterInput {
-  /** The open Store 7 authority for exactly one Worker Workspace. */
+  /** The open Store 8 authority for exactly one Worker Workspace. */
   readonly authority: Pick<SqliteWorkspaceAuthority, 'binding' | 'effects' | 'resources'>;
-  /** OS-user shared-resource lease; Store 7 only records its evidence. */
+  /** OS-user shared-resource lease; Store 8 only records its evidence. */
   readonly resourceLease: WorkspaceResourceLeasePort;
   /** Exact authenticated Controller/Worker context verifier. */
   readonly authorizeController: WorkspaceEffectControllerAuthorizer;
@@ -118,7 +118,7 @@ export function requiresWorkspaceEffectGate(classified: Readonly<ClassifiedInvoc
 }
 
 /**
- * Compose the Store 7 durable effect evidence with the OS-user resource
+ * Compose the Store 8 durable effect evidence with the OS-user resource
  * lease.  The Store facade owns effect/resource state; the filesystem lease
  * owns only cross-Workspace exclusion.  No result body, raw capability, or
  * canonical path is persisted by this composition.
@@ -198,7 +198,7 @@ export function createWorkspaceStoreEffectAdapter(
     },
     acknowledgeDispatch: async (attempt: WorkspaceEffectAttempt) => {
       await authorize(attempt);
-      // Store 7's effect evidence intentionally has no separate mutable
+      // Store 8's effect evidence intentionally has no separate mutable
       // "dispatch_acknowledged" row: the prepared row plus the external
       // resource held record is the durable pre-dispatch fence.  Re-read both
       // identities here so a changed lease cannot cross the dispatch boundary.

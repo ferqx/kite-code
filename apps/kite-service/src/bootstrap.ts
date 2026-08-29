@@ -60,7 +60,7 @@ import {
 } from '@kite-ai/runtime-server';
 import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 import {
-  assertSqliteWorkspaceStoreActive,
+  assertSqliteRuntimeRunStoreActive,
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
@@ -72,10 +72,10 @@ import {
   resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-  SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
-  SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
   type SqliteRuntimeCompatibilityImportResult,
   type SqliteRuntimeLayoutPaths,
   type SqliteRuntimeStorageOptions,
@@ -153,7 +153,7 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
   /**
-   * Optional already-open Store owner. Worker composition supplies this exact Store 7 owner so
+   * Optional already-open Store owner. Worker composition supplies this exact Store 8 owner so
    * this Host cannot open a second SQLite writer or route a read through compatibility import.
    */
   readonly storageOwner?: KiteRuntimeStorageOwner;
@@ -359,8 +359,8 @@ function createKiteRuntimeStorage(
   });
 }
 
-export const WORKSPACE_WORKER_STORE_PROFILE_ = SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH;
-export const WORKSPACE_WORKER_STORE_SCHEMA_VERSION_ = SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION;
+export const WORKSPACE_WORKER_STORE_PROFILE_ = SQLITE_RUNTIME_RUN_FORMAT_EPOCH;
+export const WORKSPACE_WORKER_STORE_SCHEMA_VERSION_ = SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION;
 export const WORKSPACE_WORKER_STATE_SCHEMA_VERSION_ = SQLITE_RUNTIME_STATE_SCHEMA_VERSION;
 
 export interface WorkspaceWorkerStoreProfile {
@@ -385,7 +385,8 @@ export interface WorkspaceWorkerStoreContext {
 
 export interface WorkspaceWorkerStoreOwner extends RuntimeStorage<RuntimeEvent, RuntimeState> {
   readonly workspaceAuthority: SqliteWorkspaceAuthority;
-  /** Store 7 atomic Runtime-session + initial Controller creation owner. */
+  readonly runs: NonNullable<RuntimeStorage<RuntimeEvent, RuntimeState>['runs']>;
+  /** Store 8 atomic Runtime-session + initial Controller creation owner. */
   readonly workspaceSessionCreation: SqliteWorkspaceSessionCreationPort<RuntimeEvent, RuntimeState>;
 }
 
@@ -449,7 +450,7 @@ export function createWorkspaceWorkerStoreContext(input: {
     binding.layoutGeneration,
     binding.workerScopeId,
   );
-  assertSqliteWorkspaceStoreActive(layout, binding, databasePath);
+  assertSqliteRuntimeRunStoreActive(layout, binding, databasePath);
   return Object.freeze({
     home,
     layout,
@@ -466,17 +467,18 @@ export function openWorkspaceWorkerStore(
     readonly storageOptions?: WorkspaceWorkerStoreStorageOptions;
   } = {},
 ): WorkspaceWorkerStoreOwner {
-  assertSqliteWorkspaceStoreActive(context.layout, context.binding, context.databasePath);
+  assertSqliteRuntimeRunStoreActive(context.layout, context.binding, context.databasePath);
   const storage = createSqliteRuntimeStorage<RuntimeEvent, RuntimeState>({
     databasePath: context.databasePath,
     codec: options.codec ?? STATE_STORAGE_BINDING_.codec,
     workspaceBinding: context.binding,
     workspaceLayout: context.layout,
+    targetStore: 'run',
     ...(options.storageOptions ? { options: options.storageOptions } : {}),
   });
-  if (!storage.workspaceAuthority || !storage.workspaceSessionCreation) {
+  if (!storage.workspaceAuthority || !storage.workspaceSessionCreation || !storage.runs) {
     storage.close();
-    throw new Error('Workspace Worker Store 7 authority/session creation is unavailable.');
+    throw new Error('Workspace Worker Store 8 authority/session creation is unavailable.');
   }
   return storage as WorkspaceWorkerStoreOwner;
 }
@@ -484,8 +486,8 @@ export function openWorkspaceWorkerStore(
 export function assertWorkspaceWorkerStoreProfile(value: WorkspaceWorkerStoreProfile): void {
   if (
     value.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-    value.storeSchemaVersion !== SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION ||
-    value.formatEpoch !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH
+    value.storeSchemaVersion !== SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION ||
+    value.formatEpoch !== SQLITE_RUNTIME_RUN_FORMAT_EPOCH
   ) {
     throw new TypeError('Workspace Worker Store profile is incompatible.');
   }
@@ -698,7 +700,7 @@ export function createKiteRuntimeObserverHistory(
 }
 
 /**
- * Query-only Observer History for an active Store 7 Workspace. The caller
+ * Query-only Observer History for an active Store 8 Workspace. The caller
  * supplies server-owned layout authority and an opaque Worker scope; no
  * Browser path or compatibility importer is accepted.
  */
@@ -714,11 +716,12 @@ export function createKiteRuntimeObserverHistoryFromWorkspaceLayout(input: {
       workerScopeId: input.workerScopeId,
       codec: STATE_STORAGE_BINDING_.codec,
       currentEventTypes: runtimeHostCurrentStateEventTypes(),
+      targetStore: 'run',
     }),
   );
 }
 
-/** Resolve the active Store 7 generation inside the Service composition root. */
+/** Resolve the active Store 8 generation inside the Service composition root. */
 export function createKiteRuntimeObserverHistoryFromActiveWorkspace(input: {
   readonly kiteHomeRoot: string;
   readonly workerScopeId: string;
@@ -1132,7 +1135,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     );
   }
 
-  // Worker composition injects the already-admitted Store 7 owner here.  The legacy Service path
+  // Worker composition injects the already-admitted Store 8 owner here.  The legacy Service path
   // remains lazy only when no owner is supplied; no compatibility wrapper is ever introduced for
   // an injected Store.
   const owner = input.storageOwner ?? createKiteRuntimeStorageOwner(input.checkpointPath);

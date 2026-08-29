@@ -31,7 +31,7 @@ export type {
   WorkspaceWorkerStoreStorageOptions,
 };
 
-/** Store 7 Directory facts stay on the same already-open SQLite connection. */
+/** Store 8 Directory facts stay on the same already-open SQLite connection. */
 export type WorkspaceWorkerStoreOwner = BootstrapWorkspaceWorkerStoreOwner & {
   readonly directoryOutbox: SqliteWorkspaceDirectoryOutbox;
   readonly openWorkspaceLogQuery: (

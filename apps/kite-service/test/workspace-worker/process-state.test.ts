@@ -52,7 +52,7 @@ function descriptor(workerScopeId: string) {
     pid: 42_001,
     startedAt: '2026-08-29T00:00:00.000Z',
     processStartIdentity: 'worker-state-start',
-    storeProfile: 'kite-coordinator-workspace-worker-web-v1-2026-08-28',
+    storeProfile: 'kite-agent-server-api-v1-2026-08-29',
     layoutGeneration: 'layout-state',
     endpoint: {
       origin: 'http://127.0.0.1:43142',

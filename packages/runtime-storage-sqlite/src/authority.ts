@@ -642,8 +642,24 @@ export function createSqliteWorkspaceAuthority(input: {
   /** Store-owner hook invoked before any durable authority mutation. */
   readonly beforeWrite?: () => void;
 }): SqliteWorkspaceAuthority {
+  return createSqliteWorkspaceAuthorityForConnection_(input);
+}
+
+/** Package-internal Store-profile adapter; public callers remain fixed to Store 7 validation. */
+export function createSqliteWorkspaceAuthorityForConnection_(input: {
+  readonly db: Database;
+  readonly binding: SqliteRuntimeWorkspaceBinding;
+  readonly nowMs?: () => number;
+  readonly assertConnection?: (
+    database: Database,
+    binding: SqliteRuntimeWorkspaceBinding,
+  ) => unknown;
+  /** Store-owner hook invoked before any durable authority mutation. */
+  readonly beforeWrite?: () => void;
+}): SqliteWorkspaceAuthority {
   assertSqliteRuntimeWorkspaceBinding(input.binding);
-  assertWorkspaceSqliteRuntimeStoreConnection(input.db, input.binding);
+  const assertConnection = input.assertConnection ?? assertWorkspaceSqliteRuntimeStoreConnection;
+  assertConnection(input.db, input.binding);
   const now = (): number => {
     const value = input.nowMs?.() ?? Date.now();
     if (!isNonNegativeSafeInteger(value)) {
@@ -653,7 +669,7 @@ export function createSqliteWorkspaceAuthority(input: {
   };
 
   const verifyStore = (): void => {
-    assertWorkspaceSqliteRuntimeStoreConnection(input.db, input.binding);
+    assertConnection(input.db, input.binding);
   };
   const transaction = <T>(work: () => T): T => {
     input.beforeWrite?.();
@@ -2361,9 +2377,13 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
   readonly request: SqliteWorkspaceInitialControllerInput;
   readonly mode: 'create' | 'replay';
   readonly nowMs?: () => number;
+  readonly assertConnection?: (
+    database: Database,
+    binding: SqliteRuntimeWorkspaceBinding,
+  ) => unknown;
 }): SqliteWorkspaceControllerOperationResult {
   assertSqliteRuntimeWorkspaceBinding(input.binding);
-  assertWorkspaceSqliteRuntimeStoreConnection(input.db, input.binding);
+  (input.assertConnection ?? assertWorkspaceSqliteRuntimeStoreConnection)(input.db, input.binding);
   const request = input.request;
   assertClientIdentity(request.clientId);
   assertGeneration(request.connectionGeneration, 'connection generation', true);

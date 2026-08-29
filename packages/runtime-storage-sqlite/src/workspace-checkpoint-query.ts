@@ -30,7 +30,7 @@ export interface SqliteWorkspaceCheckpointPage {
   readonly hasMore: boolean;
 }
 
-/** Store 7-only, same-connection Checkpoint metadata page source. */
+/** Store 7/8 same-connection Checkpoint metadata page source. */
 export interface SqliteWorkspaceCheckpointQuery {
   list(input: {
     readonly sessionId: string;
@@ -56,15 +56,17 @@ interface SnapshotIntegrityRow {
 }
 
 /**
- * Bind a bounded Checkpoint page reader to the Worker's already-open Store 7 database. It opens
+ * Bind a bounded Checkpoint page reader to the Worker's already-open Store database. It opens
  * no connection, creates no schema/index, returns no State JSON, and validates one selected
  * snapshot at a time before publishing its metadata.
  */
 export function createSqliteWorkspaceCheckpointQuery(input: {
   readonly db: Database;
   readonly binding: SqliteRuntimeWorkspaceBinding;
+  readonly formatEpoch?: string;
 }): SqliteWorkspaceCheckpointQuery {
   assertSqliteRuntimeWorkspaceBinding(input.binding);
+  const formatEpoch = input.formatEpoch ?? SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH;
   const integrity = input.db.query<SnapshotIntegrityRow, [string, string]>(
     `SELECT state_json, state_checksum, schema_version, format_epoch
        FROM runtime_named_snapshots
@@ -87,7 +89,7 @@ export function createSqliteWorkspaceCheckpointQuery(input: {
     if (
       !row ||
       row.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
-      row.format_epoch !== SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH ||
+      row.format_epoch !== formatEpoch ||
       checksum(row.state_json) !== row.state_checksum
     ) {
       throw new Error('Workspace Checkpoint snapshot is unavailable.');

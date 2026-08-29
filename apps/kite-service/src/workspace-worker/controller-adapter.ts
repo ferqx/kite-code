@@ -16,7 +16,7 @@ import type {
 } from '@kite-ai/runtime-storage-sqlite';
 
 /**
- * The application-facing view of the Store 7 controller.  It is deliberately split into an
+ * The application-facing view of the Store 8 controller.  It is deliberately split into an
  * observer surface and a native surface: a Web observer can be given the former without ever
  * receiving a request/release/resume/recovery or mutation-authorisation method.
  */
@@ -69,7 +69,7 @@ export interface WorkspaceWorkerControllerNative {
 }
 
 /**
- * Store 7 Controller adapter owned by one foreground Worker.  This is not a second authority:
+ * Store 8 Controller adapter owned by one foreground Worker.  This is not a second authority:
  * all calls delegate to the already-open `workspaceAuthority.controller` object and all results
  * are checked against this Worker's identity before crossing the application boundary.
  */
@@ -249,7 +249,7 @@ export function createWorkspaceWorkerControllerAdapter(
       controller.validateResumeCapability(request),
     authorizeMutation: (binding: WorkspaceWorkerControllerMutationBinding) => {
       assertMutationBinding(binding, workerInstanceId);
-      // Store 7 currently exposes this as a synchronous read.  The adapter intentionally does
+      // Store 8 currently exposes this as a synchronous read.  The adapter intentionally does
       // not turn it into an async or cached fact: Host commit callers must re-check the live
       // lease at their own commit boundary.
       const state = controller.read(binding.sessionId);

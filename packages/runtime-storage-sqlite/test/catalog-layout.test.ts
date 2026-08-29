@@ -82,9 +82,39 @@ describe('Coordinator Catalog active-layout write fence', () => {
       pointerFixture.cleanup();
     }
   });
+
+  test('admits Store 8 Catalog authority only through the explicit production profile', () => {
+    const fixture = createFixture('run');
+    try {
+      expect(() =>
+        assertSqliteCoordinatorCatalogActive(
+          fixture.layout,
+          fixture.generation,
+          fixture.catalogPath,
+        ),
+      ).toThrow('incomplete or stale');
+      expect(
+        assertSqliteCoordinatorCatalogActive(
+          fixture.layout,
+          fixture.generation,
+          fixture.catalogPath,
+          'run',
+        ).targetWriteState,
+      ).toBe('none');
+      markSqliteCoordinatorCatalogWritten(
+        fixture.layout,
+        fixture.generation,
+        fixture.catalogPath,
+        'run',
+      );
+      expect(readSqliteRuntimeMigrationJournal(fixture.layout)?.targetWriteState).toBe('written');
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
 
-function createFixture() {
+function createFixture(targetStore?: 'run') {
   const root = mkdtempSync(join(process.cwd(), '.kite-catalog-layout-'));
   const layout = ensureSqliteRuntimeLayoutRoot(join(root, 'home'));
   const generation = 'generation-1';
@@ -95,8 +125,11 @@ function createFixture() {
   const catalogDigest = createHash('sha256').update(catalogBytes).digest('hex');
   const sourceProfile = {
     stateSchemaVersion: 27,
-    storeSchemaVersion: 6,
-    formatEpoch: 'kite-runtime-server-v1-2026-08-26',
+    storeSchemaVersion: targetStore === 'run' ? 7 : 6,
+    formatEpoch:
+      targetStore === 'run'
+        ? 'kite-coordinator-workspace-worker-web-v1-2026-08-28'
+        : 'kite-runtime-server-v1-2026-08-26',
   } as const;
   const journal = {
     schema: 'kite.runtime-migration-journal.v1' as const,
@@ -110,14 +143,22 @@ function createFixture() {
     targetWriteState: 'none' as const,
     migrationNonce: 'catalog-layout-nonce',
   };
+  const targetProfile =
+    targetStore === 'run'
+      ? ({
+          stateSchemaVersion: 27,
+          storeSchemaVersion: 8,
+          formatEpoch: 'kite-agent-server-api-v1-2026-08-29',
+        } as const)
+      : ({
+          stateSchemaVersion: 27,
+          storeSchemaVersion: 7,
+          formatEpoch: 'kite-coordinator-workspace-worker-web-v1-2026-08-28',
+        } as const);
   writeSqliteRuntimeLayoutManifest(layout, {
     schema: 'kite.runtime-layout-manifest.v1',
     generation,
-    profile: {
-      stateSchemaVersion: 27,
-      storeSchemaVersion: 7,
-      formatEpoch: 'kite-coordinator-workspace-worker-web-v1-2026-08-28',
-    },
+    profile: targetProfile,
     catalogDigest,
     workspaceStores: [],
   });

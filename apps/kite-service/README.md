@@ -3,7 +3,7 @@
 ## 定位
 
 `@kite-ai/kite-service` workspace 拥有 production backend composition。当前 release/source 的默认 TUI、`run` 与 `resume`
-走 Local Coordinator → canonical Workspace Worker；每个 Worker 独占已 admission 的 Store 7、Runtime Host/Application、Controller
+走 Local Coordinator → canonical Workspace Worker；每个 Worker 独占已 admission 的 Store 8、Runtime Host/Application、Controller
 与 effect authority。旧单 Service/Store 6 composition仍保留给显式 `kite service *` maintenance/compatibility journey，layout
 fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 terminal presentation与Native client。
 
@@ -16,17 +16,17 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
 - `src/executable.ts` 是managed companion foreground entry。它从manager提供的显式neutral environment构造canonical
   default checkpoint/config paths，启动Native infrastructure，并以dedicated fd发布readiness；stdout不承载readiness。
 - `src/coordinator/production.ts`、`src/workspace-worker/production.ts` 与 `src/web-gateway/production.ts` 分别组合
-  Coordinator control plane、单 Workspace Worker Store 7/Host/Application 与只读 Web Gateway BFF。release entrypoint 只把
+  Coordinator control plane、单 Workspace Worker Store 8/Host/Application 与只读 Web Gateway BFF。release entrypoint 只把
   显式 source/installed executable、neutral environment、layout generation 与 readiness fd 注入这些 owner；不从 cwd、PATH、
   ambient home 或 legacy Service fallback 推导运行时。
 - `src/coordinator/catalog-builder.ts`为显式offline maintenance同时提供Store6→Store7 Catalog builder和Store7→Store8 exact Catalog
   generation copy adapter；`scripts/release/local-layout-migration.ts`只在manager注入完整停止/收敛barrier后建立source-bound fence并调用
-  whole-generation migrator。normal start/ensure不运行该路径；current Worker opener仍是Store7，待KRSRUN-03A再消费Store8 active target。
-- Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 7 writer、Controller/effect authority 与
+  whole-generation migrator。normal start/ensure不迁移已有Store7；fresh home直接建立Store8，legacy home仍要求显式maintenance。
+- Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 8 writer、Controller/effect authority 与
   Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。
 - Worker idle 时，Gateway 可按 Catalog 的 `sessionId → workerScopeId` 调用 Service-owned offline History facade。该 facade只从
-  显式Kite home的active-layout推导Store 7路径，在隔离只读snapshot上复核pointer/manifest/journal/fence、owner/no-follow/file与
+  显式Kite home的active-layout推导Store 8路径，在隔离只读snapshot上复核pointer/manifest/journal/fence、owner/no-follow/file与
   Workspace binding，并在读取前后重验active generation；它不是Store authority，不创建writer、不启动Worker、不接受Browser path，
   也不调用compatibility importer。missing/legacy/corrupt/drift一律返回typed unavailable。
 - Coordinator 的 Directory mirror 只通过 authenticated Worker control link 读取 current-format outbox。manager-local
@@ -42,9 +42,8 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   404。每个context拥有一条read-only private Runtime logical connection，每请求重验Trust；Coordinator不代理data plane，Browser/Web
   Gateway不能mint或使用该context。每context最多16个in-flight request；drain/revoke先停止新请求并等待已admit read收敛，再关闭private
   connection。History按1 MiB encoded response上限提前分页，未知SSE/mutation path即使请求非JSON media type也保持404。
-- App Runtime bridge已支持Store8条件路径：start commit提供canonical turn/Run identity，commit成功后在任何publish/schedule前写activation；
-  interaction与terminal仍由同一State transaction owner推进。private Protocol已能传输Run receipt/get/page，但current Worker Store7
-  没有`runs`port，因此该query返回unsupported，Agent API route/capability仍保持关闭。
+- App Runtime bridge在current Store8上由start commit提供canonical turn/Run identity，commit成功后在任何publish/schedule前写activation；
+  interaction与terminal仍由同一State transaction owner推进。private Protocol消费Run receipt/get/page，Agent API route/capability仍保持关闭。
 - Web Gateway只为Agent API增加release-bundled静态参考：`/api-docs`与尾斜杠映射Web入口，
   `/api-docs/openapi.json`映射candidate内的canonical artifact。该页面不发现Worker、不取得Agent context、不保存credential、
   不提供Try it/execute；API或Worker在线状态只显示为未确认，未知docs deep link保持404。
@@ -83,11 +82,11 @@ OSS candidate同包输出 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bi
 ## 关键不变量
 
 - default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
-- 默认 release terminal path 使用 State 27 / Store 7 Workspace Worker；显式 legacy Service 仍只认识 State 27 / Store 6，并在
+- 默认 release terminal path 使用 State 27 / Store 8 Workspace Worker；显式 legacy Service 仍只认识 State 27 / Store 6，并在
   committed layout/fence 存在时 fail closed。Worker 只在 Coordinator 完成 materialize/admit、active layout 与 binding 复核后打开
-  Store 7；两条路径不双写，也不存在 try-new-catch-old fallback。
+  Store 8；两条路径不双写，也不存在 try-new-catch-old fallback。Store7只作offline migration source，Worker opener明确拒绝。
 - Runtime admission 将 authenticated `connectionId`、`requestId` 与 Worker binding reference 作为只存在于进程内的
-  `RuntimeCommandContext` 传入 prepared execution closure；effect adapter 再按 Store 7 Controller/resource authority 验证，
+  `RuntimeCommandContext` 传入 prepared execution closure；effect adapter 再按 Store 8 Controller/resource authority 验证，
   不把该 context 加入 Runtime wire protocol 或 Browser contract。
 - 每个Session projection都从同一durable State revision投影完整、有序的client-safe interaction queue与唯一focus；
   intermediate revision不得携带未来queue。Runtime Contract/Protocol、Native与InProcess carrier消费同一替换语义，

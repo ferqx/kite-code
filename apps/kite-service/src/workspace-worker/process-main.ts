@@ -63,7 +63,7 @@ export interface WorkspaceWorkerMainDependencies {
 
 /**
  * Parse only manager-owned Worker environment. Workspace identity is reconstructed from explicit
- * fields and revalidated by the Store7/runtime composition before any writer opens.
+ * fields and revalidated by the Store8/runtime composition before any writer opens.
  */
 export function resolveWorkspaceWorkerMainEnvironment(
   source: Readonly<Record<string, string | undefined>>,

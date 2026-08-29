@@ -11,6 +11,7 @@ import {
   ensureSqliteWorkspaceStoreDirectory,
   inspectSqliteRuntimeRunMigrationSource,
   markSqliteRuntimeRunStoreWritten,
+  materializeAndAdmitNewWorkspaceStore,
   migrateSqliteRuntimeLayoutToRunStore,
   readSqliteActiveLayoutPointer,
   readSqliteRuntimeLayoutManifest,
@@ -135,9 +136,15 @@ describe('offline Store 7 to Store 8 generation migration', () => {
         databasePath: targetPath,
         codec,
         workspaceBinding: targetBinding,
+        workspaceLayout: fixture.layout,
         targetStore: 'run',
         options: { journalMode: 'delete' },
       });
+      expect(target.workspaceAuthority).toBeDefined();
+      expect(target.workspaceSessionCreation).toBeDefined();
+      expect(target.directoryOutbox).toBeDefined();
+      expect(target.openWorkspaceLogQuery).toBeDefined();
+      expect(target.workspaceCheckpointQuery).toBeDefined();
       expect(target.sessions.loadSnapshot<State>('session-1')).toMatchObject({
         revision: 1,
         settled: true,
@@ -150,7 +157,27 @@ describe('offline Store 7 to Store 8 generation migration', () => {
           requestDigest: 'a'.repeat(64),
         }),
       ).toMatchObject({ status: 'replay' });
+      target.sessions.setSessionName('session-1', 'Store 8 production reopen');
+      expect(readSqliteRuntimeMigrationJournal(fixture.layout)?.targetWriteState).toBe('written');
       target.close();
+
+      const newBinding = {
+        layoutGeneration: TARGET_GENERATION,
+        workerScopeId: 'worker-scope-new',
+        workspaceIdentityDigest: 'e'.repeat(64),
+      } as const;
+      const admitted = materializeAndAdmitNewWorkspaceStore(fixture.layout, newBinding, 'run');
+      const newStore = createSqliteRuntimeStorage<Event, State>({
+        databasePath: admitted.databasePath,
+        codec,
+        workspaceBinding: newBinding,
+        workspaceLayout: fixture.layout,
+        targetStore: 'run',
+        options: { journalMode: 'delete' },
+      });
+      expect(newStore.storeSchemaVersion).toBe(SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION);
+      expect(newStore.runs).toBeDefined();
+      newStore.close();
 
       const targetDatabase = new Database(targetPath, { readonly: true });
       expect(

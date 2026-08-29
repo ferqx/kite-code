@@ -33,9 +33,8 @@ fixtures与独立package Gate，并从同一schema source生成OpenAPI 3.1、JSO
 Workspace Worker listener已接入authenticated Agent API context及bounded Session/History/Checkpoint read adapter；Web release已逐字节装入
 canonical OpenAPI并提供无execute、无Worker discovery的静态`/api-docs`。Public-codec reference client已在handler及真实Worker listener上关闭
 auth/pagination/concurrent update/limits/drain/role/replacement/non-disclosure Gate。KRSRUN-01A～02A已完成neutral Run contract、unpublished
-Store8 schema/preflight、Host atomic lifecycle/original resource replay、private Run query、delete/rewind/fork/restart及whole-generation
-migration；当前执行入口为KASAPI-03A子计划KRSRUN-03A Worker composition/reopen/cutover。production Worker/Public handler仍不创建Run mutation或发布
-`runs`capability。
+Store8 schema/preflight、Host atomic lifecycle/original resource replay、private Run query、delete/rewind/fork/restart、whole-generation migration及
+production Worker cutover；当前执行入口为KASAPI-03A子计划KRSRUN-03B current/release handoff。production Worker已持Run authority，Public handler仍不创建Run mutation或发布`runs`capability。
 
 ## 1. 执行结论
 

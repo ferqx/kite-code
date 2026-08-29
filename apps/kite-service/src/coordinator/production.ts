@@ -110,11 +110,15 @@ export const createProductionKiteCoordinatorComposition: NonNullable<
     ownerReservation: createWorkspaceReservationPort({ coordinationHome }),
     admitWorkspaceStore: async ({ workspace, workerScopeId, layoutGeneration }) => {
       assertActiveGeneration(layoutGeneration);
-      materializeAndAdmitNewWorkspaceStore(layout, {
-        layoutGeneration,
-        workerScopeId,
-        workspaceIdentityDigest: workspaceIdentityDigest(workspace),
-      });
+      materializeAndAdmitNewWorkspaceStore(
+        layout,
+        {
+          layoutGeneration,
+          workerScopeId,
+          workspaceIdentityDigest: workspaceIdentityDigest(workspace),
+        },
+        'run',
+      );
     },
     registry: {
       register(value) {
@@ -195,6 +199,7 @@ export const createProductionKiteCoordinatorComposition: NonNullable<
           layout,
           environment.layoutGeneration,
           environment.catalogPath,
+          'run',
         );
       },
     },
@@ -229,7 +234,7 @@ export const createProductionKiteCoordinatorComposition: NonNullable<
     if (!pointer || pointer.generation !== expected || expected !== environment.layoutGeneration) {
       throw new Error('Coordinator active layout generation changed.');
     }
-    assertSqliteCoordinatorCatalogActive(layout, expected, environment.catalogPath);
+    assertSqliteCoordinatorCatalogActive(layout, expected, environment.catalogPath, 'run');
     return expected;
   }
 };

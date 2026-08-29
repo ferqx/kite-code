@@ -14,7 +14,7 @@ export interface OfflineWebHistoryPort {
 }
 
 /**
- * Read current-format Store 7 History while its Worker is idle. The canonical
+ * Read current-format Store 8 History while its Worker is idle. The canonical
  * Store path is derived exclusively from the explicit Kite home and current
  * active-layout pointer. Storage revalidates pointer/manifest/journal/fence,
  * file identity and Workspace binding before and after each query.

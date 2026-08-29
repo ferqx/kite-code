@@ -73,9 +73,9 @@ Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exa
 Public Agent API当前在同一Worker listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。one-shot capability由Worker
 hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
 initialize/query-only in-process Runtime Client/Server logical connection。ServerInfo只发布`checkpoints/history/sessions`，Session list/get、
-History page与Checkpoint list/preview经Service-owned safe ports可达，其他resource/mutation仍404。same-connection Store 7 page port只做bounded
+History page与Checkpoint list/preview经Service-owned safe ports可达，其他resource/mutation仍404。same-connection Store 8 page port只做bounded
 keyset/sequence read，不开放SQLite/State concrete或新connection/DDL。context close/Trust撤销/expiry/generation fence不取消Runtime work；
-controller role不绕过Store 7 Controller lease或`bindingReference`。
+controller role不绕过Store 8 Controller lease或`bindingReference`。
 每context的16-request admission与drain只约束Public HTTP资源；它不成为domain mailbox。已认证read在异步Trust重验后还必须复核context current，
 revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-02D static/conformance Gate同时证明adapter没有direct
 `RuntimeAccess`或Agent Kernel/Runtime Host/SQLite concrete import；1 MiB History response提前分页仍只消费同一safe page port。
@@ -105,10 +105,11 @@ Catalog和每个Workspace snapshot identity/digest。Coordinator-owned port精�
 binding/Store 8 preflight通过后才原子切pointer；active/corrupt/unowned/partial/WAL drift或copy fault整体blocked，新fence写入后旧Store 7 writer
 立即fail closed。
 
-这仍不是production composition cutover：Worker opener与release正常启动继续只选择Store 7，缺`storage.runs`时Host/SQLite拒绝Run mutation，
-private Run query返回unsupported，ServerInfo/Public handler仍无`runs`。Store 7与Store 8 preflight继续双向拒绝，Coordinator/Catalog/Agent
-adapter不持Run事实；显式02B maintenance一旦切到Store 8，会保持normal Worker blocked直到03A opener/reopen Gate完成，不以Store 7 fallback
-继续执行。因此没有第二RuntimeAccess、optional Store 7 DDL、event-scan回填或fallback。
+KRSRUN-03A已把production Coordinator/Workspace Worker/idle History切到Store 8-only：fresh layout直接创建Store 8，既有Store 7必须先走显式
+02B maintenance；Coordinator Catalog、新Workspace materialize/admit、Worker readiness、Controller/effect、same-connection read façade与private
+Host Run query都验证同一committed active-layout/manifest/journal/fence。Store 8 mutation先永久标记`targetWriteState=written`，restart重新验证
+profile/binding且不读取Store 7 fallback。start decision原子提交queued Run后，调度前的same-phase activation在同一revision改为running；其余
+Run transition仍必须随State revision前进。ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

@@ -14,8 +14,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
   创建default Host/Store composition。
 - `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
   sandbox/session logging、Service shell与carriers；Coordinator/Worker/Web Gateway/Web Observer production composition、
-  idle Worker的active Store 7 query-only History（含source字节/sidecar不变与wrong-scope负测）、
-  process、Store 7、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
+  idle Worker的active Store 8 query-only History（含source字节/sidecar不变与wrong-scope负测）、
+  process、Store 8、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
 - `apps/kite-web/test/`：Browser observer presentation/reducer、browser-safe DTO consumer与静态Agent API reference；后者固定验证
   `/api-docs` routing、无form/execute control、same-origin no-credential artifact读取及availability未确认状态。该workspace不得引入
   Native、Host、Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
@@ -110,6 +110,11 @@ KRSRUN-02B由`packages/runtime-storage-sqlite/test/run-migration.test.ts`、
 `packages/kite-local-runtime/test/coordinator-catalog.test.ts`与`tests/release/local-layout-migration.test.ts`固定whole-generation
 Store7→Store8 copy、Catalog全fact保留、coverage/no-backfill、WAL snapshot、active/corrupt/unowned/partial/fault阻断、old-writer fence与
 显式manager barrier orchestration。它不证明03A Worker opener/reopen、Public `runs`或三平台candidate qualification。
+
+KRSRUN-03A由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
+`process-foreground.test.ts`、`web-gateway/offline-history.test.ts`及Store Catalog layout tests固定Store8-only Worker readiness/reopen、
+Controller/read/Run façade、first-write fence、fresh layout/new Workspace、private Run query与Store7 no-fallback。Public `runs`与三平台hosted
+candidate仍由后续Gate拥有。
 
 这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
 replay 与 Store 5 source-only import；完整 durable history由SQLite log-query、

@@ -13,6 +13,9 @@ import {
   ensureSqliteRuntimeGenerationRoot,
   ensureSqliteRuntimeLayoutRoot,
   ensureSqliteWorkspaceStoreDirectory,
+  readSqliteRuntimeLayoutManifest,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
@@ -106,16 +109,16 @@ function makeStoreFixture(): {
   const database = new Database(databasePath);
   initializeSqliteRuntimeSchema(database, {
     stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-    formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+    storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     workspaceBinding: binding,
   });
   database.close();
   chmodSync(databasePath, 0o600);
   const sourceProfile = {
     stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    storeSchemaVersion: 6,
-    formatEpoch: 'kite-runtime-server-v1-2026-08-26',
+    storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   } as const;
   const journal = {
     schema: 'kite.runtime-migration-journal.v1' as const,
@@ -134,8 +137,8 @@ function makeStoreFixture(): {
     generation: LAYOUT,
     profile: {
       stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     },
     catalogDigest: journal.targetCatalogDigest,
     workspaceStores: [],
@@ -154,7 +157,7 @@ function makeStoreFixture(): {
     schema: 'kite.runtime-active-layout.v1',
     generation: LAYOUT,
   });
-  admitNewWorkspaceStore(layout, binding, databasePath);
+  admitNewWorkspaceStore(layout, binding, databasePath, 'run');
   const context = createWorkspaceWorkerStoreContext({
     home,
     workspace,
@@ -204,20 +207,25 @@ function makeApplication(
   };
 }
 
-describe('Workspace Worker Store 7 foreground state', () => {
-  test('opens only an already materialized and admitted Store 7 target', () => {
+describe('Workspace Worker Store 8 foreground state', () => {
+  test('opens only an already materialized and admitted Store 8 target', () => {
     const fixture = makeStoreFixture();
     const store = openWorkspaceWorkerStore(fixture.context);
+    expect(store.storeSchemaVersion).toBe(SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION);
+    expect(store.runs).toBeDefined();
+    expect(store.formatEpoch).toBe(SQLITE_RUNTIME_RUN_FORMAT_EPOCH);
+    expect(store.workspaceAuthority.binding).toEqual(fixture.context.binding);
+    store.close();
+    const reopened = openWorkspaceWorkerStore(fixture.context);
     try {
-      expect(store.storeSchemaVersion).toBe(7);
-      expect(store.formatEpoch).toBe(SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH);
-      expect(store.workspaceAuthority.binding).toEqual(fixture.context.binding);
+      expect(reopened.runs.list({ sessionId: 'missing-session', limit: 10 }).entries).toEqual([]);
+      expect(reopened.workspaceAuthority.binding).toEqual(fixture.context.binding);
     } finally {
-      store.close();
+      reopened.close();
     }
   });
 
-  test('fails closed without Store 7 admission and does not create a database', () => {
+  test('fails closed without Store 8 admission and does not create a database', () => {
     const root = makeRoot('kite-worker-no-store-');
     const workspacePath = realpathSync(mkdtempSync(join(root, 'workspace-')));
     const home = createKiteHomeIdentity(join(root, 'home'));
@@ -230,6 +238,28 @@ describe('Workspace Worker Store 7 foreground state', () => {
       }),
     ).toThrow();
     expect(() => realpathSync(join(home.root, 'layouts', LAYOUT, 'workers'))).toThrow();
+  });
+
+  test('rejects an active Store 7 profile without falling back to the old writer', () => {
+    const fixture = makeStoreFixture();
+    const layout = ensureSqliteRuntimeLayoutRoot(fixture.home.root);
+    const manifest = readSqliteRuntimeLayoutManifest(layout, LAYOUT)!;
+    writeSqliteRuntimeLayoutManifest(layout, {
+      ...manifest,
+      profile: {
+        stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+        formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      },
+    });
+    expect(() =>
+      createWorkspaceWorkerStoreContext({
+        home: fixture.home,
+        workspace: fixture.workspace,
+        workerScopeId: fixture.workerScopeId,
+        layoutGeneration: LAYOUT,
+      }),
+    ).toThrow('Store 8 writer manifest');
   });
 });
 

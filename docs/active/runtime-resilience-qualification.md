@@ -42,9 +42,10 @@ writer fence。迁移会用authority owner codec校验Controller/recovery/effect
 合法记录只把LayoutGeneration重绑到target；Store 8 writer在journal `committed`前仍fail closed。manager orchestration只有在exact完整
 maintenance barrier后才建立source-bound fence；Catalog存在`in_progress`operation或未登记Worker scope时不创建target。
 
-这些focused tests仍不证明production Worker restart/candidate qualification：current Worker正常启动仍是Store 7并明确拒绝Run
-mutation/resource result，private Run query为unsupported，Public Run route/ServerInfo capability仍关闭。03A cutover前不得把migration
-mechanism表述为release或三平台qualification；显式Store 8 pointer切换后normal Worker必须保持blocked，不能fallback到Store 7。
+KRSRUN-03A focused与Service owner suite已证明production Worker只打开committed Store 8、reopen仍保留Controller/read/Run façade、fresh layout与
+new Workspace直接物化Store 8、Catalog first-write fence、idle History source不变、Store 7 active profile无fallback，以及private `list_runs`
+不再返回unsupported。Service 1525、SQLite 90、Runtime fault 36与CI soak 7/7通过；本机dirty-source macOS arm64 candidate完成
+build/verify/install/upgrade/rollback/uninstall smoke。Public Run route/ServerInfo capability继续关闭，GitHub-hosted三平台candidate evidence仍不能由本机结果替代。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；

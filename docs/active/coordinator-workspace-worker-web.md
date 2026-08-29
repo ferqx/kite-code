@@ -16,7 +16,7 @@ release/platform evidence 时。
 [`Runtime Authority Boundary`](runtime-authority-boundary.md)、[`SQLite Runtime Log 只读查询`](sqlite-runtime-log-query.md)。
 
 本文是当前实现 authority，不把本机证据误写成三平台 qualification。当前 release/source 默认 TUI、`run` 与 `resume` 已切到
-Coordinator → canonical Workspace Worker；Worker 的 Store 7 路径必须由 Coordinator/layout owner 显式 admit。旧单 Service/Store 6
+Coordinator → canonical Workspace Worker；Worker 的 Store 8 路径必须由 Coordinator/layout owner 显式 admit。旧单 Service/Store 6
 composition仍作为显式 `kite service *` maintenance/compatibility owner存在，但 active-layout/migration fence 禁止它成为默认 fallback
 或与 Worker 双写。Web Gateway仍是独立永久只读 Observer BFF。
 
@@ -25,9 +25,9 @@ composition仍作为显式 `kite service *` maintenance/compatibility owner存�
 | 边界 | 当前可由源码证明的行为 | 尚未证明或未接入的行为 |
 | --- | --- | --- |
 | Coordinator | `kite-local-runtime/coordinator` 提供 closed frame/handshake codec、bounded framing、Native carrier、in-memory registry 与固定 method allowlist；`apps/kite-service/src/coordinator/production.ts` 组合 process manager、Catalog/layout admission、Worker/Gateway registry 与 release entrypoint | hosted process/ACL/三平台 qualification 与完整 crash/soak evidence 仍 pending；Coordinator 不承载 Runtime data plane |
-| Workspace Worker | `workspace-worker/production.ts` 以 Coordinator 已 admission 的 Store 7 binding 组合单 Workspace Host/Application/Controller/effect authority；默认 CLI/TUI connector、process manager、owner reservation、ready-before-register、capability/control carrier 与 release entrypoint 已闭合 | Windows/Linux hosted process/ACL 与跨平台 qualification仍 pending；不允许第二 writer 或 legacy fallback |
+| Workspace Worker | `workspace-worker/production.ts` 以 Coordinator 已 admission 的 Store 8 binding 组合单 Workspace Host/Application/Controller/effect/Run authority；默认 CLI/TUI connector、process manager、owner reservation、ready-before-register、capability/control carrier 与 release entrypoint 已闭合 | Windows/Linux hosted process/ACL 与跨平台 qualification仍 pending；不允许第二 writer 或 legacy fallback |
 | Web Observer/Gateway | Web package、query-only Observer、plain loopback Gateway carrier/upstream、Coordinator resolve/mint/direct Worker History/live、生产 gateway entrypoint 与 CLI/TUI lifecycle injection 已存在 | remote/LAN/public Web 不支持；Windows/Linux hosted process、browser/Worker reducer qualification 与 release smoke 之外的完整 Web support evidence 仍 pending |
-| Store migration | ADR-0148 与 `runtime-storage-sqlite` 已提供 Store 7 DDL、Workspace binding、Catalog/layout manifest、migration journal/fence、copy-and-switch、new-Workspace admission 与 first-write fence；默认 release terminal path 使用 committed Store 7 Worker | 自动 legacy migration仍不属于普通启动；缺 persisted Workspace identity/腐败/不确定证据时必须进入显式 maintenance。三平台 filesystem/旧 binary hosted evidence仍 pending |
+| Store migration | ADR-0148/0150 与 `runtime-storage-sqlite` 已提供 Store 7→Store 8 whole-generation copy、Workspace binding、Catalog/layout manifest、journal/fence、Store 8 new-Workspace admission 与 first-write fence；默认 release terminal path 使用 committed Store 8 Worker | 自动 legacy migration仍不属于普通启动；缺 persisted Workspace identity/腐败/不确定证据时必须进入显式 maintenance。三平台 filesystem/旧 binary hosted evidence仍 pending |
 
 ## Coordinator control-plane primitive
 
@@ -60,9 +60,9 @@ qualification。
 ## Workspace Worker 与 Controller/effect 边界
 
 `apps/kite-service/src/workspace-worker/process-manager.ts`/`process-main.ts` 在 Runtime composition 前取得 OS-user owner
-reservation 与 Workspace lock，Coordinator 完成 Store 7 materialize/admit 后才 spawn；Worker readiness 携带 exact identity、
+reservation 与 Workspace lock，Coordinator 完成 Store 8 materialize/admit 后才 spawn；Worker readiness 携带 exact identity、
 Store profile/layout generation、data endpoint 与 internal control origin，ready 后才注册 registry。`worker/production.ts` 再以
-已 admission 的 Workspace binding 打开唯一 Store 7 owner，组合真实 Runtime Host/Application/Controller/effect authority；失败时
+已 admission 的 Workspace binding 打开唯一 Store 8 owner，组合真实 Runtime Host/Application/Controller/effect/Run authority；失败时
 按 register/runtime/lock 顺序做 best-effort cleanup，不从 cwd/PATH/legacy Service fallback 推导。
 
 Worker capability 绑定 `workerInstanceId`、`workerScopeId`、Workspace digest、`clientId`、connection generation 与 purpose，默认
@@ -218,11 +218,11 @@ process收敛；Coordinator Catalog owner复制全部Session/outbox/terminal ope
 隔离复制并把coverage设为source head，不生成历史Run。任一未结算Catalog operation、未登记Workspace、unsafe WAL/SHM、binding/digest/
 preflight或copy fault都使整个generation blocked；新fence同时阻断旧Store 7 binary。
 
-该mechanism没有改变normal Coordinator/Worker composition：Worker仍只打开active Store 7，Agent ServerInfo/Public route继续不发布`runs`。
-显式maintenance若已把pointer切到Store 8，normal Worker会因profile/opener不兼容而blocked，不能回Store 7；KRSRUN-03A完成Store 8
-Controller/read facade、Worker opener/reopen与release Gate前不得由普通ensure/admission自动发起迁移或运行target。
+KRSRUN-03A已把normal Coordinator/Worker composition切到Store 8-only。fresh layout与新Workspace直接创建exact Store 8；已有Store 7仍必须显式
+maintenance，普通ensure不自动迁移。Worker readiness固定Store 8 epoch，Controller/effect/Directory/History/Checkpoint与private Run port都来自
+同一already-open connection；Store 7 manifest或旧process descriptor整体拒绝，不以catch/retry恢复旧writer。Agent ServerInfo/Public route继续不发布`runs`。
 
-Worker restart对已写Store的re-admission当前必须复用no-follow只读snapshot preflight，重新验证Store 7 profile与完整Workspace
+Worker restart对已写Store的re-admission当前必须复用no-follow只读snapshot preflight，重新验证Store 8 profile与完整Workspace
 binding；manifest/journal保留的是first-write前admission digest，只要求两者一致，不与`targetWriteState=written`后的live文件字节
 比较或重定基线。未写target仍必须匹配该digest，任一header/binding/evidence drift继续fail closed。
 Coordinator从持久Worker descriptor恢复时必须先比较PID与OS start token；confirmed dead在尝试旧control endpoint handshake前

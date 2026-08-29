@@ -8,7 +8,8 @@ import {
   ensureSqliteRuntimeGenerationRoot,
   ensureSqliteRuntimeLayoutRoot,
   ensureSqliteWorkspaceStoreDirectory,
-  SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
@@ -21,7 +22,7 @@ import { initializeSqliteRuntimeSchema } from '../../../../packages/runtime-stor
 import { createOfflineWebHistoryPort } from '../../src/web-gateway/offline-history';
 
 describe('offline Web History', () => {
-  test('reads one active Store 7 snapshot without changing the source or importing legacy data', async () => {
+  test('reads one active Store 8 snapshot without changing the source or importing legacy data', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-offline-web-history-')));
     const home = join(root, 'home');
     const layout = ensureSqliteRuntimeLayoutRoot(home);
@@ -40,13 +41,13 @@ describe('offline Web History', () => {
       const database = new Database(databasePath);
       initializeSqliteRuntimeSchema(database, {
         stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-        storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-        formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+        storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+        formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
         workspaceBinding: binding,
       });
       database
         .query(
-          'INSERT INTO runtime_sessions (session_id, project_id, workspace_digest, worker_scope_id, workspace_identity_digest, state_schema, format_epoch, revision, name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO runtime_sessions (session_id, project_id, workspace_digest, worker_scope_id, workspace_identity_digest, state_schema, format_epoch, revision, name, updated_at, run_index_from_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           'session-offline-history',
@@ -55,9 +56,10 @@ describe('offline Web History', () => {
           binding.workerScopeId,
           binding.workspaceIdentityDigest,
           SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-          SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+          SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
           1,
           'Offline History',
+          1,
           1,
         );
       database
@@ -82,16 +84,16 @@ describe('offline Web History', () => {
       const storeEntry = { workerScopeId: binding.workerScopeId, digest: 'c'.repeat(64) };
       const sourceProfile = {
         stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-        storeSchemaVersion: 6,
-        formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+        storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+        formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
       } as const;
       writeSqliteRuntimeLayoutManifest(layout, {
         schema: 'kite.runtime-layout-manifest.v1',
         generation: binding.layoutGeneration,
         profile: {
           stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-          storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-          formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+          storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
         },
         catalogDigest: 'd'.repeat(64),
         workspaceStores: [storeEntry],

@@ -235,7 +235,7 @@ export interface WorkspaceWorkerProcessManagerOptions {
   readonly spawn: WorkspaceWorkerProcessSpawnPort;
   readonly process: WorkspaceWorkerProcessProbePort;
   readonly ownerReservation: WorkspaceOwnerReservationPort;
-  /** Admit an already materialized Store 7 target while the owner reservation is held. */
+  /** Admit an already materialized Store 8 target while the owner reservation is held. */
   readonly admitWorkspaceStore: (input: {
     readonly workspace: KiteWorkspaceIdentity;
     readonly workerScopeId: string;
@@ -243,7 +243,7 @@ export interface WorkspaceWorkerProcessManagerOptions {
   }) => Promise<void>;
   readonly registry: WorkspaceWorkerProcessRegistryPort;
   readonly state?: WorkspaceWorkerProcessStatePort;
-  /** The active Store 7 LayoutGeneration is read before every new Worker spawn. */
+  /** The active Store 8 LayoutGeneration is read before every new Worker spawn. */
   readonly activeLayoutGeneration: () => Promise<string>;
   /** Worker executable/build identity expected by this Coordinator process. */
   readonly expectedBuildId?: string;

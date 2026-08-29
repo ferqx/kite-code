@@ -242,7 +242,7 @@ export function createWorkspaceReservationPort(
   });
 }
 
-/** Called by the child before it opens Store 7. The nonce is never persisted outside this file. */
+/** Called by the child before it opens Store 8. The nonce is never persisted outside this file. */
 export function claimWorkspaceReservation(
   input: WorkspaceReservationChildClaim,
 ): WorkspaceReservationChildLease {

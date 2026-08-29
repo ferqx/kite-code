@@ -67,7 +67,7 @@ export interface SessionControllerAuthority {
 /**
  * In-memory Controller conformance seam retained for the focused unit tests below. Production
  * Worker composition must use `createWorkspaceWorkerControllerAdapter`, which delegates to the
- * injected Store 7 `workspaceAuthority.controller`; this helper is never a production owner.
+ * injected Store 8 `workspaceAuthority.controller`; this helper is never a production owner.
  */
 export function createSessionControllerAuthority(input: {
   readonly workerInstanceId: string;

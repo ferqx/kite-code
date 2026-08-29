@@ -15,6 +15,8 @@ import {
   ensureSqliteRuntimeGenerationRoot,
   ensureSqliteRuntimeLayoutRoot,
   ensureSqliteWorkspaceStoreDirectory,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
@@ -173,6 +175,14 @@ test('composes a real Worker Application over one injected Store and query-only 
       status: 'ok',
       session: { sessionId: 'atomic-session' },
     });
+    await expect(
+      agentRead!.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_runs',
+        sessionId: 'atomic-session',
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', queryType: 'list_runs', runs: [] });
     await expect(agentRead!.history.listSessions({ limit: 1 })).resolves.toMatchObject({
       entries: [{ sessionId: 'atomic-session' }],
     });
@@ -317,16 +327,16 @@ function makeFixture(): Fixture {
   const database = new Database(databasePath);
   initializeSqliteRuntimeSchema(database, {
     stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-    formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+    storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     workspaceBinding: binding,
   });
   database.close();
   chmodSync(databasePath, 0o600);
   const sourceProfile = {
     stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    storeSchemaVersion: 6,
-    formatEpoch: 'kite-runtime-server-v1-2026-08-26',
+    storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
   } as const;
   const journal = {
     schema: 'kite.runtime-migration-journal.v1' as const,
@@ -345,8 +355,8 @@ function makeFixture(): Fixture {
     generation: LAYOUT,
     profile: {
       stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+      storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     },
     catalogDigest: journal.targetCatalogDigest,
     workspaceStores: [],
@@ -365,7 +375,7 @@ function makeFixture(): Fixture {
     schema: 'kite.runtime-active-layout.v1',
     generation: LAYOUT,
   });
-  admitNewWorkspaceStore(layout, binding, databasePath);
+  admitNewWorkspaceStore(layout, binding, databasePath, 'run');
   const context = createWorkspaceWorkerStoreContext({
     home,
     workspace,

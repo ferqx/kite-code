@@ -438,7 +438,7 @@ function resolveCommittedCoordinatorLayout(home: KiteHomeIdentity): {
     throw new Error('Kite Coordinator active layout is not committed.');
   }
   const catalogPath = resolveSqliteCatalogPath(paths, pointer.generation);
-  assertSqliteCoordinatorCatalogActive(paths, pointer.generation, catalogPath);
+  assertSqliteCoordinatorCatalogActive(paths, pointer.generation, catalogPath, 'run');
   return Object.freeze({ layoutGeneration: pointer.generation, catalogPath });
 }
 

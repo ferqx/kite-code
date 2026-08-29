@@ -13,9 +13,8 @@
   same-connection `runtime_runs` port。Store 8有11张表/3个named index，Session增加coverage boundary，receipt增加resource-result triple；
   `(session_id, run_id)` PK、同Session start-command unique与`(session_id, created_revision, run_id)` page index均由DDL/owner tests固定。
   KRSRUN-01B已让同一connection transaction可选提交Run insert/transition及Store8 receipt result triple；KRSRUN-02A进一步让
-  `adapter.ts`仅在显式`targetStore: 'run'`时组合该未发布target，用于同一owner上的delete/rewind/fork/reopen验证。该选择拒绝
-  Store7 active-layout evidence，不暴露Store7 Controller/read facades，也未进入Worker或release composition，不能作为Store7 fallback
-  或声明production ready。
+  `adapter.ts`仅在显式`targetStore: 'run'`时组合该profile。KRSRUN-03A允许它同时携带`workspaceLayout`作为active Store8 writer，
+  复用Controller/session-create/Directory/History/Checkpoint façade并把所有mutation接到first-write fence；不带layout时仍只是测试/迁移target。
 - 提供 owner-only generation layout 的 active-layout pointer、manifest、migration journal/fence 与窄回退状态机；离线
   `migrateSqliteRuntimeStoreToWorkspaceLayout` 只从 Service 已停止且 source-bound fence 保护的 Store 6 只读快照复制到
   Store 7，不改写 source、不在线迁移、不双写，也不启动 Worker。迁移不定义或复制 Coordinator Catalog DDL；调用方必须注入
@@ -27,18 +26,18 @@
   Session/event/snapshot/preimage/receipt/tombstone/outbox/private meta，把每个`run_index_from_revision`设为source head且不生成历史Run。
   logical digest/count/binding/Store8 preflight全部通过后才复用原journal/fence/pointer状态机切换；任一active/corrupt/unowned/partial/fault
   整体blocked，旧Store7 writer在新fence写入后即fail closed。
-- Store 7 暴露 `workspaceAuthority` durable facade：Controller operation receipt/idempotency、Controller generation/lease、
+- Store 7/8 共用 `workspaceAuthority` durable facade：Controller operation receipt/idempotency、Controller generation/lease、
   hash-only resume/DetachedRecovery rotation、detached/recovery state、effect prepare/inspect/terminal 与 resource
   attempt evidence。capability secret 只在调用者内存中出现，Store 仅保留 SHA-256 hash；resource surface 只记录外部
   OS-user lease 证据，不在 Workspace SQLite 内重新 acquire 共享文件资源。
-- `apps/kite-service/src/workspace-worker/production.ts` 是当前 Store 7 的 concrete Worker consumer：Coordinator 先完成
+- `apps/kite-service/src/workspace-worker/production.ts` 是当前 Store 8 的 concrete Worker consumer：Coordinator 先完成
   materialize/admit 与 active-generation 校验，Worker 再以已打开的唯一 Store owner 组合 Host/Application。默认 Service 仍是
-  Store 6；Store 7 不会因 Web query、legacy reader 或 open failure 被隐式启用。
+  Store 6；Store 7只作offline migration source，不会因Web query或Store8 open failure被隐式启用。
 - 执行只读 format preflight、current log query 和已知历史 source 的隔离导入。
 - `createSqliteWorkspaceRuntimeLogQueryPort` 只接受server-owned layout、active generation与opaque Worker scope，canonical Store
-  path由layout owner推导。它从Store 7 marker取得内部Workspace digest后在同一隔离只读snapshot复核完整binding，并在每次
+  path由layout owner推导。production从Store 8 marker取得内部Workspace digest后在同一隔离只读snapshot复核完整binding，并在每次
   query前后重验active pointer/manifest/journal/fence；不会在live Store旁创建WAL/SHM、schema或第二writer。
-- active Store 7 writer额外窄暴露same-connection bounded read ports：`openWorkspaceLogQuery`对`runtime_sessions/runtime_events`
+- active Store 8 writer额外窄暴露same-connection bounded read ports：`openWorkspaceLogQuery`对`runtime_sessions/runtime_events`
   执行keyset/sequence window查询，`workspaceCheckpointQuery`按`revision + checkpointId`分页并逐个验证选中snapshot checksum。
   两者不打开第二SQLite connection、不创建DDL/index、不返回State JSON/Store path，也不接受compatibility source。
 - 通过 `transaction.ts` 原子提交 Runtime event 与 snapshot。
@@ -48,7 +47,8 @@
 - 不导入或解释 Kernel/Builtin domain 类型。
 - 不提供 alternate driver、dual write 或 execution fallback；Store 7 只能通过显式 Workspace binding 进入 target path，不能
   作为 current Store 的 silent format fallback。
-- Store 8 Run port只接受调用方已经拥有的同一SQLite connection，不创建第二writer或自主transaction owner；Public Agent API不得直接消费它。
+- Store 8 Run port只接受调用方已经拥有的同一SQLite connection，不创建第二writer或自主transaction owner；Worker Host可消费private port，
+  Public Agent API仍不得直接消费或发布`runs`capability。
 - 历史 source reader 不进入 current execution port。
 
 ## 允许依赖
@@ -71,7 +71,8 @@
   普通compatibility importer仍只列出两个Store 5 profile；Store 7只由单独的offline Run migration source常量标识，不进入per-Session import。
 - Run list固定`createdRevision ASC + runId ASC`、limit 1～200并走dedicated index；Run ID只在Session内唯一。insert/transition先验证
   coverage、canonical Session revision、immutable identity、lifecycle与millisecond timestamps；insert在同一writer transaction内拒绝
-  同Session第二个queued/running/waiting Run。
+  同Session第二个queued/running/waiting Run。start decision后的same-phase `queued→running` activation可复用刚提交的State revision；其他
+  same-revision transition继续拒绝，避免把无State event的调度边界伪造成新revision。
 - Store8 transaction在一个`BEGIN IMMEDIATE`内提交State/event/snapshot/revision、Run mutation及digest-bound resource receipt，任一
   receipt/Run/SQLite fault都会完整rollback。Store8-aware receipt lookup返回原result；Store6/7 writer与current Store7 adapter收到
   resource result或Run mutation时fail closed且不留下Session partial facts。
@@ -84,12 +85,12 @@
   `targetWriteState=written`，之后 rollback helper 必须拒绝回源。新 target 只能由显式 migration/admission 流程发布；
   `admitNewWorkspaceStore` 只在已 committed 的 active generation 中登记已 materialize 且 header 已由 Store owner 验证的
   canonical file，并先将 generation 标记为 written，绝不自动推断 Workspace ownership。
-- `targetWriteState=written` 后的 Worker restart/re-admission重新验证owner/no-follow、Store 7 profile与完整 Workspace
+- `targetWriteState=written` 后的 Worker restart/re-admission重新验证owner/no-follow、Store 8 profile与完整 Workspace
   binding，并要求manifest/journal中的原始admission digest彼此一致；它不再把已写live Store字节与first-write前digest比较，
   也不重设或更新该原始digest。`targetWriteState=none`时仍必须精确匹配pre-write digest。
 - offline Store 7 log reader仍要求regular、owner-only、no-follow、nlink=1与exact Store 7 scope/profile；pointer或binding在
   query期间漂移会使本次读取失败，legacy-only/Store 6不能作为silent fallback。
-- live Worker的same-connection Session/History/Checkpoint page source只在already-open Store 7 owner存活时可用；Session按
+- live Worker的same-connection Session/History/Checkpoint page source只在already-open Store 8 owner存活时可用；Session按
   `updatedAt DESC + sessionId DESC`，Checkpoint按`revision ASC + checkpointId ASC`稳定推进，单页最多200项。关闭page reader不关闭
   writer，关闭writer后新reader fail closed；这些port不执行recovery、mutation或全Workspace正文物化。
 - Store 6 到 Store 7 的 copy-and-switch 必须由调用方提供已验证的 persisted Workspace ownership resolver；缺失/冲突归属、
@@ -114,7 +115,7 @@
 
 ## 测试
 
-`bun test packages/runtime-storage-sqlite/test`（当前89 pass；含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8 recovery与Store7 negatives）
+`bun test packages/runtime-storage-sqlite/test`（当前90 pass；含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8 production reopen/activation/recovery与Store7 negatives）
 
 ## 文档影响
 

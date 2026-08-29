@@ -21,7 +21,7 @@ import type {
 import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import { resolveSqliteArtifactStore } from './artifact-store';
 import {
-  createSqliteWorkspaceAuthority,
+  createSqliteWorkspaceAuthorityForConnection_,
   createSqliteWorkspaceInitialControllerTransaction,
   type SqliteWorkspaceAuthority,
 } from './authority';
@@ -39,13 +39,19 @@ import {
 } from './directory-outbox';
 import { createSqliteEffectLeaseStore } from './effect-leases';
 import { createSqliteEventStore } from './event-store';
-import { assertSqliteWorkspaceStoreActive, markSqliteWorkspaceStoreWritten } from './layout';
+import {
+  assertSqliteRuntimeRunStoreActive,
+  assertSqliteWorkspaceStoreActive,
+  markSqliteRuntimeRunStoreWritten,
+  markSqliteWorkspaceStoreWritten,
+} from './layout';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import {
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
   assertSqliteRuntimeStorageTargetCanOpen_,
   assertSqliteRuntimeWorkspaceBinding,
+  assertWorkspaceSqliteRuntimeStoreConnection,
   checksum,
   defaultSqliteRuntimeJournalMode,
   isCanonicalRecoveryIdentity,
@@ -94,19 +100,19 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   readonly commandReceipts: RuntimeCommandReceiptPort;
-  /** Current Store 7 durable Worker authority facade; absent for Store 6 and unpublished Store 8. */
+  /** Current Store 7/8 durable Worker authority facade; absent for Store 6. */
   readonly workspaceAuthority?: SqliteWorkspaceAuthority;
-  /** Current Store 7 atomic Runtime-session + initial Controller create port. */
+  /** Current Store 7/8 atomic Runtime-session + initial Controller create port. */
   readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
-  /** Store 7-only path-free Session Directory outbox on this same SQLite connection. */
+  /** Store 7/8 path-free Session Directory outbox on this same SQLite connection. */
   readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
-  /** Store 7-only bounded log reader factory over this same SQLite connection. */
+  /** Store 7/8 bounded log reader factory over this same SQLite connection. */
   readonly openWorkspaceLogQuery?: (
     currentEventTypes: readonly string[],
   ) => RuntimeLogQueryPort<Event>;
-  /** Store 7-only bounded Checkpoint metadata reader over this same SQLite connection. */
+  /** Store 7/8 bounded Checkpoint metadata reader over this same SQLite connection. */
   readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
-  /** Present only for the explicit, unpublished Store 8 target. */
+  /** Present only for Store 8. */
   readonly runs?: RuntimeStorage<Event, State>['runs'];
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodec<Event, State>;
@@ -124,11 +130,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     if (runStoreTarget && !workspaceBinding) {
       throw new SqliteRuntimeStorageOpenError(
         'Store 8 target requires an explicit Workspace binding.',
-      );
-    }
-    if (runStoreTarget && input.workspaceLayout) {
-      throw new SqliteRuntimeStorageOpenError(
-        'Unpublished Store 8 target cannot claim Store 7 active-layout authority.',
       );
     }
     const profile = runStoreTarget
@@ -156,22 +157,42 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     this.#codec = input.codec;
     const baseArtifacts = resolveSqliteArtifactStore(input.artifacts);
     assertNoFollowDatabasePath(input.databasePath);
-    if (workspaceBinding && !runStoreTarget) {
-      if (!input.workspaceLayout) {
+    if (workspaceBinding) {
+      if (!input.workspaceLayout && !runStoreTarget) {
         throw new SqliteRuntimeStorageOpenError(
           'Store 7 writer requires active layout authority evidence.',
         );
       }
-      assertSqliteWorkspaceStoreActive(input.workspaceLayout, workspaceBinding, input.databasePath);
+      if (input.workspaceLayout) {
+        if (runStoreTarget) {
+          assertSqliteRuntimeRunStoreActive(
+            input.workspaceLayout,
+            workspaceBinding,
+            input.databasePath,
+          );
+        } else {
+          assertSqliteWorkspaceStoreActive(
+            input.workspaceLayout,
+            workspaceBinding,
+            input.databasePath,
+          );
+        }
+      }
     }
     const markWorkspaceWritten =
-      workspaceBinding && input.workspaceLayout && !runStoreTarget
+      workspaceBinding && input.workspaceLayout
         ? () =>
-            markSqliteWorkspaceStoreWritten(
-              input.workspaceLayout!,
-              workspaceBinding,
-              input.databasePath,
-            )
+            runStoreTarget
+              ? markSqliteRuntimeRunStoreWritten(
+                  input.workspaceLayout!,
+                  workspaceBinding,
+                  input.databasePath,
+                )
+              : markSqliteWorkspaceStoreWritten(
+                  input.workspaceLayout!,
+                  workspaceBinding,
+                  input.databasePath,
+                )
         : undefined;
     if (runStoreTarget) {
       assertSqliteRuntimeStorageTargetCanOpen_(
@@ -210,10 +231,14 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       throw error;
     }
     this.#db = db;
-    if (workspaceBinding && !runStoreTarget) {
-      this.workspaceAuthority = createSqliteWorkspaceAuthority({
+    if (workspaceBinding) {
+      const assertConnection = runStoreTarget
+        ? assertSqliteRuntimeRunStoreConnection
+        : assertWorkspaceSqliteRuntimeStoreConnection;
+      this.workspaceAuthority = createSqliteWorkspaceAuthorityForConnection_({
         db,
         binding: workspaceBinding,
+        assertConnection,
         beforeWrite: markWorkspaceWritten,
       });
       this.directoryOutbox = createSqliteWorkspaceDirectoryOutbox({
@@ -233,6 +258,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       this.workspaceCheckpointQuery = createSqliteWorkspaceCheckpointQuery({
         db,
         binding: workspaceBinding,
+        formatEpoch: this.formatEpoch,
       });
     }
     const assertStorageOpen = (): void => {
@@ -665,18 +691,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       readSessionBinding: (sessionId) => selectSessionBinding?.get(sessionId) ?? null,
       readCommandReceipt,
       assertSessionAbsent,
-      initialController:
-        workspaceBinding && !runStoreTarget
-          ? {
-              create: (request, mode) =>
-                createSqliteWorkspaceInitialControllerTransaction({
-                  db,
-                  binding: workspaceBinding,
-                  request,
-                  mode,
-                }),
-            }
-          : undefined,
+      initialController: workspaceBinding
+        ? {
+            create: (request, mode) =>
+              createSqliteWorkspaceInitialControllerTransaction({
+                db,
+                binding: workspaceBinding,
+                request,
+                mode,
+                assertConnection: runStoreTarget
+                  ? assertSqliteRuntimeRunStoreConnection
+                  : assertWorkspaceSqliteRuntimeStoreConnection,
+              }),
+          }
+        : undefined,
       beforeWrite: markWorkspaceWritten,
       runStore,
     });

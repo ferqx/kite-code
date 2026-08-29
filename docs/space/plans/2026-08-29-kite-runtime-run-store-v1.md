@@ -14,9 +14,9 @@
 
 ## 1. 执行状态与边界
 
-KRSRUN-00A～02B已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
+KRSRUN-00A～03A已完成：Store 8 profile、Run row/index、receipt resource result、coverage boundary、delete/rewind/fork/recovery与
 offline generation migration已经冻结；neutral contract、unpublished exact schema/preflight、Host atomic lifecycle/resource replay、private query及
-maintenance/restart semantics和whole-generation migration已实现。当前执行入口为KRSRUN-03A Worker composition、reopen与cutover。KRSRUN-03A～03B完成前仍不得开放Run route或声明ServerInfo
+maintenance/restart semantics、whole-generation migration与production Worker cutover已实现。当前执行入口为KRSRUN-03B current authority/release handoff。03B完成前仍不得开放Run route或声明ServerInfo
 `runs`capability，也不得在Store 7做partial实现。
 
 本子计划不是第二产品roadmap。KASAPI-03A只有在本计划全部Task完成后才能关闭；KASAPI-03B～03D再接Public idempotency/Controller mapper、
@@ -196,7 +196,14 @@ macOS/Linux/Windows filesystem implementation tests。
 
 Rollback：只允许ADR-0150两个pre-write窗口；任何unknown/first write保持blocked。
 
-### KRSRUN-03A：Production composition、reopen与fault qualification
+### KRSRUN-03A：Production composition、reopen与fault qualification（已完成）
+
+完成证据：production Coordinator/Catalog、fresh layout/new Workspace、Worker readiness与opener全部显式选择Store 8；adapter在active generation
+复用Controller/session-create/Directory/History/Checkpoint并暴露canonical Run port，first-write先写journal。Store 7 manifest与旧descriptor
+无fallback；idle History与private Agent read走Store 8，Public capability仍关闭。真实TUI首次暴露的queued activation同revision缺口已收紧为仅允许
+same-phase `queued→running`。SQLite 90、Service 1525、Runtime fault 36、CI soak 7/7、15-workspace typecheck/build及本机dirty-source
+macOS arm64 candidate build/verify/install/upgrade/rollback/uninstall smoke通过；默认suite只复现既有Web Gateway `workspaceId`基线差异，远端
+macOS/Linux/Windows evidence仍pending。
 
 交付：Workspace Worker只在active-layout/manifest/journal/fence/Catalog/Store 8全部验证后ready；private Runtime TUI/CLI在Store 8上保持行为；
 Agent API仍只开放read-only shell。补齐long-run reopen、response loss、process kill、slow storage、disk full/corrupt、Controller/recovery与

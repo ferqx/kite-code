@@ -12,9 +12,8 @@ import {
 import { z } from 'zod';
 import type { WorkerConnectionCapabilityRequest } from './worker';
 
-/** The Store 7 profile a Worker process must report before it can register. */
-export const WORKSPACE_WORKER_STORE_PROFILE_ =
-  'kite-coordinator-workspace-worker-web-v1-2026-08-28' as const;
+/** The Store 8 profile a Worker process must report before it can register. */
+export const WORKSPACE_WORKER_STORE_PROFILE_ = 'kite-agent-server-api-v1-2026-08-29' as const;
 export const WORKSPACE_WORKER_READY_SCHEMA_ = 'kite.workspace-worker-ready.v1' as const;
 export const WORKSPACE_WORKER_PROCESS_DESCRIPTOR_SCHEMA_ =
   'kite.workspace-worker-process.v1' as const;
