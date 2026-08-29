@@ -68,7 +68,7 @@ release contract tests中因read-only file descriptor执行`fsync`返回`EPERM`�
 30次通过，因此未增加推测性Runtime状态。Candidate run `33280372007`的macOS/Linux完整通过，Windows已越过read-only `EPERM`，但
 write-capable Bun `fsync`对每个launcher约长阻塞10秒，使60秒测试超时并触发fixture cleanup级联失败。该run的artifact同样因后续source
 修复作废；installer改为复用Builtin Filesystem现有Windows native locked-directory/write-through publication，一次完成二进制launcher、
-active pointer与marker的flush及atomic replace，不建立第二套Windows I/O owner。
+active pointer与marker的write-through write及write-through atomic replace；release不重复高延迟的显式flush，也不建立第二套Windows I/O owner。
 
 本轮其余问题已分别收敛为：Gateway graceful stop刷完已生成response；Host query snapshot经
 NotificationProjector hydrate pending subscriber；默认Worker保持Store5 source不可见；Worker用lazy Workspace template在first-run完成后才

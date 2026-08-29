@@ -336,6 +336,7 @@ function copyRegularFileAtomically(
       temporaryName: basename(temporary),
       content: bytes,
       replaceExisting: false,
+      flushFileBuffers: false,
       beforePublish: () => {
         if (existsSync(destination)) {
           throw new Error(`Managed launcher appeared during activation: ${destination}`);
@@ -377,6 +378,7 @@ function writeActiveReleasePointer(root: string, candidateId: string): void {
       targetName: basename(pointer),
       temporaryName: basename(temporary),
       content: `${candidateId}\n`,
+      flushFileBuffers: false,
       beforePublish: () => {
         if (!existsSync(pointer)) return;
         const stat = lstatSync(pointer);
@@ -516,6 +518,7 @@ function writeMarker(root: string, marker: InstallMarker): void {
       targetName: MARKER_FILE,
       temporaryName: basename(temporary),
       content,
+      flushFileBuffers: false,
       beforePublish: () => {
         if (!existsSync(markerPath(root))) return;
         const markerStat = lstatSync(markerPath(root));

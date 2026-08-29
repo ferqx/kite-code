@@ -88,6 +88,7 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
   readonly temporaryName: string;
   readonly content: string | Uint8Array;
   readonly replaceExisting?: boolean;
+  readonly flushFileBuffers?: boolean;
   readonly beforePublish: () => void;
 }): void {
   if (process.platform !== 'win32') {
@@ -113,7 +114,7 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
     const targetPath = join(directoryPath, input.targetName);
     temporaryHandle = createWindowsTemporaryFile(api, temporaryPath);
     writeWindowsFile(api, temporaryHandle, input.content);
-    if (!api.FlushFileBuffers(temporaryHandle))
+    if (input.flushFileBuffers !== false && !api.FlushFileBuffers(temporaryHandle))
       throw windowsFilesystemError(api, 'flush temporary file');
     closeWindowsHandle(api, temporaryHandle);
     temporaryHandle = undefined;
