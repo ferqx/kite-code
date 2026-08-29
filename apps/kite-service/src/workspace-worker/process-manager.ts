@@ -1222,8 +1222,15 @@ export function createWorkspaceWorkerProcessManager(
     if (!identity || !controlIdentityMatches(loaded.record.descriptor, identity)) return undefined;
     const read = loaded.record.control.readDirectoryOutbox;
     if (!read) return undefined;
+    // `workerScopeId` is manager-local routing authority. The authenticated Worker control
+    // request is deliberately narrower and its exact codec rejects unknown fields, so project
+    // only the cursor window across the process boundary.
+    const controlRequest: WorkspaceWorkerDirectoryOutboxRequest = Object.freeze({
+      ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+      ...(request.limit === undefined ? {} : { limit: request.limit }),
+    });
     const page = await invoke(
-      () => read.call(loaded.record.control!, request),
+      () => read.call(loaded.record.control!, controlRequest),
       operationTimeoutMs,
     ).catch(() => undefined);
     return page && validDirectoryOutboxPage(page, request.workerScopeId, request.cursor)

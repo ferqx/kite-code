@@ -78,6 +78,7 @@ interface Harness {
       mintRequests: unknown[];
       stopCalls: number;
       directoryReads: number;
+      directoryRequests: unknown[];
     }
   >;
   readonly controlLinks: Map<string, WorkspaceWorkerControlLink>;
@@ -183,7 +184,13 @@ function createHarness(options: HarnessOptions = {}): Harness {
   };
   const controls = new Map<
     string,
-    { mintCalls: number; mintRequests: unknown[]; stopCalls: number; directoryReads: number }
+    {
+      mintCalls: number;
+      mintRequests: unknown[];
+      stopCalls: number;
+      directoryReads: number;
+      directoryRequests: unknown[];
+    }
   >();
   const controlLinks = new Map<string, WorkspaceWorkerControlLink>();
   const events: string[] = [];
@@ -246,6 +253,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
           mintRequests: [] as unknown[],
           stopCalls: 0,
           directoryReads: 0,
+          directoryRequests: [] as unknown[],
         };
         controls.set(scope, controlsForScope);
         const control = Object.freeze({
@@ -279,6 +287,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
             readonly limit?: number;
           }) {
             controlsForScope.directoryReads += 1;
+            controlsForScope.directoryRequests.push(request);
+            if (Object.keys(request).some((key) => key !== 'cursor' && key !== 'limit')) {
+              return undefined;
+            }
             return {
               entries: [
                 {
@@ -753,6 +765,9 @@ describe('Workspace Worker process manager', () => {
       hasMore: false,
     });
     expect(harness.controls.get('scope-directory-read')?.directoryReads).toBe(1);
+    expect(harness.controls.get('scope-directory-read')?.directoryRequests).toEqual([
+      { cursor: 4, limit: 1 },
+    ]);
   });
 
   test('does not replay an unknown spawn outcome after a manager restart while its owner fence remains held', async () => {

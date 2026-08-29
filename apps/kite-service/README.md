@@ -22,6 +22,9 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
 - Coordinator registry 只保存 path-free Worker/Session metadata；Worker 的 Store 7 writer、Controller/effect authority 与
   Runtime Host 属于该 Worker；Gateway 通过 Coordinator resolve/mint 后直接连接 Worker 的 read-only History/live surface，
   不把 Worker endpoint、capability 或 Store path 投影到 Browser。
+- Coordinator 的 Directory mirror 只通过 authenticated Worker control link 读取 current-format outbox。manager-local
+  `workerScopeId` 只用于选择并复核 exact Worker，不进入 strict control request；wire body 只投影 bounded `cursor/limit`，
+  再逐条复核响应 scope 后写入 path-free Catalog，避免 strict codec 把合法目录读取静默降成空目录。
 - Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
 - Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
