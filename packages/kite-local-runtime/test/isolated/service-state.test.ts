@@ -19,6 +19,7 @@ import {
   clearLocalRuntimeServiceState,
   createKiteHomeIdentity,
   createLocalRuntimeServiceToken,
+  ensureLocalRuntimeServiceHome,
   ensureLocalRuntimeServiceStateRoot,
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
@@ -70,6 +71,15 @@ function state() {
   temporaryRoot = mkdtempSync(join(realpathSync(tmpdir()), 'kite-local-runtime-state-'));
   return ensureLocalRuntimeServiceStateRoot(createKiteHomeIdentity(join(temporaryRoot, 'home')));
 }
+
+test('returns one native canonical Kite home identity for every local state owner', () => {
+  temporaryRoot = mkdtempSync(
+    join(realpathSync.native(tmpdir()), 'kite-local-runtime-home-identity-'),
+  );
+  const requested = join(temporaryRoot, 'home');
+  const identity = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(requested));
+  expect(identity.root).toBe(realpathSync.native(requested));
+});
 
 describe.skipIf(process.platform === 'win32')('kite-local-runtime service filesystem state', () => {
   test('creates the fixed root chain with owner-only POSIX permissions', () => {
