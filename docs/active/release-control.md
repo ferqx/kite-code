@@ -129,6 +129,10 @@ source entry。
 都拒绝缺少该Agent API contract asset的candidate，manifest逐文件SHA-256绑定其identity。GitHub-hosted candidate job 额外使用
 `--require-clean-source`，dirty-source manifest
 不得上传为候选 artifact。
+installed smoke在启动TUI前必须先对同一candidate执行Coordinator lifecycle `status`与`ensure`；失败诊断只允许报告
+闭集outcome/state/diagnostic、build identity、manager process identity是否可得，以及Coordinator state/layout文件是否存在或
+可读。诊断不得输出home、candidate path、PID、SID、endpoint或credential。该前检只是把三平台启动失败归因到身份、布局、
+状态或spawn边界，不替代真实TUI启动，也不把残留descriptor推导为健康Coordinator。
 
 旧 Linux full-chain evaluation diagnostic 及其 workflow job 已删除，不属于当前候选包或 release gate。Platform
 Capability workflow 只运行本页列出的 native probe、verifier 与 release evidence；不得从已删除脚本恢复

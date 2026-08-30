@@ -11,10 +11,22 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
+  type CoordinatorManagerResult,
+  readCoordinatorProcessStartIdentity,
+  resolveCoordinatorStatePaths,
+} from '@kite-ai/kite-local-runtime/coordinator';
+import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
 } from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
+import {
+  readSqliteActiveLayoutPointer,
+  readSqliteRuntimeLayoutManifest,
+  readSqliteRuntimeMigrationFence,
+  readSqliteRuntimeMigrationJournal,
+  resolveSqliteRuntimeLayoutPaths,
+} from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
 import { spawnReadyTui } from '../../tests/tui-system/harness/pty-process';
@@ -394,13 +406,21 @@ async function ensureInstalledCoordinatorReady(
   const prefix = dirname(dirname(executablePath));
   const candidateId = readInstallStatus(prefix).currentCandidateId;
   const candidateRoot = realpathSync.native(join(prefix, 'releases', candidateId));
+  const coordinatorHome = ensureLocalRuntimeServiceHome(
+    createKiteHomeIdentity(join(workspace.home, '.kite-code'), 'explicit_argument'),
+  );
+  const managerProcessStartIdentity = await readCoordinatorProcessStartIdentity();
   const previousCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
   try {
     process.env.KITE_CODE_RELEASE_ROOT = candidateRoot;
     const composition = createManagedLocalCoordinatorClientComposition({
-      argv: ['release-smoke', '--kite-home', join(workspace.home, '.kite-code')],
+      argv: ['release-smoke', '--kite-home', coordinatorHome.root],
       executableMode: 'installed',
+      readProcessStartIdentity: async () => managerProcessStartIdentity,
       systemHome: workspace.home,
+    });
+    const initialStatus = await composition.lifecycle.status({
+      requestId: 'release-smoke-coordinator-initial-status',
     });
     const result = await composition.lifecycle.ensure({
       requestId: 'release-smoke-coordinator-ensure',
@@ -414,12 +434,75 @@ async function ensureInstalledCoordinatorReady(
           diagnostic: result.diagnostic ?? null,
           expectedBuildId: candidateId,
           descriptorBuildId: result.descriptor?.buildId ?? null,
+          managerProcessIdentityAvailable: managerProcessStartIdentity !== undefined,
+          initialStatus: lifecycleResultDiagnostic(initialStatus),
+          stateEvidence: coordinatorStatePresence(coordinatorHome),
+          layoutEvidence: coordinatorLayoutPresence(coordinatorHome),
         })}`,
       );
     }
   } finally {
     if (previousCandidateRoot === undefined) delete process.env.KITE_CODE_RELEASE_ROOT;
     else process.env.KITE_CODE_RELEASE_ROOT = previousCandidateRoot;
+  }
+}
+
+function lifecycleResultDiagnostic(result: CoordinatorManagerResult): Readonly<{
+  outcome: CoordinatorManagerResult['outcome'];
+  state: CoordinatorManagerResult['state'];
+  diagnostic: CoordinatorManagerResult['diagnostic'] | null;
+}> {
+  return Object.freeze({
+    outcome: result.outcome,
+    state: result.state,
+    diagnostic: result.diagnostic ?? null,
+  });
+}
+
+function coordinatorStatePresence(home: ReturnType<typeof createKiteHomeIdentity>): Readonly<{
+  processDescriptor: boolean;
+  endpointDescriptor: boolean;
+  launchIntent: boolean;
+  instanceLock: boolean;
+  lifecycleLock: boolean;
+}> {
+  const paths = resolveCoordinatorStatePaths(home);
+  return Object.freeze({
+    processDescriptor: existsSync(paths.processDescriptor),
+    endpointDescriptor: existsSync(paths.endpointDescriptor),
+    launchIntent: existsSync(paths.launchIntent),
+    instanceLock: existsSync(paths.instanceLock),
+    lifecycleLock: existsSync(paths.lifecycleLock),
+  });
+}
+
+function coordinatorLayoutPresence(home: ReturnType<typeof createKiteHomeIdentity>): Readonly<{
+  activePointer: boolean;
+  activeManifest: boolean;
+  migrationJournal: boolean;
+  migrationFence: boolean;
+  readable: boolean;
+}> {
+  const paths = resolveSqliteRuntimeLayoutPaths(home.root);
+  try {
+    const pointer = readSqliteActiveLayoutPointer(paths);
+    return Object.freeze({
+      activePointer: pointer !== undefined,
+      activeManifest:
+        pointer !== undefined &&
+        readSqliteRuntimeLayoutManifest(paths, pointer.generation) !== undefined,
+      migrationJournal: readSqliteRuntimeMigrationJournal(paths) !== undefined,
+      migrationFence: readSqliteRuntimeMigrationFence(paths) !== undefined,
+      readable: true,
+    });
+  } catch {
+    return Object.freeze({
+      activePointer: false,
+      activeManifest: false,
+      migrationJournal: false,
+      migrationFence: false,
+      readable: false,
+    });
   }
 }
 
