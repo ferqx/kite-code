@@ -145,13 +145,21 @@ export function createManagedLocalCoordinatorClientComposition(
   const managerProcessStartIdentityPromise = resolveManagerProcessStartIdentity();
   const managerPromise = createManagerWhenIdentityIsKnown();
 
+  const withMode = (request?: CoordinatorManagerRequest): CoordinatorManagerRequest => ({
+    ...(request ?? {}),
+    executableMode,
+  });
   const lifecycle: ManagedLocalCoordinatorLifecycle = Object.freeze({
     ensure: (request?: CoordinatorManagerRequest) =>
-      runLifecycleOperation('ensure', request, async (manager) => manager.ensure(request)),
+      runLifecycleOperation('ensure', request, async (manager) =>
+        manager.ensure(withMode(request)),
+      ),
     status: (request?: CoordinatorManagerRequest) =>
-      runLifecycleOperation('status', request, async (manager) => manager.status(request)),
+      runLifecycleOperation('status', request, async (manager) =>
+        manager.status(withMode(request)),
+      ),
     stop: (request?: CoordinatorManagerRequest) =>
-      runLifecycleOperation('stop', request, async (manager) => manager.stop(request)),
+      runLifecycleOperation('stop', request, async (manager) => manager.stop(withMode(request))),
   });
 
   const client = createManagedRequestClient();

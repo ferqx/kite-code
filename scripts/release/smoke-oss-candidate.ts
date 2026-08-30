@@ -9,7 +9,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
@@ -25,6 +25,7 @@ import {
   rollbackOssCandidate,
   uninstallOssCandidate,
 } from './install-oss-candidate';
+import { createManagedLocalCoordinatorClientComposition } from './local-coordinator-client';
 import {
   companionArchivePaths,
   createSmokeVariantCandidate,
@@ -94,6 +95,7 @@ try {
         'run-store-maintenance-fail-closed',
         'tui-version-pty-startup',
         'service-companion',
+        'coordinator-lifecycle',
         'coordinator-worker-gateway-companion-assets',
         'web-payload-assets',
         'mcp-stdio-authenticated-wrapper',
@@ -349,6 +351,7 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
   let tui: Awaited<ReturnType<typeof spawnReadyTui>> | undefined;
   let failure: unknown;
   try {
+    await ensureInstalledCoordinatorReady(executablePath, workspace);
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
@@ -382,6 +385,42 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
     }
   }
   if (failure) throw failure;
+}
+
+async function ensureInstalledCoordinatorReady(
+  executablePath: string,
+  workspace: ReturnType<typeof createTestWorkspace>,
+): Promise<void> {
+  const prefix = dirname(dirname(executablePath));
+  const candidateId = readInstallStatus(prefix).currentCandidateId;
+  const candidateRoot = realpathSync(join(prefix, 'releases', candidateId));
+  const previousCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
+  try {
+    process.env.KITE_CODE_RELEASE_ROOT = candidateRoot;
+    const composition = createManagedLocalCoordinatorClientComposition({
+      argv: ['release-smoke', '--kite-home', join(workspace.home, '.kite-code')],
+      executableMode: 'installed',
+      systemHome: workspace.home,
+    });
+    const result = await composition.lifecycle.ensure({
+      requestId: 'release-smoke-coordinator-ensure',
+    });
+    if (result.outcome !== 'applied' || result.state !== 'ready') {
+      throw new Error(
+        `Installed Coordinator lifecycle preflight failed: ${JSON.stringify({
+          operation: result.operation,
+          outcome: result.outcome,
+          state: result.state,
+          diagnostic: result.diagnostic ?? null,
+          expectedBuildId: candidateId,
+          descriptorBuildId: result.descriptor?.buildId ?? null,
+        })}`,
+      );
+    }
+  } finally {
+    if (previousCandidateRoot === undefined) delete process.env.KITE_CODE_RELEASE_ROOT;
+    else process.env.KITE_CODE_RELEASE_ROOT = previousCandidateRoot;
+  }
 }
 
 function installedSmokeError(

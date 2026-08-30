@@ -174,8 +174,11 @@ hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native
 没有`rustc`的独立Windows checkout保留功能等价的Bun fallback；需要嵌入不同argument-log path的CLI仍分别编译。该fixture优化不缓存安装
 结果、不改变production candidate内容，也不能替代后续真实native candidate build/smoke。
 
-`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实
-Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uninstall。
+`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、
+installed Coordinator lifecycle预检、真实Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选
+安装、rollback和uninstall。Coordinator预检失败只报告operation/outcome/state/diagnostic与expected/descriptor build identity闭集，不输出
+descriptor、PID、path或credential；成功进程由
+随后TUI复用并由同一fixture exact cleanup回收。
 任一步非零都使smoke失败；该本机
 smoke不替代KLSV1-07三平台companion lifecycle qualification。
 CLI、TUI、Service、Coordinator、Worker 与 Web Gateway candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service
@@ -186,6 +189,8 @@ POSIX executable mode的source manager目标；release contract固定验证该mo
 `KITE_CODE_RELEASE_ROOT`同时是installed Coordinator/Service companion resolver的优先bin root；
 resolver仍由marker、active pointer、`.candidate-id`与manifest重新校验该immutable candidate，不能在Windows standalone把可能仍指向stable slot的
 `process.execPath`目录误当candidate root，也不能从cwd/PATH推导替代路径。
+Coordinator与Service release composition还把构造时的source/installed mode绑定到全部lifecycle请求；caller-supplied mode不能把
+installed manager切回source resolver或反向切换。
 长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
 这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。

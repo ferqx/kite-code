@@ -104,7 +104,11 @@ describe('managed local Coordinator release composition', () => {
     });
     let started = false;
     try {
-      const ensured = await composition.lifecycle.ensure({ requestId: 'coordinator-v2-ensure' });
+      const ensured = await composition.lifecycle.ensure({
+        requestId: 'coordinator-v2-ensure',
+        // The composition owns source/installed selection; callers cannot switch it.
+        executableMode: 'installed',
+      });
       expect(ensured).toMatchObject({ outcome: 'applied', state: 'ready' });
       started = ensured.outcome === 'applied';
       await expect(
