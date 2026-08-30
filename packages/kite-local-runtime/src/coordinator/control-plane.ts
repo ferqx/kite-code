@@ -5,6 +5,7 @@ import type {
   CoordinatorOperationIdentity,
 } from './catalog';
 import type {
+  CoordinatorError,
   CoordinatorIdentity,
   CoordinatorSessionMetadata,
   CoordinatorWebGatewayIdentity,
@@ -177,14 +178,14 @@ export function createCoordinatorControlPlane(
     },
     ensureWebGateway: async (_params, context) =>
       runIdempotent('ensureWebGateway', {}, context.idempotencyKey, async () => {
-        const launched = await options.gateway.ensure();
+        const launched = await withWebGatewayDiagnostic(() => options.gateway.ensure());
         return {
           gateway: gatewayReference(launched.registration),
           launchUrl: launched.launchUrl,
         };
       }),
     discoverWebGateway: async () => {
-      const discovered = await options.gateway.discover();
+      const discovered = await withWebGatewayDiagnostic(() => options.gateway.discover());
       return discovered === null
         ? { gateway: null }
         : {
@@ -194,7 +195,7 @@ export function createCoordinatorControlPlane(
     },
     stopWebGateway: async (_params, context) =>
       runIdempotent('stopWebGateway', {}, context.idempotencyKey, async () => {
-        await options.gateway.stop();
+        await withWebGatewayDiagnostic(() => options.gateway.stop());
         return { gateway: null };
       }),
     stopCoordinator: async () => {
@@ -277,6 +278,55 @@ export function createCoordinatorControlPlane(
       }
       throw error;
     }
+  }
+}
+
+async function withWebGatewayDiagnostic<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const value =
+      typeof error === 'object' && error !== null && 'diagnostic' in error
+        ? (error as { readonly diagnostic?: unknown }).diagnostic
+        : undefined;
+    const diagnostic = webGatewayDiagnostic(value);
+    if (diagnostic) {
+      throw new CoordinatorDispatcherError(
+        value === 'outcome_unknown' || value === 'ready_mismatch'
+          ? 'outcome_unknown'
+          : 'unavailable',
+        'Web Gateway lifecycle operation failed.',
+        diagnostic,
+      );
+    }
+    throw error;
+  }
+}
+
+function webGatewayDiagnostic(value: unknown): CoordinatorError['diagnostic'] | undefined {
+  switch (value) {
+    case 'web_assets_missing':
+      return 'web_assets_missing';
+    case 'recovery_required':
+      return 'web_recovery_required';
+    case 'identity_uncertain':
+      return 'web_identity_uncertain';
+    case 'ready_mismatch':
+      return 'web_ready_mismatch';
+    case 'build_mismatch':
+      return 'web_build_mismatch';
+    case 'unsupported':
+      return 'web_unsupported';
+    case 'timeout':
+      return 'web_timeout';
+    case 'state_corrupt':
+      return 'web_state_corrupt';
+    case 'outcome_unknown':
+      return 'web_outcome_unknown';
+    case 'not_running':
+      return 'web_not_running';
+    default:
+      return undefined;
   }
 }
 

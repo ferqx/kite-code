@@ -27,6 +27,11 @@ unavailable 状态，而不是无限循环。
 开发与 production 使用同一 Gateway transport；transport 失败只显示 unavailable，不会打包或回退到样例，
 也不会直接读取本地文件。
 
+角色与启动顺序保持分离：TUI/CLI Native client按需ensure Coordinator和目标Workspace Worker；`kite web`按需ensure
+Coordinator与唯一Web Gateway；Browser打开launch URL只连接已存在Gateway，不负责启动任何本机server。`bun run --cwd apps/kite-web dev`
+只是Vite静态资源开发服务器，不包含Gateway认证、Coordinator discovery或Worker连接。源码开发推荐`bun run web:dev`，它依次完成
+Vite build、fixed asset preflight和Gateway ensure并打印URL；已确认dead的残留可用`bun run agent web recover`清理。
+
 release candidate 由独立 `kite-web-gateway` companion 提供 loopback BFF，并把 `payload/web` 作为 immutable candidate asset
 绑定到 Web slot；Gateway 对在线 Worker 经 Coordinator resolve/mint 连接 current-format History/live，Worker idle 时则使用
 Service-owned active Store 7 query-only facade 读取同一 current-format History。两条路径都只向 Browser 返回 presentation DTO。Web asset、

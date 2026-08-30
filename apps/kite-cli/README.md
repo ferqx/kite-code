@@ -15,7 +15,9 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
 - CLI parser/main 已实现封闭的 Web Gateway lifecycle surface：`kite web [--json]` 请求 ensure 并打印 Coordinator
-  返回的一次性 launch URL，`kite web status [--json]` 只 discovery 已有 Gateway，`kite web stop` 请求显式 stop。
+  返回的一次性 launch URL，`kite web status [--json]` 只 discovery 已有 Gateway，`kite web stop` 请求显式 stop，
+  `kite web recover`只在Gateway manager以exact PID/start-token证明残留child已死后清理launch intent/credential。
+  lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
   这些命令只接受注入的 `CoordinatorRequestClient`，CLI 不自行发现、spawn、访问 Gateway 或取得 Controller。
 - CLI另提供唯一显式Store迁移入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`；parser只接受该exact
   shape与可选absolute`--kite-home`。CLI只输出release owner返回的closed JSON结果；blocked为非零退出，normal run/resume/ensure永不调用迁移。

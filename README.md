@@ -44,6 +44,22 @@ bun run agent run \
 
 For all options, run `bun run agent --help`.
 
+## Local Web Observer
+
+From a source checkout, one command builds and validates the Web assets, ensures the Coordinator
+and Web Gateway, and prints a one-shot loopback URL:
+
+```bash
+bun run web:dev
+```
+
+The terminal TUI/CLI ensures a Coordinator and the selected Workspace Worker only when needed.
+`kite web` ensures the Coordinator plus the single local Web Gateway. Opening a browser URL never
+starts a local server; the page is only a Gateway client. `bun run --cwd apps/kite-web dev` is a
+Vite asset server for frontend work, not the complete authenticated Gateway. If a failed launch
+left exact process-bound recovery evidence, run `bun run agent web recover`; uncertain or live
+process identity remains fail-closed.
+
 ## Documentation
 
 - [Project overview (Chinese)](docs/book/01-项目全景.md)

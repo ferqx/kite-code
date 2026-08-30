@@ -42,8 +42,8 @@ writeSync(fd, Buffer.from(JSON.stringify({
   processStartIdentity: 'fixture-start',
   buildId: 'build-host-1',
   protocolVersion: 1,
-  protocolRevision: 'kite-local-coordinator-protocol-v2',
-  clientContractRevision: 'kite-local-coordinator-client-v2'
+  protocolRevision: 'kite-local-coordinator-protocol-v3',
+  clientContractRevision: 'kite-local-coordinator-client-v3'
 }) + '\\n'));
 closeSync(fd);
 setInterval(() => undefined, 1000);
@@ -244,8 +244,8 @@ describe('Coordinator process executable and host', () => {
                 processStartIdentity: 'windows-fixture-start',
                 buildId: 'build-host-1',
                 protocolVersion: 1 as const,
-                protocolRevision: 'kite-local-coordinator-protocol-v2',
-                clientContractRevision: 'kite-local-coordinator-client-v2',
+                protocolRevision: 'kite-local-coordinator-protocol-v3',
+                clientContractRevision: 'kite-local-coordinator-client-v3',
               };
             },
           };

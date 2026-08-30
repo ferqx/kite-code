@@ -100,6 +100,7 @@ describe('cli argument parsing', () => {
       webJson: true,
     });
     expect(parseArgs(['web', 'stop']).command).toBe('web-stop');
+    expect(parseArgs(['web', 'recover']).command).toBe('web-recover');
     expect(parseArgs(['web', 'stop', 'now']).command).toBe('help');
     expect(parseArgs(['web', 'status', 'verbose']).command).toBe('help');
     expect(parseArgs(['web', 'prompt']).command).toBe('help');
@@ -149,6 +150,42 @@ describe('cli argument parsing', () => {
         }),
       ],
     ]);
+  });
+
+  test('prints the typed Web Gateway diagnostic and exposes explicit recovery', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const calls: string[] = [];
+    const coordinator = webCoordinator(calls);
+    process.argv = ['bun', 'kite', 'web'];
+    try {
+      await expect(
+        main({
+          coordinatorClient: {
+            ...coordinator,
+            ensureWebGateway: async () => ({
+              schema: 'kite.local-coordinator-frame.v1',
+              kind: 'response',
+              protocolVersion: 1,
+              requestId: 'ensure-error-1',
+              idempotencyKey: 'ensure-error-key-1',
+              deadlineMs: 5_000,
+              method: 'ensureWebGateway',
+              outcome: 'error',
+              error: { code: 'unavailable', diagnostic: 'web_assets_missing' },
+            }),
+          },
+        }),
+      ).rejects.toThrow('web_assets_missing');
+
+      process.argv = ['bun', 'kite', 'web', 'recover'];
+      await main({ coordinatorClient: coordinator });
+      expect(output.mock.calls.at(-1)).toEqual(['Kite Web Gateway recovery completed.']);
+      expect(calls).toContain('stop');
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
   });
 
   test('keeps service run private and renders lifecycle results without secrets', () => {
@@ -457,8 +494,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
           instanceId: 'coordinator-1',
           buildId: 'build-1',
           protocolVersion: 1,
-          protocolRevision: 'kite-local-coordinator-protocol-v2',
-          clientContractRevision: 'kite-local-coordinator-client-v2',
+          protocolRevision: 'kite-local-coordinator-protocol-v3',
+          clientContractRevision: 'kite-local-coordinator-client-v3',
         },
       };
     },
@@ -480,8 +517,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
               instanceId: 'gateway-1',
               buildId: 'build-1',
               protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v2',
-              clientContractRevision: 'kite-local-coordinator-client-v2',
+              protocolRevision: 'kite-local-coordinator-protocol-v3',
+              clientContractRevision: 'kite-local-coordinator-client-v3',
             },
             endpoint: { origin: 'http://127.0.0.1:43124' },
           },
@@ -513,8 +550,8 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
               instanceId: 'gateway-1',
               buildId: 'build-1',
               protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v2',
-              clientContractRevision: 'kite-local-coordinator-client-v2',
+              protocolRevision: 'kite-local-coordinator-protocol-v3',
+              clientContractRevision: 'kite-local-coordinator-client-v3',
             },
             endpoint: { origin: 'http://127.0.0.1:43124' },
           },
@@ -522,7 +559,20 @@ function webCoordinator(calls: string[]): CoordinatorRequestClient {
         },
       };
     },
-    stopWebGateway: unused,
+    stopWebGateway: async () => {
+      calls.push('stop');
+      return {
+        schema: 'kite.local-coordinator-frame.v1',
+        kind: 'response',
+        protocolVersion: 1,
+        requestId: 'stop-1',
+        idempotencyKey: 'stop-key-1',
+        deadlineMs: 5_000,
+        method: 'stopWebGateway',
+        outcome: 'ok',
+        result: { gateway: null },
+      };
+    },
     stopCoordinator: unused,
     subscribeDirectoryChanges: unused,
   } as CoordinatorRequestClient;

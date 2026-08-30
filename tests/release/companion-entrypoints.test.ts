@@ -43,4 +43,18 @@ describe('managed companion release entrypoints', () => {
     expect(source).toContain('await main().catch');
     expect(source).not.toContain('import.meta.main');
   });
+
+  test('developer Web startup builds and preflights assets before Gateway ensure', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      readonly scripts?: Readonly<Record<string, string>>;
+    };
+    const source = readFileSync('scripts/development/ensure-web.ts', 'utf8');
+    expect(manifest.scripts?.['web:dev']).toBe('bun run scripts/development/ensure-web.ts');
+    expect(source.indexOf("'build'")).toBeLessThan(
+      source.lastIndexOf('preflightWebGatewayStaticAssets'),
+    );
+    expect(source.lastIndexOf('preflightWebGatewayStaticAssets')).toBeLessThan(
+      source.indexOf("'agent', 'web'"),
+    );
+  });
 });

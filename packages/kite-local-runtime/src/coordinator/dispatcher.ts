@@ -72,11 +72,17 @@ export interface CoordinatorDispatcherOptions {
 
 export class CoordinatorDispatcherError extends Error {
   readonly code: CoordinatorError['code'];
+  readonly diagnostic?: CoordinatorError['diagnostic'];
 
-  constructor(code: CoordinatorError['code'], message: string) {
+  constructor(
+    code: CoordinatorError['code'],
+    message: string,
+    diagnostic?: CoordinatorError['diagnostic'],
+  ) {
     super(message);
     this.name = 'CoordinatorDispatcherError';
     this.code = code;
+    this.diagnostic = diagnostic;
   }
 }
 
@@ -168,6 +174,8 @@ export function createCoordinatorDispatcher(
         );
       } catch (error) {
         const known = error instanceof CoordinatorDispatcherError ? error.code : undefined;
+        const knownDiagnostic =
+          error instanceof CoordinatorDispatcherError ? error.diagnostic : undefined;
         const code =
           known === 'deadline_exceeded' ||
           known === 'outcome_unknown' ||
@@ -187,7 +195,7 @@ export function createCoordinatorDispatcher(
           error:
             code === 'deadline_exceeded'
               ? { code, diagnostic: 'expired' }
-              : { code, diagnostic: 'handler_rejected' },
+              : { code, diagnostic: knownDiagnostic ?? 'handler_rejected' },
         });
       }
 

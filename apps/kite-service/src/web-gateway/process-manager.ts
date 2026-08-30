@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   COORDINATOR_CLIENT_CONTRACT_REVISION_,
   COORDINATOR_GATEWAY_REGISTRATION_SCHEMA,
@@ -23,17 +23,21 @@ import type {
   WebGatewayProcessStopResult,
   WebGatewayReadySignal,
 } from './process-host';
+import { readWebGatewayProcessStartIdentity } from './process-host';
 import {
   createWebGatewayProcessLockIdentity,
   decodeWebGatewayProcessDescriptor,
   decodeWebGatewayProcessLockIdentity,
   gatewayRegistrationFromDescriptor,
+  WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA,
   type WebGatewayProcessDescriptor,
+  type WebGatewayProcessLaunchIntent,
   type WebGatewayProcessLockIdentity,
   type WebGatewayProcessLockLease,
   type WebGatewayProcessOperation,
   type WebGatewayProcessStatePort,
 } from './process-state';
+import { preflightWebGatewayStaticAssets, WebGatewayStaticAssetsError } from './static-assets';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_OPERATION_TIMEOUT_MS = 30_000;
@@ -60,6 +64,10 @@ export interface WebGatewayProcessManagerOptions {
   readonly environment: WebGatewayProcessEnvironmentResolver;
   readonly spawn: WebGatewayProcessSpawnPort;
   readonly process: WebGatewayProcessProbePort;
+  /** Validate the fixed static payload before any credential, launch intent, or child exists. */
+  readonly preflightStaticAssets?: (environment: WebGatewayProcessEnvironment) => void;
+  /** Resolve the exact child start token immediately after native spawn. */
+  readonly readChildProcessStartIdentity?: (pid: number) => Promise<string | undefined>;
   readonly registry?: WebGatewayProcessRegistryPort;
   /** Reconnect to a live Gateway after Coordinator restart. */
   readonly controlLinkFor?: (
@@ -94,6 +102,8 @@ export interface WebGatewayProcessManager
 
 export type WebGatewayProcessDiagnostic =
   | 'not_running'
+  | 'web_assets_missing'
+  | 'recovery_required'
   | 'identity_uncertain'
   | 'ready_mismatch'
   | 'build_mismatch'
@@ -438,6 +448,153 @@ export function createWebGatewayProcessManager(
     records.delete(gateway.descriptor.identity.instanceId);
   };
 
+  const credentialHash = (value: string): string =>
+    createHash('sha256').update(value, 'utf8').digest('hex');
+
+  const readLaunchIntent = async (): Promise<WebGatewayProcessLaunchIntent | undefined> => {
+    const raw = await invoke(
+      () => options.state.readLaunchIntent(),
+      operationTimeoutMs,
+      'Gateway launch intent read',
+    );
+    if (raw === undefined) return undefined;
+    const decoded = WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA.safeParse(raw);
+    if (!decoded.success) {
+      throw new WebGatewayProcessManagerError('state_corrupt', 'Gateway launch intent is invalid.');
+    }
+    return decoded.data;
+  };
+
+  const lockMatchesIntent = (
+    lock: WebGatewayProcessLockIdentity,
+    intent: WebGatewayProcessLaunchIntent,
+  ): boolean =>
+    lock.kind === 'instance' &&
+    lock.pid === intent.pid &&
+    lock.instanceId === intent.instanceId &&
+    lock.processStartIdentity === intent.processStartIdentity &&
+    lock.buildId === intent.buildId;
+
+  const clearDeadIntent = async (intent: WebGatewayProcessLaunchIntent): Promise<void> => {
+    const credential = await invoke(
+      () => options.state.readControlCredential(),
+      operationTimeoutMs,
+      'Gateway control credential read',
+    );
+    if (credential !== undefined && credentialHash(credential) !== intent.credentialDigest) {
+      throw new WebGatewayProcessManagerError(
+        'state_corrupt',
+        'Gateway launch credential mismatches its intent.',
+      );
+    }
+    const rawLock = await invoke(
+      () => options.state.readInstanceLock(),
+      operationTimeoutMs,
+      'Gateway instance lock read',
+    );
+    let instanceLock: WebGatewayProcessLockIdentity | undefined;
+    if (rawLock !== undefined) {
+      try {
+        instanceLock = decodeInstanceLock(rawLock);
+      } catch {
+        throw new WebGatewayProcessManagerError(
+          'state_corrupt',
+          'Gateway instance lock is invalid.',
+        );
+      }
+      if (!lockMatchesIntent(instanceLock, intent)) {
+        throw new WebGatewayProcessManagerError(
+          'state_corrupt',
+          'Gateway instance lock mismatches its launch intent.',
+        );
+      }
+    }
+    await invoke(
+      () =>
+        options.state.clearStale({
+          launchIntent: intent,
+          ...(instanceLock ? { instanceLock } : {}),
+          ...(credential ? { controlCredential: credential } : {}),
+        }),
+      operationTimeoutMs,
+      'Gateway dead launch cleanup',
+    );
+  };
+
+  const recoverOrphanedLaunch = async (): Promise<void> => {
+    const intent = await readLaunchIntent();
+    if (intent) {
+      const status = await inspectIdentity({
+        schema: 'kite.web-gateway-lock.v1',
+        kind: 'instance',
+        nonce: 'launch-intent-probe',
+        pid: intent.pid,
+        instanceId: intent.instanceId,
+        startedAt: intent.createdAt,
+        processStartIdentity: intent.processStartIdentity,
+        buildId: intent.buildId,
+        createdAt: intent.createdAt,
+      });
+      if (status === 'dead') {
+        await clearDeadIntent(intent);
+        return;
+      }
+      throw new WebGatewayProcessManagerError(
+        status === 'uncertain' ? 'identity_uncertain' : 'recovery_required',
+        status === 'uncertain'
+          ? 'Gateway launch process identity is uncertain.'
+          : 'Gateway launch process is still alive.',
+      );
+    }
+
+    const rawLock = await invoke(
+      () => options.state.readInstanceLock(),
+      operationTimeoutMs,
+      'Gateway instance lock read',
+    );
+    const credential = await invoke(
+      () => options.state.readControlCredential(),
+      operationTimeoutMs,
+      'Gateway control credential read',
+    );
+    if (rawLock !== undefined) {
+      let instanceLock: WebGatewayProcessLockIdentity;
+      try {
+        instanceLock = decodeInstanceLock(rawLock);
+      } catch {
+        throw new WebGatewayProcessManagerError(
+          'state_corrupt',
+          'Gateway instance lock is invalid.',
+        );
+      }
+      const status = await inspectIdentity(instanceLock);
+      if (status === 'dead') {
+        await invoke(
+          () =>
+            options.state.clearStale({
+              instanceLock,
+              ...(credential ? { controlCredential: credential } : {}),
+            }),
+          operationTimeoutMs,
+          'Gateway dead orphan cleanup',
+        );
+        return;
+      }
+      throw new WebGatewayProcessManagerError(
+        status === 'uncertain' ? 'identity_uncertain' : 'recovery_required',
+        status === 'uncertain'
+          ? 'Gateway orphan process identity is uncertain.'
+          : 'Gateway orphan process is still alive.',
+      );
+    }
+    if (credential !== undefined) {
+      throw new WebGatewayProcessManagerError(
+        'recovery_required',
+        'Legacy Gateway launch state has no exact process proof.',
+      );
+    }
+  };
+
   const launchUrl = async (gateway: ManagedGateway): Promise<string> => {
     if (!gateway.control) {
       throw new WebGatewayProcessManagerError(
@@ -505,70 +662,11 @@ export function createWebGatewayProcessManager(
       await clearDead(loaded.gateway);
     }
 
-    // A crash can leave the child-owned instance lock without a descriptor. Never overwrite it
-    // based on PID alone: only an exact process-start identity proven dead may be quarantined.
-    const rawInstanceLock = await invoke(
-      () => options.state.readInstanceLock(),
-      operationTimeoutMs,
-      'Gateway instance lock read',
-    );
-    if (rawInstanceLock !== undefined) {
-      let instanceLock: WebGatewayProcessLockIdentity;
-      try {
-        instanceLock = decodeWebGatewayProcessLockIdentity(rawInstanceLock);
-        if (instanceLock.kind !== 'instance') {
-          throw new TypeError('Gateway instance lock kind mismatches.');
-        }
-      } catch {
-        throw new WebGatewayProcessManagerError(
-          'state_corrupt',
-          'Gateway instance lock is invalid.',
-        );
-      }
-      const status = await inspectIdentity(instanceLock);
-      if (status !== 'dead') {
-        throw new WebGatewayProcessManagerError(
-          status === 'uncertain' ? 'identity_uncertain' : 'outcome_unknown',
-          status === 'uncertain'
-            ? 'Gateway instance owner identity is uncertain.'
-            : 'Gateway instance lock owner could not be replaced.',
-        );
-      }
-      await invoke(
-        () => options.state.clearStale({ instanceLock }),
-        operationTimeoutMs,
-        'Gateway stale instance lock cleanup',
-      );
-    }
-    const staleCredential = await invoke(
-      () => options.state.readControlCredential(),
-      operationTimeoutMs,
-      'Gateway control credential read',
-    );
-    if (staleCredential !== undefined) {
-      if (!controlCredential.safeParse(staleCredential).success) {
-        throw new WebGatewayProcessManagerError(
-          'state_corrupt',
-          'Gateway control credential is invalid.',
-        );
-      }
-      // A credential without a descriptor is a durable launch-intent marker. The detached spawn
-      // may have succeeded but not yet published its child-owned instance lock/readiness. Without
-      // an exact process identity there is no authority to delete it or replay the spawn.
-      throw new WebGatewayProcessManagerError(
-        'outcome_unknown',
-        'Gateway launch outcome is unknown and requires explicit recovery.',
-      );
-    }
+    // Recover only state bound to an exact PID/start token that is now confirmed dead. Legacy
+    // credential-only state remains fail closed because it contains no no-process proof.
+    await recoverOrphanedLaunch();
 
     const instanceId = createGatewayInstanceId(options.createGatewayInstanceId);
-    const credential = randomBytes(32).toString('base64url');
-    controlCredential.parse(credential);
-    await invoke(
-      () => options.state.publishControlCredential(credential),
-      operationTimeoutMs,
-      'Gateway control credential publish',
-    );
     const executable = await invoke(
       () => options.executableResolver.resolve(options.executableMode ?? 'source'),
       startupTimeoutMs,
@@ -581,6 +679,19 @@ export function createWebGatewayProcessManager(
       'Gateway environment resolution',
     );
     assertEnvironment(environment);
+    try {
+      (options.preflightStaticAssets ?? defaultStaticAssetPreflight)(environment);
+    } catch (error) {
+      if (error instanceof WebGatewayStaticAssetsError) {
+        throw new WebGatewayProcessManagerError(
+          'web_assets_missing',
+          'Gateway static assets are unavailable.',
+        );
+      }
+      throw error;
+    }
+    const credential = randomBytes(32).toString('base64url');
+    controlCredential.parse(credential);
     const args = options.args ?? DEFAULT_GATEWAY_ARGS;
     assertArgs(args);
     const input: WebGatewayProcessSpawnInput = {
@@ -610,6 +721,48 @@ export function createWebGatewayProcessManager(
       throw new WebGatewayProcessManagerError('outcome_unknown', 'Gateway process spawn failed.');
     }
 
+    const childProcessStartIdentity = await invoke(
+      () =>
+        (options.readChildProcessStartIdentity ?? readWebGatewayProcessStartIdentity)(child.pid),
+      operationTimeoutMs,
+      'Gateway child process identity',
+    );
+    if (!childProcessStartIdentity || !safeText(childProcessStartIdentity, 256)) {
+      await preserveFailure();
+      throw new WebGatewayProcessManagerError(
+        'identity_uncertain',
+        'Gateway child process identity is unavailable.',
+      );
+    }
+    const launchIntent = WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA.parse({
+      schema: 'kite.web-gateway-launch-intent.v1',
+      pid: child.pid,
+      instanceId,
+      processStartIdentity: childProcessStartIdentity,
+      buildId: executable.buildId,
+      credentialDigest: credentialHash(credential),
+      createdAt: nowIso(options.now),
+    });
+    try {
+      await invoke(
+        () => options.state.publishLaunchIntent(launchIntent),
+        operationTimeoutMs,
+        'Gateway launch intent publish',
+      );
+      await invoke(
+        () => options.state.publishControlCredential(credential),
+        operationTimeoutMs,
+        'Gateway control credential publish',
+      );
+    } catch (error) {
+      await preserveFailure();
+      if (error instanceof WebGatewayProcessManagerError) throw error;
+      throw new WebGatewayProcessManagerError(
+        'outcome_unknown',
+        'Gateway launch state publication failed.',
+      );
+    }
+
     let ready: WebGatewayReadySignal | undefined;
     let readyFailed = false;
     try {
@@ -628,10 +781,29 @@ export function createWebGatewayProcessManager(
       }
     }
     if (readyFailed || !ready || !readyMatches(ready, child.pid, instanceId, executable)) {
+      const status = await inspectIdentity({
+        schema: 'kite.web-gateway-lock.v1',
+        kind: 'instance',
+        nonce: 'failed-launch-probe',
+        pid: launchIntent.pid,
+        instanceId: launchIntent.instanceId,
+        startedAt: launchIntent.createdAt,
+        processStartIdentity: launchIntent.processStartIdentity,
+        buildId: launchIntent.buildId,
+        createdAt: launchIntent.createdAt,
+      });
+      if (status === 'dead') await clearDeadIntent(launchIntent);
+      else await preserveFailure();
+      throw new WebGatewayProcessManagerError(
+        status === 'uncertain' ? 'identity_uncertain' : 'ready_mismatch',
+        'Gateway readiness did not prove its process identity.',
+      );
+    }
+    if (ready.processStartIdentity !== launchIntent.processStartIdentity) {
       await preserveFailure();
       throw new WebGatewayProcessManagerError(
-        'ready_mismatch',
-        'Gateway readiness did not prove its process identity.',
+        'identity_uncertain',
+        'Gateway readiness start identity mismatches its launch intent.',
       );
     }
     const alive = await inspectDescriptor({
@@ -643,6 +815,8 @@ export function createWebGatewayProcessManager(
       endpoint: ready.endpoint,
     });
     if (alive !== 'alive') {
+      if (alive === 'dead') await clearDeadIntent(launchIntent);
+      else await preserveFailure();
       if (alive === 'uncertain')
         throw new WebGatewayProcessManagerError(
           'identity_uncertain',
@@ -678,6 +852,11 @@ export function createWebGatewayProcessManager(
         () => options.state.publishDescriptor(descriptor),
         operationTimeoutMs,
         'Gateway descriptor publish',
+      );
+      await invoke(
+        () => options.state.clearStale({ launchIntent }),
+        operationTimeoutMs,
+        'Gateway launch intent commit',
       );
       await registryRegister(registration);
     } catch (error) {
@@ -715,7 +894,10 @@ export function createWebGatewayProcessManager(
 
   const stopCore = async (): Promise<WebGatewayProcessStopResult> => {
     const loaded = await load();
-    if (loaded.kind === 'none') return 'closed';
+    if (loaded.kind === 'none') {
+      await recoverOrphanedLaunch();
+      return 'closed';
+    }
     if (loaded.kind === 'corrupt')
       throw new WebGatewayProcessManagerError('state_corrupt', 'Gateway process state is invalid.');
     const gateway = loaded.gateway;
@@ -901,6 +1083,12 @@ function assertEnvironment(environment: WebGatewayProcessEnvironment): void {
       throw new WebGatewayProcessManagerError('unsupported', 'Gateway environment is invalid.');
     }
   }
+}
+
+function defaultStaticAssetPreflight(environment: WebGatewayProcessEnvironment): void {
+  const root = environment.env.KITE_WEB_GATEWAY_STATIC_ROOT;
+  if (!root) throw new WebGatewayStaticAssetsError();
+  preflightWebGatewayStaticAssets(root);
 }
 
 function assertArgs(args: readonly string[]): void {

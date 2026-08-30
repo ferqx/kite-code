@@ -29,7 +29,7 @@ ACL/locked-directory atomic publication与非 Windows 本地环境的 no-follow 
 
 `scripts/release/local-layout-migration.ts`包含显式offline Store layout primitive，不属于normal build/install/start或自动upgrade。
 正式operator入口是`kite maintenance migrate-run-store --target-generation <fresh-generation> [--kite-home <absolute>]`，由
-`local-run-store-maintenance.ts`而非CLI构造exact barrier：先用Coordinator revision v2的authenticated stop关闭admission并确认进程退出，
+`local-run-store-maintenance.ts`而非CLI构造exact barrier：先用Coordinator revision v3（保留v2 stop语义）的authenticated stop关闭admission并确认进程退出，
 再持有同一Coordinator lifecycle lock直到migration结束以阻断并发ensure/第二maintenance，并在锁内复核descriptor、endpoint、launch intent与
 instance lock全部不存在，然后按
 持久descriptor、PID/start-token、control identity与idle hold停止Gateway/Worker；Host State与SQLite authority/effect/WAL deep validation随后共同
@@ -199,6 +199,10 @@ resolver仍由marker、active pointer、`.candidate-id`与manifest重新校验�
 `process.execPath`目录误当candidate root，也不能从cwd/PATH推导替代路径。
 Coordinator与Service release composition还把构造时的source/installed mode绑定到全部lifecycle请求；caller-supplied mode不能把
 installed manager切回source resolver或反向切换。
+Web Gateway source/installed ensure共同执行fixed asset preflight，必须在credential、launch intent和spawn前验证Web slot；缺失返回
+protocol/client v3的`web_assets_missing`且Gateway state为空。spawn后launch intent以exact child PID/start-token、build与credential digest
+绑定；dead readiness自动清理，uncertain保留。CLI `web recover`只消费同一confirmed-dead proof，`bun run web:dev`则依次build、
+preflight并ensure源码Gateway；这些路径不让Browser或Vite dev server取得Native lifecycle authority。
 长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
 这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。

@@ -36,7 +36,8 @@ composition仍作为显式 `kite service *` maintenance/compatibility owner存�
 ensure、Session Workspace resolve、path-free Session metadata list、Worker capability mint、Web Gateway ensure/discover/stop
 、Native-client-only Coordinator stop与 directory-change subscription；它不是 generic RPC，也没有 Runtime command/event/model/tool/interaction/credential payload。
 
-Coordinator frame使用wire version 1、current protocol/client revision v2、bounded request/idempotency/deadline/identifier/size/depth，
+Coordinator frame使用wire version 1、current protocol/client revision v3、bounded request/idempotency/deadline/identifier/size/depth；v3在
+v2 authenticated stop基础上新增封闭`web_*` lifecycle diagnostics，
 并拒绝 `event`、`runtimeevent`、`model`、`tool`、`interaction`、`credential`、`secret`、`token`、`stdout`、`stderr` 等 payload key。
 POSIX carrier 从已校验的 Kite home 派生 owner-only Unix socket；Windows carrier 派生 current-user SID-bound named pipe。descriptor
 不携带 socket/pipe path，平台不可用时返回 typed `unsupported`，不会退回 TCP。carrier 只负责本地 peer identity、length-prefixed
@@ -167,12 +168,19 @@ Web Observer core、Coordinator或Worker。Web入口在渲染Observer App前选�
 discover Worker、mint capability或发送Agent API data-plane request。renderer无form/Try it/execute与remote CDN/script，只展示
 release-bundled canonical OpenAPI、placeholder endpoint及availability未确认；Gateway对这些响应继续使用self-only CSP、`no-store`与固定content type。
 
+Gateway ensure在任何credential/intent/spawn前验证canonical static root、`index.html`、`api-docs/openapi.json`与至少一个allowlisted
+Vite JS asset；缺失返回wire-visible `web_assets_missing`且不留state。spawn后manager立即读取exact child PID/start-token，先写
+credential-digest-bound launch intent再写credential；readiness失败只在该identity confirmed dead时清理本次intent/credential/lock，
+alive/uncertain则保留。成功发布descriptor后exact intent才commit删除，因此Coordinator crash仍有恢复证据。
+
 Gateway正常停止存在一个有序cleanup window：child先释放自身instance lock，manager收到退出后再清parent-owned descriptor与control
-credential。Coordinator/manager若在该窗口退出，restart只可在descriptor的PID + OS start token再次confirmed dead后把“descriptor/
-credential存在、child lock缺失”作为可恢复partial state并执行exact cleanup；新Coordinator的in-memory Gateway registry为空时，清理
-同一confirmed-dead instance按幂等absence处理，而不同已注册instance仍identity mismatch。alive/uncertain、descriptor缺失的token-only
-launch、lock identity mismatch或replacement state仍不得cleanup/spawn。该恢复不把manager变成PID kill owner，也不停止Worker、Turn
-或Controller。
+credential。`kite web recover`复用lifecycle lock与exact PID/start-token no-process proof，只清confirmed-dead descriptor/launch intent/lock及
+匹配credential；live/uncertain、identity mismatch、replacement state和旧credential-only residue保持fail closed并返回typed diagnostic。
+新Coordinator registry为空时清同一dead instance按幂等absence处理。该恢复不赋予manager PID kill authority，也不停止Worker、Turn或Controller。
+
+启动角色固定：TUI/CLI Native client按需ensure Coordinator与canonical Workspace Worker；`kite web`按需ensure Coordinator与唯一Gateway；
+Browser launch URL只是既有Gateway的client，不能触发本机server。Vite dev server只服务前端asset，不含Gateway BFF/auth或Worker连接；源码
+checkout用`bun run web:dev`依次build、preflight、ensure并取得URL。
 
 `apps/kite-web` 是独立 private static React workspace。其 development 与 production transport 都只消费 `kite-app-contract`，
 transport failure 显示 unavailable，不打包或回退本地样例。页面保持 Workspace 分组既有 Session、消息/History、running live state 与主动断连，
@@ -234,7 +242,7 @@ maintenance，普通ensure不自动迁移。Worker readiness固定Store 8 epoch�
 同一already-open connection；Store 7 manifest或旧process descriptor整体拒绝，不以catch/retry恢复旧writer。Agent ServerInfo/Public route继续不发布`runs`。
 
 KRSRUN-03B提供正式offline命令`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI只把exact target交给release owner；
-owner通过Coordinator revision v2 authenticated stop先进入draining并确认process exit，再复用Gateway/Worker manager按持久descriptor、control
+owner通过Coordinator revision v3（保留v2 stop语义）authenticated stop先进入draining并确认process exit，再复用Gateway/Worker manager按持久descriptor、control
 identity、PID/start-token与idle activity逐个停止child。owner在持有Coordinator lifecycle lock后复核descriptor、endpoint、launch intent与
 instance lock全部absent，阻断并发ensure窗口。Host State predicate和SQLite deep validation共同确认Turn/Interaction/effect/external
 process为零；任一busy、unknown、corrupt或response loss保持blocked且不切pointer。normal ensure仍不自动迁移existing Store 7。

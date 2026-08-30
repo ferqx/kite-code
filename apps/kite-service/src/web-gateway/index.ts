@@ -48,6 +48,7 @@ export * from './process-main';
 export * from './process-manager';
 export * from './process-state';
 export * from './production';
+export * from './static-assets';
 export {
   createWebGatewayUpstream,
   createWorkspaceWorkerWebGatewayUpstream,

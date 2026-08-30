@@ -257,6 +257,45 @@ describe('Coordinator durable control-plane composition', () => {
     catalog.close();
   });
 
+  test('preserves a closed Web Gateway lifecycle diagnostic on the wire', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-control-web-diagnostic-')));
+    roots.push(root);
+    const catalog = openCatalog(root);
+    const plane = createCoordinatorControlPlane({
+      identity: coordinator,
+      catalog,
+      registry: createCoordinatorRegistry(),
+      workers: {
+        resolveWorkspace: async () => null,
+        ensureWorkspace: async () => worker,
+        describeScope: async () => null,
+        mintCapability: async () => {
+          throw new Error('unexpected capability mint');
+        },
+      },
+      gateway: {
+        ensure: async () => {
+          throw Object.assign(new Error('assets unavailable'), {
+            diagnostic: 'web_assets_missing',
+          });
+        },
+        discover: async () => null,
+        stop: async () => undefined,
+      },
+    });
+    plane.completeReconcile();
+    const response = await createCoordinatorDispatcher({
+      identity: coordinator,
+      peerOsIdentity: { kind: 'posix_uid', uid: 501 },
+      handlers: plane.handlers,
+    }).dispatch(request('ensureWebGateway', {}), client);
+    expect(response).toMatchObject({
+      outcome: 'error',
+      error: { code: 'unavailable', diagnostic: 'web_assets_missing' },
+    });
+    catalog.close();
+  });
+
   test('enters draining before the carrier flushes lifecycle stop', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-control-stop-')));
     roots.push(root);

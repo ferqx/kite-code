@@ -7,6 +7,9 @@
 ```bash
 bun run agent run --task "检查并修复测试"
 bun run agent trace <events.jsonl> --turn 1
+bun run agent web
+bun run agent web status
+bun run agent web recover
 bun run agent sandbox status
 bun run agent sandbox setup
 ```
@@ -27,6 +30,15 @@ stderr；EOF 只释放当前 connection，只有 parent-owned signal/shutdown ca
 composition。启动前 Workspace Trust 固定 canonical Workspace/session admission，RPC body、client metadata 或绝对路径
 不能重新选择 workspace。不存在 `kite server --web`：loopback WebSocket 只作 development/reference qualification，
 ADR-0053 的 Web production No-Go 继续有效。
+
+Native client 和 Web 的本机启动责任是分层的：TUI/CLI 按需 ensure Coordinator，并由 Coordinator 按 workspace
+ensure Workspace Worker；`bun run agent web` 按需 ensure Coordinator 与 Web Gateway，再输出一次性 launch URL。
+浏览器页面只是已启动 Gateway 的 client，打开 URL 不能启动本机 server；`bun run --cwd apps/kite-web dev`
+只提供 Vite 前端资源，不包含 Gateway 认证、BFF 或 Worker 连接。源码 checkout 中使用 `bun run web:dev`
+一次完成 Web build、资源预检与 Gateway ensure。资源不完整时 CLI 返回 `web_assets_missing`，且不写入
+credential 或 launch state；readiness 失败后只对已证明 dead 的 exact PID/start identity 自动清理。
+`bun run agent web recover` 复用同一 no-process proof 清理可证明的残留，alive、identity uncertain 或无 exact
+证据的旧 credential-only 状态依然 fail closed。
 
 Windows 的 `sandbox status` 是只读 runner readiness probe；`sandbox setup` 是不提升权限的兼容入口，
 报告当前登录用户 token 模式。已获网络授权的 Shell 直接使用该用户执行 exact command；不会创建账户或

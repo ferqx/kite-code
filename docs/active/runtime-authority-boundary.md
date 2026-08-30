@@ -119,7 +119,8 @@ registry/history和已等待subscriber；该动作不写Store。这样订阅先�
 完成ready。
 
 KRSRUN-03B新增正式offline入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI不拥有barrier；release owner先以
-Coordinator protocol/client revision v2的authenticated `stopCoordinator`关闭admission并由manager确认exact process exit，再依据持久descriptor、
+Coordinator protocol/client revision v3保留authenticated `stopCoordinator`关闭admission并由manager确认exact process exit，并新增
+path-free Web lifecycle closed diagnostics；随后依据持久descriptor、
 control credential、PID/start-token与Worker idle holds停止Gateway/全部Worker。持有Coordinator lifecycle lock后还必须直接复核descriptor、
 endpoint、launch intent与instance lock全部absent，关闭stop/status与并发ensure之间的窗口。Host pure State predicate验证terminal Turn、idle Interaction、已知
 external outcome及无cleanup/recovery authority；SQLite owner继续深检effect lease、Controller/recovery/resource authority、WAL与source digest。

@@ -33,10 +33,13 @@ import { z } from 'zod';
 
 export const WEB_GATEWAY_PROCESS_DESCRIPTOR_SCHEMA_ = 'kite.web-gateway-process.v1' as const;
 export const WEB_GATEWAY_PROCESS_LOCK_SCHEMA_ = 'kite.web-gateway-lock.v1' as const;
+export const WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA_ =
+  'kite.web-gateway-launch-intent.v1' as const;
 export const WEB_GATEWAY_PROCESS_STATE_LIMITS = Object.freeze({
   descriptorBytes: 64 * 1024,
   lockIdentityBytes: 16 * 1024,
   credentialBytes: 256,
+  launchIntentBytes: 16 * 1024,
   temporaryNameBytes: 128,
 } as const);
 
@@ -79,6 +82,21 @@ const processDescriptorSchema = z
 export type WebGatewayProcessDescriptor = z.infer<typeof processDescriptorSchema>;
 export const WEB_GATEWAY_PROCESS_DESCRIPTOR_SCHEMA = processDescriptorSchema;
 
+const launchIntentSchema = z
+  .object({
+    schema: z.literal(WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA_),
+    pid,
+    instanceId: boundedText,
+    processStartIdentity,
+    buildId: boundedText,
+    credentialDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    createdAt: timestamp,
+  })
+  .strict();
+
+export type WebGatewayProcessLaunchIntent = z.infer<typeof launchIntentSchema>;
+export const WEB_GATEWAY_PROCESS_LAUNCH_INTENT_SCHEMA = launchIntentSchema;
+
 const processLockIdentitySchema = z
   .object({
     schema: z.literal(WEB_GATEWAY_PROCESS_LOCK_SCHEMA_),
@@ -101,6 +119,7 @@ export interface WebGatewayProcessStatePaths {
   readonly root: string;
   readonly descriptor: string;
   readonly controlCredential: string;
+  readonly launchIntent: string;
   readonly instanceLock: string;
   readonly lifecycleLock: string;
 }
@@ -110,6 +129,7 @@ export interface WebGatewayProcessStateCleanup {
   readonly instanceLock?: WebGatewayProcessLockIdentity;
   readonly lifecycleLock?: WebGatewayProcessLockIdentity;
   readonly controlCredential?: string;
+  readonly launchIntent?: WebGatewayProcessLaunchIntent;
 }
 
 export interface WebGatewayProcessLockLease {
@@ -122,10 +142,12 @@ export interface WebGatewayProcessStatePort {
   readonly paths?: WebGatewayProcessStatePaths;
   readDescriptor(): Promise<unknown | undefined>;
   readControlCredential(): Promise<string | undefined>;
+  readLaunchIntent(): Promise<unknown | undefined>;
   readInstanceLock(): Promise<unknown | undefined>;
   readLifecycleLock(): Promise<unknown | undefined>;
   publishDescriptor(value: unknown): Promise<WebGatewayProcessDescriptor>;
   publishControlCredential(value: string): Promise<string>;
+  publishLaunchIntent(value: unknown): Promise<WebGatewayProcessLaunchIntent>;
   acquireLock(
     kind: WebGatewayProcessLockKind,
     identity: WebGatewayProcessLockIdentity,
@@ -215,6 +237,7 @@ export function resolveWebGatewayProcessStatePaths(root: string): WebGatewayProc
     root,
     descriptor: join(root, 'process.json'),
     controlCredential: join(root, 'control.token'),
+    launchIntent: join(root, 'launch-intent.json'),
     instanceLock: join(root, 'instance.lock'),
     lifecycleLock: join(root, 'lifecycle.lock'),
   });
@@ -231,6 +254,9 @@ export function createWebGatewayProcessStatePort(
     },
     async readControlCredential() {
       return readControlCredential(paths);
+    },
+    async readLaunchIntent() {
+      return readLaunchIntent(paths);
     },
     async readInstanceLock() {
       return readLock(paths, 'instance');
@@ -258,6 +284,16 @@ export function createWebGatewayProcessStatePort(
       );
       return credential;
     },
+    async publishLaunchIntent(value: unknown) {
+      const intent = launchIntentSchema.parse(value);
+      publishFile(
+        paths,
+        paths.launchIntent,
+        encodeJson(intent, 'Gateway launch intent'),
+        'Gateway launch intent',
+      );
+      return intent;
+    },
     async acquireLock(kind: WebGatewayProcessLockKind, value: WebGatewayProcessLockIdentity) {
       const identityValue = decodeWebGatewayProcessLockIdentity(value);
       if (identityValue.kind !== kind) fail('corrupt', `${kind} lock identity kind mismatches.`);
@@ -270,6 +306,9 @@ export function createWebGatewayProcessStatePort(
       if (expected.lifecycleLock) removeLock(paths, 'lifecycle', expected.lifecycleLock);
       if (expected.controlCredential) {
         removeCredential(paths, expected.controlCredential, 'Gateway control credential');
+      }
+      if (expected.launchIntent) {
+        removeFile(paths, paths.launchIntent, expected.launchIntent, 'Gateway launch intent');
       }
     },
     async preserveFailure() {
@@ -363,6 +402,7 @@ function assertRoot(paths: WebGatewayProcessStatePaths): void {
   if (
     paths.descriptor !== join(paths.root, 'process.json') ||
     paths.controlCredential !== join(paths.root, 'control.token') ||
+    paths.launchIntent !== join(paths.root, 'launch-intent.json') ||
     paths.instanceLock !== join(paths.root, 'instance.lock') ||
     paths.lifecycleLock !== join(paths.root, 'lifecycle.lock')
   ) {
@@ -433,6 +473,20 @@ function readControlCredential(paths: WebGatewayProcessStatePaths): string | und
   } catch {
     fail('corrupt', 'Gateway control credential is invalid.');
   }
+}
+
+function readLaunchIntent(
+  paths: WebGatewayProcessStatePaths,
+): WebGatewayProcessLaunchIntent | undefined {
+  assertRoot(paths);
+  const bytes = readRegularFile(
+    paths.launchIntent,
+    WEB_GATEWAY_PROCESS_STATE_LIMITS.launchIntentBytes,
+    'Gateway launch intent',
+  );
+  return bytes === undefined
+    ? undefined
+    : parseJson(bytes, (value) => launchIntentSchema.parse(value), 'Gateway launch intent');
 }
 
 function lockPath(paths: WebGatewayProcessStatePaths, kind: WebGatewayProcessLockKind): string {

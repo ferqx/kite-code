@@ -152,3 +152,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0148](0148-workspace-store-layout-generation-migration.md) | accepted | Store 7/新 epoch 采用 Workspace binding、deleted-session tombstone 与 offline copy-and-switch；unknown/corrupt/unowned 整体阻断 |
 | [0149](0149-stable-local-agent-api-facade.md) | accepted | Stable local REST/SSE Agent API复用现有Runtime、Store、Controller、receipt与History authority；不开放remote或Browser mutation |
 | [0150](0150-store-8-canonical-runtime-run-index.md) | accepted | Store 8以canonical Run index、receipt resource result与coverage boundary支撑first-class Run；Store 7历史不推断回填 |
+| [0151](0151-web-gateway-preflight-and-exact-launch-recovery.md) | accepted | Web Gateway在state/spawn前验证asset，并以PID/start-token绑定launch intent与显式recover |

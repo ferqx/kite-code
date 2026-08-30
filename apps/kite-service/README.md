@@ -45,6 +45,10 @@ fence 禁止它与 active Worker topology 双写。`apps/kite-cli` 只保留 ter
   authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
 - Web Gateway shutdown先停止新admission并等待in-flight handler返回fail-closed response，再使用Bun graceful listener stop让已生成的
   HTTP响应刷到loopback socket；deadline仍有界诊断。不得以forced listener stop在响应发送前制造`ECONNRESET`。
+- Web Gateway manager在写credential/launch intent或spawn前验证fixed `index.html`、OpenAPI与Vite JS asset；缺失返回
+  `web_assets_missing`且state保持空。spawn后先取得child exact PID/start-token，再发布hash-bound launch intent与credential；
+  readiness失败只在该exact process confirmed dead时自动清理，alive/uncertain保留证据。显式recover复用同一no-process proof，
+  不能把token-only legacy residue或PID数值当作删除authority。
 - Workspace Worker同一data listener当前提供Agent API `/v1`认证与bounded read façade：one-shot
   `agent_api_observer|agent_api_controller` capability在重新验证Workspace Trust后exchange为60分钟hash-only in-memory context；
   ServerInfo发布`checkpoints/history/sessions`，开放Session list/get、History page与Checkpoint list/preview，其他resource/mutation route保持

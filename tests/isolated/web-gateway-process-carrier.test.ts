@@ -26,7 +26,11 @@ describe('real Gateway carrier ↔ process manager restart', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-gateway-process-carrier-'));
     const staticRoot = join(root, 'web');
     mkdirSync(staticRoot, { mode: 0o700 });
+    mkdirSync(join(staticRoot, 'api-docs'), { mode: 0o700 });
+    mkdirSync(join(staticRoot, 'assets'), { mode: 0o700 });
     writeFileSync(join(staticRoot, 'index.html'), '<!doctype html><title>Kite Observer</title>');
+    writeFileSync(join(staticRoot, 'api-docs', 'openapi.json'), '{}');
+    writeFileSync(join(staticRoot, 'assets', 'index.js'), 'export {};');
     const executable = join(root, 'gateway-executable');
     writeFileSync(executable, 'fixture', { mode: 0o700 });
     const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
@@ -40,7 +44,9 @@ describe('real Gateway carrier ↔ process manager restart', () => {
       executableResolver: {
         resolve: async () => ({ path: executable, mode: 'source' as const, buildId: 'build-1' }),
       },
-      environment: { resolve: async () => ({ cwd: root, env: {} }) },
+      environment: {
+        resolve: async () => ({ cwd: root, env: { KITE_WEB_GATEWAY_STATIC_ROOT: staticRoot } }),
+      },
       process: {
         inspect: async (input: { readonly pid: number; readonly processStartIdentity: string }) =>
           input.pid === 44_001 && input.processStartIdentity === 'gateway-start-1'
@@ -59,6 +65,7 @@ describe('real Gateway carrier ↔ process manager restart', () => {
         },
       },
       managerProcessStartIdentity: 'manager-start-1',
+      readChildProcessStartIdentity: async () => 'gateway-start-1',
       createGatewayInstanceId: () => 'gateway-instance-1',
       operationTimeoutMs: 2_000,
       startupTimeoutMs: 2_000,

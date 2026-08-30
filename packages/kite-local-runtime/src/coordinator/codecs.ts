@@ -11,8 +11,8 @@ export const COORDINATOR_PROTOCOL_VERSION = 1 as const;
 export const COORDINATOR_PROTOCOL_SCHEMA_ = 'kite.local-coordinator-frame.v1' as const;
 export const COORDINATOR_HANDSHAKE_SCHEMA_ = 'kite.local-coordinator-handshake.v1' as const;
 export const COORDINATOR_ENDPOINT_SCHEMA_ = 'kite.local-coordinator-endpoint.v1' as const;
-export const COORDINATOR_PROTOCOL_REVISION_ = 'kite-local-coordinator-protocol-v2' as const;
-export const COORDINATOR_CLIENT_CONTRACT_REVISION_ = 'kite-local-coordinator-client-v2' as const;
+export const COORDINATOR_PROTOCOL_REVISION_ = 'kite-local-coordinator-protocol-v3' as const;
+export const COORDINATOR_CLIENT_CONTRACT_REVISION_ = 'kite-local-coordinator-client-v3' as const;
 
 export const COORDINATOR_LIMITS = Object.freeze({
   maxFrameBytes: 64 * 1024,
@@ -573,6 +573,16 @@ const coordinatorErrorSchema = z
         'wrong_build',
         'wrong_protocol',
         'wrong_peer',
+        'web_assets_missing',
+        'web_recovery_required',
+        'web_identity_uncertain',
+        'web_ready_mismatch',
+        'web_build_mismatch',
+        'web_unsupported',
+        'web_timeout',
+        'web_state_corrupt',
+        'web_outcome_unknown',
+        'web_not_running',
       ])
       .optional(),
   })

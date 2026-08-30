@@ -86,7 +86,8 @@ export interface ParsedArgs {
     | 'maintenance-migrate-run-store'
     | 'web-ensure'
     | 'web-status'
-    | 'web-stop';
+    | 'web-stop'
+    | 'web-recover';
   task?: string;
   threadId: string;
   userId: string;
@@ -163,7 +164,8 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   if (
     args.command === 'web-ensure' ||
     args.command === 'web-status' ||
-    args.command === 'web-stop'
+    args.command === 'web-stop' ||
+    args.command === 'web-recover'
   ) {
     await runWebLifecycleCommand(dependencies.coordinatorClient, args.command, args.webJson);
     return;
@@ -688,7 +690,7 @@ async function runServiceLifecycleCommand(
 
 async function runWebLifecycleCommand(
   coordinator: CoordinatorRequestClient | undefined,
-  command: 'web-ensure' | 'web-status' | 'web-stop',
+  command: 'web-ensure' | 'web-status' | 'web-stop' | 'web-recover',
   json: boolean,
 ): Promise<void> {
   if (!coordinator) throw new Error('Kite Coordinator client is unavailable.');
@@ -701,12 +703,17 @@ async function runWebLifecycleCommand(
         ? await coordinator.discoverWebGateway()
         : await coordinator.stopWebGateway();
   if (response.outcome !== 'ok') {
+    const diagnostic = response.error.diagnostic ?? response.error.code;
     throw new Error(
-      `Kite Web Gateway ${command === 'web-ensure' ? 'ensure' : command === 'web-status' ? 'status' : 'stop'} failed.`,
+      `Kite Web Gateway ${command === 'web-ensure' ? 'ensure' : command === 'web-status' ? 'status' : command === 'web-recover' ? 'recover' : 'stop'} failed: ${diagnostic}.`,
     );
   }
-  if (command === 'web-stop') {
-    console.log('Kite Web Gateway stopped.');
+  if (command === 'web-stop' || command === 'web-recover') {
+    console.log(
+      command === 'web-recover'
+        ? 'Kite Web Gateway recovery completed.'
+        : 'Kite Web Gateway stopped.',
+    );
     return;
   }
   if (command === 'web-status' && response.result.gateway === null) {
@@ -741,27 +748,29 @@ export function parseArgs(argv: string[]): ParsedArgs {
           ? 'web-status'
           : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
             ? 'web-stop'
-            : argv[0] === 'service' && argv[1] === 'ensure'
-              ? 'service-ensure'
-              : argv[0] === 'service' && argv[1] === 'status'
-                ? 'service-status'
-                : argv[0] === 'service' && argv[1] === 'stop'
-                  ? 'service-stop'
-                  : argv[0] === 'service' && argv[1] === 'restart'
-                    ? 'service-restart'
-                    : argv[0] === 'sandbox' && argv[1] === 'setup'
-                      ? 'sandbox-setup'
-                      : argv[0] === 'sandbox' && argv[1] === 'status'
-                        ? 'sandbox-status'
-                        : argv[0] === 'server' && argv[1] === '--stdio'
-                          ? 'server-stdio'
-                          : argv[0] === 'resume'
-                            ? 'resume'
-                            : argv[0] === 'run'
-                              ? 'run'
-                              : argv[0] === 'trace'
-                                ? 'trace'
-                                : 'help';
+            : commandArgv[0] === 'web' && commandArgv[1] === 'recover' && commandArgv.length === 2
+              ? 'web-recover'
+              : argv[0] === 'service' && argv[1] === 'ensure'
+                ? 'service-ensure'
+                : argv[0] === 'service' && argv[1] === 'status'
+                  ? 'service-status'
+                  : argv[0] === 'service' && argv[1] === 'stop'
+                    ? 'service-stop'
+                    : argv[0] === 'service' && argv[1] === 'restart'
+                      ? 'service-restart'
+                      : argv[0] === 'sandbox' && argv[1] === 'setup'
+                        ? 'sandbox-setup'
+                        : argv[0] === 'sandbox' && argv[1] === 'status'
+                          ? 'sandbox-status'
+                          : argv[0] === 'server' && argv[1] === '--stdio'
+                            ? 'server-stdio'
+                            : argv[0] === 'resume'
+                              ? 'resume'
+                              : argv[0] === 'run'
+                                ? 'run'
+                                : argv[0] === 'trace'
+                                  ? 'trace'
+                                  : 'help';
   rejectUnsupportedOptions(argv, command);
   if (command === 'maintenance-migrate-run-store') {
     assertRunStoreMaintenanceArguments(commandArgv);
@@ -989,6 +998,7 @@ function printHelp(): void {
   bun run agent web [--json]
   bun run agent web status [--json]
   bun run agent web stop
+  bun run agent web recover
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup

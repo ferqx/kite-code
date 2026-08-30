@@ -34,9 +34,11 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   完成FIN并幂等释放connection；client `transport.close()`不会留下永久half-open socket，因此`kite web/status`等短命令打印结果后
   能正常退出。client cleanup会在inbox close callback清除外层binding前保留并half-close exact socket；该socket close不等于停止
   Coordinator、Worker或Gateway owner。
-- Coordinator wire version仍为1，current protocol/client revision为v2。v2新增authenticated Native-client-only
+- Coordinator wire version仍为1，current protocol/client revision为v3。v2新增authenticated Native-client-only
   `stopCoordinator` lifecycle request：server先进入draining并返回accepted response，再关闭carrier/Catalog/state；process manager必须
-  以exact PID/start-token确认退出后才报告absent。Worker与Web Gateway peer不能调用该method，unknown response保持outcome-unknown。
+  以exact PID/start-token确认退出后才报告absent。v3新增封闭的`web_*` lifecycle diagnostics，使Native CLI可区分asset、recovery、
+  identity、readiness、build、timeout与state失败；不新增Browser权限或generic RPC。Worker与Web Gateway peer不能调用stop method，
+  unknown response保持outcome-unknown。
 - `./coordinator`还拥有offline Catalog generation copy primitive：在无active Catalog writer、source/target owner路径与schema精确验证后，
   逐字节保留Session metadata、outbox cursor和terminal operation receipt，只重绑target layout generation；Catalog存在未结算operation或
   未登记Workspace scope时不创建target。它不复制Runtime data plane，也不自行触发Store migration。

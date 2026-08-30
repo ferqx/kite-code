@@ -42,7 +42,8 @@ CLI exact parser
   → atomic active-layout pointer switch
 ```
 
-Coordinator wire version仍是1；current protocol/client revision v2只新增本地受认证`stopCoordinator` lifecycle method。Worker和Web Gateway
+Coordinator wire version仍是1；current protocol/client revision v3保留v2新增的本地受认证`stopCoordinator` lifecycle method，并增加
+Web Gateway asset/recovery等闭集diagnostic。Worker和Web Gateway
 peer不能调用它。CLI不能提交`coordinatorStopped=true`之类的boolean，也不能绕过manager/Store检查。
 
 ## 13.4 结果与处理

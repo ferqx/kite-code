@@ -37,6 +37,7 @@ import {
   type WebGatewayProcessSpawnPort,
   type WebGatewayProcessStatePort,
   type WebGatewayReadySignal,
+  WebGatewayStaticAssetsError,
 } from '../../src/web-gateway';
 
 const roots: string[] = [];
@@ -243,9 +244,61 @@ describe('Web Gateway process manager', () => {
     await state.publishControlCredential(credential);
     const manager = createWebGatewayProcessManager(fake.options);
 
-    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'outcome_unknown' });
+    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'recovery_required' });
     expect(fake.spawnCount).toBe(0);
     await expect(state.readControlCredential()).resolves.toBe(credential);
+  });
+
+  test('fails asset preflight before writing launch state or spawning', async () => {
+    const root = makeRoot();
+    const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
+    const fake = createFakeRuntime(state, root);
+    const manager = createWebGatewayProcessManager({
+      ...fake.options,
+      preflightStaticAssets: () => {
+        throw new WebGatewayStaticAssetsError();
+      },
+    });
+
+    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'web_assets_missing' });
+    expect(fake.spawnCount).toBe(0);
+    await expect(state.readLaunchIntent()).resolves.toBeUndefined();
+    await expect(state.readControlCredential()).resolves.toBeUndefined();
+  });
+
+  test('cleans a confirmed-dead readiness failure and retries without a duplicate Gateway', async () => {
+    const root = makeRoot();
+    const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
+    const fake = createFakeRuntime(state, root);
+    fake.failNextReadiness('dead');
+    const manager = createWebGatewayProcessManager(fake.options);
+
+    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'ready_mismatch' });
+    await expect(state.readLaunchIntent()).resolves.toBeUndefined();
+    await expect(state.readControlCredential()).resolves.toBeUndefined();
+    await expect(manager.ensure()).resolves.toMatchObject({
+      registration: { identity: { instanceId: 'gateway-process-1' } },
+    });
+    expect(fake.spawnCount).toBe(2);
+    expect(fake.registrations).toHaveLength(1);
+  });
+
+  test('preserves uncertain readiness state until explicit stop proves the child dead', async () => {
+    const root = makeRoot();
+    const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
+    const fake = createFakeRuntime(state, root);
+    fake.failNextReadiness('uncertain');
+    const manager = createWebGatewayProcessManager(fake.options);
+
+    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'identity_uncertain' });
+    await expect(state.readLaunchIntent()).resolves.toBeDefined();
+    await expect(state.readControlCredential()).resolves.toBeDefined();
+    await expect(manager.ensure()).rejects.toMatchObject({ diagnostic: 'identity_uncertain' });
+    expect(fake.spawnCount).toBe(1);
+    fake.setProcessStatus('dead');
+    await expect(manager.detailedStop()).resolves.toBe('closed');
+    await expect(state.readLaunchIntent()).resolves.toBeUndefined();
+    await expect(state.readControlCredential()).resolves.toBeUndefined();
   });
 
   test('recovers a confirmed-dead Gateway after its child lock was released before parent cleanup', async () => {
@@ -424,7 +477,8 @@ function makeDescriptor(instanceId: string, pid: number): WebGatewayProcessDescr
 }
 
 function createFakeRuntime(state: WebGatewayProcessStatePort, root: string) {
-  let processStatus: 'alive' | 'dead' = 'alive';
+  let processStatus: 'alive' | 'dead' | 'uncertain' = 'alive';
+  let nextReadinessFailure: 'dead' | 'uncertain' | undefined;
   let spawnCount = 0;
   let stopCount = 0;
   let launchCount = 0;
@@ -446,7 +500,15 @@ function createFakeRuntime(state: WebGatewayProcessStatePort, root: string) {
     pid: ready.pid,
     readiness: { release: async () => undefined },
     control,
-    waitForReady: async () => ready,
+    waitForReady: async () => {
+      if (nextReadinessFailure) {
+        processStatus = nextReadinessFailure;
+        nextReadinessFailure = undefined;
+        if (processStatus === 'dead') await instanceLease?.release();
+        throw new Error('synthetic readiness failure');
+      }
+      return ready;
+    },
   };
   const executable = {
     path: join(root, 'gateway-executable'),
@@ -482,6 +544,8 @@ function createFakeRuntime(state: WebGatewayProcessStatePort, root: string) {
     process: {
       inspect: async () => processStatus,
     } as WebGatewayProcessProbePort,
+    preflightStaticAssets: () => undefined,
+    readChildProcessStartIdentity: async () => ready.processStartIdentity,
     registry: {
       register: (value: CoordinatorGatewayRegistration) => {
         registrations.push(value);
@@ -507,6 +571,12 @@ function createFakeRuntime(state: WebGatewayProcessStatePort, root: string) {
     },
     get registrations() {
       return registrations;
+    },
+    failNextReadiness(status: 'dead' | 'uncertain') {
+      nextReadinessFailure = status;
+    },
+    setProcessStatus(status: 'alive' | 'dead' | 'uncertain') {
+      processStatus = status;
     },
   };
 }
