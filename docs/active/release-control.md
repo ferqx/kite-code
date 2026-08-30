@@ -179,9 +179,9 @@ Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` 
 任一步非零都使smoke失败；该本机
 smoke不替代KLSV1-07三平台companion lifecycle qualification。
 CLI、TUI、Service、Coordinator、Worker 与 Web Gateway candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service
-entrypoint无条件await `runKiteServiceMain()`，其余 companion 也各自调用 exact main，source manager也解析同一入口。不得依赖compiled
-standalone中的`import.meta.main`判断启动，
-因为其平台差异会让Windows companion在未发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
+entrypoint无条件await `runKiteServiceMain()`，其余 companion 也各自调用 exact main，source manager也解析同一入口；stable launcher
+同样无条件进入自己的main，而把可导入的readiness contract留在独立无副作用模块。不得依赖compiled standalone中的
+`import.meta.main`判断启动，因为其平台差异会让Windows launcher/companion在未转交命令或发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
 POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。
 长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
 这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke

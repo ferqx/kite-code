@@ -2,6 +2,7 @@
 
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
+import { resolveReadinessForwarding, stripExecutableSuffix } from '../stable-launcher-contract';
 
 /** Stable launcher contract. Keep this source independent from the application bundle. */
 export const STABLE_LAUNCHER_CONTRACT_ = 'kite-stable-release-launcher-v1' as const;
@@ -13,73 +14,6 @@ const RUNTIME_CONTROL_FRAME_SCHEMA = 'kite.runtime-control-frame.v1';
 const MCP_STDIO_CONTROL_DOMAIN = 'mcp-stdio-v1';
 const MCP_STDIO_WRAPPER_PEER_ID = 'mcp-stdio-wrapper';
 const MAX_MCP_CONTROL_LINE_BYTES = 1_048_576;
-
-interface ManagedRunTarget {
-  readonly command: 'service' | 'coordinator' | 'worker' | 'web-gateway';
-  readonly readinessEnvironmentVariable:
-    | 'KITE_SERVICE_READINESS_FD'
-    | 'KITE_COORDINATOR_READY_FD'
-    | 'KITE_WORKER_READY_FD'
-    | 'KITE_WEB_GATEWAY_READY_FD';
-}
-
-const MANAGED_RUN_TARGETS: Readonly<Record<string, ManagedRunTarget>> = Object.freeze({
-  'kite-service': {
-    command: 'service',
-    readinessEnvironmentVariable: 'KITE_SERVICE_READINESS_FD',
-  },
-  'kite-coordinator': {
-    command: 'coordinator',
-    readinessEnvironmentVariable: 'KITE_COORDINATOR_READY_FD',
-  },
-  'kite-worker': {
-    command: 'worker',
-    readinessEnvironmentVariable: 'KITE_WORKER_READY_FD',
-  },
-  'kite-web-gateway': {
-    command: 'web-gateway',
-    readinessEnvironmentVariable: 'KITE_WEB_GATEWAY_READY_FD',
-  },
-});
-
-export interface StableLauncherReadinessForwarding {
-  readonly environmentVariable: ManagedRunTarget['readinessEnvironmentVariable'];
-  readonly fd: 3;
-}
-
-/**
- * Validate the only managed process invocations accepted by a stable companion launcher.
- * CLI/TUI launchers intentionally remain argument-transparent; process companions do not.
- * Readiness must be the manager-owned fd 3 marker so a direct or ambiguous invocation cannot
- * accidentally dispatch to the Service/Coordinator/Worker/Gateway child.
- */
-export function resolveReadinessForwarding(
-  executableName: string,
-  args: readonly string[],
-  environment: Readonly<Record<string, string | undefined>>,
-): StableLauncherReadinessForwarding | undefined {
-  const target = MANAGED_RUN_TARGETS[stripExecutableSuffix(executableName)];
-  if (target === undefined) return undefined;
-  const expected = [target.command, 'run'] as const;
-  if (args.length !== expected.length || args.some((value, index) => value !== expected[index])) {
-    throw new Error(
-      `Stable ${target.command} launcher requires the exact \`${target.command} run\` arguments.`,
-    );
-  }
-  if (environment[target.readinessEnvironmentVariable] !== '3') {
-    throw new Error(
-      `Stable ${target.command} launcher requires manager-owned fd 3 readiness forwarding.`,
-    );
-  }
-  return Object.freeze({
-    environmentVariable: target.readinessEnvironmentVariable,
-    fd: 3,
-  });
-}
-
-function stripExecutableSuffix(name: string): string {
-  return name.endsWith('.exe') ? name.slice(0, -'.exe'.length) : name;
-}
 
 async function main(): Promise<void> {
   const executable = realpathSync.native(process.execPath);
@@ -266,11 +200,9 @@ function isPathWithin(parent: string, child: string): boolean {
   return path === '' || (!path.startsWith(`..${sep}`) && path !== '..');
 }
 
-if (import.meta.main) {
-  await main().catch((error: unknown) => {
-    process.stderr.write(
-      `[kite-release-launcher] ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    process.exitCode = 1;
-  });
-}
+await main().catch((error: unknown) => {
+  process.stderr.write(
+    `[kite-release-launcher] ${error instanceof Error ? error.message : String(error)}\n`,
+  );
+  process.exitCode = 1;
+});

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveReadinessForwarding } from '../../scripts/release/entrypoints/launcher';
+import { resolveReadinessForwarding } from '../../scripts/release/stable-launcher-contract';
 
 const managedCompanions = [
   ['kite-service', 'service', 'KITE_SERVICE_READINESS_FD'],

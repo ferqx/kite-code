@@ -37,4 +37,10 @@ describe('managed companion release entrypoints', () => {
     expect(source).toContain('runStoreMaintenance: localCoordinator.maintenance');
     expect(source).not.toContain('inspectMaintenanceBarrier');
   });
+
+  test('stable launcher enters its main without relying on standalone import.meta.main', () => {
+    const source = readFileSync('scripts/release/entrypoints/launcher.ts', 'utf8');
+    expect(source).toContain('await main().catch');
+    expect(source).not.toContain('import.meta.main');
+  });
 });
