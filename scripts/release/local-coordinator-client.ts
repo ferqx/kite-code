@@ -51,7 +51,11 @@ import {
   createLocalRunStoreMaintenance,
   type LocalRunStoreMaintenance,
 } from './local-run-store-maintenance';
-import { installedBuildIdentity, sourceServiceBuildIdentity } from './local-service-client';
+import {
+  installedBuildIdentity,
+  resolveInstalledReleaseExecutable,
+  sourceServiceBuildIdentity,
+} from './local-service-client';
 
 const COORDINATOR_NEUTRAL_DIRECTORY = 'neutral-cwd';
 const DEFAULT_OPERATION_DEADLINE_MS = 30_000;
@@ -114,10 +118,13 @@ export function createManagedLocalCoordinatorClientComposition(
       ? sourceServiceBuildIdentity(resolve(import.meta.dir, '../..'))
       : undefined;
   const sourceExecutable = resolve(import.meta.dir, 'entrypoints/coordinator.ts');
-  const installedExecutable = join(
-    dirname(process.execPath),
-    process.platform === 'win32' ? 'kite-coordinator.exe' : 'kite-coordinator',
-  );
+  const installedExecutable =
+    executableMode === 'installed'
+      ? resolveInstalledReleaseExecutable('kite-coordinator')
+      : join(
+          dirname(process.execPath),
+          process.platform === 'win32' ? 'kite-coordinator.exe' : 'kite-coordinator',
+        );
   const installedBuildId =
     executableMode === 'installed' ? installedBuildIdentity(installedExecutable) : undefined;
   const expectedBuildId = requireBuildIdentity(

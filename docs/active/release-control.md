@@ -182,9 +182,10 @@ CLI、TUI、Service、Coordinator、Worker 与 Web Gateway candidate都从`scrip
 entrypoint无条件await `runKiteServiceMain()`，其余 companion 也各自调用 exact main，source manager也解析同一入口；stable launcher
 同样无条件进入自己的main，而把可导入的readiness contract留在独立无副作用模块。不得依赖compiled standalone中的
 `import.meta.main`判断启动，因为其平台差异会让Windows launcher/companion在未转交命令或发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
-POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。Windows managed stable launcher
-以同一Node-compatible child-process seam把manager创建的fd3转交给candidate child；readiness仍不经过stdout，也不把Bun额外stdio数字槽当作
-Windows inherited-handle证据。
+POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。launcher传入的
+`KITE_CODE_RELEASE_ROOT`同时是installed Coordinator/Service companion resolver的优先bin root；
+resolver仍由marker、active pointer、`.candidate-id`与manifest重新校验该immutable candidate，不能在Windows standalone把可能仍指向stable slot的
+`process.execPath`目录误当candidate root，也不能从cwd/PATH推导替代路径。
 长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
 这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
 本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。

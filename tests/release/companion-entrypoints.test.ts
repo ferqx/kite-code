@@ -42,7 +42,5 @@ describe('managed companion release entrypoints', () => {
     const source = readFileSync('scripts/release/entrypoints/launcher.ts', 'utf8');
     expect(source).toContain('await main().catch');
     expect(source).not.toContain('import.meta.main');
-    expect(source).toContain('runWindowsManagedTarget(target, args, childEnv)');
-    expect(source).toContain("stdio: ['inherit', 'inherit', 'inherit', 3]");
   });
 });

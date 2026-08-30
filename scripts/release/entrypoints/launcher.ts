@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { spawn as spawnChild } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { resolveReadinessForwarding, stripExecutableSuffix } from '../stable-launcher-contract';
@@ -69,34 +68,24 @@ async function main(): Promise<void> {
 
   const readiness = resolveReadinessForwarding(name, args, process.env);
   const childEnv = readiness === undefined ? env : { ...env, [readiness.environmentVariable]: '3' };
-  if (readiness !== undefined && process.platform === 'win32') {
-    process.exitCode = await runWindowsManagedTarget(target, args, childEnv);
-    return;
-  }
   const child =
     readiness !== undefined
-      ? Bun.spawn([target, ...args], {
-          stdio: ['inherit', 'inherit', 'inherit', Bun.file('/dev/fd/3')],
-          env: childEnv,
-        })
+      ? process.platform === 'win32'
+        ? Bun.spawn([target, ...args], {
+            stdio: ['inherit', 'inherit', 'inherit', 3] as [
+              'inherit',
+              'inherit',
+              'inherit',
+              number,
+            ],
+            env: childEnv,
+          })
+        : Bun.spawn([target, ...args], {
+            stdio: ['inherit', 'inherit', 'inherit', Bun.file('/dev/fd/3')],
+            env: childEnv,
+          })
       : Bun.spawn([target, ...args], { stdio: ['inherit', 'inherit', 'inherit'], env: childEnv });
   process.exitCode = await child.exited;
-}
-
-function runWindowsManagedTarget(
-  target: string,
-  args: readonly string[],
-  env: Record<string, string | undefined>,
-): Promise<number> {
-  return new Promise<number>((resolve, reject) => {
-    const child = spawnChild(target, [...args], {
-      env,
-      stdio: ['inherit', 'inherit', 'inherit', 3],
-      windowsHide: true,
-    });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => resolve(code ?? (signal === null ? 1 : 128)));
-  });
 }
 
 async function runMcpWrapper(

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createManagedLocalServiceClientComposition,
+  resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
@@ -162,6 +163,36 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
         systemHome,
       }),
     ).toThrow('symbolic link');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('installed companion resolution pins the launcher-provided immutable candidate root', () => {
+  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'kite-installed-bin-')));
+  try {
+    const candidateRoot = join(root, 'releases', 'a'.repeat(24));
+    const stableExecutable = join(root, 'bin', 'kite');
+    expect(
+      resolveInstalledReleaseExecutable('kite-coordinator', {
+        candidateRoot,
+        executable: stableExecutable,
+        platform: 'linux',
+      }),
+    ).toBe(join(candidateRoot, 'bin', 'kite-coordinator'));
+    expect(
+      resolveInstalledReleaseExecutable('kite-service', {
+        candidateRoot,
+        executable: stableExecutable,
+        platform: 'win32',
+      }),
+    ).toBe(join(candidateRoot, 'bin', 'kite-service.exe'));
+    expect(() =>
+      resolveInstalledReleaseExecutable('kite-service', {
+        candidateRoot: 'relative-candidate',
+        executable: stableExecutable,
+      }),
+    ).toThrow('not absolute');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

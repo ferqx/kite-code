@@ -121,10 +121,13 @@ export function createManagedLocalServiceClientComposition(
     },
   };
   const sourceExecutable = resolve(import.meta.dir, './entrypoints/service.ts');
-  const installedExecutable = join(
-    dirname(process.execPath),
-    process.platform === 'win32' ? 'kite-service.exe' : 'kite-service',
-  );
+  const installedExecutable =
+    executableMode === 'installed'
+      ? resolveInstalledReleaseExecutable('kite-service')
+      : join(
+          dirname(process.execPath),
+          process.platform === 'win32' ? 'kite-service.exe' : 'kite-service',
+        );
   const native = createNativeKiteServiceManagerComposition({
     home,
     environment,
@@ -366,4 +369,24 @@ export function installedBuildIdentity(executable: string): string {
     throw new Error(`Managed candidate manifest identity is invalid for ${basename(executable)}.`);
   }
   return candidateId;
+}
+
+export function resolveInstalledReleaseExecutable(
+  name: 'kite-service' | 'kite-coordinator',
+  input: {
+    readonly executable?: string;
+    readonly candidateRoot?: string;
+    readonly platform?: NodeJS.Platform;
+  } = {},
+): string {
+  const candidateRoot = input.candidateRoot ?? process.env.KITE_CODE_RELEASE_ROOT;
+  if (candidateRoot !== undefined && !isAbsolute(candidateRoot)) {
+    throw new Error(`Managed candidate root is not absolute for ${name}.`);
+  }
+  const suffix = (input.platform ?? process.platform) === 'win32' ? '.exe' : '';
+  const binRoot =
+    candidateRoot === undefined
+      ? dirname(input.executable ?? process.execPath)
+      : join(candidateRoot, 'bin');
+  return join(binRoot, `${name}${suffix}`);
 }
