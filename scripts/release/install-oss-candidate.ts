@@ -523,6 +523,7 @@ function writeMarker(root: string, marker: InstallMarker): void {
       temporaryName: basename(temporary),
       content,
       flushFileBuffers: false,
+      writeThroughMove: false,
       beforePublish: () => {
         if (!existsSync(markerPath(root))) return;
         const markerStat = lstatSync(markerPath(root));

@@ -48,7 +48,7 @@
   ambient home fallback。Windows ACL/write-through与三平台安装证据仍由release qualification负责，不能由本地测试代替。
 - Windows locked-directory publication接受UTF-8文本或原始bytes，在pinned non-reparse目录内写入，可按owner分别要求
   write-through handle、显式`FlushFileBuffers`与write-through atomic replace。Workspace写入保留完整durability；release installer先以
-  ordinary atomic publish写launcher/pointer，最终marker才执行单次write-through commit，任一部分发布由marker/pointer/checksum交叉验证
+  ordinary atomic publish写launcher/pointer，最终marker临时文件才执行单次write-through write再普通原子替换，任一部分发布由marker/pointer/checksum交叉验证
   fail closed；Bun `fsync`不是Windows发布owner。
 
 ## 测试

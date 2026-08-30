@@ -69,7 +69,8 @@ release contract tests中因read-only file descriptor执行`fsync`返回`EPERM`�
 write-capable Bun `fsync`对每个launcher约长阻塞10秒，使60秒测试超时并触发fixture cleanup级联失败。该run的artifact同样因后续source
 修复作废；installer改为复用Builtin Filesystem现有Windows native locked-directory/write-through publication，一次完成二进制launcher、
 active pointer与marker的locked-directory publication；launcher/pointer先普通原子发布，最终marker才形成一次write-through commit，partial
-publish由marker/pointer/checksum交叉验证fail closed。release不重复高延迟的逐文件flush/move，也不建立第二套Windows I/O owner。
+publish由marker/pointer/checksum交叉验证fail closed。marker write-through write后只做普通原子替换，release不重复高延迟的逐文件flush/move，
+也不建立第二套Windows I/O owner。
 
 后续两个独立Required首轮又在同一“当前轮运行时排队第二条消息”PTY场景复现：第二次模型请求已到达fixture，但回答未进入viewport。
 确定性Native client测试证明，第一轮terminal携带active projection时建立的idle waiter可在event-free idle已结束第一轮后仍处于finally；

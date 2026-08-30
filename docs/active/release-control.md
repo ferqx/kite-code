@@ -165,7 +165,7 @@ installer contract tests的临时Service home也必须由同一state owner primi
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
 这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
 flush 父目录；Windows launcher与active pointer复用Builtin Filesystem的locked-directory ordinary atomic publish，最终marker才以
-`CreateFileW(FILE_FLAG_WRITE_THROUGH)`与`MoveFileExW(WRITE_THROUGH)`形成每次install/upgrade/rollback唯一durable commit。partial publish
+`CreateFileW(FILE_FLAG_WRITE_THROUGH)`写入临时文件，再普通原子替换，形成每次install/upgrade/rollback唯一durability barrier。partial publish
 由marker、pointer、manifest/checksum交叉验证fail closed；release不逐文件调用hosted磁盘高延迟的`FlushFileBuffers`或write-through move，
 也不依赖Bun `fsync`。Windows directory write-through、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
