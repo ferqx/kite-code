@@ -178,7 +178,8 @@ hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native
 installed Coordinator lifecycle预检、真实Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选
 安装、rollback和uninstall。Coordinator预检失败只报告operation/outcome/state/diagnostic与expected/descriptor build identity闭集，不输出
 descriptor、PID、path或credential；成功进程由
-随后TUI复用并由同一fixture exact cleanup回收。
+随后TUI复用并由同一fixture exact cleanup回收。预检注入的candidate root与stable launcher一致使用native canonical identity；Windows长路径与
+8.3/native形式不通过字符串猜测互换，所有后续marker/pointer/manifest校验仍保持strict。
 任一步非零都使smoke失败；该本机
 smoke不替代KLSV1-07三平台companion lifecycle qualification。
 CLI、TUI、Service、Coordinator、Worker 与 Web Gateway candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service

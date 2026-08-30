@@ -393,7 +393,7 @@ async function ensureInstalledCoordinatorReady(
 ): Promise<void> {
   const prefix = dirname(dirname(executablePath));
   const candidateId = readInstallStatus(prefix).currentCandidateId;
-  const candidateRoot = realpathSync(join(prefix, 'releases', candidateId));
+  const candidateRoot = realpathSync.native(join(prefix, 'releases', candidateId));
   const previousCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
   try {
     process.env.KITE_CODE_RELEASE_ROOT = candidateRoot;
