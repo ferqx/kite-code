@@ -177,7 +177,7 @@ Windows release contract fixture在同一Bun test进程内只编译一次byte-id
 hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native PE，避免把多份Bun standalone runtime重复写入每个fixture archive。
 没有`rustc`的独立Windows checkout保留功能等价的Bun fallback；需要嵌入不同argument-log path的CLI仍分别编译。该fixture优化不缓存安装
 结果、不改变production candidate内容，也不能替代后续真实native candidate build/smoke。
-Windows候选在native build前还串行运行Service state ACL/reparse、Coordinator Catalog builder与fresh Store layout owner tests；它们
+Windows候选在native build前还串行运行Service state ACL/reparse、Coordinator Catalog builder与专用fresh Store layout owner tests；它们
 证明native canonical KiteHome、target目录/新Catalog protected owner-only ACL和空布局cutover，仍不能替代随后installed
 Coordinator/TUI process smoke。
 

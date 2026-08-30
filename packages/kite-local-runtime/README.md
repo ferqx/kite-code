@@ -40,8 +40,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
 - `./coordinator`还拥有offline Catalog generation copy primitive：在无active Catalog writer、source/target owner路径与schema精确验证后，
   逐字节保留Session metadata、outbox cursor和terminal operation receipt，只重绑target layout generation；Catalog存在未结算operation或
   未登记Workspace scope时不创建target。它不复制Runtime data plane，也不自行触发Store migration。
-  Windows `initialize_target`只在固定layout目录已验证为current owner后把继承ACL收紧为protected owner-only；新Catalog文件也只在
-  本进程刚创建并记录exact inode后初始化相同ACL。`open_active`与既有target仍只验证，ACL drift不会被普通打开静默修复。
+  Windows fresh target目录由offline layout owner在exact创建回调内初始化protected owner-only ACL；Catalog只验证这些目录。
+  新Catalog文件也只在本进程刚创建并记录exact inode后初始化相同ACL。`open_active`与既有target仍只验证，ACL drift不会被普通打开静默修复。
 - Coordinator capability purpose当前封闭为`native_client`、`web_observer`、`agent_api_observer`、`agent_api_controller`。
   Web Gateway peer只能请求`web_observer`；authenticated Native peer可请求native/Agent API purpose。control plane只转发一次性
   capability与binding metadata，不代理Agent `/v1` data plane，也不保存context token。

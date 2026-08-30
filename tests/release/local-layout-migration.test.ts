@@ -10,7 +10,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openCoordinatorCatalog } from '@kite-ai/kite-local-runtime/coordinator';
-import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+} from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 import {
   createSqliteRuntimeStorage,
@@ -84,7 +87,8 @@ function state(sessionId: string): State {
 
 function fixture(): { readonly root: string; readonly home: string; readonly source: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-layout-maintenance-')));
-  return { root, home: join(root, 'home'), source: join(root, 'legacy.sqlite') };
+  const home = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(join(root, 'home'))).root;
+  return { root, home, source: join(root, 'legacy.sqlite') };
 }
 
 function sourceGuard(

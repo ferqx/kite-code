@@ -20,6 +20,9 @@
   Store 7，不改写 source、不在线迁移、不双写，也不启动 Worker。迁移不定义或复制 Coordinator Catalog DDL；调用方必须注入
   `catalogBuilder`，由 Coordinator/Service owner 用 exact target `catalogPath` 和 path-free Session routing metadata 建立唯一
   Catalog，返回的 digest 由 migration 在 pointer switch 前复核。
+  绝对KiteHome遍历接受OS合法的`~`、空格与大小写路径段，但仍拒绝空段、`.`/`..`、控制字符和超长段；generation、Worker scope等
+  app-owned segment继续走各自更窄schema。目录创建器可向上层Native owner回报本次刚创建的exact路径，用于Windows在创建瞬间初始化
+  owner ACL；adapter本身不依赖或复制Win32安全实现。
 - KRSRUN-02B新增显式offline `migrateSqliteRuntimeLayoutToRunStore`：只有manager提供Coordinator/Worker/Gateway停止且
   Turn/Interaction/effect/external process全部收敛的closed barrier后，才从active Store 7 generation的Catalog与每个Workspace
   no-follow隔离snapshot复制到fresh Store 8 generation。Catalog正文由Coordinator-owned copy port完整保留；Workspace逐表保留

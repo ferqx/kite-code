@@ -9,6 +9,7 @@ import {
   readLocalRuntimeServiceLockIdentity,
   readLocalRuntimeServiceToken,
   resolveLocalRuntimeServiceStatePaths,
+  secureWindowsStatePath,
 } from '@kite-ai/kite-local-runtime/service';
 import {
   createSqliteRuntimeLayoutCutover,
@@ -269,8 +270,7 @@ async function initializeFreshLayout(
   catalogBuilder: SqliteRuntimeMigrationCatalogBuilder,
   createMigrationNonce: (() => string) | undefined,
 ): Promise<LocalLayoutMigrationResult> {
-  ensureSqliteRuntimeLayoutRoot(layout.root);
-  ensureSqliteRuntimeGenerationRoot(layout, targetLayoutGeneration);
+  ensureFreshLayoutTargetDirectories(layout, targetLayoutGeneration);
   const catalogPath = resolveSqliteCatalogPath(layout, targetLayoutGeneration);
   const catalogDigest = await catalogBuilder.build({
     catalogPath,
@@ -326,6 +326,27 @@ async function initializeFreshLayout(
   cutover.markTargetReady();
   cutover.commit();
   return { status: 'initialized', targetLayoutGeneration, catalogPath, catalogDigest };
+}
+
+function ensureFreshLayoutTargetDirectories(
+  layout: SqliteRuntimeLayoutPaths,
+  targetLayoutGeneration: string,
+): void {
+  const initializeCreatedDirectory = (path: string): void =>
+    secureWindowsStatePath(path, 'directory', { allowOwnerInitialization: true });
+  const paths = ensureSqliteRuntimeLayoutRoot(layout.root, initializeCreatedDirectory);
+  // KiteHome itself has already passed the production owner boundary. An existing fixed layout
+  // directory must retain that owner; only an entry created by this exact call may initialize it.
+  if (!existsSync(paths.layouts)) {
+    throw new Error('Fresh layout root was not created.');
+  }
+  secureWindowsStatePath(paths.layouts, 'directory');
+  const ensuredGeneration = ensureSqliteRuntimeGenerationRoot(
+    paths,
+    targetLayoutGeneration,
+    initializeCreatedDirectory,
+  );
+  secureWindowsStatePath(ensuredGeneration, 'directory');
 }
 
 function sourceGuardFor(

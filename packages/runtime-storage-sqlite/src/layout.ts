@@ -167,20 +167,24 @@ export function resolveSqliteRuntimeLayoutPaths(kiteHomeRoot: string): SqliteRun
   });
 }
 
-export function ensureSqliteRuntimeLayoutRoot(kiteHomeRoot: string): SqliteRuntimeLayoutPaths {
+export function ensureSqliteRuntimeLayoutRoot(
+  kiteHomeRoot: string,
+  onCreated?: (path: string) => void,
+): SqliteRuntimeLayoutPaths {
   const paths = resolveSqliteRuntimeLayoutPaths(kiteHomeRoot);
   ensureOwnerDirectory(paths.root);
-  ensureOwnerDirectory(paths.layouts);
+  ensureOwnerDirectory(paths.layouts, onCreated);
   return paths;
 }
 
 export function ensureSqliteRuntimeGenerationRoot(
   paths: SqliteRuntimeLayoutPaths,
   layoutGeneration: string,
+  onCreated?: (path: string) => void,
 ): string {
   assertGeneration(layoutGeneration);
   const root = join(paths.layouts, layoutGeneration);
-  ensureOwnerDirectory(root);
+  ensureOwnerDirectory(root, onCreated);
   return root;
 }
 
@@ -1071,13 +1075,13 @@ function assertSafeSegment(value: string, label: string): void {
   }
 }
 
-function ensureOwnerDirectory(path: string): void {
+function ensureOwnerDirectory(path: string, onCreated?: (path: string) => void): void {
   const absolute = assertAbsolutePath(path);
   const parsed = parse(absolute);
   const tail = relative(parsed.root, absolute);
   let current = parsed.root;
   for (const segment of tail.split(sep).filter(Boolean)) {
-    assertSafeSegment(segment, 'Layout path segment');
+    assertFilesystemSegment(segment, 'Layout path segment');
     current = join(current, segment);
     let created = false;
     if (!existsSync(current)) {
@@ -1095,12 +1099,26 @@ function ensureOwnerDirectory(path: string): void {
     // /Users). Only the private target and directories created by this owner
     // receive the restrictive mode; never chmod a shared ancestor.
     if (created || current === absolute) chmodSync(current, 0o700);
+    if (created) onCreated?.(current);
     if (current === absolute && process.getuid && stat.uid !== process.getuid()) {
       throw new SqliteRuntimeLayoutError(
         'permission',
         'SQLite layout directory owner is unexpected.',
       );
     }
+  }
+}
+
+function assertFilesystemSegment(value: string, label: string): void {
+  if (
+    value.length === 0 ||
+    value.length > 255 ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('\0') ||
+    /\p{Cc}/u.test(value)
+  ) {
+    throw new SqliteRuntimeLayoutError('invalid_path', `${label} is invalid.`);
   }
 }
 

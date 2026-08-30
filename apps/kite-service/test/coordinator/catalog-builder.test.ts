@@ -1,16 +1,35 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openCoordinatorCatalog } from '@kite-ai/kite-local-runtime/coordinator';
+import {
+  createKiteHomeIdentity,
+  ensureLocalRuntimeServiceHome,
+  secureWindowsStatePath,
+} from '@kite-ai/kite-local-runtime/service';
+import {
+  ensureSqliteRuntimeGenerationRoot,
+  ensureSqliteRuntimeLayoutRoot,
+} from '@kite-ai/runtime-storage-sqlite';
 import { createSqliteRuntimeMigrationCatalogBuilder } from '../../src/coordinator/catalog-builder';
 
 function fixture(): { readonly root: string; readonly generation: string; readonly path: string } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-catalog-builder-')));
+  const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-catalog-builder-')));
+  const root = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(temporaryRoot)).root;
   const generation = 'generation-1';
-  const path = join(root, 'layouts', generation, 'catalog.sqlite');
-  mkdirSync(join(root, 'layouts', generation), { recursive: true, mode: 0o700 });
+  const initializeCreatedDirectory = (path: string): void =>
+    secureWindowsStatePath(path, 'directory', { allowOwnerInitialization: true });
+  const layout = ensureSqliteRuntimeLayoutRoot(root, initializeCreatedDirectory);
+  secureWindowsStatePath(layout.layouts, 'directory');
+  const generationRoot = ensureSqliteRuntimeGenerationRoot(
+    layout,
+    generation,
+    initializeCreatedDirectory,
+  );
+  secureWindowsStatePath(generationRoot, 'directory');
+  const path = join(generationRoot, 'catalog.sqlite');
   return { root, generation, path };
 }
 

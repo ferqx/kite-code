@@ -45,9 +45,9 @@ identity、path-free Session metadata、directory revision 与 Gateway singleton
 Kite home在Native no-follow/owner验证完成后统一收敛为`realpathSync.native`身份；Coordinator state、Catalog、Store layout与
 release composition必须复用这一结果。Windows长路径、8.3与大小写投影不能分别成为不同owner identity，否则fresh Catalog必须
 fail closed而不是尝试字符串互换或放宽Catalog目录校验。
-Windows fresh/迁移target的固定`layouts/<generation>`目录先验证current owner，再由offline Catalog owner收紧为protected
-owner-only DACL；新`catalog.sqlite`只有在exclusive创建并记录exact inode后才能初始化同一ACL。active Catalog、existing target、
-foreign owner、reparse或identity drift只验证并fail closed，不能借初始化路径修复。
+Windows fresh target的固定`layouts/<generation>`目录由offline layout owner只在exact创建回调内初始化protected owner-only
+DACL，Catalog只验证目录；新`catalog.sqlite`也只有在exclusive创建并记录exact inode后才能初始化同一ACL。active Catalog、
+existing target、foreign owner、reparse或identity drift只验证并fail closed，不能借初始化路径修复。
 macOS Coordinator/Worker process identity的`ps lstart`读取固定使用`LC_ALL=C`与`LANG=C`，不继承TUI/CLI shell locale；
 `zh_CN.UTF-8`等本地化输出不能使同一PID/start token在descriptor writer与client probe之间漂移。该规范化只稳定OS
 identity读取，不把PID数值本身升级为cleanup authority；token不匹配、读取失败或PID reuse仍保持uncertain/fail closed。

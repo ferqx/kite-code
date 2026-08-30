@@ -609,22 +609,14 @@ function validateCatalogStorageIdentity(storage: CoordinatorCatalogStorageIdenti
   if (!isAbsolute(storage.catalogPath) || resolve(storage.catalogPath) !== resolve(expected)) {
     throw new Error('Coordinator Catalog path is not the active layout identity.');
   }
-  const targetExists = catalogEntryExists(expected);
-  const directories = [
+  for (const directory of [
     storage.canonicalKiteHomeRoot,
     join(storage.canonicalKiteHomeRoot, 'layouts'),
     join(storage.canonicalKiteHomeRoot, 'layouts', storage.layoutGeneration),
-  ] as const;
-  for (const [index, directory] of directories.entries()) {
-    if (storage.mode === 'initialize_target' && !targetExists && index > 0) {
-      // The offline layout owner has already created these fixed target directories. On
-      // Windows their inherited ACE is not itself protected, so verify the current owner before
-      // converting it to the same protected owner-only state used by every Native state owner.
-      secureWindowsStatePath(directory, 'directory');
-    }
+  ]) {
     assertCatalogDirectory(directory);
   }
-  if (targetExists) {
+  if (catalogEntryExists(expected)) {
     assertCatalogPath(expected);
     const canonical = realpathSync.native(expected);
     if (canonical !== resolve(expected)) {

@@ -83,7 +83,7 @@ describe('ordinary open-source release candidate workflow', () => {
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
       'bun test packages/kite-local-runtime/test/isolated/service-state.test.ts',
       'apps/kite-service/test/coordinator/catalog-builder.test.ts',
-      'tests/release/local-layout-migration.test.ts',
+      'tests/release/windows-fresh-layout.test.ts',
       'bun run release:build',
     ];
     let previousIndex = -1;
