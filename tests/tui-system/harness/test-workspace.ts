@@ -26,7 +26,13 @@ import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
 } from '@kite-ai/kite-local-runtime/service';
-import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
+import {
+  readSqliteActiveLayoutPointer,
+  readSqliteRuntimeLayoutManifest,
+  resolveSqliteRuntimeLayoutPaths,
+  resolveSqliteWorkspaceStorePath,
+  sqliteCurrentRuntimeStorePath,
+} from '@kite-ai/runtime-storage-sqlite';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -108,7 +114,21 @@ function persistedRuntimeObservationFailure(
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  return sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
+  const kiteHome = join(workspace.home, '.kite-code');
+  const layout = resolveSqliteRuntimeLayoutPaths(kiteHome);
+  const pointer = readSqliteActiveLayoutPointer(layout);
+  if (pointer) {
+    const manifest = readSqliteRuntimeLayoutManifest(layout, pointer.generation);
+    if (!manifest) throw new Error('Active Runtime layout manifest is unavailable.');
+    if (manifest.workspaceStores.length > 1) {
+      throw new Error('TUI fixture Runtime Store identity is ambiguous.');
+    }
+    const store = manifest.workspaceStores[0];
+    if (store) {
+      return resolveSqliteWorkspaceStorePath(layout, pointer.generation, store.workerScopeId);
+    }
+  }
+  return sqliteCurrentRuntimeStorePath(join(kiteHome, 'checkpoints.sqlite'));
 }
 
 /**

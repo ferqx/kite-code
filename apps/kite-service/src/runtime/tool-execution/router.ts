@@ -24,7 +24,7 @@ import {
   isBuiltinSubagentTaskToolName,
   normalizeAskUserRequest,
 } from '@kite-ai/builtin-runtime/subagent';
-import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import type { RuntimeCommandContext, SubAgentEventSink } from '@kite-ai/runtime-contract';
 import { getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostToolCallSnapshot,
@@ -84,6 +84,7 @@ import {
 } from '#kite-service/runtime/tool-execution/execution-surface-guard';
 import { projectInstructionGuardFailure } from '#kite-service/runtime/tool-execution/project-instruction-guard';
 import { appPreparedShellExecutionPort } from '#kite-service/sandbox/prepared-tool-pipeline';
+import type { WorkspaceEffectDispatchComposition } from '#kite-service/workspace-worker/effect-adapter';
 import type {
   CapabilityExecutionPort,
   PreparedToolInvocation,
@@ -119,6 +120,14 @@ export async function executeAppRuntimeTools(params: {
   toolPipelineComposition: AppToolPipelineComposition;
   /** The one effect-scoped Host/Builtin attempt runtime for ordinary cutover operations. */
   ordinaryToolPipelineAttemptRuntime?: AppOrdinaryToolPipelineAttemptRuntime;
+  /** Optional Worker-owned effect gate; absent on the legacy Service route. */
+  workspaceEffect?: Readonly<WorkspaceEffectDispatchComposition> & {
+    readonly context: Readonly<
+      import('#kite-service/workspace-worker/effect-adapter').WorkspaceEffectAttemptContext
+    >;
+  };
+  /** Admission-time command context pinned by the Runtime Host. */
+  commandContext?: Readonly<RuntimeCommandContext>;
   /** The dedicated private Task runtime sharing the same effect-scoped Host coordinator. */
   taskToolPipelineAttemptRuntime?: AppTaskToolPipelineAttemptRuntime;
   providerReadinessCoordinator?: ProviderReadinessCoordinator;
@@ -917,6 +926,9 @@ export async function executeAppRuntimeTools(params: {
               reservationIds: Object.freeze(reservationIds),
             }),
             threadId: liveState.session.threadId,
+            ...(params.commandContext === undefined
+              ? {}
+              : { commandContext: params.commandContext }),
             attempt: ordinaryAttempt,
             allowSafeReadRetry,
             taskId: call.taskId ?? liveState.activeTaskId ?? null,
@@ -934,6 +946,7 @@ export async function executeAppRuntimeTools(params: {
                   })
                 : Object.freeze({ toolCallId }),
             capabilityExecution,
+            ...(params.workspaceEffect ? { workspaceEffect: params.workspaceEffect } : {}),
             signal,
             mechanismResources: Object.freeze({
               workspace: liveState.session.workspace,

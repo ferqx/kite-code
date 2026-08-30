@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   ExecutionStatusSnapshot,
   KiteAppControlClient,
@@ -46,6 +49,8 @@ import {
 } from '../../../src/carrier';
 import { KITE_SERVICE_INSTANCE_HANDSHAKE_PATH } from '../../../src/carrier/native-loopback-carrier';
 import type { KiteServiceApplicationPort } from '../../../src/carrier/ports';
+import { createSingleServiceWebLifecycle } from '../../../src/web-gateway/service-lifecycle';
+import { createWebObserverCore } from '../../../src/web-observer';
 
 const ACCESS_TOKEN = 'A'.repeat(43);
 const CONTROL_TOKEN = 'B'.repeat(43);
@@ -62,6 +67,7 @@ const otherWorkspace: KiteWorkspaceIdentity = {
 };
 
 const carriers: KiteServiceCarrier[] = [];
+const webAssetRoots: string[] = [];
 
 function providerSnapshot(): ProviderModelSnapshot {
   return {
@@ -74,9 +80,35 @@ function providerSnapshot(): ProviderModelSnapshot {
 
 afterEach(async () => {
   await Promise.all(carriers.splice(0).map((carrier) => carrier.close()));
+  while (webAssetRoots.length > 0) {
+    rmSync(webAssetRoots.pop()!, { recursive: true, force: true });
+  }
 });
 
 describe('Kite Service Native loopback carrier', () => {
+  test('dispatches /v1 only to the injected Agent API façade on the existing listener', async () => {
+    const requests: string[] = [];
+    const fixture = createFixture({
+      agentApi: {
+        handle(request) {
+          requests.push(new URL(request.url).pathname + new URL(request.url).search);
+          return new Response('agent-api', { status: 200 });
+        },
+      },
+    });
+    const carrier = track(fixture.carrier);
+    expect(await fetch(`${carrier.origin}/v1`).then((response) => response.text())).toBe(
+      'agent-api',
+    );
+    expect(
+      await fetch(`${carrier.origin}/v1/sessions?limit=1`).then((response) => response.text()),
+    ).toBe('agent-api');
+    expect(requests).toEqual(['/v1', '/v1/sessions?limit=1']);
+
+    const unavailable = track(createFixture().carrier);
+    expect(await fetch(`${unavailable.origin}/v1`).then((response) => response.status)).toBe(404);
+  });
+
   test('serves fixed health/readiness and separates access/control credentials', async () => {
     const fixture = createFixture();
     const carrier = track(fixture.carrier);
@@ -134,6 +166,105 @@ describe('Kite Service Native loopback carrier', () => {
       body: JSON.stringify({ workspace: workspace.canonicalPath }),
     });
     expect(cookie.status).toBe(401);
+  });
+
+  test('attaches Browser routes to the exact Service listener and Web stop leaves Native routes alive', async () => {
+    const root = createWebAssets();
+    const fixture = createFixture();
+    const carrier = track(fixture.carrier);
+    const web = createSingleServiceWebLifecycle({
+      createRouteOwner: (assets) =>
+        carrier.attachWebGateway({
+          staticAssetRoot: assets.root,
+          createObserver: createEmptyWebObserver,
+        }),
+    });
+
+    const first = await web.ensure(root);
+    expect(first.outcome).toBe('ready');
+    if (first.outcome !== 'ready') throw new Error('expected Browser routes to be ready');
+    expect(first.origin).toBe(carrier.origin);
+    expect(new URL(first.launchUrl).origin).toBe(carrier.origin);
+    expect(await fetch(`${carrier.origin}/`).then((response) => response.text())).toBe(
+      '<html>single service</html>',
+    );
+    expect(await fetch(`${carrier.origin}/healthz`).then((response) => response.text())).toBe('ok');
+
+    const launchToken = new URL(first.launchUrl).hash.slice(1);
+    const bootstrap = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
+      method: 'POST',
+      headers: browserJsonHeaders(carrier.origin),
+      body: JSON.stringify({ launchToken }),
+    });
+    expect(bootstrap.status).toBe(200);
+    const setCookie = bootstrap.headers.get('set-cookie');
+    if (!setCookie) throw new Error('Browser bootstrap omitted its cookie');
+    const cookie = setCookie.split(';', 1)[0]!;
+    const tabResponse = await fetch(`${carrier.origin}/_kite/web/tabs`, {
+      method: 'POST',
+      headers: browserJsonHeaders(carrier.origin, cookie),
+      body: JSON.stringify({ schema: 'kite.app.web.tab-create-request.v1' }),
+    });
+    expect(tabResponse.status).toBe(200);
+    const tab = (await tabResponse.json()) as {
+      readonly tabHandle: string;
+      readonly connectionGeneration: number;
+    };
+
+    const browserOnNative = await fetch(
+      `${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`,
+      {
+        method: 'POST',
+        headers: browserJsonHeaders(carrier.origin, cookie),
+        body: '{}',
+      },
+    );
+    expect(browserOnNative.status).toBe(401);
+    const nativeOnBrowser = await fetch(`${carrier.origin}/_kite/web/directory`, {
+      method: 'POST',
+      headers: {
+        ...browserJsonHeaders(carrier.origin),
+        authorization: `${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({ schema: 'kite.app.web.directory-request.v1' }),
+    });
+    expect(nativeOnBrowser.status).toBe(403);
+    const mutation = await fetch(`${carrier.origin}/_kite/web/mutate`, {
+      method: 'POST',
+      headers: browserJsonHeaders(carrier.origin, cookie, tab.tabHandle),
+      body: '{}',
+    });
+    expect(mutation.status).toBe(404);
+
+    const browserSocket = await openBrowserSocket(carrier, cookie);
+    const browserMessages = new SocketMessages(browserSocket);
+    browserSocket.send(JSON.stringify({ type: 'initialize', tabHandle: tab.tabHandle }));
+    await expect(browserMessages.next()).resolves.toEqual({
+      schema: 'kite.app.web.ws-initialized.v1',
+      type: 'initialized',
+      connectionGeneration: tab.connectionGeneration,
+    });
+    browserSocket.close(1000, 'done');
+    expect(() =>
+      carrier.attachWebGateway({
+        staticAssetRoot: root,
+        createObserver: createEmptyWebObserver,
+      }),
+    ).toThrow('already has');
+
+    await expect(web.stop()).resolves.toEqual({
+      outcome: 'applied',
+      state: 'absent',
+    });
+    expect(await fetch(`${carrier.origin}/`).then((response) => response.status)).toBe(404);
+    expect(await fetch(`${carrier.origin}/readyz`).then((response) => response.text())).toBe(
+      'ready',
+    );
+
+    const restarted = await web.ensure(root);
+    expect(restarted.outcome).toBe('ready');
+    expect(restarted.outcome === 'ready' ? restarted.origin : '').toBe(carrier.origin);
+    await web[Symbol.asyncDispose]();
   });
 
   test('serves an authenticated exact instance handshake and stops serving it after close', async () => {
@@ -196,7 +327,10 @@ describe('Kite Service Native loopback carrier', () => {
     expect(fixture.bound[0]?.workspace).toEqual(workspace);
 
     socket.send(JSON.stringify(pingRequest()));
-    expect(await messages.next()).toMatchObject({ id: 'ping', result: { status: 'ok' } });
+    expect(await messages.next()).toMatchObject({
+      id: 'ping',
+      result: { status: 'ok' },
+    });
 
     const replay = await expectSocketRejected(carrier, first.ticket);
     expect(replay).toBe(true);
@@ -227,10 +361,16 @@ describe('Kite Service Native loopback carrier', () => {
 
     const oversized = await openSocket(carrier, (await connectWorkspace(carrier)).ticket);
     const oversizedClosed = closed(oversized);
-    oversized.send(JSON.stringify({ value: 'x'.repeat(RUNTIME_PROTOCOL_LIMITS.maxMessageBytes) }));
+    oversized.send(
+      JSON.stringify({
+        value: 'x'.repeat(RUNTIME_PROTOCOL_LIMITS.maxMessageBytes),
+      }),
+    );
     expect((await oversizedClosed).code).toBe(1009);
 
-    const rejectedFixture = createFixture({ requestIp: () => ({ address: '192.0.2.1' }) });
+    const rejectedFixture = createFixture({
+      requestIp: () => ({ address: '192.0.2.1' }),
+    });
     const rejectedCarrier = track(rejectedFixture.carrier);
     expect(
       await fetch(`${rejectedCarrier.origin}/healthz`).then((response) => response.status),
@@ -485,7 +625,10 @@ describe('Kite Service Native loopback carrier', () => {
 
   test('rejects a delegate that tries to change the ticket-bound Workspace', async () => {
     const fixture = createFixture({
-      authorize: async () => ({ allowed: true, workspace: otherWorkspace.canonicalPath }),
+      authorize: async () => ({
+        allowed: true,
+        workspace: otherWorkspace.canonicalPath,
+      }),
     });
     const carrier = track(fixture.carrier);
     const socket = await openSocket(carrier, (await connectWorkspace(carrier)).ticket);
@@ -517,7 +660,10 @@ describe('Kite Service Native loopback carrier', () => {
     socket.close();
     await socketClosed;
     await eventually(() => fixture.diagnostics.includes('socket_closed'));
-    authorization.resolve({ allowed: true, workspace: workspace.canonicalPath });
+    authorization.resolve({
+      allowed: true,
+      workspace: workspace.canonicalPath,
+    });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(fixture.bound).toEqual([]);
@@ -539,7 +685,9 @@ describe('Kite Service Native loopback carrier', () => {
   });
 
   test('does not alias a live ticket when the random source repeats', async () => {
-    const fixture = createFixture({ randomBytes: (size) => new Uint8Array(size).fill(7) });
+    const fixture = createFixture({
+      randomBytes: (size) => new Uint8Array(size).fill(7),
+    });
     const carrier = track(fixture.carrier);
     const first = await connectWorkspace(carrier);
     const duplicate = await fetch(`${carrier.origin}${KITE_SERVICE_CONNECT_PATH}`, {
@@ -572,7 +720,10 @@ describe('Kite Service Native loopback carrier', () => {
 
   test('does not issue a ticket after carrier close wins a deferred Workspace admission', async () => {
     const admission = deferred<
-      | { readonly outcome: 'admitted'; readonly workspace: KiteWorkspaceIdentity }
+      | {
+          readonly outcome: 'admitted';
+          readonly workspace: KiteWorkspaceIdentity;
+        }
       | { readonly outcome: 'untrusted' | 'unavailable' }
     >();
     const entered = deferred<void>();
@@ -600,7 +751,10 @@ describe('Kite Service Native loopback carrier', () => {
   });
 
   test('does not publish deferred History, App, credential, or control results after close', async () => {
-    const history = deferred<{ readonly entries: []; readonly hasMore: false }>();
+    const history = deferred<{
+      readonly entries: [];
+      readonly hasMore: false;
+    }>();
     const historyEntered = deferred<void>();
     const historyDrain = deferred<void>();
     const historyFixture = createFixture({
@@ -696,7 +850,10 @@ describe('Kite Service Native loopback carrier', () => {
     credentialDrain.resolve();
     await credentialClosing;
 
-    const control = deferred<{ readonly outcome: 'applied'; readonly state: 'ready' }>();
+    const control = deferred<{
+      readonly outcome: 'applied';
+      readonly state: 'ready';
+    }>();
     const controlEntered = deferred<void>();
     const controlDrain = deferred<void>();
     const controlFixture = createFixture({
@@ -802,7 +959,10 @@ describe('Kite Service Native loopback carrier', () => {
 
       if (shouldClose) {
         await expect(sent.promise).rejects.toThrow('rejected outbound');
-        expect(closeInfo).toEqual({ code: 1013, reason: 'outbound_queue_full' });
+        expect(closeInfo).toEqual({
+          code: 1013,
+          reason: 'outbound_queue_full',
+        });
       } else {
         await sent.promise;
         expect(closeInfo).toBeUndefined();
@@ -888,7 +1048,9 @@ describe('Kite Service Native loopback carrier', () => {
       'hard ceiling',
     );
     expect(() =>
-      createFixture({ limits: { maxOutboundMessages: Number.MAX_SAFE_INTEGER } }),
+      createFixture({
+        limits: { maxOutboundMessages: Number.MAX_SAFE_INTEGER },
+      }),
     ).toThrow('hard ceiling');
   });
 });
@@ -917,11 +1079,17 @@ function createFixture(
     readonly now?: () => number;
     readonly randomBytes?: (size: number) => Uint8Array;
     readonly limits?: KiteServiceCarrierLimits;
+    readonly agentApi?: {
+      handle(request: Request): Response | Promise<Response>;
+    };
   } = {},
 ): {
   readonly carrier: KiteServiceCarrier;
   readonly application: KiteServiceApplicationPort;
-  readonly bound: Array<{ connectionId: string; workspace: KiteWorkspaceIdentity }>;
+  readonly bound: Array<{
+    connectionId: string;
+    workspace: KiteWorkspaceIdentity;
+  }>;
   readonly closed: string[];
   readonly stopCalls: number;
   readonly historyCalls: number;
@@ -929,7 +1097,10 @@ function createFixture(
   readonly credentialCalls: number;
   readonly diagnostics: string[];
 } {
-  const bound: Array<{ connectionId: string; workspace: KiteWorkspaceIdentity }> = [];
+  const bound: Array<{
+    connectionId: string;
+    workspace: KiteWorkspaceIdentity;
+  }> = [];
   const closed: string[] = [];
   let stopCalls = 0;
   let historyCalls = 0;
@@ -943,7 +1114,11 @@ function createFixture(
       sessionId: 'session-1',
       revision: 1,
     }),
-    query: async (query) => ({ status: 'ok', queryType: query.type, sessions: [] }),
+    query: async (query) => ({
+      status: 'ok',
+      queryType: query.type,
+      sessions: [],
+    }),
     subscribe: () => ({
       [Symbol.asyncIterator]: () => ({
         next: async () => await new Promise<IteratorResult<never>>(() => undefined),
@@ -956,13 +1131,18 @@ function createFixture(
       {
         runtime,
         admission: {
-          authorize: async () => ({ allowed: true, workspace: workspace.canonicalPath }),
+          authorize: async () => ({
+            allowed: true,
+            workspace: workspace.canonicalPath,
+          }),
         },
       },
       { serverInfo: { version: 'service-test', instanceId: 'instance-1' } },
     );
   if (input.beginDraining) {
-    Object.defineProperty(server, 'beginDraining', { value: input.beginDraining });
+    Object.defineProperty(server, 'beginDraining', {
+      value: input.beginDraining,
+    });
   }
   const snapshots = fakeAppControl();
   const application: KiteServiceApplicationPort = {
@@ -974,7 +1154,11 @@ function createFixture(
           historyCalls += 1;
           return { entries: [], hasMore: false };
         }),
-      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      listEvents: async () => ({
+        entries: [],
+        hasMore: false,
+        observedLastSequence: 0,
+      }),
       loadSession: async () => ({
         session: {
           sessionId: 'session-1',
@@ -983,6 +1167,7 @@ function createFixture(
           updatedAt: 0,
           lastSequence: 0,
         },
+        records: [],
         events: [],
         interactionMode: 'auto',
         recovery: 'normal',
@@ -1043,6 +1228,7 @@ function createFixture(
     buildId: 'dev:0123456789012345678901234567890123456789',
     accessToken: ACCESS_TOKEN,
     controlToken: CONTROL_TOKEN,
+    ...(input.agentApi ? { agentApi: input.agentApi } : {}),
     ...(input.isReady ? { isReady: input.isReady } : {}),
     requestIp: input.requestIp,
     limits: {
@@ -1081,7 +1267,10 @@ function createFixture(
 
   function fakeAppControl(): KiteAppControlClient {
     const currentProviderSnapshot = providerSnapshot();
-    const externalReadScope = { roots: [], digest: `sha256:${'0'.repeat(64)}` as const };
+    const externalReadScope = {
+      roots: [],
+      digest: `sha256:${'0'.repeat(64)}` as const,
+    };
     const trustQuery: WorkspaceTrustQueryResponse = {
       schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
       workspace,
@@ -1249,6 +1438,54 @@ function jsonHeaders(authorization: string): Record<string, string> {
   return { authorization, 'content-type': 'application/json' };
 }
 
+function browserJsonHeaders(
+  origin: string,
+  cookie?: string,
+  tabHandle?: string,
+): Record<string, string> {
+  return {
+    origin,
+    'content-type': 'application/json',
+    'sec-fetch-site': 'same-origin',
+    'sec-fetch-mode': 'cors',
+    ...(cookie ? { cookie } : {}),
+    ...(tabHandle ? { 'x-kite-web-tab': tabHandle } : {}),
+  };
+}
+
+async function openBrowserSocket(carrier: KiteServiceCarrier, cookie: string): Promise<WebSocket> {
+  return new Promise<WebSocket>((resolvePromise, reject) => {
+    const socket = new WebSocket(`${carrier.origin.replace('http:', 'ws:')}/_kite/web/client`, {
+      headers: {
+        Cookie: cookie,
+        Origin: carrier.origin,
+        'Sec-Fetch-Mode': 'websocket',
+        'Sec-Fetch-Site': 'same-origin',
+      },
+    } as unknown as string[]);
+    const timer = setTimeout(
+      () => reject(new Error('Single-Service Browser socket open timed out')),
+      1_000,
+    );
+    socket.addEventListener(
+      'open',
+      () => {
+        clearTimeout(timer);
+        resolvePromise(socket);
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      'error',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('Single-Service Browser socket failed to open'));
+      },
+      { once: true },
+    );
+  });
+}
+
 function initializeRequest() {
   return {
     jsonrpc: '2.0' as const,
@@ -1256,13 +1493,22 @@ function initializeRequest() {
     method: 'initialize' as const,
     params: {
       protocolVersion: 1,
-      clientInfo: { name: 'carrier-test', version: '1', instanceId: 'client-1' },
+      clientInfo: {
+        name: 'carrier-test',
+        version: '1',
+        instanceId: 'client-1',
+      },
     },
   };
 }
 
 function pingRequest() {
-  return { jsonrpc: '2.0' as const, id: 'ping', method: 'server/ping' as const, params: {} };
+  return {
+    jsonrpc: '2.0' as const,
+    id: 'ping',
+    method: 'server/ping' as const,
+    params: {},
+  };
 }
 
 function closed(socket: WebSocket): Promise<CloseEvent> {
@@ -1470,4 +1716,41 @@ function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity
     left.projectId === right.projectId &&
     left.workspaceDigest === right.workspaceDigest
   );
+}
+
+function createWebAssets(): string {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-service-web-routes-')));
+  webAssetRoots.push(root);
+  mkdirSync(join(root, 'api-docs'));
+  mkdirSync(join(root, 'assets'));
+  writeFileSync(join(root, 'index.html'), '<html>single service</html>');
+  writeFileSync(join(root, 'api-docs', 'openapi.json'), '{}');
+  writeFileSync(join(root, 'assets', 'app.js'), 'export {};');
+  return root;
+}
+
+function createEmptyWebObserver(binding: {
+  readonly tabHandle: string;
+  readonly connectionGeneration: number;
+}) {
+  return createWebObserverCore({
+    directory: { list: () => [] },
+    history: {
+      loadSession: async (sessionId) => ({
+        sessionId,
+        lastSequence: 0,
+        records: [],
+      }),
+    },
+    live: {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: async () => ({ done: true, value: undefined as never }),
+        }),
+      }),
+    },
+    gatewayInstanceId: 'instance-1',
+    contractRevision: 'kite-app-web-observer-v1',
+    createTabBinding: () => binding,
+  });
 }

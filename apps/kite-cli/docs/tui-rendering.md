@@ -95,8 +95,11 @@
   以同一个50ms frame合并累计reasoning/text（每类保留最新值且reasoning先于text），并按tool/stream合并progress；
   durable边界与Turn结束前先flush。数据源切换不得改变文本的既有 Markdown 提交语义：普通文本按完整段落、
   列表按完整 item、已识别代码/表格组件按完整内部行推进；不得把普通文本拆成逐行消息块，也不得把同一阶段的
-  Thinking移到独立dynamic区域。前台Native client dispatch completed reasoning后必须等待Ink presentation flush，再消费下一条text、
-  terminal或interaction事件；整轮完成后的单次flush不能替代这个事件间屏障。
+  Thinking移到独立dynamic区域。前台Native client dispatch completed reasoning后先等待Ink presentation flush，再消费下一条text、
+  terminal或interaction事件；整轮完成后的flush不能替代这个事件间屏障。两处等待都以1秒为上限：正常路径等待真实commit，
+  但迟到/失败的UI promise不能停止canonical event消费或prompt FIFO；deadline不是用固定延迟猜测正常渲染时序。
+- 不完整的普通paragraph继续只存在于request-scoped cumulative text buffer，不提前进入视觉树。terminal `model.responded.summary`
+  是optional；缺失时必须用同request最后一条已接受delta收口尾段，不能因没有summary而删除Thought后留下空回答。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
   越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。

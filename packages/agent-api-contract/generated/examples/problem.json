@@ -1,0 +1,1 @@
+{"code":"revision_conflict","current_revision":42,"request_id":"request-1","retryable":false,"schema":"kite.agent-api.problem.v1","status":412,"title":"Session revision changed","type":"urn:kite:agent-api:problem:revision_conflict"}

@@ -11,6 +11,7 @@ import {
   decodeCurrentRuntimeEventJson,
   encodeCurrentAgentStateJson,
   encodeCurrentRuntimeEventJson,
+  hasUnresolvedToolFailures,
   isCurrentAgentStateSnapshot,
   isCurrentPendingInteractionRequest,
   LEGACY_STATE26_FORMAT_EPOCH,
@@ -24,6 +25,51 @@ import type { RuntimeCompatibleRecordFormat, RuntimeSnapshotCodec } from '../sto
 
 export interface RuntimeHostStateStorageBinding {
   readonly codec: RuntimeSnapshotCodec<RuntimeEvent, AgentState>;
+}
+
+const TERMINAL_TOOL_STATUSES = new Set([
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'exhausted',
+]);
+const TERMINAL_APPROVAL_STATUSES = new Set([
+  'succeeded',
+  'failed',
+  'cancelled',
+  'rejected',
+  'expired',
+]);
+
+/** Exact State half of a Runtime Store generation offline-maintenance barrier. */
+export function isRuntimeHostStateSettledForMigration(state: Readonly<AgentState>): boolean {
+  if (state.turn.status === 'active' || state.interactions.kind !== 'idle') return false;
+  if (state.terminalOutcome?.knownExternalEffects === 'unknown') return false;
+  if (
+    Object.values(state.tools.calls).some((call) => !TERMINAL_TOOL_STATUSES.has(call.status)) ||
+    Object.values(state.capabilities.invocations).some((invocation) =>
+      ['recorded', 'running', 'unknown'].includes(invocation.status),
+    ) ||
+    Object.values(state.modelInvocations).some((invocation) =>
+      ['prepared', 'dispatching'].includes(invocation.status),
+    ) ||
+    Object.values(state.providerReadiness).some((readiness) =>
+      ['prepared', 'attempted'].includes(readiness.status),
+    ) ||
+    [...state.pendingApprovals.values()].some(
+      (approval) => !TERMINAL_APPROVAL_STATUSES.has(approval.status),
+    ) ||
+    [...state.approvalReceipts.values()].some((receipt) => receipt.status !== 'terminal') ||
+    Object.values(state.skills.frames).some((frame) => frame.status === 'active') ||
+    Object.keys(state.suspendedSubagents).length !== 0 ||
+    state.providerAdmission.pending.length !== 0 ||
+    hasUnresolvedToolFailures(state.toolRecovery) ||
+    !canForkAgentState(state)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {

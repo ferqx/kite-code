@@ -336,6 +336,27 @@ export const RUNTIME_PROTOCOL_QUERY_SCHEMA_ = z.discriminatedUnion('type', [
       checkpointId: identifier,
     })
     .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('get_run'),
+      sessionId: identifier,
+      runId: identifier,
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('list_runs'),
+      sessionId: identifier,
+      status: z
+        .enum(['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'unknown'])
+        .optional(),
+      phase: z.enum(['planning', 'building']).optional(),
+      cursor: z.object({ createdRevision: safeRevision, runId: identifier }).strict().optional(),
+      limit: safeRevision.min(1).max(200),
+    })
+    .strict(),
 ]);
 export type RuntimeProtocolQuery = z.infer<typeof RUNTIME_PROTOCOL_QUERY_SCHEMA_>;
 export const RUNTIME_SUBSCRIPTION_SPEC_SCHEMA_ = z.discriminatedUnion('scope', [
@@ -610,12 +631,79 @@ const contextStatus = z
     compactionAvailable: z.boolean(),
   })
   .strict();
+const runTerminal = z
+  .object({
+    reasonCode: identifier,
+    safeRetry: z.boolean(),
+    recoveryEntry: z.enum(['none', 'retry', 'reconcile', 'new_run', 'operator_action']),
+    outcomeId: identifier.optional(),
+  })
+  .strict();
+const runProjection = z
+  .object({
+    schema: z.literal('kite.runtime-run.v1'),
+    sessionId: identifier,
+    runId: identifier,
+    originSessionId: identifier.optional(),
+    originRunId: identifier.optional(),
+    phase: z.enum(['planning', 'building']),
+    status: z.enum(['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'unknown']),
+    createdRevision: safeRevision,
+    lastRevision: safeRevision,
+    createdAtMs: safeRevision,
+    startedAtMs: safeRevision.optional(),
+    finishedAtMs: safeRevision.optional(),
+    terminal: runTerminal.optional(),
+  })
+  .strict()
+  .superRefine((run, context) => {
+    const terminal = ['completed', 'failed', 'cancelled', 'unknown'].includes(run.status);
+    if ((run.originSessionId === undefined) !== (run.originRunId === undefined)) {
+      context.addIssue({ code: 'custom', message: 'Run origin identity must be complete' });
+    }
+    if (run.lastRevision < run.createdRevision) {
+      context.addIssue({ code: 'custom', message: 'Run revision order is invalid' });
+    }
+    if ((run.status === 'queued') !== (run.startedAtMs === undefined)) {
+      context.addIssue({ code: 'custom', message: 'Run started time does not match status' });
+    }
+    if (terminal !== (run.finishedAtMs !== undefined)) {
+      context.addIssue({ code: 'custom', message: 'Run finished time does not match status' });
+    }
+    if (
+      (run.startedAtMs !== undefined && run.startedAtMs < run.createdAtMs) ||
+      (run.finishedAtMs !== undefined && run.finishedAtMs < (run.startedAtMs ?? run.createdAtMs))
+    ) {
+      context.addIssue({ code: 'custom', message: 'Run timestamps are not monotonic' });
+    }
+    if (!terminal && run.terminal !== undefined) {
+      context.addIssue({ code: 'custom', message: 'Active Run cannot carry terminal detail' });
+    }
+    if (
+      (run.status === 'failed' || run.status === 'cancelled' || run.status === 'unknown') &&
+      run.terminal === undefined
+    ) {
+      context.addIssue({ code: 'custom', message: 'Non-success terminal Run needs detail' });
+    }
+  });
+const runResource = z
+  .object({ kind: z.literal('run'), run: runProjection })
+  .strict()
+  .superRefine((resource, context) => {
+    if (
+      resource.run.status !== 'queued' ||
+      resource.run.lastRevision !== resource.run.createdRevision
+    ) {
+      context.addIssue({ code: 'custom', message: 'Original Run resource must be queued' });
+    }
+  });
 const commandErrorCode = z.enum([
   'invalid_command',
   'invalid_session',
   'session_not_found',
   'revision_conflict',
   'turn_not_found',
+  'run_not_found',
   'interaction_mismatch',
   'checkpoint_unavailable',
   'policy_denied',
@@ -631,6 +719,7 @@ export const RUNTIME_COMMAND_RECEIPT_SCHEMA_ = z.union([
       commandId: identifier,
       sessionId: identifier,
       revision: safeRevision,
+      resource: runResource.optional(),
     })
     .strict(),
   z
@@ -647,6 +736,7 @@ export const RUNTIME_COMMAND_RECEIPT_SCHEMA_ = z.union([
       commandId: identifier,
       sessionId: identifier,
       originalRevision: safeRevision,
+      resource: runResource.optional(),
     })
     .strict(),
 ]);
@@ -693,6 +783,26 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
     .strict(),
   z
     .object({
+      status: z.literal('ok'),
+      queryType: z.literal('get_run'),
+      revision: safeRevision.optional(),
+      run: runProjection,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
+      queryType: z.literal('list_runs'),
+      revision: safeRevision.optional(),
+      runs: z.array(runProjection).max(200),
+      nextRunCursor: z
+        .object({ createdRevision: safeRevision, runId: identifier })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
       status: z.enum(['not_found', 'rejected', 'unavailable']),
       queryType: z.enum([
         'list_sessions',
@@ -700,6 +810,8 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
         'get_context_status',
         'list_checkpoints',
         'get_rewind_preview',
+        'get_run',
+        'list_runs',
       ]),
       code: commandErrorCode,
     })

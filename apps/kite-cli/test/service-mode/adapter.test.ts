@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import {
+  WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+  type WorkerControllerClient,
+  type WorkerControllerDurableOperation,
+  type WorkerControllerMutationResponse,
+} from '@kite-ai/kite-app-contract/worker-controller';
 import type {
   LocalKiteConnection,
   LocalKiteConnectionStatus,
@@ -14,9 +20,13 @@ import type {
 import { RuntimeClient } from '@kite-ai/runtime-client';
 import type { RuntimeNotification, RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import {
+  acquireKiteServiceModeController,
   connectKiteServiceMode,
   createKiteServiceModeAdapter,
+  createKiteServiceModeSession,
+  detachKiteServiceModeController,
   type KiteServiceModeConnector,
+  releaseKiteServiceModeController,
 } from '../../src/service-mode';
 
 const workspace: KiteWorkspaceIdentity = {
@@ -187,6 +197,214 @@ describe('Kite Service mode CLI adapter', () => {
     await expect(adapter.reconnect()).rejects.toThrow('closed');
     expect(closeAttempts).toBe(1);
   });
+
+  test('acquires only an exact native Controller lease and detaches/releases without Runtime commands', async () => {
+    const fixture = createFixture();
+    let status: 'idle' | 'active' = 'idle';
+    let controllerGeneration = 0;
+    const calls: string[] = [];
+    const controller: WorkerControllerClient = {
+      async createSession() {
+        throw new Error('unused');
+      },
+      async read(request) {
+        calls.push(`read:${request.sessionId}`);
+        return {
+          schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+          operation: 'read_controller',
+          state: {
+            sessionId: request.sessionId,
+            status,
+            controllerGeneration,
+            connectionGeneration: status === 'active' ? 4 : 0,
+            clientId: status === 'active' ? 'native-client' : null,
+            workerInstanceId: status === 'active' ? fixture.connection.service.instanceId : null,
+            interactionGeneration: 0,
+            resumeCapabilityExpiresAtMs: null,
+          },
+        };
+      },
+      async requestControl(request) {
+        calls.push(`request:${request.sessionId}`);
+        status = 'active';
+        controllerGeneration = 1;
+        return {
+          schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+          operation: 'request_control',
+          status: 'applied',
+          receipt: {
+            schema: 'kite.app.worker-controller.receipt.v1',
+            sessionId: request.sessionId,
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            operation: 'request_control',
+            status: 'applied',
+            code: 'acquired',
+            controllerGeneration,
+            connectionGeneration: 4,
+            interactionGeneration: 0,
+            clientId: 'native-client',
+            workerInstanceId: fixture.connection.service.instanceId,
+            completedAt: 1,
+          },
+          lease: {
+            sessionId: request.sessionId,
+            clientId: 'native-client',
+            connectionGeneration: 4,
+            controllerGeneration,
+            workerInstanceId: fixture.connection.service.instanceId,
+            status: 'active',
+          },
+        };
+      },
+      async releaseControl(request) {
+        calls.push(`release:${request.sessionId}`);
+        status = 'idle';
+        return {
+          schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+          operation: 'release_control',
+          status: 'applied',
+          receipt: {
+            schema: 'kite.app.worker-controller.receipt.v1',
+            sessionId: request.sessionId,
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            operation: 'release_control',
+            status: 'applied',
+            code: 'released',
+            controllerGeneration: 2,
+            connectionGeneration: 4,
+            interactionGeneration: 0,
+            clientId: 'native-client',
+            workerInstanceId: fixture.connection.service.instanceId,
+            completedAt: 2,
+          },
+        };
+      },
+      async detach(request) {
+        calls.push(`detach:${request.sessionId}`);
+        return {
+          schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+          operation: 'detach_controller',
+          status: 'applied',
+          receipt: {
+            schema: 'kite.app.worker-controller.receipt.v1',
+            sessionId: request.sessionId,
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            operation: 'detach_controller',
+            status: 'applied',
+            code: 'detached',
+            controllerGeneration,
+            connectionGeneration: 4,
+            interactionGeneration: request.interactionGeneration,
+            clientId: 'native-client',
+            workerInstanceId: fixture.connection.service.instanceId,
+            completedAt: 3,
+          },
+        };
+      },
+      issueResumeCapability: async () => {
+        throw new Error('unused');
+      },
+      resume: async () => {
+        throw new Error('unused');
+      },
+      mintDetachedRecoveryCapability: async () => {
+        throw new Error('unused');
+      },
+      abandonDetachedController: async () => {
+        throw new Error('unused');
+      },
+      validateResumeCapability: async () => ({
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'validate_resume_capability',
+        status: 'missing',
+      }),
+    };
+    const connection = { ...fixture.connection, controller };
+    const lease = await acquireKiteServiceModeController(connection, 'session-1');
+    expect(lease).toMatchObject({
+      sessionId: 'session-1',
+      clientId: 'native-client',
+      connectionGeneration: 4,
+      controllerGeneration: 1,
+    });
+    expect(calls).toEqual(['read:session-1', 'request:session-1', 'read:session-1']);
+    await detachKiteServiceModeController(connection, lease);
+    expect(calls).toContain('detach:session-1');
+    status = 'active';
+    await expect(acquireKiteServiceModeController(connection, 'session-1')).rejects.toThrow(
+      'already owned',
+    );
+    await releaseKiteServiceModeController(connection, lease).catch(() => undefined);
+    expect(fixture.commandCalls).toHaveLength(0);
+  });
+
+  test('tracks separate Session leases on one authenticated connection and rejects foreign or stale state', async () => {
+    const fixture = createFixture();
+    const states = new Map<string, TestControllerState>();
+    const calls: string[] = [];
+    const controller = createControllerClient(states, calls, fixture.connection.service.instanceId);
+    const connection = { ...fixture.connection, controller };
+
+    const first = await acquireKiteServiceModeController(connection, 'session-one');
+    const second = await acquireKiteServiceModeController(connection, 'session-two');
+    expect(first.sessionId).toBe('session-one');
+    expect(second.sessionId).toBe('session-two');
+    expect(first.controllerGeneration).toBe(1);
+    expect(second.controllerGeneration).toBe(1);
+    await expect(acquireKiteServiceModeController(connection, 'session-one')).resolves.toBe(first);
+
+    states.set('foreign-session', {
+      status: 'active',
+      controllerGeneration: 7,
+      connectionGeneration: 9,
+      interactionGeneration: 0,
+      clientId: 'foreign-client',
+      workerInstanceId: fixture.connection.service.instanceId,
+    });
+    await expect(
+      acquireKiteServiceModeController(connection, 'foreign-session'),
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    states.set('session-one', {
+      ...states.get('session-one')!,
+      controllerGeneration: 2,
+    });
+    await expect(acquireKiteServiceModeController(connection, 'session-one')).rejects.toMatchObject(
+      { code: 'busy' },
+    );
+    expect(calls).toEqual([
+      'read:session-one',
+      'request:session-one',
+      'read:session-one',
+      'read:session-two',
+      'request:session-two',
+      'read:session-two',
+      'read:session-one',
+      'read:foreign-session',
+      'read:session-one',
+    ]);
+  });
+
+  test('creates a Session and generation-one Controller through one atomic native use case', async () => {
+    const fixture = createFixture();
+    const states = new Map<string, TestControllerState>();
+    const calls: string[] = [];
+    const controller = createControllerClient(states, calls, fixture.connection.service.instanceId);
+    const connection = { ...fixture.connection, controller };
+
+    const created = await createKiteServiceModeSession(connection, 'session-created');
+    expect(created).toMatchObject({
+      sessionRevision: 1,
+      lease: { sessionId: 'session-created', controllerGeneration: 1 },
+    });
+    expect(calls).toEqual(['create:session-created']);
+    await expect(acquireKiteServiceModeController(connection, 'session-created')).resolves.toBe(
+      created.lease,
+    );
+  });
 });
 
 function createFixture(): {
@@ -317,5 +535,146 @@ function ephemeralNotification(
     streamId: 'stream-1',
     sequence,
     event: { type: 'model.text_delta', requestId: 'request-1', text: 'hello' },
+  };
+}
+
+interface TestControllerState {
+  status: 'idle' | 'active' | 'detached';
+  controllerGeneration: number;
+  connectionGeneration: number;
+  interactionGeneration: number;
+  clientId: string | null;
+  workerInstanceId: string | null;
+}
+
+function createControllerClient(
+  states: Map<string, TestControllerState>,
+  calls: string[],
+  workerInstanceId: string,
+): WorkerControllerClient {
+  const stateFor = (sessionId: string): TestControllerState => {
+    const existing = states.get(sessionId);
+    if (existing) return existing;
+    const initial: TestControllerState = {
+      status: 'idle',
+      controllerGeneration: 0,
+      connectionGeneration: 0,
+      interactionGeneration: 0,
+      clientId: null,
+      workerInstanceId: null,
+    };
+    states.set(sessionId, initial);
+    return initial;
+  };
+  const operation = (
+    request: {
+      readonly sessionId: string;
+      readonly requestId: string;
+      readonly requestDigest: string;
+    },
+    name: WorkerControllerDurableOperation,
+    result: TestControllerState,
+  ): WorkerControllerMutationResponse => ({
+    schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+    operation: name,
+    status: 'applied',
+    receipt: {
+      schema: 'kite.app.worker-controller.receipt.v1',
+      sessionId: request.sessionId,
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      operation: name,
+      status: 'applied',
+      code: name === 'request_control' ? 'acquired' : 'released',
+      controllerGeneration: result.controllerGeneration,
+      connectionGeneration: result.connectionGeneration,
+      interactionGeneration: result.interactionGeneration,
+      clientId: result.clientId,
+      workerInstanceId: result.workerInstanceId,
+      completedAt: 1,
+    },
+    lease: {
+      sessionId: request.sessionId,
+      clientId: result.clientId!,
+      connectionGeneration: result.connectionGeneration,
+      controllerGeneration: result.controllerGeneration,
+      workerInstanceId,
+      status: 'active',
+    },
+  });
+
+  return {
+    async createSession(request) {
+      calls.push(`create:${request.sessionId}`);
+      const created: TestControllerState = {
+        status: 'active',
+        controllerGeneration: 1,
+        connectionGeneration: 9,
+        interactionGeneration: 0,
+        clientId: 'native-client',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, created);
+      const durable = operation(request, 'request_control', created);
+      return { ...durable, operation: 'create_session', sessionRevision: 1 };
+    },
+    async read(request) {
+      calls.push(`read:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      return {
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'read_controller',
+        state: {
+          sessionId: request.sessionId,
+          status: state.status,
+          controllerGeneration: state.controllerGeneration,
+          connectionGeneration: state.connectionGeneration,
+          clientId: state.clientId,
+          workerInstanceId: state.workerInstanceId,
+          interactionGeneration: state.interactionGeneration,
+          resumeCapabilityExpiresAtMs: null,
+        },
+      };
+    },
+    async requestControl(request) {
+      calls.push(`request:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      if (state.status === 'active') {
+        throw new Error('controller busy');
+      }
+      const next: TestControllerState = {
+        ...state,
+        status: 'active',
+        controllerGeneration: state.controllerGeneration + 1,
+        connectionGeneration: 9,
+        clientId: 'native-client',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, next);
+      return operation(request, 'request_control', next);
+    },
+    releaseControl: async () => {
+      throw new Error('unused');
+    },
+    detach: async () => {
+      throw new Error('unused');
+    },
+    issueResumeCapability: async () => {
+      throw new Error('unused');
+    },
+    resume: async () => {
+      throw new Error('unused');
+    },
+    mintDetachedRecoveryCapability: async () => {
+      throw new Error('unused');
+    },
+    abandonDetachedController: async () => {
+      throw new Error('unused');
+    },
+    validateResumeCapability: async () => ({
+      schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+      operation: 'validate_resume_capability',
+      status: 'missing',
+    }),
   };
 }

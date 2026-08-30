@@ -44,6 +44,15 @@
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
+## Kite Web 打开
+
+`/web`调用可选的`discoverWeb` callback完成asset preflight和single-Service `web_ensure`，成功时显示release owner返回的一次性launch URL；
+callback缺失或ensure失败时显示固定unavailable文案。该动作可以按需启动唯一Service并attach同listener Browser route，但不启动第二进程、
+不创建Runtime Session、不发送Runtime command，也不取得Controller capability。
+
+`web_status`保持纯只读，不由`/web`用于mint token。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
+Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
+
 ## 单一交互表面
 
 - Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。
@@ -90,6 +99,10 @@
 - `full` 是唯一 unrestricted interaction mode；restricted backend 不可兑现 scope 时 fail closed。
 - Session 切换恢复各自模型 route、interaction mode、context 与 Runtime projection，不继承上一 Session 的瞬时状态。
 - 历史 Session 先等待 typed Runtime readiness/recovery，再通过 HistoryClient 读取 persisted head 并提交 navigation；迟到 load 不覆盖新选择。
+- `/rewind`的checkpoint list/preview绑定Reducer当前`activeSessionId`，只读query不依赖subscription ready；执行rewind仍等待exact
+  Session readiness与Controller。连续fork后必须等待新Session durable identity，不能用旧viewport文本冒充第二次完成。
+- TUI干净退出前重读权威projection：idle且无pending interaction的本client Controller执行release，active/pending/unknown执行detach；
+  所以后续进程可直接取得已完成Session的Controller，而未完成Turn仍保留detached recovery边界。
 - Session 删除是带 scoped command receipt 的 Runtime command；Host/Store 在单一事务边界删除 Session
   facts 并保留 receipt。TUI 不直接删除 SQLite 行，也不能在 close snapshot 之后把已删 Session 复活。
 

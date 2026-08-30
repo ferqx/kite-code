@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const WORKSPACES = [
+  'packages/agent-api-contract',
   'packages/runtime-contract',
   'packages/runtime-protocol',
   'packages/runtime-server',
@@ -15,6 +16,7 @@ const WORKSPACES = [
   'packages/builtin-runtime',
   'apps/kite-cli',
   'apps/kite-service',
+  'apps/kite-web',
 ] as const;
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);

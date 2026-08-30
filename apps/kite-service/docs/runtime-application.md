@@ -16,6 +16,11 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
+默认 Service composition 当前仍是 State 27 / Store 6。`workspace-worker/production.ts` 是另一条显式 production path：它只接收
+Coordinator/layout owner 已 materialize/admit 的 Store 8 owner、Workspace binding 与 generation，随后在同一 Worker 内组合唯一
+Host/Application/Controller/effect/Run authority；Worker 不创建 manifest、不打开第二 Store，也不把 Store 8 隐式回退为 Store 7/6。Coordinator
+和 Web Gateway 是独立 companion process owner，不能通过本页的 Service composition 推导为同一进程。
+
 ## Workspace、Trust 与 routing
 
 Service neutral boot不解析请求Workspace的config/MCP/Skill或启动Workspace runtime。第一阶段，authenticated App Control
@@ -28,6 +33,10 @@ Service-owned config、model route、MCP、Skill、Sandbox/Shell与checkpoint in
 Store，不建立第二reader/writer authority。该Store-only list/startup hydration已持有完整Runtime State snapshot，因此直接
 投影同revision的完整interaction queue与唯一focus；它不得用空queue占位，也不得为了恢复pending interaction启动
 Workspace context、MCP或Skill扫描。
+
+单Workspace Worker的first-run也是该惰性边界：Store 8、Host、Server和App Control可以在Provider未配置时ready，credential/model
+mutation仍由同一Worker owner处理；`workspaceTemplateFor`直到配置ready后的首个Runtime context请求才调用`runtimeInputsFor`并等待
+MCP readiness。它不创建configuration-only第二Worker或placeholder execution backend，未完成配置的Runtime请求保持unavailable。
 
 ## App Control、History 与 mutation
 
@@ -51,9 +60,19 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 该规则同样覆盖manual compaction：command intent与effect terminal都通过Coordinator记录各自post-event State后才发布；
 不得直接写Session再让Bridge用batch最终State投影早期revision，否则activation必须fail closed且不能调度compaction。
 
+Store8 capability存在时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
+resource receipt和State decision共同提交。bridge activation先调用Coordinator的queued→running transition，再发布notification或交给
+Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
+current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
+
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
+Workspace Worker另为每个Agent API context打开一条read-only in-process Runtime Client/Server logical connection；admission只允许
+initialize/query，并继续把persisted Session identity与当前Workspace交叉校验。Session page先从同一Store 8 connection取得bounded keyset
+IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
+same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
+subscribe或recovery。
 operation gate的quiesce线性化关闭新mutation admission后立即返回lease与`activeOperations`观察值；普通stop据此
 立即resume并返回`service_busy`，不会先等待active mutation而退化成manager timeout。只有commit drain与signal owner
 shutdown会等待idle后进入draining。
@@ -70,11 +89,22 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 `model.responded.messageId`配对。它只提供模型步骤聚合因果关系，不携带prompt、Provider handle、Kernel State或
 execution authority；Service不得让TUI从事件相邻关系反推该归属。
 
+Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
+Worker binding reference）。Worker application 的 effect composition 只接受该已固定 context，并由 Store 8 authority、Controller
+generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
+Protocol wire frame，也不向 Web Observer 暴露。
+
 ## Clean-cutover non-goals
 
-没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、Web/Desktop/public SDK、
-generic RPC、OS Service或Store schema迁移。Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated
-nondefault checkpoint path；它不是第二default root。Store 6/State 27保持不变。
+没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private
+Web Observer/Gateway 是独立的只读 companion，不把 Browser 变成 Controller；remote/LAN Web、Desktop/public SDK 仍不属于 V1。
+Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
+Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
+schema fallback。
+Store 7→Store 8只存在于显式offline maintenance：调用方先关闭所有Coordinator/Worker/Gateway admission并证明
+Turn/Interaction/effect/external process已收敛，再由source-bound journal/fence、Coordinator-owned Catalog copy与Runtime Store
+whole-generation migrator共同切换。普通Runtime Application不调用该入口；fresh home直接初始化Store8，production Worker只接受
+committed Store8 evidence，Store7 profile不作为open failure fallback。
 
 ## 验证
 

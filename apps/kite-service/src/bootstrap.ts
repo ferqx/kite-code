@@ -1,21 +1,29 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import {
   type BuiltinToolCatalogProjection,
   createBuiltinContextCompilerPort,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
+import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import { ensureLocalRuntimeServiceHome } from '@kite-ai/kite-local-runtime/service';
 import {
   RuntimeClient,
   type RuntimeClientTransport,
   type RuntimeHistoryClient,
 } from '@kite-ai/runtime-client';
 import {
+  assertListRuntimeLogEventsRequest,
+  assertListRuntimeLogSessionsRequest,
+  type ListRuntimeLogEventsRequest,
+  type ListRuntimeLogSessionsRequest,
   RUNTIME_CONTRACT_BOUNDARY_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
@@ -35,7 +43,12 @@ import {
   resolveProjectIdentity,
   runtimeHostCurrentStateEventTypes,
 } from '@kite-ai/runtime-host';
-import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import type {
+  RuntimeLogEventReadPage,
+  RuntimeLogQueryPort,
+  RuntimeLogSessionReadPage,
+  RuntimeStorage,
+} from '@kite-ai/runtime-host/storage';
 import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
@@ -47,21 +60,37 @@ import {
 } from '@kite-ai/runtime-server';
 import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 import {
+  assertSqliteRuntimeRunStoreActive,
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
+  createSqliteWorkspaceRuntimeLogQueryPort,
   discoverSqliteRuntimeCompatibilitySource,
+  type KiteHomeArtifactStore,
+  type KiteHomeDirectoryQueryPort,
+  openKiteHomeRuntimeStorage,
+  readSqliteActiveLayoutPointer,
+  resolveSqliteRuntimeLayoutPaths,
+  resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   type SqliteRuntimeCompatibilityImportResult,
+  type SqliteRuntimeLayoutPaths,
+  type SqliteRuntimeStorageOptions,
+  type SqliteRuntimeWorkspaceBinding,
+  type SqliteWorkspaceAuthority,
+  type SqliteWorkspaceSessionCreationPort,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
 import type { KiteInProcessAppControlComposition } from './app-control';
+import { createKiteHomeBuiltinArtifactBackends } from './bootstrap/kite-home-artifact-backends';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import { createInstalledKiteRuntimeCompositionFactory } from './bootstrap/model-runtime-composition';
 import {
@@ -79,6 +108,11 @@ import type {
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
 import {
+  createKiteSingleServiceSessionCreationCoordinator,
+  type KiteSingleServiceSessionCreationCoordinator,
+} from './bootstrap/single-service-session-creation';
+import type { KiteServiceWebGatewayRouteOptions } from './carrier';
+import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
   createRuntimeExecutionBridgeRouter,
@@ -87,10 +121,36 @@ import {
   createRuntimeWorkspaceContextFactory,
   type RuntimeOperationGate,
 } from './runtime-application';
-import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
+import {
+  createKiteRuntimeHistoryClient,
+  createKiteRuntimeObserverHistoryPort,
+} from './runtime-client/history-adapter';
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
+import { createSingleServiceWebObserverFactory, type WebObserverHistoryPort } from './web-observer';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+/**
+ * Store 9 target composition for Browser routes. The exact Service composition root is the only
+ * App module allowed to bind the concrete SQLite Directory query to in-process Runtime/History.
+ */
+export function createKiteSingleServiceWebGatewayTarget(input: {
+  readonly directory: KiteHomeDirectoryQueryPort;
+  readonly runtime: RuntimeAccess;
+  readonly history: WebObserverHistoryPort;
+  readonly serviceInstanceId: string;
+  readonly contractRevision: string;
+}): Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'> {
+  return Object.freeze({
+    createObserver: createSingleServiceWebObserverFactory({
+      runtime: input.runtime,
+      directory: input.directory,
+      history: input.history,
+      serviceInstanceId: input.serviceInstanceId,
+      contractRevision: input.contractRevision,
+    }),
+  });
+}
 
 interface KiteRuntimeClientAccess extends RuntimeAccess {
   readonly history?: RuntimeHistoryClient;
@@ -124,6 +184,11 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   readonly serverInstanceId?: string;
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
+  /**
+   * Optional already-open Store owner. Worker composition supplies this exact Store 8 owner so
+   * this Host cannot open a second SQLite writer or route a read through compatibility import.
+   */
+  readonly storageOwner?: KiteRuntimeStorageOwner;
   readonly workspaces?: readonly Omit<
     CliRuntimeBridgeInput,
     'checkpointPath' | 'projectIdentity' | 'sessionId'
@@ -209,7 +274,10 @@ function createKiteInProcessRuntimeAccess(input: {
           authorize: async (request: RuntimeServerAdmissionInput) => {
             const sessionId = admissionSessionId(request);
             if (sessionId !== undefined && !input.ownsSession(sessionId)) {
-              return { allowed: false as const, reason: 'unauthorized' as const };
+              return {
+                allowed: false as const,
+                reason: 'unauthorized' as const,
+              };
             }
             return { allowed: true as const, workspace: canonicalPath };
           },
@@ -324,6 +392,152 @@ function createKiteRuntimeStorage(
     databasePath,
     codec: stateBinding.codec,
   });
+}
+
+export const WORKSPACE_WORKER_STORE_PROFILE_ = SQLITE_RUNTIME_RUN_FORMAT_EPOCH;
+export const WORKSPACE_WORKER_STORE_SCHEMA_VERSION_ = SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION;
+export const WORKSPACE_WORKER_STATE_SCHEMA_VERSION_ = SQLITE_RUNTIME_STATE_SCHEMA_VERSION;
+
+export interface WorkspaceWorkerStoreProfile {
+  readonly stateSchemaVersion: typeof WORKSPACE_WORKER_STATE_SCHEMA_VERSION_;
+  readonly storeSchemaVersion: typeof WORKSPACE_WORKER_STORE_SCHEMA_VERSION_;
+  readonly formatEpoch: typeof WORKSPACE_WORKER_STORE_PROFILE_;
+}
+
+export const WORKSPACE_WORKER_STORE_PROFILE: WorkspaceWorkerStoreProfile = Object.freeze({
+  stateSchemaVersion: WORKSPACE_WORKER_STATE_SCHEMA_VERSION_,
+  storeSchemaVersion: WORKSPACE_WORKER_STORE_SCHEMA_VERSION_,
+  formatEpoch: WORKSPACE_WORKER_STORE_PROFILE_,
+});
+
+export interface WorkspaceWorkerStoreContext {
+  readonly home: import('@kite-ai/kite-local-runtime/service').KiteHomeIdentity;
+  readonly layout: SqliteRuntimeLayoutPaths;
+  readonly binding: SqliteRuntimeWorkspaceBinding;
+  readonly databasePath: string;
+  readonly profile: WorkspaceWorkerStoreProfile;
+}
+
+export interface WorkspaceWorkerStoreOwner extends RuntimeStorage<RuntimeEvent, RuntimeState> {
+  readonly workspaceAuthority: SqliteWorkspaceAuthority;
+  readonly runs: NonNullable<RuntimeStorage<RuntimeEvent, RuntimeState>['runs']>;
+  /** Store 8 atomic Runtime-session + initial Controller creation owner. */
+  readonly workspaceSessionCreation: SqliteWorkspaceSessionCreationPort<RuntimeEvent, RuntimeState>;
+}
+
+export type WorkspaceWorkerStoreAuthority = SqliteWorkspaceAuthority;
+export type WorkspaceWorkerStoreStorageOptions = SqliteRuntimeStorageOptions;
+export type WorkspaceWorkerStoreCodec = (typeof STATE_STORAGE_BINDING_)['codec'];
+
+export function workspaceIdentityDigest(workspace: KiteWorkspaceIdentity): string {
+  const material = JSON.stringify({
+    canonicalPath: workspace.canonicalPath,
+    projectId: workspace.projectId,
+    workspaceDigest: workspace.workspaceDigest,
+  });
+  return `sha256:${createHash('sha256').update(`kite.workspace-identity.v1\0${material}`).digest('hex')}`;
+}
+
+export function canonicalWorkspaceIdentity(
+  workspace: KiteWorkspaceIdentity,
+): KiteWorkspaceIdentity {
+  if (!workspace.canonicalPath || !isAbsolute(workspace.canonicalPath)) {
+    throw new TypeError('Workspace canonical path must be absolute.');
+  }
+  const canonicalPath = realpathSync.native(resolve(workspace.canonicalPath));
+  const expectedDigest = `sha256:${createHash('sha256').update(canonicalPath).digest('hex')}`;
+  const expectedProjectId = `project_${expectedDigest.slice('sha256:'.length)}`;
+  if (
+    canonicalPath !== workspace.canonicalPath ||
+    workspace.workspaceDigest !== expectedDigest ||
+    workspace.projectId !== expectedProjectId
+  ) {
+    throw new TypeError('Workspace identity is not the exact canonical project identity.');
+  }
+  return Object.freeze({
+    canonicalPath,
+    projectId: workspace.projectId,
+    workspaceDigest: workspace.workspaceDigest,
+  });
+}
+
+export function createWorkspaceWorkerStoreContext(input: {
+  readonly home: import('@kite-ai/kite-local-runtime/service').KiteHomeIdentity;
+  readonly workspace: KiteWorkspaceIdentity;
+  readonly workerScopeId: string;
+  readonly layoutGeneration: string;
+}): WorkspaceWorkerStoreContext {
+  assertWorkspaceWorkerStoreProfile(WORKSPACE_WORKER_STORE_PROFILE);
+  const home = ensureLocalRuntimeServiceHome(input.home);
+  const canonicalWorkspace = canonicalWorkspaceIdentity(input.workspace);
+  assertSafeWorkspaceWorkerIdentity(input.workerScopeId, 'Worker scope');
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/u.test(input.layoutGeneration)) {
+    throw new TypeError('Workspace Worker layout generation is invalid.');
+  }
+  const layout = resolveSqliteRuntimeLayoutPaths(home.root);
+  const binding: SqliteRuntimeWorkspaceBinding = Object.freeze({
+    layoutGeneration: input.layoutGeneration,
+    workerScopeId: input.workerScopeId,
+    workspaceIdentityDigest: workspaceIdentityDigest(canonicalWorkspace),
+  });
+  const databasePath = resolveSqliteWorkspaceStorePath(
+    layout,
+    binding.layoutGeneration,
+    binding.workerScopeId,
+  );
+  assertSqliteRuntimeRunStoreActive(layout, binding, databasePath);
+  return Object.freeze({
+    home,
+    layout,
+    binding,
+    databasePath,
+    profile: WORKSPACE_WORKER_STORE_PROFILE,
+  });
+}
+
+export function openWorkspaceWorkerStore(
+  context: WorkspaceWorkerStoreContext,
+  options: {
+    readonly codec?: WorkspaceWorkerStoreCodec;
+    readonly storageOptions?: WorkspaceWorkerStoreStorageOptions;
+  } = {},
+): WorkspaceWorkerStoreOwner {
+  assertSqliteRuntimeRunStoreActive(context.layout, context.binding, context.databasePath);
+  const storage = createSqliteRuntimeStorage<RuntimeEvent, RuntimeState>({
+    databasePath: context.databasePath,
+    codec: options.codec ?? STATE_STORAGE_BINDING_.codec,
+    workspaceBinding: context.binding,
+    workspaceLayout: context.layout,
+    targetStore: 'run',
+    ...(options.storageOptions ? { options: options.storageOptions } : {}),
+  });
+  if (!storage.workspaceAuthority || !storage.workspaceSessionCreation || !storage.runs) {
+    storage.close();
+    throw new Error('Workspace Worker Store 8 authority/session creation is unavailable.');
+  }
+  return storage as WorkspaceWorkerStoreOwner;
+}
+
+export function assertWorkspaceWorkerStoreProfile(value: WorkspaceWorkerStoreProfile): void {
+  if (
+    value.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+    value.storeSchemaVersion !== SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION ||
+    value.formatEpoch !== SQLITE_RUNTIME_RUN_FORMAT_EPOCH
+  ) {
+    throw new TypeError('Workspace Worker Store profile is incompatible.');
+  }
+}
+
+function assertSafeWorkspaceWorkerIdentity(value: string, label: string): void {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 512 ||
+    value.includes('\0') ||
+    [...value].some((character) => /\p{Cc}/u.test(character))
+  ) {
+    throw new TypeError(`${label} identity is invalid.`);
+  }
 }
 
 export function compatibilitySourcePaths(checkpointPath: string): readonly string[] {
@@ -473,6 +687,18 @@ export function suppressCompatibleKiteSession(checkpointPath: string, sessionId:
 
 export interface KiteRuntimeStorageOwner {
   readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  /** Store 9-only dedicated Artifact tables; legacy owners omit this port. */
+  readonly artifactStore?: KiteHomeArtifactStore;
+  /** Store 9 durable Controller/effect/resource authority for one admitted Workspace. */
+  readonly authorityForWorkspace?: (
+    workspace: AdmittedWorkspace,
+  ) => import('@kite-ai/runtime-storage-sqlite').SqliteWorkspaceAuthority;
+  /** Store 9 compound Runtime Session + initial Controller transaction coordinator. */
+  readonly sessionCreation?: KiteSingleServiceSessionCreationCoordinator;
+  /** Fence active Controller leases left by a previous single-Service instance. */
+  readonly reconcileControllerAuthority?: (serviceInstanceId: string) => void;
+  /** Store 9 owner admits canonical Workspace identity before a new Session transaction. */
+  readonly admitWorkspace?: (workspace: AdmittedWorkspace) => void;
   /** Current-format index path; unlike `storage.sessions`, it never imports a legacy session. */
   listCurrentSessions(
     query?: string,
@@ -483,6 +709,111 @@ export interface KiteRuntimeStorageOwner {
   getCurrentSessionModelRoute(
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
+}
+
+export interface KiteHomeRuntimeStorageCompositionOwner extends KiteRuntimeStorageOwner {
+  readonly directory: KiteHomeDirectoryQueryPort;
+  readonly artifactStore: KiteHomeArtifactStore;
+}
+
+/** Exact Store 9 owner used only by the Service composition root. */
+export function createKiteHomeRuntimeStorageComposition(
+  kiteHomeRoot: string,
+): KiteHomeRuntimeStorageCompositionOwner {
+  const target = openKiteHomeRuntimeStorage<RuntimeEvent, RuntimeState>({
+    databasePath: join(kiteHomeRoot, 'kite.sqlite'),
+    codec: STATE_STORAGE_BINDING_.codec,
+    stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  });
+  const workspaceIdFor = (workspace: AdmittedWorkspace): string => {
+    const digest = workspaceIdentityDigest({
+      canonicalPath: workspace.canonicalPath,
+      projectId: workspace.projectId,
+      workspaceDigest: workspace.workspaceDigest,
+    });
+    return `workspace_${digest.slice('sha256:'.length)}`;
+  };
+  const atomicSessionCreation = createKiteSingleServiceSessionCreationCoordinator({
+    storage: target.storage,
+    creationForWorkspace: (workspace) =>
+      target.sessionCreationForWorkspace(workspaceIdFor(workspace)),
+  });
+  return Object.freeze({
+    directory: target.directory,
+    artifactStore: target.artifactStore,
+    storage: atomicSessionCreation.storage,
+    sessionCreation: atomicSessionCreation.coordinator,
+    reconcileControllerAuthority(serviceInstanceId: string) {
+      if (
+        !serviceInstanceId ||
+        serviceInstanceId.length > 512 ||
+        /\p{Cc}/u.test(serviceInstanceId)
+      ) {
+        throw new Error('Service Controller recovery identity is invalid.');
+      }
+      const workspaces = target.database
+        .query<{ workspace_id: string }, []>(
+          'SELECT workspace_id FROM workspaces ORDER BY workspace_id',
+        )
+        .all();
+      for (const workspace of workspaces) {
+        const authority = target.authorityForWorkspace(workspace.workspace_id);
+        const sessions = target.database
+          .query<{ session_id: string }, [string]>(
+            'SELECT session_id FROM runtime_sessions WHERE workspace_id = ? ORDER BY session_id',
+          )
+          .all(workspace.workspace_id);
+        for (const session of sessions) {
+          const state = authority.controller.read(session.session_id);
+          if (state.status !== 'active' || state.workerInstanceId === serviceInstanceId) continue;
+          if (!state.clientId || !state.workerInstanceId) {
+            throw new Error('Persisted active Controller identity is incomplete.');
+          }
+          const requestId = `service-reconcile-${createHash('sha256')
+            .update(`${serviceInstanceId}\0${session.session_id}\0${state.controllerGeneration}`)
+            .digest('hex')}`;
+          const result = authority.controller.detachController({
+            sessionId: session.session_id,
+            requestId,
+            requestDigest: createHash('sha256').update(requestId).digest('hex'),
+            clientId: state.clientId,
+            connectionGeneration: state.connectionGeneration,
+            controllerGeneration: state.controllerGeneration,
+            workerInstanceId: state.workerInstanceId,
+            interactionGeneration: state.interactionGeneration,
+          });
+          if (result.status !== 'applied' && result.status !== 'replay') {
+            throw new Error('Persisted Controller could not enter restart recovery.');
+          }
+        }
+      }
+    },
+    authorityForWorkspace(workspace: AdmittedWorkspace) {
+      return target.authorityForWorkspace(workspaceIdFor(workspace));
+    },
+    admitWorkspace(workspace: AdmittedWorkspace) {
+      const digest = workspaceIdentityDigest({
+        canonicalPath: workspace.canonicalPath,
+        projectId: workspace.projectId,
+        workspaceDigest: workspace.workspaceDigest,
+      });
+      target.admissions.admit({
+        workspaceId: workspaceIdFor(workspace),
+        canonicalPath: workspace.canonicalPath,
+        workspaceIdentityDigest: digest,
+        projectId: workspace.projectId,
+        workspaceDigest: workspace.workspaceDigest,
+        displayName: basename(workspace.canonicalPath),
+      });
+    },
+    listCurrentSessions: (query = '', limit = 50) =>
+      target.storage.sessions.listSessions(query, limit),
+    loadCurrentSnapshot: (sessionId: string) =>
+      target.storage.sessions.loadSnapshot<RuntimeState>(sessionId),
+    getCurrentSessionModelRoute: (sessionId: string) =>
+      target.storage.sessions.getSessionModelRoute(sessionId),
+  });
 }
 
 /**
@@ -502,6 +833,193 @@ export function createKiteRuntimeHistory(checkpointPath: string): RuntimeHistory
       importSession: (sessionId) => importCompatibleKiteSession(checkpointPath, sessionId),
     },
   );
+}
+
+/**
+ * Browser/Observer History is current-format and query-only. It intentionally
+ * omits the compatibility importer used by the native terminal journey.
+ */
+export function createKiteRuntimeObserverHistory(
+  checkpointPath: string,
+): import('./web-observer').WebObserverHistoryPort {
+  return createKiteRuntimeObserverHistoryPort(() =>
+    createSqliteRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
+      databasePath: sqliteCurrentRuntimeStorePath(checkpointPath),
+      codec: STATE_STORAGE_BINDING_.codec,
+      currentEventTypes: runtimeHostCurrentStateEventTypes(),
+    }),
+  );
+}
+
+/**
+ * Query-only Observer History for an active Store 8 Workspace. The caller
+ * supplies server-owned layout authority and an opaque Worker scope; no
+ * Browser path or compatibility importer is accepted.
+ */
+export function createKiteRuntimeObserverHistoryFromWorkspaceLayout(input: {
+  readonly layout: SqliteRuntimeLayoutPaths;
+  readonly layoutGeneration: string;
+  readonly workerScopeId: string;
+}): import('./web-observer').WebObserverHistoryPort {
+  return createKiteRuntimeObserverHistoryPort(() =>
+    createSqliteWorkspaceRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
+      layout: input.layout,
+      layoutGeneration: input.layoutGeneration,
+      workerScopeId: input.workerScopeId,
+      codec: STATE_STORAGE_BINDING_.codec,
+      currentEventTypes: runtimeHostCurrentStateEventTypes(),
+      targetStore: 'run',
+    }),
+  );
+}
+
+/** Resolve the active Store 8 generation inside the Service composition root. */
+export function createKiteRuntimeObserverHistoryFromActiveWorkspace(input: {
+  readonly kiteHomeRoot: string;
+  readonly workerScopeId: string;
+}): import('./web-observer').WebObserverHistoryPort {
+  const layout = resolveSqliteRuntimeLayoutPaths(input.kiteHomeRoot);
+  const pointer = readSqliteActiveLayoutPointer(layout);
+  if (!pointer) throw new Error('Active Workspace layout is unavailable.');
+  return createKiteRuntimeObserverHistoryFromWorkspaceLayout({
+    layout,
+    layoutGeneration: pointer.generation,
+    workerScopeId: input.workerScopeId,
+  });
+}
+
+const MAX_INJECTED_STORE_SESSION_SCAN = 100_000;
+
+/**
+ * Query-only History over an already-open Runtime Store.
+ *
+ * The Worker owns the Store connection, so opening a SQLite log reader here would create a
+ * second connection with an independently resolved path.  This adapter only consumes the
+ * injected SessionStore read methods and therefore cannot discover or import a legacy Session.
+ */
+export function createKiteRuntimeObserverHistoryFromStorage(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+): RuntimeHistoryClient {
+  return createKiteRuntimeHistoryClient(() => createInjectedStoreLogQueryPort(storage));
+}
+
+/** Browser-safe Store 9 History over the same injected connection; no compatibility importer. */
+export function createKiteRuntimeWebObserverHistoryFromStorage(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+): WebObserverHistoryPort {
+  return createKiteRuntimeObserverHistoryPort(() => createInjectedStoreLogQueryPort(storage));
+}
+
+function createInjectedStoreLogQueryPort(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+): RuntimeLogQueryPort<RuntimeEvent> {
+  let closed = false;
+  const currentEventTypes = new Set(runtimeHostCurrentStateEventTypes());
+  const assertOpen = (): void => {
+    if (closed) throw new Error('Runtime observer Store query is closed.');
+  };
+  const readSessionRows = (query: string): ReturnType<typeof storage.sessions.listSessions> => {
+    const rows = storage.sessions.listSessions(query, MAX_INJECTED_STORE_SESSION_SCAN);
+    if (rows.length >= MAX_INJECTED_STORE_SESSION_SCAN) {
+      throw new Error('Runtime observer Session directory exceeds its bounded query limit.');
+    }
+    return rows;
+  };
+  const sessionExists = (sessionId: string): boolean => {
+    if (storage.sessions.loadSnapshotRecord(sessionId) !== null) return true;
+    return readSessionRows('').some((entry) => entry.threadId === sessionId);
+  };
+
+  return Object.freeze({
+    listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionReadPage {
+      assertOpen();
+      assertListRuntimeLogSessionsRequest(request);
+      const candidates = readSessionRows(request.query ?? '')
+        .map((entry) => {
+          const model = storage.sessions.getSessionModelRoute(entry.threadId);
+          return {
+            sessionId: entry.threadId,
+            name: entry.name,
+            updatedAt: entry.updatedAt,
+            lastSequence: storage.sessions.getLastEventPosition(entry.threadId),
+            ...(model === null ? {} : { model }),
+          };
+        })
+        .filter(
+          (entry) =>
+            request.cursor === undefined ||
+            entry.updatedAt < request.cursor.updatedAt ||
+            (entry.updatedAt === request.cursor.updatedAt &&
+              entry.sessionId.localeCompare(request.cursor.sessionId) < 0),
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt - left.updatedAt || right.sessionId.localeCompare(left.sessionId),
+        );
+      const selected = candidates.slice(0, request.limit);
+      const hasMore = candidates.length > selected.length;
+      const last = selected.at(-1);
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && last
+          ? {
+              nextCursor: {
+                updatedAt: last.updatedAt,
+                sessionId: last.sessionId,
+              },
+            }
+          : {}),
+      };
+    },
+
+    listEvents(request: ListRuntimeLogEventsRequest): RuntimeLogEventReadPage<RuntimeEvent> {
+      assertOpen();
+      assertListRuntimeLogEventsRequest(request);
+      const requestedTypes = request.eventTypes ? new Set(request.eventTypes) : undefined;
+      if (requestedTypes && [...requestedTypes].some((type) => !currentEventTypes.has(type))) {
+        throw new Error('Runtime observer event filter contains an unknown current event type.');
+      }
+      const stored = storage.sessions.loadEventsStrict(request.sessionId);
+      if (stored.length === 0 && !sessionExists(request.sessionId)) {
+        throw new Error(`Runtime session was not found: ${request.sessionId}`);
+      }
+      const candidates = stored
+        .map((record) => ({
+          sessionId: request.sessionId,
+          sequence: record.id,
+          eventId: record.event_id ?? `${request.sessionId}:${record.id}`,
+          ...(record.causation_id === undefined ? {} : { causationId: record.causation_id }),
+          ...(record.occurred_at === undefined ? {} : { occurredAt: record.occurred_at }),
+          createdAt: record.created_at,
+          event: record.event,
+        }))
+        .filter(
+          (record) =>
+            (request.afterSequence === undefined || record.sequence > request.afterSequence) &&
+            (request.beforeSequence === undefined || record.sequence < request.beforeSequence) &&
+            (requestedTypes === undefined || requestedTypes.has(record.event.type)),
+        )
+        .sort((left, right) => left.sequence - right.sequence);
+      const hasMore = candidates.length > request.limit;
+      const selected =
+        request.direction === 'backward'
+          ? candidates.slice(Math.max(0, candidates.length - request.limit))
+          : candidates.slice(0, request.limit);
+      const cursor =
+        request.direction === 'backward' ? selected.at(0)?.sequence : selected.at(-1)?.sequence;
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && cursor !== undefined ? { nextCursor: cursor } : {}),
+        observedLastSequence: storage.sessions.getLastEventPosition(request.sessionId),
+      };
+    },
+
+    close(): void {
+      closed = true;
+    },
+  });
 }
 
 export function createKiteRuntimeStorageOwner(checkpointPath: string): KiteRuntimeStorageOwner {
@@ -764,6 +1282,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
       projectId: projectIdentity.projectId,
       workspaceDigest: projectIdentity.workspaceDigest,
     });
+    input.storageOwner?.admitWorkspace?.(admission);
     const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
     if (byWorkspace.has(key)) {
       throw new TypeError(`Duplicate Runtime Workspace identity: ${canonicalPath}`);
@@ -781,7 +1300,13 @@ export function createKiteMultiWorkspaceRuntimeServer(
     );
   }
 
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  // Worker composition injects the already-admitted Store 8 owner here.  The legacy Service path
+  // remains lazy only when no owner is supplied; no compatibility wrapper is ever introduced for
+  // an injected Store.
+  const owner = input.storageOwner ?? createKiteRuntimeStorageOwner(input.checkpointPath);
+  const artifactBackends = owner.artifactStore
+    ? createKiteHomeBuiltinArtifactBackends(owner.artifactStore)
+    : undefined;
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
   const interactionBroker = createRuntimeInteractionBroker<CliRuntimeInteractionResolution>();
   const connectionWorkspaces = new Map<string, AdmittedWorkspace>();
@@ -839,7 +1364,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
       capabilities,
       builtinToolCatalog,
     );
-    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
+    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
+      modelOperationExecution,
+      artifactBackends,
+    );
     const modelInvocationRuntimeFactory = (workspace: string) => ({
       ...modelRuntime(workspace),
       builtinToolCatalog,
@@ -856,6 +1384,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     });
     const contexts = createRuntimeWorkspaceContextFactory({
       create: async (admission) => {
+        input.storageOwner?.admitWorkspace?.(admission);
         const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
         const registered =
           byWorkspace.get(key) ??
@@ -993,7 +1522,11 @@ export function createKiteMultiWorkspaceRuntimeServer(
       admission,
       queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
         if (query.type !== 'list_sessions') {
-          return { status: 'rejected', queryType: query.type, code: 'unsupported' };
+          return {
+            status: 'rejected',
+            queryType: query.type,
+            code: 'unsupported',
+          };
         }
         // The process-wide index is Store authority. Reading it must never
         // instantiate a Workspace context (which can load project config,
@@ -1067,12 +1600,15 @@ export function createKiteMultiWorkspaceRuntimeServer(
     });
   });
   const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
-    authorize: async () => ({ allowed: false as const, reason: 'unauthorized' as const }),
+    authorize: async () => ({
+      allowed: false as const,
+      reason: 'unauthorized' as const,
+    }),
   });
   const runtime: RuntimeAccess = input.operationGate
     ? Object.freeze({
-        command: (command: RuntimeCommand) =>
-          input.operationGate!.runMutation(() => host.command(command)),
+        command: (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) =>
+          input.operationGate!.runMutation(() => host.command(command, context)),
         query: (query: RuntimeQuery) => host.query(query),
         subscribe: (subscription: RuntimeSubscription) => host.subscribe(subscription),
       })
@@ -1135,7 +1671,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 : undefined;
             const isFreshCreate = command?.type === 'create_session' && persisted === undefined;
             if (!isFreshCreate && (!persisted || !sameAdmission(persisted, admitted))) {
-              return { allowed: false as const, reason: 'unauthorized' as const };
+              return {
+                allowed: false as const,
+                reason: 'unauthorized' as const,
+              };
             }
           }
           connectionWorkspaces.set(request.connectionId, admitted);

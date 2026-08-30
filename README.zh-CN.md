@@ -44,6 +44,19 @@ bun run agent run \
 
 完整参数以 `bun run agent --help` 为准。
 
+## 本地 Web Observer
+
+源码 checkout 使用一条命令完成 Web asset 构建与前检、按需启动 Coordinator/Web Gateway，并打印一次性 loopback URL：
+
+```bash
+bun run web:dev
+```
+
+终端 TUI/CLI 只在需要时 ensure Coordinator 与目标 Workspace Worker；`kite web` ensure Coordinator 与唯一 Web Gateway。
+浏览器打开 URL 不负责启动本机 server，页面只是 Gateway client。`bun run --cwd apps/kite-web dev` 只是前端开发用的 Vite
+asset server，不等于带认证、Coordinator discovery 与 Worker 连接的完整 Gateway。若失败启动留下了可由 exact PID/start-token
+证明已死亡的残留，可执行 `bun run agent web recover`；进程仍存活或身份不确定时继续 fail closed。
+
 ## 文档
 
 - [项目全景](docs/book/01-项目全景.md)

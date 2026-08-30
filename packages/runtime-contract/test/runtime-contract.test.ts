@@ -579,6 +579,28 @@ describe('runtime contract package boundary', () => {
     };
     expect(isRuntimeQuery(query)).toBe(true);
     expect(() => assertRuntimeQuery({ ...query, extra: true })).toThrow('Invalid RuntimeQuery');
+    const listRuns = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_runs' as const,
+      sessionId: 'session-1',
+      phase: 'building' as const,
+      status: 'waiting' as const,
+      cursor: { createdRevision: 7, runId: 'run-7' },
+      limit: 200,
+    };
+    expect(isRuntimeQuery(listRuns)).toBe(true);
+    expect(isRuntimeQuery({ ...listRuns, limit: 201 })).toBe(false);
+    expect(isRuntimeQuery({ ...listRuns, cursor: { ...listRuns.cursor, extra: true } })).toBe(
+      false,
+    );
+    expect(
+      isRuntimeQuery({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_run',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      }),
+    ).toBe(true);
 
     const clearGrants = {
       schema: RUNTIME_COMMAND_SCHEMA_,
@@ -635,7 +657,16 @@ describe('runtime contract package boundary', () => {
         afterSequence: 1,
         beforeSequence: 2,
       }),
-    ).toThrow('mutually exclusive');
+    ).not.toThrow();
+    expect(() =>
+      assertListRuntimeLogEventsRequest({
+        sessionId: 'session-1',
+        direction: 'forward',
+        limit: 2,
+        afterSequence: 2,
+        beforeSequence: 2,
+      }),
+    ).toThrow('lower than beforeSequence');
     expect(() =>
       assertListRuntimeLogEventsRequest({
         sessionId: 'session-1',

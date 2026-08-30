@@ -13,11 +13,14 @@ import {
   mapRuntimeClientEventToProtocol,
   mapRuntimeCommandToProtocol,
   mapRuntimeNotificationToSubscriptionMessage,
+  mapRuntimeQueryResultToProtocol,
+  mapRuntimeQueryToProtocol,
   mapSubscriptionMessageToClientUpdate,
   RUNTIME_PROTOCOL_EVENT_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_MESSAGE_SCHEMA_,
   RUNTIME_PROTOCOL_RESPONSE_SCHEMA_,
+  RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_,
   safeDecodeRuntimeProtocolMessage,
@@ -286,6 +289,78 @@ describe('Runtime Protocol', () => {
         jsonrpc: '2.0',
         id: 'rpc-5',
         error: { code: -32004, message: 'Unauthorized', data: { code: 'unauthorized' } },
+      }).success,
+    ).toBeFalse();
+  });
+
+  test('encodes bounded private Run get/page and original resource receipts', () => {
+    const run = {
+      schema: 'kite.runtime-run.v1' as const,
+      sessionId: 'session-1',
+      runId: 'run-1',
+      phase: 'building' as const,
+      status: 'queued' as const,
+      createdRevision: 4,
+      lastRevision: 4,
+      createdAtMs: 1_700_000_000_000,
+    };
+    const listQuery = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_runs' as const,
+      sessionId: 'session-1',
+      cursor: { createdRevision: 3, runId: 'run-0' },
+      limit: 200,
+    };
+    expect(mapRuntimeQueryToProtocol(listQuery)).toEqual(listQuery);
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
+        id: 'run-query',
+        method: 'runtime/query',
+        params: { query: { ...listQuery, limit: 201 } },
+      }).success,
+    ).toBeFalse();
+    expect(
+      mapRuntimeQueryResultToProtocol({
+        status: 'ok',
+        queryType: 'list_runs',
+        runs: [run],
+        nextRunCursor: { createdRevision: 4, runId: 'run-1' },
+      }),
+    ).toEqual({
+      status: 'ok',
+      queryType: 'list_runs',
+      runs: [run],
+      nextRunCursor: { createdRevision: 4, runId: 'run-1' },
+    });
+    const receipt = {
+      status: 'idempotent_replay' as const,
+      commandId: 'command-1',
+      sessionId: 'session-1',
+      originalRevision: 4,
+      resource: { kind: 'run' as const, run },
+    };
+    expect(RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(receipt).success).toBeTrue();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        ...receipt,
+        resource: { ...receipt.resource, privateCommand: 'hidden' },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        ...receipt,
+        resource: {
+          kind: 'run',
+          run: { ...run, status: 'running', startedAtMs: 1_700_000_000_001 },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        status: 'ok',
+        queryType: 'get_run',
+        run: { ...run, status: 'failed', finishedAtMs: 1_700_000_000_002 },
       }).success,
     ).toBeFalse();
   });
@@ -746,7 +821,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '499d39ab:731d86b4';
+    const expectedDigest = '5a390143:e340a076';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

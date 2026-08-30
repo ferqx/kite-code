@@ -102,6 +102,11 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/help')).toEqual({ type: 'help' });
   });
 
+  test('parses only the discovery-only /web command without arguments', () => {
+    expect(parseSlashCommand('/web')).toEqual({ type: 'web' });
+    expect(parseSlashCommand('/web start')).toEqual({ type: 'unknown', raw: '/web start' });
+  });
+
   test('parses command names case-insensitively like the suggestion matcher', () => {
     expect(parseSlashCommand('/HELP')).toEqual({ type: 'help' });
   });

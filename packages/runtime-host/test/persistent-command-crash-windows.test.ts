@@ -234,7 +234,7 @@ describe('Host persistent command crash windows', () => {
     expect(replay.activations).toHaveLength(0);
     expect(replay.preparedExecutions).toHaveLength(0);
     expect(replay.schedules).toHaveLength(0);
-    expect(replay.recoveries).toEqual(['session-1']);
+    expect(replay.recoveries).toEqual([]);
     await restarted[Symbol.asyncDispose]();
   });
 
@@ -256,7 +256,7 @@ describe('Host persistent command crash windows', () => {
     expect(replay.commits).toHaveLength(0);
     expect(replay.preparedExecutions).toHaveLength(0);
     expect(replay.schedules).toHaveLength(0);
-    expect(replay.recoveries).toEqual(['session-1']);
+    expect(replay.recoveries).toEqual([]);
     await restarted[Symbol.asyncDispose]();
   });
 
@@ -280,12 +280,12 @@ describe('Host persistent command crash windows', () => {
       expect(replay.commits).toHaveLength(0);
       expect(replay.preparedExecutions).toHaveLength(0);
       expect(replay.schedules).toHaveLength(0);
-      expect(replay.recoveries).toEqual(['session-1']);
+      expect(replay.recoveries).toEqual([]);
       await restarted[Symbol.asyncDispose]();
     }
   });
 
-  test('a receipt replay leaves schedule, pre-attempt work, and a failed run to the recovery owner', async () => {
+  test('a receipt replay never invents scheduling, pre-attempt work, or implicit recovery', async () => {
     const receipts = new StrictReceiptPort();
     const original = new CrashWindowBridge(receipts, { execute: true, holdBeforeAttempt: true });
     const host = hostFor(receipts, original);
@@ -305,7 +305,7 @@ describe('Host persistent command crash windows', () => {
     expect(replay.schedules).toHaveLength(0);
     expect(replay.runs).toHaveLength(0);
     expect(replay.attempts).toHaveLength(0);
-    expect(replay.recoveries).toEqual(['session-1']);
+    expect(replay.recoveries).toEqual([]);
 
     original.releaseAttempt();
     await host.waitForSessionIdle('session-1');
@@ -331,7 +331,7 @@ describe('Host persistent command crash windows', () => {
     expect(afterRunFailure.preparedExecutions).toHaveLength(0);
     expect(afterRunFailure.schedules).toHaveLength(0);
     expect(afterRunFailure.runs).toHaveLength(0);
-    expect(afterRunFailure.recoveries).toEqual(['session-1']);
+    expect(afterRunFailure.recoveries).toEqual([]);
     await afterRestart[Symbol.asyncDispose]();
   });
 
@@ -361,7 +361,7 @@ describe('Host persistent command crash windows', () => {
     expect(replay.commits).toHaveLength(0);
     expect(replay.preparedExecutions).toHaveLength(0);
     expect(replay.schedules).toHaveLength(0);
-    expect(replay.recoveries).toEqual(['session-a', 'session-b']);
+    expect(replay.recoveries).toEqual([]);
     await restarted[Symbol.asyncDispose]();
   });
 });

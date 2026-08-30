@@ -14,9 +14,58 @@
 
 Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
 
+Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
+untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
+初始化失败也不恢复或重放该secret，Client必须重新mint。context TTL、logout、generation supersede、Native connection close或Worker restart只释放
+HTTP admission并关闭其private read logical connection，不取消Run/Session、不触发recovery、不写Store。每次read request重验Trust；Trust撤销会
+撤销context，Trust暂时不可用返回503。History cursor把first-page through sequence与boundary event digest固定；boundary被rewind/delete替换时409
+invalidated，不把新History拼到旧watermark。response loss后Client必须重新mint/exchange，不从descriptor或旧token恢复。
+每context最多16个in-flight request；第17个返回retryable 429。logout、Trust撤销、generation fence、drain与replacement先阻止新admission，
+等待已认证read（包括pending Trust重验）收敛后关闭一次private connection；迟到admission复核closed/revoked事实并返回503/401，不能进入owner。
+History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
+覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；Gateway restart仍由独立process/carrier suite证明且不代理`/v1`。
+
+KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和
+digest-bound original resource receipt；Run/receipt任一fault完整rollback。activation、waiting/running与terminal/cancel由deterministic
+commit clock推进，Store writer拒绝同Session第二个active Run。response loss/restart retry从persistent lookup直接返回同一original
+queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
+Run keyset page，SQLite query plan命中专用index且不扫event journal。
+
+KRSRUN-02A focused matrix现已证明unpublished Store 8 owner上的delete FK cascade/retained receipt、rewind partial-boundary refusal与fault
+rollback、fork settled-terminal copy/origin/coverage/no-source-receipt、reopen及cross-Workspace binding isolation。Host GET/list在resume前只做
+`unknown/recovery_required`投影且不recover，resume只运行一次existing recovery；unknown refinement保留原finish clock，既有recovery suite继续
+证明不重复external dispatch。late retry与current Run missing是两个独立事实，retained receipt revision可高于rewound Session head。
+
+KRSRUN-02B focused matrix已证明Store 7→Store 8 whole-generation copy、per-Session coverage、不回填历史Run、Catalog完整fact copy、
+安全WAL隔离snapshot、source immutability、active/corrupt/unowned/partial/Catalog/copy fault整体阻断，以及pointer/journal/fence与旧Store 7
+writer fence。迁移会用authority owner codec校验Controller/recovery/effect/resource与recovery identity，拒绝活动、损坏或无归属记录，并验证
+合法记录只把LayoutGeneration重绑到target；Store 8 writer在journal `committed`前仍fail closed。manager orchestration只有在exact完整
+maintenance barrier后才建立source-bound fence；Catalog存在`in_progress`operation或未登记Worker scope时不创建target。
+
+KRSRUN-03A focused与Service owner suite已证明production Worker只打开committed Store 8、reopen仍保留Controller/read/Run façade、fresh layout与
+new Workspace直接物化Store 8、Catalog first-write fence、idle History source不变、Store 7 active profile无fallback，以及private `list_runs`
+不再返回unsupported。Service 1525、SQLite 90、Runtime fault 36与CI soak 7/7通过；本机dirty-source macOS arm64 candidate完成
+build/verify/install/upgrade/rollback/uninstall smoke。Public Run route/ServerInfo capability继续关闭，GitHub-hosted三平台candidate evidence仍不能由本机结果替代。
+
+KRSRUN-03B focused evidence增加formal maintenance CLI parser/blocked exit、Coordinator v2 authenticated stop/draining、manager exact-exit确认、
+empty process-chain Store 7→8 end-to-end command、持锁后Coordinator absence复核及State convergence negatives。正式入口不接收caller-supplied zero barrier；Gateway/Worker
+state残留、busy activity、PID/start-token/control uncertainty、unknown external effect或source deep-validation失败均保持blocked。当前本机结果仍只
+是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
+`sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 211、最终focused 38及
+candidate `af43f919f756c276fb945834`已通过；完整边界见
+[03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
+macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
+
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
-远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。
+远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。terminal先于idle projection时，
+每轮remote-idle waiter必须绑定该轮completion callback；前轮waiter的迟到finally不能遮蔽后继轮terminal/query或其presentation flush。
+只有applied receipt后才能登记current accepted completion；每轮2秒后、至多每2秒一次的bounded query fallback只在projection满足
+current revision floor且权威idle时收敛它，使terminal/idle notification gap不依赖下一条subscription event。
+Ink flush是非权威展示屏障，正常等待真实commit但最多1秒；迟到/失败不能停止subscription消费answer/terminal，也不能阻塞后继prompt。
+模型terminal可以省略optional summary；qualification必须覆盖无换行ordinary delta由request-scoped cumulative buffer收口，不能丢失尾段。
+run promise只接受跨过current command floor且匹配canonical receipt `runId`的`run.terminal|run.failure`；`turn.terminal`、`task.terminal`
+与previous Run的迟到终态不能结束successor。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
 失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live
@@ -54,7 +103,7 @@ release matrix及正式hosted qualification仍pending。Windows state primitive�
 owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Windows candidate job，但必须等待当前实现head
 的远端结果，不能用POSIX或本机测试替代。
 
-当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
+当前local evidence为manager 37/135、carrier 23/129、Service shell 23/97、Runtime transport 3/852、Runtime fault
 36/106、CI-profile soak 7/7 cases、Service owner 1365 parallel tests / 6795 expects加34个isolated files、CLI owner
 757 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
@@ -237,7 +286,10 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都只属于 explicit readonly historical source profile，不能进入当前执行路径。
+strict mismatch 与 no-fallback contract。production缺省仍使用加密随机identity与系统时钟；默认Workspace Worker writer精确为
+State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`，显式legacy Service maintenance仍为State 27 / Store 6 /
+`kite-runtime-server-v1-2026-08-26`，Store 7只作offline migration source。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`
+与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都只属于explicit readonly historical source profile，不能进入当前Worker执行路径。
 
 RM-04 production Store 由 Service 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
@@ -265,6 +317,10 @@ State 26 的旧 Project ID 只有在 source session row 与 decoded State identi
 mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 source 继续 byte-for-byte 不变，无法证明 identity 的失败只
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于
 `apps/kite-service/test/state-store-project-identity-compatibility.test.ts`。
+
+Store-only Session可能在subscriber先注册后才由query加载；qualification要求query projection经NotificationProjector唤醒该pending
+subscriber且仍保持Store read non-mutating。TUI shutdown另以权威projection区分idle release与active/pending/unknown detach；重启后已完成
+Session必须可重新取得Controller，未完成Turn不得被clean exit误释放。
 
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault

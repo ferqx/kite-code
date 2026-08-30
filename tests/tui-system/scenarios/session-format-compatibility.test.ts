@@ -4,29 +4,18 @@ import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite-ai/agent-kernel';
 import { resolveProjectIdentity } from '@kite-ai/runtime-host';
-import {
-  SQLITE_RUNTIME_DDL,
-  sqliteCurrentRuntimeStorePath,
-  sqliteRuntimeStorePath,
-} from '@kite-ai/runtime-storage-sqlite';
+import { SQLITE_RUNTIME_DDL, sqliteRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitCurrentInput,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import {
-  screenContains,
-  screenHasSessionRow,
-  waitForCondition,
-  waitForText,
-} from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+  createTestWorkspace,
+  observePersistedSessionIds,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const SESSION_ID = 'legacy-session-1';
 const SESSION_NAME = 'Original compatible session';
@@ -39,26 +28,6 @@ const THIRD_SESSION_NAME = 'Third compatible session';
 const THIRD_MESSAGE = 'Third State 26 message remains visible';
 const MALFORMED_SESSION_ID = 'malformed-legacy-session';
 const MALFORMED_SESSION_NAME = 'Broken compatible session';
-
-async function selectListedSession(tui: PtyProcess, name: string): Promise<void> {
-  // Runtime Server V1 keeps the new process's fresh current session as the
-  // first selector row. Search for the named historical row rather than
-  // relying on its relative position among current and imported sessions.
-  await activateSessionSearch(tui);
-  await typeText(tui, name);
-  await waitForCondition(
-    () => screenHasSessionRow(tui.viewport(), name),
-    `filtered session row ${JSON.stringify(name)} to load`,
-    10_000,
-  );
-  tui.write('\x1b[B');
-  await waitForCondition(
-    () => screenHasSessionRow(tui.viewport(), name, { selected: true }),
-    `filtered session row ${JSON.stringify(name)} to become selected`,
-    5_000,
-  );
-  await submitCurrentInput(tui);
-}
 
 function checksum(value: string): string {
   let hash = 2166136261;
@@ -347,22 +316,7 @@ function seedMalformedState26Session(checkpointPath: string, workspace: string):
   return sourcePath;
 }
 
-function currentStoreHasLegacySession(checkpointPath: string, sessionId = SESSION_ID): boolean {
-  const database = new Database(sqliteCurrentRuntimeStorePath(checkpointPath), { readonly: true });
-  try {
-    return Boolean(
-      database
-        .query<{ count: number }, [string]>(
-          'SELECT COUNT(*) AS count FROM runtime_sessions WHERE session_id = ?',
-        )
-        .get(sessionId)?.count,
-    );
-  } finally {
-    database.close();
-  }
-}
-
-describe('TUI PTY System — State 26 Session Compatibility', () => {
+describe('TUI PTY System — State 26 legacy Service source isolation', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
@@ -376,9 +330,8 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
     checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
-    // Compatibility import does not override the Local Service connection admission. Bind the
-    // fixture to the current canonical Workspace; cross-Workspace resume is covered separately
-    // and must remain fail-closed.
+    // The source is deliberately bound to this Workspace. The default Coordinator/Worker path
+    // must still ignore it: Store 5 compatibility belongs only to explicit legacy Service mode.
     const historicalWorkspace = workspace.workspace;
     sourcePath = seedState26Session(checkpointPath, historicalWorkspace);
     sourceFingerprint = [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`].map((path) => ({
@@ -393,56 +346,41 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  step('lists the known old session without compatibility or migration messaging', async () => {
+  step('keeps legacy Store 5 sessions outside the default Worker selector', async () => {
     await submitCommand(tui, '/resume');
-    const output = await waitForText(() => tui.viewport(), SESSION_NAME, 10_000);
-    expect(screenContains(output, SESSION_NAME)).toBe(true);
+    const output = await waitForText(() => tui.viewport(), '会话列表', 10_000);
+    expect(screenContains(output, SESSION_NAME)).toBe(false);
+    expect(screenContains(output, SECOND_SESSION_NAME)).toBe(false);
+    expect(screenContains(output, THIRD_SESSION_NAME)).toBe(false);
     expect(screenContains(output, '迁移')).toBe(false);
     expect(screenContains(output, '兼容')).toBe(false);
     expect(screenContains(output, '服务不可用')).toBe(false);
-  });
-
-  step('imports only after Enter and restores the original message silently', async () => {
-    expect(existsSync(sqliteCurrentRuntimeStorePath(checkpointPath))).toBe(true);
-    expect(currentStoreHasLegacySession(checkpointPath)).toBe(false);
-    await selectListedSession(tui, SESSION_NAME);
-    const output = await waitForText(() => tui.viewport(), MESSAGE, 15_000);
-    expect(screenContains(output, MESSAGE)).toBe(true);
-    expect(screenContains(output, '历史会话打开失败')).toBe(false);
-    expect(currentStoreHasLegacySession(checkpointPath)).toBe(true);
+    expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(1);
     for (const [index, path] of [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`].entries()) {
       const expected = sourceFingerprint[index];
       if (!expected) throw new Error(`Missing source fingerprint for ${path}.`);
       expect(readFileSync(path).toString('hex')).toBe(expected.hex);
       expect(statSync(path).mtimeMs).toBe(expected.mtimeMs);
     }
+    tui.write('\x1b');
+    await waitForCondition(
+      () => !screenContains(tui.viewport(), '会话列表') && screenContains(tui.viewport(), '❯'),
+      'the current Session input to regain focus after closing the selector',
+      5_000,
+    );
   });
 
-  step('serializes two more lazy imports and switches on the same live Runtime owner', async () => {
-    await submitCommand(tui, '/resume');
-    await waitForText(() => tui.viewport(), SECOND_SESSION_NAME, 10_000);
-    await selectListedSession(tui, SECOND_SESSION_NAME);
-    let output = await waitForText(() => tui.viewport(), SECOND_MESSAGE, 15_000);
-    expect(screenContains(output, '历史会话打开失败')).toBe(false);
-    expect(currentStoreHasLegacySession(checkpointPath, SECOND_SESSION_ID)).toBe(true);
-
-    await submitCommand(tui, '/resume');
-    await waitForText(() => tui.viewport(), THIRD_SESSION_NAME, 10_000);
-    await selectListedSession(tui, THIRD_SESSION_NAME);
-    output = await waitForText(() => tui.viewport(), THIRD_MESSAGE, 15_000);
-    expect(screenContains(output, '历史会话打开失败')).toBe(false);
-    expect(currentStoreHasLegacySession(checkpointPath, THIRD_SESSION_ID)).toBe(true);
-  });
-
-  step('switches back to the first loaded session without losing its rendered turns', async () => {
-    await submitCommand(tui, '/resume');
-    await waitForText(() => tui.viewport(), SESSION_NAME, 10_000);
-    await selectListedSession(tui, SESSION_NAME);
-    const output = await waitForText(() => tui.viewport(), `❯ ${MESSAGE}`, 15_000);
-    expect(screenContains(output, MESSAGE)).toBe(true);
-    expect(screenContains(output, THIRD_MESSAGE)).toBe(false);
-    expect(screenContains(output, '会话列表')).toBe(false);
-    expect(screenContains(output, '历史会话打开失败')).toBe(false);
+  step('continues the fresh Store 8 session without importing the source', async () => {
+    server.setResponses([{ message: { content: 'Fresh Store 8 session remains usable.' } }]);
+    await submitUserMessage(tui, server, 'Continue without legacy import', { timeout: 15_000 });
+    const output = await waitForText(
+      () => tui.viewport(),
+      'Fresh Store 8 session remains usable.',
+      15_000,
+    );
+    expect(screenContains(output, 'Continue without legacy import')).toBe(true);
+    expect(screenContains(output, MESSAGE)).toBe(false);
+    expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(1);
   });
 
   test(
@@ -452,7 +390,7 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
   );
 });
 
-describe('TUI PTY System — malformed compatible session isolation', () => {
+describe('TUI PTY System — malformed legacy Service source isolation', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
@@ -477,15 +415,19 @@ describe('TUI PTY System — malformed compatible session isolation', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  step('fails only the selected malformed session with a generic message', async () => {
+  step('does not expose the malformed source to the default Worker', async () => {
     await submitCommand(tui, '/resume');
-    await waitForText(() => tui.viewport(), MALFORMED_SESSION_NAME, 10_000);
-    await selectListedSession(tui, MALFORMED_SESSION_NAME);
-    const output = await waitForText(() => tui.viewport(), '历史会话打开失败', 15_000);
-    expect(screenContains(output, '当前会话未受影响')).toBe(true);
-    expect(screenContains(output, '历史会话服务不可用')).toBe(false);
-    expect(screenContains(output, '❯')).toBe(true);
+    const output = await waitForText(() => tui.viewport(), '会话列表', 10_000);
+    expect(screenContains(output, MALFORMED_SESSION_NAME)).toBe(false);
+    expect(screenContains(output, '历史会话打开失败')).toBe(false);
     expect(readFileSync(sourcePath).toString('hex')).toBe(sourceHex);
+    expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(1);
+    tui.write('\x1b');
+    await waitForCondition(
+      () => !screenContains(tui.viewport(), '会话列表') && screenContains(tui.viewport(), '❯'),
+      'the current Session input to regain focus after closing the selector',
+      5_000,
+    );
   });
 
   step('continues the fresh session after the isolated failure', async () => {

@@ -36,6 +36,11 @@ History handler只取得Service-owned `RuntimeHistoryClient`；App routes逐条�
 queue、buffered amount、heartbeat与drain都有hard ceiling；binary/oversized/malformed/backpressure均按固定低信息语义
 fail closed，diagnostic不携带body、token、path或secret。
 
+同一Worker listener把`/v1`namespace委托给注入的Agent API façade。carrier只完成loopback/Host/readiness/close barrier，不解析Public
+credential、resource或role。当前façade只实现`/v1/auth/exchange`、`/v1/auth/session`与`GET /v1`；其他route固定404。Agent query由
+façade自行closed decode，因此不会被private carrier的全局“禁止query”规则提前吞掉；private route仍保持无query。未注入façade时
+`/v1`固定404，不创建第二listener或generic route registry。
+
 carrier close先停止接受新业务并关闭Runtime socket，再以`stop(false)`给已进入HTTP handler的响应一个有界
 `drainDeadlineMs`刷出窗口；窗口耗尽才以`stop(true)`强制关闭listener。该顺序保证control stop的
 `applied + draining`响应可先交付调用方，同时仍让transport owner在deadline内完成退出；它不延长Session/Turn
@@ -58,5 +63,5 @@ development loopback/reference仅用于同一Protocol transport qualification，
 
 ## 验证
 
-`bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts`。
+`bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/agent-api/context.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts`。
 这些local结果不构成KLSV1-07 Windows/三平台或全部PTY evidence。

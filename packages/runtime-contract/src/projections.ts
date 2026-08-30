@@ -1,4 +1,44 @@
 export const RUNTIME_PROJECTION_SCHEMA_ = 'kite.runtime-projection.v1' as const;
+export const RUNTIME_RUN_PROJECTION_SCHEMA_ = 'kite.runtime-run.v1' as const;
+
+export type RuntimeRunPhase = 'planning' | 'building';
+export type RuntimeRunStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'unknown';
+
+export interface RuntimeRunTerminalProjection {
+  readonly reasonCode: string;
+  readonly safeRetry: boolean;
+  readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
+  readonly outcomeId?: string;
+}
+
+/** Client-safe projection of the Store 8 canonical Run row. */
+export interface RuntimeRunProjection {
+  readonly schema: typeof RUNTIME_RUN_PROJECTION_SCHEMA_;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly originSessionId?: string;
+  readonly originRunId?: string;
+  readonly phase: RuntimeRunPhase;
+  readonly status: RuntimeRunStatus;
+  readonly createdRevision: number;
+  readonly lastRevision: number;
+  readonly createdAtMs: number;
+  readonly startedAtMs?: number;
+  readonly finishedAtMs?: number;
+  readonly terminal?: RuntimeRunTerminalProjection;
+}
+
+export interface RuntimeRunPageCursor {
+  readonly createdRevision: number;
+  readonly runId: string;
+}
 
 export interface RuntimeEvidenceSummary {
   readonly kind: string;

@@ -3,6 +3,7 @@ import type {
   RuntimeAccess,
   RuntimeAccessNotification,
   RuntimeCommand,
+  RuntimeCommandContext,
   RuntimeNotification,
   RuntimeQuery,
   RuntimeSubscription,
@@ -212,6 +213,61 @@ describe('Runtime Server', () => {
       result: { status: 'ok', queryType: 'list_sessions' },
     });
     expect(runtime.queries).toHaveLength(1);
+
+    await pair.client.send({
+      jsonrpc: '2.0',
+      id: 'query-runs',
+      method: 'runtime/query',
+      params: {
+        query: {
+          schema: 'kite.runtime-query.v1',
+          type: 'list_runs',
+          sessionId: 'session-1',
+          limit: 10,
+        },
+      },
+    });
+    expect(await next(messages)).toMatchObject({
+      id: 'query-runs',
+      result: { status: 'ok', queryType: 'list_runs', runs: [{ runId: 'run-1' }] },
+    });
+    expect(runtime.queries).toHaveLength(2);
+  });
+
+  test('pins admission connection and binding reference into the in-process command context', async () => {
+    const runtime = new FakeRuntime();
+    const pair = createRuntimeServerInProcessHub(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => ({
+            allowed: true as const,
+            workspace: '/trusted/workspace',
+            bindingReference: `binding:${input.connectionId}`,
+          }),
+        },
+      },
+      serverOptions(),
+    ).open();
+    const messages = pair.client.messages()[Symbol.asyncIterator]();
+    await initializePair(pair, messages);
+
+    await pair.client.send(commandRequest('command-context-1'));
+    expect(await next(messages)).toMatchObject({
+      id: 'command-context-1',
+      result: { status: 'applied' },
+    });
+    expect(runtime.commandContexts).toHaveLength(1);
+    expect(runtime.commandContexts[0]).toMatchObject({
+      schema: 'kite.runtime-command-context.v1',
+      connectionId: 'connection-1',
+      requestId: 'command-context-1',
+      bindingReference: 'binding:connection-1',
+    });
+    expect(Object.isFrozen(runtime.commandContexts[0])).toBeTrue();
+    expect(Object.isFrozen(runtime.commandContexts[0]?.clientInfo)).toBeTrue();
+    expect(runtime.commandContexts[0]).not.toHaveProperty('workspace');
+    await pair.connection.close();
   });
 
   test('binds distinct per-connection admission ports while resume/query retain persisted authority', async () => {
@@ -1028,6 +1084,7 @@ function emptyIndex(): RuntimeAccessNotification[] {
 
 class FakeRuntime implements RuntimeAccess {
   commands: RuntimeCommand[] = [];
+  commandContexts: Array<RuntimeCommandContext | undefined> = [];
   queries: RuntimeQuery[] = [];
   subscriptions: RuntimeSubscription[] = [];
   notifications: RuntimeAccessNotification[] = [];
@@ -1045,8 +1102,9 @@ class FakeRuntime implements RuntimeAccess {
   endAfterNotifications = false;
   throwOnIteratorReturn = false;
 
-  async command(command: RuntimeCommand) {
+  async command(command: RuntimeCommand, context?: RuntimeCommandContext) {
     this.commands.push(command);
+    this.commandContexts.push(context);
     await this.commandGate;
     return {
       status: 'applied' as const,
@@ -1080,6 +1138,31 @@ class FakeRuntime implements RuntimeAccess {
               },
             },
           };
+    }
+    if (query.type === 'list_runs') {
+      return {
+        status: 'ok' as const,
+        queryType: query.type,
+        runs: [
+          {
+            schema: 'kite.runtime-run.v1' as const,
+            sessionId: query.sessionId,
+            runId: 'run-1',
+            phase: 'building' as const,
+            status: 'queued' as const,
+            createdRevision: 1,
+            lastRevision: 1,
+            createdAtMs: 100,
+          },
+        ],
+      };
+    }
+    if (query.type === 'get_run') {
+      return {
+        status: 'not_found' as const,
+        queryType: query.type,
+        code: 'run_not_found' as const,
+      };
     }
     return { status: 'ok' as const, queryType: query.type, sessions: this.querySessions };
   }

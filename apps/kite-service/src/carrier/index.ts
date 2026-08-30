@@ -43,6 +43,7 @@ export {
   type KiteServiceCarrierDiagnosticCode,
   type KiteServiceCarrierLimits,
   type KiteServiceCarrierOptions,
+  type KiteServiceWebGatewayRouteOptions,
 } from './native-loopback-carrier';
 export type {
   KiteServiceApplicationPort,

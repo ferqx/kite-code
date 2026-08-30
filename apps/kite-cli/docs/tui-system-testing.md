@@ -42,6 +42,8 @@
   ordinary stop。该重试不得用于`outcome_unknown`，也不得把TUI disconnect解释成Session cancel。
 - cleanup失败诊断只附最后一次manager status的safe outcome/state/diagnostic；不得打印descriptor、PID、home/path、token
   或HTTP body。
+- test-owned Coordinator/Worker companion只在持久descriptor的PID与OS start token仍精确匹配时接收清理信号；先给SIGTERM
+  graceful窗口，超时后再次核验同一identity才可SIGKILL并等待退出。该test-only fallback不进入production manager，也不能仅凭PID执行。
 
 ## Journey 规则
 

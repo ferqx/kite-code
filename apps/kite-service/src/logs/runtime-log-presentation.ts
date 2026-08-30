@@ -91,19 +91,54 @@ export function projectRuntimeLogEvent(
   switch (event.type) {
     case 'user.message_appended': {
       const content = stringField(event, 'content');
+      const messageId = stringField(event, 'messageId');
       return {
         ...base,
         summary: content || 'User message',
-        detail: content ? { kind: 'message', fields: { content } } : base.detail,
+        detail:
+          content && messageId
+            ? { kind: 'message', fields: { content, message_id: messageId } }
+            : base.detail,
       };
     }
+    case 'model.responded': {
+      const messageId = stringField(event, 'messageId');
+      const requestId = stringField(event, 'invocationId') ?? messageId;
+      const text = stringField(event, 'text');
+      const reasoningText = stringField(event, 'reasoningText');
+      return {
+        ...base,
+        summary: text || 'Model response',
+        detail:
+          messageId && requestId
+            ? {
+                kind: 'model',
+                fields: {
+                  message_id: messageId,
+                  request_id: requestId,
+                  ...(text ? { text } : {}),
+                  ...(reasoningText ? { reasoning_text: reasoningText } : {}),
+                },
+              }
+            : base.detail,
+      };
+    }
+    case 'tool.queued':
     case 'tool.started':
     case 'tool.finished':
     case 'tool.failed':
     case 'tool.cancelled':
     case 'tool.rejected':
-    case 'tool.queued':
-      return { ...base, detail: { kind: 'tool' } };
+      return {
+        ...base,
+        detail: {
+          kind: 'tool',
+          fields: {
+            tool_call_id: event.toolCallId,
+            label: 'name' in event ? safeText(String(event.name), 256) : 'Tool',
+          },
+        },
+      };
     case 'model.invocation_attempt_started':
     case 'model.invocation_completed':
     case 'model.invocation_interrupted':

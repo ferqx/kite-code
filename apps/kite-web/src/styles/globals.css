@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-terminal: var(--terminal);
+  --color-foreground: var(--foreground);
+  --color-copy: var(--copy);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-running: var(--running);
+  --color-danger: var(--danger);
+  --color-terminal-copy: var(--terminal-copy);
+  --color-ring: var(--ring);
+  --shadow-soft: 0 12px 32px rgb(0 0 0 / 0.16);
+  --shadow-glow: 0 0 28px color-mix(in oklab, var(--accent) 34%, transparent);
+}
+
+:root {
+  color-scheme: dark;
+  --canvas: oklch(0.155 0.01 260);
+  --sidebar: oklch(0.135 0.012 260);
+  --surface: oklch(0.19 0.012 260);
+  --surface-raised: oklch(0.225 0.015 260);
+  --terminal: oklch(0.115 0.01 260);
+  --foreground: oklch(0.94 0.01 86);
+  --copy: oklch(0.86 0.012 86);
+  --muted: oklch(0.4 0.012 260);
+  --muted-foreground: oklch(0.64 0.014 260);
+  --border: oklch(0.29 0.014 260 / 0.72);
+  --border-strong: oklch(0.39 0.025 260 / 0.8);
+  --accent: oklch(0.72 0.14 165);
+  --accent-foreground: oklch(0.13 0.025 165);
+  --running: oklch(0.76 0.16 155);
+  --danger: oklch(0.7 0.17 25);
+  --terminal-copy: oklch(0.78 0.03 150);
+  --ring: oklch(0.72 0.14 165);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--canvas);
+  color: var(--foreground);
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 72% -20%, oklch(0.34 0.06 180 / 0.13), transparent 44%), var(--canvas);
+  text-rendering: optimizeLegibility;
+}
+button {
+  font: inherit;
+}
+::selection {
+  background: color-mix(in oklab, var(--accent) 32%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    transition-duration: 0.01ms;
+  }
+}

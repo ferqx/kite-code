@@ -2,91 +2,94 @@
 
 ## 定位
 
-`@kite-ai/kite-service` 是唯一 production Runtime composition root。KLSV1-06 clean cutover 后，默认 Store 的
-Runtime Host、Runtime Server、SQLite、Builtin Runtime、Runtime Application、raw History projector与 App Control
-owner全部只在本Service；`apps/kite-cli` 只保留 terminal presentation与Native client。
+`@kite-ai/kite-service`拥有production backend composition。当前source/release的TUI、`run/resume`、`service *`与`web`按
+canonical Kite Home复用唯一Local Service；该进程拥有唯一Store 9 writer、Runtime Host、Controller authority、Native endpoint与
+loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope，但不拥有独立进程或数据库。
+
+`apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker、独立Web Gateway及Store 6/7/8代码只可由
+显式离线迁移、legacy recovery或对应测试调用，不得回到普通terminal/Web data plane。
 
 ## 拥有职责
 
-- `src/composition.ts` 组合唯一 Runtime Application、Host/Store/Builtin execution、Runtime Server、History reader、
-  Workspace router、interaction broker、App Control与共享 mutation gate。
-- 拥有service-owned config/credential、Workspace Trust、Provider/model、MCP Supervisor/auth、Skill、Sandbox/Shell、Git、
-  observability、session logging、checkpoint与release/execution status owner；向client只投影closed safe contract。
-- `src/executable.ts` 是managed companion foreground entry。它从manager提供的显式neutral environment构造canonical
-  default checkpoint/config paths，启动Native infrastructure，并以dedicated fd发布readiness；stdout不承载readiness。
-- Native infrastructure只绑定 `127.0.0.1:0`，拥有Runtime WebSocket、History、exact App Control、credential、
-  authenticated instance handshake与control stop route；state/descriptor/token/instance lock由Service正常发布/清理。
-- Workspace启动保持neutral。Trust query/decision先由App Control canonicalize并持久化revision CAS；只有trusted后carrier
-  才签发instance/Workspace-bound one-shot ticket，Runtime create与persisted Session identity继续交叉校验。
-- 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain，关闭carrier/application后最后
-  清理state。signal shutdown执行recovery-safe cancel/drain/dispose。
+- `src/composition.ts`组合唯一Runtime Application、Host/Store、Builtin execution、Runtime Server、History、Workspace router、
+  interaction broker、App Control与共享mutation gate。
+- Service拥有config/credential、Workspace Trust、Provider/model、MCP Supervisor/auth、Skill、Sandbox/Shell、Git、observability、
+  session logging、checkpoint及release/execution status，并只向client投影closed safe contract。
+- `src/executable.ts`接受manager专用的exact `service run-single`入口，从显式canonical home、build identity、neutral cwd、allowlisted env和
+  readiness fd启动；stdout不承载readiness。
+- `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；
+  access/control capability与process identity只在进程内和IPC握手中存在，不写入Kite Home。
+- `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/
+  receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
+- native Runtime command在admission时复核当前Controller generation与connection/client identity；执行复用现有Runtime/Host的per-Session
+  mailbox、transaction、receipt与recovery，不增加第二套Workspace command registry或跨home OS lease。
+- 同一Service listener同时承载Native/Runtime、Agent API和Browser Observer route。Browser cookie不能访问Native/Controller/mutation route，
+  Native authorization也不能进入Browser route；`web stop`只撤销Browser session，不停止Service或Runtime。
+- 项目采用未发布clean cutover。Service只打开current `kite.sqlite`，不扫描、迁移或删除旧DB/layout/Artifact/process state及
+  `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
+- Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成
+  neutral first-run配置，但不创建第二Host、第二Store或fallback backend。
+- 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain。signal shutdown执行recovery-safe
+  cancel/drain/dispose。
 
 ## 不拥有职责
 
-- 不拥有 terminal CLI/TUI、Ink/React、presentation reducer或client preference；不导入 `apps/kite-cli`。
-- 不提供第二默认Store、embedded fallback、app-to-app import、dual write、try-new-catch-old、通用多Store或OS Service。
-- 不把development WebSocket reference、parent-owned stdio test carrier或KLSV1-05 fake process harness描述为额外
-  production listener。Web/Desktop/public SDK仍不在V1支持面。
-- manager lifecycle/state/process primitive由 `@kite-ai/kite-local-runtime/manager` 提供，release composition选择
-  explicit source/installed companion与Kite home；Service process不自行扮演client manager。
+- 不拥有terminal CLI/TUI、Ink/React、presentation reducer或client preference，也不导入`apps/kite-cli`。
+- 不提供第二默认Service、第二Store、embedded fallback、dual write、try-new-catch-old、通用多Store或OS Service。
+- 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener。
+- 不提供remote/LAN、多租户或Browser mutation data plane。Web是private loopback observer；Agent API的角色与能力仍受独立contract约束。
+- manager lifecycle/process primitive由`@kite-ai/kite-local-runtime/manager`提供；Service process不自行扮演client manager。
 
 ## 允许依赖
 
-允许依赖唯一 backend composition所需的 Builtin Runtime、Runtime Host/Server/SPI/Contract/Protocol、SQLite adapter、
-browser-safe App Contract与Native-only local-runtime substrate。禁止依赖 CLI/TUI或另一个App source。
+允许依赖唯一backend composition所需的Builtin Runtime、Runtime Host/Server/SPI/Contract/Protocol、SQLite adapter、browser-safe App
+Contract、browser-safe Agent API Contract与Native-only local-runtime substrate。禁止依赖CLI/TUI或另一个App source。
 
 ## 公开入口
 
-package根入口只服务repo内部composition/test。compiled `kite-service` companion接受exact internal `service run`，由
-managed manager以显式absolute executable、neutral cwd、allowlisted env和dedicated readiness fd启动；普通用户通过
-`kite service ensure/status/stop/restart` 控制窄lifecycle surface。
+package根入口只服务repo内部composition/test。compiled `kite-service`只接受manager调用的exact internal `service run-single`；普通用户通过
+`kite service ensure/status/stop/restart`控制窄lifecycle surface。
 
-OSS candidate同包输出 `bin/kite`、`bin/kite-tui` 与相邻 `bin/kite-service`（Windows为`.exe`）；manifest、install
-preflight与active launcher验证都把companion作为required file。source mode固定解析repo内Service entry，installed mode
-固定解析当前terminal executable相邻companion，不从cwd或PATH猜测。
+OSS candidate只输出`bin/kite`、`bin/kite-tui`、`bin/kite-service`（Windows为`.exe`）及`payload/web`。manifest中的
+Coordinator/Worker/Gateway slot必须为null，archive不得包含相应executable或launcher。`payload/web/api-docs/openapi.json`是必需的Agent API
+contract asset；installed mode只从launcher固定的immutable candidate root解析Service和Web assets，不从cwd或PATH猜测。
 
 ## 关键不变量
 
-- default canonical Store只有本Service一个Host/writer/root；terminal disconnect不取消Turn、不disposeHost/Store。
-- 每个Session projection都从同一durable State revision投影完整、有序的client-safe interaction queue与唯一focus；
-  intermediate revision不得携带未来queue。Runtime Contract/Protocol、Native与InProcess carrier消费同一替换语义，
-  不能把snapshot与旧client interaction做并集，也不能因对象共享引用改变logical-message行为。Store-only启动/index
-  hydration直接从已加载Runtime State投影完整queue，不实例化Workspace context，也不能把pending交互伪装为空。
-  pending interaction在无关State revision前进后以稳定kind-specific identity和当前Session CAS重新投影；结算transaction
-  固定使用Host inspect已接受的command revision，inspect与commit之间State再前进必须CAS失败，不能自动替换成更新revision。
-  Service重启后从durable State重建pending effect与active Turn continuation；结算receipt applied后由Host重新调度原Turn，
-  不依赖旧进程的waiter/closure，也不重复提交approval或dispatch工具。旧generation/digest/provider/verification/input/command
-  内容仍fail closed。
-- Service-owned Workspace scope discovery把canonical Workspace之外的Git`gitDir/commondir`作为exact external-read
-  identity纳入Trust snapshot/revision；用户未确认时Runtime不连接且native sandbox获得零外部root，确认后才只读投影。
-  scope漂移会使trust重新变为unknown；该授权不依赖命令名、不包含primary working tree，也不升级Git write/transaction权力。
-- Runtime Application、state与transport基础设施都必须ready后才发布descriptor；没有noop listener/state或伪ready。
-- descriptor发布身份必须由manager通过`GET /readyz`后authenticated exact `POST /_kite/instance`重新证明，不能回显或
-  信任磁盘descriptor。instance/Protocol/client-contract/server/build任一缺失或不匹配都fail closed；expected build
-  drift返回`incompatible + build_mismatch`，任一结果都不授权清理alive/uncertain state或spawn replacement。
-- access/control token独立且restart-scoped；ticket为32-byte base64url、hash-only、30秒TTL、一次性、instance与
-  Workspace bound。credential、token、raw Provider body与diagnostic secret不跨client seam。
-- Windows filesystem state通过current-user SID、protected owner-only DACL与non-reparse verifier保护；ACL drift
-  fail closed。hosted Windows lifecycle/release job通过前，本地POSIX/focused tests与candidate layout仍不构成
-  KLSV1-07三平台或全部PTY通过。
+- 每个canonical Kite Home最多一个Service、一个Runtime Host、一个Store 9 writer与一个`kite.sqlite`。
+- Kite Home只保存用户配置、`skills/`、`sessions/`和`kite.sqlite`及SQLite companion；不得写process descriptor、token、socket、lock、
+  launch intent、layout sidecar或filesystem Artifact root。
+- POSIX每home runtime只允许`service.sock`与`service.lock`；Windows endpoint使用named pipe。custom home按canonical home digest
+  隔离endpoint并作为相互独立的profile，不增加跨home coordination。
+- `kite web`必须在任何DB、endpoint或Service lifecycle访问前验证fixed asset root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
+  `web_assets_missing`且不留下状态。
+- Store 9 mutation直接使用同一`BEGIN IMMEDIATE` transaction。Session初始State/snapshot/receipt/recovery identity/Controller state与
+  receipt共同commit或rollback；Session删除同事务清理namespaced authority。数据库不保存migration phase、first-write marker或旧Coordinator
+  operation receipt。
+- Controller恢复绑定client/service identity、connection generation与rotating capability。Service restart只在取得新exact reservation后把旧
+  instance lease转为detached；同一logical client恢复到新generation，不启动Worker process。
+- status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不自动重放mutation。
+- 正常Service从不删除legacy source；旧开发数据保持原样且不作为current fallback。
+- Windows owner/DACL/reparse、named pipe ACL与locked-directory evidence必须由真实Windows qualification证明；macOS/Linux结果不能代替。
 
 ## 本地文档
 
 - [Runtime Application 与 App Control](docs/runtime-application.md)
 - [Native/stdio/development carrier](docs/runtime-server-carrier.md)
+- [Agent API context 与 route shell](docs/agent-api.md)
 - [Service state 与锁](docs/service-state.md)
 - [Service auth boundary](docs/service-auth.md)
 - [Service lifecycle 与恢复](docs/service-resilience.md)
 - [KLSV1-05 fake process harness](docs/process-harness.md)
 
+跨包当前边界见[`docs/active/single-service-local-runtime.md`](../../docs/active/single-service-local-runtime.md)。
+
 ## 测试
 
-`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。owner tests覆盖relocated Runtime/
-History/App Control与Native shell/carrier；当前owner run为1365 parallel tests / 6795 expects并通过全部34个isolated
-files。manager focused evidence位于`packages/kite-local-runtime/test/manager`（37/135）。完整40个TUI PTY scenario与
-本机macOS arm64 release smoke已经通过；正式Windows及当前实现head三平台process/release qualification仍pending。
+`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-service typecheck`。single-Service manager/native/release journey位于
+`packages/kite-local-runtime/test`与`tests/release`；正式Linux/Windows hosted process/release qualification仍pending。
 
 ## 文档影响
 
-Runtime/application/carrier变化更新本README及对应本地文档；跨包Runtime authority、Trust、History、恢复、release或
-qualification变化同步更新匹配的`docs/active/`与`tests/README.md`。
+Runtime/application/carrier变化更新本README及对应本地文档；跨包Runtime authority、Trust、History、恢复、release或qualification行为
+同步更新匹配的`docs/active/`与`tests/README.md`。

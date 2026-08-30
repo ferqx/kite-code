@@ -424,7 +424,9 @@ export class NativeRuntimeHistoryClient {
 
   async loadSession(sessionId: string): Promise<RuntimeHistorySessionTranscript> {
     if (!boundedString(sessionId, 512)) throw invalidRequestError();
-    const value = await this.#request(LOCAL_RUNTIME_HISTORY_LOAD_SESSION_PATH, { sessionId });
+    const value = await this.#request(LOCAL_RUNTIME_HISTORY_LOAD_SESSION_PATH, {
+      sessionId,
+    });
     return decodeRuntimeHistoryTranscript(value);
   }
 }
@@ -944,6 +946,7 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
     body: unknown,
     signal?: AbortSignal,
     maxResponseBytes?: number,
+    refreshOnUnauthorized = true,
   ): Promise<unknown> {
     if (this.#closed) throw closedError();
     const service = this.#requireService();
@@ -976,6 +979,18 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
       );
     }
     this.#assertHttpIdentity(service.instanceId, identityGeneration);
+    if (
+      response.status === 401 &&
+      refreshOnUnauthorized &&
+      this.#runtime.snapshotStore.getSnapshot().connectionGeneration === 0
+    ) {
+      // Pre-Runtime App Control can legitimately wait on an in-person Trust decision longer than
+      // a one-shot Worker capability TTL. A 401 is produced before route parsing or dispatch, so
+      // refreshing the exact Coordinator/Worker identity and retrying once cannot replay a
+      // mutation. Once Runtime is connected, callers must use explicit reconnect instead.
+      await this.#prepareIdentity(true);
+      return this.#post(path, body, signal, maxResponseBytes, false);
+    }
     if (response.status !== 200) {
       throw new LocalRuntimeConnectionError(
         response.status === 400
@@ -1716,9 +1731,11 @@ function sameWorkspaceIdentity(
   );
 }
 
-function isNonAppliedLifecycleResult(
-  value: unknown,
-): value is { readonly outcome: string; readonly descriptor?: unknown } {
+function isNonAppliedLifecycleResult(value: unknown): value is {
+  readonly outcome: string;
+  readonly descriptor?: unknown;
+  readonly diagnostic?: unknown;
+} {
   return isRecord(value) && typeof value.outcome === 'string' && value.outcome !== 'applied';
 }
 
@@ -1800,7 +1817,10 @@ function decodeRuntimeLogSessionCursor(value: unknown): RuntimeLogSessionCursor 
   assertOnlyKeys(value, ['sessionId', 'updatedAt']);
   if (!boundedString(value.sessionId, 512) || !nonNegativeSafeInteger(value.updatedAt))
     throw invalidResponseError();
-  return Object.freeze({ sessionId: value.sessionId, updatedAt: value.updatedAt });
+  return Object.freeze({
+    sessionId: value.sessionId,
+    updatedAt: value.updatedAt,
+  });
 }
 
 function decodeRuntimeLogEventPage(value: unknown): RuntimeLogEventPage {
@@ -1926,7 +1946,10 @@ function decodeRuntimeLogEventDetail(value: unknown): RuntimeLogEventDetail {
       (value.artifact.availability !== 'available' && value.artifact.availability !== 'unavailable')
     )
       throw invalidResponseError();
-    artifact = { kind: value.artifact.kind, availability: value.artifact.availability };
+    artifact = {
+      kind: value.artifact.kind,
+      availability: value.artifact.availability,
+    };
   }
   return Object.freeze({
     kind: value.kind as RuntimeLogEventDetail['kind'],
@@ -1937,9 +1960,9 @@ function decodeRuntimeLogEventDetail(value: unknown): RuntimeLogEventDetail {
 
 function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTranscript {
   if (!isRecord(value)) throw invalidResponseError();
-  assertOnlyKeys(value, ['events', 'interactionMode', 'recovery', 'session']);
+  assertOnlyKeys(value, ['events', 'interactionMode', 'records', 'recovery', 'session']);
   const session = decodeRuntimeLogSessionEntry(value.session);
-  if (!Array.isArray(value.events)) throw invalidResponseError();
+  if (!Array.isArray(value.events) || !Array.isArray(value.records)) throw invalidResponseError();
   const events: RuntimeClientEvent[] = [];
   for (const event of value.events) {
     try {
@@ -1948,6 +1971,39 @@ function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTr
       throw invalidResponseError();
     }
     events.push(event);
+  }
+  const records: RuntimeHistorySessionTranscript['records'][number][] = [];
+  let previousSequence = -1;
+  for (const record of value.records) {
+    if (!isRecord(record)) throw invalidResponseError();
+    assertOnlyKeys(record, ['events', 'sequence']);
+    if (
+      !nonNegativeSafeInteger(record.sequence) ||
+      record.sequence <= previousSequence ||
+      record.sequence > session.lastSequence ||
+      !Array.isArray(record.events)
+    ) {
+      throw invalidResponseError();
+    }
+    previousSequence = record.sequence;
+    const recordEvents: RuntimeClientEvent[] = [];
+    for (const event of record.events) {
+      try {
+        assertRuntimeClientEvent(event);
+      } catch {
+        throw invalidResponseError();
+      }
+      recordEvents.push(event);
+    }
+    records.push(
+      Object.freeze({
+        sequence: record.sequence,
+        events: Object.freeze(recordEvents),
+      }),
+    );
+  }
+  if (JSON.stringify(records.flatMap((record) => record.events)) !== JSON.stringify(events)) {
+    throw invalidResponseError();
   }
   if (
     value.interactionMode !== 'accept_edits' &&
@@ -1959,6 +2015,7 @@ function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTr
     throw invalidResponseError();
   return Object.freeze({
     session,
+    records: Object.freeze(records),
     events: Object.freeze(events),
     interactionMode: value.interactionMode,
     recovery: value.recovery,

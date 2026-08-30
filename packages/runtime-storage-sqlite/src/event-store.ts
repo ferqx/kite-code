@@ -8,6 +8,7 @@ export function createSqliteEventStore<Event>(input: {
   readonly codec: SqliteRuntimeSnapshotCodec<Event, unknown>;
   readonly stateSchemaVersion: number;
   readonly isClosed: () => boolean;
+  readonly beforeWrite?: () => void;
 }) {
   const insertEvent = input.db.query(
     'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, created_at) VALUES (?, ?, ?, ?, ?, unixepoch())',
@@ -50,6 +51,7 @@ export function createSqliteEventStore<Event>(input: {
     metadata?: readonly RuntimeEventMetadata[],
     forkCreatedAt?: readonly number[],
   ): void => {
+    if (events.length > 0) input.beforeWrite?.();
     for (const [index, event] of events.entries()) {
       const entry = eventMetadataAt(metadata, index);
       const implicitSequence = lastEventPosition(sessionId) + 1;
@@ -137,9 +139,14 @@ export function createSqliteEventStore<Event>(input: {
     lastEventPosition,
     revisionAtOrBefore: (sessionId: string, position: number) =>
       selectEventRevisionAtOrBefore.get(sessionId, position)?.revision ?? 0,
-    deleteAll: (sessionId: string) => deleteEvents.run(sessionId),
-    deleteAfter: (sessionId: string, position: number) =>
-      deleteEventsAfter.run(sessionId, position),
+    deleteAll: (sessionId: string) => {
+      input.beforeWrite?.();
+      return deleteEvents.run(sessionId);
+    },
+    deleteAfter: (sessionId: string, position: number) => {
+      input.beforeWrite?.();
+      return deleteEventsAfter.run(sessionId, position);
+    },
     insertSerializedForkEvent: (record: {
       readonly sessionId: string;
       readonly eventJson: string;
@@ -148,8 +155,9 @@ export function createSqliteEventStore<Event>(input: {
       readonly causationId: string | null;
       readonly occurredAt: string | null;
       readonly createdAt: number;
-    }) =>
-      insertForkEvent.run(
+    }) => {
+      input.beforeWrite?.();
+      return insertForkEvent.run(
         record.sessionId,
         record.eventJson,
         record.eventId,
@@ -158,6 +166,7 @@ export function createSqliteEventStore<Event>(input: {
         record.causationId,
         record.occurredAt,
         record.createdAt,
-      ),
+      );
+    },
   });
 }

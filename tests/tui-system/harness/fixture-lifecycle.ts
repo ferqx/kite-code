@@ -1,5 +1,5 @@
 import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
-import { createManagedLocalServiceClientComposition } from '../../../scripts/release/local-service-client';
+import { createManagedLocalSingleServiceComposition } from '../../../scripts/release/single-service-native-client';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
@@ -41,12 +41,12 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
       if (!codeRoot) {
         throw new Error('TUI test workspace is missing its explicit KITE_CODE_HOME.');
       }
-      const managed = createManagedLocalServiceClientComposition({
+      const managed = createManagedLocalSingleServiceComposition({
         argv: ['tui-system-cleanup', '--kite-home', codeRoot],
         environment: workspace.env,
         systemHome: workspace.home,
       });
-      let stopped = await managed.lifecycle.stop({
+      let stopped = await managed.manager.stop({
         clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
       });
       // A just-disconnected PTY can briefly race the independent identity probe. The manager
@@ -60,7 +60,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
         attempt += 1
       ) {
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
-        stopped = await managed.lifecycle.stop({
+        stopped = await managed.manager.stop({
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
@@ -70,16 +70,16 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
       // Never apply this retry to `outcome_unknown`.
       for (let attempt = 0; stopped.outcome === 'service_busy' && attempt < 50; attempt += 1) {
         await new Promise<void>((resolve) => setTimeout(resolve, 100));
-        stopped = await managed.lifecycle.stop({
+        stopped = await managed.manager.stop({
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
-      let lastObservedStatus: Awaited<ReturnType<typeof managed.lifecycle.status>> | undefined;
+      let lastObservedStatus: Awaited<ReturnType<typeof managed.manager.status>> | undefined;
       if (stopped.outcome !== 'applied') {
         if (stopped.outcome === 'outcome_unknown') {
           for (let attempt = 0; attempt < 50; attempt += 1) {
             await new Promise<void>((resolve) => setTimeout(resolve, 100));
-            const observed = await managed.lifecycle.status({
+            const observed = await managed.manager.status({
               clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
             });
             lastObservedStatus = observed;

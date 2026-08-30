@@ -19,18 +19,25 @@
  * Default interaction mode is accept-edits: workspace writes auto-approve.
  */
 
-import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  screenContains,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
+import {
+  createTestWorkspace,
+  observePersistedSessionIds,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -167,17 +174,7 @@ describe('TUI PTY System — File Rewind', () => {
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(SECOND_NOTES_UPDATE);
 
       // 会话恢复使用 fork：源会话和新会话都仍在 Runtime Store 中。
-      const runtimeDb = new Database(
-        sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
-        {
-          readonly: true,
-        },
-      );
-      const sessionCount = runtimeDb
-        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
-        .get()?.count;
-      runtimeDb.close();
-      expect(sessionCount).toBe(2);
+      expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(2);
 
       // TUI recovers — prompt visible
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
@@ -192,12 +189,17 @@ describe('TUI PTY System — File Rewind', () => {
     async () => {
       await submitCommand(tui, '/rewind');
       await waitForText(() => tui.viewport(), '回退', 15000);
+      await waitForText(() => tui.viewport(), 'Enter 继续', 15000);
 
       tui.write('\r');
       await waitForText(() => tui.viewport(), '回退 · 恢复到此消息之前', 15000);
       await waitForText(() => tui.viewport(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
       tui.write('\r');
 
+      await waitForCondition(() => {
+        const observed = observePersistedSessionIds(workspace);
+        return observed.status === 'ready' && observed.value.length === 3;
+      }, 'the second rewind target Session to become durable');
       await waitForText(
         () => tui.outputSinceLastAction(),
         '已从检查点创建新会话，并恢复 1 个文件',
@@ -206,17 +208,7 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(FIRST_NOTES_UPDATE);
 
-      const runtimeDb = new Database(
-        sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
-        {
-          readonly: true,
-        },
-      );
-      const sessionCount = runtimeDb
-        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
-        .get()?.count;
-      runtimeDb.close();
-      expect(sessionCount).toBe(3);
+      expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(3);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,

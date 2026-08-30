@@ -17,7 +17,12 @@ import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { createArtifactPort, type RuntimeStorageBoundary } from '@kite-ai/runtime-host/storage';
+import {
+  createArtifactPort,
+  type RuntimeStorage,
+  type RuntimeStorageBoundary,
+  type RuntimeStoredRun,
+} from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite-ai/runtime-spi';
 import {
   createRuntimeModuleRegistry,
@@ -88,6 +93,139 @@ describe('runtime host package boundary', () => {
     await expect(
       host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
     ).rejects.toThrow('disposed');
+  });
+
+  test('serves bounded Store 8 Run queries without App recovery or event scans', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 3));
+    bridge.commandImplementation = async (command) => applied(command.commandId, 'session-1', 3);
+    const run: RuntimeStoredRun = {
+      sessionId: 'session-1',
+      runId: 'run-1',
+      startCommandId: 'command-1',
+      phase: 'building',
+      status: 'running',
+      createdRevision: 2,
+      lastRevision: 3,
+      createdAtMs: 100,
+      startedAtMs: 110,
+    };
+    const base = testStorage();
+    const storage = {
+      ...base,
+      sessions: {
+        ...base.sessions,
+        loadSnapshotRecord: (sessionId: string) =>
+          sessionId === 'session-1'
+            ? {
+                state: {},
+                metadata: {
+                  eventPosition: 3,
+                  stateRevision: 3,
+                  stateChecksum: 'checksum',
+                  schemaVersion: 27,
+                },
+              }
+            : null,
+      },
+      runs: {
+        get: (sessionId: string, runId: string) =>
+          sessionId === run.sessionId && runId === run.runId ? run : null,
+        getActive: (sessionId: string) => (sessionId === run.sessionId ? run : null),
+        list: (request) => ({
+          entries:
+            (request.status === undefined || request.status === run.status) &&
+            (request.phase === undefined || request.phase === run.phase)
+              ? [run]
+              : [],
+          hasMore: false,
+        }),
+        insert: () => undefined,
+        transition: () => 'applied' as const,
+        rewindSession: () => ({ status: 'applied', deletedCount: 0 }) as const,
+        forkSession: () => ({ status: 'applied', copiedCount: 0 }) as const,
+      },
+    } as RuntimeStorage;
+    const host = createRuntimeHost({
+      storage,
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_run',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'get_run',
+      revision: 3,
+      run: {
+        schema: 'kite.runtime-run.v1',
+        runId: 'run-1',
+        status: 'unknown',
+        startedAtMs: 110,
+        finishedAtMs: 110,
+        terminal: { reasonCode: 'recovery_required', recoveryEntry: 'reconcile' },
+      },
+    });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'list_runs',
+      runs: [{ runId: 'run-1', status: 'unknown' }],
+    });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'running',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [] });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'unknown',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [{ runId: 'run-1', status: 'unknown' }] });
+    expect(bridge.recoveries).toEqual([]);
+
+    await expect(
+      host.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session',
+        commandId: 'resume-1',
+        sessionId: 'session-1',
+      }),
+    ).resolves.toMatchObject({ status: 'applied', sessionId: 'session-1', revision: 3 });
+    const recovered = await host.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_run',
+      sessionId: 'session-1',
+      runId: 'run-1',
+    });
+    expect(recovered).toMatchObject({
+      status: 'ok',
+      run: { runId: 'run-1', status: 'running' },
+    });
+    expect(recovered.status === 'ok' && recovered.run && 'finishedAtMs' in recovered.run).toBe(
+      false,
+    );
+    expect(bridge.recoveries).toEqual(['session-1']);
+    await host[Symbol.asyncDispose]();
   });
 
   test('accepts one prebuilt registry and exact snapshot without taking another snapshot', async () => {
@@ -469,6 +607,42 @@ describe('runtime host package boundary', () => {
 });
 
 describe('runtime host command and projection authority', () => {
+  test('hydrates a pending session subscription from an authoritative query projection', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-query-hydration', projection('session-query-hydration', 3));
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.start();
+    const iterator = host
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-query-hydration' } })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_session_projection',
+        sessionId: 'session-query-hydration',
+      }),
+    ).resolves.toMatchObject({ status: 'ok', revision: 3 });
+    await expect(pending).resolves.toMatchObject({
+      done: false,
+      value: {
+        durability: 'durable',
+        sessionId: 'session-query-hydration',
+        revision: 3,
+        projection: {
+          kind: 'snapshot',
+          session: { sessionId: 'session-query-hydration', revision: 3 },
+        },
+      },
+    });
+    await iterator.return?.();
+    await host[Symbol.asyncDispose]();
+  });
+
   test('atomically deletes the durable Session, retains its receipt, and never recovers it on replay', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-1', projection('session-1', 3));

@@ -21,6 +21,66 @@ describe('Runtime Client boundary', () => {
 });
 
 describe('RuntimeClient protocol state machine', () => {
+  test('round-trips private Run queries and original command resources', async () => {
+    const run = {
+      schema: 'kite.runtime-run.v1' as const,
+      sessionId: 'session-1',
+      runId: 'run-1',
+      phase: 'building' as const,
+      status: 'queued' as const,
+      createdRevision: 2,
+      lastRevision: 2,
+      createdAtMs: 100,
+    };
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('server-runs')));
+      }
+      if (message.method === 'runtime/command') {
+        target.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: message.params.command.commandId,
+            sessionId: 'session-1',
+            revision: 2,
+            resource: { kind: 'run', run },
+          }),
+        );
+      }
+      if (message.method === 'runtime/query') {
+        target.push(
+          result(message.id, {
+            status: 'ok',
+            queryType: 'list_runs',
+            runs: [run],
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    await expect(client.execute(startCommand())).resolves.toMatchObject({
+      status: 'applied',
+      resource: { kind: 'run', run: { runId: 'run-1', status: 'queued' } },
+    });
+    await expect(
+      client.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_runs',
+        sessionId: 'session-1',
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'list_runs',
+      runs: [{ runId: 'run-1' }],
+    });
+    await client.close();
+  });
+
   test('correlates RPC responses and rejects pending work on disconnect', async () => {
     const connection = new FakeConnection(async (message, target) => {
       if (message.method === 'initialize')

@@ -443,7 +443,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
                 // standalone terminal then arrives after the aggregate, which
                 // is the persisted ordering from the project-overview report.
                 args: {
-                  command: `bun -e "await Bun.sleep(200); console.log('status-ok')"`,
+                  command:
+                    "if [ -x /bin/sleep ]; then /bin/sleep 0.2; else /usr/bin/sleep 0.2; fi; printf 'status-ok\\n'",
                 },
               },
               {

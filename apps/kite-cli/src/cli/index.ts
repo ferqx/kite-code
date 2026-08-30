@@ -4,6 +4,7 @@ import {
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import {
+  type KiteSingleServiceClient,
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   type LocalRuntimeLifecycleResult,
 } from '@kite-ai/kite-local-runtime/client';
@@ -18,7 +19,15 @@ import {
   type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
-import { connectKiteServiceMode, type KiteServiceModeConnector } from '#kite-cli/service-mode';
+import {
+  acquireKiteServiceModeController,
+  connectKiteServiceMode,
+  createKiteServiceModeSession,
+  detachKiteServiceModeController,
+  type KiteServiceModeConnector,
+  type KiteServiceModeControllerLease,
+  releaseKiteServiceModeController,
+} from '#kite-cli/service-mode';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#kite-cli/trace/replay';
 
 interface RuntimeCommandIdAllocator {
@@ -35,6 +44,11 @@ export interface CliMainDependencies {
   readonly serviceConnector?: KiteServiceModeConnector;
   /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
   readonly serviceManager?: KiteServiceManager;
+  /** Accepted target Web lifecycle over the one Service native IPC endpoint. */
+  readonly singleServiceWeb?: {
+    readonly client: KiteSingleServiceClient;
+    readonly staticAssetRoot: string;
+  };
   readonly commandIds?: RuntimeCommandIdAllocator;
 }
 
@@ -50,7 +64,10 @@ export interface ParsedArgs {
     | 'service-ensure'
     | 'service-status'
     | 'service-stop'
-    | 'service-restart';
+    | 'service-restart'
+    | 'web-ensure'
+    | 'web-status'
+    | 'web-stop';
   task?: string;
   threadId: string;
   userId: string;
@@ -75,6 +92,7 @@ export interface ParsedArgs {
   releaseStatus: boolean;
   telemetryStatus: boolean;
   serviceJson: boolean;
+  webJson: boolean;
 }
 
 export async function main(dependencies: CliMainDependencies): Promise<void> {
@@ -106,6 +124,21 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     await runServiceLifecycleCommand(dependencies.serviceManager, args.command, args.serviceJson);
     return;
   }
+  if (
+    args.command === 'web-ensure' ||
+    args.command === 'web-status' ||
+    args.command === 'web-stop'
+  ) {
+    if (!dependencies.singleServiceWeb) {
+      throw new Error('Kite Web single-Service client is unavailable.');
+    }
+    await runSingleServiceWebLifecycleCommand(
+      dependencies.singleServiceWeb,
+      args.command,
+      args.webJson,
+    );
+    return;
+  }
   if (args.command === 'resume' && !args.task?.trim()) {
     throw new Error('resume requires --task (or positional task text) to continue the session.');
   }
@@ -117,6 +150,10 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     workspace: args.workspace,
   });
   let iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
+  let controllerLease: KiteServiceModeControllerLease | undefined;
+  let turnMayHaveStarted = false;
+  let turnSettled = false;
+  let primaryError: unknown;
   const commandIds = dependencies.commandIds ?? createRuntimeCommandIdAllocator();
   try {
     // Native connectors may intentionally return a prepared connection before
@@ -187,6 +224,16 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
 
     const access = service.runtime;
     const sessionId = args.threadId;
+    let createdSessionRevision: number | undefined;
+    if (service.controller) {
+      if (args.command === 'resume') {
+        controllerLease = await acquireKiteServiceModeController(service.connection, sessionId);
+      } else {
+        const created = await createKiteServiceModeSession(service.connection, sessionId);
+        controllerLease = created.lease;
+        createdSessionRevision = created.sessionRevision;
+      }
+    }
     let expectedRevision = 0;
     if (args.command === 'resume') {
       const receipt = await access.command({
@@ -199,6 +246,8 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         throw new Error(`Runtime session resume rejected: ${receipt.code}`);
       }
       expectedRevision = receipt.status === 'applied' ? receipt.revision : receipt.originalRevision;
+    } else if (createdSessionRevision !== undefined) {
+      expectedRevision = createdSessionRevision;
     } else {
       const receipt = await access.command({
         schema: RUNTIME_COMMAND_SCHEMA_,
@@ -236,6 +285,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       },
     });
     iterator = subscription[Symbol.asyncIterator]();
+    turnMayHaveStarted = true;
     const startReceipt = await access.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: commandIds.next(),
@@ -253,6 +303,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
           }),
     });
     if (startReceipt.status !== 'applied' && startReceipt.status !== 'idempotent_replay') {
+      turnMayHaveStarted = false;
       throw new Error(`Runtime turn rejected: ${startReceipt.code}`);
     }
 
@@ -267,7 +318,10 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
           notification.durability === 'durable'
             ? notification.projection.session.activeWork?.status
             : undefined;
-        if (status && ['completed', 'cancelled', 'failed'].includes(status)) break;
+        if (status && ['completed', 'cancelled', 'failed'].includes(status)) {
+          turnSettled = true;
+          break;
+        }
         continue;
       }
       console.log(JSON.stringify(projectCliRuntimeEvent(event)));
@@ -282,10 +336,31 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         }
       }
     }
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await iterator?.return?.();
-    await service.close('cli_client_closed');
+    const cleanupFailures: unknown[] = [];
+    await iterator?.return?.().catch((error: unknown) => cleanupFailures.push(error));
+    if (controllerLease) {
+      const settle =
+        turnMayHaveStarted && !turnSettled
+          ? detachKiteServiceModeController(service.connection, controllerLease)
+          : releaseKiteServiceModeController(service.connection, controllerLease);
+      await settle.catch((error: unknown) => cleanupFailures.push(error));
+    }
+    await service.close('cli_client_closed').catch((error: unknown) => cleanupFailures.push(error));
+    await settleCliCleanup(primaryError, cleanupFailures);
   }
+}
+
+async function settleCliCleanup(
+  primaryError: unknown,
+  failures: readonly unknown[],
+): Promise<void> {
+  if (primaryError !== undefined || failures.length === 0) return;
+  if (failures.length === 1) throw failures[0];
+  throw new AggregateError(failures, 'CLI Controller and connection cleanup failed.');
 }
 
 function formatExternalReadScope(roots: readonly string[]): string {
@@ -357,7 +432,11 @@ async function promptForRuntimeInteraction(
       }
       if (value === 'f' || value === 'feedback') {
         console.error('Enter your feedback:');
-        return { kind: 'plan_review', decision: 'feedback', feedback: await readCliStdin() };
+        return {
+          kind: 'plan_review',
+          decision: 'feedback',
+          feedback: await readCliStdin(),
+        };
       }
       return { kind: 'plan_review', decision: 'cancel' };
     }
@@ -582,31 +661,80 @@ async function runServiceLifecycleCommand(
   }
 }
 
+async function runSingleServiceWebLifecycleCommand(
+  target: NonNullable<CliMainDependencies['singleServiceWeb']>,
+  command: 'web-ensure' | 'web-status' | 'web-stop',
+  json: boolean,
+): Promise<void> {
+  if (command === 'web-stop') {
+    const response = await target.client.stopWeb();
+    if (response.outcome === 'unavailable') {
+      throw new Error(`Kite Web stop failed: ${response.diagnostic}.`);
+    }
+    console.log('Kite Web stopped.');
+    return;
+  }
+  if (command === 'web-status') {
+    const response = await target.client.statusWeb();
+    if (response.state === 'absent') {
+      console.log(json ? JSON.stringify({ state: 'not_running' }) : 'Kite Web is not running.');
+      return;
+    }
+    console.log(
+      json
+        ? JSON.stringify({
+            state: 'ready',
+            origin: response.origin,
+            assetDigest: response.assetDigest,
+          })
+        : `Kite Web is ready at ${response.origin}.`,
+    );
+    return;
+  }
+  const response = await target.client.ensureWeb(target.staticAssetRoot);
+  if (response.outcome === 'unavailable') {
+    throw new Error(`Kite Web ensure failed: ${response.diagnostic}.`);
+  }
+  console.log(
+    json ? JSON.stringify({ state: 'ready', launchUrl: response.launchUrl }) : response.launchUrl,
+  );
+}
+
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command =
-    argv[0] === 'service' && argv[1] === 'ensure'
-      ? 'service-ensure'
-      : argv[0] === 'service' && argv[1] === 'status'
-        ? 'service-status'
-        : argv[0] === 'service' && argv[1] === 'stop'
-          ? 'service-stop'
-          : argv[0] === 'service' && argv[1] === 'restart'
-            ? 'service-restart'
-            : argv[0] === 'sandbox' && argv[1] === 'setup'
-              ? 'sandbox-setup'
-              : argv[0] === 'sandbox' && argv[1] === 'status'
-                ? 'sandbox-status'
-                : argv[0] === 'server' && argv[1] === '--stdio'
-                  ? 'server-stdio'
-                  : argv[0] === 'resume'
-                    ? 'resume'
-                    : argv[0] === 'run'
-                      ? 'run'
-                      : argv[0] === 'trace'
-                        ? 'trace'
-                        : 'help';
+  const commandArgv = withoutKiteHome(argv);
+  const command: ParsedArgs['command'] =
+    commandArgv[0] === 'web' &&
+    (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
+      ? 'web-ensure'
+      : commandArgv[0] === 'web' &&
+          commandArgv[1] === 'status' &&
+          (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
+        ? 'web-status'
+        : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
+          ? 'web-stop'
+          : argv[0] === 'service' && argv[1] === 'ensure'
+            ? 'service-ensure'
+            : argv[0] === 'service' && argv[1] === 'status'
+              ? 'service-status'
+              : argv[0] === 'service' && argv[1] === 'stop'
+                ? 'service-stop'
+                : argv[0] === 'service' && argv[1] === 'restart'
+                  ? 'service-restart'
+                  : argv[0] === 'sandbox' && argv[1] === 'setup'
+                    ? 'sandbox-setup'
+                    : argv[0] === 'sandbox' && argv[1] === 'status'
+                      ? 'sandbox-status'
+                      : argv[0] === 'server' && argv[1] === '--stdio'
+                        ? 'server-stdio'
+                        : argv[0] === 'resume'
+                          ? 'resume'
+                          : argv[0] === 'run'
+                            ? 'run'
+                            : argv[0] === 'trace'
+                              ? 'trace'
+                              : 'help';
   rejectUnsupportedOptions(argv, command);
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
@@ -708,7 +836,20 @@ export function parseArgs(argv: string[]): ParsedArgs {
     releaseStatus: argv.includes('--release-status'),
     telemetryStatus: argv.includes('--telemetry-status'),
     serviceJson: command === 'service-status' && argv.includes('--json'),
+    webJson: (command === 'web-ensure' || command === 'web-status') && argv.includes('--json'),
   };
+}
+
+function withoutKiteHome(argv: readonly string[]): string[] {
+  const output: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--kite-home') {
+      index += 1;
+      continue;
+    }
+    output.push(argv[index]!);
+  }
+  return output;
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
@@ -718,6 +859,9 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['command']): void {
+  if (argv.includes('--target-generation')) {
+    throw new Error("Unsupported CLI option '--target-generation'.");
+  }
   const unsupported = [
     '--checkpoints',
     '--no-sandbox',
@@ -742,8 +886,13 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
       throw new Error('Interaction mode flags are supported only by run and resume.');
     }
   }
-  if (argv.includes('--json') && command !== 'service-status') {
-    throw new Error('The --json option is supported only by service status.');
+  if (
+    argv.includes('--json') &&
+    command !== 'service-status' &&
+    command !== 'web-ensure' &&
+    command !== 'web-status'
+  ) {
+    throw new Error('The --json option is unsupported for this command.');
   }
 }
 
@@ -788,6 +937,9 @@ function printHelp(): void {
   bun run agent service status [--json]
   bun run agent service stop
   bun run agent service restart
+  bun run agent web [--json]
+  bun run agent web status [--json]
+  bun run agent web stop
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup
@@ -802,7 +954,7 @@ Options:
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit
   --telemetry-status     Print redacted telemetry consent/export status and exit
-  --json                 Emit the exact lifecycle result (service status only)
+  --json                 Emit a closed JSON result for service status or Web ensure/status
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --trust-workspace      Record trust for --workspace and continue (source=config)

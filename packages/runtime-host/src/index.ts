@@ -71,13 +71,20 @@ export type {
 } from './format/restore';
 export { restoreRuntimeHostStateSession } from './format/restore';
 export type { RuntimeHostStateStorageBinding } from './format/storage-binding';
-export { createRuntimeHostStateStorageBinding } from './format/storage-binding';
+export {
+  createRuntimeHostStateStorageBinding,
+  isRuntimeHostStateSettledForMigration,
+} from './format/storage-binding';
 export {
   createRuntimeCommandCommitEvidence,
   digestRuntimeCommand,
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from './host/command-receipt';
+export {
+  parseRuntimeStoredCommandResource,
+  projectRuntimeStoredRun,
+} from './host/run-projection';
 export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
 
 export type {

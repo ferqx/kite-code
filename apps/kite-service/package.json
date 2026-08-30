@@ -16,6 +16,7 @@
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
+    "@kite-ai/agent-api-contract": "workspace:*",
     "@kite-ai/builtin-runtime": "workspace:*",
     "@kite-ai/kite-app-contract": "workspace:*",
     "@kite-ai/kite-local-runtime": "workspace:*",

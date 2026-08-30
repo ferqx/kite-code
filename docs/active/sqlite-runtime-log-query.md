@@ -12,6 +12,16 @@ SQLite Runtime Store 是可回放会话日志的唯一事实源。`runtime_event
 
 `@kite-ai/runtime-contract` 仅定义 storage-neutral DTO 和 validator；`@kite-ai/runtime-host/storage` 的 `RuntimeLogQueryPort` 是受信任 App 进程内部使用的原始事件只读 port，绝不混入可写 `SessionStore`，也不能直接作为 HTTP 或 RPC 返回类型。SQLite adapter 先做 no-follow preflight，再在实际用于查询的只读连接上重新验证 current Store marker 与表结构；有界、参数化 cursor 查询和本页 current-codec 解码都使用这条连接。它不创建 schema、不写库、不返回 raw `event_json`，也不接受旧 epoch/兼容 decoder。busy/locked 归为 temporary unavailable，未知或损坏 current event 只让所在查询失败，不扫描或拖垮其他会话。不同分页允许观察到并发 writer 的新提交，因此结果只报告该次查询观察到的最后序号，不宣称跨页快照一致，也不宣称未读取事件或 snapshot 已通过全会话完整性验证；恢复完整性仍由 session-scoped Store 打开边界负责。
 
+Store 8 offline Web History是显式例外的pinned snapshot journey：`createSqliteWorkspaceRuntimeLogQueryPort`由production caller显式选择Run profile，只接受server-owned
+layout、active generation与opaque Worker scope，路径由layout内部推导；它在隔离只读snapshot上读取内部Workspace digest并复核
+exact Store 8 header/DDL/所有ownership rows，query前后再次验证active pointer/manifest/journal/fence与owner/no-follow/nlink。
+因此不会在source旁创建WAL/SHM或第二writer。Service Web adapter的一次`loadSession`只创建一个reader并在同一snapshot分页，
+`observedLastSequence`变化、超过4096 records、binding/layout drift、Store 6/legacy-only或损坏内容都fail closed为unavailable；
+compatibility import不参与该journey。
+
+当前single-Service Web/Native History直接从同一Store 9 `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
+mirror或Worker discovery。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
+
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留
@@ -40,6 +50,25 @@ HTTP/SSE/Web UI 或 production entrypoint。任何 bootstrap bearer、cookie、t
 history projector与三个authenticated exact History HTTP handler。handler只取得`RuntimeHistoryClient` safe result，不取得
 Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
 `apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
+
+active Workspace Worker的Agent API read journey不打开上述offline snapshot或第二SQLite connection。Store 8 adapter在同一writer connection上
+窄提供bounded Session keyset与History sequence-window log port；Service仍通过`RuntimeHistoryClient` safe projector消费，不把raw event交给
+Agent adapter。Public History first page固定`through_sequence`，后续同时使用exclusive after/before window并复核boundary event digest；durable
+`model.responded`最多展开reasoning/message两个`public_ordinal`，cursor可在同sequence内续读。selected Checkpoint metadata按revision/id keyset并
+逐个验证current schema/epoch/checksum，preview只经Runtime query返回计数。不存在全Workspace transcript物化、compatibility import、path投影、
+DDL/index变化或Store writer替代。
+Public History page还受1 MiB encoded response上限：adapter只在已取得的bounded source page内逐项计算Public body，达到上限即以最后
+`sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
+或把超限安全前缀整体降成503。
+
+KRSRUN-01A当时的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或当时的
+Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在当时Store 8尚未cutover前，Web/Agent History
+仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
+KRSRUN-02A的显式unpublished Run target与delete/rewind/fork maintenance同样不改变该边界：Run rewind随既有Session transaction删除较新
+row，但History仍只按event/snapshot的原子结果和既有cursor invalidation判断；fork的Run coverage/origin也不成为History内容或完整性来源。
+KRSRUN-02B迁移逐字节保留event/snapshot/History逻辑事实并仅增加coverage/空Run index；source/target logical digest必须一致。KRSRUN-03A后
+offline Web History与same-connection Worker page port承认exact Store 8；Store 7入口仅保留为显式旧profile测试/迁移source，production不在
+Store 8 open/read失败时fallback，也不得用Run coverage截断既有History。
 
 Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不

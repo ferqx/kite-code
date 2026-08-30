@@ -141,6 +141,7 @@ function emptyHistorySession(session: HarnessSession): RuntimeHistorySessionTran
       updatedAt: Date.parse(session.updatedAt),
       lastSequence: session.revision,
     },
+    records: [],
     events: [],
     interactionMode: 'auto',
     recovery: 'normal',
@@ -302,6 +303,13 @@ function createFakeApplication(config: KiteServiceProcessHarnessChildConfig): {
           queryType: query.type,
           revision: session.revision,
           checkpoints: [],
+        };
+      }
+      if (query.type === 'get_run' || query.type === 'list_runs') {
+        return {
+          status: 'unavailable',
+          queryType: query.type,
+          code: 'unsupported',
         };
       }
       return {

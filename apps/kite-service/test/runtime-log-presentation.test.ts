@@ -16,7 +16,10 @@ describe('RuntimeLogPresentationProjector', () => {
     });
     expect(entry.detail).toEqual({
       kind: 'message',
-      fields: { content: expect.stringContaining('[redacted]') },
+      fields: {
+        content: expect.stringContaining('[redacted]'),
+        message_id: 'message-1',
+      },
     });
     const content = (entry.detail?.fields?.content as string) ?? '';
     expect(content).not.toContain('super-secret');
@@ -24,6 +27,34 @@ describe('RuntimeLogPresentationProjector', () => {
     expect(Array.from(content).length).toBeGreaterThan(4_000);
     expect(Array.from(content).length).toBeLessThanOrEqual(65_537);
     expect(JSON.stringify(entry)).not.toContain('messageId');
+  });
+
+  test('projects only bounded safe model identifiers and text for Public History mapping', () => {
+    const entry = projectRuntimeLogEvent({
+      sessionId: 'session-1',
+      sequence: 2,
+      eventId: 'event-model',
+      createdAt: 2,
+      event: {
+        type: 'model.responded',
+        messageId: 'message-model',
+        invocationId: 'request-model',
+        reasoningText: 'token=hidden reasoning',
+        text: 'api_key=hidden answer',
+        toolCalls: [{ id: 'tool-private', name: 'private', args: { path: '/private' } }],
+      },
+    });
+    expect(entry.detail).toEqual({
+      kind: 'model',
+      fields: {
+        message_id: 'message-model',
+        request_id: 'request-model',
+        reasoning_text: '[redacted] reasoning',
+        text: '[redacted] answer',
+      },
+    });
+    expect(JSON.stringify(entry)).not.toContain('/private');
+    expect(JSON.stringify(entry)).not.toContain('tool-private');
   });
 
   test('shows artifact kind only, never its locator or body', () => {

@@ -7,3 +7,6 @@ export * from './native-lock';
 export * from './native-process';
 export * from './native-state';
 export * from './ports';
+export * from './single-service-manager';
+export * from './single-service-native';
+export * from './single-service-spawn';

@@ -83,6 +83,17 @@ export async function executeAppRuntimeToolsEffect(
   subagentEventSink: SubAgentEventSink,
 ): Promise<RuntimeEvent[]> {
   const providerReadinessCoordinator = new ProviderReadinessCoordinator(dependencies.mcpManager);
+  const workspaceEffect =
+    dependencies.workspaceEffectCompositionFactory === undefined
+      ? undefined
+      : dependencies.commandContext === undefined ||
+          dependencies.commandContext.bindingReference === null
+        ? (() => {
+            throw new Error(
+              'Workspace effect composition requires an authenticated command binding reference.',
+            );
+          })()
+        : dependencies.workspaceEffectCompositionFactory(dependencies.commandContext);
   const persistAttemptStartEvents = executionContext?.persistAttemptStartEvents;
   const persistTerminalRecoveryEvents = executionContext?.persistTerminalRecoveryEvents;
   const stateToolPipelinePersistence =
@@ -207,6 +218,7 @@ export async function executeAppRuntimeToolsEffect(
           toolPipelineComposition,
           ordinaryToolPipelineAttemptRuntime,
           taskToolPipelineAttemptRuntime,
+          ...(workspaceEffect === undefined ? {} : { workspaceEffect }),
           planArtifactStore: dependencies.planArtifactStore,
           providerReadinessCoordinator,
           skillManifests: dependencies.skills,

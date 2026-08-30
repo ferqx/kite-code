@@ -15,6 +15,11 @@
   event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
   opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
+- 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
+  Run resource；这些DTO不代表Public Agent API route已开放。
+- 为已认证的 App admission 定义可选的进程内 `RuntimeCommandContext`（connection/request identity 与 opaque
+  Worker binding reference）；它只随 `RuntimeAccess.command()` 在本进程内传递，永不进入 Runtime Protocol、History 或 Browser
+  contract。
 - 为未来 transport adapter 提供中立数据边界。
 
 ## 不拥有职责
@@ -35,6 +40,8 @@
 
 - 所有客户端数据保持普通 JSON-safe 数据。
 - command 必须携带唯一 `commandId`；Session mutation 使用 revision fencing。
+- Run query只接受Session-scoped opaque identity和最多200项的ASC keyset cursor；Run resource只出现在创建它的original/replayed
+  applied receipt，不允许Client以当前query结果伪造原始command response。
 - `delete_session` 是 Host-owned mutation：按 scoped command identity 删除 Session durable facts并保留
   receipt；Client/TUI 不能直接调用 Store delete。重放同一 digest 返回原 receipt，不同 digest fail closed。
 - `respond_interaction` 必须携带匹配的 client-safe interaction identity：Session revision，及按 kind
@@ -42,10 +49,14 @@
   interaction可选携带有界原始command供用户作知情决定；它不携带cwd、grant subject或binding digest。
 - `RuntimeSubscriptionSpec` 是唯一可序列化 selector；`AbortSignal` 只属于 local
   `RuntimeSubscription`，不得进入 wire。
+- `RuntimeCommandContext` 必须在 admission 后 strict validate/freeze；`bindingReference` 只能由 App-owned admission
+  提供，Contract package 不解释其内容、不持有 credential，也不按 Session 反查 authority。
 - `plan.approved` 是审核 settlement 的封闭 client event，携带 interaction identity、Session revision 与
   execution mode；Client 不从 raw Plan/Kernel event 推断审核已完成。
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
   不携带 callback、Store handle 或历史 interaction settlement authority。
+- `ListRuntimeLogEventsRequest`允许同时携带exclusive `afterSequence < beforeSequence`，形成有界sequence window；
+  单侧cursor仍保持原语义，等于或反向window fail closed。该窗口只约束只读History，不产生snapshot/receipt或Store authority。
 - `RuntimeSessionProjection.interactionQueue` 是同 revision 的完整、有序替换集；`activeInteractionId` 必须属于该集，
   每个interaction的`sessionRevision`是当前 settlement CAS，必须等于queue/session revision；稳定交互身份由
   `interactionId`与kind-specific generation/plan/provider/verification/input/command字段共同组成。Session revision

@@ -57,6 +57,20 @@ test('starts neutral and admits a trusted workspace lazily', async () => {
     await expect(
       composition.carrierApplication.workspaceAdmission.resolveIdentity(queried.workspace),
     ).resolves.toEqual(queried.workspace);
+    await expect(
+      composition.carrierApplication.runtimeAdmission
+        .create(queried.workspace, 'browser-connection', 'web_observer')
+        .authorize({
+          connectionId: 'browser-connection',
+          operation: 'runtime/command',
+          requestId: 'browser-command',
+          command: {
+            type: 'user_message',
+            commandId: 'browser-command',
+            sessionId: 'session-1',
+          },
+        }),
+    ).resolves.toEqual({ allowed: false, reason: 'unauthorized' });
   } finally {
     await composition[Symbol.asyncDispose]();
   }

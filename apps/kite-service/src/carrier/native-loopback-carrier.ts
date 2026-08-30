@@ -22,6 +22,12 @@ import {
   workspaceTrustQueryResponseCodec,
 } from '@kite-ai/kite-app-contract';
 import {
+  WORKER_CONTROLLER_PATH_,
+  type WorkerControllerRequest,
+  workerControllerRequestCodec,
+  workerControllerResponseCodec,
+} from '@kite-ai/kite-app-contract/worker-controller';
+import {
   decodeLocalRuntimeCredentialRequest,
   decodeLocalRuntimeCredentialResult,
   encodeLocalRuntimeCredentialResult,
@@ -52,7 +58,17 @@ import type {
   RuntimeServerAdmissionPort,
   RuntimeServerLogicalMessageConnection,
 } from '@kite-ai/runtime-server';
-import type { KiteServiceApplicationPort, ServiceWorkspaceAdmissionResult } from './ports';
+import {
+  createWebGatewayCarrier,
+  type WebGatewayCarrier,
+  type WebGatewayCarrierOptions,
+} from '../web-gateway/carrier';
+import type {
+  KiteServiceApplicationPort,
+  ServiceControllerPort,
+  ServiceRuntimeConnectionBinding,
+  ServiceWorkspaceAdmissionResult,
+} from './ports';
 
 export const KITE_SERVICE_LOOPBACK_HOST = '127.0.0.1' as const;
 export const KITE_SERVICE_CONNECT_PATH = '/_kite/connect' as const;
@@ -62,6 +78,9 @@ export const KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH = '/_kite/history/list-sess
 export const KITE_SERVICE_HISTORY_LIST_EVENTS_PATH = '/_kite/history/list-events' as const;
 export const KITE_SERVICE_HISTORY_LOAD_SESSION_PATH = '/_kite/history/load-session' as const;
 export const KITE_SERVICE_CONTROL_STOP_PATH = '/_kite/control/stop' as const;
+export const KITE_SERVICE_CONTROLLER_SESSION_HEADER = 'x-kite-worker-controller-session' as const;
+export const KITE_SERVICE_CONTROLLER_GENERATION_HEADER =
+  'x-kite-worker-controller-generation' as const;
 
 export const KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME = 'Kite-Local-Access' as const;
 export const KITE_SERVICE_CONTROL_AUTHORIZATION_SCHEME = 'Kite-Local-Control' as const;
@@ -83,7 +102,26 @@ const MAX_TICKETS = 1_024;
 const HEARTBEAT_POLL_INTERVAL_MS = 10;
 
 type RequestIp = Readonly<{ address: string }> | null;
-type SocketData = Readonly<{ session: ServiceSocketSession }>;
+type SocketData = Readonly<{ session: ServiceSocketSession }> | Readonly<{ connection: unknown }>;
+
+type BrowserSocketData = Readonly<{ connection: unknown }>;
+
+interface AttachedWebGatewayRoutes {
+  readonly fetch: (
+    request: Request,
+    server: Bun.Server<BrowserSocketData>,
+  ) => Response | Promise<Response> | undefined | Promise<undefined>;
+  readonly websocket: {
+    readonly open?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+    readonly message?: (
+      socket: Bun.ServerWebSocket<BrowserSocketData>,
+      message: string | Buffer,
+    ) => void;
+    readonly drain?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+    readonly close?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+  };
+  readonly leaseId: symbol;
+}
 
 export type KiteServiceCarrierDiagnosticCode =
   | 'socket_open'
@@ -115,6 +153,24 @@ export interface KiteServiceCarrierOptions {
   /** Access and control material are supplied by the Service state owner. */
   readonly accessToken: string;
   readonly controlToken: string;
+  /** Stable Public Agent API façade; the carrier owns only loopback dispatch and drain framing. */
+  readonly agentApi?: {
+    handle(request: Request): Response | Promise<Response>;
+  };
+  /** Optional Worker capability verifier; fixed access-token comparison remains the default. */
+  readonly accessTokenVerifier?: (input: {
+    readonly token: string;
+    readonly request: Request;
+    readonly pathname: string;
+  }) => boolean;
+  /** Authenticated role copied into the one-shot WebSocket ticket. */
+  readonly connectionKindForRequest?: (
+    request: Request,
+  ) => 'native_client' | 'web_observer' | undefined;
+  /** Native-only binding extracted from already-authenticated Worker capability headers. */
+  readonly connectionBindingForRequest?: (
+    request: Request,
+  ) => ServiceRuntimeConnectionBinding | undefined;
   /** The listener is created only after the injected application is ready. */
   readonly isReady?: () => boolean;
   readonly limits?: KiteServiceCarrierLimits;
@@ -128,10 +184,17 @@ export interface KiteServiceCarrierOptions {
   readonly onDiagnostic?: (code: KiteServiceCarrierDiagnosticCode) => void;
 }
 
+export type KiteServiceWebGatewayRouteOptions = Omit<
+  WebGatewayCarrierOptions,
+  'instanceId' | 'nativeControl' | 'requestIp' | 'serve'
+>;
+
 export interface KiteServiceCarrier extends AsyncDisposable {
   readonly descriptor: LocalRuntimeServiceDescriptor;
   readonly origin: string;
   readonly rpcUrl: string;
+  /** Attach Browser-only routes to this exact listener; only one owner may be active. */
+  attachWebGateway(options: KiteServiceWebGatewayRouteOptions): WebGatewayCarrier;
   close(): Promise<void>;
 }
 
@@ -151,6 +214,8 @@ interface TicketRecord {
   readonly hash: Buffer;
   readonly workspace: KiteWorkspaceIdentity;
   readonly instanceId: string;
+  readonly connectionKind?: 'native_client' | 'web_observer';
+  readonly connectionBinding?: ServiceRuntimeConnectionBinding;
   readonly expiresAt: number;
 }
 
@@ -174,6 +239,8 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
   let closed = false;
   let closing: Promise<void> | undefined;
   let bunServer: Bun.Server<SocketData> | undefined;
+  let webGatewayRoutes: AttachedWebGatewayRoutes | undefined;
+  let webGatewayCarrier: WebGatewayCarrier | undefined;
 
   const closeAllSockets = (): unknown[] => {
     const failures: unknown[] = [];
@@ -202,6 +269,16 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         return fixedResponse(403, 'forbidden');
       }
       const url = new URL(request.url);
+      if (webGatewayRoutes && isWebGatewayPath(url.pathname)) {
+        return webGatewayRoutes.fetch(request, server as unknown as Bun.Server<BrowserSocketData>);
+      }
+      if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
+        if (!(options.isReady?.() ?? true) || !options.agentApi) {
+          emitDiagnostic(options.onDiagnostic, 'route_unavailable');
+          return fixedResponse(404, 'not_found');
+        }
+        return afterDispatchCloseBarrier(options.agentApi.handle(request), () => closed);
+      }
       if (url.search.length !== 0) {
         emitDiagnostic(options.onDiagnostic, 'route_rejected');
         return fixedResponse(403, 'forbidden');
@@ -251,6 +328,12 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
           () => closed,
         );
       }
+      if (url.pathname === WORKER_CONTROLLER_PATH_) {
+        return afterDispatchCloseBarrier(
+          handleControllerRoute(request, binding, options, limits),
+          () => closed,
+        );
+      }
       if (isAppControlPath(url.pathname)) {
         return afterDispatchCloseBarrier(
           handleAppControlRoute(request, binding, options, url.pathname, limits),
@@ -267,25 +350,55 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       data: {} as SocketData,
       maxPayloadLength: RUNTIME_PROTOCOL_LIMITS.maxMessageBytes * 2,
       backpressureLimit: limits.maxBufferedAmount,
-      closeOnBackpressureLimit: true,
+      closeOnBackpressureLimit: false,
       sendPings: false,
       open(socket) {
-        socket.data.session.open(socket);
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.open(
+            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
+          );
+          return;
+        }
+        webGatewayRoutes?.websocket.open?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
       message(socket, message) {
-        socket.data.session.message(socket, message);
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.message(
+            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
+            message,
+          );
+          return;
+        }
+        webGatewayRoutes?.websocket.message?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+          message,
+        );
       },
       drain(socket) {
-        socket.data.session.drain();
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.drain();
+          return;
+        }
+        webGatewayRoutes?.websocket.drain?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
       ping(socket, data) {
-        socket.pong(data);
+        if (isServiceSocketData(socket.data)) socket.pong(data);
       },
       pong(socket) {
-        socket.data.session.heartbeat();
+        if (isServiceSocketData(socket.data)) socket.data.session.heartbeat();
       },
       close(socket) {
-        socket.data.session.closedByPeer();
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.closedByPeer();
+          return;
+        }
+        webGatewayRoutes?.websocket.close?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
     },
   });
@@ -316,11 +429,91 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       descriptor,
       origin: binding.origin,
       rpcUrl: descriptor.endpoint.websocketUrl,
+      attachWebGateway(routeOptions: KiteServiceWebGatewayRouteOptions): WebGatewayCarrier {
+        if (closed || closing || !bunServer) throw new Error('Service listener is unavailable.');
+        if (webGatewayRoutes || webGatewayCarrier) {
+          throw new Error('Service listener already has a Web Gateway route owner.');
+        }
+        const leaseId = Symbol('service-web-gateway-routes');
+        let attached = false;
+        const sharedServe = ((serveOptions: {
+          readonly fetch?: AttachedWebGatewayRoutes['fetch'];
+          readonly websocket?: AttachedWebGatewayRoutes['websocket'];
+        }) => {
+          if (
+            attached ||
+            !serveOptions.fetch ||
+            !serveOptions.websocket ||
+            webGatewayRoutes ||
+            !bunServer
+          ) {
+            throw new Error('Service Web Gateway route attachment is invalid.');
+          }
+          attached = true;
+          webGatewayRoutes = Object.freeze({
+            fetch: serveOptions.fetch,
+            websocket: serveOptions.websocket,
+            leaseId,
+          });
+          return Object.freeze({
+            port: bunServer.port,
+            stop: async () => {
+              if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
+            },
+          }) as unknown as Bun.Server<BrowserSocketData>;
+        }) as unknown as typeof Bun.serve;
+        let gateway: WebGatewayCarrier;
+        try {
+          gateway = createWebGatewayCarrier({
+            ...routeOptions,
+            instanceId: options.instanceId,
+            serve: sharedServe,
+          });
+          if (
+            gateway.origin !== binding.origin ||
+            (webGatewayRoutes as AttachedWebGatewayRoutes | undefined)?.leaseId !== leaseId
+          ) {
+            throw new Error('Service Web Gateway route binding is incompatible.');
+          }
+        } catch (error) {
+          if ((webGatewayRoutes as AttachedWebGatewayRoutes | undefined)?.leaseId === leaseId)
+            webGatewayRoutes = undefined;
+          throw error;
+        }
+        let routeClosing: Promise<void> | undefined;
+        const attachedGateway: WebGatewayCarrier = Object.freeze({
+          origin: gateway.origin,
+          get launchUrl() {
+            return gateway.launchUrl;
+          },
+          mintLaunchUrl: () => gateway.mintLaunchUrl(),
+          close: () => {
+            routeClosing ??= gateway.close().finally(() => {
+              if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
+              if (webGatewayCarrier === attachedGateway) webGatewayCarrier = undefined;
+            });
+            return routeClosing;
+          },
+          [Symbol.asyncDispose]() {
+            return this.close();
+          },
+        });
+        webGatewayCarrier = attachedGateway;
+        return attachedGateway;
+      },
       close(): Promise<void> {
         closing ??= (async () => {
           closed = true;
           tickets.close();
           const failures: unknown[] = [];
+          const currentWebGateway = webGatewayCarrier;
+          if (currentWebGateway) {
+            try {
+              await currentWebGateway.close();
+            } catch (error) {
+              failures.push(error);
+            }
+          }
           try {
             await options.application.server.beginDraining();
           } catch (error) {
@@ -354,6 +547,23 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 }
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
+
+function isServiceSocketData(value: SocketData): value is Readonly<{
+  session: ServiceSocketSession;
+}> {
+  return 'session' in value;
+}
+
+function isWebGatewayPath(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/api-docs' ||
+    pathname === '/api-docs/' ||
+    pathname === '/api-docs/openapi.json' ||
+    pathname.startsWith('/assets/') ||
+    pathname.startsWith('/_kite/web/')
+  );
+}
 
 async function stopListenerAfterActiveResponses(
   server: Bun.Server<SocketData>,
@@ -398,11 +608,7 @@ function handleInstanceHandshake(
     request.method !== 'POST' ||
     !originAbsentOrExact(request, binding.origin) ||
     request.headers.get('cookie') !== null ||
-    !matchesAuthorization(
-      request.headers.get('authorization'),
-      options.accessToken,
-      KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
-    ) ||
+    !matchesAccessAuthorization(request, options, KITE_SERVICE_INSTANCE_HANDSHAKE_PATH) ||
     !isJsonContentType(request.headers.get('content-type'))
   ) {
     emitDiagnostic(options.onDiagnostic, 'route_rejected');
@@ -487,11 +693,7 @@ function handleConnect(
     request.method !== 'POST' ||
     !originAbsentOrExact(request, binding.origin) ||
     request.headers.get('cookie') !== null ||
-    !matchesAuthorization(
-      request.headers.get('authorization'),
-      options.accessToken,
-      KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
-    ) ||
+    !matchesAccessAuthorization(request, options, KITE_SERVICE_CONNECT_PATH) ||
     !isJsonContentType(request.headers.get('content-type'))
   ) {
     emitDiagnostic(options.onDiagnostic, 'route_rejected');
@@ -511,9 +713,25 @@ function handleConnect(
       }
       if (admitted.outcome === 'untrusted') return fixedResponse(403, 'workspace_untrusted');
       if (admitted.outcome !== 'admitted') return fixedResponse(503, 'workspace_unavailable');
+      const connectionKind = options.connectionKindForRequest?.(request);
+      let connectionBinding: ServiceRuntimeConnectionBinding | undefined;
+      if (connectionKind === 'native_client') {
+        try {
+          connectionBinding = options.connectionBindingForRequest?.(request);
+        } catch {
+          emitDiagnostic(options.onDiagnostic, 'route_rejected');
+          return fixedResponse(401, 'unauthorized');
+        }
+      }
       let ticket: string | undefined;
       try {
-        ticket = tickets.issue(admitted.workspace, options.instanceId, KITE_SERVICE_TICKET_TTL_MS);
+        ticket = tickets.issue(
+          admitted.workspace,
+          options.instanceId,
+          KITE_SERVICE_TICKET_TTL_MS,
+          connectionKind,
+          connectionBinding,
+        );
       } catch {
         emitDiagnostic(options.onDiagnostic, 'route_unavailable');
         return fixedResponse(503, 'unavailable');
@@ -549,13 +767,15 @@ function handleRpcUpgrade(
     request.headers.get('authorization'),
     KITE_SERVICE_TICKET_AUTHORIZATION_SCHEME,
   );
-  const workspace = ticket ? tickets.consume(ticket, options.instanceId) : undefined;
-  if (!workspace) return fixedResponse(401, 'unauthorized');
+  const ticketBinding = ticket ? tickets.consume(ticket, options.instanceId) : undefined;
+  if (!ticketBinding) return fixedResponse(401, 'unauthorized');
   if (isClosing()) return fixedResponse(503, 'unavailable');
   const session = new ServiceSocketSession({
     server: options.application.server,
     application: options.application,
-    workspace,
+    workspace: ticketBinding.workspace,
+    connectionKind: ticketBinding.connectionKind,
+    connectionBinding: ticketBinding.connectionBinding,
     limits,
     now: options.now ?? Date.now,
     sessions,
@@ -603,11 +823,7 @@ function handleHistoryRoute(
     request.method !== 'POST' ||
     !originAbsentOrExact(request, binding.origin) ||
     request.headers.get('cookie') !== null ||
-    !matchesAuthorization(
-      request.headers.get('authorization'),
-      options.accessToken,
-      KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
-    ) ||
+    !matchesAccessAuthorization(request, options, pathname) ||
     !isJsonContentType(request.headers.get('content-type'))
   ) {
     emitDiagnostic(options.onDiagnostic, 'route_rejected');
@@ -680,6 +896,92 @@ async function invokeHistoryRoute<T>(
   }
 }
 
+function handleControllerRoute(
+  request: Request,
+  binding: Readonly<{ host: string; origin: string }>,
+  options: KiteServiceCarrierOptions,
+  limits: NormalizedLimits,
+): Response | Promise<Response> {
+  if (
+    request.method !== 'POST' ||
+    !originAbsentOrExact(request, binding.origin) ||
+    request.headers.get('cookie') !== null ||
+    !matchesAccessAuthorization(request, options, WORKER_CONTROLLER_PATH_) ||
+    !isJsonContentType(request.headers.get('content-type'))
+  ) {
+    emitDiagnostic(options.onDiagnostic, 'route_rejected');
+    return fixedResponse(401, 'unauthorized');
+  }
+  const controller = options.application.controller;
+  let connectionKind: 'native_client' | 'web_observer' | undefined;
+  try {
+    connectionKind = options.connectionKindForRequest?.(request);
+  } catch {
+    connectionKind = undefined;
+  }
+  if (!controller || !options.connectionBindingForRequest || connectionKind !== 'native_client') {
+    emitDiagnostic(options.onDiagnostic, 'route_rejected');
+    return fixedResponse(404, 'not_found');
+  }
+  return readJsonBody(request, limits.maxHttpBodyBytes).then(async (body) => {
+    if (!body.ok) return fixedResponse(400, 'invalid_request');
+    let value: WorkerControllerRequest;
+    try {
+      value = workerControllerRequestCodec.decode(body.value);
+    } catch {
+      return fixedResponse(400, 'invalid_request');
+    }
+    let connectionBinding: ServiceRuntimeConnectionBinding | undefined;
+    try {
+      connectionBinding = options.connectionBindingForRequest?.(request);
+    } catch {
+      return fixedResponse(401, 'unauthorized');
+    }
+    if (!connectionBinding || !isValidConnectionBinding(connectionBinding)) {
+      return fixedResponse(401, 'unauthorized');
+    }
+    try {
+      const response = await dispatchControllerRoute(controller, value, connectionBinding);
+      return jsonResponse(
+        200,
+        workerControllerResponseCodec.encode(response),
+        limits.maxHttpBodyBytes,
+      );
+    } catch {
+      return fixedResponse(503, 'temporarily_unavailable');
+    }
+  });
+}
+
+function dispatchControllerRoute(
+  controller: ServiceControllerPort,
+  request: WorkerControllerRequest,
+  binding: ServiceRuntimeConnectionBinding,
+) {
+  switch (request.operation) {
+    case 'create_session':
+      return controller.createSession(request, binding);
+    case 'read_controller':
+      return controller.read(request, binding);
+    case 'request_control':
+      return controller.requestControl(request, binding);
+    case 'release_control':
+      return controller.releaseControl(request, binding);
+    case 'detach_controller':
+      return controller.detach(request, binding);
+    case 'issue_resume_capability':
+      return controller.issueResumeCapability(request, binding);
+    case 'resume_controller':
+      return controller.resume(request, binding);
+    case 'mint_detached_recovery_capability':
+      return controller.mintDetachedRecoveryCapability(request, binding);
+    case 'abandon_detached_controller':
+      return controller.abandonDetachedController(request, binding);
+    case 'validate_resume_capability':
+      return controller.validateResumeCapability(request, binding);
+  }
+}
+
 function handleAppControlRoute(
   request: Request,
   binding: Readonly<{ host: string; origin: string }>,
@@ -691,11 +993,7 @@ function handleAppControlRoute(
     request.method !== 'POST' ||
     !originAbsentOrExact(request, binding.origin) ||
     request.headers.get('cookie') !== null ||
-    !matchesAuthorization(
-      request.headers.get('authorization'),
-      options.accessToken,
-      KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
-    ) ||
+    !matchesAccessAuthorization(request, options, pathname) ||
     !isJsonContentType(request.headers.get('content-type'))
   ) {
     emitDiagnostic(options.onDiagnostic, 'route_rejected');
@@ -950,8 +1248,19 @@ class TicketAuthority {
     this.#now = now;
   }
 
-  issue(workspace: KiteWorkspaceIdentity, instanceId: string, ttlMs: number): string | undefined {
+  issue(
+    workspace: KiteWorkspaceIdentity,
+    instanceId: string,
+    ttlMs: number,
+    connectionKind?: 'native_client' | 'web_observer',
+    connectionBinding?: ServiceRuntimeConnectionBinding,
+  ): string | undefined {
     if (this.#closed) return undefined;
+    if (connectionBinding !== undefined) {
+      if (connectionKind !== 'native_client' || !isValidConnectionBinding(connectionBinding)) {
+        throw new TypeError('Service connection binding is invalid.');
+      }
+    }
     this.cleanup();
     if (this.#tickets.size >= MAX_TICKETS) return undefined;
     const bytes = this.#random(32);
@@ -976,12 +1285,23 @@ class TicketAuthority {
       hash,
       workspace,
       instanceId,
+      ...(connectionKind ? { connectionKind } : {}),
+      ...(connectionBinding ? { connectionBinding } : {}),
       expiresAt,
     });
     return token;
   }
 
-  consume(token: string, instanceId: string): KiteWorkspaceIdentity | undefined {
+  consume(
+    token: string,
+    instanceId: string,
+  ):
+    | {
+        readonly workspace: KiteWorkspaceIdentity;
+        readonly connectionKind?: 'native_client' | 'web_observer';
+        readonly connectionBinding?: ServiceRuntimeConnectionBinding;
+      }
+    | undefined {
     const hash = hashToken(token);
     const key = hash.toString('hex');
     const record = this.#tickets.get(key);
@@ -994,7 +1314,13 @@ class TicketAuthority {
     const valid = record.instanceId === instanceId && safeNow(this.#now) < record.expiresAt && same;
     hash.fill(0);
     record.hash.fill(0);
-    return valid ? record.workspace : undefined;
+    return valid
+      ? {
+          workspace: record.workspace,
+          ...(record.connectionKind ? { connectionKind: record.connectionKind } : {}),
+          ...(record.connectionBinding ? { connectionBinding: record.connectionBinding } : {}),
+        }
+      : undefined;
   }
 
   cleanup(): void {
@@ -1017,6 +1343,8 @@ class TicketAuthority {
 class ServiceRuntimeAdmission implements RuntimeServerAdmissionPort {
   readonly #application: KiteServiceApplicationPort;
   readonly #workspace: KiteWorkspaceIdentity;
+  readonly #connectionKind: 'native_client' | 'web_observer' | undefined;
+  readonly #connectionBinding: ServiceRuntimeConnectionBinding | undefined;
   readonly #onBound: (connectionId: string) => void;
   #delegate: RuntimeServerAdmissionPort | undefined;
   #closed = false;
@@ -1025,10 +1353,14 @@ class ServiceRuntimeAdmission implements RuntimeServerAdmissionPort {
   constructor(
     application: KiteServiceApplicationPort,
     workspace: KiteWorkspaceIdentity,
+    connectionKind: 'native_client' | 'web_observer' | undefined,
+    connectionBinding: ServiceRuntimeConnectionBinding | undefined,
     onBound: (connectionId: string) => void,
   ) {
     this.#application = application;
     this.#workspace = workspace;
+    this.#connectionKind = connectionKind;
+    this.#connectionBinding = connectionBinding;
     this.#onBound = onBound;
   }
 
@@ -1039,6 +1371,8 @@ class ServiceRuntimeAdmission implements RuntimeServerAdmissionPort {
       this.#delegate ??= this.#application.runtimeAdmission.create(
         this.#workspace,
         input.connectionId,
+        this.#connectionKind,
+        this.#connectionBinding,
       );
       decision = await this.#delegate.authorize(input);
     } catch {
@@ -1067,6 +1401,8 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
   readonly #server: RuntimeServer;
   readonly #application: KiteServiceApplicationPort;
   readonly #workspace: KiteWorkspaceIdentity;
+  readonly #connectionKind: 'native_client' | 'web_observer' | undefined;
+  readonly #connectionBinding: ServiceRuntimeConnectionBinding | undefined;
   readonly #limits: NormalizedLimits;
   readonly #now: () => number;
   readonly #sessions: Set<ServiceSocketSession>;
@@ -1083,6 +1419,8 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
     readonly server: RuntimeServer;
     readonly application: KiteServiceApplicationPort;
     readonly workspace: KiteWorkspaceIdentity;
+    readonly connectionKind?: 'native_client' | 'web_observer';
+    readonly connectionBinding?: ServiceRuntimeConnectionBinding;
     readonly limits: NormalizedLimits;
     readonly now: () => number;
     readonly sessions: Set<ServiceSocketSession>;
@@ -1091,6 +1429,8 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
     this.#server = input.server;
     this.#application = input.application;
     this.#workspace = input.workspace;
+    this.#connectionKind = input.connectionKind;
+    this.#connectionBinding = input.connectionBinding;
     this.#limits = input.limits;
     this.#now = input.now;
     this.#sessions = input.sessions;
@@ -1122,6 +1462,8 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
     this.#admission = new ServiceRuntimeAdmission(
       this.#application,
       this.#workspace,
+      this.#connectionKind,
+      this.#connectionBinding,
       (connectionId) => this.#application.onConnectionBound?.(connectionId, this.#workspace),
     );
     this.#connection = this.#server.open(this, {
@@ -1129,7 +1471,7 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
       onClose: (connectionId) => {
         this.#admission?.close();
         this.#sessions.delete(this);
-        this.#application.onConnectionClosed?.(connectionId);
+        this.#application.onConnectionClosed?.(connectionId, this.#connectionBinding);
       },
     });
     if (this.#connection.state === 'closed') this.forceClose(1013, 'server_unavailable');
@@ -1493,6 +1835,23 @@ function boundedString(value: unknown, maximum: number): value is string {
   );
 }
 
+function isValidConnectionBinding(value: ServiceRuntimeConnectionBinding): boolean {
+  const controllerGeneration = value.controllerGeneration;
+  return (
+    boundedString(value.clientId, 512) &&
+    Number.isSafeInteger(value.connectionGeneration) &&
+    value.connectionGeneration >= 1 &&
+    boundedString(value.workerInstanceId, 512) &&
+    (value.requestedWorkspace === undefined || boundedString(value.requestedWorkspace, 4_096)) &&
+    (value.controllerSessionId === undefined || boundedString(value.controllerSessionId, 512)) &&
+    ((controllerGeneration === undefined && value.controllerSessionId === undefined) ||
+      (value.controllerSessionId !== undefined &&
+        typeof controllerGeneration === 'number' &&
+        Number.isSafeInteger(controllerGeneration) &&
+        controllerGeneration >= 1))
+  );
+}
+
 function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity): boolean {
   return (
     left.canonicalPath === right.canonicalPath &&
@@ -1521,6 +1880,30 @@ function matchesAuthorization(value: string | null, expected: string, scheme: st
   candidate.fill(0);
   target.fill(0);
   return match;
+}
+
+function matchesAccessAuthorization(
+  request: Request,
+  options: KiteServiceCarrierOptions,
+  pathname: string,
+): boolean {
+  const token = authorizationToken(
+    request.headers.get('authorization'),
+    KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
+  );
+  if (!token) return false;
+  if (options.accessTokenVerifier) {
+    try {
+      return options.accessTokenVerifier({ token, request, pathname });
+    } catch {
+      return false;
+    }
+  }
+  return matchesAuthorization(
+    request.headers.get('authorization'),
+    options.accessToken,
+    KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
+  );
 }
 
 function secretsEqual(left: string, right: string): boolean {

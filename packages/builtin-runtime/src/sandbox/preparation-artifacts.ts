@@ -5,11 +5,13 @@ import {
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPoint,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from '../model';
 import { userKiteCodeDir } from '../model/artifact-paths';
 
 export interface SandboxPreparationArtifactStoreOptions {
   readonly root?: string;
+  readonly backend?: PrivateImmutableArtifactStorageBackend<'sandbox_preparation'>;
   readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
@@ -42,7 +44,9 @@ export class SandboxPreparationArtifactStore {
 
   constructor(options: SandboxPreparationArtifactStoreOptions) {
     this.#storage = new PrivateImmutableArtifactStorage({
-      root: options.root ?? sandboxPreparationArtifactRoot(),
+      ...(options.backend
+        ? { backend: options.backend }
+        : { root: options.root ?? sandboxPreparationArtifactRoot() }),
       namespace: 'sandbox-preparations',
       partitions: [
         { kind: 'sandbox_preparation', directory: 'plans', extension: '.json' },

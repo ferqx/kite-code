@@ -378,6 +378,31 @@ export function ensureLocalRuntimeServiceHome(identity: KiteHomeIdentity): KiteH
   return createKiteHomeIdentity(canonical, identity.source);
 }
 
+/**
+ * Reuse the Native no-follow/owner-only directory walk for another fixed
+ * repo-private local-runtime state owner. Callers provide only literal safe
+ * path segments; request or Workspace input must never reach this primitive.
+ */
+export function ensurePrivateKiteHomeDirectory(
+  identity: KiteHomeIdentity,
+  segments: readonly string[],
+): string {
+  if (
+    segments.length === 0 ||
+    segments.length > 8 ||
+    segments.some((segment) => !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(segment))
+  ) {
+    fail('invalid_path', 'Private Kite home directory segments are invalid.');
+  }
+  const validatedIdentity = ensureLocalRuntimeServiceHome(identity);
+  let current = validatedIdentity.root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    ensureDirectoryAtPath(current, 'Private Kite home state directory', true);
+  }
+  return current;
+}
+
 function validateExistingStateRoot(
   paths: LocalRuntimeServiceStatePaths,
 ): DirectoryBoundary | undefined {
@@ -410,9 +435,9 @@ function validateExistingStateRoot(
 
 function requireRealPath(path: string): string {
   // Keep this isolated so callers never accidentally use realpath as a write target.
-  // eslint/biome accepts the native implementation through the local import below.
-  // The dynamic property avoids adding a second `realpathSync` import to every call site.
-  return realpathSync(path);
+  // Every state owner and Catalog validator must compare the same native canonical identity;
+  // the non-native implementation can project a different Windows long/8.3 path spelling.
+  return realpathSync.native(path);
 }
 
 function assertStateRoot(paths: LocalRuntimeServiceStatePaths): DirectoryBoundary {

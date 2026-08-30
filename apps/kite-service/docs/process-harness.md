@@ -14,4 +14,7 @@ fixture不导入`apps/kite-cli`、Host、Store、Builtin或SQLite，不打开def
 exact App Control、client disconnect后的Session继续、credential response unavailable后query确认、stdout purity与startup
 timeout。所有state位于测试临时home；本地POSIX结果不构成Windows或release evidence。
 
+fixture的closed query switch显式识别private `get_run/list_runs`并返回`unsupported`；它不伪造Store8 Run row、resource receipt或
+production capability，相关原子性证据只来自Host/SQLite owner tests。
+
 验证：`bun test --no-orphans apps/kite-service/test/isolated/process-harness/process-harness.test.ts`。

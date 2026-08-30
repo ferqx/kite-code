@@ -32,6 +32,7 @@ describe('ordinary open-source candidate archive', () => {
     const packageRoots = [
       'apps/kite-cli',
       'apps/kite-service',
+      'packages/agent-api-contract',
       'packages/agent-kernel',
       'packages/builtin-runtime',
       'packages/kite-app-contract',
@@ -69,7 +70,28 @@ describe('ordinary open-source candidate archive', () => {
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     });
-    expect(verified.files.size).toBe(8);
+    expect(verified.files.size).toBe(13);
+    expect(verified.files.has('payload/web/api-docs/openapi.json')).toBe(true);
+    expect(verified.manifest.releaseSlots).toEqual(
+      expect.objectContaining({
+        coordinator: {
+          entrypoint: null,
+          identity: null,
+        },
+        worker: {
+          entrypoint: null,
+          identity: null,
+        },
+        gateway: {
+          entrypoint: null,
+          identity: null,
+        },
+        web: {
+          entrypoint: 'payload/web/index.html',
+          identity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+        },
+      }),
+    );
   });
 
   test('rejects archive and payload tampering', async () => {
@@ -89,6 +111,68 @@ describe('ordinary open-source candidate archive', () => {
       `${createHash('sha256').update(bytes).digest('hex')}  ${basename(restored.archivePath)}\n`,
     );
     await expect(verifyOssCandidate(restored.archivePath)).rejects.toThrow();
+  });
+
+  test('rejects a non-empty retired release slot', async () => {
+    const fixture = await createFixture('0.1.0');
+    const manifest = structuredClone(fixture.manifest);
+    if (manifest.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    manifest.releaseSlots.coordinator.entrypoint = 'bin/kite';
+    manifest.releaseSlots.coordinator.identity = manifest.releaseSlots.cli.identity;
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/aliased-companion.tar.gz`,
+      manifest,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/aliased-companion.tar.gz`)).rejects.toThrow(
+      'Retired release slot coordinator must be empty',
+    );
+  });
+
+  test('rejects a missing or aliased Web payload slot', async () => {
+    const fixture = await createFixture('0.1.0');
+    const missing = structuredClone(fixture.manifest);
+    if (missing.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    missing.releaseSlots.web = { entrypoint: null, identity: null };
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/missing-web.tar.gz`,
+      manifest: missing,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/missing-web.tar.gz`)).rejects.toThrow(
+      'fixed payload path',
+    );
+
+    const aliased = structuredClone(fixture.manifest);
+    if (aliased.releaseSlots === undefined) throw new Error('fixture omitted release slots');
+    aliased.releaseSlots.web.entrypoint = 'docs/RELEASE_NOTES.md';
+    aliased.releaseSlots.web.identity = fixture.manifest.files.find(
+      (entry) => entry.path === 'docs/RELEASE_NOTES.md',
+    )!.sha256;
+    await writeOssCandidateArchive({
+      archivePath: `${fixture.root}/aliased-web.tar.gz`,
+      manifest: aliased,
+      files: fixture.files,
+    });
+    await expect(verifyOssCandidate(`${fixture.root}/aliased-web.tar.gz`)).rejects.toThrow(
+      'fixed payload path',
+    );
+  });
+
+  test('rejects a Web payload without the bundled Agent API contract', async () => {
+    const fixture = await createFixture('0.1.0');
+    const manifest = structuredClone(fixture.manifest);
+    manifest.files = manifest.files.filter(
+      (entry) => entry.path !== 'payload/web/api-docs/openapi.json',
+    );
+    const files = new Map(fixture.files);
+    files.delete('payload/web/api-docs/openapi.json');
+    const archivePath = `${fixture.root}/missing-agent-api-contract.tar.gz`;
+    await writeOssCandidateArchive({ archivePath, manifest, files });
+
+    await expect(verifyOssCandidate(archivePath)).rejects.toThrow(
+      'missing its bundled Agent API contract',
+    );
   });
 
   test('writes byte-identical archives for the same manifest and files', async () => {

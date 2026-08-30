@@ -81,6 +81,8 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
     case 'get_context_status':
     case 'list_checkpoints':
     case 'get_rewind_preview':
+    case 'get_run':
+    case 'list_runs':
       return query;
   }
 }
@@ -92,6 +94,8 @@ export function mapRuntimeQueryToProtocol(query: RuntimeQuery): RuntimeProtocolQ
     case 'get_context_status':
     case 'list_checkpoints':
     case 'get_rewind_preview':
+    case 'get_run':
+    case 'list_runs':
       return query;
     default:
       return undefined;
@@ -391,6 +395,23 @@ export function mapRuntimeQueryResultToProtocol(
             ...(result.revision === undefined ? {} : { revision: result.revision }),
             rewindPreview: result.rewindPreview,
           }).data;
+    case 'get_run':
+      return result.run === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            ...(result.revision === undefined ? {} : { revision: result.revision }),
+            run: result.run,
+          }).data;
+    case 'list_runs':
+      return RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        status: 'ok',
+        queryType: result.queryType,
+        ...(result.revision === undefined ? {} : { revision: result.revision }),
+        runs: result.runs ?? [],
+        ...(result.nextRunCursor === undefined ? {} : { nextRunCursor: result.nextRunCursor }),
+      }).data;
     default:
       return undefined;
   }

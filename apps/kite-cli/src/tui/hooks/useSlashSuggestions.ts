@@ -37,6 +37,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'rewind', aliases: [], descriptionKey: 'command.rewind' },
   { name: 'export', aliases: [], descriptionKey: 'command.export' },
   { name: 'context', aliases: [], descriptionKey: 'command.context' },
+  { name: 'web', aliases: [], description: 'Show the existing read-only Kite Web URL' },
   { name: 'clear', aliases: ['c'], descriptionKey: 'command.clear' },
   { name: 'help', aliases: ['h'], descriptionKey: 'command.help' },
   { name: 'exit', aliases: ['quit', 'q'], descriptionKey: 'command.exit' },

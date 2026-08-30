@@ -9,15 +9,19 @@ import type {
   RuntimeLogSessionPage,
 } from '@kite-ai/runtime-contract';
 import { assertListRuntimeLogSessionsRequest } from '@kite-ai/runtime-contract';
+import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
+import type { WebObserverHistoryPort } from '../web-observer/core';
 import { projectRuntimeClientEvent, projectRuntimeModelResponseRequestId } from './event-projector';
 import { projectRuntimeClientText } from './safe-text';
 
 type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
   | (() => RuntimeLogQueryPort<RuntimeEvent>);
+
+const MAX_OBSERVER_HISTORY_RECORDS = 4_096;
 
 export interface KiteRuntimeHistoryCompatibilitySession {
   readonly threadId: string;
@@ -235,7 +239,7 @@ function stableReasoningSegmentId(
  * its authoritative full summary so the reducer can finalize the preceding
  * cumulative delta without appending a duplicate block.
  */
-function projectRuntimeHistoryEvents(
+export function projectRuntimeHistoryEvents(
   event: RuntimeEvent,
   sessionRevision: number,
 ): readonly RuntimeClientEvent[] {
@@ -266,6 +270,66 @@ function projectRuntimeHistoryEvents(
   return projected;
 }
 
+/**
+ * Current-format Web Observer History retains each durable source sequence.
+ * It has no compatibility parameter, so a read can never import or write a
+ * legacy Session as a side effect.
+ */
+export function createKiteRuntimeObserverHistoryPort(
+  logs: RuntimeLogQuerySource,
+): WebObserverHistoryPort {
+  return Object.freeze({
+    async loadSession(sessionId: string) {
+      return withLogs(logs, (reader) => {
+        const all: Array<{
+          readonly sequence: number;
+          readonly events: readonly RuntimeClientEvent[];
+        }> = [];
+        let afterSequence: number | undefined;
+        let observedLastSequence: number | undefined;
+        for (;;) {
+          const page = reader.listEvents({
+            sessionId,
+            ...(afterSequence === undefined ? {} : { afterSequence }),
+            direction: 'forward',
+            limit: 200,
+          });
+          if (
+            observedLastSequence !== undefined &&
+            page.observedLastSequence !== observedLastSequence
+          ) {
+            throw new Error('Runtime observer history changed during the pinned read.');
+          }
+          observedLastSequence = page.observedLastSequence;
+          for (const record of page.entries) {
+            if (afterSequence !== undefined && record.sequence <= afterSequence) {
+              throw new Error('Runtime observer history pagination did not advance.');
+            }
+            afterSequence = record.sequence;
+            all.push({
+              sequence: record.sequence,
+              events: projectRuntimeHistoryEvents(record.event, record.sequence),
+            });
+            if (all.length > MAX_OBSERVER_HISTORY_RECORDS) {
+              throw new Error('Runtime observer History exceeds its bounded record limit.');
+            }
+          }
+          if (!page.hasMore) {
+            return Object.freeze({
+              sessionId,
+              lastSequence: observedLastSequence,
+              records: Object.freeze(all),
+            });
+          }
+          if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
+            throw new Error('Runtime observer history pagination cursor is invalid.');
+          }
+        }
+      });
+    },
+  });
+}
+
 /** App-owned bridge from the raw decoded log port to fixed client-safe history DTOs. */
 export function createKiteRuntimeHistoryClient(
   logs: RuntimeLogQuerySource,
@@ -291,8 +355,11 @@ export function createKiteRuntimeHistoryClient(
         session = findCurrentSession(logs, sessionId);
       }
       if (!session) throw new Error(`Runtime session was not found: ${sessionId}`);
-      const events = withLogs(logs, (reader) => {
-        const all: RuntimeClientEvent[] = [];
+      const records = withLogs(logs, (reader) => {
+        const all: Array<{
+          readonly sequence: number;
+          readonly events: readonly RuntimeClientEvent[];
+        }> = [];
         let afterSequence: number | undefined;
         for (;;) {
           const page = reader.listEvents({
@@ -306,7 +373,10 @@ export function createKiteRuntimeHistoryClient(
               throw new Error('Runtime history pagination did not advance.');
             }
             afterSequence = record.sequence;
-            all.push(...projectRuntimeHistoryEvents(record.event, record.sequence));
+            all.push({
+              sequence: record.sequence,
+              events: projectRuntimeHistoryEvents(record.event, record.sequence),
+            });
           }
           if (!page.hasMore) return all;
           if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
@@ -314,12 +384,61 @@ export function createKiteRuntimeHistoryClient(
           }
         }
       });
+      const events = records.flatMap((record) => record.events);
       return {
         session,
+        records,
         events,
         interactionMode: interactionModeFor(events),
         recovery: pendingHistoricalInteraction(events) ? 'pending_interaction' : 'normal',
       };
     },
   });
+}
+
+/**
+ * Bounded current-format page façade for consumers that must never materialize a complete
+ * Workspace directory or transcript. The injected log port remains the source of keyset and
+ * sequence pagination; no compatibility discovery or smart-name scan is performed.
+ */
+export function createKiteRuntimePagedHistoryClient(
+  logs: RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return Object.freeze({
+    async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
+      assertListRuntimeLogSessionsRequest(request);
+      return withLogs(logs, (reader) => {
+        const page = reader.listSessions(request);
+        return Object.freeze({
+          entries: Object.freeze(page.entries.map(mapLogSession)),
+          ...(page.nextCursor ? { nextCursor: Object.freeze(page.nextCursor) } : {}),
+          hasMore: page.hasMore,
+        });
+      });
+    },
+    async listEvents(request: ListRuntimeLogEventsRequest) {
+      return withLogs(logs, (reader) => projectRuntimeLogEventPage(reader.listEvents(request)));
+    },
+  });
+}
+
+/** Select the current Runtime event table inside the Service History owner, not a Worker root. */
+export function createKiteRuntimePagedHistoryFromWorkspaceStore(
+  openLogs: (currentEventTypes: readonly string[]) => RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return createKiteRuntimePagedHistoryClient(openLogs(runtimeHostCurrentStateEventTypes()));
+}
+
+/**
+ * Current-format, query-only History surface for observer-only consumers.
+ *
+ * Unlike the terminal History journey, this entry point deliberately has no
+ * compatibility source and therefore cannot discover or import a legacy
+ * Session as a side effect of list/load. A missing legacy-only Session stays
+ * unavailable until an authorized native client performs the explicit import.
+ */
+export function createKiteRuntimeObserverHistoryClient(
+  logs: RuntimeLogQuerySource,
+): RuntimeHistoryClient {
+  return createKiteRuntimeHistoryClient(logs);
 }

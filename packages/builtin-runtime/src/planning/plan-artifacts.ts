@@ -50,6 +50,15 @@ export interface PlanArtifactContent {
   artifact: PlanArtifactRef;
 }
 
+export interface PlanArtifactStorageBackend {
+  write(input: {
+    readonly taskId: string;
+    readonly plan: PlanDocument;
+    readonly markdown: string;
+  }): PlanArtifactRef;
+  read(ref: PlanArtifactRef): Readonly<{ plan: PlanDocument; markdown: string }>;
+}
+
 export class PlanArtifactError extends Error {
   public readonly code:
     | 'invalid_reference'
@@ -171,7 +180,10 @@ function assertRealPathInsideRoot(root: string, directory: string): string {
 
 function validateArtifactParent(
   target: string,
-  options: { create: boolean; missingCode: 'invalid_reference' | 'artifact_missing' },
+  options: {
+    create: boolean;
+    missingCode: 'invalid_reference' | 'artifact_missing';
+  },
 ): ArtifactParentBoundary {
   assertInsideRoot(target);
   const root = resolve(planArtifactRoot());
@@ -551,16 +563,28 @@ function syncArtifactDirectoryChain(directory: string): void {
   }
 }
 
+const PLAN_ARTIFACT_BACKENDS = new WeakMap<PlanArtifactStore, PlanArtifactStorageBackend>();
+
 export class PlanArtifactStore {
+  constructor(options: { readonly backend?: PlanArtifactStorageBackend } = {}) {
+    if (options.backend) PLAN_ARTIFACT_BACKENDS.set(this, options.backend);
+  }
+
   write(taskId: string, plan: PlanDocument): PlanArtifactRef {
     assertSafeSegment(taskId, 'taskId');
     assertSafeSegment(plan.planId, 'planId');
     assertSafeVersion(plan.version);
     assertPlanDocument(plan, 'invalid_reference');
-    assertInsideRoot(planArtifactPath(taskId, plan.version));
-
-    const target = planArtifactPath(taskId, plan.version);
     const markdown = serialize(plan, taskId);
+
+    const backend = PLAN_ARTIFACT_BACKENDS.get(this);
+    if (backend) {
+      const ref = backend.write({ taskId, plan, markdown });
+      assertBackendReference(ref, taskId, plan, markdown);
+      return ref;
+    }
+    assertInsideRoot(planArtifactPath(taskId, plan.version));
+    const target = planArtifactPath(taskId, plan.version);
 
     try {
       const currentBoundary = validateArtifactParent(target, {
@@ -618,6 +642,18 @@ export class PlanArtifactStore {
     assertSafeSegment(ref.taskId, 'taskId');
     assertSafeSegment(ref.planId, 'planId');
     assertSafeVersion(ref.version);
+    const backend = PLAN_ARTIFACT_BACKENDS.get(this);
+    if (backend) {
+      const stored = backend.read(ref);
+      assertPlanDocument(stored.plan, 'artifact_corrupt');
+      assertBackendReference(ref, ref.taskId, stored.plan, stored.markdown);
+      return {
+        taskId: ref.taskId,
+        plan: stored.plan,
+        markdown: stored.markdown,
+        artifact: ref,
+      };
+    }
     const target = planArtifactPath(ref.taskId, ref.version);
     assertInsideRoot(target);
     const artifactFile = readRegularArtifact(target, 'artifact_missing');
@@ -638,5 +674,29 @@ export class PlanArtifactStore {
       markdown: artifactFile.markdown,
       artifact: makeRef(ref.taskId, plan, target, artifactFile.byteLength),
     };
+  }
+}
+
+function assertBackendReference(
+  ref: PlanArtifactRef,
+  taskId: string,
+  plan: PlanDocument,
+  markdown: string,
+): void {
+  if (
+    ref.artifactId !== artifactId(plan.planId, plan.version) ||
+    ref.taskId !== taskId ||
+    ref.planId !== plan.planId ||
+    ref.version !== plan.version ||
+    ref.fileName !== `v${plan.version}.md` ||
+    typeof ref.relativePath !== 'string' ||
+    ref.relativePath.length === 0 ||
+    typeof ref.displayPath !== 'string' ||
+    ref.displayPath.length === 0 ||
+    ref.structuralDigest !== plan.structuralDigest ||
+    ref.byteLength !== Buffer.byteLength(markdown, 'utf8') ||
+    computePlanStructuralDigest(plan) !== plan.structuralDigest
+  ) {
+    throw new PlanArtifactError('Plan Artifact backend identity is invalid.', 'artifact_corrupt');
   }
 }

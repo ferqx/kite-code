@@ -10,7 +10,7 @@ import {
 import type { NativeProviderCredentialClient } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import type { InteractionMode, RuntimeAccess } from '@kite-ai/runtime-contract';
-import type { RuntimeServer } from '@kite-ai/runtime-server';
+import type { RuntimeServer, RuntimeServerAdmissionInput } from '@kite-ai/runtime-server';
 import {
   createKiteInProcessAppControlComposition,
   type KiteInProcessAppControlComposition,
@@ -18,9 +18,11 @@ import {
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteRuntimeHistory,
+  createKiteRuntimeObserverHistoryFromStorage,
   type KiteMultiWorkspaceRuntimeServerInput,
   type KiteMultiWorkspaceRuntimeServerOwner,
 } from './bootstrap';
+import { createSingleServiceControllerPort } from './bootstrap/single-service-controller';
 import {
   createNativeKiteServiceInfrastructure,
   type NativeKiteServiceApplicationPort,
@@ -60,6 +62,8 @@ export interface KiteServiceRuntimeCompositionOptions {
   readonly instanceId?: string;
   /** The one explicit current Store path used by the Service owner. */
   readonly checkpointPath: string;
+  /** Already-open Store 9 owner; when present no legacy Store or History connection is opened. */
+  readonly storageOwner?: import('./bootstrap').KiteRuntimeStorageOwner;
   /** At least one admitted Workspace template is required for Runtime execution. */
   readonly workspaces?: readonly (KiteServiceWorkspaceTemplate | KiteServiceWorkspaceSpec)[];
   /** Lazy template resolver used after Trust/connection admission; it is never called at boot. */
@@ -232,35 +236,43 @@ function createKiteServiceRuntimeCompositionUnchecked(
     checkpointPath: input.checkpointPath,
     serverInstanceId: instanceId,
     operationGate,
+    ...(input.storageOwner ? { storageOwner: input.storageOwner } : {}),
     ...(templates.length === 0 ? {} : { workspaces: templates }),
     ...(hasDynamicTemplate
       ? {
           workspaceTemplateFor: async (workspace: KiteWorkspaceIdentity) => {
-            if (input.workspaceTemplateFor) return input.workspaceTemplateFor(workspace);
-            const requested = workspaceSpecs.find(
-              (spec) =>
-                appControl.admitWorkspace(spec.workspace).canonicalPath === workspace.canonicalPath,
-            );
-            const runtime = appControl.runtimeInputsFor(workspace);
-            await runtime.workspaceReady;
-            return {
-              userId: requested?.userId ?? 'kite-service',
-              workspace: workspace.canonicalPath,
-              config: runtime.config,
-              shellExecutor: runtime.shellExecutor,
-              interactionMode:
-                requested?.interactionMode ?? runtime.config.interactionMode ?? 'auto',
-              sandboxBackend: requested?.sandboxBackend ?? discoverSandboxBackendCandidate(),
-              mcpManager: runtime.mcpManager,
-              skillManifests: runtime.skillManifests,
-              skillOptions: runtime.skillOptions,
-              initialSkillActivations: requested?.initialSkillActivations ?? [],
-            };
+            const template = input.workspaceTemplateFor
+              ? await input.workspaceTemplateFor(workspace)
+              : await (async (): Promise<KiteServiceWorkspaceTemplate> => {
+                  const requested = workspaceSpecs.find(
+                    (spec) =>
+                      appControl.admitWorkspace(spec.workspace).canonicalPath ===
+                      workspace.canonicalPath,
+                  );
+                  const runtime = appControl.runtimeInputsFor(workspace);
+                  await runtime.workspaceReady;
+                  return {
+                    userId: requested?.userId ?? 'kite-service',
+                    workspace: workspace.canonicalPath,
+                    config: runtime.config,
+                    shellExecutor: runtime.shellExecutor,
+                    interactionMode:
+                      requested?.interactionMode ?? runtime.config.interactionMode ?? 'auto',
+                    sandboxBackend: requested?.sandboxBackend ?? discoverSandboxBackendCandidate(),
+                    mcpManager: runtime.mcpManager,
+                    skillManifests: runtime.skillManifests,
+                    skillOptions: runtime.skillOptions,
+                    initialSkillActivations: requested?.initialSkillActivations ?? [],
+                  };
+                })();
+            return template;
           },
         }
       : {}),
   });
-  const history = createKiteRuntimeHistory(input.checkpointPath);
+  const history = input.storageOwner
+    ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
+    : createKiteRuntimeHistory(input.checkpointPath);
   const persistedWorkspace = (sessionId: string): KiteWorkspaceIdentity | undefined => {
     const snapshot = owner.storage.sessions.loadSnapshot<{
       readonly session: {
@@ -336,16 +348,21 @@ function createKiteServiceRuntimeCompositionUnchecked(
       return trust.status === 'trusted' ? admitted : undefined;
     },
   };
+  const authorityForWorkspace = input.storageOwner?.authorityForWorkspace
+    ? (workspace: KiteWorkspaceIdentity) => {
+        input.storageOwner!.admitWorkspace?.(workspace);
+        return input.storageOwner!.authorityForWorkspace!(workspace);
+      }
+    : undefined;
   const runtimeAdmission = {
-    create(workspace: KiteWorkspaceIdentity, connectionId: string) {
+    create(
+      workspace: KiteWorkspaceIdentity,
+      connectionId: string,
+      connectionKind?: 'native_client' | 'web_observer',
+      binding?: import('./carrier/ports').ServiceRuntimeConnectionBinding,
+    ) {
       return {
-        async authorize(request: {
-          readonly connectionId: string;
-          readonly operation: string;
-          readonly command?: unknown;
-          readonly query?: unknown;
-          readonly subscription?: unknown;
-        }) {
+        async authorize(request: RuntimeServerAdmissionInput) {
           if (request.connectionId !== connectionId) {
             return { allowed: false as const, reason: 'unauthorized' as const };
           }
@@ -354,6 +371,9 @@ function createKiteServiceRuntimeCompositionUnchecked(
             workspace: workspace.canonicalPath,
           });
           if (trust.status !== 'trusted') {
+            return { allowed: false as const, reason: 'unauthorized' as const };
+          }
+          if (request.operation === 'runtime/command' && connectionKind !== 'native_client') {
             return { allowed: false as const, reason: 'unauthorized' as const };
           }
           const sessionId = sessionIdForRequest(request);
@@ -365,11 +385,50 @@ function createKiteServiceRuntimeCompositionUnchecked(
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
           }
-          return { allowed: true as const, workspace: workspace.canonicalPath };
+          if (
+            request.operation === 'runtime/command' &&
+            connectionKind === 'native_client' &&
+            authorityForWorkspace
+          ) {
+            if (
+              !sessionId ||
+              !binding ||
+              binding.controllerSessionId !== sessionId ||
+              binding.controllerGeneration === undefined
+            ) {
+              return { allowed: false as const, reason: 'unauthorized' as const };
+            }
+            const state = authorityForWorkspace(workspace).controller.read(sessionId);
+            if (
+              state.status !== 'active' ||
+              state.clientId !== binding.clientId ||
+              state.connectionGeneration !== binding.connectionGeneration ||
+              state.controllerGeneration !== binding.controllerGeneration ||
+              state.workerInstanceId !== instanceId
+            ) {
+              return { allowed: false as const, reason: 'unauthorized' as const };
+            }
+          }
+          return {
+            allowed: true as const,
+            workspace: workspace.canonicalPath,
+          };
         },
       };
     },
   };
+  const controller =
+    authorityForWorkspace && input.storageOwner?.sessionCreation
+      ? createSingleServiceControllerPort({
+          serviceInstanceId: instanceId,
+          runtime: owner.runtime,
+          storage: owner.storage,
+          sessionCreation: input.storageOwner.sessionCreation,
+          workspaceAdmission,
+          authorityForWorkspace,
+          workspaceForSession: persistedWorkspace,
+        })
+      : undefined;
   let application!: KiteRuntimeApplication;
   const carrierApplication: NativeKiteServiceApplicationPort = {
     server: owner.server,
@@ -378,6 +437,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
     runtimeAdmission,
     appControl: appControl.gateway,
     credential: appControl.credentialClient,
+    ...(controller ? { controller } : {}),
     onConnectionBound: (connectionId, workspace) => {
       const admitted = workspaceForPath(workspace.canonicalPath);
       if (admitted) owner.bindConnection(connectionId, admitted);

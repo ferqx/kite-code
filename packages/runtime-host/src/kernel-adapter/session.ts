@@ -31,10 +31,14 @@ import type {
   RuntimeCommandCommitEvidence,
   RuntimeEventMetadata,
   RuntimeRestoreBoundary,
+  RuntimeRunStatus,
+  RuntimeRunTransactionMutation,
   RuntimeStoredCommandReceipt,
+  RuntimeStoredCommandResourceResult,
+  RuntimeStoredRun,
   RuntimeTransactionInput,
 } from '../storage';
-import { createRuntimeStoredCommandReceipt } from '../storage';
+import { createRuntimeRunStartResourceResult, createRuntimeStoredCommandReceipt } from '../storage';
 import type {
   StateRuntimeEffectLease as BaseStateRuntimeEffectLease,
   StateRuntimeEffectPersistenceAcknowledgement,
@@ -151,6 +155,10 @@ export interface StateRuntimeCommandCommitResult {
 export interface StateRuntimeSession {
   readonly sessionId: string;
   getState(): Readonly<AgentState>;
+  /** True only when the injected storage owner has passed Store 8 preflight. */
+  supportsRunStorage(): boolean;
+  /** Row-only post-commit activation; Store 6/7 remain an explicit no-op. */
+  activateRun(runId: string): void;
   processEvent(event: KernelEvent): StateRuntimeProcessEventResult;
   processEventBatch(
     events: readonly KernelEvent[],
@@ -313,6 +321,35 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     return this.#state;
   }
 
+  supportsRunStorage(): boolean {
+    return this.#services.runs !== undefined;
+  }
+
+  activateRun(runId: string): void {
+    const runs = this.#services.runs;
+    if (!runs) return;
+    const current = runs.get(this.sessionId, runId);
+    if (!current) throw new Error(`Runtime Run activation target is missing: ${runId}.`);
+    if (current.status !== 'queued') {
+      if (current.status === 'running') return;
+      throw new Error(`Runtime Run activation target is ${current.status}: ${runId}.`);
+    }
+    const startedAtMs = Math.max(current.createdAtMs, this.#clockMilliseconds());
+    const result = runs.transition({
+      sessionId: this.sessionId,
+      runId,
+      expectedLastRevision: current.lastRevision,
+      next: Object.freeze({
+        ...current,
+        status: 'running',
+        startedAtMs,
+      }),
+    });
+    if (result !== 'applied') {
+      throw new Error(`Runtime Run activation was not applied: ${result}.`);
+    }
+  }
+
   processEvent(event: KernelEvent): StateRuntimeProcessEventResult {
     const occurredAt = this.#eventTimestamp();
     this.#lastProcessedEventId = undefined;
@@ -422,8 +459,18 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         occurredAt: envelope.occurredAt,
       }),
     );
-    const receipt = commandEvidence
-      ? createRuntimeStoredCommandReceipt(commandEvidence, decision.nextState.revision)
+    const runCommit = this.#runCommitForDecision(
+      previousState,
+      decision.nextState,
+      metadata,
+      commandEvidence,
+    );
+    const receiptEvidence =
+      commandEvidence && runCommit?.resourceResult
+        ? Object.freeze({ ...commandEvidence, resourceResult: runCommit.resourceResult })
+        : commandEvidence;
+    const receipt = receiptEvidence
+      ? createRuntimeStoredCommandReceipt(receiptEvidence, decision.nextState.revision)
       : undefined;
     const input: RuntimeTransactionInput<KernelEvent, AgentState> = {
       sessionId: this.sessionId,
@@ -432,6 +479,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       metadata,
       expectedRestoreBoundary: this.#restoreBoundary(),
       ...(receipt ? { commandReceipt: receipt } : {}),
+      ...(runCommit ? { runMutation: runCommit.mutation } : {}),
     };
     try {
       if (receipt) this.#services.transactions.commitCommandDecision(input);
@@ -783,12 +831,102 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     };
   }
 
+  #runCommitForDecision(
+    previousState: Readonly<AgentState>,
+    nextState: Readonly<AgentState>,
+    metadata: readonly RuntimeEventMetadata[],
+    commandEvidence?: RuntimeCommandCommitEvidence,
+  ):
+    | {
+        readonly mutation: RuntimeRunTransactionMutation;
+        readonly resourceResult?: RuntimeStoredCommandResourceResult;
+      }
+    | undefined {
+    const runStart = commandEvidence?.runStart;
+    if (runStart) {
+      if (!this.#services.runs) {
+        throw new Error('Runtime start Run evidence requires Store 8 authority.');
+      }
+      if (commandEvidence.resourceResult !== undefined) {
+        throw new Error('Runtime start Run resource result is Host-owned.');
+      }
+      if (
+        nextState.turn.turnId !== runStart.runId ||
+        nextState.turn.status !== 'active' ||
+        nextState.revision <= previousState.revision
+      ) {
+        throw new Error('Runtime start Run evidence does not match the accepted State decision.');
+      }
+      const run: RuntimeStoredRun = Object.freeze({
+        sessionId: this.sessionId,
+        runId: runStart.runId,
+        startCommandId: commandEvidence.commandId,
+        phase: runStart.phase,
+        status: 'queued',
+        createdRevision: nextState.revision,
+        lastRevision: nextState.revision,
+        createdAtMs: timestampMilliseconds(metadata.at(-1)?.occurredAt),
+      });
+      return Object.freeze({
+        mutation: Object.freeze({ type: 'insert', run }),
+        resourceResult: createRuntimeRunStartResourceResult(run),
+      });
+    }
+
+    const runs = this.#services.runs;
+    const runId = previousState.turn.turnId;
+    if (!runs || !runId) return undefined;
+    const current = runs.get(this.sessionId, runId);
+    if (!current || isFinalRunStatus(current.status)) return undefined;
+    const status = projectRunStatus(previousState, nextState, current.status);
+    if (!status || status === current.status) return undefined;
+    if (current.status === 'unknown' && !isPreciseTerminalRunStatus(status)) return undefined;
+    const occurredAtMs = Math.max(
+      current.startedAtMs ?? current.createdAtMs,
+      timestampMilliseconds(metadata.at(-1)?.occurredAt),
+    );
+    const terminal = isTerminalRunStatus(status);
+    const next: RuntimeStoredRun = Object.freeze({
+      ...current,
+      status,
+      lastRevision: nextState.revision,
+      ...(terminal
+        ? {
+            finishedAtMs:
+              current.status === 'unknown' && current.finishedAtMs !== undefined
+                ? current.finishedAtMs
+                : occurredAtMs,
+          }
+        : {}),
+      ...(terminal
+        ? {
+            terminal: projectRunTerminal(nextState, status),
+          }
+        : {}),
+    });
+    return Object.freeze({
+      mutation: Object.freeze({
+        type: 'transition',
+        transition: Object.freeze({
+          sessionId: this.sessionId,
+          runId,
+          expectedLastRevision: current.lastRevision,
+          next,
+        }),
+      }),
+    });
+  }
+
   #eventTimestamp(): string {
     const value = this.#defaults.clock();
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)) {
       throw new Error('Runtime Host clock returned an invalid State timestamp.');
     }
     return value;
+  }
+
+  #clockMilliseconds(): number {
+    return timestampMilliseconds(this.#eventTimestamp());
   }
 
   #sandboxFact(): boolean {
@@ -812,6 +950,81 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       finalizeAgentEvent(normalizeAgentEvent(event, state, occurredAt), occurredAt),
     );
   }
+}
+
+function projectRunStatus(
+  previousState: Readonly<AgentState>,
+  nextState: Readonly<AgentState>,
+  current: RuntimeRunStatus,
+): RuntimeRunStatus | undefined {
+  if (nextState.turn.status === 'completed') return 'completed';
+  if (nextState.turn.status === 'aborted') {
+    if (nextState.terminalOutcome?.status === 'unknown') return 'unknown';
+    return nextState.turn.abortCause === 'user' ? 'cancelled' : 'failed';
+  }
+  if (nextState.turn.status !== 'active') return undefined;
+  if (nextState.interactions.kind !== 'idle') return 'waiting';
+  if (current === 'waiting' && previousState.interactions.kind !== 'idle') return 'running';
+  return undefined;
+}
+
+function projectRunTerminal(
+  state: Readonly<AgentState>,
+  status: RuntimeRunStatus,
+): NonNullable<RuntimeStoredRun['terminal']> {
+  const outcome = state.terminalOutcome;
+  if (outcome) {
+    return Object.freeze({
+      reasonCode: outcome.reasonCode,
+      safeRetry: outcome.safeRetry,
+      recoveryEntry: outcome.recoveryEntry,
+    });
+  }
+  switch (status) {
+    case 'completed':
+      return Object.freeze({ reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' });
+    case 'cancelled':
+      return Object.freeze({
+        reasonCode: 'cancelled',
+        safeRetry: false,
+        recoveryEntry: 'new_run',
+      });
+    case 'unknown':
+      return Object.freeze({
+        reasonCode: 'unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      });
+    default:
+      return Object.freeze({
+        reasonCode: 'runtime_failed',
+        safeRetry: false,
+        recoveryEntry: 'new_run',
+      });
+  }
+}
+
+function isTerminalRunStatus(status: RuntimeRunStatus): boolean {
+  return (
+    status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'unknown'
+  );
+}
+
+function isPreciseTerminalRunStatus(status: RuntimeRunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+function isFinalRunStatus(status: RuntimeRunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+function timestampMilliseconds(value: string | undefined): number {
+  if (value === undefined) throw new Error('Runtime Run transition requires event commit time.');
+  const milliseconds = Date.parse(value);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    throw new Error('Runtime Run transition timestamp is invalid.');
+  }
+  return milliseconds;
 }
 
 export function createRuntimeHostStateSession(

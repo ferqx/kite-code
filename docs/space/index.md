@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-27（Kite Local Runtime Service V1 已激活，KLSV1-00～02 完成）
+最后更新：2026-08-30（单Service/单Store本机Runtime current authority已登记）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -20,6 +20,7 @@
 
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
+| `../active/agent-api-contract.md` | active | browser-safe Public Agent API V1 DTO、codec、limits与compatibility；当前无listener | 修改Agent API contract、HTTP/SSE adapter、OpenAPI/schema、SDK或静态API docs时。 |
 | `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
 | `../active/runtime-authority-boundary.md` | active | RAV1 authority sequence、可信域、attacker、持久完整性、真实 process boundary 与短生命周期 frame material | 修改 identity、Grant/Receipt、持久完整性、子进程协议、Model/MCP transport、Credential broker 或 State/Store cutover 时。 |
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
@@ -38,6 +39,8 @@
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
 | `../active/sqlite-runtime-log-query.md` | active | SQLite Runtime Store 的只读会话与事件查询、展示投影与数据边界 | 修改 Runtime Store event/session 数据、日志查询 Contract、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。 |
+| `../active/coordinator-workspace-worker-web.md` | active | 单Service内复用的Workspace/Controller模块、同listener只读Web与retired companion边界 | 修改Coordinator/Workspace/Web源码、browser auth或native Controller时。 |
+| `../active/single-service-local-runtime.md` | active | 每个canonical Kite Home唯一Service、Store 9、最小OS runtime、same-listener Web与legacy迁移边界 | 修改CLI/TUI本机连接、Service lifecycle/native IPC、Store 9、Web启动、Kite Home文件、旧Store迁移或release内容时。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |

@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
 import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
+import {
+  WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+  type WorkerControllerClient,
+  type WorkerControllerDurableOperation,
+  type WorkerControllerMutationResponse,
+} from '@kite-ai/kite-app-contract/worker-controller';
 import type {
   LocalKiteConnection,
   LocalRuntimeServiceDescriptor,
@@ -213,6 +219,74 @@ test('Native TUI facade completes an active run from an idle snapshot after a su
   await facade.dispose();
 });
 
+test('Native TUI facade polls an accepted run when its Run terminal notification is absent', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.finishNextTurnWithoutRunTerminal();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await Promise.race([
+    facade.getRuntime(sessionId)!.runTask('recover terminal notification gap', {
+      dispatch: () => {},
+    }),
+    Bun.sleep(3_500).then(() => {
+      throw new Error('Accepted Runtime turn did not recover from a terminal notification gap.');
+    }),
+  ]);
+
+  expect(remote.idleQueryRevisions).toContain(3);
+  await facade.dispose();
+});
+
+test('Native TUI facade hands a late idle query to the current accepted turn', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.overlapIdleWaitersOnConsecutiveTurns();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+
+  await session.runTask('first turn with delayed idle query', { dispatch: () => {} });
+  await Promise.race([
+    session.runTask('second turn after event-free idle', { dispatch: () => {} }),
+    Bun.sleep(1_000).then(() => {
+      throw new Error(
+        `The current accepted Runtime turn did not consume authoritative idle: ${remote.idleQueryRevisions.join(',')}`,
+      );
+    }),
+  ]);
+
+  expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+  expect(remote.idleQueryRevisions).toContain(7);
+  await facade.dispose();
+});
+
+test('Native TUI facade bounds a stalled Ink flush without blocking later answer events', async () => {
+  const remote = new FakeRuntimeConnection();
+  const facade = facadeFor(remote, {
+    flushPresentation: () => new Promise<void>(() => undefined),
+  });
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const events: string[] = [];
+
+  await Promise.race([
+    facade.getRuntime(sessionId)!.runTask('answer after stalled presentation flush', {
+      dispatch: (action) => {
+        if (action.type === 'RUNTIME_EVENT') events.push(action.event.type);
+      },
+    }),
+    Bun.sleep(3_000).then(() => {
+      throw new Error('A stalled Ink flush blocked Runtime subscription consumption.');
+    }),
+  ]);
+
+  expect(events.indexOf('reasoning.activity')).toBeLessThan(events.indexOf('model.text_delta'));
+  expect(events).toContain('run.terminal');
+  await facade.dispose();
+});
+
 test('Native TUI facade ignores an idle snapshot older than the accepted turn receipt', async () => {
   const remote = new FakeRuntimeConnection();
   remote.finishNextTurnAfterStaleSnapshot();
@@ -308,12 +382,91 @@ test('Native TUI facade converges when terminal projection arrives before the co
   await facade.dispose();
 });
 
+test('Native TUI opens an existing Session as Observer, then acquires its lease without reconnecting', async () => {
+  const remote = new FakeRuntimeConnection();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  let connectCalls = 0;
+  let reconnectCalls = 0;
+  const facade = facadeFor(remote, {
+    controller,
+    onConnect: () => {
+      connectCalls += 1;
+    },
+    onReconnect: () => {
+      reconnectCalls += 1;
+    },
+  });
+  const session = facade.registerSession('existing-session', '/tmp/tui-client-workspace');
+  await facade.waitForSessionReady('existing-session');
+
+  await session.runTask('mutate existing session', { dispatch: () => {} });
+
+  expect(connectCalls).toBe(1);
+  expect(reconnectCalls).toBe(0);
+  expect(remote.commands).not.toContain('resume_session');
+  expect(remote.commands).toContain('start_turn');
+  expect(controllerCalls).toEqual([
+    'read:existing-session',
+    'request:existing-session',
+    'read:existing-session',
+  ]);
+  await facade.dispose();
+  expect(remote.commands).not.toContain('cancel_turn');
+});
+
+test('Native TUI releases every confirmed-idle Session lease on dispose without cancelling Turns', async () => {
+  const remote = new FakeRuntimeConnection();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  const facade = facadeFor(remote, { controller });
+  const first = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(first);
+  const second = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(second);
+
+  await facade.dispose();
+
+  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([
+    `release:${first}`,
+    `release:${second}`,
+  ]);
+  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([]);
+  expect(controllerCalls.filter((call) => call.startsWith('create:'))).toEqual([
+    `create:${first}`,
+    `create:${second}`,
+  ]);
+  expect(remote.commands).not.toContain('create_session');
+  expect(remote.commands).not.toContain('cancel_turn');
+  expect(remote.closeCalls).toBe(1);
+});
+
+test('Native TUI detaches an active Session lease on dispose without cancelling its Turn', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const controllerCalls: string[] = [];
+  const controller = createControllerClient('service-tui-test', controllerCalls);
+  const facade = facadeFor(remote, { controller });
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.dispose();
+
+  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([
+    `detach:${sessionId}`,
+  ]);
+  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([]);
+  expect(remote.commands).not.toContain('cancel_turn');
+  expect(remote.closeCalls).toBe(1);
+});
+
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
   readonly interactionExpectedRevisions: number[] = [];
   readonly startTurnExpectedRevisions: number[] = [];
   readonly startTurnCommandIds: string[] = [];
   readonly deferredTurnDeliveryOrder: string[] = [];
+  readonly idleQueryRevisions: number[] = [];
   closeCalls = 0;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
@@ -330,6 +483,12 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #nextStartTurnConflictRevision: number | undefined;
   #advanceRevisionOnEveryStart = false;
   #deferNextStartTurnReceipt = false;
+  #overlapIdleWaiters = false;
+  #omitSecondTerminalNotification = false;
+  #terminalGapOnNextTurn = false;
+  #delayedIdleQueries = 0;
+  #startTurnOrdinal = 0;
+  #currentRunId = 'run-0';
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -371,6 +530,16 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   deliverNextStartTurnReceiptAfterTerminalProjection(): void {
     this.#deferNextStartTurnReceipt = true;
+  }
+
+  overlapIdleWaitersOnConsecutiveTurns(): void {
+    this.#overlapIdleWaiters = true;
+    this.#omitSecondTerminalNotification = true;
+    this.#delayedIdleQueries = 1;
+  }
+
+  finishNextTurnWithoutRunTerminal(): void {
+    this.#terminalGapOnNextTurn = true;
   }
 
   #emitApproval(sessionId: string): void {
@@ -434,18 +603,28 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       if (message.method === 'runtime/query') {
         const query = message.params.query;
         if (query.type === 'get_session_projection') {
-          const session =
-            this.#restoreActiveTurn && !this.#restoredTurnReleased
-              ? projection(query.sessionId, 1, 'running')
-              : idleProjection(query.sessionId, 2);
-          this.push(
-            result(message.id, {
-              status: 'ok',
-              queryType: query.type,
-              revision: session.revision,
-              session,
-            }),
-          );
+          const respond = () => {
+            const session = this.#overlapIdleWaiters
+              ? idleProjection(query.sessionId, this.#authoritativeRevision)
+              : this.#restoreActiveTurn && !this.#restoredTurnReleased
+                ? projection(query.sessionId, 1, 'running')
+                : idleProjection(query.sessionId, Math.max(2, this.#authoritativeRevision));
+            this.idleQueryRevisions.push(session.revision);
+            this.push(
+              result(message.id, {
+                status: 'ok',
+                queryType: query.type,
+                revision: session.revision,
+                session,
+              }),
+            );
+          };
+          if (this.#delayedIdleQueries > 0) {
+            this.#delayedIdleQueries -= 1;
+            setTimeout(respond, 200);
+          } else {
+            respond();
+          }
         }
         return;
       }
@@ -573,13 +752,15 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             sessionId: command.sessionId,
             revision: command.expectedRevision + 2,
             session: projection(command.sessionId, command.expectedRevision + 2, 'completed'),
-            event: { type: 'run.terminal', runId: 'run-approval', status: 'completed' },
+            event: { type: 'run.terminal', runId: this.#currentRunId, status: 'completed' },
           }),
         );
         this.#authoritativeRevision = command.expectedRevision + 2;
         return;
       }
       if (command.type === 'start_turn') {
+        this.#startTurnOrdinal += 1;
+        this.#currentRunId = `run-${this.#startTurnOrdinal}`;
         this.startTurnExpectedRevisions.push(command.expectedRevision);
         this.startTurnCommandIds.push(command.commandId);
         if (this.#nextStartTurnConflictRevision !== undefined) {
@@ -619,6 +800,19 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           commandId: command.commandId,
           sessionId: command.sessionId,
           revision: acceptedRevision,
+          resource: {
+            kind: 'run',
+            run: {
+              schema: 'kite.runtime-run.v1',
+              sessionId: command.sessionId,
+              runId: this.#currentRunId,
+              phase: command.phase ?? 'building',
+              status: 'queued',
+              createdRevision: acceptedRevision,
+              lastRevision: acceptedRevision,
+              createdAtMs: acceptedRevision,
+            },
+          },
         });
         if (!deferReceipt) this.push(commandReceipt);
         if (this.#approvalOnNextTurn) {
@@ -722,7 +916,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
               sessionId: command.sessionId,
               revision: terminalRevision,
               session: idleProjection(command.sessionId, terminalRevision),
-              event: { type: 'run.terminal', runId: 'run-after-stale', status: 'completed' },
+              event: {
+                type: 'run.terminal',
+                runId: this.#currentRunId,
+                status: 'completed',
+              },
             }),
           );
           return;
@@ -798,21 +996,72 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           }),
         );
         if (deferReceipt) this.deferredTurnDeliveryOrder.push('terminal_projection');
-        this.push(
-          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
-            type: 'notification',
-            durability: 'durable',
-            sessionId: command.sessionId,
-            revision: terminalRevision,
-            session: projection(command.sessionId, terminalRevision, 'completed'),
-            event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
-          }),
-        );
+        const omitRunTerminal =
+          this.#terminalGapOnNextTurn ||
+          (this.#omitSecondTerminalNotification && this.#startTurnOrdinal === 2);
+        this.#terminalGapOnNextTurn = false;
+        if (!omitRunTerminal) {
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: terminalRevision,
+              session: projection(
+                command.sessionId,
+                terminalRevision,
+                this.#overlapIdleWaiters ? 'running' : 'completed',
+              ),
+              event: {
+                type: 'run.terminal',
+                runId: this.#currentRunId,
+                status: 'completed',
+              },
+            }),
+          );
+        } else {
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: terminalRevision,
+              session: projection(
+                command.sessionId,
+                terminalRevision,
+                this.#overlapIdleWaiters ? 'running' : 'completed',
+              ),
+              event: {
+                type: 'turn.terminal',
+                turnId: this.#overlapIdleWaiters ? 'run-1' : this.#currentRunId,
+                status: 'completed',
+              },
+            }),
+          );
+        }
         if (deferReceipt) {
           this.deferredTurnDeliveryOrder.push('command_receipt');
           this.push(commandReceipt);
         }
-        this.#authoritativeRevision = terminalRevision;
+        if (this.#overlapIdleWaiters) {
+          const idleRevision = terminalRevision + 1;
+          this.#authoritativeRevision = idleRevision;
+          if (this.#startTurnOrdinal === 1) {
+            setTimeout(() => {
+              this.push(
+                subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+                  type: 'notification',
+                  durability: 'durable',
+                  sessionId: command.sessionId,
+                  revision: idleRevision,
+                  session: idleProjection(command.sessionId, idleRevision),
+                }),
+              );
+            }, 10);
+          }
+        } else {
+          this.#authoritativeRevision = terminalRevision;
+        }
         return;
       }
       const revision = ('expectedRevision' in command ? command.expectedRevision : 0) + 1;
@@ -956,13 +1205,21 @@ function idleProjection(sessionId: string, revision: number) {
   };
 }
 
-function facadeFor(remote: FakeRuntimeConnection) {
+function facadeFor(
+  remote: FakeRuntimeConnection,
+  options: {
+    readonly controller?: WorkerControllerClient;
+    readonly onConnect?: () => void;
+    readonly onReconnect?: () => void;
+    readonly flushPresentation?: () => Promise<void>;
+  } = {},
+) {
   const runtime = new RuntimeClient({
     transport: transport(remote),
     clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
     history: history(),
   });
-  const connection: LocalKiteConnection = {
+  const connection: LocalKiteConnection & { readonly controller?: WorkerControllerClient } = {
     runtime,
     history: history(),
     app: {} as KiteAppControlClient,
@@ -981,15 +1238,177 @@ function facadeFor(remote: FakeRuntimeConnection) {
     snapshotStore: runtime.snapshotStore,
     subscribe: (listener) => runtime.snapshotStore.subscribe(listener),
     prepareAppControl: async () => undefined,
-    connect: async () => undefined,
-    reconnect: () => runtime.reconnect(),
+    connect: async () => {
+      options.onConnect?.();
+    },
+    reconnect: async () => {
+      options.onReconnect?.();
+      await runtime.reconnect();
+    },
     close: async () => runtime.close('tui-test-close'),
     [Symbol.asyncDispose]: async () => runtime.close('tui-test-dispose'),
+    ...(options.controller === undefined ? {} : { controller: options.controller }),
   };
   return createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
+    ...(options.flushPresentation === undefined
+      ? {}
+      : { flushPresentation: options.flushPresentation }),
   });
+}
+
+interface TestControllerState {
+  status: 'idle' | 'active' | 'detached';
+  controllerGeneration: number;
+  connectionGeneration: number;
+  interactionGeneration: number;
+  clientId: string | null;
+  workerInstanceId: string | null;
+}
+
+function createControllerClient(workerInstanceId: string, calls: string[]): WorkerControllerClient {
+  const states = new Map<string, TestControllerState>();
+  const stateFor = (sessionId: string): TestControllerState => {
+    const current = states.get(sessionId);
+    if (current) return current;
+    const initial: TestControllerState = {
+      status: 'idle',
+      controllerGeneration: 0,
+      connectionGeneration: 0,
+      interactionGeneration: 0,
+      clientId: null,
+      workerInstanceId: null,
+    };
+    states.set(sessionId, initial);
+    return initial;
+  };
+  const operation = (
+    request: {
+      readonly sessionId: string;
+      readonly requestId: string;
+      readonly requestDigest: string;
+    },
+    operationName: WorkerControllerDurableOperation,
+    state: TestControllerState,
+  ): WorkerControllerMutationResponse => ({
+    schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+    operation: operationName,
+    status: 'applied',
+    receipt: {
+      schema: 'kite.app.worker-controller.receipt.v1',
+      sessionId: request.sessionId,
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      operation: operationName,
+      status: 'applied',
+      code: operationName === 'request_control' ? 'acquired' : 'detached',
+      controllerGeneration: state.controllerGeneration,
+      connectionGeneration: state.connectionGeneration,
+      interactionGeneration: state.interactionGeneration,
+      clientId: state.clientId,
+      workerInstanceId: state.workerInstanceId,
+      completedAt: 1,
+    },
+    ...(operationName === 'request_control'
+      ? {
+          lease: {
+            sessionId: request.sessionId,
+            clientId: state.clientId!,
+            connectionGeneration: state.connectionGeneration,
+            controllerGeneration: state.controllerGeneration,
+            workerInstanceId,
+            status: 'active' as const,
+          },
+        }
+      : {}),
+  });
+  return {
+    async createSession(request) {
+      calls.push(`create:${request.sessionId}`);
+      const created: TestControllerState = {
+        status: 'active',
+        controllerGeneration: 1,
+        connectionGeneration: 1,
+        interactionGeneration: 0,
+        clientId: 'client-tui-test',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, created);
+      const durable = operation(request, 'request_control', created);
+      return { ...durable, operation: 'create_session', sessionRevision: 1 };
+    },
+    async read(request) {
+      calls.push(`read:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      return {
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'read_controller',
+        state: {
+          sessionId: request.sessionId,
+          status: state.status,
+          controllerGeneration: state.controllerGeneration,
+          connectionGeneration: state.connectionGeneration,
+          clientId: state.clientId,
+          workerInstanceId: state.workerInstanceId,
+          interactionGeneration: state.interactionGeneration,
+          resumeCapabilityExpiresAtMs: null,
+        },
+      };
+    },
+    async requestControl(request) {
+      calls.push(`request:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      if (state.status === 'active') throw new Error('Controller is busy.');
+      const active: TestControllerState = {
+        ...state,
+        status: 'active',
+        controllerGeneration: state.controllerGeneration + 1,
+        connectionGeneration: 1,
+        clientId: 'client-tui-test',
+        workerInstanceId,
+      };
+      states.set(request.sessionId, active);
+      return operation(request, 'request_control', active);
+    },
+    async releaseControl(request) {
+      calls.push(`release:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      states.set(request.sessionId, {
+        ...state,
+        status: 'idle',
+        controllerGeneration: state.controllerGeneration + 1,
+        clientId: null,
+        workerInstanceId: null,
+      });
+      return operation(request, 'release_control', state);
+    },
+    async detach(request) {
+      calls.push(`detach:${request.sessionId}`);
+      const state = stateFor(request.sessionId);
+      states.set(request.sessionId, { ...state, status: 'detached' });
+      return operation(request, 'detach_controller', state);
+    },
+    async issueResumeCapability() {
+      throw new Error('unused');
+    },
+    async resume() {
+      throw new Error('unused');
+    },
+    async mintDetachedRecoveryCapability() {
+      throw new Error('unused');
+    },
+    async abandonDetachedController() {
+      throw new Error('unused');
+    },
+    async validateResumeCapability() {
+      return {
+        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
+        operation: 'validate_resume_capability',
+        status: 'missing',
+      };
+    },
+  };
 }
 
 function subscriptionUpdate(subscriptionId: string, generation: number, message: object): object {

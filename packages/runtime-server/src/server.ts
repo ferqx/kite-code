@@ -1,9 +1,11 @@
 import type {
   RuntimeAccess,
   RuntimeAccessNotification,
+  RuntimeCommandContext,
   RuntimeNotification,
   RuntimeSubscriptionSpec,
 } from '@kite-ai/runtime-contract';
+import { freezeRuntimeCommandContext } from '@kite-ai/runtime-contract';
 import {
   type InitializeResult,
   mapProtocolCommandToRuntimeCommand,
@@ -47,7 +49,12 @@ export interface RuntimeServerAdmissionInput {
 }
 
 export type RuntimeServerAdmissionDecision =
-  | { readonly allowed: true; readonly workspace: string }
+  | {
+      readonly allowed: true;
+      readonly workspace: string;
+      /** Opaque App-owned reference to the authenticated connection binding. */
+      readonly bindingReference?: string;
+    }
   | { readonly allowed: false; readonly reason?: 'unauthorized' | 'unavailable' };
 
 /** App-owned authority for transport, role and its one already-trusted Workspace. */
@@ -454,7 +461,18 @@ class ServerConnection implements RuntimeServerConnection {
     });
     await this.#sendResult(
       request.id,
-      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(await this.#backend.runtime.command(command)),
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(
+        await this.#backend.runtime.command(
+          command,
+          freezeRuntimeCommandContext({
+            schema: 'kite.runtime-command-context.v1',
+            connectionId: this.connectionId,
+            requestId: request.id,
+            bindingReference: decision.bindingReference ?? null,
+            ...(this.#clientInfo === undefined ? {} : { clientInfo: this.#clientInfo }),
+          } satisfies RuntimeCommandContext),
+        ),
+      ),
       releasePermit,
     );
   }
