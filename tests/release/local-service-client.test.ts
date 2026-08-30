@@ -12,11 +12,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  createManagedLocalServiceClientComposition,
   resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
+import { createManagedLocalSingleServiceComposition } from '../../scripts/release/single-service-native-client';
 
 test('managed client forwards only explicit built-in provider environment keys', () => {
   expect(
@@ -44,7 +44,7 @@ test('managed client forwards only explicit built-in provider environment keys',
   expect(selected.KITE_CODE_HOME).toBeUndefined();
 });
 
-test('source release build identity includes terminal, Service, Worker, Gateway, and package inputs', () => {
+test('source release build identity includes the single-Service bundle inputs', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-build-id-'));
   try {
     mkdirSync(join(root, 'apps', 'kite-service'), { recursive: true });
@@ -65,14 +65,6 @@ test('source release build identity includes terminal, Service, Worker, Gateway,
     runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'unrelated cli change']);
     const committedClientChange = sourceServiceBuildIdentity(root);
     expect(committedClientChange).not.toBe(clean);
-
-    const maintenanceOwner = join(root, 'scripts', 'release', 'local-run-store-maintenance.ts');
-    mkdirSync(join(root, 'scripts', 'release'), { recursive: true });
-    writeFileSync(maintenanceOwner, 'export const maintenanceRevision = 1;\n');
-    runGit(root, ['add', '.']);
-    runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'maintenance owner change']);
-    const committedMaintenanceChange = sourceServiceBuildIdentity(root);
-    expect(committedMaintenanceChange).not.toBe(committedClientChange);
 
     writeFileSync(tracked, 'export const value = 2;\n');
     runGit(root, ['add', '.']);
@@ -104,7 +96,7 @@ test('managed client derives default KiteHome only from the canonical OS identit
   const ambientHome = join(root, 'workspace-dotenv-home');
   mkdirSync(systemHome);
   try {
-    const managed = createManagedLocalServiceClientComposition({
+    createManagedLocalSingleServiceComposition({
       argv: ['bun', 'kite'],
       systemHome,
       environment: {
@@ -115,7 +107,6 @@ test('managed client derives default KiteHome only from the canonical OS identit
         PATH: process.env.PATH,
       },
     });
-    expect(managed.executableMode).toBe('source');
     expect(existsSync(join(systemHome, '.kite-code'))).toBe(true);
     expect(existsSync(ambientHome)).toBe(false);
     expect(existsSync(join(root, 'ambient-kite-home'))).toBe(false);
@@ -131,7 +122,7 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
   mkdirSync(systemHome);
   mkdirSync(explicitHome, { mode: 0o755 });
   try {
-    createManagedLocalServiceClientComposition({
+    createManagedLocalSingleServiceComposition({
       argv: ['bun', 'kite', '--kite-home', explicitHome],
       systemHome,
       environment: { PATH: process.env.PATH },
@@ -141,13 +132,13 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
     if (process.platform !== 'win32') expect(lstatSync(explicitHome).mode & 0o777).toBe(0o700);
 
     expect(() =>
-      createManagedLocalServiceClientComposition({
+      createManagedLocalSingleServiceComposition({
         argv: ['bun', 'kite', '--kite-home', 'relative-home'],
         systemHome,
       }),
     ).toThrow('absolute path');
     expect(() =>
-      createManagedLocalServiceClientComposition({
+      createManagedLocalSingleServiceComposition({
         argv: ['bun', 'kite', '--kite-home', explicitHome, '--kite-home', explicitHome],
         systemHome,
       }),
@@ -158,7 +149,7 @@ test('managed client accepts one explicit absolute non-symlink KiteHome and reje
     mkdirSync(target);
     symlinkSync(target, link, 'dir');
     expect(() =>
-      createManagedLocalServiceClientComposition({
+      createManagedLocalSingleServiceComposition({
         argv: ['bun', 'kite', '--kite-home', link],
         systemHome,
       }),
@@ -173,13 +164,6 @@ test('installed companion resolution pins the launcher-provided immutable candid
   try {
     const candidateRoot = join(root, 'releases', 'a'.repeat(24));
     const stableExecutable = join(root, 'bin', 'kite');
-    expect(
-      resolveInstalledReleaseExecutable('kite-coordinator', {
-        candidateRoot,
-        executable: stableExecutable,
-        platform: 'linux',
-      }),
-    ).toBe(join(candidateRoot, 'bin', 'kite-coordinator'));
     expect(
       resolveInstalledReleaseExecutable('kite-service', {
         candidateRoot,

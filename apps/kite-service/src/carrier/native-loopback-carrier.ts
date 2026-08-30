@@ -58,6 +58,11 @@ import type {
   RuntimeServerAdmissionPort,
   RuntimeServerLogicalMessageConnection,
 } from '@kite-ai/runtime-server';
+import {
+  createWebGatewayCarrier,
+  type WebGatewayCarrier,
+  type WebGatewayCarrierOptions,
+} from '../web-gateway/carrier';
 import type {
   KiteServiceApplicationPort,
   ServiceControllerPort,
@@ -97,7 +102,26 @@ const MAX_TICKETS = 1_024;
 const HEARTBEAT_POLL_INTERVAL_MS = 10;
 
 type RequestIp = Readonly<{ address: string }> | null;
-type SocketData = Readonly<{ session: ServiceSocketSession }>;
+type SocketData = Readonly<{ session: ServiceSocketSession }> | Readonly<{ connection: unknown }>;
+
+type BrowserSocketData = Readonly<{ connection: unknown }>;
+
+interface AttachedWebGatewayRoutes {
+  readonly fetch: (
+    request: Request,
+    server: Bun.Server<BrowserSocketData>,
+  ) => Response | Promise<Response> | undefined | Promise<undefined>;
+  readonly websocket: {
+    readonly open?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+    readonly message?: (
+      socket: Bun.ServerWebSocket<BrowserSocketData>,
+      message: string | Buffer,
+    ) => void;
+    readonly drain?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+    readonly close?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
+  };
+  readonly leaseId: symbol;
+}
 
 export type KiteServiceCarrierDiagnosticCode =
   | 'socket_open'
@@ -160,10 +184,17 @@ export interface KiteServiceCarrierOptions {
   readonly onDiagnostic?: (code: KiteServiceCarrierDiagnosticCode) => void;
 }
 
+export type KiteServiceWebGatewayRouteOptions = Omit<
+  WebGatewayCarrierOptions,
+  'instanceId' | 'nativeControl' | 'requestIp' | 'serve'
+>;
+
 export interface KiteServiceCarrier extends AsyncDisposable {
   readonly descriptor: LocalRuntimeServiceDescriptor;
   readonly origin: string;
   readonly rpcUrl: string;
+  /** Attach Browser-only routes to this exact listener; only one owner may be active. */
+  attachWebGateway(options: KiteServiceWebGatewayRouteOptions): WebGatewayCarrier;
   close(): Promise<void>;
 }
 
@@ -208,6 +239,8 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
   let closed = false;
   let closing: Promise<void> | undefined;
   let bunServer: Bun.Server<SocketData> | undefined;
+  let webGatewayRoutes: AttachedWebGatewayRoutes | undefined;
+  let webGatewayCarrier: WebGatewayCarrier | undefined;
 
   const closeAllSockets = (): unknown[] => {
     const failures: unknown[] = [];
@@ -236,6 +269,9 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         return fixedResponse(403, 'forbidden');
       }
       const url = new URL(request.url);
+      if (webGatewayRoutes && isWebGatewayPath(url.pathname)) {
+        return webGatewayRoutes.fetch(request, server as unknown as Bun.Server<BrowserSocketData>);
+      }
       if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
         if (!(options.isReady?.() ?? true) || !options.agentApi) {
           emitDiagnostic(options.onDiagnostic, 'route_unavailable');
@@ -314,25 +350,55 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       data: {} as SocketData,
       maxPayloadLength: RUNTIME_PROTOCOL_LIMITS.maxMessageBytes * 2,
       backpressureLimit: limits.maxBufferedAmount,
-      closeOnBackpressureLimit: true,
+      closeOnBackpressureLimit: false,
       sendPings: false,
       open(socket) {
-        socket.data.session.open(socket);
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.open(
+            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
+          );
+          return;
+        }
+        webGatewayRoutes?.websocket.open?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
       message(socket, message) {
-        socket.data.session.message(socket, message);
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.message(
+            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
+            message,
+          );
+          return;
+        }
+        webGatewayRoutes?.websocket.message?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+          message,
+        );
       },
       drain(socket) {
-        socket.data.session.drain();
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.drain();
+          return;
+        }
+        webGatewayRoutes?.websocket.drain?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
       ping(socket, data) {
-        socket.pong(data);
+        if (isServiceSocketData(socket.data)) socket.pong(data);
       },
       pong(socket) {
-        socket.data.session.heartbeat();
+        if (isServiceSocketData(socket.data)) socket.data.session.heartbeat();
       },
       close(socket) {
-        socket.data.session.closedByPeer();
+        if (isServiceSocketData(socket.data)) {
+          socket.data.session.closedByPeer();
+          return;
+        }
+        webGatewayRoutes?.websocket.close?.(
+          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        );
       },
     },
   });
@@ -363,11 +429,91 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       descriptor,
       origin: binding.origin,
       rpcUrl: descriptor.endpoint.websocketUrl,
+      attachWebGateway(routeOptions: KiteServiceWebGatewayRouteOptions): WebGatewayCarrier {
+        if (closed || closing || !bunServer) throw new Error('Service listener is unavailable.');
+        if (webGatewayRoutes || webGatewayCarrier) {
+          throw new Error('Service listener already has a Web Gateway route owner.');
+        }
+        const leaseId = Symbol('service-web-gateway-routes');
+        let attached = false;
+        const sharedServe = ((serveOptions: {
+          readonly fetch?: AttachedWebGatewayRoutes['fetch'];
+          readonly websocket?: AttachedWebGatewayRoutes['websocket'];
+        }) => {
+          if (
+            attached ||
+            !serveOptions.fetch ||
+            !serveOptions.websocket ||
+            webGatewayRoutes ||
+            !bunServer
+          ) {
+            throw new Error('Service Web Gateway route attachment is invalid.');
+          }
+          attached = true;
+          webGatewayRoutes = Object.freeze({
+            fetch: serveOptions.fetch,
+            websocket: serveOptions.websocket,
+            leaseId,
+          });
+          return Object.freeze({
+            port: bunServer.port,
+            stop: async () => {
+              if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
+            },
+          }) as unknown as Bun.Server<BrowserSocketData>;
+        }) as unknown as typeof Bun.serve;
+        let gateway: WebGatewayCarrier;
+        try {
+          gateway = createWebGatewayCarrier({
+            ...routeOptions,
+            instanceId: options.instanceId,
+            serve: sharedServe,
+          });
+          if (
+            gateway.origin !== binding.origin ||
+            (webGatewayRoutes as AttachedWebGatewayRoutes | undefined)?.leaseId !== leaseId
+          ) {
+            throw new Error('Service Web Gateway route binding is incompatible.');
+          }
+        } catch (error) {
+          if ((webGatewayRoutes as AttachedWebGatewayRoutes | undefined)?.leaseId === leaseId)
+            webGatewayRoutes = undefined;
+          throw error;
+        }
+        let routeClosing: Promise<void> | undefined;
+        const attachedGateway: WebGatewayCarrier = Object.freeze({
+          origin: gateway.origin,
+          get launchUrl() {
+            return gateway.launchUrl;
+          },
+          mintLaunchUrl: () => gateway.mintLaunchUrl(),
+          close: () => {
+            routeClosing ??= gateway.close().finally(() => {
+              if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
+              if (webGatewayCarrier === attachedGateway) webGatewayCarrier = undefined;
+            });
+            return routeClosing;
+          },
+          [Symbol.asyncDispose]() {
+            return this.close();
+          },
+        });
+        webGatewayCarrier = attachedGateway;
+        return attachedGateway;
+      },
       close(): Promise<void> {
         closing ??= (async () => {
           closed = true;
           tickets.close();
           const failures: unknown[] = [];
+          const currentWebGateway = webGatewayCarrier;
+          if (currentWebGateway) {
+            try {
+              await currentWebGateway.close();
+            } catch (error) {
+              failures.push(error);
+            }
+          }
           try {
             await options.application.server.beginDraining();
           } catch (error) {
@@ -401,6 +547,23 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 }
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
+
+function isServiceSocketData(value: SocketData): value is Readonly<{
+  session: ServiceSocketSession;
+}> {
+  return 'session' in value;
+}
+
+function isWebGatewayPath(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/api-docs' ||
+    pathname === '/api-docs/' ||
+    pathname === '/api-docs/openapi.json' ||
+    pathname.startsWith('/assets/') ||
+    pathname.startsWith('/_kite/web/')
+  );
+}
 
 async function stopListenerAfterActiveResponses(
   server: Bun.Server<SocketData>,
@@ -1679,6 +1842,7 @@ function isValidConnectionBinding(value: ServiceRuntimeConnectionBinding): boole
     Number.isSafeInteger(value.connectionGeneration) &&
     value.connectionGeneration >= 1 &&
     boundedString(value.workerInstanceId, 512) &&
+    (value.requestedWorkspace === undefined || boundedString(value.requestedWorkspace, 4_096)) &&
     (value.controllerSessionId === undefined || boundedString(value.controllerSessionId, 512)) &&
     ((controllerGeneration === undefined && value.controllerSessionId === undefined) ||
       (value.controllerSessionId !== undefined &&

@@ -43,6 +43,8 @@ interface SnapshotBoundaryRow {
 export interface SqliteWorkspaceSessionCreationInput<Event, State> {
   readonly runtime: RuntimeTransactionInput<Event, State>;
   readonly controller: SqliteWorkspaceInitialControllerInput;
+  /** Store 9-only Host recovery identity committed with the initial Session. */
+  readonly recoveryIdentity?: string;
 }
 
 export interface SqliteWorkspaceSessionCreationResult {
@@ -104,10 +106,16 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   readonly assertSessionAbsent?: (sessionId: string) => void;
   /** Internal Store 7 authority seam; never exposed as a raw DB callback. */
   readonly initialController?: InitialControllerTransactionPort;
+  /** Store 9 same-transaction recovery identity primitive. */
+  readonly initialRecoveryIdentity?: Readonly<{
+    put(sessionId: string, value: string): void;
+  }>;
   readonly receiptWriter?: SqliteRuntimeCommandReceiptWriter;
   /** Same-connection Store 8 port. Omit for Store 6/7. */
   readonly runStore?: RuntimeRunStorePort;
   readonly beforeWrite?: () => void;
+  /** Store 9 injects its first-write-aware transaction owner instead of opening a second BEGIN. */
+  readonly runWriteTransaction?: <Result>(write: () => Result) => Result;
 }): RuntimeStorage<Event, State>['transactions'] & {
   readonly createSessionWithInitialController?: SqliteWorkspaceSessionCreationPort<
     Event,
@@ -228,6 +236,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   };
 
   const inTransaction = <T>(work: () => T): T => {
+    if (input.runWriteTransaction) return input.runWriteTransaction(work);
     input.db.run('BEGIN IMMEDIATE');
     try {
       const result = work();
@@ -284,12 +293,29 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
             );
           }
           assertSqliteRuntimeCommandReceipt(commandReceipt, runtime.sessionId);
+          const persistRecoveryIdentity = (): void => {
+            if (!input.initialRecoveryIdentity) {
+              if (creation.recoveryIdentity !== undefined) {
+                throw new SqliteRuntimeCommandReceiptValidationError(
+                  'Initial recovery identity is unsupported by this Store profile.',
+                );
+              }
+              return;
+            }
+            if (!creation.recoveryIdentity) {
+              throw new SqliteRuntimeCommandReceiptValidationError(
+                'Initial recovery identity is required by this Store profile.',
+              );
+            }
+            input.initialRecoveryIdentity.put(runtime.sessionId, creation.recoveryIdentity);
+          };
           try {
             input.beforeWrite?.();
             return inTransaction(() => {
               const existing = input.readCommandReceipt!(commandReceipt);
               if (existing) {
                 assertSameCommandReceipt(existing, commandReceipt);
+                persistRecoveryIdentity();
                 const controller = input.initialController!.create(creation.controller, 'replay');
                 if (controller.status === 'rejected') {
                   throw new SqliteRuntimeCommandReceiptValidationError(
@@ -304,6 +330,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
               }
               input.assertSessionAbsent!(runtime.sessionId);
               const metadata = persist(runtime);
+              persistRecoveryIdentity();
               const controller = input.initialController!.create(creation.controller, 'create');
               if (controller.status === 'rejected') {
                 throw new SqliteRuntimeCommandReceiptValidationError(

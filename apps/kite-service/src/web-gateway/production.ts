@@ -1,10 +1,9 @@
 import type { CoordinatorRequestClient } from '@kite-ai/kite-local-runtime/coordinator';
+import { WEB_OBSERVER_CONTRACT_REVISION_ } from '../web-observer/core';
 import { createWebGatewayCarrier, type WebGatewayCarrier } from './carrier';
 import { createOfflineWebHistoryPort } from './offline-history';
 import type { WebGatewayMainEnvironment } from './process-main';
 import { createWorkspaceWorkerWebGatewayUpstream } from './upstream';
-
-export const WEB_GATEWAY_CONTRACT_REVISION_ = 'kite-app-web-observer-v1' as const;
 
 /**
  * Compose the production browser BFF over a narrow Coordinator client and direct read-only
@@ -18,7 +17,7 @@ export function createProductionWebGatewayCarrier(
   const upstream = createWorkspaceWorkerWebGatewayUpstream({
     coordinator,
     gatewayInstanceId: environment.instanceId,
-    contractRevision: WEB_GATEWAY_CONTRACT_REVISION_,
+    contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
     offlineHistory: createOfflineWebHistoryPort(environment.home),
   });
   let closePromise: Promise<void> | undefined;

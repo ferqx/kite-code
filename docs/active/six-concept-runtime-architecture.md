@@ -6,7 +6,10 @@
 
 验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`、`bun run --cwd packages/kite-local-runtime test`、`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-cli test`。
 
-相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143；模块局部边界见各 workspace README。
+相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143、ADR-0152、ADR-0153；模块局部边界见各 workspace README。
+
+物理本机拓扑当前是每个Kite Home一个Service、一个Store 9 connection与一个HTTP listener；Workspace仍是逻辑admission/execution
+scope，不对应独立Worker进程或DB。详见[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
 
 ## 总览
 

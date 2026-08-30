@@ -6,6 +6,7 @@ import {
   canonicalModelJson,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from '../model';
 import { subagentContinuationArtifactRoot } from './artifact-paths';
 import {
@@ -50,13 +51,24 @@ export class SubagentContinuationArtifactError extends Error {
 export class SubagentContinuationArtifactStore implements SubagentContinuationArtifactAccess {
   readonly #storage: PrivateImmutableArtifactStorage<'subagent_continuation'>;
 
-  constructor(options: { root?: string } = {}) {
+  constructor(
+    options: {
+      root?: string;
+      backend?: PrivateImmutableArtifactStorageBackend<'subagent_continuation'>;
+    } = {},
+  ) {
     try {
       this.#storage = new PrivateImmutableArtifactStorage({
-        root: options.root ?? subagentContinuationArtifactRoot(),
+        ...(options.backend
+          ? { backend: options.backend }
+          : { root: options.root ?? subagentContinuationArtifactRoot() }),
         namespace: 'subagent-continuations',
         partitions: [
-          { kind: 'subagent_continuation', directory: 'continuations', extension: '.json' },
+          {
+            kind: 'subagent_continuation',
+            directory: 'continuations',
+            extension: '.json',
+          },
         ],
         maxArtifactBytes: 4 * 1024 * 1024,
       });

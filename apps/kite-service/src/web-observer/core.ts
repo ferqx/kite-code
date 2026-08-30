@@ -48,6 +48,8 @@ import {
   type WebPresentationState,
 } from './presentation';
 
+export const WEB_OBSERVER_CONTRACT_REVISION_ = 'kite-app-web-observer-v1' as const;
+
 /** Path-free owner-supplied Workspace grouping for the Web left rail. */
 export interface WebObserverDirectoryPort {
   list: () => Promise<readonly WebDirectoryEntry[]> | readonly WebDirectoryEntry[];

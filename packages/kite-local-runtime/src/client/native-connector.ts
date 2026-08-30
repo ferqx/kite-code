@@ -424,7 +424,9 @@ export class NativeRuntimeHistoryClient {
 
   async loadSession(sessionId: string): Promise<RuntimeHistorySessionTranscript> {
     if (!boundedString(sessionId, 512)) throw invalidRequestError();
-    const value = await this.#request(LOCAL_RUNTIME_HISTORY_LOAD_SESSION_PATH, { sessionId });
+    const value = await this.#request(LOCAL_RUNTIME_HISTORY_LOAD_SESSION_PATH, {
+      sessionId,
+    });
     return decodeRuntimeHistoryTranscript(value);
   }
 }
@@ -1729,9 +1731,11 @@ function sameWorkspaceIdentity(
   );
 }
 
-function isNonAppliedLifecycleResult(
-  value: unknown,
-): value is { readonly outcome: string; readonly descriptor?: unknown } {
+function isNonAppliedLifecycleResult(value: unknown): value is {
+  readonly outcome: string;
+  readonly descriptor?: unknown;
+  readonly diagnostic?: unknown;
+} {
   return isRecord(value) && typeof value.outcome === 'string' && value.outcome !== 'applied';
 }
 
@@ -1813,7 +1817,10 @@ function decodeRuntimeLogSessionCursor(value: unknown): RuntimeLogSessionCursor 
   assertOnlyKeys(value, ['sessionId', 'updatedAt']);
   if (!boundedString(value.sessionId, 512) || !nonNegativeSafeInteger(value.updatedAt))
     throw invalidResponseError();
-  return Object.freeze({ sessionId: value.sessionId, updatedAt: value.updatedAt });
+  return Object.freeze({
+    sessionId: value.sessionId,
+    updatedAt: value.updatedAt,
+  });
 }
 
 function decodeRuntimeLogEventPage(value: unknown): RuntimeLogEventPage {
@@ -1939,7 +1946,10 @@ function decodeRuntimeLogEventDetail(value: unknown): RuntimeLogEventDetail {
       (value.artifact.availability !== 'available' && value.artifact.availability !== 'unavailable')
     )
       throw invalidResponseError();
-    artifact = { kind: value.artifact.kind, availability: value.artifact.availability };
+    artifact = {
+      kind: value.artifact.kind,
+      availability: value.artifact.availability,
+    };
   }
   return Object.freeze({
     kind: value.kind as RuntimeLogEventDetail['kind'],
@@ -1985,7 +1995,12 @@ function decodeRuntimeHistoryTranscript(value: unknown): RuntimeHistorySessionTr
       }
       recordEvents.push(event);
     }
-    records.push(Object.freeze({ sequence: record.sequence, events: Object.freeze(recordEvents) }));
+    records.push(
+      Object.freeze({
+        sequence: record.sequence,
+        events: Object.freeze(recordEvents),
+      }),
+    );
   }
   if (JSON.stringify(records.flatMap((record) => record.events)) !== JSON.stringify(events)) {
     throw invalidResponseError();

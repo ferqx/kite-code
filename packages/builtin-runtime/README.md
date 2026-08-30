@@ -9,6 +9,8 @@
 - 通过 `createBuiltinRuntimeModules()` 注册唯一 Builtin operation owner 与 executor。
 - 从一个 frozen SPI snapshot 投影 parser、schema、description、availability、effects、traits 与 revision。
 - 实现具体 filesystem、git、model、planning、sandbox、MCP、Skill、Subagent 和 Verification mechanism。
+- 拥有Model/Plan/Capability/filesystem preimage/Sandbox/Subagent private Artifact的schema-aware reader/writer；持久层由App注入，
+  Builtin不发现SQLite、Kite Home或第二storage authority。
 
 ## 不拥有职责
 
@@ -29,6 +31,8 @@
 - 当前 snapshot 固定包含 20 个 model-visible tools 和 8 个 internal operations。
 - App/Host/catalog/executor 必须使用同一个 snapshot。
 - 任何 terminal uncertainty 不转换为成功或 fallback。
+- `PrivateImmutableArtifactStorage`必须在App注入backend与filesystem root之间二选一。single-Service production固定使用typed DB backend且不
+  fallback；filesystem root只保留给显式旧owner和owner-local测试。ref derivation、canonical JSON、schema、digest、size与owner验证在两种backend间一致。
 - Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、
   不含用户内容的确定性 `activationId`，使同一逻辑 command 的重试保持同一 activation identity。
   无效注入在 activation 建立前 fail closed，不能回退生成另一个 identity 后继续执行。

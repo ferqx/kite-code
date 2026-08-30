@@ -10,6 +10,7 @@ export function createSqliteEffectLeaseStore(
   db: Database,
   isClosed: () => boolean,
   beforeWrite?: () => void,
+  runWriteTransaction?: <Result>(write: () => Result) => Result,
 ): SqliteEffectLeaseStore {
   const deleteExpired = db.query(
     'DELETE FROM runtime_effect_leases WHERE session_id = ? AND effect_id = ? AND expires_at_ms <= ?',
@@ -38,11 +39,12 @@ export function createSqliteEffectLeaseStore(
       if (isClosed() || expiresAtMs <= Date.now()) return false;
       const now = Date.now();
       beforeWrite?.();
-      return db.transaction(() => {
+      const mutate = () => {
         deleteExpired.run(sessionId, effectId, now);
         insert.run(sessionId, effectId, ownerId, expiresAtMs);
         return hasLease(sessionId, effectId, ownerId, now);
-      })();
+      };
+      return runWriteTransaction ? runWriteTransaction(mutate) : db.transaction(mutate)();
     },
     renewEffectLease: (
       sessionId: string,
@@ -53,13 +55,18 @@ export function createSqliteEffectLeaseStore(
       if (isClosed() || expiresAtMs <= Date.now()) return false;
       const now = Date.now();
       beforeWrite?.();
-      renew.run(expiresAtMs, sessionId, effectId, ownerId, now);
-      return hasLease(sessionId, effectId, ownerId, now);
+      const mutate = () => {
+        renew.run(expiresAtMs, sessionId, effectId, ownerId, now);
+        return hasLease(sessionId, effectId, ownerId, now);
+      };
+      return runWriteTransaction ? runWriteTransaction(mutate) : mutate();
     },
     releaseEffectLease: (sessionId: string, effectId: string, ownerId: string): void => {
       if (!isClosed()) {
         beforeWrite?.();
-        release.run(sessionId, effectId, ownerId);
+        const mutate = () => release.run(sessionId, effectId, ownerId);
+        if (runWriteTransaction) runWriteTransaction(mutate);
+        else mutate();
       }
     },
   });

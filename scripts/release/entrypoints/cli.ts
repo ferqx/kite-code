@@ -1,8 +1,6 @@
 import { parseArgs, main as runCliMain } from '../../../apps/kite-cli/src/cli/index';
 import packageJson from '../../../package.json' with { type: 'json' };
-import { createManagedLocalCoordinatorClientComposition } from '../local-coordinator-client';
-import { createManagedLocalServiceClientComposition } from '../local-service-client';
-import { createManagedLocalWorkspaceWorkerConnector } from '../local-workspace-worker-client';
+import { createManagedLocalSingleServiceComposition } from '../single-service-native-client';
 
 if (process.argv.includes('--version')) {
   console.log(`Kite Code ${packageJson.version}`);
@@ -16,47 +14,29 @@ if (process.argv.includes('--version')) {
       ? runCliMain({})
       : command.startsWith('service-')
         ? (() => {
-            // Explicit legacy Service lifecycle commands remain maintenance operations. Normal
-            // run/resume traffic below uses the Coordinator-owned Workspace Worker path.
-            const localService = createManagedLocalServiceClientComposition({
+            const localService = createManagedLocalSingleServiceComposition({
               argv: process.argv,
               executableMode,
             });
-            return runCliMain({ serviceManager: localService.lifecycle });
+            return runCliMain({ serviceManager: localService.manager });
           })()
-        : command === 'maintenance-migrate-run-store'
+        : command.startsWith('web-')
           ? (() => {
-              const localCoordinator = createManagedLocalCoordinatorClientComposition({
+              const localService = createManagedLocalSingleServiceComposition({
+                argv: process.argv,
+                executableMode,
+              });
+              return runCliMain({ singleServiceWeb: localService.web });
+            })()
+          : (() => {
+              const localService = createManagedLocalSingleServiceComposition({
                 argv: process.argv,
                 executableMode,
               });
               return runCliMain({
-                runStoreMaintenance: localCoordinator.maintenance,
+                serviceConnector: localService.connector,
               });
-            })()
-          : command.startsWith('web-')
-            ? (() => {
-                const localCoordinator = createManagedLocalCoordinatorClientComposition({
-                  argv: process.argv,
-                  executableMode,
-                });
-                return runCliMain({
-                  coordinatorClient: localCoordinator.client,
-                });
-              })()
-            : (() => {
-                const localCoordinator = createManagedLocalCoordinatorClientComposition({
-                  argv: process.argv,
-                  executableMode,
-                });
-                const workerConnector = createManagedLocalWorkspaceWorkerConnector({
-                  coordinatorClient: localCoordinator.client,
-                });
-                return runCliMain({
-                  serviceConnector: workerConnector,
-                  coordinatorClient: localCoordinator.client,
-                });
-              })();
+            })();
   run.catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

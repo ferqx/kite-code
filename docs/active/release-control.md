@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、`open-source-first-release.md`。
+相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、ADR-0152、`open-source-first-release.md`。
 
 ## 首发权威
 
@@ -18,32 +18,24 @@ G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitH
 构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
-候选支持入口包括本地TUI、用户在场的foreground CLI，以及 private loopback Web Observer；前两者经 Coordinator 定位并直接连接
-canonical Workspace Worker，Web 通过独立 Gateway companion 连接 Coordinator/Worker 的 read-only surface。显式 `kite service *`
-仍控制旧 Service maintenance companion，但它不是默认 terminal data plane，active layout/fence 禁止 Store 6/7 双写。internal stdio、development loopback WebSocket、
+候选支持入口包括本地TUI、用户在场的foreground CLI，以及 private loopback Web Observer；三者按canonical Kite Home复用唯一Local
+Service、Store 9与loopback HTTP listener。Coordinator、Workspace Worker和独立Gateway只保留内部源码测试，不存在release entrypoint、
+migration command或`web recover`。internal stdio、development loopback WebSocket、
 browser与Desktop reference只作内部child或conformance，不能写成remote/public支持。KLSV1-06仅有
-本地candidate/composition evidence；当前macOS arm64的build/verify/install/CLI+TUI+Service+MCP wrapper/upgrade/
-rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 companion build/install/process
+本地candidate/composition evidence；当前macOS arm64的build/verify/install/CLI+TUI+single-Service+MCP wrapper/upgrade/
+rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 single-Service build/install/process
 matrix尚未取得，必须保持pending，不能以workflow定义、本地通过或artifact上传取代真实三平台结果；Windows
 ACL/locked-directory atomic publication与非 Windows 本地环境的 no-follow 断言也不能互相替代。
 
-`scripts/release/local-layout-migration.ts`包含显式offline Store layout primitive，不属于normal build/install/start或自动upgrade。
-正式operator入口是`kite maintenance migrate-run-store --target-generation <fresh-generation> [--kite-home <absolute>]`，由
-`local-run-store-maintenance.ts`而非CLI构造exact barrier：先用Coordinator revision v3（保留v2 stop语义）的authenticated stop关闭admission并确认进程退出，
-再持有同一Coordinator lifecycle lock直到migration结束以阻断并发ensure/第二maintenance，并在锁内复核descriptor、endpoint、launch intent与
-instance lock全部不存在，然后按
-持久descriptor、PID/start-token、control identity与idle hold停止Gateway/Worker；Host State与SQLite authority/effect/WAL deep validation随后共同
-证明Turn/Interaction/effect/external process为零，才建立source-bound fence、复制完整Catalog/Workspace generation并切pointer。任一busy/
-unknown/corrupt保持blocked并非零退出。fresh home由普通ensure直接初始化Store 8，已有Store 7仍不得自动迁移；production Worker只接受
-committed Store 8 pointer，不得fallback启动Store 7 Worker。本机03B dirty-source macOS arm64 candidate
-`af43f919f756c276fb945834`已通过build/verify/install、正式maintenance fail-closed、upgrade/rollback/uninstall；archive digest为
-`sha256:53268efa7340d5f223fd3e28c31aab792e85329d31f672e694868b73d550bba0`。这是
-[local evidence](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)，三平台candidate结论继续pending。
+项目采用未发布clean cutover。正式release不包含Store 7/8 migration、legacy Coordinator/Worker/Gateway entrypoint或恢复控制面；正常Service
+不扫描、迁移或删除旧DB/layout/Artifact/process state。`scripts/release/single-service-native-client.ts`只绑定home/runtime/build/Web asset
+identity到current typed client，custom home按digest隔离且不解析ambient socket/token。macOS arm64本机candidate裁剪与验证已完成；
+Ubuntu/Windows hosted evidence仍未完成。
 
 ## 候选制品
 
-`bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite`、`kite-tui`、`kite-service`、
-`kite-coordinator`、`kite-worker` 与 `kite-web-gateway`，并构建 `payload/web` 静态资产；Web build从canonical contract逐字节生成必需的
+`bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite`、`kite-tui`与`kite-service`，并构建
+`payload/web` 静态资产；Web build从canonical contract逐字节生成必需的
 `payload/web/api-docs/openapi.json`，输出：
 
 - gzip tar 候选包；
@@ -51,29 +43,18 @@ committed Store 8 pointer，不得fallback启动Store 7 Worker。本机03B dirty
 - archive SHA-256 sidecar；
 - release notes、known limitations 与普通维护者检查清单。
 
-候选中的`kite`与`kite-tui`由release entrypoint注入managed Coordinator/Worker connector；前台`run/resume`与TUI默认
-ensure Coordinator/Workspace Worker，CLI另为显式 maintenance 注入`kite service ensure/status/stop/restart` legacy manager、offline
-Run Store migration owner，并提供`kite web*` Coordinator surface。Web
-命令只通过 Coordinator client ensure/discover/stop Gateway，TUI `/web` 只 discovery；connector/manager失败直接暴露，不
+候选中的`kite`与`kite-tui`由release entrypoint注入managed single-Service connector；前台`run/resume`、TUI、`service *`和
+`web`默认ensure/复用同一Service。CLI不构造legacy Coordinator或Store migration owner。
+Web命令先做asset preflight，再通过native IPC注册/status/stop同Service listener中的Browser route；TUI `/web`调用ensure/open；connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
-source/installed Worker connector仅对同一canonical Workspace的typed Worker recovery-pending/unavailable执行一次connect内
-的有界恢复：50/150/400/1000毫秒后重试完整ensure→capability mint→instance handshake，总等待不超过1.6秒，用于收敛
-dead/draining Worker descriptor刚进入可清理状态的窗口。Manager的spawn/readiness outcome-unknown仍由reservation阻止第二次
-spawn；Coordinator transport、protocol与exact identity mismatch立即fail closed。每个默认logical connection使用独立client
-identity，避免并发generation覆盖capability。该机制不是legacy Service/embedded fallback，也不改变单Worker、单Store writer
-或Coordinator identity边界。
-source/installed POSIX Worker由Coordinator保留owner-held child-exit handle；正常idle exit一经确认就按exact
-instance/PID/start-token在同一scope串行清理reservation、registry与process state，避免stale descriptor存活到数值PID被复用。
-这不放宽restart恢复：Coordinator进程重启后若没有原child handle，PID reuse仍是identity uncertain，禁止cleanup/spawn。
-Windows runner必须提供等价native handle evidence且通过hosted qualification后才能宣称相同行为。
-source/installed client的ensure若撞上同一Coordinator内旧Worker正在drain，会在manager的per-scope operation deadline内等待
-exact child exit，完成cleanup后直接启动replacement；不会要求用户重复运行CLI/TUI。超时或proof不匹配仍fail closed，且不
-重复spawn。
+source/installed client只ensure每个canonical Kite Home唯一的Service；每个logical connection使用独立client identity与generation，
+Service restart时通过rotating capability恢复Controller，不启动Workspace Worker。Manager的spawn/readiness outcome-unknown由native
+reservation阻止第二次spawn；alive/uncertain identity保持fail closed，confirmed dead才清理exact socket/reservation并启动replacement。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
-Service。source mode的build identity绑定同一immutable companion bundle所需的CLI/TUI/Service/Coordinator/Worker/Gateway/Web、
-package/root build inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一 companion/build input 改变都
-产生新bundle identity。摘要不可用或越界时fail closed，dirty source不能复用旧detached companion。
+Service。source mode的build identity绑定同一single-Service bundle所需的CLI/TUI/Service/Web、package/root build
+inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
+摘要不可用或越界时fail closed，dirty source不能复用旧Service。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装器写入 v2 managed-install marker 与唯一 `active` regular-file
@@ -115,13 +96,10 @@ symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 
 但任何 credential get/put/delete 都 fail closed。它不回退到文件、环境变量或明文存储；该限制必须在
 release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭据。
 
-候选 executable 由 `scripts/release/entrypoints/` 的无 guard 薄入口显式调用 CLI `main()`、TUI `runTui()`、Coordinator、
-Worker、Web Gateway 与 Service main；不能依赖 compiled runtime 对 `import.meta.main` 的平台相关判定。源码入口仍保留自身
-guard，避免被测试或其他模块导入时自动启动。
-source manager在POSIX直接执行带shebang的Service/Coordinator/Worker/Gateway entry；Windows source-mode必须以当前Bun
-executable为command、对应 TypeScript entry为首个argument。Windows不得尝试把`.ts`当作native executable；installed candidate
-仍直接执行 resolved `kite-service.exe`、`kite-coordinator.exe`、`kite-worker.exe` 或 `kite-web-gateway.exe`，不能回退PATH或
-source entry。
+候选 executable 由 `scripts/release/entrypoints/` 的无 guard 薄入口显式调用 CLI `main()`、TUI `runTui()`与Service main；不能依赖
+compiled runtime 对 `import.meta.main` 的平台相关判定。Coordinator/Worker/Gateway不再有release entrypoint；相关旧内部模块既不编译或
+归档，也不是current lifecycle或maintenance authority。source manager在POSIX直接执行带shebang的Service entry；Windows source-mode以当前Bun executable为command、Service
+TypeScript entry为首个argument。installed candidate只执行resolved `kite-service.exe`，不能回退PATH或source entry。
 
 `bun run release:verify` 在执行任何 binary 前解析 archive，拒绝未知/缺失/重复路径、绝对路径、父目录
 跳转、link、schema 漂移、target 不匹配和任一 checksum 不一致。只有 verifier 通过后 smoke 才可以
@@ -129,10 +107,8 @@ source entry。
 都拒绝缺少该Agent API contract asset的candidate，manifest逐文件SHA-256绑定其identity。GitHub-hosted candidate job 额外使用
 `--require-clean-source`，dirty-source manifest
 不得上传为候选 artifact。
-installed smoke在启动TUI前必须先对同一candidate执行Coordinator lifecycle `status`与`ensure`；失败诊断只允许报告
-闭集outcome/state/diagnostic、build identity、manager process identity是否可得，以及Coordinator state/layout文件是否存在或
-可读。诊断不得输出home、candidate path、PID、SID、endpoint或credential。该前检只是把三平台启动失败归因到身份、布局、
-状态或spawn边界，不替代真实TUI启动，也不把残留descriptor推导为健康Coordinator。
+installed smoke由TUI/CLI直接按需ensure同一Service，不预启动Coordinator。失败诊断只报告闭集outcome/state/diagnostic与build identity，
+不得输出home、candidate path、PID、SID、endpoint或credential；残留legacy state只可由migration/recovery preflight分类，不能推导为健康Service。
 
 旧 Linux full-chain evaluation diagnostic 及其 workflow job 已删除，不属于当前候选包或 release gate。Platform
 Capability workflow 只运行本页列出的 native probe、verifier 与 release evidence；不得从已删除脚本恢复
@@ -145,9 +121,8 @@ matrix 或 approved registry。
 或 reparse point。第一次安装创建自身 marker；后续替换、回滚或卸载要求 marker 的 canonical root
 与实际目标完全一致。安装器不接管无 marker 的已有目录。
 
-每个候选保存到 immutable `releases/<candidateId>`；首次安装以 atomic copy 创建 stable `bin/kite`、`bin/kite-tui`、
-`bin/kite-service`、`bin/kite-coordinator`、`bin/kite-worker` 与 `bin/kite-web-gateway` launchers，后续 upgrade/rollback
-只验证既有 launcher identity，不逐文件替换正在运行的 companion。安装器以 v2 marker 与唯一 `active` regular-file pointer 原子切换 current/previous；
+每个候选保存到 immutable `releases/<candidateId>`；首次安装以 atomic copy 创建 stable `bin/kite`、`bin/kite-tui`与
+`bin/kite-service` launcher，后续upgrade/rollback只验证既有launcher identity。安装器以v2 marker与唯一`active` regular-file pointer原子切换current/previous；
 running process 固定启动时的 candidate root，不重新读取 pointer。rollback 只可切换到已验证、仍位于同一 managed
 root 的 previous candidate。uninstall 在删除前
 精确枚举受管树并校验 marker、release checksum、launcher 与允许的目录结构；发现未知文件、目录或 link
@@ -167,8 +142,8 @@ owner/ACL再补救；Windows管理员token的default owner不能替代current-us
 installer contract tests的临时Service home也必须由同一state owner primitive创建，不能用普通Windows `mkdir`默认owner
 替代current-user SID/protected DACL身份后再伪造lifecycle fence通过。
 
-当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
-这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
+当前候选manifest的`releaseSlots`绑定CLI、TUI、Service与Web entrypoint/identity；Coordinator、Worker、Gateway slot必须同时为null，且
+archive不得出现对应executable或launcher。这些asset identities不等于三平台process/runtime qualification。POSIX atomic rename后会
 flush 父目录；Windows launcher、active pointer与marker复用Builtin Filesystem的locked-directory ordinary atomic publish。partial publish
 由marker、pointer、manifest/checksum交叉验证fail closed；release不把hosted虚拟磁盘高延迟的write-through或`FlushFileBuffers`作为安装
 正确性前提，也不依赖Bun `fsync`。Windows locked-directory publication、ACL 与
@@ -177,35 +152,24 @@ Windows release contract fixture在同一Bun test进程内只编译一次byte-id
 hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native PE，避免把多份Bun standalone runtime重复写入每个fixture archive。
 没有`rustc`的独立Windows checkout保留功能等价的Bun fallback；需要嵌入不同argument-log path的CLI仍分别编译。该fixture优化不缓存安装
 结果、不改变production candidate内容，也不能替代后续真实native candidate build/smoke。
-Windows候选在native build前还串行运行Service state ACL/reparse、Coordinator Catalog builder与专用fresh Store layout owner tests；它们
-证明native canonical KiteHome、target目录/新Catalog protected owner-only ACL和空布局cutover，仍不能替代随后installed
-Coordinator/TUI process smoke。
+Windows候选在native build前还串行运行Service state ACL/reparse与fresh Store 9 owner tests；它们证明native canonical KiteHome、
+`kite.sqlite`与runtime endpoint的protected owner-only边界，仍不能替代随后installed single-Service/TUI process smoke。
 
-`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、
-installed Coordinator lifecycle预检、真实Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选
-安装、rollback和uninstall。Coordinator预检失败只报告operation/outcome/state/diagnostic、expected/descriptor build identity、
-manager identity availability、initial status及state/layout presence闭集，不输出descriptor、PID、SID、path、endpoint或credential；成功进程由
-随后TUI复用并由同一fixture exact cleanup回收。预检注入的candidate root与production-validated Kite home都使用native canonical
-identity；Windows长路径、8.3与大小写形式不通过字符串猜测互换，所有后续Catalog/marker/pointer/manifest校验仍保持strict。
-任一步非零都使smoke失败；该本机
-smoke不替代KLSV1-07三平台companion lifecycle qualification。
-CLI、TUI、Service、Coordinator、Worker 与 Web Gateway candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service
-entrypoint无条件await `runKiteServiceMain()`，其余 companion 也各自调用 exact main，source manager也解析同一入口；stable launcher
-同样无条件进入自己的main，而把可导入的readiness contract留在独立无副作用模块。不得依赖compiled standalone中的
-`import.meta.main`判断启动，因为其平台差异会让Windows launcher/companion在未转交命令或发布ready/terminal时以0退出。Service entrypoint同时是带Bun shebang与
-POSIX executable mode的source manager目标；release contract固定验证该mode，不能只保证compiled candidate可启动。launcher传入的
-`KITE_CODE_RELEASE_ROOT`同时是installed Coordinator/Service companion resolver的优先bin root；
-resolver仍由marker、active pointer、`.candidate-id`与manifest重新校验该immutable candidate，不能在Windows standalone把可能仍指向stable slot的
-`process.execPath`目录误当candidate root，也不能从cwd/PATH推导替代路径。
-Coordinator与Service release composition还把构造时的source/installed mode绑定到全部lifecycle请求；caller-supplied mode不能把
-installed manager切回source resolver或反向切换。
-Web Gateway source/installed ensure共同执行fixed asset preflight，必须在credential、launch intent和spawn前验证Web slot；缺失返回
-protocol/client v3的`web_assets_missing`且Gateway state为空。spawn后launch intent以exact child PID/start-token、build与credential digest
-绑定；dead readiness自动清理，uncertain保留。CLI `web recover`只消费同一confirmed-dead proof，`bun run web:dev`则依次build、
-preflight并ensure源码Gateway；这些路径不让Browser或Vite dev server取得Native lifecycle authority。
-长期驻留的test-owned Worker/Coordinator在删除fixture前按descriptor中的PID+OS start token精确复核，再由test owner发送SIGTERM；
-这不是产品manager的PID kill，也不能替代authenticated Coordinator stop surface的evidence。smoke结束时会删除其独占临时根；Windows只对刚退出native executable造成的短暂文件锁执行有界重试。若smoke
-本身与临时根清理同时失败，runner保留并报告两项错误，清理异常不得覆盖原始候选失败。
+`bun run release:smoke`在新临时目录中完成verify、install、CLI help/version、TUI启动、single-Service reuse、retired slot/file absence、
+Web payload、installed `kite-service` MCP stdio
+wrapper、第二候选安装、rollback和uninstall。
+candidate root与Kite home都使用native canonical identity；Windows长路径、8.3与大小写形式不通过字符串猜测互换，后续
+marker/pointer/manifest校验保持strict。任一步非零都使smoke失败；本机smoke不替代KLSV1-07三平台single-Service qualification。
+
+CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层入口编译；Service entrypoint无条件await
+`runKiteServiceMain()`，且只接受exact `service run-single`；旧`service run`直接拒绝。stable launcher也无条件进入自己的main。不得依赖compiled standalone中的`import.meta.main`判断启动。Service
+entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标；launcher传入的`KITE_CODE_RELEASE_ROOT`是installed Service
+resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
+
+Web source/installed ensure在任何Service lifecycle访问前执行fixed asset preflight；缺失返回`web_assets_missing`，不得创建DB、socket或
+Browser route。asset有效后才ensure同一Service并在其HTTP listener内注册Browser session。status不mint launch token；
+`bun run web:dev`依次build、preflight并ensure single-Service。这些路径不让Browser或Vite dev server取得Native
+lifecycle authority。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；

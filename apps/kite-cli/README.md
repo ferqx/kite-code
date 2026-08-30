@@ -3,24 +3,22 @@
 ## 定位
 
 `@kite-ai/kite-cli` 是 terminal presentation 与 Native client App。它不再是 Runtime composition root；当前 release/source
-entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canonical Workspace 对应的 Workspace Worker，随后直接连接
-该 Worker 的 Runtime data plane。`kite service *` 只保留为显式 legacy Service maintenance surface，不是默认执行路径。
+entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Home连接唯一Local Service；CLI不拥有Runtime或Store。
 
 ## 拥有职责
 
 - 拥有 CLI parser/output、Ink TUI、terminal interaction/rendering、client-safe reducer/projection，以及 language、theme、
   color preset、key binding 等 presentation-local preference。
-- 通过 release composition 注入的 Worker connector 取得 Runtime、History、App Control、Native credential 与 connection
-  snapshot；CLI/TUI 自身不读取 descriptor/token/lock，也不直接 spawn Worker。Coordinator client 只负责 closed resolve/ensure/mint。
+- 通过release composition注入的single-Service connector取得Runtime、History、App Control、Native credential与connection
+  snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
-- CLI parser/main 已实现封闭的 Web Gateway lifecycle surface：`kite web [--json]` 请求 ensure 并打印 Coordinator
-  返回的一次性 launch URL，`kite web status [--json]` 只 discovery 已有 Gateway，`kite web stop` 请求显式 stop，
-  `kite web recover`只在Gateway manager以exact PID/start-token证明残留child已死后清理launch intent/credential。
-  lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
-  这些命令只接受注入的 `CoordinatorRequestClient`，CLI 不自行发现、spawn、访问 Gateway 或取得 Controller。
-- CLI另提供唯一显式Store迁移入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`；parser只接受该exact
-  shape与可选absolute`--kite-home`。CLI只输出release owner返回的closed JSON结果；blocked为非零退出，normal run/resume/ensure永不调用迁移。
+- CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的一次性URL，
+  `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。status不mint
+  launch token；lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
+- KHSS-02的单Service Web client已由release/source默认入口选择：同一parser/output接受release注入的`KiteSingleServiceClient +
+  staticAssetRoot`，`web/status/stop`直接走per-home native IPC并使用“Kite Web”术语；`web_assets_missing`等typed diagnostic原样输出，
+  `/web` TUI callback调用同一ensure/open语义取得一次性URL，不通过status创建认证状态。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
@@ -44,11 +42,10 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
   repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
 - 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend
   fallback。managed Service 不可用时直接失败。
-- 不拥有 Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart` 只把显式 maintenance 命令转交 legacy
-  Service manager；默认 run/resume/TUI 使用 Coordinator + Worker connector。CLI 不自行 discover、spawn、kill 或清理 owner state。
-  Store迁移命令同样只调用release注入的maintenance owner，不接收barrier boolean、不打开SQLite或解释State。
-- `scripts/release/entrypoints/cli.ts` 按命令注入 legacy Service manager、production `CoordinatorRequestClient` 或 Worker connector；
-  layout、Coordinator、Worker 或 Gateway 不可用时均 fail closed。parser/main contract 与本地 tests 不等于三平台 qualification。
+- 不拥有Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart`与默认run/resume/TUI使用同一
+  single-Service manager/connector；CLI不自行discover、spawn、kill或清理owner state。
+- `scripts/release/entrypoints/cli.ts`只注入single-Service manager/connector/Web client，不组合legacy Coordinator或Store migration。
+  任一owner不可用时fail closed。parser/main contract与本地tests不等于三平台qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
   parent-owned test/internal、显式非默认 Store 场景。
 
@@ -61,8 +58,8 @@ libraries。不得依赖 `@kite-ai/runtime-host`、`@kite-ai/runtime-server`、`
 ## 公开入口
 
 导出 package 根入口以及 `@kite-ai/kite-cli/cli`、`@kite-ai/kite-cli/tui`。release/source entrypoint在 CLI 外组合
-managed connector/lifecycle；installed candidate 从同一 immutable release root 解析相邻 Coordinator、Worker、Gateway 与显式 legacy
-Service companion。
+managed connector/lifecycle；installed candidate从同一immutable release root解析Service与Web assets。额外Coordinator/Worker/Gateway
+executable、release entrypoint与slot均已删除。
 
 ## 关键不变量
 
@@ -70,20 +67,16 @@ Service companion。
   fake/native conformance test，不能重新取得 backend object。
 - Runtime initialize 前必须完成 Service-owned Workspace Trust query/decision；wire path、cwd 或 client metadata不能
   提升 Workspace authority。
-- connection close 与 Worker owner shutdown分离。exit/reconnect只处理本 client generation；Session、Turn、interaction、Controller
-  与 Store lifecycle仍由所属 Worker决定。
-- first-run仍连接同一个Workspace Worker，但Provider未配置时只使用其neutral App Control/credential surface；CLI不创建bootstrap
-  Host、第二Runtime或本地config authority。配置完成后的首个Runtime请求才触发Worker内的Workspace execution composition。
-- release/source Worker connector 在同一 canonical Workspace 的 ensure、capability mint 或 instance handshake 返回短暂
-  recovery-pending/unavailable 时，只在一次 `connect()` 内执行总计不超过 1.6 秒的有界全链重试，以闭合 dead/draining
-  Worker descriptor 回收窗口；Manager 对 uncertain identity 不清理、不二次 spawn，Coordinator transport、protocol 或
-  exact identity mismatch仍立即fail closed，且不会回退legacy Service或embedded backend。每个默认logical connection使用独立
-  client identity，不能让并发generation互相覆盖capability。
+- connection close与Service owner shutdown分离。exit/reconnect只处理本client generation；Session、Turn、interaction、Controller与
+  Store lifecycle仍由Service决定。
+- first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
+  本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
+- release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
+  corrupt identity不替换。manager mutation不自动重放，且不会回退legacy Coordinator/Worker或embedded backend。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
-- TUI `/web` 是 discovery-only：只调用可选的 `discoverWebGateway` callback；没有已有 Gateway 时显示
-  `Kite Web is not running. Run \`kite-code web\`.`，不启动 Gateway、不取得 Controller。release TUI entrypoint 已注入该
-  discovery callback；它不会把 Browser Observer 升级为 Controller，也不能把本地 asset/entrypoint smoke 写成 hosted support。
+- TUI `/web`调用可选的`discoverWeb` callback执行asset preflight与同一Service的Web ensure/open，取得一次性URL；它不启动第二进程、
+  不取得Controller，也不能把本地asset/entrypoint smoke写成hosted support。
 
 ## 本地文档
 

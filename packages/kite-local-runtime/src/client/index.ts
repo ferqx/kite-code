@@ -7,6 +7,8 @@ export * from './bun-websocket-transport';
 export * from './codecs';
 export * from './connection';
 export * from './native-connector';
+export * from './native-ipc';
+export * from './single-service-client';
 
 export const KITE_LOCAL_RUNTIME_CLIENT_BOUNDARY_ = Object.freeze({
   nativeOnly: true,

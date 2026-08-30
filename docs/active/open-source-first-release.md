@@ -32,24 +32,23 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
-Store generation migration不是安装器或候选自动upgrade步骤。fresh home由normal ensure直接创建Store 8；已有Store 7仍只走显式offline
-maintenance，不在release smoke中隐式迁移。Store 8 Worker/reopen的本机candidate smoke已通过，但三平台filesystem/process evidence完成前仍不计入G1；
-旧candidate/Store 7 Worker必须fail closed，不能由installer rollback或runtime fallback绕过data-generation write fence。
+项目采用未发布clean cutover。fresh home由normal ensure直接创建`kite.sqlite` Store 9；正式CLI/candidate不提供Store 7/8 migration、
+legacy companion entrypoint或启动期source cleanup。Store 9 reopen与single-Service本机candidate smoke已通过，但三平台filesystem/process
+evidence完成前仍不计入G1；旧内部source不作为runtime fallback，也不会被正常Service自动删除。
 
-首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，
-默认唯一Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web Observer 由独立
-Gateway companion、Coordinator 与 Workspace Worker 组合；Service-owned internal stdio、development loopback WebSocket、
+首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，默认唯一
+Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web Observer由同一Service listener组合；
+Service-owned internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-companion/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、
-CLI/TUI、Service/Coordinator/Worker/Gateway companion assets、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台
-dirty-source开发证据；真实
+single-Service/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI、single-Service、
+retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
 Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 
 ## 制品与安装
 
-`bun run release:build`为当前平台编译`kite` CLI、`kite-tui`、`kite-service`、`kite-coordinator`、`kite-worker`、
-`kite-web-gateway` companions，并生成 `payload/web` 静态资产；其中固定`api-docs/openapi.json`逐字节来自canonical Agent API OpenAPI，
+`bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与`kite-service`，并生成`payload/web`静态资产；其中固定
+`api-docs/openapi.json`逐字节来自canonical Agent API OpenAPI，
 是verifier、installer preflight与smoke共同要求且由manifest checksum绑定的必需asset。所有制品共享 candidate identity，另生成 gzip tar、严格 manifest、
 逐文件 SHA-256 和 archive SHA-256。checksum 是完整性信息，不是签名、notarization、provenance 或
 attestation。构建只允许当前 OS/architecture 的 native target；macOS、Linux、Windows 各自由对应
@@ -63,19 +62,18 @@ Standalone build resolver机械覆盖十五个workspace package的全部public e
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
-临时prefix中完成安装、CLI help/version、已安装standalone TUI通过managed Service的真实PTY startup、installed
-companion MCP stdio wrapper、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
+临时prefix中完成安装、CLI help/version、已安装standalone TUI通过managed Service的真实PTY startup、
+installed Service MCP stdio wrapper、retired companion absence、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
 改名到 immutable 最终目录。v2 managed-install marker 与唯一 `active` pointer 原子绑定当前/previous candidate；
 stable launcher 将启动时的 candidate root pin 给 child process，running process 不重新读取 pointer。首次安装才以
-atomic copy 创建 `bin/kite`、`bin/kite-tui`、`bin/kite-service`、`bin/kite-coordinator`、`bin/kite-worker`、`bin/kite-web-gateway`
-stable launchers；upgrade/rollback 只验证既有
+atomic copy创建`bin/kite`、`bin/kite-tui`与`bin/kite-service` stable launcher；upgrade/rollback只验证既有
 launcher identity，不逐文件替换或停止仍在运行的旧 candidate。只有 destructive uninstall 才执行 ordinary Service
 stop、确认 state absent 并取得 Native lifecycle fence；busy、unknown、残留state或identity不确定时active candidate
 保持不变。upgrade还拒绝跨 OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、
 符号链接或不匹配 marker时拒绝覆盖、回滚或删除。
 
-当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；这些
-independent asset identities 不等于三平台 process/runtime qualification。Windows resolver 只接受 v2 marker、唯一 `active` regular-file
+当前候选manifest的`releaseSlots`绑定CLI、TUI、Service与Web entrypoint/identity；Coordinator、Worker、Gateway slot必须为null且archive
+不得包含对应executable/launcher。这些asset identities不等于三平台process/runtime qualification。Windows resolver只接受v2 marker、唯一`active` regular-file
 pointer、immutable candidate 与 exact identity，并对 runner/marker/pointer/runtime 执行 no-follow 校验。POSIX rename
 后会 flush 父目录；Windows launcher、active pointer与marker统一通过locked-directory ordinary atomic publish落盘。partial publish会因
 marker/pointer/checksum不一致fail closed；installer不把hosted虚拟磁盘高延迟的write-through或`FlushFileBuffers`作为安装正确性前提，
@@ -97,7 +95,7 @@ marker/pointer/checksum不一致fail closed；installer不把hosted虚拟磁盘�
   继续通过运行时 admission。
 - Auto Compaction 首版不受支持并默认关闭；未来若要启用必须重新立项。
 - remote/LAN Web、多租户、托管 runner、服务端 credential custody、无人值守共享 writer 和远程发布控制面明确不受首版支持；
-  private loopback Web Observer 仅在对应 companion、layout 与 hosted qualification 闭合后宣称支持。
+  private loopback Web Observer只复用同一Service listener，并仍需hosted qualification闭合后宣称三平台支持。
 
 ## 明确移出路线图
 

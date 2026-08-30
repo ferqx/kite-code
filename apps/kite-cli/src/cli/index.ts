@@ -4,10 +4,10 @@ import {
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import {
+  type KiteSingleServiceClient,
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   type LocalRuntimeLifecycleResult,
 } from '@kite-ai/kite-local-runtime/client';
-import type { CoordinatorRequestClient } from '@kite-ai/kite-local-runtime/coordinator';
 import type { KiteServiceManager } from '@kite-ai/kite-local-runtime/manager';
 import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import {
@@ -44,30 +44,12 @@ export interface CliMainDependencies {
   readonly serviceConnector?: KiteServiceModeConnector;
   /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
   readonly serviceManager?: KiteServiceManager;
-  /** Coordinator lifecycle surface used only by explicit `web` commands. */
-  readonly coordinatorClient?: CoordinatorRequestClient;
-  /** Release-owned offline Store maintenance; never used by run/resume startup. */
-  readonly runStoreMaintenance?: RunStoreMaintenance;
+  /** Accepted target Web lifecycle over the one Service native IPC endpoint. */
+  readonly singleServiceWeb?: {
+    readonly client: KiteSingleServiceClient;
+    readonly staticAssetRoot: string;
+  };
   readonly commandIds?: RuntimeCommandIdAllocator;
-}
-
-export interface RunStoreMaintenance {
-  migrate(input: { readonly targetLayoutGeneration: string }): Promise<
-    | {
-        readonly status: 'committed';
-        readonly sourceLayoutGeneration: string;
-        readonly targetLayoutGeneration: string;
-        readonly catalogDigest: string;
-        readonly workspaceStoreDigests: readonly {
-          readonly workerScopeId: string;
-          readonly digest: string;
-        }[];
-      }
-    | {
-        readonly status: 'blocked';
-        readonly reason: string;
-      }
-  >;
 }
 
 export interface ParsedArgs {
@@ -83,11 +65,9 @@ export interface ParsedArgs {
     | 'service-status'
     | 'service-stop'
     | 'service-restart'
-    | 'maintenance-migrate-run-store'
     | 'web-ensure'
     | 'web-status'
-    | 'web-stop'
-    | 'web-recover';
+    | 'web-stop';
   task?: string;
   threadId: string;
   userId: string;
@@ -113,7 +93,6 @@ export interface ParsedArgs {
   telemetryStatus: boolean;
   serviceJson: boolean;
   webJson: boolean;
-  targetLayoutGeneration?: string;
 }
 
 export async function main(dependencies: CliMainDependencies): Promise<void> {
@@ -145,29 +124,19 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     await runServiceLifecycleCommand(dependencies.serviceManager, args.command, args.serviceJson);
     return;
   }
-  if (args.command === 'maintenance-migrate-run-store') {
-    if (!dependencies.runStoreMaintenance) {
-      throw new Error('Run Store maintenance owner is unavailable.');
-    }
-    if (!args.targetLayoutGeneration) {
-      throw new Error('maintenance migrate-run-store requires --target-generation.');
-    }
-    const result = await dependencies.runStoreMaintenance.migrate({
-      targetLayoutGeneration: args.targetLayoutGeneration,
-    });
-    console.log(JSON.stringify(result));
-    if (result.status !== 'committed') {
-      throw new Error(`Run Store migration blocked: ${result.reason}.`);
-    }
-    return;
-  }
   if (
     args.command === 'web-ensure' ||
     args.command === 'web-status' ||
-    args.command === 'web-stop' ||
-    args.command === 'web-recover'
+    args.command === 'web-stop'
   ) {
-    await runWebLifecycleCommand(dependencies.coordinatorClient, args.command, args.webJson);
+    if (!dependencies.singleServiceWeb) {
+      throw new Error('Kite Web single-Service client is unavailable.');
+    }
+    await runSingleServiceWebLifecycleCommand(
+      dependencies.singleServiceWeb,
+      args.command,
+      args.webJson,
+    );
     return;
   }
   if (args.command === 'resume' && !args.task?.trim()) {
@@ -463,7 +432,11 @@ async function promptForRuntimeInteraction(
       }
       if (value === 'f' || value === 'feedback') {
         console.error('Enter your feedback:');
-        return { kind: 'plan_review', decision: 'feedback', feedback: await readCliStdin() };
+        return {
+          kind: 'plan_review',
+          decision: 'feedback',
+          feedback: await readCliStdin(),
+        };
       }
       return { kind: 'plan_review', decision: 'cancel' };
     }
@@ -688,47 +661,42 @@ async function runServiceLifecycleCommand(
   }
 }
 
-async function runWebLifecycleCommand(
-  coordinator: CoordinatorRequestClient | undefined,
-  command: 'web-ensure' | 'web-status' | 'web-stop' | 'web-recover',
+async function runSingleServiceWebLifecycleCommand(
+  target: NonNullable<CliMainDependencies['singleServiceWeb']>,
+  command: 'web-ensure' | 'web-status' | 'web-stop',
   json: boolean,
 ): Promise<void> {
-  if (!coordinator) throw new Error('Kite Coordinator client is unavailable.');
-  const handshake = await coordinator.handshake();
-  if (!handshake.accepted) throw new Error('Kite Coordinator rejected the client identity.');
-  const response =
-    command === 'web-ensure'
-      ? await coordinator.ensureWebGateway()
-      : command === 'web-status'
-        ? await coordinator.discoverWebGateway()
-        : await coordinator.stopWebGateway();
-  if (response.outcome !== 'ok') {
-    const diagnostic = response.error.diagnostic ?? response.error.code;
-    throw new Error(
-      `Kite Web Gateway ${command === 'web-ensure' ? 'ensure' : command === 'web-status' ? 'status' : command === 'web-recover' ? 'recover' : 'stop'} failed: ${diagnostic}.`,
-    );
+  if (command === 'web-stop') {
+    const response = await target.client.stopWeb();
+    if (response.outcome === 'unavailable') {
+      throw new Error(`Kite Web stop failed: ${response.diagnostic}.`);
+    }
+    console.log('Kite Web stopped.');
+    return;
   }
-  if (command === 'web-stop' || command === 'web-recover') {
+  if (command === 'web-status') {
+    const response = await target.client.statusWeb();
+    if (response.state === 'absent') {
+      console.log(json ? JSON.stringify({ state: 'not_running' }) : 'Kite Web is not running.');
+      return;
+    }
     console.log(
-      command === 'web-recover'
-        ? 'Kite Web Gateway recovery completed.'
-        : 'Kite Web Gateway stopped.',
+      json
+        ? JSON.stringify({
+            state: 'ready',
+            origin: response.origin,
+            assetDigest: response.assetDigest,
+          })
+        : `Kite Web is ready at ${response.origin}.`,
     );
     return;
   }
-  if (command === 'web-status' && response.result.gateway === null) {
-    console.log(
-      json ? JSON.stringify({ state: 'not_running' }) : 'Kite Web Gateway is not running.',
-    );
-    return;
-  }
-  if (response.result.gateway === null || response.result.launchUrl === undefined) {
-    throw new Error('Kite Web Gateway did not return a launch URL.');
+  const response = await target.client.ensureWeb(target.staticAssetRoot);
+  if (response.outcome === 'unavailable') {
+    throw new Error(`Kite Web ensure failed: ${response.diagnostic}.`);
   }
   console.log(
-    json
-      ? JSON.stringify({ state: 'ready', launchUrl: response.result.launchUrl })
-      : response.result.launchUrl,
+    json ? JSON.stringify({ state: 'ready', launchUrl: response.launchUrl }) : response.launchUrl,
   );
 }
 
@@ -737,44 +705,37 @@ async function runWebLifecycleCommand(
 export function parseArgs(argv: string[]): ParsedArgs {
   const commandArgv = withoutKiteHome(argv);
   const command: ParsedArgs['command'] =
-    commandArgv[0] === 'maintenance' && commandArgv[1] === 'migrate-run-store'
-      ? 'maintenance-migrate-run-store'
+    commandArgv[0] === 'web' &&
+    (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
+      ? 'web-ensure'
       : commandArgv[0] === 'web' &&
-          (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
-        ? 'web-ensure'
-        : commandArgv[0] === 'web' &&
-            commandArgv[1] === 'status' &&
-            (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
-          ? 'web-status'
-          : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
-            ? 'web-stop'
-            : commandArgv[0] === 'web' && commandArgv[1] === 'recover' && commandArgv.length === 2
-              ? 'web-recover'
-              : argv[0] === 'service' && argv[1] === 'ensure'
-                ? 'service-ensure'
-                : argv[0] === 'service' && argv[1] === 'status'
-                  ? 'service-status'
-                  : argv[0] === 'service' && argv[1] === 'stop'
-                    ? 'service-stop'
-                    : argv[0] === 'service' && argv[1] === 'restart'
-                      ? 'service-restart'
-                      : argv[0] === 'sandbox' && argv[1] === 'setup'
-                        ? 'sandbox-setup'
-                        : argv[0] === 'sandbox' && argv[1] === 'status'
-                          ? 'sandbox-status'
-                          : argv[0] === 'server' && argv[1] === '--stdio'
-                            ? 'server-stdio'
-                            : argv[0] === 'resume'
-                              ? 'resume'
-                              : argv[0] === 'run'
-                                ? 'run'
-                                : argv[0] === 'trace'
-                                  ? 'trace'
-                                  : 'help';
+          commandArgv[1] === 'status' &&
+          (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
+        ? 'web-status'
+        : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
+          ? 'web-stop'
+          : argv[0] === 'service' && argv[1] === 'ensure'
+            ? 'service-ensure'
+            : argv[0] === 'service' && argv[1] === 'status'
+              ? 'service-status'
+              : argv[0] === 'service' && argv[1] === 'stop'
+                ? 'service-stop'
+                : argv[0] === 'service' && argv[1] === 'restart'
+                  ? 'service-restart'
+                  : argv[0] === 'sandbox' && argv[1] === 'setup'
+                    ? 'sandbox-setup'
+                    : argv[0] === 'sandbox' && argv[1] === 'status'
+                      ? 'sandbox-status'
+                      : argv[0] === 'server' && argv[1] === '--stdio'
+                        ? 'server-stdio'
+                        : argv[0] === 'resume'
+                          ? 'resume'
+                          : argv[0] === 'run'
+                            ? 'run'
+                            : argv[0] === 'trace'
+                              ? 'trace'
+                              : 'help';
   rejectUnsupportedOptions(argv, command);
-  if (command === 'maintenance-migrate-run-store') {
-    assertRunStoreMaintenanceArguments(commandArgv);
-  }
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
@@ -876,25 +837,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     telemetryStatus: argv.includes('--telemetry-status'),
     serviceJson: command === 'service-status' && argv.includes('--json'),
     webJson: (command === 'web-ensure' || command === 'web-status') && argv.includes('--json'),
-    targetLayoutGeneration:
-      command === 'maintenance-migrate-run-store'
-        ? optionalValue('--target-generation')
-        : undefined,
   };
-}
-
-function assertRunStoreMaintenanceArguments(argv: readonly string[]): void {
-  if (
-    argv.length !== 4 ||
-    argv[0] !== 'maintenance' ||
-    argv[1] !== 'migrate-run-store' ||
-    argv[2] !== '--target-generation' ||
-    !argv[3]
-  ) {
-    throw new Error(
-      'maintenance migrate-run-store requires exactly --target-generation <generation>.',
-    );
-  }
 }
 
 function withoutKiteHome(argv: readonly string[]): string[] {
@@ -916,8 +859,8 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['command']): void {
-  if (argv.includes('--target-generation') && command !== 'maintenance-migrate-run-store') {
-    throw new Error("Unsupported CLI option '--target-generation' outside Store maintenance.");
+  if (argv.includes('--target-generation')) {
+    throw new Error("Unsupported CLI option '--target-generation'.");
   }
   const unsupported = [
     '--checkpoints',
@@ -994,11 +937,9 @@ function printHelp(): void {
   bun run agent service status [--json]
   bun run agent service stop
   bun run agent service restart
-  bun run agent maintenance migrate-run-store --target-generation <generation>
   bun run agent web [--json]
   bun run agent web status [--json]
   bun run agent web stop
-  bun run agent web recover
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup
@@ -1009,7 +950,6 @@ Options:
   --thread <id>          LangGraph thread id
   --workspace <path>     Tool workspace
   --kite-home <path>     Advanced: explicit managed Service home (validated by release composition)
-  --target-generation    Fresh Store 8 generation for explicit offline migration
   --skill <name>         Activate a skill (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit

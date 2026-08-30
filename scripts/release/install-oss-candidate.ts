@@ -235,9 +235,6 @@ function activateRelease(
     [`kite${suffix}`, launcherPaths.cli],
     [`kite-tui${suffix}`, launcherPaths.tui],
     [`kite-service${suffix}`, launcherPaths.service],
-    [`kite-coordinator${suffix}`, launcherPaths.coordinator],
-    [`kite-worker${suffix}`, launcherPaths.worker],
-    [`kite-web-gateway${suffix}`, launcherPaths.gateway],
   ] as const;
   for (const [name] of launchers) {
     const destination = join(binRoot, name);
@@ -297,9 +294,6 @@ function executableArchivePathsForManifest(manifest: z.infer<typeof ossCandidate
   cli: string;
   tui: string;
   service: string;
-  coordinator: string;
-  worker: string;
-  gateway: string;
 } {
   const suffix = manifest.target.os === 'win32' ? '.exe' : '';
   const slots = manifest.releaseSlots;
@@ -308,14 +302,17 @@ function executableArchivePathsForManifest(manifest: z.infer<typeof ossCandidate
     cli: `bin/kite${suffix}`,
     tui: `bin/kite-tui${suffix}`,
     service: `bin/kite-service${suffix}`,
-    coordinator: `bin/kite-coordinator${suffix}`,
-    worker: `bin/kite-worker${suffix}`,
-    gateway: `bin/kite-web-gateway${suffix}`,
   } as const;
   for (const [name, path] of Object.entries(expected)) {
     const slot = slots[name as keyof typeof expected];
     if (slot.entrypoint !== path || slot.identity === null) {
       throw new Error(`Candidate release slot ${name} is not bound to its executable.`);
+    }
+  }
+  for (const name of ['coordinator', 'worker', 'gateway'] as const) {
+    const slot = slots[name];
+    if (slot.entrypoint !== null || slot.identity !== null) {
+      throw new Error(`Candidate retired release slot ${name} is not empty.`);
     }
   }
   return expected;
@@ -572,9 +569,6 @@ function assertManagedTreeForUninstall(
   expected.add(`bin/kite${suffix}`);
   expected.add(`bin/kite-tui${suffix}`);
   expected.add(`bin/kite-service${suffix}`);
-  expected.add(`bin/kite-coordinator${suffix}`);
-  expected.add(`bin/kite-worker${suffix}`);
-  expected.add(`bin/kite-web-gateway${suffix}`);
   const releasesRoot = join(root, 'releases');
   assertSafeDirectory(releasesRoot, 'Managed releases directory');
   const releaseIds = new Set<string>();
@@ -610,19 +604,6 @@ function assertManagedTreeForUninstall(
   verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite${suffix}`);
   verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-tui${suffix}`);
   verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-service${suffix}`);
-  verifyActiveLauncher(
-    root,
-    marker.currentCandidateId,
-    activeManifest,
-    `kite-coordinator${suffix}`,
-  );
-  verifyActiveLauncher(root, marker.currentCandidateId, activeManifest, `kite-worker${suffix}`);
-  verifyActiveLauncher(
-    root,
-    marker.currentCandidateId,
-    activeManifest,
-    `kite-web-gateway${suffix}`,
-  );
 
   const pending = [root];
   let entries = 0;

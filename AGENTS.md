@@ -17,6 +17,13 @@
 3. 同一 current authority 被两个任务同时影响时必须串行：先合并一个任务，另一个 rebase 后重新运行文档影响门禁。
 4. 不得用 `git add -A` 吸收同一工作树中的无关改动。发现不属于当前任务的 dirty 文件时，保留原样并将可写任务迁入独立 worktree。
 
+## 阶段完成前过度设计门禁
+
+每个显式实施阶段或 Task tranche 在标记 `completed` 前，必须读取并显式执行项目 Skill
+`.agents/skills/overengineering-check/SKILL.md`。检查该阶段新增的 process、持久状态、协议、恢复路径、兼容层、抽象、配置和测试矩阵是否有
+当前需求与生产消费者；仅由自身测试/文档支撑、为未发布格式保留或被带入普通启动路径的一次性机制必须删除或延期，阶段保持
+`in_progress`。最终交付前还必须对完整 diff 再执行一次。该 Skill 不替代 correctness、安全、文档影响或提交门禁，也不授权扩大用户范围。
+
 ## 提交前文档门禁
 
 在暂存已完成的功能实现、创建提交、推送代码或创建 Pull Request 前，必须读取 `.agents/skills/document-before-commit/SKILL.md`，显式激活项目 Skill `document-before-commit`，并完整执行该 Skill。

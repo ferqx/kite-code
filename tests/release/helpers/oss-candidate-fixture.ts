@@ -23,26 +23,17 @@ export async function createOssCandidateFixture(
   const cli = await fixtureCliBytes(root, target, stopOutcome, argumentLogPath);
   const suffix = target.executableSuffix;
   const launcher = await fixtureLauncherBytes(root, target);
-  const coordinator = bytes('#!/bin/sh\nexit 1\n');
-  const worker = bytes('#!/bin/sh\nexit 1\n');
-  const gateway = bytes('#!/bin/sh\nexit 1\n');
   const web = bytes('<!doctype html><html><body><div id="root"></div></body></html>\n');
   const agentApi = bytes('{"openapi":"3.1.0"}\n');
   const files = new Map<string, Uint8Array>([
     [`bin/kite${suffix}`, cli],
     [`bin/kite-tui${suffix}`, bytes('#!/bin/sh\necho Kite TUI\n')],
     [`bin/kite-service${suffix}`, bytes('#!/bin/sh\necho Kite Service\n')],
-    [`bin/kite-coordinator${suffix}`, coordinator],
-    [`bin/kite-worker${suffix}`, worker],
-    [`bin/kite-web-gateway${suffix}`, gateway],
     ['payload/web/index.html', web],
     ['payload/web/api-docs/openapi.json', agentApi],
     [`release/launchers/kite${suffix}`, launcher],
     [`release/launchers/kite-tui${suffix}`, launcher],
     [`release/launchers/kite-service${suffix}`, launcher],
-    [`release/launchers/kite-coordinator${suffix}`, launcher],
-    [`release/launchers/kite-worker${suffix}`, launcher],
-    [`release/launchers/kite-web-gateway${suffix}`, launcher],
     ['docs/MAINTAINER_CHECKLIST.md', bytes('# Checklist\n')],
     ['docs/KNOWN_LIMITATIONS.md', bytes('# Limitations\n')],
     ['docs/RELEASE_NOTES.md', bytes('# Notes\n')],
@@ -77,15 +68,9 @@ export async function createOssCandidateFixture(
         entrypoint: `bin/kite-service${suffix}`,
         identity: digest(files.get(`bin/kite-service${suffix}`)!),
       },
-      coordinator: {
-        entrypoint: `bin/kite-coordinator${suffix}`,
-        identity: digest(coordinator),
-      },
-      worker: { entrypoint: `bin/kite-worker${suffix}`, identity: digest(worker) },
-      gateway: {
-        entrypoint: `bin/kite-web-gateway${suffix}`,
-        identity: digest(gateway),
-      },
+      coordinator: { entrypoint: null, identity: null },
+      worker: { entrypoint: null, identity: null },
+      gateway: { entrypoint: null, identity: null },
       web: { entrypoint: 'payload/web/index.html', identity: digest(web) },
     },
     files: [...files]

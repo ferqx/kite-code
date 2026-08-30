@@ -42,10 +42,9 @@ fixture。后续新增 Service 或 package 时，只有在 source 与 owner READ
 当前 Browser observer workspace 的规范路径是 `apps/kite-web`。它是独立的 private presentation workspace，
 只消费 browser-safe `@kite-ai/kite-app-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
 Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
-源码中的完整 Web 启动入口是根 `package.json` 的 `bun run web:dev`：它依次执行 Web build、fixed asset
-preflight 和 Coordinator/Web Gateway ensure。`apps/kite-web` 的 Vite dev server 只是资源开发入口，Browser
-也不拥有启动本机 Gateway 的 authority；完整角色和恢复规则见
-[`active/coordinator-workspace-worker-web.md`](active/coordinator-workspace-worker-web.md)。
+源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、fixed asset preflight和single-Service Web
+ensure。`apps/kite-web`的Vite dev server只是资源开发入口，Browser也不拥有启动本机Service的authority；当前角色见
+[`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)，旧Gateway恢复仅见transition文档。
 KASAPI-01A后，根build、test、typecheck discovery覆盖15个实际workspace；新增的
 `packages/agent-api-contract`是zero-workspace-dependency、browser-safe Public wire contract，当前由Service Agent API façade消费。Runtime
 package owner gate当前覆盖15个workspace并检查Service→contract唯一依赖边，独立`check:agent-api-packages`继续强化Public contract/consumer
@@ -58,6 +57,8 @@ current authority；generator不成为runtime export。KASAPI-02C后，Web build
 Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
 `kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+当前默认单Service、单SQLite、最小OS runtime与legacy migration边界见
+[`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)。
 
 KLSV1-06 clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
 MCP、Sandbox、Observability、Session Logger、release 与 process harness 使用互斥 owner；`manager/**` 已迁入

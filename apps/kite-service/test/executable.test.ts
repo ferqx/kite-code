@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { KiteServiceRuntimeComposition } from '../src/composition';
 import {
   createKiteServiceExecutable,
   isKiteServiceMcpStdioInvocation,
@@ -147,16 +146,17 @@ describe('Kite Service internal executable adapter', () => {
       KITE_CODE_HOME: '/tmp/kite-service-code',
       [osHomeKey]: '/tmp/kite-service-os-home',
       KITE_SERVICE_BUILD_ID: 'dev:test',
+      KITE_SINGLE_SERVICE_RUNTIME_PARENT: '/tmp',
     } satisfies Record<string, string>;
 
     await expect(
-      runKiteServiceMain(['service', 'run'], {
+      runKiteServiceMain(['service', 'run-single'], {
         environment: { ...base, KITE_CODE_HOME: 'relative-home' },
         createComposition,
       }),
     ).rejects.toThrow();
     await expect(
-      runKiteServiceMain(['service', 'run'], {
+      runKiteServiceMain(['service', 'run-single'], {
         environment: { ...base, KITE_CODE_HOME: '/tmp/evil\nroot' },
         createComposition,
       }),
@@ -164,7 +164,7 @@ describe('Kite Service internal executable adapter', () => {
     const withoutOsHome: Record<string, string | undefined> = { ...base };
     withoutOsHome[osHomeKey] = undefined;
     await expect(
-      runKiteServiceMain(['service', 'run'], {
+      runKiteServiceMain(['service', 'run-single'], {
         environment: withoutOsHome,
         createComposition,
       }),
@@ -172,64 +172,31 @@ describe('Kite Service internal executable adapter', () => {
     const withoutBuildId: Record<string, string | undefined> = { ...base };
     withoutBuildId.KITE_SERVICE_BUILD_ID = undefined;
     await expect(
-      runKiteServiceMain(['service', 'run'], {
+      runKiteServiceMain(['service', 'run-single'], {
         environment: withoutBuildId,
         createComposition,
       }),
     ).rejects.toThrow();
+    const withoutRuntimeParent: Record<string, string | undefined> = { ...base };
+    withoutRuntimeParent.KITE_SINGLE_SERVICE_RUNTIME_PARENT = undefined;
+    await expect(
+      runKiteServiceMain(['service', 'run-single'], {
+        environment: withoutRuntimeParent,
+        createComposition,
+      }),
+    ).rejects.toThrow('KITE_SINGLE_SERVICE_RUNTIME_PARENT');
   });
 
-  test('passes the exact neutral manager environment to the concrete seam', async () => {
+  test('rejects the retired Service entry and resolves the exact neutral manager environment', async () => {
     const osHomeKey = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
     const environment = {
       KITE_CODE_HOME: '/tmp/kite-service-code',
       [osHomeKey]: '/tmp/kite-service-os-home',
       KITE_SERVICE_BUILD_ID: 'installed:2026-08-27',
     } satisfies Record<string, string>;
-    let captured: Parameters<KiteServiceRuntimeComposition['createInfrastructure']>[0] | undefined;
-    const infrastructure = {
-      shell: {
-        waitForShutdown: async () => ({
-          operation: 'signal_shutdown' as const,
-          outcome: 'applied' as const,
-          state: 'absent' as const,
-        }),
-      },
-      start: async () => ({
-        operation: 'start' as const,
-        outcome: 'applied' as const,
-        state: 'ready' as const,
-      }),
-      stop: async () => ({
-        operation: 'stop' as const,
-        outcome: 'applied' as const,
-        state: 'absent' as const,
-      }),
-      requestStop: async () => ({
-        operation: 'stop' as const,
-        outcome: 'applied' as const,
-        state: 'absent' as const,
-      }),
-      [Symbol.asyncDispose]: async () => undefined,
-    } as const;
-    type InfrastructureOptions = Parameters<
-      KiteServiceRuntimeComposition['createInfrastructure']
-    >[0];
-    const composition = {
-      createInfrastructure(options: InfrastructureOptions) {
-        captured = options;
-        return infrastructure;
-      },
-      [Symbol.asyncDispose]: async () => undefined,
-    } as unknown as KiteServiceRuntimeComposition;
-    // Keep the composition callback typed while capturing the exact input at the seam.
-    const createComposition: typeof import('../src/composition').createKiteServiceRuntimeComposition =
-      () => composition;
-
-    await runKiteServiceMain(['service', 'run'], { environment, createComposition });
-    expect(captured?.home.root).toBe(environment.KITE_CODE_HOME);
-    expect(captured?.buildId).toBe(environment.KITE_SERVICE_BUILD_ID);
-    expect(captured?.instanceId).toStartWith('service_');
+    await expect(runKiteServiceMain(['service', 'run'], { environment })).rejects.toThrow(
+      'run-single',
+    );
     expect(resolveKiteServiceMainEnvironment(environment)).toEqual({
       codeRoot: environment.KITE_CODE_HOME,
       osHome: environment[osHomeKey]!,

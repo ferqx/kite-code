@@ -106,10 +106,8 @@ KRSRUN-02A再由`packages/runtime-storage-sqlite/test/run-recovery.test.ts`、`r
 no-receipt copy、reopen/Workspace isolation、pre-resume unknown投影、显式resume与unknown terminal refinement。它仍是unpublished Store8
 mechanism evidence，不替代02B migration、03A production composition或release三平台qualification。
 
-KRSRUN-02B由`packages/runtime-storage-sqlite/test/run-migration.test.ts`、
-`packages/kite-local-runtime/test/coordinator-catalog.test.ts`与`tests/release/local-layout-migration.test.ts`固定whole-generation
-Store7→Store8 copy、Catalog全fact保留、coverage/no-backfill、WAL snapshot、active/corrupt/unowned/partial/fault阻断、old-writer fence与
-显式manager barrier orchestration。它不证明03A Worker opener/reopen、Public `runs`或三平台candidate qualification。
+KRSRUN-02B的Store7→Store8 migration是未发布历史机制；ADR-0154 clean cutover后不再由`tests/release`或正式CLI验证/组合。current release
+只验证single-Service、Store 9与retired companion absence。
 
 KRSRUN-03A由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
 `process-foreground.test.ts`、`web-gateway/offline-history.test.ts`及Store Catalog layout tests固定Store8-only Worker readiness/reopen、

@@ -1,17 +1,5 @@
-import { existsSync } from 'node:fs';
 import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
-import {
-  createCoordinatorProcessStatePort,
-  decodeCoordinatorProcessDescriptor,
-  readCoordinatorProcessStartIdentity,
-  resolveCoordinatorStatePaths,
-} from '@kite-ai/kite-local-runtime/coordinator';
-import { createKiteHomeIdentity, type KiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
-import {
-  createWorkspaceWorkerProcessStatePort,
-  decodeWorkspaceWorkerProcessDescriptor,
-} from '../../../apps/kite-service/src/workspace-worker';
-import { createManagedLocalServiceClientComposition } from '../../../scripts/release/local-service-client';
+import { createManagedLocalSingleServiceComposition } from '../../../scripts/release/single-service-native-client';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
@@ -53,13 +41,12 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
       if (!codeRoot) {
         throw new Error('TUI test workspace is missing its explicit KITE_CODE_HOME.');
       }
-      await stopTestOwnedCoordinatorTree(codeRoot);
-      const managed = createManagedLocalServiceClientComposition({
+      const managed = createManagedLocalSingleServiceComposition({
         argv: ['tui-system-cleanup', '--kite-home', codeRoot],
         environment: workspace.env,
         systemHome: workspace.home,
       });
-      let stopped = await managed.lifecycle.stop({
+      let stopped = await managed.manager.stop({
         clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
       });
       // A just-disconnected PTY can briefly race the independent identity probe. The manager
@@ -73,7 +60,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
         attempt += 1
       ) {
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
-        stopped = await managed.lifecycle.stop({
+        stopped = await managed.manager.stop({
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
@@ -83,16 +70,16 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
       // Never apply this retry to `outcome_unknown`.
       for (let attempt = 0; stopped.outcome === 'service_busy' && attempt < 50; attempt += 1) {
         await new Promise<void>((resolve) => setTimeout(resolve, 100));
-        stopped = await managed.lifecycle.stop({
+        stopped = await managed.manager.stop({
           clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         });
       }
-      let lastObservedStatus: Awaited<ReturnType<typeof managed.lifecycle.status>> | undefined;
+      let lastObservedStatus: Awaited<ReturnType<typeof managed.manager.status>> | undefined;
       if (stopped.outcome !== 'applied') {
         if (stopped.outcome === 'outcome_unknown') {
           for (let attempt = 0; attempt < 50; attempt += 1) {
             await new Promise<void>((resolve) => setTimeout(resolve, 100));
-            const observed = await managed.lifecycle.status({
+            const observed = await managed.manager.status({
               clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
             });
             lastObservedStatus = observed;
@@ -151,72 +138,4 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
   if (errors.length > 0) {
     throw new AggregateError(errors, 'TUI system fixture cleanup failed');
   }
-}
-
-/**
- * Stop companions intentionally designed to outlive a terminal client. This is test-owner
- * cleanup only: production managers never kill by PID, and this helper signals a process only
- * after its server-owned PID + OS start token match the isolated fixture descriptor exactly.
- */
-export async function stopTestOwnedCoordinatorTree(codeRoot: string): Promise<void> {
-  const home: KiteHomeIdentity = createKiteHomeIdentity(codeRoot, 'explicit_argument');
-  if (!existsSync(resolveCoordinatorStatePaths(home).root)) return;
-  const workerState = createWorkspaceWorkerProcessStatePort(home);
-  if (!workerState.listDescriptors) {
-    throw new Error('Workspace Worker fixture state cannot enumerate owned processes.');
-  }
-  const workers = await workerState.listDescriptors();
-  for (const raw of workers) {
-    const descriptor = decodeWorkspaceWorkerProcessDescriptor(raw);
-    await signalExactFixtureProcess(
-      descriptor.pid,
-      descriptor.processStartIdentity,
-      'Workspace Worker',
-    );
-  }
-  const rawCoordinator = await createCoordinatorProcessStatePort(home).readDescriptor();
-  if (rawCoordinator === undefined) return;
-  const descriptor = decodeCoordinatorProcessDescriptor(rawCoordinator);
-  await signalExactFixtureProcess(descriptor.pid, descriptor.processStartIdentity, 'Coordinator');
-}
-
-async function signalExactFixtureProcess(
-  pid: number,
-  expectedStartIdentity: string,
-  label: string,
-): Promise<void> {
-  const actual = await readCoordinatorProcessStartIdentity(pid, process.platform);
-  if (actual !== expectedStartIdentity) {
-    throw new Error(`${label} fixture process identity is uncertain; refusing cleanup signal.`);
-  }
-  process.kill(pid, 'SIGTERM');
-  if (await waitForExactFixtureProcessExit(pid, expectedStartIdentity, 100)) return;
-  const beforeForce = await readCoordinatorProcessStartIdentity(pid, process.platform);
-  if (beforeForce !== expectedStartIdentity) return;
-  process.kill(pid, 'SIGKILL');
-  if (await waitForExactFixtureProcessExit(pid, expectedStartIdentity, 100)) return;
-  throw new Error(`${label} fixture process did not stop within the cleanup deadline.`);
-}
-
-async function waitForExactFixtureProcessExit(
-  pid: number,
-  expectedStartIdentity: string,
-  attempts: number,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if (isNativeError(error, 'ESRCH')) return true;
-      throw error;
-    }
-    const current = await readCoordinatorProcessStartIdentity(pid, process.platform);
-    if (current !== expectedStartIdentity) return true;
-  }
-  return false;
-}
-
-function isNativeError(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && error.code === code;
 }

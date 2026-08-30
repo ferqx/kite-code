@@ -100,6 +100,21 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   current SID由fixed system `whoami.exe`有界解析
   一次并缓存，ACL apply/verify不启动child process；resolver timeout不授权访问。只有当前操作刚exclusive创建并记录
   inode的entry可初始化owner SID，既有路径owner不匹配时拒绝。
+- 当前single-Service production endpoint contract让canonical Kite home只投影32字符SHA-256 digest；POSIX调用方必须
+  注入已验证的OS runtime parent并为每home只得到`service.sock`与`service.lock`，Windows只得到按digest隔离的named pipe identity。
+  不同custom home是独立profile；local-runtime不为它们增加共享lease、locator或coordination state。
+  helper不读取、创建或删除路径，也不从ambient environment猜测runtime parent。KHSS-02在该identity上新增exact、32 KiB、每连接
+  单请求的Native IPC codec/client，封闭为`describe/web_ensure/web_status/web_stop/service_stop`五个operation；Service identity与HTTP access token
+  只通过owner-only endpoint内存响应返回，Web diagnostic保持typed，unknown field/build/request identity mismatch fail closed。上层
+  `KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop或Web lifecycle mutation。
+  同阶段的`createKiteSingleServiceManager`只从endpoint与最小lifecycle reservation判断owner：同进程ensure single-flight，alive exact
+  PID/start-token等待ready，dead exact owner才清理匹配的socket inode/lock并spawn，uncertain/corrupt/drift全部阻断。Native probe比较OS
+  process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。
+  `createKiteSingleServiceNativeSpawnPort`现通过dedicated fd3启动真实source/installed child；真实macOS journey覆盖ensure复用、exact
+  reservation、Home内无`runtime-service/`以及authenticated stop。stop收到accepted后即使endpoint先关闭造成一次半关闭exchange，manager也只
+  在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。
+  single-Service manager现是CLI/TUI/Web默认production path；正式release不再组合旧descriptor/token、Coordinator manager、Store migration或
+  `web recover`。clean cutover不会从legacy source恢复，也不会在普通ensure中扫描或删除它们。
 
 ## 测试与 evidence
 

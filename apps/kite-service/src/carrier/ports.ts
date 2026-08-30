@@ -56,6 +56,8 @@ export interface ServiceRuntimeConnectionBinding {
   readonly clientId: string;
   readonly connectionGeneration: number;
   readonly workerInstanceId: string;
+  /** Untrusted request path; the Service re-runs canonical Workspace admission before use. */
+  readonly requestedWorkspace?: string;
   /** Session selected by the native Controller binding headers, if any. */
   readonly controllerSessionId?: string;
   /** Generation observed when the one-shot connection ticket was minted. */

@@ -29,9 +29,7 @@
   Session/event/snapshot/preimage/receipt/tombstone/outbox/private meta，把每个`run_index_from_revision`设为source head且不生成历史Run。
   logical digest/count/binding/Store8 preflight全部通过后才复用原journal/fence/pointer状态机切换；任一active/corrupt/unowned/partial/fault
   整体blocked，旧Store7 writer在新fence写入后即fail closed。
-- KRSRUN-03B由release owner提供正式命令`kite maintenance migrate-run-store --target-generation <fresh-generation>`。
-  命令先通过Manager关闭Coordinator admission，按exact PID/start-token和authenticated control逐个停止Gateway与idle Worker，
-  再由Host State predicate及本owner的authority/effect/WAL深检共同证明closed barrier；busy、unknown或corrupt均不建立target pointer。
+- Store 7/8 migration primitive是未发布历史机制，不再由正式CLI、release entrypoint或candidate调用。
 - Store 7/8 共用 `workspaceAuthority` durable facade：Controller operation receipt/idempotency、Controller generation/lease、
   hash-only resume/DetachedRecovery rotation、detached/recovery state、effect prepare/inspect/terminal 与 resource
   attempt evidence。capability secret 只在调用者内存中出现，Store 仅保留 SHA-256 hash；resource surface 只记录外部
@@ -55,6 +53,21 @@
   作为 current Store 的 silent format fallback。
 - Store 8 Run port只接受调用方已经拥有的同一SQLite connection，不创建第二writer或自主transaction owner；Worker Host可消费private port，
   Public Agent API仍不得直接消费或发布`runs`capability。
+- KHSS当前production Store 9 / `kite-home-single-service-v1-2026-08-30` exact inventory在一个DB内固定
+  `workspaces`、现有Runtime/Run/receipt/tombstone事实与八张领域专用Artifact表。该target明确拒绝`runtime_artifacts`通用blob、Directory
+  outbox、未知table/column/index和metadata drift，也不保存legacy Coordinator operation receipt或migration state。
+- `createKiteHomeArtifactStore`只暴露Model/Plan/Capability/filesystem preimage/Sandbox/Subagent领域方法，保留existing ref/byte bound、
+  exact retry冲突和complete reachability GC。
+- KHSS-02的`createKiteHomeDirectoryQuery`直接从同一Store 9 connection按`workspace_id`读取bounded、path-free Workspace/Session
+  目录；它不读取`canonical_path`，不创建Catalog mirror、outbox cursor、compatibility reader或第二SQLite连接。Session固定按
+  `updated_at DESC + session_id ASC`排列，并只统计本Workspace下同Session的event sequence。
+- 同一未接production切口新增`createKiteHomeWorkspaceAdmissionPort`、`createKiteHomeWorkspaceSessionStore`与
+  `createKiteHomeWorkspaceRuntimeJournal`：Workspace ID固定从当前`sha256:` identity digest派生，identity不可漂移，safe display label
+  可更新；Session必须携带与已admit Workspace完全一致的project/workspace identity，跨Workspace读取或重绑fail closed。event、rolling
+  snapshot、resource-result receipt与receipt-bearing delete复用同一Store 9 connection及writer transaction；删除后receipt与
+  `runtime_session_tombstones.workspace_id`保留。Session `format_epoch`必须显式使用Runtime State epoch，不能误用Store 9物理epoch。
+  `createKiteHomeRuntimeRunStore`继续保留Store 8的coverage、单active Run、immutable identity、lifecycle、pagination、rewind/fork规则；
+  Run insert/transition现与State/event/snapshot及digest-bound start receipt同事务，Store 9 DDL也保留queued/start、terminal/finish的exact CHECK。
 - 历史 source reader 不进入 current execution port。
 
 ## 允许依赖
@@ -110,6 +123,16 @@
   先按owner codec完整校验；任何未收敛或损坏事实整体阻断，合法记录只重绑target LayoutGeneration后复制。target首次写通过
   `markSqliteRuntimeRunStoreWritten`把generation永久标记written；Store7/Store8 active helper按manifest profile双向阻断错误binary，Store8
   writer还必须等journal达到`committed`。
+- Store 9由`initializeKiteHomeStoreSchema`创建fresh DB并由`assertKiteHomeStoreSchema`验证exact 19-table/5-index
+  inventory、FK、quick check与固定metadata；`openKiteHomeRuntimeStorage`提供production one-connection `RuntimeStorage`、Workspace admission、
+  checkpoint/fork、Directory、Run、receipt/recovery/effect与typed Artifact lifecycle，不提供compatibility fallback。Artifact表按
+  Model/Plan/Capability/filesystem mutation preimage/Sandbox/Subagent领域分离并保留各自大小上限；Runtime checkpoint preimage仍使用
+  `runtime_file_preimages`。Workspace identity digest固定为现有
+  `sha256:<64 hex>`，不是裸hex。
+- `createKiteHomeWriteTransactionPort`直接以`BEGIN IMMEDIATE`拥有Store 9 mutation；constraint或callback fault整笔rollback。它不读取或写入
+  migration phase、first-write marker，也没有额外global writer queue。
+- Store 9 Directory query只消费已经exact preflight的同一connection；返回类型没有canonical path或Store path，Workspace和每Workspace
+  Session数量分别有256 hard bound。跨Workspace归属只由`runtime_sessions.workspace_id`外键与query predicate决定，不能由Browser输入重绑。
 - `runtime_command_receipts` 的主键精确为 `(scope_session_id, command_id)`；applied receipt 与 event/snapshot 同一 `BEGIN IMMEDIATE` 原子提交。
   rewind后receipt的`committed_revision`可以高于current Session head，这是保留original applied decision的预期语义，reopen按owner/digest/
   canonical receipt验证而不把它误判为未来伪造事实。不会建立额外 receipt 索引、TTL 或裁剪。
@@ -122,7 +145,8 @@
 
 ## 测试
 
-`bun test packages/runtime-storage-sqlite/test`（当前90 pass；含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8 production reopen/activation/recovery与Store7 negatives）
+`bun run --cwd packages/runtime-storage-sqlite test`（含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8
+production reopen/activation/recovery、Store7 negatives与Store9 Workspace/Session/journal transaction scope）。
 
 ## 文档影响
 

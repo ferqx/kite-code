@@ -1,41 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-const companions = [
-  {
-    path: 'scripts/release/entrypoints/coordinator.ts',
-    main: 'runKiteCoordinatorMain',
-    factory: 'createProductionKiteCoordinatorComposition',
-  },
-  {
-    path: 'scripts/release/entrypoints/worker.ts',
-    main: 'runWorkspaceWorkerMain',
-    factory: 'createProductionWorkspaceWorkerRuntime',
-  },
-  {
-    path: 'scripts/release/entrypoints/gateway.ts',
-    main: 'runWebGatewayMain',
-    factory: 'createProductionWebGatewayCarrier',
-  },
-] as const;
-
-describe('managed companion release entrypoints', () => {
-  for (const companion of companions) {
-    test(`${companion.path} delegates to its exact main with its production factory`, () => {
-      const source = readFileSync(companion.path, 'utf8');
-      expect(source).toContain(companion.main);
-      expect(source).toContain(companion.factory);
-      expect(source).toContain('process.argv.slice(2)');
-      expect(source).toContain('environment: process.env');
-      expect(source).not.toContain("throw new Error('not implemented')");
-    });
-  }
-
-  test('CLI binds the formal migration command only to the release maintenance owner', () => {
+describe('current release entrypoints', () => {
+  test('CLI release entrypoint does not import legacy companion or migration owners', () => {
     const source = readFileSync('scripts/release/entrypoints/cli.ts', 'utf8');
-    expect(source).toContain("command === 'maintenance-migrate-run-store'");
-    expect(source).toContain('runStoreMaintenance: localCoordinator.maintenance');
-    expect(source).not.toContain('inspectMaintenanceBarrier');
+    expect(source).not.toContain('local-coordinator-client');
+    expect(source).not.toContain('migrate-run-store');
+    expect(source).not.toContain('migrate-single-store');
+    expect(source).not.toContain('web-recover');
   });
 
   test('stable launcher enters its main without relying on standalone import.meta.main', () => {
@@ -44,7 +16,7 @@ describe('managed companion release entrypoints', () => {
     expect(source).not.toContain('import.meta.main');
   });
 
-  test('developer Web startup builds and preflights assets before Gateway ensure', () => {
+  test('developer Web startup builds and preflights assets before single-Service ensure', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
       readonly scripts?: Readonly<Record<string, string>>;
     };

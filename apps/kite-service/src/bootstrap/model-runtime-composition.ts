@@ -33,6 +33,7 @@ import {
 } from '@kite-ai/builtin-runtime/subagent';
 import { planModelInvocationResource } from '@kite-ai/runtime-host/kernel-adapter';
 import { userKiteCodeDir } from '#kite-service/config/paths';
+import type { KiteHomeBuiltinArtifactBackends } from './kite-home-artifact-backends';
 import type { RuntimeState } from './runtime/state-runtime';
 import {
   type AppSubagentRuntimeFactory,
@@ -48,7 +49,18 @@ type InstalledSubagentComposition = GovernedSubagentComposition<
 
 const installedSubagentCompositions = new Map<string, InstalledSubagentComposition>();
 
-function installedSubagentComposition() {
+function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends) {
+  if (backends) {
+    return createGovernedLocalSubagentComposition({
+      driver: new BuiltinChildRuntimeDriver(),
+      taskArtifacts: new SubagentTaskArtifactStore({
+        backend: backends.subagentTask,
+      }),
+      lifecycleArtifacts: new SubagentLifecycleArtifactStore({
+        backend: backends.subagentLifecycle,
+      }),
+    });
+  }
   const installation = userKiteCodeDir();
   const existing = installedSubagentCompositions.get(installation);
   if (existing) return existing;
@@ -65,7 +77,16 @@ function installedSubagentComposition() {
 
 export type InstalledKiteRuntimeComposition = {
   status: 'available';
-  artifacts: ModelArtifactStore;
+  artifacts: Pick<
+    ModelArtifactStore,
+    | 'writeSurface'
+    | 'readSurface'
+    | 'writeResponse'
+    | 'readResponse'
+    | 'writeProviderOptions'
+    | 'readProviderOptions'
+    | 'collectGarbage'
+  >;
   /** The one App-owned immutable Plan Artifact writer for this runtime. */
   planArtifacts: PlanArtifactStore;
   capabilityArtifacts: CapabilityArtifactStore;
@@ -89,13 +110,20 @@ export type InstalledKiteRuntimeCompositionFactory = (
 /** Reuse one composition per canonical Workspace without a process-global fence. */
 export function createInstalledKiteRuntimeCompositionFactory(
   operationExecution: BuiltinModelOperationExecutionPort,
+  artifactBackends?: KiteHomeBuiltinArtifactBackends,
 ): InstalledKiteRuntimeCompositionFactory {
   const installed = new Map<string, InstalledKiteRuntimeComposition>();
+  const subagentComposition = installedSubagentComposition(artifactBackends);
   return (workspace) => {
     const canonicalWorkspace = canonicalPathForComparison(workspace);
     const existing = installed.get(canonicalWorkspace);
     if (existing) return existing;
-    const created = resolveInstalledKiteRuntimeComposition(workspace, operationExecution);
+    const created = resolveInstalledKiteRuntimeComposition(
+      workspace,
+      operationExecution,
+      artifactBackends,
+      subagentComposition,
+    );
     installed.set(canonicalWorkspace, created);
     return created;
   };
@@ -105,17 +133,32 @@ export function createInstalledKiteRuntimeCompositionFactory(
 export function resolveInstalledKiteRuntimeComposition(
   workspace?: string,
   operationExecution?: BuiltinModelOperationExecutionPort,
+  artifactBackends?: KiteHomeBuiltinArtifactBackends,
+  injectedSubagentComposition?: InstalledSubagentComposition,
 ): InstalledKiteRuntimeComposition {
   if (!operationExecution) {
     throw new Error('Builtin Model operation execution port is unavailable.');
   }
-  const artifacts = new ModelArtifactStore({});
-  const planArtifacts = new PlanArtifactStore();
-  const capabilityArtifacts = new CapabilityArtifactStore();
-  const sandboxPreparationArtifacts = new SandboxPreparationArtifactStore({});
-  const subagentComposition = installedSubagentComposition();
-  const subagentContinuationStore = new SubagentContinuationArtifactStore();
-  const subagentTaskRequestStore = new SubagentTaskRequestArtifactStore();
+  const artifacts = new ModelArtifactStore(
+    artifactBackends ? { backend: artifactBackends.model } : {},
+  );
+  const planArtifacts = new PlanArtifactStore(
+    artifactBackends ? { backend: artifactBackends.plan } : {},
+  );
+  const capabilityArtifacts = new CapabilityArtifactStore(
+    artifactBackends ? { backend: artifactBackends.capability } : {},
+  );
+  const sandboxPreparationArtifacts = new SandboxPreparationArtifactStore(
+    artifactBackends ? { backend: artifactBackends.sandboxPreparation } : {},
+  );
+  const subagentComposition =
+    injectedSubagentComposition ?? installedSubagentComposition(artifactBackends);
+  const subagentContinuationStore = new SubagentContinuationArtifactStore(
+    artifactBackends ? { backend: artifactBackends.subagentContinuation } : {},
+  );
+  const subagentTaskRequestStore = new SubagentTaskRequestArtifactStore(
+    artifactBackends ? { backend: artifactBackends.subagentTask } : {},
+  );
   const subagentContinuationArtifacts: SubagentContinuationArtifactAccess = Object.freeze({
     write: (input: Parameters<SubagentContinuationArtifactAccess['write']>[0]) =>
       subagentContinuationStore.write(input),
@@ -162,7 +205,9 @@ export function resolveInstalledKiteRuntimeComposition(
             canonicalWorkspace: canonicalPathForComparison(workspace),
             grants: filesystemGrants,
             provider: new LocalWorkspaceFilesystemProvider(filesystemGrants.verifier()),
-            preimageArtifacts: new FilesystemPreimageArtifactStore(),
+            preimageArtifacts: new FilesystemPreimageArtifactStore(
+              artifactBackends ? { backend: artifactBackends.filesystemPreimage } : {},
+            ),
             capabilityArtifacts,
           },
         }

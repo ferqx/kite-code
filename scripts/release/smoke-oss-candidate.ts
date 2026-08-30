@@ -9,24 +9,12 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import {
-  type CoordinatorManagerResult,
-  readCoordinatorProcessStartIdentity,
-  resolveCoordinatorStatePaths,
-} from '@kite-ai/kite-local-runtime/coordinator';
+import { join, resolve } from 'node:path';
 import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
 } from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
-import {
-  readSqliteActiveLayoutPointer,
-  readSqliteRuntimeLayoutManifest,
-  readSqliteRuntimeMigrationFence,
-  readSqliteRuntimeMigrationJournal,
-  resolveSqliteRuntimeLayoutPaths,
-} from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
 import { spawnReadyTui } from '../../tests/tui-system/harness/pty-process';
@@ -37,14 +25,11 @@ import {
   rollbackOssCandidate,
   uninstallOssCandidate,
 } from './install-oss-candidate';
-import { createManagedLocalCoordinatorClientComposition } from './local-coordinator-client';
 import {
-  companionArchivePaths,
   createSmokeVariantCandidate,
   currentOssReleaseTarget,
   defaultOssCandidateArchivePath,
   type OssCandidateManifest,
-  releaseLauncherArchivePaths,
   verifyOssCandidate,
 } from './oss-candidate';
 
@@ -104,11 +89,9 @@ try {
         'verify',
         'install',
         'cli-help-version',
-        'run-store-maintenance-fail-closed',
         'tui-version-pty-startup',
-        'service-companion',
-        'coordinator-lifecycle',
-        'coordinator-worker-gateway-companion-assets',
+        'single-service-companion',
+        'retired-companion-slots-absent',
         'web-payload-assets',
         'mcp-stdio-authenticated-wrapper',
         'upgrade',
@@ -154,7 +137,7 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
   const cli = join(prefix, 'bin', `kite${suffix}`);
   const tui = join(prefix, 'bin', `kite-tui${suffix}`);
   const service = join(prefix, 'bin', `kite-service${suffix}`);
-  assertInstalledCompanionAssets(prefix, manifest);
+  assertInstalledReleaseAssets(prefix, manifest);
   const help = Bun.spawnSync([cli, '--help'], { stdout: 'pipe', stderr: 'pipe' });
   if (help.exitCode !== 0 || !help.stdout.toString().includes('Usage:')) {
     throw installedSmokeError('CLI help', help);
@@ -167,77 +150,28 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
   if (tuiVersion.exitCode !== 0 || !tuiVersion.stdout.toString().startsWith('Kite Code TUI ')) {
     throw installedSmokeError('TUI version', tuiVersion);
   }
-  runInstalledRunStoreMaintenanceSmoke(cli);
   await runInstalledMcpStdioWrapperSmoke(service);
-  await runInstalledTuiStartupSmoke(tui);
+  await runInstalledTuiStartupSmoke(cli, tui);
 }
 
-function runInstalledRunStoreMaintenanceSmoke(cli: string): void {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-run-store-maintenance-smoke-')));
-  try {
-    const result = Bun.spawnSync(
-      [
-        cli,
-        'maintenance',
-        'migrate-run-store',
-        '--target-generation',
-        'generation-smoke-store-8',
-        '--kite-home',
-        join(root, '.kite-code'),
-      ],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
-    let output: unknown;
-    try {
-      output = JSON.parse(result.stdout.toString().trim()) as unknown;
-    } catch {
-      throw installedSmokeError('Run Store maintenance result', result);
-    }
-    if (
-      result.exitCode === 0 ||
-      !output ||
-      typeof output !== 'object' ||
-      (output as { readonly status?: unknown }).status !== 'blocked' ||
-      (output as { readonly reason?: unknown }).reason !== 'maintenance_required'
-    ) {
-      throw installedSmokeError('Run Store maintenance fail-closed boundary', result);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-function assertInstalledCompanionAssets(prefix: string, manifest: OssCandidateManifest): void {
+function assertInstalledReleaseAssets(prefix: string, manifest: OssCandidateManifest): void {
   if (manifest.releaseSlots === undefined) {
-    throw new Error('Installed candidate is missing companion release slots.');
+    throw new Error('Installed candidate is missing release slots.');
   }
   const candidateId = readInstallStatus(prefix).currentCandidateId;
   const candidateRoot = join(prefix, 'releases', candidateId);
-  const companions = companionArchivePaths(manifest.target);
-  const launchers = releaseLauncherArchivePaths(manifest);
-  const expected = [
-    ['coordinator', companions.coordinator, launchers.coordinator],
-    ['worker', companions.worker, launchers.worker],
-    ['gateway', companions.gateway, launchers.gateway],
-  ] as const;
-  for (const [name, archivePath, launcherPath] of expected) {
+  for (const name of ['coordinator', 'worker', 'gateway'] as const) {
     const slot = manifest.releaseSlots[name];
-    if (slot.entrypoint !== archivePath || slot.identity === null) {
-      throw new Error(`Installed ${name} companion slot is not bound to its executable.`);
+    if (slot.entrypoint !== null || slot.identity !== null) {
+      throw new Error(`Installed retired ${name} slot is not empty.`);
     }
-    const candidatePath = join(candidateRoot, ...archivePath.split('/'));
-    const stablePath = join(prefix, 'bin', archivePath.split('/').at(-1)!);
-    const launcher = join(candidateRoot, ...launcherPath.split('/'));
-    assertRegularFile(candidatePath, `${name} companion`);
-    assertRegularFile(stablePath, `${name} stable companion launcher`);
-    assertRegularFile(launcher, `${name} companion launcher asset`);
-    const bytes = readFileSync(candidatePath);
-    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-    if (digest !== slot.identity) {
-      throw new Error(`Installed ${name} companion identity does not match its release slot.`);
-    }
-    if (!readFileSync(stablePath).equals(readFileSync(launcher))) {
-      throw new Error(`Installed ${name} stable companion does not match its launcher asset.`);
+    const suffix = manifest.target.os === 'win32' ? '.exe' : '';
+    if (
+      existsSync(
+        join(candidateRoot, 'bin', `kite-${name === 'gateway' ? 'web-gateway' : name}${suffix}`),
+      )
+    ) {
+      throw new Error(`Installed candidate still contains retired ${name} companion.`);
     }
   }
   const web = manifest.releaseSlots.web;
@@ -352,7 +286,10 @@ async function drainRemainingMcpOutput(
   }
 }
 
-async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {
+async function runInstalledTuiStartupSmoke(
+  cliExecutablePath: string,
+  tuiExecutablePath: string,
+): Promise<void> {
   const server = createMockModelServer();
   // This is a standalone startup smoke, not Windows managed-network
   // onboarding coverage. Keep its fixture independent from any local account
@@ -363,11 +300,10 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
   let tui: Awaited<ReturnType<typeof spawnReadyTui>> | undefined;
   let failure: unknown;
   try {
-    await ensureInstalledCoordinatorReady(executablePath, workspace);
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
-      executablePath,
+      executablePath: tuiExecutablePath,
       mockServer: server,
       workspace,
     });
@@ -385,6 +321,13 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
         : error;
     }
     try {
+      await stopInstalledTuiService(cliExecutablePath, workspace);
+    } catch (error) {
+      failure = failure
+        ? new AggregateError([failure, error], 'Installed TUI smoke and Service cleanup failed')
+        : error;
+    }
+    try {
       await cleanupTuiSystemFixtures({
         tuis: [],
         mockServers: [server],
@@ -399,111 +342,71 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
   if (failure) throw failure;
 }
 
-async function ensureInstalledCoordinatorReady(
-  executablePath: string,
-  workspace: ReturnType<typeof createTestWorkspace>,
+async function stopInstalledTuiService(
+  cliExecutablePath: string,
+  workspace: Pick<ReturnType<typeof createTestWorkspace>, 'env' | 'workspace'>,
 ): Promise<void> {
-  const prefix = dirname(dirname(executablePath));
-  const candidateId = readInstallStatus(prefix).currentCandidateId;
-  const candidateRoot = realpathSync.native(join(prefix, 'releases', candidateId));
-  const coordinatorHome = ensureLocalRuntimeServiceHome(
-    createKiteHomeIdentity(join(workspace.home, '.kite-code'), 'explicit_argument'),
+  const environment = { ...workspace.env };
+  for (const key of [
+    'PATH',
+    'SystemRoot',
+    'WINDIR',
+    'ComSpec',
+    'PATHEXT',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  const stopped = Bun.spawnSync(
+    [cliExecutablePath, 'service', 'stop', '--kite-home', workspace.env.KITE_CODE_HOME],
+    {
+      cwd: workspace.workspace,
+      env: environment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
   );
-  const managerProcessStartIdentity = await readCoordinatorProcessStartIdentity();
-  const previousCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
-  try {
-    process.env.KITE_CODE_RELEASE_ROOT = candidateRoot;
-    const composition = createManagedLocalCoordinatorClientComposition({
-      argv: ['release-smoke', '--kite-home', coordinatorHome.root],
-      executableMode: 'installed',
-      readProcessStartIdentity: async () => managerProcessStartIdentity,
-      systemHome: workspace.home,
-    });
-    const initialStatus = await composition.lifecycle.status({
-      requestId: 'release-smoke-coordinator-initial-status',
-    });
-    const result = await composition.lifecycle.ensure({
-      requestId: 'release-smoke-coordinator-ensure',
-    });
-    if (result.outcome !== 'applied' || result.state !== 'ready') {
-      throw new Error(
-        `Installed Coordinator lifecycle preflight failed: ${JSON.stringify({
-          operation: result.operation,
-          outcome: result.outcome,
-          state: result.state,
-          diagnostic: result.diagnostic ?? null,
-          expectedBuildId: candidateId,
-          descriptorBuildId: result.descriptor?.buildId ?? null,
-          managerProcessIdentityAvailable: managerProcessStartIdentity !== undefined,
-          initialStatus: lifecycleResultDiagnostic(initialStatus),
-          stateEvidence: coordinatorStatePresence(coordinatorHome),
-          layoutEvidence: coordinatorLayoutPresence(coordinatorHome),
-        })}`,
-      );
+  if (stopped.exitCode !== 0) throw installedSmokeError('TUI Service stop', stopped);
+
+  let observed = Bun.spawnSync(
+    [cliExecutablePath, 'service', 'status', '--json', '--kite-home', workspace.env.KITE_CODE_HOME],
+    {
+      cwd: workspace.workspace,
+      env: environment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (
+      observed.exitCode === 0 &&
+      /"outcome":"applied"/u.test(observed.stdout.toString()) &&
+      /"state":"absent"/u.test(observed.stdout.toString())
+    ) {
+      return;
     }
-  } finally {
-    if (previousCandidateRoot === undefined) delete process.env.KITE_CODE_RELEASE_ROOT;
-    else process.env.KITE_CODE_RELEASE_ROOT = previousCandidateRoot;
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    observed = Bun.spawnSync(
+      [
+        cliExecutablePath,
+        'service',
+        'status',
+        '--json',
+        '--kite-home',
+        workspace.env.KITE_CODE_HOME,
+      ],
+      {
+        cwd: workspace.workspace,
+        env: environment,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
   }
-}
-
-function lifecycleResultDiagnostic(result: CoordinatorManagerResult): Readonly<{
-  outcome: CoordinatorManagerResult['outcome'];
-  state: CoordinatorManagerResult['state'];
-  diagnostic: CoordinatorManagerResult['diagnostic'] | null;
-}> {
-  return Object.freeze({
-    outcome: result.outcome,
-    state: result.state,
-    diagnostic: result.diagnostic ?? null,
-  });
-}
-
-function coordinatorStatePresence(home: ReturnType<typeof createKiteHomeIdentity>): Readonly<{
-  processDescriptor: boolean;
-  endpointDescriptor: boolean;
-  launchIntent: boolean;
-  instanceLock: boolean;
-  lifecycleLock: boolean;
-}> {
-  const paths = resolveCoordinatorStatePaths(home);
-  return Object.freeze({
-    processDescriptor: existsSync(paths.processDescriptor),
-    endpointDescriptor: existsSync(paths.endpointDescriptor),
-    launchIntent: existsSync(paths.launchIntent),
-    instanceLock: existsSync(paths.instanceLock),
-    lifecycleLock: existsSync(paths.lifecycleLock),
-  });
-}
-
-function coordinatorLayoutPresence(home: ReturnType<typeof createKiteHomeIdentity>): Readonly<{
-  activePointer: boolean;
-  activeManifest: boolean;
-  migrationJournal: boolean;
-  migrationFence: boolean;
-  readable: boolean;
-}> {
-  const paths = resolveSqliteRuntimeLayoutPaths(home.root);
-  try {
-    const pointer = readSqliteActiveLayoutPointer(paths);
-    return Object.freeze({
-      activePointer: pointer !== undefined,
-      activeManifest:
-        pointer !== undefined &&
-        readSqliteRuntimeLayoutManifest(paths, pointer.generation) !== undefined,
-      migrationJournal: readSqliteRuntimeMigrationJournal(paths) !== undefined,
-      migrationFence: readSqliteRuntimeMigrationFence(paths) !== undefined,
-      readable: true,
-    });
-  } catch {
-    return Object.freeze({
-      activePointer: false,
-      activeManifest: false,
-      migrationJournal: false,
-      migrationFence: false,
-      readable: false,
-    });
-  }
+  throw installedSmokeError('TUI Service shutdown observation', observed);
 }
 
 function installedSmokeError(

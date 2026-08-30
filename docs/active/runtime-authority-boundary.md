@@ -6,19 +6,22 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153。
 
 ## 当前可信域
 
 Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
 当前不建立持久 Project authority。Project identity 是 Runtime Host 从 native canonical Workspace realpath
-确定性派生的标识；Session 创建只接受 Workspace/Session facts。Coordinator 必须复用 Host 的同一
+确定性派生的标识；Session 创建只接受 Workspace/Session facts。当前Service Workspace admission必须复用Host的同一
 `resolveProjectIdentity()` 结果校验 durable digest，不能把 Builtin sandbox 用于边界比较的 Windows
 case-folded path 再次哈希成第二个 Project identity。二者仍指向同一真实 Workspace，但只有前者拥有
 持久 Project digest，后者只拥有 path containment/equality 语义。不存在 `ProjectIdentityStore`、
 `ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。Service App是
 唯一 composition root，Host/Store operation 仍各有一个 production owner。
+
+当前默认Service/Store/native discovery边界见[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。本文后续
+出现的Coordinator/Worker/Store 8 generation只约束legacy offline migration source，不是普通run/resume/Web的第二authority。
 
 ## Runtime Server / Client authority boundary
 
@@ -118,13 +121,8 @@ Host query命中Store-authoritative Session projection时，经同一Notificatio
 registry/history和已等待subscriber；该动作不写Store。这样订阅先注册、query后加载且Session未出现在本进程notification history时仍能
 完成ready。
 
-KRSRUN-03B新增正式offline入口`kite maintenance migrate-run-store --target-generation <fresh-generation>`。CLI不拥有barrier；release owner先以
-Coordinator protocol/client revision v3保留authenticated `stopCoordinator`关闭admission并由manager确认exact process exit，并新增
-path-free Web lifecycle closed diagnostics；随后依据持久descriptor、
-control credential、PID/start-token与Worker idle holds停止Gateway/全部Worker。持有Coordinator lifecycle lock后还必须直接复核descriptor、
-endpoint、launch intent与instance lock全部absent，关闭stop/status与并发ensure之间的窗口。Host pure State predicate验证terminal Turn、idle Interaction、已知
-external outcome及无cleanup/recovery authority；SQLite owner继续深检effect lease、Controller/recovery/resource authority、WAL与source digest。
-任一busy、unknown、corrupt或response-loss均返回blocked且不切pointer。normal ensure只初始化fresh Store 8，不自动迁移existing Store 7。
+Store 7/8 migration与旧Coordinator/Worker/Gateway control plane属于未发布历史机制。ADR-0154 clean cutover后，正式CLI/release不再组合
+这些entrypoint、barrier或descriptor recovery；current Runtime authority只从单Service与Store 9建立，普通startup也不扫描或删除旧source。
 
 Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
 raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含

@@ -296,7 +296,7 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('scripts/release/session-log-acl-smoke.ts')).toEqual([
       'observability-and-session-logging',
     ]);
-    expect(triggeredRepositoryRules('scripts/release/local-run-store-maintenance.ts')).toEqual([
+    expect(triggeredRepositoryRules('scripts/release/single-service-native-client.ts')).toEqual([
       'release-candidate',
     ]);
     expect(triggeredRepositoryRules('scripts/run-default-tests.ts')).toEqual(['test-system']);

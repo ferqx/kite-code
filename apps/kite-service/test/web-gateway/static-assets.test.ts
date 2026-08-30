@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  inspectWebGatewayStaticAssets,
   preflightWebGatewayStaticAssets,
   WebGatewayStaticAssetsError,
 } from '../../src/web-gateway/static-assets';
@@ -18,6 +19,13 @@ test('requires the complete fixed Web Gateway asset surface', () => {
     expect(() => preflightWebGatewayStaticAssets(root)).toThrow(WebGatewayStaticAssetsError);
     writeFileSync(join(root, 'assets', 'app.js'), 'export {};');
     expect(preflightWebGatewayStaticAssets(root)).toBe(root);
+    const first = inspectWebGatewayStaticAssets(root);
+    expect(first).toMatchObject({
+      root,
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    writeFileSync(join(root, 'assets', 'app.js'), 'export const revision = 2;');
+    expect(inspectWebGatewayStaticAssets(root).digest).not.toBe(first.digest);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -69,6 +69,71 @@ export {
   type SqliteWorkspaceDirectoryOutboxPage,
 } from './directory-outbox';
 export {
+  createKiteHomeArtifactStore,
+  KiteHomeArtifactError,
+  type KiteHomeArtifactErrorCode,
+  type KiteHomeArtifactGarbageCollectionInput,
+  type KiteHomeArtifactGarbageCollectionResult,
+  type KiteHomeArtifactStore,
+  type KiteHomeModelArtifactKind,
+  type KiteHomePlanArtifactReference,
+  type KiteHomePrivateArtifactReference,
+  type KiteHomeSubagentTaskArtifactKind,
+} from './kite-home-artifacts';
+export { createKiteHomeWorkspaceAuthority } from './kite-home-authority';
+export { createKiteHomeCheckpointStore } from './kite-home-checkpoints';
+export {
+  createKiteHomeCommandReceiptStore,
+  type KiteHomeCommandReceiptStore,
+} from './kite-home-command-receipts';
+export {
+  createKiteHomeDirectoryQuery,
+  type KiteHomeDirectoryQueryOptions,
+  type KiteHomeDirectoryQueryPort,
+  type KiteHomeDirectorySession,
+  type KiteHomeDirectoryWorkspace,
+} from './kite-home-directory';
+export {
+  createKiteHomeRecoveryIdentityLedger,
+  type KiteHomeRecoveryIdentityLedger,
+} from './kite-home-recovery-identities';
+export { createKiteHomeRuntimeRunStore } from './kite-home-runs';
+export { openKiteHomeRuntimeStorage } from './kite-home-runtime-file';
+export {
+  createKiteHomeWorkspaceRuntimeJournal,
+  type KiteHomeWorkspaceRuntimeJournal,
+} from './kite-home-runtime-journal';
+export {
+  createKiteHomeRuntimeStorageForConnection,
+  type KiteHomeRuntimeStorageOwner,
+} from './kite-home-runtime-storage';
+export {
+  assertKiteHomeStoreSchema,
+  initializeKiteHomeStoreSchema,
+  KITE_HOME_STORE_DDL,
+  KITE_HOME_STORE_FORMAT_EPOCH,
+  KITE_HOME_STORE_INDEXES,
+  KITE_HOME_STORE_SCHEMA_VERSION,
+  KITE_HOME_STORE_TABLE_COLUMNS,
+  KiteHomeStoreSchemaError,
+} from './kite-home-store';
+export {
+  createKiteHomeWorkspaceAdmissionPort,
+  createKiteHomeWorkspaceSessionStore,
+  type KiteHomeSessionBinding,
+  type KiteHomeWorkspaceAdmission,
+  type KiteHomeWorkspaceAdmissionPort,
+  type KiteHomeWorkspaceAdmissionResult,
+  type KiteHomeWorkspaceSessionStore,
+  KiteHomeWorkspaceStoreError,
+  type KiteHomeWorkspaceStoreErrorCode,
+} from './kite-home-workspaces';
+export {
+  createKiteHomeWriteTransactionPort,
+  KiteHomeWriteError,
+  type KiteHomeWriteTransactionPort,
+} from './kite-home-write';
+export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,
   assertSqliteRuntimeRunStoreActive,

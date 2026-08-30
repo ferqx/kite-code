@@ -6,8 +6,10 @@ import {
   WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
-import type { CoordinatorRequestClient } from '@kite-ai/kite-local-runtime/coordinator';
+import type {
+  KiteSingleServiceClient,
+  LocalKiteConnection,
+} from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
 
@@ -21,76 +23,12 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
   });
 
-  test('recognizes only the explicit Run Store maintenance command shape', () => {
-    expect(
-      parseArgs(['maintenance', 'migrate-run-store', '--target-generation', 'generation-store-8']),
-    ).toMatchObject({
-      command: 'maintenance-migrate-run-store',
-      targetLayoutGeneration: 'generation-store-8',
-    });
-    expect(
-      parseArgs([
-        'maintenance',
-        'migrate-run-store',
-        '--target-generation',
-        'generation-store-8',
-        '--kite-home',
-        '/tmp/kite-home',
-      ]).command,
-    ).toBe('maintenance-migrate-run-store');
-    expect(() => parseArgs(['maintenance', 'migrate-run-store'])).toThrow(
-      'requires exactly --target-generation',
-    );
-    expect(() =>
-      parseArgs([
-        'maintenance',
-        'migrate-run-store',
-        '--target-generation',
-        'generation-store-8',
-        'unexpected',
-      ]),
-    ).toThrow('requires exactly --target-generation');
-    expect(() => parseArgs(['run', '--target-generation', 'generation-store-8'])).toThrow(
-      "Unsupported CLI option '--target-generation'",
-    );
-  });
-
-  test('runs offline Run Store maintenance and fails closed on a blocked result', async () => {
-    const originalArgv = process.argv;
-    const output = spyOn(console, 'log').mockImplementation(() => undefined);
-    const targets: string[] = [];
-    process.argv = [
-      'bun',
-      'kite',
-      'maintenance',
-      'migrate-run-store',
-      '--target-generation',
-      'generation-store-8',
-    ];
-    try {
-      await expect(
-        main({
-          runStoreMaintenance: {
-            async migrate({ targetLayoutGeneration }) {
-              targets.push(targetLayoutGeneration);
-              return { status: 'blocked', reason: 'active_work' };
-            },
-          },
-        }),
-      ).rejects.toThrow('Run Store migration blocked: active_work');
-      expect(targets).toEqual(['generation-store-8']);
-      expect(output.mock.calls).toEqual([
-        [JSON.stringify({ status: 'blocked', reason: 'active_work' })],
-      ]);
-    } finally {
-      process.argv = originalArgv;
-      output.mockRestore();
-    }
-  });
-
   test('recognizes only the closed Web Gateway lifecycle commands', () => {
     expect(parseArgs(['web']).command).toBe('web-ensure');
-    expect(parseArgs(['web', '--json'])).toMatchObject({ command: 'web-ensure', webJson: true });
+    expect(parseArgs(['web', '--json'])).toMatchObject({
+      command: 'web-ensure',
+      webJson: true,
+    });
     expect(parseArgs(['web', 'status'])).toMatchObject({
       command: 'web-status',
       webJson: false,
@@ -100,7 +38,7 @@ describe('cli argument parsing', () => {
       webJson: true,
     });
     expect(parseArgs(['web', 'stop']).command).toBe('web-stop');
-    expect(parseArgs(['web', 'recover']).command).toBe('web-recover');
+    expect(parseArgs(['web', 'recover']).command).toBe('help');
     expect(parseArgs(['web', 'stop', 'now']).command).toBe('help');
     expect(parseArgs(['web', 'status', 'verbose']).command).toBe('help');
     expect(parseArgs(['web', 'prompt']).command).toBe('help');
@@ -111,80 +49,66 @@ describe('cli argument parsing', () => {
     );
   });
 
-  test('prints only the Coordinator-issued one-shot launch URL for web ensure', async () => {
+  test('uses the single-Service Web client without Coordinator or Gateway terminology', async () => {
     const originalArgv = process.argv;
     const output = spyOn(console, 'log').mockImplementation(() => undefined);
     const calls: string[] = [];
-    let printed: unknown[][] = [];
-    process.argv = ['bun', 'kite', 'web'];
+    const client = singleServiceWebClient(calls);
     try {
-      await main({ coordinatorClient: webCoordinator(calls) });
-      printed = output.mock.calls;
-    } finally {
-      process.argv = originalArgv;
-      output.mockRestore();
-    }
-    expect(calls).toEqual(['handshake', 'ensure']);
-    expect(printed).toEqual([[`http://127.0.0.1:43124/#${'a'.repeat(43)}`]]);
-  });
+      process.argv = ['bun', 'kite', 'web'];
+      await main({
+        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
+      });
+      expect(output.mock.calls.at(-1)).toEqual([`http://127.0.0.1:43125/#${'b'.repeat(43)}`]);
 
-  test('reports Web Gateway status without starting it', async () => {
-    const originalArgv = process.argv;
-    const output = spyOn(console, 'log').mockImplementation(() => undefined);
-    const calls: string[] = [];
-    let printed: unknown[][] = [];
-    process.argv = ['bun', 'kite', 'web', 'status', '--json'];
-    try {
-      await main({ coordinatorClient: webCoordinator(calls) });
-      printed = output.mock.calls;
-    } finally {
-      process.argv = originalArgv;
-      output.mockRestore();
-    }
-    expect(calls).toEqual(['handshake', 'discover']);
-    expect(printed).toEqual([
-      [
+      process.argv = ['bun', 'kite', 'web', 'status', '--json'];
+      await main({
+        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
+      });
+      expect(output.mock.calls.at(-1)).toEqual([
         JSON.stringify({
           state: 'ready',
-          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
+          origin: 'http://127.0.0.1:43125',
+          assetDigest: '1'.repeat(64),
         }),
-      ],
-    ]);
+      ]);
+
+      process.argv = ['bun', 'kite', 'web', 'stop'];
+      await main({
+        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
+      });
+      expect(output.mock.calls.at(-1)).toEqual(['Kite Web stopped.']);
+      expect(calls).toEqual(['ensure:/bundle/web', 'status', 'stop']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
   });
 
-  test('prints the typed Web Gateway diagnostic and exposes explicit recovery', async () => {
+  test('surfaces the single-Service typed asset diagnostic without a generic ensure error', async () => {
     const originalArgv = process.argv;
-    const output = spyOn(console, 'log').mockImplementation(() => undefined);
-    const calls: string[] = [];
-    const coordinator = webCoordinator(calls);
     process.argv = ['bun', 'kite', 'web'];
     try {
       await expect(
         main({
-          coordinatorClient: {
-            ...coordinator,
-            ensureWebGateway: async () => ({
-              schema: 'kite.local-coordinator-frame.v1',
-              kind: 'response',
-              protocolVersion: 1,
-              requestId: 'ensure-error-1',
-              idempotencyKey: 'ensure-error-key-1',
-              deadlineMs: 5_000,
-              method: 'ensureWebGateway',
-              outcome: 'error',
-              error: { code: 'unavailable', diagnostic: 'web_assets_missing' },
-            }),
+          singleServiceWeb: {
+            staticAssetRoot: '/bundle/missing',
+            client: {
+              ...singleServiceWebClient([]),
+              ensureWeb: async () => ({
+                schema: 'kite.local-native.response.v1',
+                requestId: 'web-missing',
+                operation: 'web_ensure',
+                outcome: 'unavailable',
+                state: 'absent',
+                diagnostic: 'web_assets_missing',
+              }),
+            },
           },
         }),
-      ).rejects.toThrow('web_assets_missing');
-
-      process.argv = ['bun', 'kite', 'web', 'recover'];
-      await main({ coordinatorClient: coordinator });
-      expect(output.mock.calls.at(-1)).toEqual(['Kite Web Gateway recovery completed.']);
-      expect(calls).toContain('stop');
+      ).rejects.toThrow('Kite Web ensure failed: web_assets_missing.');
     } finally {
       process.argv = originalArgv;
-      output.mockRestore();
     }
   });
 
@@ -445,7 +369,11 @@ describe('cli argument parsing', () => {
       await main({
         serviceConnector: {
           connect: async () =>
-            createCliConnection({ calls, commandWorkspaces, queryStatus: 'trusted' }),
+            createCliConnection({
+              calls,
+              commandWorkspaces,
+              queryStatus: 'trusted',
+            }),
         },
       });
     } finally {
@@ -473,109 +401,67 @@ describe('cli argument parsing', () => {
   });
 });
 
-function webCoordinator(calls: string[]): CoordinatorRequestClient {
-  const unused = async (): Promise<never> => {
-    throw new Error('unexpected Coordinator call');
-  };
+function singleServiceWebClient(calls: string[]): KiteSingleServiceClient {
   return {
-    handshake: async () => {
-      calls.push('handshake');
-      return {
-        schema: 'kite.local-coordinator-handshake.v1',
-        kind: 'handshake_response',
+    describe: async () => ({
+      schema: 'kite.local-native.response.v1',
+      requestId: 'describe-1',
+      operation: 'describe',
+      outcome: 'ready',
+      service: {
+        instanceId: 'service-1',
+        pid: 42,
+        startedAt: '2026-08-30T00:00:00.000Z',
         protocolVersion: 1,
-        requestId: 'handshake-1',
-        idempotencyKey: 'handshake-key-1',
-        deadlineMs: 5_000,
-        accepted: true,
-        diagnostic: 'accepted',
-        coordinator: {
-          role: 'coordinator',
-          instanceId: 'coordinator-1',
-          buildId: 'build-1',
-          protocolVersion: 1,
-          protocolRevision: 'kite-local-coordinator-protocol-v3',
-          clientContractRevision: 'kite-local-coordinator-client-v3',
-        },
-      };
-    },
-    ensureWebGateway: async () => {
-      calls.push('ensure');
+        clientContractRevision: 'kite-local-runtime-contract-v1',
+        serverVersion: 'service-1',
+        buildId: 'build-1',
+        httpOrigin: 'http://127.0.0.1:43125',
+      },
+      accessToken: 'a'.repeat(43),
+    }),
+    ensureWeb: async (root) => {
+      calls.push(`ensure:${root}`);
       return {
-        schema: 'kite.local-coordinator-frame.v1',
-        kind: 'response',
-        protocolVersion: 1,
+        schema: 'kite.local-native.response.v1',
         requestId: 'ensure-1',
-        idempotencyKey: 'ensure-key-1',
-        deadlineMs: 5_000,
-        method: 'ensureWebGateway',
-        outcome: 'ok',
-        result: {
-          gateway: {
-            identity: {
-              role: 'web_gateway',
-              instanceId: 'gateway-1',
-              buildId: 'build-1',
-              protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v3',
-              clientContractRevision: 'kite-local-coordinator-client-v3',
-            },
-            endpoint: { origin: 'http://127.0.0.1:43124' },
-          },
-          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
-        },
+        operation: 'web_ensure',
+        outcome: 'ready',
+        origin: 'http://127.0.0.1:43125',
+        launchUrl: `http://127.0.0.1:43125/#${'b'.repeat(43)}`,
+        assetDigest: '1'.repeat(64),
       };
     },
-    status: unused,
-    resolveWorkspaceWorker: unused,
-    ensureWorkspaceWorker: unused,
-    resolveSessionWorkspace: unused,
-    listSessionMetadata: unused,
-    mintWorkerConnectionCapability: unused,
-    discoverWebGateway: async () => {
-      calls.push('discover');
+    statusWeb: async () => {
+      calls.push('status');
       return {
-        schema: 'kite.local-coordinator-frame.v1',
-        kind: 'response',
-        protocolVersion: 1,
-        requestId: 'discover-1',
-        idempotencyKey: 'discover-key-1',
-        deadlineMs: 5_000,
-        method: 'discoverWebGateway',
-        outcome: 'ok',
-        result: {
-          gateway: {
-            identity: {
-              role: 'web_gateway',
-              instanceId: 'gateway-1',
-              buildId: 'build-1',
-              protocolVersion: 1,
-              protocolRevision: 'kite-local-coordinator-protocol-v3',
-              clientContractRevision: 'kite-local-coordinator-client-v3',
-            },
-            endpoint: { origin: 'http://127.0.0.1:43124' },
-          },
-          launchUrl: `http://127.0.0.1:43124/#${'a'.repeat(43)}`,
-        },
+        schema: 'kite.local-native.response.v1',
+        requestId: 'status-1',
+        operation: 'web_status',
+        outcome: 'ready',
+        state: 'ready',
+        origin: 'http://127.0.0.1:43125',
+        assetDigest: '1'.repeat(64),
       };
     },
-    stopWebGateway: async () => {
+    stopWeb: async () => {
       calls.push('stop');
       return {
-        schema: 'kite.local-coordinator-frame.v1',
-        kind: 'response',
-        protocolVersion: 1,
+        schema: 'kite.local-native.response.v1',
         requestId: 'stop-1',
-        idempotencyKey: 'stop-key-1',
-        deadlineMs: 5_000,
-        method: 'stopWebGateway',
-        outcome: 'ok',
-        result: { gateway: null },
+        operation: 'web_stop',
+        outcome: 'applied',
+        state: 'absent',
       };
     },
-    stopCoordinator: unused,
-    subscribeDirectoryChanges: unused,
-  } as CoordinatorRequestClient;
+    stopService: async () => ({
+      schema: 'kite.local-native.response.v1',
+      requestId: 'service-stop-1',
+      operation: 'service_stop',
+      outcome: 'applied',
+      state: 'draining',
+    }),
+  };
 }
 
 function createCliConnection(input: {

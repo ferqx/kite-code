@@ -3,6 +3,7 @@ import {
   canonicalModelJson,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from '../model';
 import { subagentLifecycleArtifactRoot } from './artifact-paths';
 import type { SubagentGrantVerifier } from './grant-authority';
@@ -31,10 +32,17 @@ export interface SubagentLifecycleArtifactAccess {
 export class SubagentLifecycleArtifactStore implements SubagentLifecycleArtifactAccess {
   readonly #storage: PrivateImmutableArtifactStorage<'subagent_handle'>;
 
-  constructor(options: { readonly root?: string } = {}) {
+  constructor(
+    options: {
+      readonly root?: string;
+      readonly backend?: PrivateImmutableArtifactStorageBackend<'subagent_handle'>;
+    } = {},
+  ) {
     try {
       this.#storage = new PrivateImmutableArtifactStorage({
-        root: options.root ?? subagentLifecycleArtifactRoot(),
+        ...(options.backend
+          ? { backend: options.backend }
+          : { root: options.root ?? subagentLifecycleArtifactRoot() }),
         namespace: 'subagent-lifecycles',
         partitions: [{ kind: 'subagent_handle', directory: 'handles', extension: '.json' }],
         maxArtifactBytes: 64 * 1024,

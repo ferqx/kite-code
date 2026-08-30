@@ -1,33 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
-import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-} from 'node:fs';
-import { userInfo } from 'node:os';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import {
-  createLocalKiteConnection,
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  type LocalKiteConnection,
-} from '@kite-ai/kite-local-runtime/client';
-import {
-  createKiteServiceEnvironment,
-  createKiteServiceExecutableResolver,
-  createNativeKiteServiceManagerComposition,
-  KITE_SERVICE_ENVIRONMENT_ALLOWLIST,
-  type KiteServiceManager,
-  type KiteServiceManagerRequest,
-} from '@kite-ai/kite-local-runtime/manager';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-  resolveLocalRuntimeServiceStatePaths,
-} from '@kite-ai/kite-local-runtime/service';
+import { KITE_SERVICE_ENVIRONMENT_ALLOWLIST } from '@kite-ai/kite-local-runtime/manager';
 
 const PROVIDER_ENVIRONMENT_KEYS = Object.freeze([
   'DEEPSEEK_API_KEY',
@@ -42,11 +16,12 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
   'apps/kite-service',
   'apps/kite-web',
   'packages',
-  'scripts/release/entrypoints',
-  'scripts/release/local-coordinator-client.ts',
-  'scripts/release/local-layout-migration.ts',
-  'scripts/release/local-run-store-maintenance.ts',
+  'scripts/release/entrypoints/cli.ts',
+  'scripts/release/entrypoints/launcher.ts',
+  'scripts/release/entrypoints/service.ts',
+  'scripts/release/entrypoints/tui.ts',
   'scripts/release/local-service-client.ts',
+  'scripts/release/single-service-native-client.ts',
   'package.json',
   'bun.lock',
   'tsconfig.json',
@@ -54,128 +29,7 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
 const MAX_SOURCE_BUILD_UNTRACKED_FILES = 1_024;
 const MAX_SOURCE_BUILD_UNTRACKED_BYTES = 64 * 1024 * 1024;
 
-export interface ManagedLocalServiceConnector {
-  connect(input: { readonly workspace: string }): Promise<LocalKiteConnection>;
-}
-
-export interface ManagedLocalServiceLifecycle {
-  ensure(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['ensure']>;
-  status(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['status']>;
-  stop(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['stop']>;
-  restart(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['restart']>;
-}
-
-export interface ManagedLocalServiceClientComposition {
-  readonly connector: ManagedLocalServiceConnector;
-  readonly lifecycle: ManagedLocalServiceLifecycle;
-  readonly executableMode: 'source' | 'installed';
-}
-
-export interface ManagedLocalServiceClientCompositionOptions {
-  readonly argv?: readonly string[];
-  readonly environment?: Readonly<Record<string, string | undefined>>;
-  /** Canonical OS account home supplied by the release/platform adapter. */
-  readonly systemHome?: string;
-  /** Build-owned executable layout; callers may not infer this from Workspace or ambient env. */
-  readonly executableMode?: 'source' | 'installed';
-}
-
-/**
- * Release/source entrypoint composition. App packages receive only typed connector/lifecycle
- * objects; neither terminal App imports the Service App or reconstructs state/process authority.
- */
-export function createManagedLocalServiceClientComposition(
-  options: ManagedLocalServiceClientCompositionOptions = {},
-): ManagedLocalServiceClientComposition {
-  const sourceEnvironment = options.environment ?? process.env;
-  const systemHome = realpathSync(options.systemHome ?? userInfo().homedir);
-  const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
-  const home = ensureLocalRuntimeServiceHome(
-    createKiteHomeIdentity(
-      explicitHome ?? join(systemHome, '.kite-code'),
-      explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
-    ),
-  );
-  const statePaths = resolveLocalRuntimeServiceStatePaths(home);
-  const executableMode = options.executableMode ?? 'source';
-  const installed = executableMode === 'installed';
-  const sourceBuildId = installed
-    ? 'dev:installed-placeholder'
-    : sourceServiceBuildIdentity(resolve(import.meta.dir, '../..'));
-  const installedBuildId = installed ? installedBuildIdentity(process.execPath) : sourceBuildId;
-  const expectedBuildId = installed ? installedBuildId : sourceBuildId;
-  const source = selectKiteServiceEnvironmentSource(sourceEnvironment);
-  const environment = {
-    async resolve() {
-      const value = createKiteServiceEnvironment({
-        homeRoot: home.root,
-        stateRoot: statePaths.root,
-        source,
-        systemHome,
-        ...(process.platform === 'win32' ? { userProfile: systemHome } : {}),
-        nodeEnvironment: 'production',
-        allowedKeys: PROVIDER_ENVIRONMENT_KEYS,
-      });
-      ensureNeutralDirectory(value.cwd);
-      return value;
-    },
-  };
-  const sourceExecutable = resolve(import.meta.dir, './entrypoints/service.ts');
-  const installedExecutable =
-    executableMode === 'installed'
-      ? resolveInstalledReleaseExecutable('kite-service')
-      : join(
-          dirname(process.execPath),
-          process.platform === 'win32' ? 'kite-service.exe' : 'kite-service',
-        );
-  const native = createNativeKiteServiceManagerComposition({
-    home,
-    environment,
-    executableMode,
-    executableResolver: createKiteServiceExecutableResolver({
-      source: sourceExecutable,
-      installed: installedExecutable,
-      sourceBuildId,
-      installedBuildId,
-    }),
-    expectedBuildId,
-  });
-  const withMode = (request?: KiteServiceManagerRequest): KiteServiceManagerRequest => ({
-    ...(request ?? {}),
-    executableMode,
-  });
-  const lifecycle: ManagedLocalServiceLifecycle = Object.freeze({
-    ensure: (request?: KiteServiceManagerRequest) => native.manager.ensure(withMode(request)),
-    status: (request?: KiteServiceManagerRequest) => native.manager.status(withMode(request)),
-    stop: (request?: KiteServiceManagerRequest) => native.manager.stop(withMode(request)),
-    restart: (request?: KiteServiceManagerRequest) => native.manager.restart(withMode(request)),
-  });
-  const connector: ManagedLocalServiceConnector = Object.freeze({
-    connect: async (input: { readonly workspace: string }) => {
-      const connection = createLocalKiteConnection({
-        manager: native.ensure,
-        state: native.clientState,
-        workspace: input.workspace,
-        clientInfo: {
-          name: 'kite-terminal',
-          version: '0.1.0',
-          instanceId: `terminal_${randomUUID()}`,
-        },
-        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-      });
-      try {
-        await connection.prepareAppControl();
-        return connection;
-      } catch (error) {
-        await connection.close('app_control_prepare_failed').catch(() => undefined);
-        throw error;
-      }
-    },
-  });
-  return Object.freeze({ connector, lifecycle, executableMode });
-}
-
-function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
+export function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
   const positions = argv.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
   if (positions.length === 0) return undefined;
   if (positions.length !== 1) throw new Error('--kite-home may be supplied only once.');
@@ -194,18 +48,6 @@ export function selectKiteServiceEnvironmentSource(
     result[key] = source[key];
   }
   return Object.freeze(result);
-}
-
-function ensureNeutralDirectory(path: string): void {
-  if (!existsSync(path)) mkdirSync(path, { recursive: false, mode: 0o700 });
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error('Service neutral cwd is not a real directory.');
-  }
-  if (readdirSync(path).length !== 0) {
-    throw new Error('Service neutral cwd must remain empty.');
-  }
-  chmodSync(path, 0o700);
 }
 
 export function sourceServiceBuildIdentity(repositoryRoot: string): string {
@@ -372,7 +214,7 @@ export function installedBuildIdentity(executable: string): string {
 }
 
 export function resolveInstalledReleaseExecutable(
-  name: 'kite-service' | 'kite-coordinator',
+  name: 'kite-service',
   input: {
     readonly executable?: string;
     readonly candidateRoot?: string;

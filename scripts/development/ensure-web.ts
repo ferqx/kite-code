@@ -18,5 +18,5 @@ async function run(command: readonly string[]): Promise<void> {
     stderr: 'inherit',
   });
   const exitCode = await child.exited;
-  if (exitCode !== 0) throw new Error('Web developer startup failed.');
+  if (exitCode !== 0) process.exitCode = exitCode;
 }

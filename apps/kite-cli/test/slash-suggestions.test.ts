@@ -35,7 +35,7 @@ describe('slash command suggestions', () => {
       {
         name: 'web',
         aliases: [],
-        description: 'Show the existing read-only Web Gateway URL',
+        description: 'Show the existing read-only Kite Web URL',
       },
     ]);
   });

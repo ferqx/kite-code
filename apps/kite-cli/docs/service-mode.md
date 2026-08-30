@@ -1,23 +1,16 @@
 # Managed Local Service mode
 
 本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。该目录承载 terminal 使用的 Native client adapter；
-当前 release/source 默认 connector 由 Coordinator resolve/mint 后直接连接 Workspace Worker。显式 `kite service *` 仍注入 legacy
-Service lifecycle manager，但不是默认 run/resume/TUI data plane；CLI不导入Service App。
+当前release/source默认connector直接ensure每个canonical Kite Home唯一的Local Service；run/resume/TUI、`service *`与Web复用同一
+native endpoint、Store 9和HTTP listener。CLI不导入Service App，也不持有process或Store authority。
 
 adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、owner status与
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
-Web Gateway lifecycle 不属于该 Service adapter。CLI 的 `kite web [--json]`、`kite web status [--json]` 与 `kite web stop`
-只通过单独注入的 `CoordinatorRequestClient` 分别执行 ensure、已有 Gateway discovery 与 stop；CLI 不自行启动 Gateway、
-读取其内部状态或取得 Controller。`scripts/release/entrypoints/cli.ts` 已按命令注入 managed Coordinator client；layout、
-Coordinator 或 Gateway 不可用时明确返回 unavailable。该 parser/adapter contract 与 tests 不代表 hosted Web qualification；
-candidate `releaseSlots` 已绑定 Coordinator、Worker、Gateway、Web entrypoint/identity。
-
-Store generation maintenance也不属于Service-mode adapter。`kite maintenance migrate-run-store --target-generation <fresh-generation>`
-只接受release entrypoint注入的offline owner：owner关闭Coordinator admission、验证并停止Gateway/idle Worker、深检State与SQLite authority后
-才执行whole-generation copy-and-switch。CLI不构造maintenance barrier；busy/unknown/corrupt返回closed blocked JSON与非零退出。
-普通`run/resume`、TUI、`web`和`service ensure`均不会隐式调用该命令。
+Web lifecycle由release注入的`KiteSingleServiceClient`承载。CLI的`kite web [--json]`先做asset preflight再ensure Service，status/stop在
+absent时不spawn；status只返回state/origin/asset digest，不创建launch token。TUI `/web`通过ensure/open取得一次性URL。正式CLI不组合legacy
+Coordinator、Store migration或`web recover`；该parser/adapter contract与tests不代表hosted Web qualification。
 
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
 TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败

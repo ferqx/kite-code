@@ -2,13 +2,21 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import {
+  createKiteHomeIdentity,
+  readLocalProcessStartIdentity,
+} from '@kite-ai/kite-local-runtime/service';
 import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,
   runMcpStdioChildRuntime,
   runPosixSupervisorChild,
 } from '@kite-ai/runtime-host';
+import {
+  createKiteHomeRuntimeStorageComposition,
+  createKiteRuntimeWebObserverHistoryFromStorage,
+  createKiteSingleServiceWebGatewayTarget,
+} from './bootstrap';
 import { createKiteServiceRuntimeComposition } from './composition';
 import type {
   KiteRuntimeApplicationPort,
@@ -20,6 +28,8 @@ import type {
 } from './ports';
 import { createKiteServiceShell } from './shell';
 import { createProcessSignalPort } from './signals';
+import { createSingleServiceInfrastructure } from './single-service-infrastructure';
+import { WEB_OBSERVER_CONTRACT_REVISION_ } from './web-observer/core';
 
 /** Internal executable input. Runtime/Application ownership is always supplied by the caller. */
 export interface KiteServiceExecutableOptions {
@@ -66,6 +76,7 @@ export interface KiteServiceMainEnvironment {
   readonly osHome: string;
   readonly buildId: string;
   readonly readinessFd?: string;
+  readonly runtimeParent?: string;
 }
 
 export function resolveKiteServiceMainEnvironment(
@@ -84,6 +95,14 @@ export function resolveKiteServiceMainEnvironment(
     ...(source.KITE_SERVICE_READINESS_FD === undefined
       ? {}
       : { readinessFd: source.KITE_SERVICE_READINESS_FD }),
+    ...(source.KITE_SINGLE_SERVICE_RUNTIME_PARENT === undefined
+      ? {}
+      : {
+          runtimeParent: requiredAbsoluteEnvironmentValue(
+            source,
+            'KITE_SINGLE_SERVICE_RUNTIME_PARENT',
+          ),
+        }),
   });
 }
 
@@ -108,36 +127,73 @@ export async function runKiteServiceMain(
     runPosixSupervisorChild(args.slice(1));
     return;
   }
-  if (args.length !== 2 || args[0] !== 'service' || args[1] !== 'run') {
-    throw new Error('Kite Service internal entry requires the exact `service run` arguments.');
+  const singleServiceRun = args.length === 2 && args[0] === 'service' && args[1] === 'run-single';
+  if (!singleServiceRun) {
+    throw new Error('Kite Service internal entry requires exact `service run-single` arguments.');
   }
   // These values are supplied by the manager's explicit, neutral child environment.  Do not
   // derive Service identity from cwd, homedir(), Workspace files, or a missing ambient variable.
   const environment = resolveKiteServiceMainEnvironment(dependencies.environment);
   const createComposition = dependencies.createComposition ?? createKiteServiceRuntimeComposition;
   const instanceId = `service_${randomUUID()}`;
-  const composition = createComposition({
-    instanceId,
-    checkpointPath: join(environment.codeRoot, 'checkpoints.sqlite'),
-    userConfigPath: join(environment.codeRoot, 'kite-code.jsonc'),
-    workspaceTrustStorePath: join(environment.codeRoot, 'workspace-trust.jsonc'),
-    userMcpConfigPath: join(environment.codeRoot, 'mcp.json'),
-    mcpApprovalPath: join(environment.codeRoot, 'mcp-project-approvals.jsonc'),
-    userKiteCodeSkillsDir: join(environment.codeRoot, 'skills'),
-    userAgentsSkillsDir: join(environment.osHome, '.agents', 'skills'),
-  });
+  const runtimeParent = environment.runtimeParent;
+  if (process.platform !== 'win32' && runtimeParent === undefined) {
+    throw new Error('Single-Service child requires KITE_SINGLE_SERVICE_RUNTIME_PARENT.');
+  }
+  const singleStore = createKiteHomeRuntimeStorageComposition(environment.codeRoot);
+  let composition: ReturnType<typeof createKiteServiceRuntimeComposition>;
+  try {
+    composition = createComposition({
+      instanceId,
+      checkpointPath: join(environment.codeRoot, 'kite.sqlite'),
+      storageOwner: singleStore,
+      userConfigPath: join(environment.codeRoot, 'kite-code.jsonc'),
+      workspaceTrustStorePath: join(environment.codeRoot, 'workspace-trust.jsonc'),
+      userMcpConfigPath: join(environment.codeRoot, 'mcp.json'),
+      mcpApprovalPath: join(environment.codeRoot, 'mcp-project-approvals.jsonc'),
+      userKiteCodeSkillsDir: join(environment.codeRoot, 'skills'),
+      userAgentsSkillsDir: join(environment.osHome, '.agents', 'skills'),
+    });
+  } catch (error) {
+    singleStore?.storage.close();
+    throw error;
+  }
   const readinessFd = environment.readinessFd;
   const readiness =
     readinessFd === undefined
       ? undefined
       : createProcessReadinessPort(instanceId, Number(readinessFd));
-  const infrastructure = composition.createInfrastructure({
-    home: createKiteHomeIdentity(environment.codeRoot, 'explicit_argument'),
+  const home = createKiteHomeIdentity(environment.codeRoot, 'explicit_argument');
+  const infrastructure = createSingleServiceInfrastructure({
+    home,
+    ...(process.platform === 'win32'
+      ? {}
+      : {
+          runtimeParent: runtimeParent!,
+        }),
+    application: composition.carrierApplication,
     instanceId,
     serverVersion: 'kite-service-v1',
     buildId: environment.buildId,
+    processStartIdentity:
+      (await readLocalProcessStartIdentity(process.pid, process.platform)) ??
+      (() => {
+        throw new Error('Single-Service process start identity is unavailable.');
+      })(),
+    webGateway: createKiteSingleServiceWebGatewayTarget({
+      directory: singleStore.directory,
+      runtime: composition.runtime,
+      history: createKiteRuntimeWebObserverHistoryFromStorage(singleStore.storage),
+      serviceInstanceId: instanceId,
+      contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
+    }),
+    signals: createProcessSignalPort(),
+    onEndpointReserved: () => {
+      singleStore.reconcileControllerAuthority?.(instanceId);
+    },
     ...(readiness === undefined ? {} : { readiness }),
   });
+  let primaryError: unknown;
   try {
     const started = await infrastructure.start();
     if (started.outcome !== 'applied') {
@@ -147,10 +203,20 @@ export async function runKiteServiceMain(
     if (stopped.outcome !== 'applied') {
       throw new Error(stopped.diagnostic ?? 'Service shutdown failed.');
     }
-  } finally {
-    await infrastructure[Symbol.asyncDispose]();
-    await composition[Symbol.asyncDispose]();
+  } catch (error) {
+    primaryError = error;
   }
+  try {
+    await infrastructure[Symbol.asyncDispose]();
+  } catch (error) {
+    primaryError ??= error;
+  }
+  try {
+    await composition[Symbol.asyncDispose]();
+  } catch (error) {
+    primaryError ??= error;
+  }
+  if (primaryError !== undefined) throw primaryError;
 }
 
 /** Bun standalone uses a platform-specific argv prefix; private markers are validated at either seam. */

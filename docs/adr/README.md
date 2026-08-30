@@ -153,3 +153,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0149](0149-stable-local-agent-api-facade.md) | accepted | Stable local REST/SSE Agent API复用现有Runtime、Store、Controller、receipt与History authority；不开放remote或Browser mutation |
 | [0150](0150-store-8-canonical-runtime-run-index.md) | accepted | Store 8以canonical Run index、receipt resource result与coverage boundary支撑first-class Run；Store 7历史不推断回填 |
 | [0151](0151-web-gateway-preflight-and-exact-launch-recovery.md) | accepted | Web Gateway在state/spawn前验证asset，并以PID/start-token绑定launch intent与显式recover |
+| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154 | 每个Kite Home收敛为单Service、单SQLite、DB-backed typed Artifact与最小OS runtime endpoint |
+| [0153](0153-filesystem-preimage-remains-a-private-artifact-domain.md) | accepted | Filesystem mutation preimage保持独立typed Artifact表，不与Runtime checkpoint preimage或Capability result混用 |
+| [0154](0154-pre-release-store9-clean-cutover.md) | accepted | 未发布Store 9采用clean cutover；正式路径不迁移或清理旧布局，Web status保持只读 |

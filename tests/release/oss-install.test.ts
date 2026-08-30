@@ -65,9 +65,9 @@ describe('managed candidate install lifecycle', () => {
     roots.push(parent);
     const prefix = join(parent, 'managed');
     const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
-    expectAdjacentCompanionAssets(prefix, firstMarker.currentCandidateId);
+    expectSingleServiceExecutableAssets(prefix, firstMarker.currentCandidateId);
     const secondMarker = await installOssCandidate({ archivePath: second.archivePath, prefix });
-    expectAdjacentCompanionAssets(prefix, secondMarker.currentCandidateId);
+    expectSingleServiceExecutableAssets(prefix, secondMarker.currentCandidateId);
     expect(secondMarker.previousCandidateId).toBe(firstMarker.currentCandidateId);
     const rolledBack = rollbackOssCandidate(prefix);
     expect(rolledBack.currentCandidateId).toBe(firstMarker.currentCandidateId);
@@ -253,9 +253,9 @@ describe('managed candidate install lifecycle', () => {
   });
 });
 
-function expectAdjacentCompanionAssets(prefix: string, candidateId: string): void {
+function expectSingleServiceExecutableAssets(prefix: string, candidateId: string): void {
   const suffix = process.platform === 'win32' ? '.exe' : '';
-  for (const name of ['kite-coordinator', 'kite-worker', 'kite-web-gateway']) {
+  for (const name of ['kite', 'kite-tui', 'kite-service']) {
     const stable = join(prefix, 'bin', `${name}${suffix}`);
     const candidate = join(prefix, 'releases', candidateId, 'bin', `${name}${suffix}`);
     const stableStat = lstatSync(stable);
@@ -264,6 +264,12 @@ function expectAdjacentCompanionAssets(prefix: string, candidateId: string): voi
     expect(candidateStat.isSymbolicLink()).toBe(false);
     expect(stableStat.isFile()).toBe(true);
     expect(candidateStat.isFile()).toBe(true);
+  }
+  for (const name of ['kite-coordinator', 'kite-worker', 'kite-web-gateway']) {
+    expect(existsSync(join(prefix, 'bin', `${name}${suffix}`))).toBe(false);
+    expect(existsSync(join(prefix, 'releases', candidateId, 'bin', `${name}${suffix}`))).toBe(
+      false,
+    );
   }
 }
 

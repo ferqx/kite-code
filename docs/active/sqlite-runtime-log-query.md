@@ -19,6 +19,9 @@ exact Store 8 header/DDL/所有ownership rows，query前后再次验证active po
 `observedLastSequence`变化、超过4096 records、binding/layout drift、Store 6/legacy-only或损坏内容都fail closed为unavailable；
 compatibility import不参与该journey。
 
+当前single-Service Web/Native History直接从同一Store 9 `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
+mirror或Worker discovery。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
+
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留

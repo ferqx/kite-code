@@ -169,16 +169,32 @@ export async function acquireKiteServiceModeController(
   const existing = leases.get(sessionId);
   const observed = await readController(controller, sessionId);
   if (observed.state.status === 'active') {
-    if (
-      !existing ||
-      !sameControllerLease(existing, observed.state, connection.service.instanceId)
-    ) {
-      throw new KiteServiceModeControllerError(
-        'busy',
-        'The Session Controller is already owned by another native connection.',
-      );
+    if (existing && sameControllerLease(existing, observed.state, connection.service.instanceId)) {
+      return existing;
     }
-    return existing;
+    if (
+      existing &&
+      observed.state.sessionId === existing.sessionId &&
+      observed.state.clientId === existing.clientId &&
+      observed.state.controllerGeneration === existing.controllerGeneration &&
+      observed.state.workerInstanceId === connection.service.instanceId &&
+      positiveControllerGeneration(observed.state.connectionGeneration)
+    ) {
+      const resumed: KiteServiceModeControllerLease = Object.freeze({
+        sessionId,
+        clientId: existing.clientId,
+        connectionGeneration: observed.state.connectionGeneration,
+        controllerGeneration: observed.state.controllerGeneration,
+        interactionGeneration: observed.state.interactionGeneration,
+        workerInstanceId: observed.state.workerInstanceId,
+      });
+      leases.set(sessionId, resumed);
+      return resumed;
+    }
+    throw new KiteServiceModeControllerError(
+      'busy',
+      'The Session Controller is already owned by another native connection.',
+    );
   }
   if (observed.state.status === 'detached') {
     throw new KiteServiceModeControllerError(

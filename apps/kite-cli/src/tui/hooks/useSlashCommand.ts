@@ -210,7 +210,7 @@ export function useSlashCommand(
             .catch(() => {
               dispatch({
                 type: 'LOCAL_TEXT',
-                text: '  ⎿  Web Gateway discovery is unavailable.',
+                text: '  ⎿  Kite Web discovery is unavailable.',
                 isError: true,
               });
             });

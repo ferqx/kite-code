@@ -496,13 +496,10 @@ export function inspectSqliteWorkspaceAuthorityGenerationCopy(input: {
 }): SqliteWorkspaceAuthorityGenerationInspection {
   assertSqliteRuntimeWorkspaceBinding(input.sourceBinding);
   assertSqliteRuntimeWorkspaceBinding(input.targetBinding);
-  if (
-    input.sourceBinding.workerScopeId !== input.targetBinding.workerScopeId ||
-    input.sourceBinding.workspaceIdentityDigest !== input.targetBinding.workspaceIdentityDigest
-  ) {
+  if (input.sourceBinding.workspaceIdentityDigest !== input.targetBinding.workspaceIdentityDigest) {
     throw new SqliteWorkspaceAuthorityError(
       'ownership_mismatch',
-      'Workspace authority generation copy may not change Workspace ownership.',
+      'Workspace authority copy may not change Workspace identity.',
     );
   }
   const ownedSessions = new Set(
@@ -575,13 +572,15 @@ export function inspectSqliteWorkspaceAuthorityGenerationCopy(input: {
       value: JSON.stringify({
         ...record,
         layoutGeneration: input.targetBinding.layoutGeneration,
+        workerScopeId: input.targetBinding.workerScopeId,
+        workspaceIdentityDigest: input.targetBinding.workspaceIdentityDigest,
       }),
     });
   }
   return Object.freeze({ rows: Object.freeze(rows), settled });
 }
 
-type ParsedAuthorityMetadataKey =
+export type ParsedAuthorityMetadataKey =
   | {
       readonly kind: 'controller' | 'recovery' | 'detached-recovery';
       readonly sessionId: string;
@@ -635,6 +634,13 @@ function parseAuthorityMetadataKey(key: string): ParsedAuthorityMetadataKey {
   };
 }
 
+/** Store-profile adapters may inspect a namespaced key only after stripping their own prefix. */
+export function inspectSqliteWorkspaceAuthorityMetadataKey(
+  key: string,
+): ParsedAuthorityMetadataKey {
+  return parseAuthorityMetadataKey(key);
+}
+
 export function createSqliteWorkspaceAuthority(input: {
   readonly db: Database;
   readonly binding: SqliteRuntimeWorkspaceBinding;
@@ -656,6 +662,16 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
   ) => unknown;
   /** Store-owner hook invoked before any durable authority mutation. */
   readonly beforeWrite?: () => void;
+  /** Store-profile transaction owner; when supplied it also owns first-write semantics. */
+  readonly runTransaction?: <T>(work: () => T) => T;
+  /** Store-profile Session ownership check. */
+  readonly ensureSession?: (sessionId: string) => void;
+  /** Store-profile namespace for authority metadata keys. */
+  readonly metadataKey?: (key: string) => string;
+  /** Store-profile metadata reader; defaults to Store 7/8 runtime_store_meta. */
+  readonly readMetadata?: (key: string) => unknown | undefined;
+  /** Store-profile metadata writer; called only inside the owner transaction. */
+  readonly writeMetadata?: (key: string, value: unknown) => void;
 }): SqliteWorkspaceAuthority {
   assertSqliteRuntimeWorkspaceBinding(input.binding);
   const assertConnection = input.assertConnection ?? assertWorkspaceSqliteRuntimeStoreConnection;
@@ -671,58 +687,69 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
   const verifyStore = (): void => {
     assertConnection(input.db, input.binding);
   };
-  const transaction = <T>(work: () => T): T => {
-    input.beforeWrite?.();
-    input.db.run('BEGIN IMMEDIATE');
-    try {
-      const result = work();
-      input.db.run('COMMIT');
-      return result;
-    } catch (error) {
+  const transaction =
+    input.runTransaction ??
+    (<T>(work: () => T): T => {
+      input.beforeWrite?.();
+      input.db.run('BEGIN IMMEDIATE');
       try {
-        input.db.run('ROLLBACK');
-      } catch {
-        // SQLite may have rolled back after a failed statement.
+        const result = work();
+        input.db.run('COMMIT');
+        return result;
+      } catch (error) {
+        try {
+          input.db.run('ROLLBACK');
+        } catch {
+          // SQLite may have rolled back after a failed statement.
+        }
+        throw error;
       }
-      throw error;
-    }
-  };
+    });
 
-  const ensureSession = (sessionId: string): void => {
-    assertSessionId(sessionId);
-    const row = input.db
-      .query<
-        {
-          worker_scope_id: string;
-          workspace_identity_digest: string;
-        },
-        [string]
-      >(
-        'SELECT worker_scope_id, workspace_identity_digest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
-      )
-      .get(sessionId);
-    if (
-      !row ||
-      row.worker_scope_id !== input.binding.workerScopeId ||
-      row.workspace_identity_digest !== input.binding.workspaceIdentityDigest
-    ) {
-      throw new SqliteWorkspaceAuthorityError(
-        'ownership_mismatch',
-        'Workspace authority Session ownership is invalid.',
-      );
-    }
-  };
+  const ensureSession =
+    input.ensureSession ??
+    ((sessionId: string): void => {
+      assertSessionId(sessionId);
+      const row = input.db
+        .query<
+          {
+            worker_scope_id: string;
+            workspace_identity_digest: string;
+          },
+          [string]
+        >(
+          'SELECT worker_scope_id, workspace_identity_digest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+        .get(sessionId);
+      if (
+        !row ||
+        row.worker_scope_id !== input.binding.workerScopeId ||
+        row.workspace_identity_digest !== input.binding.workspaceIdentityDigest
+      ) {
+        throw new SqliteWorkspaceAuthorityError(
+          'ownership_mismatch',
+          'Workspace authority Session ownership is invalid.',
+        );
+      }
+    });
 
-  const stateKey = (sessionId: string): string => authorityKey('controller', sessionId);
-  const recoveryKey = (sessionId: string): string => authorityKey('recovery', sessionId);
+  const metadataKey = input.metadataKey ?? ((key: string): string => key);
+  const readMetadata = input.readMetadata ?? ((key: string) => readJson(input.db, key));
+  const writeMetadata =
+    input.writeMetadata ?? ((key: string, value: unknown) => writeJson(input.db, key, value));
+
+  const stateKey = (sessionId: string): string =>
+    metadataKey(authorityKey('controller', sessionId));
+  const recoveryKey = (sessionId: string): string =>
+    metadataKey(authorityKey('recovery', sessionId));
   const operationKey = (sessionId: string, requestId: string): string =>
-    authorityKey('operation', sessionId, requestId);
+    metadataKey(authorityKey('operation', sessionId, requestId));
   const effectKey = (sessionId: string, effectId: string): string =>
-    authorityKey('effect', sessionId, effectId);
+    metadataKey(authorityKey('effect', sessionId, effectId));
   const detachedRecoveryKey = (sessionId: string): string =>
-    authorityKey('detached-recovery', sessionId);
+    metadataKey(authorityKey('detached-recovery', sessionId));
   const resourceKey = (sessionId: string, resourceId: string): string =>
-    authorityKey('resource', sessionId, resourceId);
+    metadataKey(authorityKey('resource', sessionId, resourceId));
 
   const defaultControllerState = (sessionId: string): PersistedControllerState => ({
     schema: SQLITE_WORKSPACE_AUTHORITY_SCHEMA,
@@ -742,7 +769,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
   });
 
   const readStateTx = (sessionId: string): PersistedControllerState => {
-    const row = readJson(input.db, stateKey(sessionId));
+    const row = readMetadata(stateKey(sessionId));
     return row === undefined
       ? defaultControllerState(sessionId)
       : parseControllerState(row, input.binding, sessionId);
@@ -757,7 +784,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     }
   };
   const readRecoveryTx = (sessionId: string): PersistedRecoveryState => {
-    const row = readJson(input.db, recoveryKey(sessionId));
+    const row = readMetadata(recoveryKey(sessionId));
     return row === undefined
       ? {
           schema: SQLITE_WORKSPACE_RECOVERY_STATE_SCHEMA,
@@ -773,10 +800,10 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
       : parseRecoveryState(row, input.binding, sessionId);
   };
   const writeStateTx = (value: PersistedControllerState): void => {
-    writeJson(input.db, stateKey(value.sessionId), value);
+    writeMetadata(stateKey(value.sessionId), value);
   };
   const writeRecoveryTx = (value: PersistedRecoveryState): void => {
-    writeJson(input.db, recoveryKey(value.sessionId), value);
+    writeMetadata(recoveryKey(value.sessionId), value);
   };
 
   const operationSubject = (value: Record<string, unknown>): string => digestJson(value);
@@ -785,7 +812,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     sessionId: string,
     requestId: string,
   ): PersistedOperationReceipt | undefined => {
-    const value = readJson(input.db, operationKey(sessionId, requestId));
+    const value = readMetadata(operationKey(sessionId, requestId));
     if (value === undefined) return undefined;
     return parseOperationReceipt(value, input.binding, sessionId, requestId);
   };
@@ -843,7 +870,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         workerScopeId: input.binding.workerScopeId,
         workspaceIdentityDigest: input.binding.workspaceIdentityDigest,
       };
-      writeJson(input.db, operationKey(request.sessionId, request.requestId), receipt);
+      writeMetadata(operationKey(request.sessionId, request.requestId), receipt);
       return operationResult(receipt, outcome.state, false);
     });
   };
@@ -1153,7 +1180,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
       ) {
         return { status: 'rejected', code: 'recovery_generation_mismatch', state: current };
       }
-      const existingValue = readJson(input.db, detachedRecoveryKey(request.sessionId));
+      const existingValue = readMetadata(detachedRecoveryKey(request.sessionId));
       if (existingValue !== undefined) {
         const existing = parseDetachedRecoveryCapability(
           existingValue,
@@ -1183,7 +1210,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         issuedAt: timestamp,
         consumedAt: null,
       };
-      writeJson(input.db, detachedRecoveryKey(request.sessionId), capability);
+      writeMetadata(detachedRecoveryKey(request.sessionId), capability);
       return {
         status: 'applied',
         code: 'detached_recovery_capability_issued',
@@ -1218,7 +1245,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     return operation(request, 'abandon_detached_controller', subjectDigest, () => {
       const current = readStateTx(request.sessionId);
       const recovery = readRecoveryTx(request.sessionId);
-      const value = readJson(input.db, detachedRecoveryKey(request.sessionId));
+      const value = readMetadata(detachedRecoveryKey(request.sessionId));
       if (
         current.status !== 'detached' ||
         current.controllerGeneration !== request.expectedControllerGeneration ||
@@ -1263,7 +1290,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         controllerGeneration: next.controllerGeneration,
         updatedAt: timestamp,
       });
-      writeJson(input.db, detachedRecoveryKey(request.sessionId), {
+      writeMetadata(detachedRecoveryKey(request.sessionId), {
         ...capability,
         state: 'consumed',
         consumedAt: timestamp,
@@ -1328,7 +1355,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     sessionId: string,
     effectId: string,
   ): PersistedEffectEvidence | undefined => {
-    const value = readJson(input.db, effectKey(sessionId, effectId));
+    const value = readMetadata(effectKey(sessionId, effectId));
     if (value === undefined) return undefined;
     return parseEffectEvidence(value, input.binding, sessionId, effectId);
   };
@@ -1425,7 +1452,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         preparedAt: timestamp,
         terminalAt: null,
       };
-      writeJson(input.db, effectKey(request.sessionId, request.effectId), evidence);
+      writeMetadata(effectKey(request.sessionId, request.effectId), evidence);
       return { status: 'prepared', evidence };
     });
   };
@@ -1444,7 +1471,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
       terminalCode: null,
       terminalAt: timestamp,
     };
-    writeJson(input.db, effectKey(sessionId, effectId), unknown);
+    writeMetadata(effectKey(sessionId, effectId), unknown);
     input.db
       .query('DELETE FROM runtime_effect_leases WHERE session_id = ? AND effect_id = ?')
       .run(sessionId, `${EFFECT_LEASE_PREFIX}${effectId}`);
@@ -1531,7 +1558,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         terminalCode: request.terminalCode ?? null,
         terminalAt: timestamp,
       };
-      writeJson(input.db, effectKey(request.sessionId, request.effectId), terminal);
+      writeMetadata(effectKey(request.sessionId, request.effectId), terminal);
       input.db
         .query(
           'DELETE FROM runtime_effect_leases WHERE session_id = ? AND effect_id = ? AND owner_id = ?',
@@ -1545,7 +1572,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     sessionId: string,
     resourceId: string,
   ): PersistedResourceLease | undefined => {
-    const value = readJson(input.db, resourceKey(sessionId, resourceId));
+    const value = readMetadata(resourceKey(sessionId, resourceId));
     if (value === undefined) return undefined;
     return parseResourceLease(value, input.binding, sessionId, resourceId);
   };
@@ -1593,7 +1620,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         externalLeaseDigest: null,
         state: 'prepared',
       };
-      writeJson(input.db, resourceKey(request.sessionId, request.resourceId), result);
+      writeMetadata(resourceKey(request.sessionId, request.resourceId), result);
       return result;
     });
   };
@@ -1637,7 +1664,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         externalLeaseDigest: request.externalLeaseDigest,
         state: 'held',
       };
-      writeJson(input.db, resourceKey(request.sessionId, request.resourceId), result);
+      writeMetadata(resourceKey(request.sessionId, request.resourceId), result);
       return result;
     });
   };
@@ -1672,7 +1699,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
         );
       }
       const result: PersistedResourceLease = { ...existing, state: 'released' };
-      writeJson(input.db, resourceKey(request.sessionId, request.resourceId), result);
+      writeMetadata(resourceKey(request.sessionId, request.resourceId), result);
       return result;
     });
   };
@@ -1694,7 +1721,7 @@ export function createSqliteWorkspaceAuthorityForConnection_(input: {
     const expired: PersistedResourceLease = { ...existing, state: 'expired' };
     transaction(() => {
       if (controllerLease) assertCurrentControllerLeaseTx(controllerLease);
-      writeJson(input.db, resourceKey(sessionId, resourceId), expired);
+      writeMetadata(resourceKey(sessionId, resourceId), expired);
     });
     return expired;
   };
@@ -2381,6 +2408,10 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
     database: Database,
     binding: SqliteRuntimeWorkspaceBinding,
   ) => unknown;
+  readonly ensureSession?: (sessionId: string) => void;
+  readonly metadataKey?: (key: string) => string;
+  readonly readMetadata?: (key: string) => unknown | undefined;
+  readonly writeMetadata?: (key: string, value: unknown) => void;
 }): SqliteWorkspaceControllerOperationResult {
   assertSqliteRuntimeWorkspaceBinding(input.binding);
   (input.assertConnection ?? assertWorkspaceSqliteRuntimeStoreConnection)(input.db, input.binding);
@@ -2395,26 +2426,34 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
   }
   assertFutureTimestamp(request.resumeExpiresAtMs, timestamp);
 
-  const session = input.db
-    .query<{ worker_scope_id: string; workspace_identity_digest: string }, [string]>(
-      'SELECT worker_scope_id, workspace_identity_digest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
-    )
-    .get(request.sessionId);
-  if (
-    !session ||
-    session.worker_scope_id !== input.binding.workerScopeId ||
-    session.workspace_identity_digest !== input.binding.workspaceIdentityDigest
-  ) {
-    throw new SqliteWorkspaceAuthorityError(
-      'ownership_mismatch',
-      'Workspace authority Session ownership is invalid.',
-    );
+  if (input.ensureSession) {
+    input.ensureSession(request.sessionId);
+  } else {
+    const session = input.db
+      .query<{ worker_scope_id: string; workspace_identity_digest: string }, [string]>(
+        'SELECT worker_scope_id, workspace_identity_digest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+      )
+      .get(request.sessionId);
+    if (
+      !session ||
+      session.worker_scope_id !== input.binding.workerScopeId ||
+      session.workspace_identity_digest !== input.binding.workspaceIdentityDigest
+    ) {
+      throw new SqliteWorkspaceAuthorityError(
+        'ownership_mismatch',
+        'Workspace authority Session ownership is invalid.',
+      );
+    }
   }
 
-  const stateKey = authorityKey('controller', request.sessionId);
-  const recoveryKey = authorityKey('recovery', request.sessionId);
-  const operationKey = authorityKey('operation', request.sessionId, request.requestId);
-  const operationValue = readJson(input.db, operationKey);
+  const metadataKey = input.metadataKey ?? ((key: string): string => key);
+  const readMetadata = input.readMetadata ?? ((key: string) => readJson(input.db, key));
+  const writeMetadata =
+    input.writeMetadata ?? ((key: string, value: unknown) => writeJson(input.db, key, value));
+  const stateKey = metadataKey(authorityKey('controller', request.sessionId));
+  const recoveryKey = metadataKey(authorityKey('recovery', request.sessionId));
+  const operationKey = metadataKey(authorityKey('operation', request.sessionId, request.requestId));
+  const operationValue = readMetadata(operationKey);
   const subjectDigest = digestJson({
     clientId: request.clientId,
     connectionGeneration: request.connectionGeneration,
@@ -2423,7 +2462,7 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
     resumeExpiresAtMs: request.resumeExpiresAtMs,
   });
   const readState = (): PersistedControllerState => {
-    const value = readJson(input.db, stateKey);
+    const value = readMetadata(stateKey);
     return value === undefined
       ? defaultInitialControllerState(input.binding, request.sessionId)
       : parseControllerState(value, input.binding, request.sessionId);
@@ -2462,13 +2501,13 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
     return replay;
   }
 
-  if (operationValue !== undefined || readJson(input.db, stateKey) !== undefined) {
+  if (operationValue !== undefined || readMetadata(stateKey) !== undefined) {
     throw new SqliteWorkspaceAuthorityError(
       'idempotency_conflict',
       'Initial Controller target already has authority state.',
     );
   }
-  if (readJson(input.db, recoveryKey) !== undefined) {
+  if (readMetadata(recoveryKey) !== undefined) {
     throw new SqliteWorkspaceAuthorityError(
       'idempotency_conflict',
       'Initial Controller target already has recovery state.',
@@ -2487,8 +2526,8 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
     resumeCapabilityExpiresAtMs: request.resumeExpiresAtMs,
     updatedAt: timestamp,
   };
-  writeJson(input.db, stateKey, next);
-  writeJson(input.db, recoveryKey, {
+  writeMetadata(stateKey, next);
+  writeMetadata(recoveryKey, {
     schema: SQLITE_WORKSPACE_RECOVERY_STATE_SCHEMA,
     sessionId: request.sessionId,
     layoutGeneration: input.binding.layoutGeneration,
@@ -2518,7 +2557,7 @@ export function createSqliteWorkspaceInitialControllerTransaction(input: {
     workerScopeId: input.binding.workerScopeId,
     workspaceIdentityDigest: input.binding.workspaceIdentityDigest,
   };
-  writeJson(input.db, operationKey, receipt);
+  writeMetadata(operationKey, receipt);
   return operationResult(receipt, next, false);
 }
 

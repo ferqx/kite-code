@@ -105,21 +105,6 @@ describe('production Coordinator composition', () => {
     expect(source).toContain('registry.stopWebGateway(instanceId);');
   });
 
-  test('release Coordinator entrypoint injects the production factory explicitly', () => {
-    const entrypoint = readFileSync(
-      join(import.meta.dir, '../../../../scripts/release/entrypoints/coordinator.ts'),
-      'utf8',
-    );
-
-    expect(entrypoint).toContain(
-      "import { createProductionKiteCoordinatorComposition } from '../../../apps/kite-service/src/coordinator/production';",
-    );
-    expect(entrypoint).toContain(
-      'await runKiteCoordinatorMain(process.argv.slice(2), {\n  environment: process.env,\n  createComposition: createProductionKiteCoordinatorComposition,\n});',
-    );
-    expect(entrypoint).not.toContain('runKiteServiceMain');
-  });
-
   test('folds authenticated Worker outbox pages into Catalog and registry with cursor CAS', async () => {
     const sessions: CoordinatorSessionMetadata[] = [];
     const cursors = new Map<string, string>();

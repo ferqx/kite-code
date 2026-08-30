@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-30（Runtime Run Store完成KRSRUN-01B Host atomic lifecycle/resource replay/private query）
+最后更新：2026-08-30（激活Kite Home单一化方案：单Service、单SQLite、DB-backed typed Artifact与最小OS runtime）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-30-kite-home-and-local-runtime-simplification.md`](2026-08-30-kite-home-and-local-runtime-simplification.md) | active | P0 | ADR-0152/0153、State 27 / Store 8与当前Runtime/Controller/effect/Artifact/Web authority | 替代多companion、Catalog+Workspace DB、generation sidecar与filesystem Artifact；保留typed schema、Observer-only Web和durable recovery语义 | 单Service、单`kite.sqlite`、专用Artifact表、最小OS runtime、离线clean cutover与三平台qualification |
 | [`2026-08-29-kite-agent-server-api-v1.md`](2026-08-29-kite-agent-server-api-v1.md) | active | P1 | ADR-0149/0150、KRSV1/KCWW 与当前 Runtime/Store/Controller/Web authority | 在 private Runtime Protocol 之上新增 stable local REST/SSE façade；不开放 remote、Browser mutation、public `/rpc` 或第二 Runtime/Store | KASAPI-00A～02D与KRSRUN-01A～03A已完成；Store 8 production cutover已闭合。当前进入KRSRUN-03B current/release handoff；Public Run mutation与`runs`capability继续blocked |
 | [`2026-08-29-kite-runtime-run-store-v1.md`](2026-08-29-kite-runtime-run-store-v1.md) | active | P1 | ADR-0150、KASAPI-00C/02D、Store 8 current authority | KASAPI-03A子计划：State 27 / Store 8 canonical Run index、receipt resource result、coverage boundary与offline generation migration | KRSRUN-00A～03A已完成；当前执行03B current authority/release handoff。migration不回填历史Run，production Worker不fallback Store 7且Public capability关闭 |
 | [`2026-08-28-kite-coordinator-workspace-worker-web-v1.md`](2026-08-28-kite-coordinator-workspace-worker-web-v1.md) | active | P1 | KLSV1/KRSV1、ADR-0147/0148、当前 Runtime/Store/Workspace Trust/Release/TUI authority | Coordinator control plane、per-Workspace Store7 Worker/Controller/effect authority、atomic Session create、默认 CLI/TUI cutover与永久只读 Web Observer/Gateway 已实现；macOS arm64 installed candidate smoke通过 | KCWW-01～08实现与本地Gate已闭合；Web无任何mutation/Controller surface。Linux/Windows hosted process/filesystem/release qualification仍待远端证据，不能用本机结果替代 |
