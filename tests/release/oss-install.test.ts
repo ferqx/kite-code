@@ -191,6 +191,7 @@ describe('managed candidate install lifecycle', () => {
 
   test('switches the active pointer while ordinary Service stop is busy', async () => {
     const target = currentOssReleaseTarget();
+    const suffix = target.executableSuffix;
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-upgrade-busy-'));
     roots.push(parent);
     const stopLog = join(parent, 'stop-arguments.log');
@@ -201,18 +202,20 @@ describe('managed candidate install lifecycle', () => {
     const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
 
     const firstPayload = readFileSync(
-      join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', 'kite'),
+      join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', `kite${suffix}`),
     );
-    const stableLauncher = readFileSync(join(prefix, 'bin', 'kite'));
+    const stableLauncher = readFileSync(join(prefix, 'bin', `kite${suffix}`));
     const secondMarker = await installOssCandidate({ archivePath: second.archivePath, prefix });
     expect(secondMarker.currentCandidateId).not.toBe(firstMarker.currentCandidateId);
     expect(readFileSync(join(prefix, 'active'), 'utf8')).toBe(
       `${secondMarker.currentCandidateId}\n`,
     );
     expect(
-      readFileSync(join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', 'kite')),
+      readFileSync(
+        join(prefix, 'releases', firstMarker.currentCandidateId, 'bin', `kite${suffix}`),
+      ),
     ).toEqual(firstPayload);
-    expect(readFileSync(join(prefix, 'bin', 'kite'))).toEqual(stableLauncher);
+    expect(readFileSync(join(prefix, 'bin', `kite${suffix}`))).toEqual(stableLauncher);
     expect(readdirSync(join(prefix, 'releases'))).toHaveLength(2);
     expect(existsSync(stopLog)).toBe(false);
   });
