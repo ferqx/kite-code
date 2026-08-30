@@ -190,18 +190,31 @@ async function signalExactFixtureProcess(
     throw new Error(`${label} fixture process identity is uncertain; refusing cleanup signal.`);
   }
   process.kill(pid, 'SIGTERM');
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  if (await waitForExactFixtureProcessExit(pid, expectedStartIdentity, 100)) return;
+  const beforeForce = await readCoordinatorProcessStartIdentity(pid, process.platform);
+  if (beforeForce !== expectedStartIdentity) return;
+  process.kill(pid, 'SIGKILL');
+  if (await waitForExactFixtureProcessExit(pid, expectedStartIdentity, 100)) return;
+  throw new Error(`${label} fixture process did not stop within the cleanup deadline.`);
+}
+
+async function waitForExactFixtureProcessExit(
+  pid: number,
+  expectedStartIdentity: string,
+  attempts: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
     try {
       process.kill(pid, 0);
     } catch (error) {
-      if (isNativeError(error, 'ESRCH')) return;
+      if (isNativeError(error, 'ESRCH')) return true;
       throw error;
     }
     const current = await readCoordinatorProcessStartIdentity(pid, process.platform);
-    if (current !== expectedStartIdentity) return;
+    if (current !== expectedStartIdentity) return true;
   }
-  throw new Error(`${label} fixture process did not stop within the cleanup deadline.`);
+  return false;
 }
 
 function isNativeError(error: unknown, code: string): boolean {
