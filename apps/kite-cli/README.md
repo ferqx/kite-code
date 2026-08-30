@@ -28,7 +28,13 @@ entrypoint 的默认 TUI、`run` 与 `resume` 经 Local Coordinator 定位 canon
   退出前按 exact Session projection确认Controller disposition：idle且无pending interaction时release，active/pending或query不确定时
   detach；Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
 - 连续普通prompt使用client-local FIFO；terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
-  前一轮尚在finally的waiter不能遮蔽后继轮，也不能清除后继轮的presentation flush责任。
+  每轮只有applied receipt后才登记accepted completion identity，并启动2秒后、至多每2秒一次的bounded query fallback；它只在projection满足
+  当前revision floor且权威idle时收敛current run，弥补terminal/idle notification gap，迟到waiter/finally不能清除后继轮状态。Ink flush只作展示屏障：
+  正常等待真实commit，但最多1秒；UI promise迟到或失败不能停止canonical subscription、后续answer/terminal或下一条prompt。
+- run promise只接受跨过当前command revision floor、且与receipt canonical `runId`一致的`run.terminal|run.failure`；`turn.terminal`
+  与`task.terminal`只参与展示。上一轮迟到的Turn/Task终态不能结束刚applied的后继Run。
+- 普通模型正文仍只按完整Markdown组件发布；未到段落边界的cumulative text保存在request-scoped隐藏buffer。`model.responded`
+  可以省略optional summary，reducer必须用已接收buffer收口最后一段，不能把合法回答清成空白。
 
 ## 不拥有职责
 

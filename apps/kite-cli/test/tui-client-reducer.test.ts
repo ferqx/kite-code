@@ -743,6 +743,35 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(textBlocks.every((block) => block.streaming !== true)).toBe(true);
   });
 
+  test('commits a buffered ordinary paragraph when terminal summary is omitted', () => {
+    const requestId = 'request-terminal-without-summary';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    };
+
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({ type: 'model.text_delta', requestId, text: 'Queued turn completed.' });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(0);
+
+    dispatch({
+      type: 'model.responded',
+      requestId,
+      messageId: 'message-terminal-without-summary',
+      toolCallCount: 0,
+    });
+
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: 'Queued turn completed.',
+        streaming: false,
+        modelRequestId: requestId,
+      }),
+    ]);
+    expect(state.currentModelTextSource).toBeUndefined();
+  });
+
   test('keeps one mutable structural component and commits it only when closed', () => {
     const requestId = 'request-structural-commit';
     let state = createInitialState();

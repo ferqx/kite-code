@@ -219,7 +219,27 @@ test('Native TUI facade completes an active run from an idle snapshot after a su
   await facade.dispose();
 });
 
-test('Native TUI facade gives each consecutive turn its own remote-idle waiter', async () => {
+test('Native TUI facade polls an accepted run when its Run terminal notification is absent', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.finishNextTurnWithoutRunTerminal();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await Promise.race([
+    facade.getRuntime(sessionId)!.runTask('recover terminal notification gap', {
+      dispatch: () => {},
+    }),
+    Bun.sleep(3_500).then(() => {
+      throw new Error('Accepted Runtime turn did not recover from a terminal notification gap.');
+    }),
+  ]);
+
+  expect(remote.idleQueryRevisions).toContain(3);
+  await facade.dispose();
+});
+
+test('Native TUI facade hands a late idle query to the current accepted turn', async () => {
   const remote = new FakeRuntimeConnection();
   remote.overlapIdleWaitersOnConsecutiveTurns();
   const facade = facadeFor(remote);
@@ -230,12 +250,40 @@ test('Native TUI facade gives each consecutive turn its own remote-idle waiter',
   await session.runTask('first turn with delayed idle query', { dispatch: () => {} });
   await Promise.race([
     session.runTask('second turn after event-free idle', { dispatch: () => {} }),
-    Bun.sleep(500).then(() => {
-      throw new Error('Consecutive Runtime turn did not acquire its own idle waiter.');
+    Bun.sleep(1_000).then(() => {
+      throw new Error(
+        `The current accepted Runtime turn did not consume authoritative idle: ${remote.idleQueryRevisions.join(',')}`,
+      );
     }),
   ]);
 
   expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+  expect(remote.idleQueryRevisions).toContain(7);
+  await facade.dispose();
+});
+
+test('Native TUI facade bounds a stalled Ink flush without blocking later answer events', async () => {
+  const remote = new FakeRuntimeConnection();
+  const facade = facadeFor(remote, {
+    flushPresentation: () => new Promise<void>(() => undefined),
+  });
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const events: string[] = [];
+
+  await Promise.race([
+    facade.getRuntime(sessionId)!.runTask('answer after stalled presentation flush', {
+      dispatch: (action) => {
+        if (action.type === 'RUNTIME_EVENT') events.push(action.event.type);
+      },
+    }),
+    Bun.sleep(3_000).then(() => {
+      throw new Error('A stalled Ink flush blocked Runtime subscription consumption.');
+    }),
+  ]);
+
+  expect(events.indexOf('reasoning.activity')).toBeLessThan(events.indexOf('model.text_delta'));
+  expect(events).toContain('run.terminal');
   await facade.dispose();
 });
 
@@ -418,6 +466,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly startTurnExpectedRevisions: number[] = [];
   readonly startTurnCommandIds: string[] = [];
   readonly deferredTurnDeliveryOrder: string[] = [];
+  readonly idleQueryRevisions: number[] = [];
   closeCalls = 0;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
@@ -435,8 +484,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #advanceRevisionOnEveryStart = false;
   #deferNextStartTurnReceipt = false;
   #overlapIdleWaiters = false;
+  #omitSecondTerminalNotification = false;
+  #terminalGapOnNextTurn = false;
   #delayedIdleQueries = 0;
   #startTurnOrdinal = 0;
+  #currentRunId = 'run-0';
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -482,7 +534,12 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   overlapIdleWaitersOnConsecutiveTurns(): void {
     this.#overlapIdleWaiters = true;
+    this.#omitSecondTerminalNotification = true;
     this.#delayedIdleQueries = 1;
+  }
+
+  finishNextTurnWithoutRunTerminal(): void {
+    this.#terminalGapOnNextTurn = true;
   }
 
   #emitApproval(sessionId: string): void {
@@ -546,23 +603,28 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       if (message.method === 'runtime/query') {
         const query = message.params.query;
         if (query.type === 'get_session_projection') {
+          const respond = () => {
+            const session = this.#overlapIdleWaiters
+              ? idleProjection(query.sessionId, this.#authoritativeRevision)
+              : this.#restoreActiveTurn && !this.#restoredTurnReleased
+                ? projection(query.sessionId, 1, 'running')
+                : idleProjection(query.sessionId, Math.max(2, this.#authoritativeRevision));
+            this.idleQueryRevisions.push(session.revision);
+            this.push(
+              result(message.id, {
+                status: 'ok',
+                queryType: query.type,
+                revision: session.revision,
+                session,
+              }),
+            );
+          };
           if (this.#delayedIdleQueries > 0) {
             this.#delayedIdleQueries -= 1;
-            await Bun.sleep(50);
+            setTimeout(respond, 200);
+          } else {
+            respond();
           }
-          const session = this.#overlapIdleWaiters
-            ? idleProjection(query.sessionId, this.#authoritativeRevision)
-            : this.#restoreActiveTurn && !this.#restoredTurnReleased
-              ? projection(query.sessionId, 1, 'running')
-              : idleProjection(query.sessionId, 2);
-          this.push(
-            result(message.id, {
-              status: 'ok',
-              queryType: query.type,
-              revision: session.revision,
-              session,
-            }),
-          );
         }
         return;
       }
@@ -690,7 +752,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             sessionId: command.sessionId,
             revision: command.expectedRevision + 2,
             session: projection(command.sessionId, command.expectedRevision + 2, 'completed'),
-            event: { type: 'run.terminal', runId: 'run-approval', status: 'completed' },
+            event: { type: 'run.terminal', runId: this.#currentRunId, status: 'completed' },
           }),
         );
         this.#authoritativeRevision = command.expectedRevision + 2;
@@ -698,6 +760,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       }
       if (command.type === 'start_turn') {
         this.#startTurnOrdinal += 1;
+        this.#currentRunId = `run-${this.#startTurnOrdinal}`;
         this.startTurnExpectedRevisions.push(command.expectedRevision);
         this.startTurnCommandIds.push(command.commandId);
         if (this.#nextStartTurnConflictRevision !== undefined) {
@@ -737,6 +800,19 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           commandId: command.commandId,
           sessionId: command.sessionId,
           revision: acceptedRevision,
+          resource: {
+            kind: 'run',
+            run: {
+              schema: 'kite.runtime-run.v1',
+              sessionId: command.sessionId,
+              runId: this.#currentRunId,
+              phase: command.phase ?? 'building',
+              status: 'queued',
+              createdRevision: acceptedRevision,
+              lastRevision: acceptedRevision,
+              createdAtMs: acceptedRevision,
+            },
+          },
         });
         if (!deferReceipt) this.push(commandReceipt);
         if (this.#approvalOnNextTurn) {
@@ -840,7 +916,11 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
               sessionId: command.sessionId,
               revision: terminalRevision,
               session: idleProjection(command.sessionId, terminalRevision),
-              event: { type: 'run.terminal', runId: 'run-after-stale', status: 'completed' },
+              event: {
+                type: 'run.terminal',
+                runId: this.#currentRunId,
+                status: 'completed',
+              },
             }),
           );
           return;
@@ -916,20 +996,49 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           }),
         );
         if (deferReceipt) this.deferredTurnDeliveryOrder.push('terminal_projection');
-        this.push(
-          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
-            type: 'notification',
-            durability: 'durable',
-            sessionId: command.sessionId,
-            revision: terminalRevision,
-            session: projection(
-              command.sessionId,
-              terminalRevision,
-              this.#overlapIdleWaiters ? 'running' : 'completed',
-            ),
-            event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
-          }),
-        );
+        const omitRunTerminal =
+          this.#terminalGapOnNextTurn ||
+          (this.#omitSecondTerminalNotification && this.#startTurnOrdinal === 2);
+        this.#terminalGapOnNextTurn = false;
+        if (!omitRunTerminal) {
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: terminalRevision,
+              session: projection(
+                command.sessionId,
+                terminalRevision,
+                this.#overlapIdleWaiters ? 'running' : 'completed',
+              ),
+              event: {
+                type: 'run.terminal',
+                runId: this.#currentRunId,
+                status: 'completed',
+              },
+            }),
+          );
+        } else {
+          this.push(
+            subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+              type: 'notification',
+              durability: 'durable',
+              sessionId: command.sessionId,
+              revision: terminalRevision,
+              session: projection(
+                command.sessionId,
+                terminalRevision,
+                this.#overlapIdleWaiters ? 'running' : 'completed',
+              ),
+              event: {
+                type: 'turn.terminal',
+                turnId: this.#overlapIdleWaiters ? 'run-1' : this.#currentRunId,
+                status: 'completed',
+              },
+            }),
+          );
+        }
         if (deferReceipt) {
           this.deferredTurnDeliveryOrder.push('command_receipt');
           this.push(commandReceipt);
@@ -938,15 +1047,17 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           const idleRevision = terminalRevision + 1;
           this.#authoritativeRevision = idleRevision;
           if (this.#startTurnOrdinal === 1) {
-            this.push(
-              subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
-                type: 'notification',
-                durability: 'durable',
-                sessionId: command.sessionId,
-                revision: idleRevision,
-                session: idleProjection(command.sessionId, idleRevision),
-              }),
-            );
+            setTimeout(() => {
+              this.push(
+                subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+                  type: 'notification',
+                  durability: 'durable',
+                  sessionId: command.sessionId,
+                  revision: idleRevision,
+                  session: idleProjection(command.sessionId, idleRevision),
+                }),
+              );
+            }, 10);
           }
         } else {
           this.#authoritativeRevision = terminalRevision;
@@ -1100,6 +1211,7 @@ function facadeFor(
     readonly controller?: WorkerControllerClient;
     readonly onConnect?: () => void;
     readonly onReconnect?: () => void;
+    readonly flushPresentation?: () => Promise<void>;
   } = {},
 ) {
   const runtime = new RuntimeClient({
@@ -1140,6 +1252,9 @@ function facadeFor(
   return createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
+    ...(options.flushPresentation === undefined
+      ? {}
+      : { flushPresentation: options.flushPresentation }),
   });
 }
 

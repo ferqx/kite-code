@@ -51,7 +51,7 @@ uncertain/corrupt refusal、Coordinator stop/status 与 acquire 之间的并发 
 | aggregate implementation suite | 3403 pass / 4 skip | 并行资源争用导致 2 个环境性失败；相关 Coordinator fd/readiness 与 POSIX supervisor 文件串行复跑为 22 pass / 1 skip / 0 fail |
 | runtime fault | 36 pass / 0 fail | `bun run test:runtime:fault` |
 | runtime CI-profile soak | 7/7 passed | canonical report digest `sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`；不是 formal qualification |
-| release tests | 210 pass / 0 fail | 包含 source entrypoint、manager 与 maintenance composition |
+| release tests | 211 pass / 0 fail | 包含 source entrypoint、manager、maintenance composition与Windows fixture复用边界 |
 | final focused regression | 38 pass / 0 fail | migration、Coordinator client/control plane/carrier 与 Service composition |
 | TUI system | shards 0/4、1/4、2/4、3/4 passed | 首次配置、Store5隔离、连续rewind、Controller clean-exit、Session restart与Shell/Thought均通过 |
 | Web Gateway close race | 600 pass / 0 fail | `carrier.test.ts --rerun-each 50`；in-flight bootstrap不再被forced listener stop reset |
@@ -75,7 +75,12 @@ marker write-through，Windows虚拟磁盘仍会把生命周期测试拖过60秒
 后续两个独立Required首轮又在同一“当前轮运行时排队第二条消息”PTY场景复现：第二次模型请求已到达fixture，但回答未进入viewport。
 确定性Native client测试证明，第一轮terminal携带active projection时建立的idle waiter可在event-free idle已结束第一轮后仍处于finally；
 旧实现只保存一个session级Promise，因而第二轮terminal无法建立自己的query waiter，run promise与Ink flush一起悬挂。当前实现把waiter绑定
-每轮`resolveRun` identity，只有自己的finally可清理该identity；CI环境排队场景本地重复30次、first-run清理场景30项均通过。
+每轮`resolveRun` identity，只有自己的finally可清理该identity。后续hosted与本地负载复现又证明还需覆盖successor terminal notification gap：
+applied receipt后登记current accepted completion；每个accepted run另以2秒后、至多每2秒一次的bounded query fallback覆盖terminal/idle notification
+同时缺失，只有projection满足current revision floor且权威idle才可收敛，未applied的新run不能被旧idle误结束。同时普通无换行delta进入
+request-scoped cumulative buffer，terminal合法省略optional summary时仍收口尾段；Ink flush等待有1秒上限，presentation promise不能停止
+canonical subscription。最终PTY诊断进一步确认旧实现会用前轮迟到的`turn.terminal`提前解决后继run promise；当前只接受跨过current
+command floor且匹配receipt canonical `runId`的`run.terminal|run.failure`，Task/Turn终态不再拥有run completion。
 
 本轮其余问题已分别收敛为：Gateway graceful stop刷完已生成response；Host query snapshot经
 NotificationProjector hydrate pending subscriber；默认Worker保持Store5 source不可见；Worker用lazy Workspace template在first-run完成后才

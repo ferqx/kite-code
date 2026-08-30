@@ -9,6 +9,9 @@ import {
   writeOssCandidateArchive,
 } from '../../../scripts/release/oss-candidate';
 
+let cachedWindowsLauncher: Promise<Uint8Array> | undefined;
+const cachedWindowsCli = new Map<'applied' | 'service_busy', Promise<Uint8Array>>();
+
 export async function createOssCandidateFixture(
   version: string,
   target: OssReleaseTarget = currentOssReleaseTarget(),
@@ -99,19 +102,13 @@ async function fixtureLauncherBytes(root: string, target: OssReleaseTarget): Pro
       '#!/bin/sh\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\ncandidate=$(cat "$root/active")\nexec "$root/releases/$candidate/bin/$(basename -- "$0")" "$@"\n',
     );
   }
-  const entrypoint = join(root, 'fixture-launcher.ts');
-  const executable = join(root, 'fixture-launcher.exe');
-  writeFileSync(
-    entrypoint,
-    `const fs = require('node:fs');\nconst path = require('node:path');\nconst root = path.dirname(path.dirname(process.execPath));\nconst candidate = fs.readFileSync(path.join(root, 'active'), 'utf8').trim();\nconst name = path.basename(process.execPath);\nconst child = Bun.spawn([path.join(root, 'releases', candidate, 'bin', name), ...process.argv.slice(2)], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });\nprocess.exitCode = await child.exited;\n`,
-  );
-  const built = await Bun.build({
-    entrypoints: [entrypoint],
-    compile: { outfile: executable, autoloadDotenv: false, autoloadBunfig: false },
-    minify: true,
-  });
-  if (!built.success) throw new Error('Windows release fixture launcher compilation failed.');
-  return new Uint8Array(readFileSync(executable));
+  cachedWindowsLauncher ??= compileWindowsFixtureLauncher(root);
+  try {
+    return new Uint8Array(await cachedWindowsLauncher);
+  } catch (error) {
+    cachedWindowsLauncher = undefined;
+    throw error;
+  }
 }
 
 async function fixtureCliBytes(
@@ -131,6 +128,40 @@ async function fixtureCliBytes(
     return bytes(script.replace('#!/bin/sh\n', `#!/bin/sh\n${recordArguments}`));
   }
 
+  if (!argumentLogPath) {
+    const cached = cachedWindowsCli.get(stopOutcome) ?? compileWindowsFixtureCli(root, stopOutcome);
+    cachedWindowsCli.set(stopOutcome, cached);
+    try {
+      return new Uint8Array(await cached);
+    } catch (error) {
+      if (cachedWindowsCli.get(stopOutcome) === cached) cachedWindowsCli.delete(stopOutcome);
+      throw error;
+    }
+  }
+  return compileWindowsFixtureCli(root, stopOutcome, argumentLogPath);
+}
+
+async function compileWindowsFixtureLauncher(root: string): Promise<Uint8Array> {
+  const entrypoint = join(root, 'fixture-launcher.ts');
+  const executable = join(root, 'fixture-launcher.exe');
+  writeFileSync(
+    entrypoint,
+    `const fs = require('node:fs');\nconst path = require('node:path');\nconst root = path.dirname(path.dirname(process.execPath));\nconst candidate = fs.readFileSync(path.join(root, 'active'), 'utf8').trim();\nconst name = path.basename(process.execPath);\nconst child = Bun.spawn([path.join(root, 'releases', candidate, 'bin', name), ...process.argv.slice(2)], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });\nprocess.exitCode = await child.exited;\n`,
+  );
+  const built = await Bun.build({
+    entrypoints: [entrypoint],
+    compile: { outfile: executable, autoloadDotenv: false, autoloadBunfig: false },
+    minify: true,
+  });
+  if (!built.success) throw new Error('Windows release fixture launcher compilation failed.');
+  return new Uint8Array(readFileSync(executable));
+}
+
+async function compileWindowsFixtureCli(
+  root: string,
+  stopOutcome: 'applied' | 'service_busy',
+  argumentLogPath?: string,
+): Promise<Uint8Array> {
   const entrypoint = join(root, 'fixture-cli.ts');
   const executable = join(root, 'fixture-kite.exe');
   writeFileSync(

@@ -66,7 +66,10 @@ Service-owned presentation frame在closed projector前统一合并累计reasonin
 legacy Session seam与concrete Service bridge共享该实现，
 因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。interaction/cancel/close/shutdown等旁路durable
 publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
-后续client event，不能让terminal先结算后再补一个独立Thought。
+后续client event，不能让terminal先结算后再补一个独立Thought。该presentation-only等待最多1秒；正常路径仍以真实commit为准，
+但UI promise迟到或失败不能取得subscription、Runtime terminal或prompt FIFO authority。
+Native run completion只由跨过current command revision floor且匹配receipt canonical `runId`的`run.terminal|run.failure`拥有；
+Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 

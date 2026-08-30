@@ -51,7 +51,7 @@ KRSRUN-03B focused evidence增加formal maintenance CLI parser/blocked exit、Co
 empty process-chain Store 7→8 end-to-end command、持锁后Coordinator absence复核及State convergence negatives。正式入口不接收caller-supplied zero barrier；Gateway/Worker
 state残留、busy activity、PID/start-token/control uncertainty、unknown external effect或source deep-validation失败均保持blocked。当前本机结果仍只
 是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
-`sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 210、最终focused 38及
+`sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 211、最终focused 38及
 candidate `af43f919f756c276fb945834`已通过；完整边界见
 [03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
 macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
@@ -60,6 +60,12 @@ macOS/Linux/Windows command/candidate结果未登记前，三平台qualification
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
 远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。terminal先于idle projection时，
 每轮remote-idle waiter必须绑定该轮completion callback；前轮waiter的迟到finally不能遮蔽后继轮terminal/query或其presentation flush。
+只有applied receipt后才能登记current accepted completion；每轮2秒后、至多每2秒一次的bounded query fallback只在projection满足
+current revision floor且权威idle时收敛它，使terminal/idle notification gap不依赖下一条subscription event。
+Ink flush是非权威展示屏障，正常等待真实commit但最多1秒；迟到/失败不能停止subscription消费answer/terminal，也不能阻塞后继prompt。
+模型terminal可以省略optional summary；qualification必须覆盖无换行ordinary delta由request-scoped cumulative buffer收口，不能丢失尾段。
+run promise只接受跨过current command floor且匹配canonical receipt `runId`的`run.terminal|run.failure`；`turn.terminal`、`task.terminal`
+与previous Run的迟到终态不能结束successor。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
 失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live

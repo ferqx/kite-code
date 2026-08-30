@@ -46,6 +46,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         ...next,
         currentModelRequestId: event.requestId,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningSegmentId: undefined,
@@ -210,6 +211,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         exited: true,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningRequestId: undefined,
@@ -606,7 +608,7 @@ function reconcileStreamedModelText(
 ): TuiState {
   let next = removeStreamingModelComponent(state, event.requestId);
   const rendered = modelTextBlocks(next, event.requestId).map((block) => block.content);
-  const summary = event.summary;
+  const summary = event.summary ?? state.currentModelTextSource;
   if (summary === undefined || !/\S/u.test(summary)) return next;
   const joined = rendered.join('');
   if (joined === summary || rendered.join('\n') === summary) return next;
@@ -748,15 +750,16 @@ function projectModelTextDelta(
     // the durable terminal remains the authoritative reconciliation point.
     return streamed;
   }
+  const accepted = { ...streamed, currentModelTextSource: event.text };
   const unpublishedSource = event.text.slice(renderedSource.length);
-  if (unpublishedSource.length === 0) return streamed;
+  if (unpublishedSource.length === 0) return accepted;
   const { committed, live } = splitStreamingMarkdown(unpublishedSource);
 
   if (!committed) {
-    if (!live) return streamed;
+    if (!live) return accepted;
     return {
       ...showStreamingModelComponent(
-        awaitSafeThoughtTerminal(streamed),
+        awaitSafeThoughtTerminal(accepted),
         event.requestId,
         unpublishedSource,
         live,
@@ -765,7 +768,7 @@ function projectModelTextDelta(
     };
   }
 
-  const withoutLive = removeStreamingModelComponent(streamed, event.requestId);
+  const withoutLive = removeStreamingModelComponent(accepted, event.requestId);
   const prepared = prepareThoughtForCommittedText(withoutLive, event.requestId);
   const next = appendBlock(prepared.state, {
     id: prepared.state.nextBlockId,
@@ -851,8 +854,13 @@ function clearCompletedModelState(state: TuiState, requestId: string): TuiState 
   return {
     ...state,
     thoughtPhaseStatus: undefined,
-    currentModelTextStreamed: undefined,
-    ...(ownsCurrentRequest ? { currentModelRequestId: undefined } : {}),
+    ...(ownsCurrentRequest
+      ? {
+          currentModelRequestId: undefined,
+          currentModelTextStreamed: undefined,
+          currentModelTextSource: undefined,
+        }
+      : {}),
     ...(state.toolBearingModelRequestId === requestId
       ? { toolBearingModelRequestId: undefined, toolBearingPresentationGroupId: undefined }
       : {}),
@@ -893,6 +901,7 @@ function projectModelResponded(
         ...settled,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: event.requestId,
         toolBearingPresentationGroupId: event.messageId,
         thoughtPhaseStatus: 'running',
@@ -1021,6 +1030,7 @@ function settleUserCancelledTerminal(state: TuiState): TuiState {
     exited: false,
     currentModelRequestId: undefined,
     currentModelTextStreamed: undefined,
+    currentModelTextSource: undefined,
     toolBearingModelRequestId: undefined,
     toolBearingPresentationGroupId: undefined,
     currentModelReasoningSegmentId: undefined,
@@ -1071,6 +1081,7 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
         exited: true,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
       }

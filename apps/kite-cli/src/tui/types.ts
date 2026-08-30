@@ -353,6 +353,9 @@ export interface TuiState {
   /** The current invocation emitted cumulative text deltas. The visible tree
    *  may still be empty while an incomplete paragraph remains buffered. */
   currentModelTextStreamed?: boolean;
+  /** Latest accepted cumulative model text. It closes an incomplete ordinary
+   *  paragraph when the terminal event legitimately omits its optional summary. */
+  currentModelTextSource?: string;
   /** Most recently settled tool-bearing invocation. Delayed cumulative text
    *  remains correlated to its sibling response components without becoming
    *  a Thought caption. */

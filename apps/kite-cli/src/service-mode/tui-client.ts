@@ -43,6 +43,9 @@ import {
 const CANCEL_RETRY_LIMIT = 8;
 const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
 const CONTROLLER_DISPOSITION_DEADLINE_MS = 1_000;
+const PRESENTATION_FLUSH_DEADLINE_MS = 1_000;
+const RUN_IDLE_QUERY_INITIAL_DELAY_MS = 2_000;
+const RUN_IDLE_QUERY_MAX_DELAY_MS = 2_000;
 
 interface NativeSessionRecord {
   readonly threadId: string;
@@ -83,6 +86,10 @@ interface NativeSessionRecord {
   rejectReady: (error: unknown) => void;
   runPromise: Promise<void> | undefined;
   runIdleResolution: { readonly resolveRun: () => void } | undefined;
+  runAcceptedResolution:
+    | { readonly resolveRun: () => void; readonly rejectRun: (error: unknown) => void }
+    | undefined;
+  runAcceptedRunId: string | undefined;
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
   controllerLease: KiteServiceModeControllerLease | undefined;
@@ -291,6 +298,8 @@ class NativeTuiRuntimeClient {
       rejectReady,
       runPromise: undefined,
       runIdleResolution: undefined,
+      runAcceptedResolution: undefined,
+      runAcceptedRunId: undefined,
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
       controllerLease: undefined,
@@ -428,6 +437,7 @@ class NativeTuiRuntimeClient {
   ): Promise<void> {
     let event: RuntimeClientEvent | undefined;
     let reconcileSnapshot = false;
+    let authoritativeProjection = false;
     if (isRuntimeNotification(notification)) {
       if (notification.durability === 'ephemeral') {
         event = notification.event;
@@ -441,6 +451,7 @@ class NativeTuiRuntimeClient {
         }
         record.revision = Math.max(record.revision, notification.revision);
         if (authoritative) {
+          authoritativeProjection = true;
           record.agentLoopActive = isActiveWork(projection.activeWork);
           // The wire contract intentionally flattens both Host snapshots and
           // event-free durable projections to the same closed notification
@@ -468,9 +479,14 @@ class NativeTuiRuntimeClient {
       record.eventBuffer.push(event);
     }
     if (event.type === 'reasoning.activity' && event.state === 'completed') {
-      await this.#flushPresentation?.();
+      await this.#flushPresentationBounded();
     }
-    if (isTerminalEvent(event)) {
+    if (
+      isRunTerminalEvent(event) &&
+      authoritativeProjection &&
+      (record.runAcceptedRunId === undefined || record.runAcceptedRunId === event.runId)
+    ) {
+      record.runAcceptedRunId ??= event.runId;
       if (isActiveWork(record.projection?.activeWork)) {
         const resolveRun = record.resolveRun;
         if (resolveRun && record.runIdleResolution?.resolveRun !== resolveRun) {
@@ -537,13 +553,13 @@ class NativeTuiRuntimeClient {
   }
 
   async #resolveRunAfterRemoteIdle(record: NativeSessionRecord): Promise<void> {
-    const resolveRun = record.resolveRun;
-    const rejectRun = record.rejectRun;
     try {
       await this.#waitForRemoteIdle(record);
-      if (record.resolveRun === resolveRun) resolveRun?.();
+      const accepted = record.runAcceptedResolution;
+      if (accepted && record.resolveRun === accepted.resolveRun) accepted.resolveRun();
     } catch (error) {
-      if (record.rejectRun === rejectRun) rejectRun?.(error);
+      const accepted = record.runAcceptedResolution;
+      if (accepted && record.rejectRun === accepted.rejectRun) accepted.rejectRun(error);
     }
   }
 
@@ -678,6 +694,8 @@ class NativeTuiRuntimeClient {
       record.resolveRun = resolve;
       record.rejectRun = reject;
     });
+    record.runAcceptedResolution = undefined;
+    record.runAcceptedRunId = undefined;
     // `runTask()` is the public failure channel. A concurrent
     // waitForRunCompletion() must observe the same rejection, but the internal
     // completion Promise must not become an unhandled rejection when there is
@@ -721,7 +739,28 @@ class NativeTuiRuntimeClient {
       }
       if (!receipt) throw new Error('Runtime turn did not return a command receipt.');
       this.#assertApplied(receipt);
+      const receiptRunId =
+        (receipt.status === 'applied' || receipt.status === 'idempotent_replay') &&
+        receipt.resource?.kind === 'run'
+          ? receipt.resource.run.runId
+          : undefined;
+      if (
+        receiptRunId !== undefined &&
+        record.runAcceptedRunId !== undefined &&
+        record.runAcceptedRunId !== receiptRunId
+      ) {
+        throw new Error('Runtime turn receipt did not match its terminal Run identity.');
+      }
+      record.runAcceptedRunId = receiptRunId ?? record.runAcceptedRunId;
       this.#recordRevision(record, receipt);
+      if (record.resolveRun && record.rejectRun) {
+        const accepted = Object.freeze({
+          resolveRun: record.resolveRun,
+          rejectRun: record.rejectRun,
+        });
+        record.runAcceptedResolution = accepted;
+        void this.#watchAcceptedRunUntilRemoteIdle(record, accepted);
+      }
       record.runProjectionRevisionFloor =
         receipt.status === 'applied'
           ? receipt.revision
@@ -730,7 +769,7 @@ class NativeTuiRuntimeClient {
             : expectedRevision + 1;
       this.#syncSnapshot(record);
       await withDeadline(completion, RUN_WAIT_DEADLINE_MS, 'Runtime turn');
-      await this.#flushPresentation?.();
+      await this.#flushPresentationBounded();
     } catch (error) {
       record.rejectRun?.(error);
       throw error;
@@ -738,6 +777,8 @@ class NativeTuiRuntimeClient {
       record.resolveRun = undefined;
       record.rejectRun = undefined;
       record.runPromise = undefined;
+      record.runAcceptedResolution = undefined;
+      record.runAcceptedRunId = undefined;
       record.runProjectionRevisionFloor = undefined;
       record.agentLoopActive = false;
       record.reserved = false;
@@ -757,34 +798,84 @@ class NativeTuiRuntimeClient {
   async #waitForRemoteIdle(record: NativeSessionRecord): Promise<void> {
     const deadline = Date.now() + RUN_WAIT_DEADLINE_MS;
     while (!this.#closed && Date.now() < deadline) {
-      const result = await this.#runtime.query({
-        schema: RUNTIME_QUERY_SCHEMA_,
-        type: 'get_session_projection',
-        sessionId: record.threadId,
-      });
-      if (
-        result.status === 'ok' &&
-        result.queryType === 'get_session_projection' &&
-        result.session
-      ) {
-        const minimumRevision = Math.max(
-          record.revision,
-          record.runProjectionRevisionFloor ?? record.revision,
-        );
-        if (result.session.revision < minimumRevision) {
-          await Bun.sleep(25);
-          continue;
-        }
-        if (result.session.revision >= (record.projection?.revision ?? 0)) {
-          record.projection = result.session;
-        }
-        record.revision = Math.max(record.revision, result.session.revision);
-        record.agentLoopActive = isActiveWork(result.session.activeWork);
-        if (!record.agentLoopActive) return;
-      }
+      if (await this.#queryRemoteIdle(record)) return;
       await Bun.sleep(25);
     }
     throw new Error('Runtime execution did not reach its cleanup barrier.');
+  }
+
+  async #watchAcceptedRunUntilRemoteIdle(
+    record: NativeSessionRecord,
+    accepted: NonNullable<NativeSessionRecord['runAcceptedResolution']>,
+  ): Promise<void> {
+    let delayMs = RUN_IDLE_QUERY_INITIAL_DELAY_MS;
+    while (
+      !this.#closed &&
+      record.runAcceptedResolution === accepted &&
+      record.resolveRun === accepted.resolveRun
+    ) {
+      await Bun.sleep(delayMs);
+      if (
+        this.#closed ||
+        record.runAcceptedResolution !== accepted ||
+        record.resolveRun !== accepted.resolveRun
+      ) {
+        return;
+      }
+      try {
+        if (await this.#queryRemoteIdle(record)) {
+          if (
+            record.runAcceptedResolution === accepted &&
+            record.resolveRun === accepted.resolveRun
+          ) {
+            accepted.resolveRun();
+          }
+          return;
+        }
+      } catch {
+        // This is a subscription-gap fallback. A transient query failure does
+        // not replace the run's existing completion/deadline authority.
+      }
+      delayMs = Math.min(delayMs * 2, RUN_IDLE_QUERY_MAX_DELAY_MS);
+    }
+  }
+
+  async #queryRemoteIdle(record: NativeSessionRecord): Promise<boolean> {
+    const result = await this.#runtime.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId: record.threadId,
+    });
+    if (
+      result.status !== 'ok' ||
+      result.queryType !== 'get_session_projection' ||
+      !result.session
+    ) {
+      return false;
+    }
+    const minimumRevision = Math.max(
+      record.revision,
+      record.runProjectionRevisionFloor ?? record.revision,
+    );
+    if (result.session.revision < minimumRevision) return false;
+    if (result.session.revision >= (record.projection?.revision ?? 0)) {
+      record.projection = result.session;
+    }
+    record.revision = Math.max(record.revision, result.session.revision);
+    record.agentLoopActive = isActiveWork(result.session.activeWork);
+    return !record.agentLoopActive;
+  }
+
+  async #flushPresentationBounded(): Promise<void> {
+    const flushPresentation = this.#flushPresentation;
+    if (!flushPresentation) return;
+    const attempt = Promise.resolve()
+      .then(flushPresentation)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+    await Promise.race([attempt, Bun.sleep(PRESENTATION_FLUSH_DEADLINE_MS)]);
   }
 
   async #setInteractionMode(
@@ -1323,13 +1414,10 @@ function isActiveWork(
   );
 }
 
-function isTerminalEvent(event: RuntimeClientEvent): boolean {
-  return (
-    event.type === 'run.terminal' ||
-    event.type === 'turn.terminal' ||
-    event.type === 'task.terminal' ||
-    event.type === 'run.failure'
-  );
+function isRunTerminalEvent(
+  event: RuntimeClientEvent,
+): event is Extract<RuntimeClientEvent, { type: 'run.terminal' | 'run.failure' }> {
+  return event.type === 'run.terminal' || event.type === 'run.failure';
 }
 
 function isSettlingEvent(

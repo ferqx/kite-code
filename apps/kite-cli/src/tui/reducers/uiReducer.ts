@@ -187,6 +187,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningStreamed: false,
