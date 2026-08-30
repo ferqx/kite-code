@@ -169,7 +169,9 @@ flush 父目录；Windows launcher、active pointer与marker复用Builtin Filesy
 正确性前提，也不依赖Bun `fsync`。Windows locked-directory publication、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 Windows release contract fixture在同一Bun test进程内只编译一次byte-identical launcher及无argument-log的default CLI variant；
-需要嵌入不同argument-log path的CLI仍分别编译。该缓存只缩短fixture准备时间，不缓存安装结果，也不能替代后续真实native candidate build/smoke。
+hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native PE，避免把多份Bun standalone runtime重复写入每个fixture archive。
+没有`rustc`的独立Windows checkout保留功能等价的Bun fallback；需要嵌入不同argument-log path的CLI仍分别编译。该fixture优化不缓存安装
+结果、不改变production candidate内容，也不能替代后续真实native candidate build/smoke。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实
 Coordinator→Workspace Worker ensure/mint/handshake、installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uninstall。
