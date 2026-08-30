@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { verifyWindowsStatePath } from '../service/windows-state-security';
+import { secureWindowsStatePath, verifyWindowsStatePath } from '../service/windows-state-security';
 import { COORDINATOR_SESSION_METADATA_SCHEMA, type CoordinatorSessionMetadata } from './codecs';
 
 const CATALOG_SCHEMA_VERSION = 1;
@@ -111,6 +111,7 @@ export function copyCoordinatorCatalogGeneration(
     assertCatalogReadyForGenerationCopy(source, input.expectedWorkerScopeIds);
     writeFileSync(targetPath, source.serialize(), { flag: 'wx', mode: 0o600 });
     ownedTarget = readCatalogFileIdentity(targetPath);
+    secureWindowsStatePath(targetPath, 'file', { allowOwnerInitialization: true });
     target = new Database(targetPath, { strict: true });
     target.run('PRAGMA journal_mode = DELETE');
     target
@@ -207,7 +208,10 @@ export function openCoordinatorCatalog(
       create: storage.mode === 'initialize_target',
       strict: true,
     });
-    if (!existed) ownedTarget = readCatalogFileIdentity(catalogPath);
+    if (!existed) {
+      ownedTarget = readCatalogFileIdentity(catalogPath);
+      secureWindowsStatePath(catalogPath, 'file', { allowOwnerInitialization: true });
+    }
   } catch (error) {
     CLAIMED_CATALOGS.delete(catalogPath);
     throw error;
@@ -605,14 +609,22 @@ function validateCatalogStorageIdentity(storage: CoordinatorCatalogStorageIdenti
   if (!isAbsolute(storage.catalogPath) || resolve(storage.catalogPath) !== resolve(expected)) {
     throw new Error('Coordinator Catalog path is not the active layout identity.');
   }
-  for (const directory of [
+  const targetExists = catalogEntryExists(expected);
+  const directories = [
     storage.canonicalKiteHomeRoot,
     join(storage.canonicalKiteHomeRoot, 'layouts'),
     join(storage.canonicalKiteHomeRoot, 'layouts', storage.layoutGeneration),
-  ]) {
+  ] as const;
+  for (const [index, directory] of directories.entries()) {
+    if (storage.mode === 'initialize_target' && !targetExists && index > 0) {
+      // The offline layout owner has already created these fixed target directories. On
+      // Windows their inherited ACE is not itself protected, so verify the current owner before
+      // converting it to the same protected owner-only state used by every Native state owner.
+      secureWindowsStatePath(directory, 'directory');
+    }
     assertCatalogDirectory(directory);
   }
-  if (catalogEntryExists(expected)) {
+  if (targetExists) {
     assertCatalogPath(expected);
     const canonical = realpathSync.native(expected);
     if (canonical !== resolve(expected)) {

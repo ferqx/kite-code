@@ -52,8 +52,8 @@ jobs:
           bun run scripts/release/windows-runner-evidence.ts
           git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
-        name: Verify Windows Service state ACL and reparse boundary
-        run: bun test packages/kite-local-runtime/test/isolated/service-state.test.ts
+        name: Verify Windows state ACL, Catalog, and fresh layout boundary
+        run: bun test packages/kite-local-runtime/test/isolated/service-state.test.ts apps/kite-service/test/coordinator/catalog-builder.test.ts tests/release/local-layout-migration.test.ts
       - name: Release contract tests
         run: >-
           bun test
