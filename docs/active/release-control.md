@@ -25,7 +25,7 @@ browser与Desktop reference只作内部child或conformance，不能写成remote/
 本地candidate/composition evidence；当前macOS arm64的build/verify/install/CLI+TUI+Service+MCP wrapper/upgrade/
 rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 companion build/install/process
 matrix尚未取得，必须保持pending，不能以workflow定义、本地通过或artifact上传取代真实三平台结果；Windows
-ACL/write-through与非 Windows 本地环境的 no-follow 断言也不能互相替代。
+ACL/locked-directory atomic publication与非 Windows 本地环境的 no-follow 断言也不能互相替代。
 
 `scripts/release/local-layout-migration.ts`包含显式offline Store layout primitive，不属于normal build/install/start或自动upgrade。
 正式operator入口是`kite maintenance migrate-run-store --target-generation <fresh-generation> [--kite-home <absolute>]`，由
@@ -164,10 +164,9 @@ installer contract tests的临时Service home也必须由同一state owner primi
 
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；
 这些 independent asset identities 不等于三平台 process/runtime qualification。POSIX atomic rename 后会
-flush 父目录；Windows launcher与active pointer复用Builtin Filesystem的locked-directory ordinary atomic publish，最终marker才以
-`CreateFileW(FILE_FLAG_WRITE_THROUGH)`写入临时文件，再普通原子替换，形成每次install/upgrade/rollback唯一durability barrier。partial publish
-由marker、pointer、manifest/checksum交叉验证fail closed；release不逐文件调用hosted磁盘高延迟的`FlushFileBuffers`或write-through move，
-也不依赖Bun `fsync`。Windows directory write-through、ACL 与
+flush 父目录；Windows launcher、active pointer与marker复用Builtin Filesystem的locked-directory ordinary atomic publish。partial publish
+由marker、pointer、manifest/checksum交叉验证fail closed；release不把hosted虚拟磁盘高延迟的write-through或`FlushFileBuffers`作为安装
+正确性前提，也不依赖Bun `fsync`。Windows locked-directory publication、ACL 与
 三平台安装/运行 qualification 仍须对应 hosted/真实 Windows 证据，不能以本地 macOS 结果代替。
 
 `bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、fresh-home Run Store maintenance fail-closed、TUI version、真实

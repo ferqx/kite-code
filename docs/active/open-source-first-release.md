@@ -44,7 +44,7 @@ KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成�
 companion/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、
 CLI/TUI、Service/Coordinator/Worker/Gateway companion assets、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台
 dirty-source开发证据；真实
-Windows ACL/write-through与三平台 qualification 仍未取得。
+Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 
 ## 制品与安装
 
@@ -77,9 +77,9 @@ stop、确认 state absent 并取得 Native lifecycle fence；busy、unknown、�
 当前候选 manifest 的 `releaseSlots` 已绑定 CLI、TUI、Service、Coordinator、Worker、Gateway 与 Web entrypoint/identity；这些
 independent asset identities 不等于三平台 process/runtime qualification。Windows resolver 只接受 v2 marker、唯一 `active` regular-file
 pointer、immutable candidate 与 exact identity，并对 runner/marker/pointer/runtime 执行 no-follow 校验。POSIX rename
-后会 flush 父目录；Windows launcher与active pointer通过locked-directory ordinary atomic publish先落盘，最终marker执行每次操作唯一的
-write-through write后普通原子替换。partial publish会因marker/pointer/checksum不一致fail closed；installer不重复hosted磁盘的逐文件高延迟flush，
-也不依赖Bun `fsync`；其directory write-through、ACL 与
+后会 flush 父目录；Windows launcher、active pointer与marker统一通过locked-directory ordinary atomic publish落盘。partial publish会因
+marker/pointer/checksum不一致fail closed；installer不把hosted虚拟磁盘高延迟的write-through或`FlushFileBuffers`作为安装正确性前提，
+也不依赖Bun `fsync`；其locked-directory publication、ACL 与
 三平台安装/运行 qualification 仍须 hosted/真实证据，
 不能以本地结果代替。
 

@@ -421,9 +421,9 @@ function syncRegularFile(path: string): void {
 }
 
 function syncDirectory(path: string): void {
-  // Windows has no portable directory-fsync primitive in Node. The temporary
-  // regular file is still flushed before atomic rename; Windows write-through
-  // durability remains a platform qualification requirement.
+  // Windows release publication uses the locked-directory native primitive and
+  // validates marker/pointer/checksum consistency after each ordinary atomic
+  // publish. Node does not expose a portable directory-fsync primitive there.
   if (process.platform === 'win32') return;
   const descriptor = openSync(path, 'r');
   try {
@@ -523,6 +523,7 @@ function writeMarker(root: string, marker: InstallMarker): void {
       temporaryName: basename(temporary),
       content,
       flushFileBuffers: false,
+      writeThroughFile: false,
       writeThroughMove: false,
       beforePublish: () => {
         if (!existsSync(markerPath(root))) return;

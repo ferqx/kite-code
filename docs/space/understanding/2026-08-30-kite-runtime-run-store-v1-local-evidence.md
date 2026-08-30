@@ -67,10 +67,10 @@ release contract tests中因read-only file descriptor执行`fsync`返回`EPERM`�
 第二轮implementation head `8dd77d0d`的Required run `33280371984`在首轮单次TUI PTY排队场景失败后重跑成功；同一场景本地连续
 30次通过，因此未增加推测性Runtime状态。Candidate run `33280372007`的macOS/Linux完整通过，Windows已越过read-only `EPERM`，但
 write-capable Bun `fsync`对每个launcher约长阻塞10秒，使60秒测试超时并触发fixture cleanup级联失败。该run的artifact同样因后续source
-修复作废；installer改为复用Builtin Filesystem现有Windows native locked-directory/write-through publication，一次完成二进制launcher、
-active pointer与marker的locked-directory publication；launcher/pointer先普通原子发布，最终marker才形成一次write-through commit，partial
-publish由marker/pointer/checksum交叉验证fail closed。marker write-through write后只做普通原子替换，release不重复高延迟的逐文件flush/move，
-也不建立第二套Windows I/O owner。
+修复作废；installer改为复用Builtin Filesystem现有Windows native locked-directory publication，一次完成二进制launcher、active pointer与
+marker的ordinary atomic publish，partial publish由marker/pointer/checksum交叉验证fail closed。后续hosted结果证明即使每次操作只保留一个
+marker write-through，Windows虚拟磁盘仍会把生命周期测试拖过60秒，且该额外barrier并非计划要求、也未形成完整directory durability证明；
+因此release移除全部高延迟write-through/flush，只保留同一native primitive、no-follow与交叉校验，不建立第二套Windows I/O owner。
 
 后续两个独立Required首轮又在同一“当前轮运行时排队第二条消息”PTY场景复现：第二次模型请求已到达fixture，但回答未进入viewport。
 确定性Native client测试证明，第一轮terminal携带active projection时建立的idle waiter可在event-free idle已结束第一轮后仍处于finally；
