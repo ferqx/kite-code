@@ -74,6 +74,7 @@ export interface SingleServiceNativeClientCompositionOptions {
 
 export interface SingleServiceNativeClientComposition {
   readonly endpoint: KiteLocalRuntimeEndpoint;
+  readonly expectedBuildId: string;
   readonly client: KiteSingleServiceClient;
   readonly web: {
     readonly client: KiteSingleServiceClient;
@@ -89,6 +90,7 @@ export interface ManagedSingleServiceNativeCompositionOptions
   readonly env: Readonly<Record<string, string>>;
   readonly args?: readonly string[];
   readonly childStderr?: 'ignore' | 'inherit';
+  readonly canReplaceInstalledBuild?: () => boolean;
   readonly startupTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly fetch?: LocalRuntimeFetch;
@@ -142,6 +144,7 @@ export function createSingleServiceNativeClientComposition(
   });
   return Object.freeze({
     endpoint,
+    expectedBuildId: options.expectedBuildId,
     client,
     web: Object.freeze({ client, staticAssetRoot }),
     discoverWeb: async () => {
@@ -159,6 +162,16 @@ export function createManagedSingleServiceNativeComposition(
   const manager = createKiteSingleServiceManager({
     endpoint: base.endpoint,
     client: base.client,
+    clientForBuild: (buildId) =>
+      createKiteSingleServiceClient({
+        endpoint: base.endpoint,
+        expectedBuildId: buildId,
+        webContractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
+        ...(options.request ? { request: options.request } : {}),
+      }),
+    ...(options.canReplaceInstalledBuild
+      ? { canReplaceInstalledBuild: options.canReplaceInstalledBuild }
+      : {}),
     process: createKiteSingleServiceNativeProcessIdentityProbe(options.platform),
     spawn: createKiteSingleServiceNativeSpawnPort({
       executable: options.executable,
@@ -296,12 +309,13 @@ export function createManagedSingleServiceNativeComposition(
       });
       const connection = createLocalKiteConnection({
         manager: {
-          async ensure(options) {
+          async ensure(ensureOptions) {
             const previousServiceInstanceId = state.serviceInstanceId;
             const controllerRecovery = state.controllerBinding;
             const result = await manager.ensure({
-              ...(options?.clientContractRevision
-                ? { clientContractRevision: options.clientContractRevision }
+              executableMode: options.executable.mode,
+              ...(ensureOptions?.clientContractRevision
+                ? { clientContractRevision: ensureOptions.clientContractRevision }
                 : {}),
             });
             if (result.outcome !== 'applied' || result.state !== 'ready') return result;
@@ -437,6 +451,17 @@ export function createManagedLocalSingleServiceComposition(
           },
     cwd: runtimeParent,
     env,
+    ...(executableMode === 'installed'
+      ? {
+          canReplaceInstalledBuild: () => {
+            try {
+              return installedBuildIdentity(process.execPath) === expectedBuildId;
+            } catch {
+              return false;
+            }
+          },
+        }
+      : {}),
   });
 }
 

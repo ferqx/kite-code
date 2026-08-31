@@ -86,6 +86,8 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/rewind')).toEqual({ type: 'rewind' });
     expect(parseSlashCommand('/export')).toEqual({ type: 'export' });
     expect(parseSlashCommand('/context')).toEqual({ type: 'context' });
+    expect(parseSlashCommand('/status')).toEqual({ type: 'status' });
+    expect(parseSlashCommand('/status extra')).toEqual({ type: 'unknown', raw: '/status extra' });
   });
 
   // ── /clear ──

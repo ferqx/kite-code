@@ -271,7 +271,12 @@ export function createSingleServiceInfrastructure(
   ): Promise<KiteLocalNativeResponse> {
     if (
       request.expectedBuildId !== options.buildId &&
-      !(isDevelopmentBuild(options.buildId) && isDevelopmentBuild(request.expectedBuildId))
+      !(isDevelopmentBuild(options.buildId) && isDevelopmentBuild(request.expectedBuildId)) &&
+      !(
+        request.operation === 'service_stop' &&
+        isInstalledBuild(options.buildId) &&
+        isInstalledBuild(request.expectedBuildId)
+      )
     ) {
       return rejected(request.requestId, 'incompatible');
     }
@@ -365,6 +370,10 @@ export function createSingleServiceInfrastructure(
 
 function isDevelopmentBuild(buildId: string): boolean {
   return /^dev:[A-Za-z0-9:._-]+$/u.test(buildId);
+}
+
+function isInstalledBuild(buildId: string): boolean {
+  return /^[a-f0-9]{24}$/u.test(buildId);
 }
 
 function rejected(

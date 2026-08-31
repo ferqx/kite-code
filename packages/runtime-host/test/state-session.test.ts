@@ -260,6 +260,7 @@ describe('Runtime Host State session', () => {
     expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
 
     session.activateRun('run-1');
+    expect(f.acknowledgements).toEqual(['command_decision', 'attempt_start']);
     expect(f.runs.get('state-session-test\0run-1')).toMatchObject({
       status: 'running',
       startedAtMs: Date.parse(NOW),
@@ -294,6 +295,19 @@ describe('Runtime Host State session', () => {
       finishedAtMs: Date.parse(NOW),
       terminal: { reasonCode: 'cancelled', recoveryEntry: 'new_run' },
     });
+  });
+
+  test('keeps a queued Run unchanged when its activation transaction fails', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-1' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-1', phase: 'building' },
+    });
+    f.failCommit = true;
+
+    expect(() => session.activateRun('run-1')).toThrow('commit refused');
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
   });
 
   test('refines a recovered unknown Run only to a precise terminal without moving its finish clock', () => {

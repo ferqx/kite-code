@@ -26,7 +26,8 @@ History response达到1 MiB encoded上限时以last public ordinal提前分页�
 覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；Gateway restart仍由独立process/carrier suite证明且不代理`/v1`。
 
 KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和
-digest-bound original resource receipt；Run/receipt任一fault完整rollback。activation、waiting/running与terminal/cancel由deterministic
+digest-bound original resource receipt；Run/receipt任一fault完整rollback。queued到running的activation必须先提交`attempt_start` transaction，
+transaction失败保留queued且不进入publish/schedule；waiting/running与terminal/cancel由deterministic
 commit clock推进，Store writer拒绝同Session第二个active Run。response loss/restart retry从persistent lookup直接返回同一original
 queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
 Run keyset page，SQLite query plan命中专用index且不扫event journal。
@@ -93,7 +94,11 @@ identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain
 `incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
 与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 single-Service Native IPC v2对source开发作更窄的例外：protocol/client-contract exact且双方build identity均为`dev:`时允许build drift并
-复用resident owner；installed/candidate、source↔installed或Web semantic revision drift仍fail closed。该例外不授权cleanup、spawn或mutation replay。
+复用resident owner；installed/candidate普通request仍exact fail closed。POSIX manager用reservation中的上一installed build identity重新验证；
+Windows Service仅对exact contract和双方installed candidate identity的`service_stop`允许跨build。confirmed absent后才启动当前companion。
+manager还必须从managed marker/active pointer动态证明caller是current candidate，阻止退役client反向换代。该路径仅对明确未应用的
+`service_busy`重试；ambiguous stop只做exact状态查询，
+source↔installed、identity uncertainty与Web semantic revision drift仍阻断。source例外不授权cleanup、spawn或mutation replay。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待

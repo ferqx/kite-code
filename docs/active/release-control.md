@@ -129,7 +129,11 @@ root 的 previous candidate。uninstall 在删除前
 立即停止，不删除任何内容，也不扩大删除范围。
 
 upgrade/rollback 不停止、不 force-kill、也不删除仍在运行的旧 candidate；pointer 切换只影响后续新启动进程，
-并要求 target candidate 已完整校验。只有 destructive uninstall 才在删除前调用当前 candidate 的普通
+并要求 target candidate 已完整校验。切换后首次由新candidate启动的managed client负责内部收敛旧Service：它使用reservation绑定的旧build
+identity精确验证/stop旧owner，确认退出后启动当前companion；installer本身不取得该进程authority，也不要求用户手工结束旧进程。
+managed manager每次换代前重新读取marker/active pointer并要求caller build仍是current candidate；切换前已启动的旧CLI/TUI不能反向停止
+新Service或重新拉起旧companion。
+只有 destructive uninstall 才在删除前调用当前 candidate 的普通
 `kite service stop`、确认 `service status --json` 为 `applied + absent`，随后取得同一 Native lifecycle fence。
 `service_busy`、identity uncertain、state 残留或任何 stop/status 失败都保持 active candidate 与 managed tree 不变；
 installer 不手工清 state。

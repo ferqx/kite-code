@@ -242,6 +242,40 @@ describe('Single-Service native infrastructure target', () => {
       });
     },
   );
+
+  test.skipIf(process.platform === 'win32')(
+    'allows an exact-contract installed client to stop the previous installed build',
+    async () => {
+      const fixtureRoot = makeRoot();
+      const homeRoot = join(fixtureRoot, 'home');
+      const runtimeParent = join(fixtureRoot, 'runtime');
+      mkdirSync(homeRoot);
+      const previousBuild = '1'.repeat(24);
+      const owner = createTarget(
+        homeRoot,
+        runtimeParent,
+        'installed-service-instance',
+        undefined,
+        previousBuild,
+      );
+      owners.push(owner);
+      await owner.start();
+
+      const stopped = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+        ...request('service_stop', 'installed-cross-build-stop'),
+        expectedBuildId: '2'.repeat(24),
+      });
+      expect(stopped).toMatchObject({
+        operation: 'service_stop',
+        outcome: 'applied',
+        state: 'draining',
+      });
+      await expect(owner.shell.waitForShutdown()).resolves.toMatchObject({
+        outcome: 'applied',
+        state: 'absent',
+      });
+    },
+  );
 });
 
 function createTarget(
@@ -249,6 +283,7 @@ function createTarget(
   runtimeParent: string,
   instanceId = 'single-service-instance',
   onEndpointReserved?: () => void,
+  buildId = BUILD_ID,
 ): SingleServiceInfrastructure {
   return createSingleServiceInfrastructure({
     home: createKiteHomeIdentity(homeRoot),
@@ -256,7 +291,7 @@ function createTarget(
     application: createApplication(),
     instanceId,
     serverVersion: 'single-service-test',
-    buildId: BUILD_ID,
+    buildId,
     processStartIdentity: `test-process-${instanceId}`,
     ...(onEndpointReserved ? { onEndpointReserved } : {}),
     webGateway: {

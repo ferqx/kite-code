@@ -13,6 +13,8 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
+- TUI `/status`显示当前Local Service的PID、启动时间、实际build identity与client composition期望值。source模式发现resident
+  Service build drift时在首次主界面显式警告；`bun run tui:fresh`先通过同一manager执行安全restart，成功ready后才启动TUI。
 - CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的普通loopback URL，
   `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。本地Web不mint token；
   lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
@@ -73,6 +75,9 @@ executable、release entrypoint与slot均已删除。
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
 - release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
   corrupt identity不替换。manager mutation不自动重放，且不会回退legacy Coordinator/Worker或embedded backend。
+- source build drift允许普通`bun run tui`继续复用wire-compatible resident Service，但必须可见且可通过`/status`复核；只有显式
+  `bun run tui:fresh`可请求restart。installed build drift不降级为开发态warning，也不交给用户清理：manager使用受保护reservation中的
+  上一build identity精确确认旧owner，等待安全stop后自动启动当前installed companion；busy超时与任何身份/结果不确定仍fail closed。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
 - TUI `/web`调用可选的`discoverWeb` callback执行asset preflight与同一Service的Web ensure/open，取得一次性URL；它不启动第二进程、

@@ -26,7 +26,13 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 
 - `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。
 - Native IPC contract当前为`kite-local-runtime-contract-v2`。protocol/client-contract revision相同且双方build identity均为`dev:`时，
-  source build drift复用现有ready Service；installed或source↔installed drift继续拒绝。build ID不替代wire compatibility。
+  source build drift复用现有ready Service，但TUI必须显式显示drift warning并由`/status`投影PID、startedAt、actual/expected build；
+  `bun run tui:fresh`是source owner显式请求manager restart的入口，只有`applied + ready`才启动TUI。installed drift不复用混合构建：POSIX manager从
+  exact lifecycle reservation取得上一installed build identity，以该身份重新验证instance/PID/startedAt/build；Windows named pipe没有
+  filesystem reservation，因此Service只对protocol/client-contract exact且双方均为24位installed identity的`service_stop`放行跨build请求。
+  两端都只请求安全stop，`service_busy`仅因明确表示未应用而可在stop deadline内重试；owner退出后才启动当前immutable companion。source↔installed、identity uncertainty、
+  unavailable与outcome-unknown一律不强制替换。发起方还必须由managed install marker/active pointer证明自己是当前active candidate；已退役
+  candidate不能反向停止新Service或重新启动旧build。build ID不替代wire compatibility，warning也不提升admission authority。
 - `kite web`先验证fixed asset root、`index.html`、OpenAPI和hashed JS/CSS，再ensure Service。缺失返回
   `web_assets_missing`，不读取lifecycle、不spawn、不创建DB/socket/token。
 - `web_ensure`额外校验`kite-app-web-observer-v2` semantic revision；revision drift返回incompatible，不把新Browser asset挂到旧Web wire。
@@ -47,7 +53,10 @@ continuation。Builtin schema-aware store由single-Service production注入DB ba
 
 Store 9只保存current schema/format metadata和有生产消费者的领域事实，不保存migration phase、first-write rollback marker或旧Coordinator
 operation receipt。所有mutation直接复用一个`BEGIN IMMEDIATE` transaction；普通Runtime command仍复核当前Controller generation并使用
-现有Runtime/Host per-Session mailbox、receipt与recovery语义。
+现有Runtime/Host per-Session mailbox、receipt与recovery语义。Native command admission按command的exact Session读取当前Controller lease，
+并核对Service instance、client identity与connection generation；不得把WebSocket建立时的Controller Session/generation header当作后续
+mutation的静态authority。因此Runtime socket可以先于首个Controller建立，同一连接切换到其持有的其他Session lease也不需要重连；
+不匹配当前Store lease的外来client仍固定拒绝。
 
 ## Clean cutover
 

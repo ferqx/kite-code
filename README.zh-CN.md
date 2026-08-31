@@ -33,6 +33,15 @@ bun run tui
 
 首次启动时，按照界面引导配置模型 Provider。
 
+源码开发时，`/status`会显示常驻Local Service的PID、启动时间与build identity。如果TUI提示源码build drift，使用以下命令
+安全重启Service并启动TUI：
+
+```bash
+bun run tui:fresh
+```
+
+正式安装版会在内部安全换代上一版本遗留的Service；用户不需要查找、结束或手动重启旧进程。
+
 Headless CLI：
 
 ```bash

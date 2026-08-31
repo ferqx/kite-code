@@ -19,8 +19,18 @@ TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Wo
 reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
 再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
 snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
+正常的Controller创建/取得发生在Runtime socket建立之后时不触发reconnect：Service按每条mutation的exact Session从Store读取当前lease，
+再核对该socket的client/connection identity；socket握手时尚不存在或指向其他Session的Controller header不能成为静态授权快照。
 TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
 Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。
+
+开发态普通TUI允许复用wire-compatible的`dev:` resident Service，但TUI从release composition取得expected build identity并与descriptor中的
+实际build比较；不一致时首次进入主界面显示一次可操作警告，`/status`始终显示PID、startedAt、actual/expected build，并在每次执行时从
+当前connection descriptor读取，Service reconnect或内部换代后不复用首次渲染快照。该比较只用于展示，
+不成为新的admission authority。`bun run tui:fresh`显式调用同一manager restart，只有结果为`applied + ready`才继续启动TUI；busy、uncertain
+或失败一律停止，不强杀、不删除Store、不隐式重放。installed模式不使用warning替代兼容检查：POSIX用reservation记录的旧build identity
+精确describe/stop，Windows用exact contract与installed identity限定跨build stop，等待owner退出后启动当前companion；用户不需要手动结束旧Service。明确`service_busy`
+可在stop deadline内等待并重试，identity drift、source↔installed或ambiguous stop仍fail closed。
 
 Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后先等待
 注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。该等待以1秒为上限：正常路径仍

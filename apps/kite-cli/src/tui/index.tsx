@@ -52,6 +52,10 @@ import type {
   ContextCompactionResult,
   RuntimePresentationEvent,
 } from './runtime-presentation';
+import {
+  formatServiceBuildDriftWarning,
+  formatServiceRuntimeStatus,
+} from './service-runtime-status';
 import { SessionNavigationAuthority } from './session-navigation';
 import {
   classifyHistoricalSessionOpenFailure,
@@ -99,6 +103,8 @@ export interface TuiBootstrapProps {
   credentialClient?: NativeProviderCredentialClient;
   /** Discovery only: `/web` never starts a Gateway. */
   discoverWebGateway?: () => Promise<string | undefined>;
+  /** Client composition build identity used only for local status/drift presentation. */
+  expectedServiceBuildId?: string;
 }
 
 interface TuiAppProps {
@@ -110,6 +116,12 @@ interface TuiAppProps {
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
   discoverWebGateway?: () => Promise<string | undefined>;
+  readServiceRuntime?: () => Readonly<{
+    pid: number;
+    startedAt: string;
+    buildId: string;
+    expectedBuildId?: string;
+  }>;
 }
 
 interface TuiInitialConfig {
@@ -142,6 +154,7 @@ export function TuiBootstrap({
   appControlGateway,
   credentialClient,
   discoverWebGateway,
+  expectedServiceBuildId,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
   _serviceModeForExit = serviceMode ?? null;
@@ -325,6 +338,18 @@ export function TuiBootstrap({
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
       discoverWebGateway={discoverWebGateway}
+      readServiceRuntime={
+        serviceMode
+          ? () => ({
+              pid: serviceMode.service.pid,
+              startedAt: serviceMode.service.startedAt,
+              buildId: serviceMode.service.buildId,
+              ...(expectedServiceBuildId === undefined
+                ? {}
+                : { expectedBuildId: expectedServiceBuildId }),
+            })
+          : undefined
+      }
     />,
   );
 }
@@ -338,6 +363,7 @@ function TuiApp({
   languagePreference,
   onLanguageSelect,
   discoverWebGateway,
+  readServiceRuntime,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
@@ -350,6 +376,7 @@ function TuiApp({
   );
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  const serviceDriftWarningShownRef = React.useRef(false);
 
   const [themePreset, setThemePreset] = React.useState<ThemePreset>(() => {
     const saved = loadColorPreset(workspace);
@@ -1094,6 +1121,17 @@ function TuiApp({
     [],
   );
 
+  React.useEffect(() => {
+    if (serviceDriftWarningShownRef.current || !readServiceRuntime) return;
+    const warning = formatServiceBuildDriftWarning(
+      readServiceRuntime(),
+      translate('serviceStatus.driftStartup'),
+    );
+    if (!warning) return;
+    serviceDriftWarningShownRef.current = true;
+    void dispatchSessionLoad({ type: 'LOCAL_TEXT', text: warning, isError: true });
+  }, [dispatchSessionLoad, readServiceRuntime, translate]);
+
   const enterPlanMode = React.useCallback(() => {
     // With no submitted task, `/plan` is only input policy for the next
     // start_turn.  Creating a local Runtime planning placeholder here would
@@ -1247,6 +1285,23 @@ function TuiApp({
         });
     },
     discoverWebGateway,
+    () => {
+      const serviceRuntime = readServiceRuntime?.();
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/status' });
+      dispatchSessionLoad({
+        type: 'LOCAL_TEXT',
+        text: serviceRuntime
+          ? formatServiceRuntimeStatus(serviceRuntime, {
+              pid: translate('serviceStatus.pid'),
+              startedAt: translate('serviceStatus.startedAt'),
+              buildId: translate('serviceStatus.buildId'),
+              expectedBuildId: translate('serviceStatus.expectedBuildId'),
+              driftWarning: translate('serviceStatus.driftWarning'),
+            })
+          : `  ⎿  ${translate('serviceStatus.unavailable')}`,
+        ...(serviceRuntime ? {} : { isError: true }),
+      });
+    },
   );
 
   // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal

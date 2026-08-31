@@ -23,6 +23,7 @@ export type SlashAction =
   | { type: 'rewind' }
   | { type: 'export' }
   | { type: 'context' }
+  | { type: 'status' }
   | { type: 'web' }
   | { type: 'compact'; customInstructions?: string }
   | { type: 'compact_reset' }
@@ -70,6 +71,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'export' };
     case 'context':
       return { type: 'context' };
+    case 'status':
+      return args.length === 0 ? { type: 'status' } : { type: 'unknown', raw: input };
     case 'web':
       return args.length === 0 ? { type: 'web' } : { type: 'unknown', raw: input };
     case 'compact':
@@ -107,6 +110,7 @@ export function useSlashCommand(
   onContext?: () => void,
   onCompactReset?: () => void,
   onDiscoverWeb?: () => Promise<string | undefined>,
+  onStatus?: () => void,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -189,6 +193,9 @@ export function useSlashCommand(
         case 'context':
           onContext?.();
           break;
+        case 'status':
+          onStatus?.();
+          break;
         case 'web':
           dispatch({ type: 'USER_MESSAGE', text: '/web' });
           if (!onDiscoverWeb) {
@@ -265,6 +272,7 @@ export function useSlashCommand(
       onContext,
       onCompactReset,
       onDiscoverWeb,
+      onStatus,
     ],
   );
 }

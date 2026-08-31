@@ -53,9 +53,19 @@ callback缺失或ensure失败时显示固定unavailable文案。该动作可以�
 `web_status`保持纯只读，不由`/web`用于mint token。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
 Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
 
+## Local Service 状态与开发态刷新
+
+- `/status`是纯本地展示命令，只读取注入的Service descriptor与source/release composition expected build；显示PID、startedAt、actual build和
+  expected build，不发送Runtime/App Control mutation，也不把build比较提升为admission authority。
+- source模式允许普通`bun run tui`复用wire-compatible resident `dev:` Service；actual/expected不一致时首次进入主界面显示一次warning，
+  `/status`持续保留完整identity用于复核。installed模式仍由manager exact build gate拒绝漂移，不能降级为warning。
+- `bun run tui:fresh`通过同一manager显式restart，只有`applied + ready`才进入TUI；busy、uncertain或失败直接停止，不能强杀、删除Store、
+  重放mutation或静默回退普通ensure。
+
 ## 单一交互表面
 
-- Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。
+- Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界；`/status`只写入本地消息区，
+  不新增Overlay或交互authority。
 - Slash suggestion 只拥有 partial completion；已经精确匹配的命令由主输入的 Enter 路径提交一次。
   Esc 可关闭当前 suggestion，后续输入变化才重新打开，不能由 suggestion 与 TextInput 各提交一次或互相吞掉。
 - Modal 可见时隐藏主输入提示、Footer 状态栏和 slash suggestion，不允许两个交互表面同时取得键盘 authority。

@@ -390,20 +390,21 @@ function createKiteServiceRuntimeCompositionUnchecked(
             connectionKind === 'native_client' &&
             authorityForWorkspace
           ) {
-            if (
-              !sessionId ||
-              !binding ||
-              binding.controllerSessionId !== sessionId ||
-              binding.controllerGeneration === undefined
-            ) {
+            if (!sessionId || !binding) {
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
+            // A Native Runtime socket is established before the TUI creates or
+            // acquires a Session Controller. The Store is the current lease
+            // authority for the command's exact Session; controller headers
+            // captured at WebSocket open are only a stale client claim and
+            // must not override this lookup.
             const state = authorityForWorkspace(workspace).controller.read(sessionId);
             if (
               state.status !== 'active' ||
               state.clientId !== binding.clientId ||
               state.connectionGeneration !== binding.connectionGeneration ||
-              state.controllerGeneration !== binding.controllerGeneration ||
+              (binding.controllerSessionId === sessionId &&
+                binding.controllerGeneration !== state.controllerGeneration) ||
               state.workerInstanceId !== instanceId
             ) {
               return { allowed: false as const, reason: 'unauthorized' as const };

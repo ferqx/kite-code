@@ -33,6 +33,16 @@ bun run tui
 
 On first launch, follow the interface to configure a model provider.
 
+During source development, `/status` shows the resident Local Service PID, start time, and build
+identity. If the TUI reports source build drift, restart the Service safely and launch the TUI with:
+
+```bash
+bun run tui:fresh
+```
+
+Installed releases reconcile a resident Service from the previous release internally; users do
+not need to find, kill, or restart the old process.
+
 Headless CLI:
 
 ```bash

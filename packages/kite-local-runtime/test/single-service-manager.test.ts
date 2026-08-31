@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { KiteLocalNativeConnectionError, type KiteSingleServiceClient } from '../src/client';
+import {
+  KiteLocalNativeConnectionError,
+  type KiteSingleServiceClient,
+  KiteSingleServiceClientError,
+} from '../src/client';
 import {
   createKiteSingleServiceManager,
   createKiteSingleServiceNativeProcessIdentityProbe,
@@ -17,6 +21,10 @@ const endpoint = resolveKiteLocalRuntimeEndpoint({
   runtimeParent: '/tmp',
   platform: 'linux',
 });
+const windowsEndpoint = resolveKiteLocalRuntimeEndpoint({
+  home: createKiteHomeIdentity('/tmp/kite-single-manager-windows-home'),
+  platform: 'win32',
+});
 
 const reservation: KiteLocalRuntimeLifecycleReservation = {
   schema: KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_,
@@ -25,6 +33,10 @@ const reservation: KiteLocalRuntimeLifecycleReservation = {
   instanceId: 'service-1',
   buildId: 'build-1',
   startedAt: '2026-08-30T00:00:00.000Z',
+};
+const previousInstalledReservation: KiteLocalRuntimeLifecycleReservation = {
+  ...reservation,
+  buildId: '1'.repeat(24),
 };
 
 describe('single-Service process manager', () => {
@@ -144,6 +156,192 @@ describe('single-Service process manager', () => {
     });
     expect(cleared).toBe(1);
     expect(spawns).toBe(1);
+  });
+
+  test('installed ensure waits out a busy previous build, stops it, and launches the current build', async () => {
+    const runtime = installedUpgradeRuntime(['service_busy', 'service_busy', 'applied']);
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: (buildId) => {
+        expect(buildId).toBe(previousInstalledReservation.buildId);
+        return runtime.previousClient;
+      },
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => (runtime.previousReady ? previousInstalledReservation : undefined),
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          return {
+            waitForReady: async () => {
+              runtime.currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      now: () => runtime.time,
+      wait: async (milliseconds) => {
+        runtime.time += milliseconds;
+      },
+      pollIntervalMs: 1,
+      stopTimeoutMs: 10,
+      requestId: () => 'installed-upgrade',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      operation: 'ensure',
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(runtime.stopCalls).toBe(3);
+    expect(runtime.spawns).toBe(1);
+  });
+
+  test('installed ensure never forces a permanently busy previous build', async () => {
+    const runtime = installedUpgradeRuntime([]);
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => previousInstalledReservation,
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          throw new Error('must not spawn');
+        },
+      },
+      now: () => runtime.time,
+      wait: async (milliseconds) => {
+        runtime.time += milliseconds;
+      },
+      pollIntervalMs: 1,
+      stopTimeoutMs: 3,
+      requestId: () => 'installed-upgrade-busy',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      operation: 'ensure',
+      outcome: 'service_busy',
+      state: 'ready',
+      diagnostic: 'service_busy',
+    });
+    expect(runtime.stopCalls).toBeGreaterThan(1);
+    expect(runtime.spawns).toBe(0);
+  });
+
+  test('installed ensure resolves an ambiguous stop from exact absence without replaying it', async () => {
+    const runtime = installedUpgradeRuntime(['outcome_unknown']);
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => (runtime.previousReady ? 'alive' : 'dead') },
+      readReservation: () => (runtime.previousReady ? previousInstalledReservation : undefined),
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          return {
+            waitForReady: async () => {
+              runtime.currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      requestId: () => 'installed-upgrade-ambiguous',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(1);
+  });
+
+  test('Windows installed ensure replaces the previous build without a filesystem reservation', async () => {
+    const runtime = installedUpgradeRuntime(['applied']);
+    runtime.currentClient = {
+      ...runtime.currentClient,
+      stopService: runtime.previousClient.stopService,
+    };
+    const manager = createKiteSingleServiceManager({
+      endpoint: windowsEndpoint,
+      client: runtime.currentClient,
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'uncertain' },
+      readReservation: () => undefined,
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          return {
+            waitForReady: async () => {
+              runtime.currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      requestId: () => 'windows-installed-upgrade',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(1);
+  });
+
+  test('an inactive installed candidate cannot replace the current Service', async () => {
+    const runtime = installedUpgradeRuntime(['applied']);
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      canReplaceInstalledBuild: () => false,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => previousInstalledReservation,
+      spawn: { spawn: async () => Promise.reject(new Error('must not spawn')) },
+      requestId: () => 'inactive-installed-candidate',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'incompatible',
+      state: 'ready',
+      diagnostic: 'build_mismatch',
+    });
+    expect(runtime.stopCalls).toBe(0);
+    expect(runtime.spawns).toBe(0);
+  });
+
+  test('source ensure does not replace an incompatible installed owner', async () => {
+    const runtime = installedUpgradeRuntime(['applied']);
+    let compatibilityClients = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => {
+        compatibilityClients += 1;
+        return runtime.previousClient;
+      },
+      process: { inspect: async () => 'alive' },
+      readReservation: () => previousInstalledReservation,
+      spawn: { spawn: async () => Promise.reject(new Error('must not spawn')) },
+      requestId: () => 'source-mismatch',
+    });
+
+    await expect(manager.ensure({ executableMode: 'source' })).resolves.toMatchObject({
+      outcome: 'incompatible',
+      diagnostic: 'build_mismatch',
+    });
+    expect(compatibilityClients).toBe(0);
+    expect(runtime.stopCalls).toBe(0);
   });
 
   test('keeps uncertain identity and does not spawn or replay stop', async () => {
@@ -301,4 +499,85 @@ function fakeRuntime(): {
     },
   };
   return runtime;
+}
+
+function installedUpgradeRuntime(
+  stopOutcomes: Array<'service_busy' | 'applied' | 'outcome_unknown'>,
+) {
+  const runtime = {
+    previousReady: true,
+    currentReady: false,
+    stopCalls: 0,
+    spawns: 0,
+    time: 0,
+    currentClient: undefined as unknown as KiteSingleServiceClient,
+    previousClient: undefined as unknown as KiteSingleServiceClient,
+  };
+  runtime.currentClient = unusedClient({
+    describe: async () => {
+      if (runtime.currentReady) return described('2'.repeat(24), 'service-2');
+      if (runtime.previousReady) throw new KiteSingleServiceClientError('incompatible');
+      throw new KiteLocalNativeConnectionError('unavailable');
+    },
+  });
+  runtime.previousClient = unusedClient({
+    describe: async () => described(previousInstalledReservation.buildId, 'service-1'),
+    stopService: async () => {
+      runtime.stopCalls += 1;
+      const outcome = stopOutcomes.shift() ?? 'service_busy';
+      if (outcome === 'service_busy') {
+        return {
+          schema: 'kite.local-native.response.v1',
+          requestId: `stop-${runtime.stopCalls}`,
+          operation: 'service_stop',
+          outcome,
+          state: 'ready',
+        };
+      }
+      runtime.previousReady = false;
+      if (outcome === 'outcome_unknown') throw new Error('response lost after accepted stop');
+      return {
+        schema: 'kite.local-native.response.v1',
+        requestId: `stop-${runtime.stopCalls}`,
+        operation: 'service_stop',
+        outcome,
+        state: 'draining',
+      };
+    },
+  });
+  return runtime;
+}
+
+function described(buildId: string, instanceId: string) {
+  return {
+    schema: 'kite.local-native.response.v1',
+    requestId: 'describe',
+    operation: 'describe',
+    outcome: 'ready',
+    service: {
+      instanceId,
+      pid: 42_001,
+      startedAt: '2026-08-30T00:00:00.000Z',
+      protocolVersion: 1,
+      clientContractRevision: 'kite-local-runtime-contract-v2',
+      serverVersion: 'service-1',
+      buildId,
+      httpOrigin: 'http://127.0.0.1:43170',
+    },
+    accessToken: 'a'.repeat(43),
+  } as const;
+}
+
+function unusedClient(overrides: Partial<KiteSingleServiceClient> = {}): KiteSingleServiceClient {
+  const unused = async (): Promise<never> => {
+    throw new Error('not used');
+  };
+  return {
+    describe: unused,
+    ensureWeb: unused,
+    statusWeb: unused,
+    stopWeb: unused,
+    stopService: unused,
+    ...overrides,
+  };
 }

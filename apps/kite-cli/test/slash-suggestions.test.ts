@@ -23,6 +23,7 @@ describe('slash command suggestions', () => {
       'rewind',
       'export',
       'context',
+      'status',
       'web',
       'clear',
       'help',

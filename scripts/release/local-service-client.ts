@@ -190,6 +190,7 @@ export function installedBuildIdentity(executable: string): string {
     record.canonicalRoot !== realpathSync.native(installRoot) ||
     typeof record.currentCandidateId !== 'string' ||
     !/^[a-f0-9]{24}$/u.test(record.currentCandidateId) ||
+    record.currentCandidateId !== candidateId ||
     record.activePointer !== 'active'
   ) {
     throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);

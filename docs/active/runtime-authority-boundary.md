@@ -89,8 +89,8 @@ Web Gateway的`/api-docs`只读取candidate内固定OpenAPI静态资产，不建
 discovery或Store query，也不提供execute control；因此该参考页不是新的RuntimeAccess、data plane或Browser Controller surface。
 
 KRSRUN-01B已把unpublished Store 8 capability接入Host transaction机制：start的State/event/snapshot/revision、queued Run与original
-resource receipt同一commit；activation在publish/schedule前推进running，interaction/terminal/cancel/recovery State batch同步推进waiting/
-running/terminal。Private Runtime Contract/Protocol只新增closed Run receipt与bounded get/page；Host query直接消费neutral port且不触发
+resource receipt同一commit；activation在publish/schedule前通过现有`attempt_start` transaction推进running，不得在Store writer transaction
+之外直接调用Run transition；interaction/terminal/cancel/recovery State batch同步推进waiting/running/terminal。Private Runtime Contract/Protocol只新增closed Run receipt与bounded get/page；Host query直接消费neutral port且不触发
 recovery。Start receipt replay在lookup命中后直接返回original queued resource，不recover、inspect、activate、prepare或schedule。
 
 KRSRUN-02A已把delete/rewind/fork与restart语义接到同一owner：`adapter.ts`只有在显式unpublished`targetStore: 'run'`时组合Store 8
@@ -115,7 +115,8 @@ KRSRUN-03A已把production Coordinator/Workspace Worker/idle History切到Store 
 02B maintenance；Coordinator Catalog、新Workspace materialize/admit、Worker readiness、Controller/effect、same-connection read façade与private
 Host Run query都验证同一committed active-layout/manifest/journal/fence。Store 8 mutation先永久标记`targetWriteState=written`，restart重新验证
 profile/binding且不读取Store 7 fallback。start decision原子提交queued Run后，调度前的same-phase activation在同一revision改为running；其余
-Run transition仍必须随State revision前进。ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
+Run transition仍必须随State revision前进；该activation仍由Host的`attempt_start` transaction持有single writer，不能退化为裸Run port mutation。
+ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
 
 Host query命中Store-authoritative Session projection时，经同一NotificationProjector发布event-free durable snapshot以hydrate process-local
 registry/history和已等待subscriber；该动作不写Store。这样订阅先注册、query后加载且Session未出现在本进程notification history时仍能
@@ -139,7 +140,11 @@ Protocol/client-contract/serverVersion/build identity一致。server identity dr
 `spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
 该instance proof也不创建persisted Project authority或跨Host Store fence。
 当前single-Service Native IPC v2只在protocol/client-contract exact且Service/caller build identity同为`dev:`时把build drift视为可复用；
-installed/candidate、source↔installed与Web semantic revision仍要求exact compatibility。build ID是部署/诊断身份，不替代wire revision。
+installed/candidate、source↔installed与Web semantic revision仍要求exact request compatibility。production manager只对
+installed→installed drift换代：POSIX使用strict reservation中的旧build identity重新验证旧owner，Windows只允许exact contract且双方installed
+identity的跨build`service_stop`；confirmed absent后才spawn当前companion。
+manager还要动态验证caller build与managed active pointer一致，退役candidate不能反向停止current Service。它不放宽普通Service gate，
+也不把source或uncertain identity提升为replacement authority。build ID是部署/诊断身份，不替代wire revision。
 
 ## Authority sequence
 

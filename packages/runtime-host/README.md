@@ -11,7 +11,8 @@
 - 拥有 persistent scoped command receipt 的验证与 replay decision；Store 负责持久记录的原子落盘，bridge/Server/Client 不得推断或另建 receipt authority。
 - `/storage`定义SQLite-neutral `RuntimeStoredRun`、ASC keyset query/page、active lookup、insert/transition/rewind/fork maintenance port、closed terminal detail与可选
   receipt resource result。Store 8 capability存在时，State session把start queued row、original Run resource receipt与
-  State/event/snapshot放入同一transaction，activation写running，interaction/terminal/cancel/recovery event batch同步推进同一Run。
+  State/event/snapshot放入同一transaction；activation必须通过现有`attempt_start` transaction把queued推进running，不能直接调用Run port绕过
+  Store writer；interaction/terminal/cancel/recovery event batch同步推进同一Run。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
 - 根入口导出纯函数`isRuntimeHostStateSettledForMigration`，保守验证terminal Turn、idle Interaction、已知external effect、
   terminal Tool/Capability/Model/approval、无cleanup/subagent/recovery authority；SQLite owner仍独立验证effect lease与durable authority row。

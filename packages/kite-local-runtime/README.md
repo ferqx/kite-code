@@ -109,14 +109,19 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   `KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop或Web lifecycle mutation。
   Native IPC client contract当前为`kite-local-runtime-contract-v2`。Service先用protocol/client-contract revision判断wire兼容；
   只有Service与caller的build identity都以`dev:`标识时，纯source build drift才允许复用同一ready owner。installed/candidate与
-  source↔installed build drift继续返回`incompatible/build_mismatch`。`web_ensure`另携带exact Web semantic revision，当前为
+  source↔installed build drift继续返回`incompatible/build_mismatch`。production manager只对installed→installed drift执行内部换代：POSIX从
+  strict lifecycle reservation取得旧build ID，创建该旧build绑定的Native client并重新核对instance/PID/startedAt/build；Windows没有filesystem
+  reservation，Native Service只对exact protocol/client-contract且双方均为24位installed identity的`service_stop`允许跨build，其他operation仍保持
+  exact build gate。manager在进入该路径前还必须动态验证caller build仍是managed install active pointer指向的candidate，退役进程不能
+  反向停止新Service并形成版本争抢。这兼容既有POSIX旧Service且不允许source参与换代。`web_ensure`另携带exact Web semantic revision，当前为
   `kite-app-web-observer-v2`；不匹配时不得attach混合版本Browser route。
   同阶段的`createKiteSingleServiceManager`只从endpoint与最小lifecycle reservation判断owner：同进程ensure single-flight，alive exact
   PID/start-token等待ready，dead exact owner才清理匹配的socket inode/lock并spawn，uncertain/corrupt/drift全部阻断。Native probe比较OS
   process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。
   `createKiteSingleServiceNativeSpawnPort`现通过dedicated fd3启动真实source/installed child；真实macOS journey覆盖ensure复用、exact
-  reservation、Home内无`runtime-service/`以及authenticated stop。stop收到accepted后即使endpoint先关闭造成一次半关闭exchange，manager也只
-  在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。
+  reservation、Home内无`runtime-service/`、authenticated stop以及旧installed build到当前build的真实子进程换代。普通stop收到accepted后即使
+  endpoint先关闭造成一次半关闭exchange，manager也只在同一PID/start-token/reservation边界内继续等待；installed换代仅在明确
+  `service_busy`（未应用）时于deadline内重试，accepted/ambiguous stop不重放，identity drift/uncertain仍立即blocked。
   single-Service manager现是CLI/TUI/Web默认production path；正式release不再组合旧descriptor/token、Coordinator manager、Store migration或
   `web recover`。clean cutover不会从legacy source恢复，也不会在普通ensure中扫描或删除它们。
 

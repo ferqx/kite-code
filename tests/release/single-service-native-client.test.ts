@@ -42,6 +42,7 @@ describe('single-Service release client target', () => {
     });
 
     expect(first.endpoint.homeDigest).not.toBe(second.endpoint.homeDigest);
+    expect(first.expectedBuildId).toBe('build-1');
     expect(first.web.staticAssetRoot).toBe('/bundle/web');
     await expect(first.discoverWeb()).resolves.toBe('http://127.0.0.1:43170');
     expect(operations).toEqual(['web_ensure']);

@@ -23,7 +23,9 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
   installed/source边界保持exact。Web route另校验`kite-app-web-observer-v2`revision，不能被source复用规则绕过。
 - `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/
   receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
-- native Runtime command在admission时复核当前Controller generation与connection/client identity；执行复用现有Runtime/Host的per-Session
+- native Runtime command在admission时按command的exact Session从Store 9读取当前Controller lease，并复核Service instance、
+  connection generation与client identity；WebSocket建立时携带的Controller Session/generation只是连接期claim，不能覆盖当前Store authority。
+  因此先建立Runtime连接、再创建Controller以及同一连接持有多个Session lease都不要求重连。执行继续复用现有Runtime/Host的per-Session
   mailbox、transaction、receipt与recovery，不增加第二套Workspace command registry或跨home OS lease。
 - 同一Service listener同时承载Native/Runtime、Agent API和Browser Observer route。本地Browser route不使用Cookie、launch token或
   WebSocket认证ticket；tab handle只用于连接隔离与Observer资源释放。Browser仍没有Controller/mutation route；`web stop`只卸载

@@ -335,19 +335,24 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       throw new Error(`Runtime Run activation target is ${current.status}: ${runId}.`);
     }
     const startedAtMs = Math.max(current.createdAtMs, this.#clockMilliseconds());
-    const result = runs.transition({
+    this.#services.transactions.commit('attempt_start', {
       sessionId: this.sessionId,
-      runId,
-      expectedLastRevision: current.lastRevision,
-      next: Object.freeze({
-        ...current,
-        status: 'running',
-        startedAtMs,
-      }),
+      events: [],
+      snapshot: this.#state,
+      runMutation: {
+        type: 'transition',
+        transition: {
+          sessionId: this.sessionId,
+          runId,
+          expectedLastRevision: current.lastRevision,
+          next: Object.freeze({
+            ...current,
+            status: 'running',
+            startedAtMs,
+          }),
+        },
+      },
     });
-    if (result !== 'applied') {
-      throw new Error(`Runtime Run activation was not applied: ${result}.`);
-    }
   }
 
   processEvent(event: KernelEvent): StateRuntimeProcessEventResult {

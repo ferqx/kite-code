@@ -33,6 +33,8 @@ export interface KiteSingleServiceSpawnPort {
 export interface KiteSingleServiceManagerOptions {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly client: KiteSingleServiceClient;
+  readonly clientForBuild?: (buildId: string) => KiteSingleServiceClient;
+  readonly canReplaceInstalledBuild?: () => boolean;
   readonly process: KiteLocalRuntimeProcessIdentityProbe;
   readonly spawn: KiteSingleServiceSpawnPort;
   readonly startupTimeoutMs?: number;
@@ -93,6 +95,14 @@ export function createKiteSingleServiceManager(
     const initial = await describe();
     if (initial === 'ready') return result(id, operation, 'applied', 'ready');
     if (initial === 'incompatible') {
+      if (request?.executableMode === 'installed') {
+        if (options.canReplaceInstalledBuild?.() !== true) {
+          return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
+        }
+        const stopped = await stopInstalledBuild(id, operation);
+        if (stopped.outcome !== 'applied' || stopped.state !== 'absent') return stopped;
+        return ensure({ ...request, requestId: id }, operation);
+      }
       return result(id, operation, 'incompatible', 'absent', 'build_mismatch');
     }
     if (initial === 'uncertain') {
@@ -222,6 +232,89 @@ export function createKiteSingleServiceManager(
       : result(id, operation, 'outcome_unknown', 'draining', 'identity_uncertain');
   }
 
+  async function stopInstalledBuild(
+    id: string,
+    operation: 'ensure' | 'restart',
+  ): Promise<LocalRuntimeLifecycleResult> {
+    const lifecycle = readLifecycle();
+    if (lifecycle === 'corrupt') {
+      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+    }
+    if (lifecycle === null) {
+      return options.endpoint.kind === 'named_pipe'
+        ? stopInstalledClient(id, operation, options.client)
+        : result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+    }
+    if (!isInstalledBuildId(lifecycle.buildId) || options.clientForBuild === undefined) {
+      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+    }
+    const owner = await options.process.inspect(lifecycle.pid, lifecycle.processStartIdentity);
+    if (owner === 'uncertain') {
+      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+    }
+    if (owner === 'dead') {
+      const cleanup = await clearDead({
+        endpoint: options.endpoint,
+        expected: lifecycle,
+        process: options.process,
+      });
+      return cleanup.outcome === 'cleared'
+        ? result(id, operation, 'applied', 'absent')
+        : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
+    }
+
+    const previousClient = options.clientForBuild(lifecycle.buildId);
+    try {
+      const previous = await previousClient.describe();
+      if (
+        previous.service.instanceId !== lifecycle.instanceId ||
+        previous.service.pid !== lifecycle.pid ||
+        previous.service.startedAt !== lifecycle.startedAt ||
+        previous.service.buildId !== lifecycle.buildId
+      ) {
+        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+      }
+    } catch {
+      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+    }
+
+    return stopInstalledClient(id, operation, previousClient, lifecycle);
+  }
+
+  async function stopInstalledClient(
+    id: string,
+    operation: 'ensure' | 'restart',
+    client: KiteSingleServiceClient,
+    lifecycle?: KiteLocalRuntimeLifecycleReservation,
+  ): Promise<LocalRuntimeLifecycleResult> {
+    const deadlineAt = now() + stopTimeoutMs;
+    for (;;) {
+      let stopped: Awaited<ReturnType<KiteSingleServiceClient['stopService']>>;
+      try {
+        stopped = await client.stopService();
+      } catch {
+        const absent = await waitUntilAbsent(deadlineAt, lifecycle);
+        return absent
+          ? result(id, operation, 'applied', 'absent')
+          : result(id, operation, 'outcome_unknown', 'draining', 'identity_uncertain');
+      }
+      if (stopped.outcome === 'service_busy') {
+        if (now() >= deadlineAt) {
+          return result(id, operation, 'service_busy', 'ready', 'service_busy');
+        }
+        await wait(Math.min(pollIntervalMs, Math.max(1, deadlineAt - now())));
+        continue;
+      }
+      if (stopped.outcome !== 'applied') {
+        return result(id, operation, 'unavailable', stopped.state, 'identity_uncertain');
+      }
+      const absent = await waitUntilAbsent(deadlineAt, lifecycle);
+      return absent
+        ? result(id, operation, 'applied', 'absent')
+        : result(id, operation, 'outcome_unknown', 'draining', 'identity_uncertain');
+    }
+  }
+
   async function describe(): Promise<'ready' | 'absent' | 'incompatible' | 'uncertain'> {
     try {
       await options.client.describe();
@@ -277,9 +370,9 @@ export function createKiteSingleServiceManager(
           if (cleanup.outcome === 'blocked') return false;
           return true;
         }
-        // A just-accepted stop may close the endpoint before its process and exact reservation
-        // settle. Treat one invalid/half-closed exchange as draining, not as authority loss.
-        if (current === 'incompatible') return false;
+        // A just-accepted compatibility stop may leave the exact previous-build endpoint
+        // observable until shutdown settles. The unchanged lifecycle identity authorizes waiting,
+        // never cleanup or a second stop after an ambiguous response.
       } else if (current === 'uncertain') {
         return false;
       }
@@ -311,6 +404,10 @@ function sameLifecycle(
     left.socketDevice === right.socketDevice &&
     left.socketInode === right.socketInode
   );
+}
+
+function isInstalledBuildId(value: string): boolean {
+  return /^[a-f0-9]{24}$/u.test(value);
 }
 
 function checkedRequest(

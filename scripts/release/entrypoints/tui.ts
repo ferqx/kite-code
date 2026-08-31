@@ -9,8 +9,17 @@ if (process.argv.includes('--version')) {
     argv: process.argv,
     executableMode: process.env.KITE_STANDALONE_EXECUTABLE === '1' ? 'installed' : 'source',
   });
+  if (process.argv.includes('--fresh-service')) {
+    const restarted = await localService.manager.restart();
+    if (restarted.outcome !== 'applied' || restarted.state !== 'ready') {
+      throw new Error(
+        `Fresh TUI Service restart failed: ${restarted.diagnostic ?? restarted.outcome}.`,
+      );
+    }
+  }
   runTui({
     connectService: localService.connector,
     discoverWebGateway: localService.discoverWeb,
+    expectedServiceBuildId: localService.expectedBuildId,
   });
 }
