@@ -45,16 +45,23 @@ export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: Sess
             No Workspace sessions are available.
           </div>
         ) : (
-          <nav aria-label="Workspace sessions" className="space-y-2">
+          <nav
+            aria-label="Workspace sessions"
+            className="min-w-0 max-w-full space-y-2 overflow-hidden"
+          >
             {workspaces.map((workspace) => (
-              <CollapsiblePrimitive.Root key={workspace.workspaceId} defaultOpen>
+              <CollapsiblePrimitive.Root
+                key={workspace.workspaceId}
+                defaultOpen
+                className="min-w-0 max-w-full"
+              >
                 <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-surface">
                   <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
                   <FolderKanban className="size-3.5" />
                   <span className="min-w-0 flex-1 truncate">{workspace.label}</span>
                   <span className="text-[10px] tabular-nums">{workspace.sessions.length}</span>
                 </CollapsiblePrimitive.Trigger>
-                <CollapsiblePrimitive.Content className="mt-1 space-y-1">
+                <CollapsiblePrimitive.Content className="mt-1 min-w-0 max-w-full space-y-1 overflow-hidden">
                   {workspace.sessions.map((session) => {
                     const selected = session.sessionId === selectedSessionId;
                     return (
@@ -65,7 +72,7 @@ export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: Sess
                         aria-current={selected ? 'page' : undefined}
                         aria-label={`View ${session.displayName}`}
                         className={cn(
-                          'group relative w-full rounded-xl border px-3 py-3 text-left transition-colors',
+                          'group relative w-full min-w-0 max-w-full overflow-hidden rounded-xl border px-3 py-3 text-left transition-colors',
                           selected
                             ? 'border-border-strong bg-surface-raised shadow-soft'
                             : 'border-transparent hover:border-border hover:bg-surface',
@@ -83,9 +90,10 @@ export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: Sess
                           <div className="min-w-0 flex-1">
                             <p
                               className={cn(
-                                'truncate text-xs font-medium',
+                                'line-clamp-2 max-w-full break-all text-xs font-medium',
                                 selected && 'text-foreground',
                               )}
+                              title={session.displayName}
                             >
                               {session.displayName}
                             </p>

@@ -24,7 +24,6 @@ export type SlashAction =
   | { type: 'export' }
   | { type: 'context' }
   | { type: 'status' }
-  | { type: 'web' }
   | { type: 'compact'; customInstructions?: string }
   | { type: 'compact_reset' }
   | { type: 'unknown'; raw: string };
@@ -73,8 +72,6 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'context' };
     case 'status':
       return args.length === 0 ? { type: 'status' } : { type: 'unknown', raw: input };
-    case 'web':
-      return args.length === 0 ? { type: 'web' } : { type: 'unknown', raw: input };
     case 'compact':
       // PR 9: /compact reset is a distinct action, not a compaction with customInstructions="reset"
       if (args[0] === 'reset' && args.length === 1) {
@@ -109,7 +106,6 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
-  onDiscoverWeb?: () => Promise<string | undefined>,
   onStatus?: () => void,
 ) {
   return useCallback(
@@ -196,32 +192,6 @@ export function useSlashCommand(
         case 'status':
           onStatus?.();
           break;
-        case 'web':
-          dispatch({ type: 'USER_MESSAGE', text: '/web' });
-          if (!onDiscoverWeb) {
-            dispatch({
-              type: 'LOCAL_TEXT',
-              text: '  ⎿  Kite Web is not running. Run `kite-code web`.',
-              isError: true,
-            });
-            break;
-          }
-          void onDiscoverWeb()
-            .then((url) => {
-              dispatch({
-                type: 'LOCAL_TEXT',
-                text: url ? `  ⎿  ${url}` : '  ⎿  Kite Web is not running. Run `kite-code web`.',
-                ...(url ? {} : { isError: true }),
-              });
-            })
-            .catch(() => {
-              dispatch({
-                type: 'LOCAL_TEXT',
-                text: '  ⎿  Kite Web discovery is unavailable.',
-                isError: true,
-              });
-            });
-          break;
         case 'exit':
           // Process teardown is owned by the single injected TUI exit coordinator.  Keeping the
           // optional callback as a no-op in isolated hook tests avoids a second direct exit path.
@@ -271,7 +241,6 @@ export function useSlashCommand(
       onCompact,
       onContext,
       onCompactReset,
-      onDiscoverWeb,
       onStatus,
     ],
   );

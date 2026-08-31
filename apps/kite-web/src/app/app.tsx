@@ -204,8 +204,8 @@ export function App(props: AppProps = {}) {
   };
 
   return (
-    <main className="grid h-dvh grid-cols-[320px_minmax(0,1fr)] overflow-hidden max-lg:grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1">
-      <div className="h-full max-md:hidden">
+    <main className="grid h-dvh min-h-0 grid-cols-[320px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden max-lg:grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1">
+      <div className="h-full min-h-0 overflow-hidden max-md:hidden">
         <SessionSidebar
           workspaces={state.workspaces}
           selectedSessionId={state.selectedSessionId}

@@ -51,13 +51,10 @@ export function createSingleStoreWebObserverDirectoryPort(
               } catch {
                 status = 'unavailable';
               }
-              const displayName = projectRuntimeClientText(
-                session.name || session.sessionId,
-                160,
-              ).trim();
+              const displayName = projectRuntimeClientText(session.name, 160).trim();
               return Object.freeze({
                 sessionId: session.sessionId,
-                displayName: displayName || session.sessionId,
+                displayName: displayName || 'Untitled session',
                 updatedAt: session.updatedAt,
                 lastSequence: session.lastSequence,
                 status,

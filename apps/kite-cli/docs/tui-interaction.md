@@ -44,19 +44,20 @@
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
-## Kite Web 打开
+## Local Service 与 Kite Web 状态
 
-`/web`调用可选的`discoverWeb` callback完成asset preflight和single-Service `web_ensure`，成功时显示release owner返回的一次性launch URL；
-callback缺失或ensure失败时显示固定unavailable文案。该动作可以按需启动唯一Service并attach同listener Browser route，但不启动第二进程、
+TUI只保留`/status`：先读取当前Service descriptor与source/release composition expected build，再调用可选的`discoverWeb` callback完成asset
+preflight和single-Service `web_ensure`；一条结果同时显示PID、startedAt、actual/expected build与release owner返回的launch URL。
+callback缺失或ensure失败时Web字段显示固定unavailable文案。该动作可以按需attach同listener Browser route，但不启动第二进程、
 不创建Runtime Session、不发送Runtime command，也不取得Controller capability。
 
-`web_status`保持纯只读，不由`/web`用于mint token。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
+`/web`不再解析、不出现在补全或帮助中，也不保留alias。`web_status`保持CLI纯只读；TUI `/status`的ensure/open不mint Browser认证token。
+candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
 Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
 
-## Local Service 状态与开发态刷新
+## 开发态刷新
 
-- `/status`是纯本地展示命令，只读取注入的Service descriptor与source/release composition expected build；显示PID、startedAt、actual build和
-  expected build，不发送Runtime/App Control mutation，也不把build比较提升为admission authority。
+- `/status`不发送Runtime/App Control mutation，也不把build比较提升为admission authority；Web ensure/open只管理同一Service的Browser observer route。
 - source模式允许普通`bun run tui`复用wire-compatible resident `dev:` Service；actual/expected不一致时首次进入主界面显示一次warning，
   `/status`持续保留完整identity用于复核。installed模式仍由manager exact build gate拒绝漂移，不能降级为warning。
 - `bun run tui:fresh`通过同一manager显式restart，只有`applied + ready`才进入TUI；busy、uncertain或失败直接停止，不能强杀、删除Store、

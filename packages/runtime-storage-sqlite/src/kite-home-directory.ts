@@ -62,7 +62,24 @@ export function createKiteHomeDirectoryQuery(
     },
     [string, number]
   >(
-    `SELECT s.session_id, s.name, s.updated_at,
+    `SELECT s.session_id,
+            COALESCE(
+              NULLIF(s.name, ''),
+              (
+                SELECT CASE
+                         WHEN json_type(first_event.event_json, '$.content') = 'text'
+                           THEN json_extract(first_event.event_json, '$.content')
+                         ELSE ''
+                       END
+                  FROM runtime_events AS first_event
+                 WHERE first_event.session_id = s.session_id
+                   AND json_extract(first_event.event_json, '$.type') = 'user.message_appended'
+                 ORDER BY first_event.sequence ASC
+                 LIMIT 1
+              ),
+              ''
+            ) AS name,
+            s.updated_at,
             COALESCE(MAX(e.sequence), 0) AS last_sequence
        FROM runtime_sessions AS s
        LEFT JOIN runtime_events AS e ON e.session_id = s.session_id

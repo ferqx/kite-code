@@ -31,7 +31,9 @@ bun install
 bun run tui
 ```
 
-On first launch, follow the interface to configure a model provider.
+This source-development command builds the current Kite Web assets before launching the TUI, so
+the URL shown by `/status` always serves the current checkout. On first launch, follow the
+interface to configure a model provider.
 
 During source development, `/status` shows the resident Local Service PID, start time, and build
 identity. If the TUI reports source build drift, restart the Service safely and launch the TUI with:

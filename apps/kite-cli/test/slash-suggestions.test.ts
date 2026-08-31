@@ -24,21 +24,14 @@ describe('slash command suggestions', () => {
       'export',
       'context',
       'status',
-      'web',
       'clear',
       'help',
       'exit',
     ]);
   });
 
-  test('describes /web as discovery-only', () => {
-    expect(findSlashCommandDefs('web')).toEqual([
-      {
-        name: 'web',
-        aliases: [],
-        description: 'Show the existing read-only Kite Web URL',
-      },
-    ]);
+  test('removes the separate /web command', () => {
+    expect(findSlashCommandDefs('web')).toEqual([]);
   });
 
   test('presents permissions as a selector command without manual mode arguments', () => {

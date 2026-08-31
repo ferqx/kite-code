@@ -22,6 +22,10 @@ generation 的事件归约，重新建立 tab、读取 bounded History，再恢�
 或 error 状态；History 请求失败可在页面内重试。实时流失败时会保留已显示的 History，并单独提示 live updates 不可用。
 切换 Session 时，旧请求的迟到响应不会覆盖当前选择；terminal resync 的自动重连固定最多三次，随后停在可重试的
 unavailable 状态，而不是无限循环。
+桌面主网格固定使用`minmax(0,1fr)`行约束，左侧Workspace/Session区域独立纵向滚动，不能由Session数量撑高整页并把消息/空状态
+推到viewport之外。Session名称最多展示两行并在容器内断行，hover title保留完整值；Store未持久命名时，Directory使用第一条durable
+用户消息作为只读展示名，而不是直接暴露长UUID。
+仍没有任何用户消息的空Session显示为`Untitled session`，其空History状态在可视消息区明确呈现。
 
 开发与 production 使用同一 Gateway transport；transport 失败只显示 unavailable，不会打包或回退到样例，
 也不会直接读取本地文件。

@@ -31,6 +31,14 @@ test('binds the Store 9 Directory to the in-process Web Observer only at the Ser
       ) VALUES ('session-1', 'workspace-1', 'project-1', 'digest-1', 27, 'epoch', 1, 'Task', 2, 0)`,
     )
     .run();
+  database
+    .query(
+      `INSERT INTO runtime_sessions(
+        session_id, workspace_id, project_id, workspace_digest, state_schema,
+        format_epoch, revision, name, updated_at, run_index_from_revision
+      ) VALUES ('session-empty', 'workspace-1', 'project-1', 'digest-1', 27, 'epoch', 0, '', 1, 0)`,
+    )
+    .run();
   const target = createKiteSingleServiceWebGatewayTarget({
     directory: createKiteHomeDirectoryQuery(database),
     runtime: runtime(),
@@ -54,6 +62,13 @@ test('binds the Store 9 Directory to the in-process Web Observer only at the Ser
           updatedAt: 2,
           lastSequence: 0,
           status: 'idle',
+        },
+        {
+          sessionId: 'session-empty',
+          displayName: 'Untitled session',
+          updatedAt: 1,
+          lastSequence: 0,
+          status: 'unavailable',
         },
       ],
     },

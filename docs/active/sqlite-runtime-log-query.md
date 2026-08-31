@@ -20,7 +20,8 @@ exact Store 8 header/DDL/所有ownership rows，query前后再次验证active po
 compatibility import不参与该journey。
 
 当前single-Service Web/Native History直接从同一Store 9 `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
-mirror或Worker discovery。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
+mirror或Worker discovery。Directory的空Session name只读投影第一条durable `user.message_appended`正文作为Browser展示fallback；它不写回
+`runtime_sessions.name`，不创建命名receipt或第二authority。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
 
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。

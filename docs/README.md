@@ -77,8 +77,10 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 默认 `all` 作用域检查当前任务工作树的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority不能由两个任务并发拥有；
 后开始的任务必须等待、rebase并重新验证。不得建立文档锁服务、临时authority副本或兼容重定向来规避冲突。
 
-本地TUI开发中，`bun run tui`允许复用wire-compatible的常驻`dev:` Service，并在build drift时显示警告；使用`/status`核对
-Service PID、启动时间和actual/expected build。需要确保加载当前源码时使用`bun run tui:fresh`，它通过现有manager安全restart后再启动TUI。
+本地TUI开发中，`bun run tui`和`bun run tui:fresh`都先执行当前`apps/kite-web` Vite build，再进入TUI，因此`/status`的Kite Web URL不会
+继续提供旧的ignored `dist/` bundle。普通`bun run tui`仍允许复用wire-compatible的常驻`dev:` Service并在build drift时显示警告；使用
+`/status`核对Service PID、启动时间和actual/expected build。需要确保Service本身加载当前源码时使用`bun run tui:fresh`，它通过现有manager
+安全restart后再启动TUI。
 
 ## 目录职责
 

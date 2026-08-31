@@ -31,7 +31,7 @@ bun install
 bun run tui
 ```
 
-首次启动时，按照界面引导配置模型 Provider。
+源码开发命令会先构建当前Kite Web assets再启动TUI，因此`/status`显示的URL始终对应当前checkout。首次启动时，按照界面引导配置模型 Provider。
 
 源码开发时，`/status`会显示常驻Local Service的PID、启动时间与build identity。如果TUI提示源码build drift，使用以下命令
 安全重启Service并启动TUI：

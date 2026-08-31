@@ -60,7 +60,8 @@
   exact retry冲突和complete reachability GC。
 - KHSS-02的`createKiteHomeDirectoryQuery`直接从同一Store 9 connection按`workspace_id`读取bounded、path-free Workspace/Session
   目录；它不读取`canonical_path`，不创建Catalog mirror、outbox cursor、compatibility reader或第二SQLite连接。Session固定按
-  `updated_at DESC + session_id ASC`排列，并只统计本Workspace下同Session的event sequence。
+  `updated_at DESC + session_id ASC`排列，并只统计本Workspace下同Session的event sequence；空的持久`name`只读回退到该Session第一条
+  `user.message_appended`正文，后续Service层继续执行client-safe文本投影。该回退不写Store，也不建立第二份命名authority。
 - 同一未接production切口新增`createKiteHomeWorkspaceAdmissionPort`、`createKiteHomeWorkspaceSessionStore`与
   `createKiteHomeWorkspaceRuntimeJournal`：Workspace ID固定从当前`sha256:` identity digest派生，identity不可漂移，safe display label
   可更新；Session必须携带与已admit Workspace完全一致的project/workspace identity，跨Workspace读取或重绑fail closed。event、rolling

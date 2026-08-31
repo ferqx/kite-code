@@ -13,14 +13,15 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
-- TUI `/status`显示当前Local Service的PID、启动时间、实际build identity与client composition期望值。source模式发现resident
-  Service build drift时在首次主界面显式警告；`bun run tui:fresh`先通过同一manager执行安全restart，成功ready后才启动TUI。
+- TUI只保留`/status`作为本机状态入口：显示当前Local Service的PID、启动时间、实际/预期build identity，并通过同一
+  Web ensure/open callback附上Kite Web URL。source模式发现resident Service build drift时在首次主界面显式警告；
+  根`bun run tui`与`bun run tui:fresh`在进入entrypoint前都先构建当前Kite Web assets；后者再通过同一manager执行安全restart，成功ready后才启动TUI。
 - CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的普通loopback URL，
   `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。本地Web不mint token；
   lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
 - KHSS-02的单Service Web client已由release/source默认入口选择：同一parser/output接受release注入的`KiteSingleServiceClient +
   staticAssetRoot`，`web/status/stop`直接走per-home native IPC并使用“Kite Web”术语；`web_assets_missing`等typed diagnostic原样输出，
-  `/web` TUI callback调用同一ensure/open语义取得普通loopback URL，不通过status创建认证状态。
+  TUI `/status`调用同一ensure/open语义取得普通loopback URL，不创建Browser认证状态。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
@@ -80,7 +81,7 @@ executable、release entrypoint与slot均已删除。
   上一build identity精确确认旧owner，等待安全stop后自动启动当前installed companion；busy超时与任何身份/结果不确定仍fail closed。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
-- TUI `/web`调用可选的`discoverWeb` callback执行asset preflight与同一Service的Web ensure/open，取得一次性URL；它不启动第二进程、
+- TUI `/status`调用可选的`discoverWeb` callback执行asset preflight与同一Service的Web ensure/open并与Service identity一并展示；它不启动第二进程、
   不取得Controller，也不能把本地asset/entrypoint smoke写成hosted support。
 
 ## 本地文档

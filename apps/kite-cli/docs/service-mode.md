@@ -9,7 +9,8 @@ adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
 Web lifecycle由release注入的`KiteSingleServiceClient`承载。CLI的`kite web [--json]`先做asset preflight再ensure Service，status/stop在
-absent时不spawn；status只返回state/origin/asset digest。本地Web不创建launch token，TUI `/web`通过ensure/open取得普通loopback URL。正式CLI不组合legacy
+absent时不spawn；status只返回state/origin/asset digest。本地Web不创建launch token，TUI `/status`通过ensure/open取得普通loopback URL并与
+Service identity合并展示；TUI不再提供独立`/web`。正式CLI不组合legacy
 Coordinator、Store migration或`web recover`；该parser/adapter contract与tests不代表hosted Web qualification。
 
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
@@ -31,6 +32,8 @@ Controller；queued/running/waiting、pending interaction或query失败一律det
 或失败一律停止，不强杀、不删除Store、不隐式重放。installed模式不使用warning替代兼容检查：POSIX用reservation记录的旧build identity
 精确describe/stop，Windows用exact contract与installed identity限定跨build stop，等待owner退出后启动当前companion；用户不需要手动结束旧Service。明确`service_busy`
 可在stop deadline内等待并重试，identity drift、source↔installed或ambiguous stop仍fail closed。
+根package中的`bun run tui`与`bun run tui:fresh`只在源码开发入口先执行`apps/kite-web` build，防止ignored `dist/`陈旧；installed standalone
+不运行源码构建，继续使用candidate内manifest绑定的Web assets。
 
 Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后先等待
 注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。该等待以1秒为上限：正常路径仍

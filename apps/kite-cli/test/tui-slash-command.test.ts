@@ -104,8 +104,8 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/help')).toEqual({ type: 'help' });
   });
 
-  test('parses only the discovery-only /web command without arguments', () => {
-    expect(parseSlashCommand('/web')).toEqual({ type: 'web' });
+  test('does not retain /web after it is merged into /status', () => {
+    expect(parseSlashCommand('/web')).toEqual({ type: 'unknown', raw: '/web' });
     expect(parseSlashCommand('/web start')).toEqual({ type: 'unknown', raw: '/web start' });
   });
 

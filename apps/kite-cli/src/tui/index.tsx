@@ -1284,13 +1284,19 @@ function TuiApp({
           });
         });
     },
-    discoverWebGateway,
     () => {
       const serviceRuntime = readServiceRuntime?.();
       dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/status' });
-      dispatchSessionLoad({
-        type: 'LOCAL_TEXT',
-        text: serviceRuntime
+      void (async () => {
+        let web = translate('serviceStatus.webUnavailable');
+        if (discoverWebGateway) {
+          try {
+            web = (await discoverWebGateway()) ?? translate('serviceStatus.webUnavailable');
+          } catch {
+            web = translate('serviceStatus.webDiscoveryUnavailable');
+          }
+        }
+        const identity = serviceRuntime
           ? formatServiceRuntimeStatus(serviceRuntime, {
               pid: translate('serviceStatus.pid'),
               startedAt: translate('serviceStatus.startedAt'),
@@ -1298,9 +1304,13 @@ function TuiApp({
               expectedBuildId: translate('serviceStatus.expectedBuildId'),
               driftWarning: translate('serviceStatus.driftWarning'),
             })
-          : `  ⎿  ${translate('serviceStatus.unavailable')}`,
-        ...(serviceRuntime ? {} : { isError: true }),
-      });
+          : `  ⎿  ${translate('serviceStatus.unavailable')}`;
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: `${identity}\n     ${translate('serviceStatus.web')}: ${web}`,
+          ...(serviceRuntime ? {} : { isError: true }),
+        });
+      })();
     },
   );
 

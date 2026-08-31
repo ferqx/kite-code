@@ -94,6 +94,22 @@ describe('Kite Home Store Directory query', () => {
       RangeError,
     );
   });
+
+  test('uses the first durable user message when a Session has no persisted name', () => {
+    using database = new Database(':memory:', { strict: true });
+    initializeKiteHomeStoreSchema(database);
+    insertWorkspace(database, 'workspace-a', '/private/workspace-a', 'Alpha', 'a');
+    insertSession(database, 'session-unnamed', 'workspace-a', '', 10);
+    insertEvent(database, 'session-unnamed', 'event-system', 1, {
+      type: 'session.created',
+    });
+    insertEvent(database, 'session-unnamed', 'event-user', 2, {
+      type: 'user.message_appended',
+      content: '修复 Web 会话列表超出问题',
+    });
+
+    expect(directorySession(database, 'session-unnamed')?.name).toBe('修复 Web 会话列表超出问题');
+  });
 });
 
 function insertWorkspace(
@@ -149,12 +165,20 @@ function insertEvent(
   sessionId: string,
   eventId: string,
   sequence: number,
+  event: Readonly<Record<string, unknown>> = {},
 ): void {
   database
     .query(
       `INSERT INTO runtime_events(
         session_id, event_id, sequence, schema_version, event_json, created_at
-      ) VALUES (?, ?, ?, 1, '{}', 1)`,
+      ) VALUES (?, ?, ?, 1, ?, 1)`,
     )
-    .run(sessionId, eventId, sequence);
+    .run(sessionId, eventId, sequence, JSON.stringify(event));
+}
+
+function directorySession(database: Database, sessionId: string) {
+  return createKiteHomeDirectoryQuery(database)
+    .list()
+    .flatMap((workspace) => workspace.sessions)
+    .find((session) => session.sessionId === sessionId);
 }
