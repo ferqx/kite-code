@@ -70,7 +70,7 @@ admission完成，不消费one-shot capability。所有response使用Problem/DTO
 
 - 不直接取得RuntimeAccess/Host/Store/Kernel/SQLite concrete；private logical connection只允许Runtime query，不允许command/subscribe；
 - 不开放create/cancel/respond/rewind/fork/delete或Controller request/release/resume；
-- 不向Browser、Gateway cookie或Web launch token签发context；
+- 不向Browser或Web tab handle签发context；本地Web本身不创建Gateway cookie或launch token；
 - 不调用complete transcript convenience或先物化全Workspace Session/History/Checkpoint再分页；
 - 不把已发布的三个read capability解释为`runs`、`interactions`、`session_stream`或mutation ready。
 

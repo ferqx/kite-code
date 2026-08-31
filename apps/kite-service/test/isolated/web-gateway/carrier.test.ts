@@ -126,11 +126,11 @@ async function start(
 
 async function createTab(
   carrier: WebGatewayCarrier,
-  session: { readonly cookie: string; readonly origin: string },
+  session: { readonly origin: string },
 ): Promise<{ readonly tabHandle: string; readonly connectionGeneration: number }> {
   const response = await fetch(`${carrier.origin}${KITE_WEB_TABS_PATH}`, {
     method: 'POST',
-    headers: jsonHeaders(session.origin, session.cookie),
+    headers: jsonHeaders(session.origin),
     body: JSON.stringify({ schema: 'kite.app.web.tab-create-request.v1' }),
   });
   expect(response.status).toBe(200);
@@ -140,11 +140,10 @@ async function createTab(
   };
 }
 
-async function openSocket(carrier: WebGatewayCarrier, cookie: string): Promise<WebSocket> {
+async function openSocket(carrier: WebGatewayCarrier): Promise<WebSocket> {
   return new Promise<WebSocket>((resolvePromise, reject) => {
     const socket = new WebSocket(`${carrier.origin.replace('http:', 'ws:')}/_kite/web/client`, {
       headers: {
-        Cookie: cookie,
         Origin: carrier.origin,
         'Sec-Fetch-Mode': 'websocket',
         'Sec-Fetch-Site': 'same-origin',
@@ -198,21 +197,15 @@ async function socketClosed(socket: WebSocket): Promise<CloseEvent> {
   });
 }
 
-async function bootstrap(
-  carrier: WebGatewayCarrier,
-): Promise<{ readonly cookie: string; readonly origin: string }> {
-  const token = new URL(carrier.launchUrl).hash.slice(1);
+async function bootstrap(carrier: WebGatewayCarrier): Promise<{ readonly origin: string }> {
   const response = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
     method: 'POST',
     headers: jsonHeaders(carrier.origin),
-    body: JSON.stringify({ launchToken: token }),
+    body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
   });
   expect(response.status).toBe(200);
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie === null) throw new Error('bootstrap omitted cookie');
-  const cookie = setCookie.split(';', 1)[0];
-  if (cookie === undefined) throw new Error('bootstrap cookie is malformed');
-  return { cookie, origin: carrier.origin };
+  expect(response.headers.get('set-cookie')).toBeNull();
+  return { origin: carrier.origin };
 }
 
 describe('Web Gateway loopback carrier', () => {
@@ -236,8 +229,8 @@ describe('Web Gateway loopback carrier', () => {
     });
     const first = await control.mintLaunchUrl();
     const second = await control.mintLaunchUrl();
-    expect(first).not.toBe(second);
-    expect(first).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]{43}$/u);
+    expect(first).toBe(carrier.origin);
+    expect(second).toBe(first);
 
     const confusedNative = await fetch(`${carrier.origin}${KITE_WEB_NATIVE_MINT_PATH}`, {
       method: 'POST',
@@ -267,83 +260,23 @@ describe('Web Gateway loopback carrier', () => {
     expect(stopRequested).toBe(1);
   });
 
-  test('exchanges one-shot fragment token for an instance-bound cookie and exact tab route', async () => {
+  test('bootstraps without credentials and requires an exact tab route', async () => {
     const carrier = await start();
     const session = await bootstrap(carrier);
-    const replayToken = new URL(carrier.launchUrl).hash.slice(1);
-    const replay = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
-      method: 'POST',
-      headers: jsonHeaders(carrier.origin),
-      body: JSON.stringify({ launchToken: replayToken }),
-    });
-    expect(replay.status).toBe(401);
 
     const tab = await createTab(carrier, session);
     expect(tab.tabHandle).toMatch(/^[A-Za-z0-9_-]{32}$/u);
 
     const directory = await fetch(`${carrier.origin}${KITE_WEB_DIRECTORY_PATH}`, {
       method: 'POST',
-      headers: jsonHeaders(session.origin, session.cookie, tab.tabHandle),
+      headers: jsonHeaders(session.origin, undefined, tab.tabHandle),
       body: JSON.stringify({ schema: WEB_DIRECTORY_REQUEST_SCHEMA_ }),
     });
     expect(directory.status).toBe(200);
     expect(await directory.text()).not.toContain('/private/explicit-web-root');
   });
 
-  test('rotates a valid current cookie, rejects duplicate cookies, and retires old tabs', async () => {
-    const disconnected: string[] = [];
-    const carrier = await start({
-      createObserver: (binding) => {
-        const core = observer(binding);
-        return {
-          ...core,
-          disconnect: async (request) => {
-            disconnected.push(binding.tabHandle);
-            return core.disconnect(request);
-          },
-        };
-      },
-    });
-    const first = await bootstrap(carrier);
-    const oldTab = await createTab(carrier, first);
-
-    const rotationToken = new URL(carrier.mintLaunchUrl()).hash.slice(1);
-    const rotatedResponse = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
-      method: 'POST',
-      headers: jsonHeaders(carrier.origin, first.cookie),
-      body: JSON.stringify({ launchToken: rotationToken }),
-    });
-    expect(rotatedResponse.status).toBe(200);
-    const setCookie = rotatedResponse.headers.get('set-cookie');
-    if (setCookie === null) throw new Error('rotation omitted cookie');
-    const rotated = { cookie: setCookie.split(';', 1)[0]!, origin: carrier.origin };
-    expect(rotated.cookie).not.toBe(first.cookie);
-    expect(disconnected).toContain(oldTab.tabHandle);
-
-    const oldDirectory = await fetch(`${carrier.origin}${KITE_WEB_DIRECTORY_PATH}`, {
-      method: 'POST',
-      headers: jsonHeaders(carrier.origin, first.cookie, oldTab.tabHandle),
-      body: JSON.stringify({ schema: WEB_DIRECTORY_REQUEST_SCHEMA_ }),
-    });
-    expect(oldDirectory.status).toBe(401);
-
-    const duplicateToken = new URL(carrier.mintLaunchUrl()).hash.slice(1);
-    const duplicate = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
-      method: 'POST',
-      headers: jsonHeaders(carrier.origin, `${rotated.cookie}; ${rotated.cookie}`),
-      body: JSON.stringify({ launchToken: duplicateToken }),
-    });
-    expect(duplicate.status).toBe(401);
-
-    const tokenWasNotConsumed = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
-      method: 'POST',
-      headers: jsonHeaders(carrier.origin),
-      body: JSON.stringify({ launchToken: duplicateToken }),
-    });
-    expect(tokenWasNotConsumed.status).toBe(200);
-  });
-
-  test('isolates multiple tab observer lifecycles under one browser cookie', async () => {
+  test('isolates multiple tab observer lifecycles without browser credentials', async () => {
     const disconnected: string[] = [];
     const carrier = await start({
       createObserver: (binding) => {
@@ -365,14 +298,14 @@ describe('Web Gateway loopback carrier', () => {
 
     const disconnect = await fetch(`${carrier.origin}${KITE_WEB_DISCONNECT_PATH}`, {
       method: 'POST',
-      headers: jsonHeaders(carrier.origin, session.cookie, first.tabHandle),
+      headers: jsonHeaders(carrier.origin, undefined, first.tabHandle),
       body: JSON.stringify({ schema: 'kite.app.web.disconnect-request.v1' }),
     });
     expect(disconnect.status).toBe(200);
 
     const secondDirectory = await fetch(`${carrier.origin}${KITE_WEB_DIRECTORY_PATH}`, {
       method: 'POST',
-      headers: jsonHeaders(carrier.origin, session.cookie, second.tabHandle),
+      headers: jsonHeaders(carrier.origin, undefined, second.tabHandle),
       body: JSON.stringify({ schema: WEB_DIRECTORY_REQUEST_SCHEMA_ }),
     });
     expect(secondDirectory.status).toBe(200);
@@ -385,7 +318,7 @@ describe('Web Gateway loopback carrier', () => {
     const session = await bootstrap(carrier);
     const tab = await createTab(carrier, session);
 
-    const initializedSocket = await openSocket(carrier, session.cookie);
+    const initializedSocket = await openSocket(carrier);
     const initializedMessage = nextSocketMessage(initializedSocket);
     initializedSocket.send(JSON.stringify({ type: 'initialize', tabHandle: tab.tabHandle }));
     await expect(initializedMessage).resolves.toEqual({
@@ -395,7 +328,7 @@ describe('Web Gateway loopback carrier', () => {
     });
     initializedSocket.close(1000, 'done');
 
-    const uninitializedSocket = await openSocket(carrier, session.cookie);
+    const uninitializedSocket = await openSocket(carrier);
     const close = await socketClosed(uninitializedSocket);
     expect(close.code).toBe(1008);
     expect(close.reason).toBe('initialize_timeout');
@@ -406,12 +339,12 @@ describe('Web Gateway loopback carrier', () => {
     const session = await bootstrap(carrier);
     await createTab(carrier, session);
 
-    const binarySocket = await openSocket(carrier, session.cookie);
+    const binarySocket = await openSocket(carrier);
     const binaryClosed = socketClosed(binarySocket);
     binarySocket.send(new Uint8Array([1, 2, 3]));
     await expect(binaryClosed).resolves.toMatchObject({ code: 1009, reason: 'message_too_big' });
 
-    const malformedSocket = await openSocket(carrier, session.cookie);
+    const malformedSocket = await openSocket(carrier);
     const malformedClosed = socketClosed(malformedSocket);
     malformedSocket.send('{"type":');
     await expect(malformedClosed).resolves.toMatchObject({ code: 1008, reason: 'invalid_request' });
@@ -419,7 +352,7 @@ describe('Web Gateway loopback carrier', () => {
     const oversizedCarrier = await start({ limits: { maxWsMessageBytes: 16 } });
     const oversizedSession = await bootstrap(oversizedCarrier);
     await createTab(oversizedCarrier, oversizedSession);
-    const oversizedSocket = await openSocket(oversizedCarrier, oversizedSession.cookie);
+    const oversizedSocket = await openSocket(oversizedCarrier);
     const oversizedClosed = socketClosed(oversizedSocket);
     oversizedSocket.send('x'.repeat(17));
     const oversizedClose = await oversizedClosed;
@@ -465,7 +398,7 @@ describe('Web Gateway loopback carrier', () => {
     });
     const session = await bootstrap(carrier);
     const tab = await createTab(carrier, session);
-    const socket = await openSocket(carrier, session.cookie);
+    const socket = await openSocket(carrier);
     const initialized = nextSocketMessage(socket);
     socket.send(JSON.stringify({ type: 'initialize', tabHandle: tab.tabHandle }));
     await initialized;
@@ -496,7 +429,7 @@ describe('Web Gateway loopback carrier', () => {
     expect(received.slice(terminalIndex + 1)).toEqual([]);
   });
 
-  test('drains an in-flight bootstrap and never publishes a late cookie after close begins', async () => {
+  test('drains an in-flight bootstrap without publishing browser credentials', async () => {
     let releaseBootstrap!: () => void;
     let markEntered!: () => void;
     const entered = new Promise<void>((resolvePromise) => {
@@ -520,11 +453,10 @@ describe('Web Gateway loopback carrier', () => {
           : core;
       },
     });
-    const token = new URL(carrier.launchUrl).hash.slice(1);
     const request = fetch(`${carrier.origin}/_kite/web/bootstrap`, {
       method: 'POST',
       headers: jsonHeaders(carrier.origin),
-      body: JSON.stringify({ launchToken: token }),
+      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
     });
     await entered;
     const closing = carrier.close();
@@ -537,7 +469,7 @@ describe('Web Gateway loopback carrier', () => {
       const late = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
         method: 'POST',
         headers: jsonHeaders(carrier.origin),
-        body: JSON.stringify({ launchToken: token }),
+        body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
       });
       expect([502, 503]).toContain(late.status);
       expect(late.headers.get('set-cookie')).toBeNull();
@@ -575,11 +507,10 @@ describe('Web Gateway loopback carrier', () => {
           : core;
       },
     });
-    const token = new URL(carrier.launchUrl).hash.slice(1);
     const request = fetch(`${carrier.origin}/_kite/web/bootstrap`, {
       method: 'POST',
       headers: jsonHeaders(carrier.origin),
-      body: JSON.stringify({ launchToken: token }),
+      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
     }).catch(() => undefined);
     await entered;
     await carrier.close();
@@ -590,14 +521,13 @@ describe('Web Gateway loopback carrier', () => {
 
   test('rejects wrong Origin, Authorization, OPTIONS and mutation/unknown routes', async () => {
     const carrier = await start();
-    const token = new URL(carrier.launchUrl).hash.slice(1);
     const wrongOrigin = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
       method: 'POST',
       headers: {
         ...jsonHeaders(carrier.origin),
         origin: 'http://127.0.0.1:1',
       },
-      body: JSON.stringify({ launchToken: token }),
+      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
     });
     expect(wrongOrigin.status).toBe(403);
 
@@ -607,7 +537,7 @@ describe('Web Gateway loopback carrier', () => {
         ...jsonHeaders(carrier.origin),
         authorization: 'Bearer worker-secret',
       },
-      body: JSON.stringify({ launchToken: token }),
+      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
     });
     expect(authorization.status).toBe(403);
 

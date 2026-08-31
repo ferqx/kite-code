@@ -1,16 +1,4 @@
 export {
-  createWebGatewayAuth,
-  WEB_LAUNCH_TOKEN_TTL_MS,
-  WEB_MAX_LAUNCH_TOKENS,
-  WEB_MAX_SESSIONS,
-  WEB_SESSION_TTL_MS,
-  type WebGatewayAuthOptions,
-  type WebGatewayLaunch,
-  type WebGatewaySessionMaterial,
-  type WebGatewaySessionRecord,
-  type WebGatewaySessionRegistry,
-} from './auth';
-export {
   createWebGatewayCarrier,
   KITE_WEB_BOOTSTRAP_PATH,
   KITE_WEB_CLIENT_PATH,

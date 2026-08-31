@@ -123,7 +123,8 @@ describe('Single-Service native infrastructure target', () => {
       if (!ownerOrigin) throw new Error('Service HTTP origin is unavailable');
       expect(first.origin).toBe(ownerOrigin);
       expect(second.origin).toBe(first.origin);
-      expect(second.launchUrl).not.toBe(first.launchUrl);
+      expect(first.launchUrl).toBe(first.origin);
+      expect(second.launchUrl).toBe(first.launchUrl);
       expect(await fetch(`${first.origin}/`).then((response) => response.text())).toBe(
         '<html>single service target</html>',
       );

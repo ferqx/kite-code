@@ -10,7 +10,6 @@ import {
 } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import {
-  WEB_BOOTSTRAP_REQUEST_SCHEMA_,
   WEB_DISCONNECT_REQUEST_SCHEMA_,
   WEB_SUBSCRIBE_REQUEST_SCHEMA_,
   WEB_UNSUBSCRIBE_REQUEST_SCHEMA_,
@@ -20,6 +19,7 @@ import {
   type WebObserverStreamEvent,
   type WebSubscribeRequest,
   type WebUnsubscribeRequest,
+  webBootstrapRequestCodec,
   webBootstrapResponseCodec,
   webDirectoryResponseCodec,
   webDisconnectRequestCodec,
@@ -35,7 +35,6 @@ import {
   webUnsubscribeResponseCodec,
 } from '@kite-ai/kite-app-contract';
 import type { WebObserverCore } from '../web-observer';
-import { createWebGatewayAuth, type WebGatewaySessionRecord } from './auth';
 
 export const KITE_WEB_LOOPBACK_HOST = '127.0.0.1' as const;
 export const KITE_WEB_BOOTSTRAP_PATH = '/_kite/web/bootstrap' as const;
@@ -114,10 +113,7 @@ export interface WebGatewayCarrierOptions {
   readonly instanceId: string;
   readonly nativeControl?: WebGatewayNativeControlOptions;
   readonly limits?: WebGatewayLimits;
-  readonly now?: () => number;
   readonly randomBytes?: (size: number) => Uint8Array;
-  readonly maxSessions?: number;
-  readonly maxLaunchTokens?: number;
   /** Test seam; production uses Bun.file under the explicit root. */
   readonly readAsset?: WebGatewayAssetReader;
   /** Test seam for loopback peer inspection. */
@@ -129,9 +125,6 @@ export interface WebGatewayCarrierOptions {
 
 export interface WebGatewayCarrier extends AsyncDisposable {
   readonly origin: string;
-  /** Launch URL whose fragment contains the one-shot token for body exchange. */
-  readonly launchUrl: string;
-  mintLaunchUrl(): string;
   close(): Promise<void>;
 }
 
@@ -148,7 +141,6 @@ interface NormalizedLimits {
 
 interface TabRecord {
   readonly tabHandle: string;
-  readonly cookieHash: string;
   readonly connectionGeneration: number;
   readonly subscriptions: Set<string>;
   readonly observer: WebObserverCore;
@@ -166,14 +158,12 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
   const staticRoot = options.readAsset
     ? resolve(options.staticAssetRoot)
     : secureStaticAssetRoot(options.staticAssetRoot);
-  const now = options.now ?? Date.now;
   const readAsset = options.readAsset ?? defaultAssetReader;
   const tabs = new Map<string, TabRecord>();
   const sockets = new Set<WebGatewaySocket>();
   let closed = false;
   let closing: Promise<void> | undefined;
   let bunServer!: Bun.Server<SocketData>;
-  let auth!: ReturnType<typeof createWebGatewayAuth>;
   let nextConnectionGeneration = 0;
   let pendingTabCreates = 0;
   let nativeStopAccepted = false;
@@ -275,25 +265,12 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
     throw new Error('Web Gateway did not obtain an ephemeral port.');
   }
   const binding = bindingFor(port);
-  auth = createWebGatewayAuth({
-    instanceId: options.instanceId,
-    origin: binding.origin,
-    now,
-    randomBytes: options.randomBytes,
-    maxSessions: options.maxSessions,
-    maxLaunchTokens: options.maxLaunchTokens,
-  });
-
   const nativeControlDigest = options.nativeControl
     ? controlCredentialDigest(options.nativeControl.credential)
     : undefined;
 
   return Object.freeze({
     origin: binding.origin,
-    get launchUrl() {
-      return auth.url;
-    },
-    mintLaunchUrl: () => auth.mintLaunchUrl(),
     close: () => {
       closing ??= closeGateway();
       return closing;
@@ -312,33 +289,16 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
     const body = await readJson(request, limits.maxHttpBodyBytes);
     if (!body.ok) return secureResponse(400, 'invalid_request');
     if (closed) return secureResponse(503, 'unavailable');
-    const token = exactLaunchBody(body.value);
-    if (token === undefined) return secureResponse(400, 'invalid_request');
-    const inspectedCookie = auth.inspectCookie(request.headers.get('cookie'));
-    if (inspectedCookie.status === 'invalid') return secureResponse(401, 'unauthorized');
-    const replacedCookieHash =
-      inspectedCookie.status === 'valid' ? inspectedCookie.record.cookieHash : undefined;
-    const session = auth.consumeLaunch(token, replacedCookieHash);
-    if (session === undefined) return secureResponse(401, 'unauthorized');
-    if (replacedCookieHash !== undefined) await retireCookieTabs(replacedCookieHash);
-    if (closed) {
-      auth.revokeSession(session.cookieHash);
-      return secureResponse(503, 'unavailable');
-    }
+    const requestValue = webBootstrapRequestCodec.decode(body.value);
     let response: WebBootstrapResponse;
     try {
-      response = await bootstrapObserver.bootstrap({ schema: WEB_BOOTSTRAP_REQUEST_SCHEMA_ });
+      response = await bootstrapObserver.bootstrap(requestValue);
     } catch {
-      auth.revokeSession(session.cookieHash);
       return secureResponse(503, 'unavailable');
     }
-    if (closed) {
-      auth.revokeSession(session.cookieHash);
-      return secureResponse(503, 'unavailable');
-    }
-    return jsonResponse(webBootstrapResponseCodec.encode(response), {
-      'set-cookie': session.setCookie,
-    });
+    return closed
+      ? secureResponse(503, 'unavailable')
+      : jsonResponse(webBootstrapResponseCodec.encode(response));
   }
 
   async function handleNativeControl(
@@ -369,19 +329,13 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
     }
     if (closed) return secureResponse(503, 'unavailable');
     if (pathname === KITE_WEB_NATIVE_MINT_PATH) {
-      let launchUrl: string;
-      try {
-        launchUrl = auth.mintLaunchUrl();
-      } catch {
-        return secureResponse(503, 'unavailable');
-      }
       return jsonResponse({
         schema: KITE_WEB_CONTROL_RESPONSE_SCHEMA_,
         operation: 'mint_launch',
         gatewayInstanceId: options.instanceId,
         buildId: control.buildId,
         origin: requestBinding.origin,
-        launchUrl,
+        launchUrl: requestBinding.origin,
       });
     }
     if (nativeStopAccepted) return secureResponse(503, 'unavailable');
@@ -410,10 +364,8 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       return secureResponse(request.method === 'POST' ? 403 : 405, 'forbidden');
     }
     if (!isJsonRequest(request)) return secureResponse(415, 'unsupported_media_type');
-    const session = auth.authorize(request.headers.get('cookie'));
-    if (session === undefined) return secureResponse(401, 'unauthorized');
-    const tab = tabForRequest(request, session, tabs);
-    if (tab === undefined) return secureResponse(401, 'unauthorized');
+    const tab = tabForRequest(request, tabs);
+    if (tab === undefined) return secureResponse(404, 'not_found');
     const body = await readJson(request, limits.maxHttpBodyBytes);
     if (!body.ok) return secureResponse(400, 'invalid_request');
     if (closed) return secureResponse(503, 'unavailable');
@@ -450,8 +402,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       return secureResponse(request.method === 'POST' ? 403 : 405, 'forbidden');
     }
     if (!isJsonRequest(request)) return secureResponse(415, 'unsupported_media_type');
-    const session = auth.authorize(request.headers.get('cookie'));
-    if (session === undefined) return secureResponse(401, 'unauthorized');
     if (tabs.size + pendingTabCreates >= limits.maxTabs) return secureResponse(429, 'unavailable');
     const body = await readJson(request, limits.maxHttpBodyBytes);
     if (!body.ok) return secureResponse(400, 'invalid_request');
@@ -482,7 +432,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       }
       const tab: TabRecord = {
         tabHandle: response.tabHandle,
-        cookieHash: session.cookieHash,
         connectionGeneration: response.connectionGeneration,
         subscriptions: new Set(),
         observer,
@@ -522,11 +471,8 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       diagnose(options, 'request_rejected');
       return secureResponse(403, 'forbidden');
     }
-    const session = auth.authorize(request.headers.get('cookie'));
-    if (session === undefined) return secureResponse(401, 'unauthorized');
     if (closed) return secureResponse(503, 'unavailable');
     const connection = new WebGatewaySocket({
-      session,
       tabs: tabRegistry,
       limits,
       diagnose: (code) => diagnose(options, code),
@@ -542,21 +488,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
   async function closeTabSockets(tab: TabRecord): Promise<void> {
     tab.socket?.closeAfterDrain(1000, 'disconnected');
     tab.socket = undefined;
-  }
-
-  async function retireCookieTabs(cookieHash: string): Promise<void> {
-    const retirements: Promise<unknown>[] = [];
-    for (const tab of tabs.values()) {
-      if (tab.cookieHash !== cookieHash) continue;
-      tabs.delete(tab.tabHandle);
-      if (tab.socket !== undefined) {
-        tab.socket.closeAfterDrain(1008, 'session_replaced');
-        tab.socket = undefined;
-      } else {
-        retirements.push(disconnectTabObserver(tab).catch(() => undefined));
-      }
-    }
-    await Promise.allSettled(retirements);
   }
 
   async function closeGateway(): Promise<void> {
@@ -594,7 +525,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       if (result.status === 'rejected') failures.push(result.reason);
     }
     tabs.clear();
-    auth.close();
     let listenerSettled = false;
     let listenerFailure: unknown;
     // Graceful stop owns the transport flush after the handler has returned its
@@ -634,7 +564,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
 }
 
 class WebGatewaySocket {
-  readonly #session: WebGatewaySessionRecord;
   readonly #tabs: Map<string, TabRecord>;
   readonly #limits: NormalizedLimits;
   readonly #diagnose: (code: WebGatewayDiagnosticCode) => void;
@@ -659,12 +588,10 @@ class WebGatewaySocket {
   });
 
   constructor(input: {
-    readonly session: WebGatewaySessionRecord;
     readonly tabs: Map<string, TabRecord>;
     readonly limits: NormalizedLimits;
     readonly diagnose: (code: WebGatewayDiagnosticCode) => void;
   }) {
-    this.#session = input.session;
     this.#tabs = input.tabs;
     this.#limits = input.limits;
     this.#diagnose = input.diagnose;
@@ -841,8 +768,8 @@ class WebGatewaySocket {
       return;
     }
     const tab = this.#tabs.get(value.tabHandle);
-    if (tab === undefined || tab.cookieHash !== this.#session.cookieHash) {
-      this.protocolClose(1008, 'unauthorized');
+    if (tab === undefined) {
+      this.protocolClose(1008, 'tab_unavailable');
       return;
     }
     if (tab.socket !== undefined && tab.socket !== this)
@@ -1130,20 +1057,11 @@ function isWebSocketUpgrade(request: Request): boolean {
   return request.method === 'GET' && request.headers.get('upgrade')?.toLowerCase() === 'websocket';
 }
 
-function tabForRequest(
-  request: Request,
-  session: WebGatewaySessionRecord,
-  tabs: Map<string, TabRecord>,
-): TabRecord | undefined {
+function tabForRequest(request: Request, tabs: Map<string, TabRecord>): TabRecord | undefined {
   const value = request.headers.get(KITE_WEB_TAB_HEADER);
   if (value === null || value.includes(',')) return undefined;
   const tab = tabs.get(value.trim());
-  return tab?.cookieHash === session.cookieHash ? tab : undefined;
-}
-
-function exactLaunchBody(value: unknown): string | undefined {
-  if (!isPlainObject(value) || !hasExactKeys(value, ['launchToken'])) return undefined;
-  return typeof value.launchToken === 'string' ? value.launchToken : undefined;
+  return tab;
 }
 
 function exactSchemaBody(value: unknown, kind: 'directory'): object | undefined {

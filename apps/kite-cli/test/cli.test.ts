@@ -59,7 +59,7 @@ describe('cli argument parsing', () => {
       await main({
         singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
       });
-      expect(output.mock.calls.at(-1)).toEqual([`http://127.0.0.1:43125/#${'b'.repeat(43)}`]);
+      expect(output.mock.calls.at(-1)).toEqual(['http://127.0.0.1:43125']);
 
       process.argv = ['bun', 'kite', 'web', 'status', '--json'];
       await main({
@@ -428,7 +428,7 @@ function singleServiceWebClient(calls: string[]): KiteSingleServiceClient {
         operation: 'web_ensure',
         outcome: 'ready',
         origin: 'http://127.0.0.1:43125',
-        launchUrl: `http://127.0.0.1:43125/#${'b'.repeat(43)}`,
+        launchUrl: 'http://127.0.0.1:43125',
         assetDigest: '1'.repeat(64),
       };
     },

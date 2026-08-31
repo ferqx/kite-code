@@ -115,10 +115,7 @@ export const kiteLocalNativeResponseSchema = z.union([
       operation: z.literal('web_ensure'),
       outcome: z.literal('ready'),
       origin,
-      launchUrl: z
-        .string()
-        .url()
-        .refine((value) => /#[A-Za-z0-9_-]{43}$/u.test(value)),
+      launchUrl: origin,
       assetDigest: digest,
     })
     .strict(),

@@ -13,8 +13,7 @@ export type SingleServiceWebDiagnostic =
 
 export interface SingleServiceWebRouteOwner {
   readonly origin: string;
-  mintLaunchUrl(): string;
-  /** Revoke Browser sessions/tickets and close Browser sockets/routes only. */
+  /** Close Browser sockets/routes only. */
   close(): Promise<void> | void;
 }
 
@@ -74,7 +73,7 @@ interface ActiveWebRoutes {
 
 /**
  * Service-owned, in-memory Browser lifecycle. Operations are serialized so concurrent `kite web`
- * calls reuse one route owner and each receive a fresh launch URL. Asset validation runs before
+ * calls reuse one route owner and return its stable loopback URL. Asset validation runs before
  * any route/auth state is created; a failure therefore leaves the current Browser state unchanged.
  */
 export function createSingleServiceWebLifecycle(
@@ -111,11 +110,7 @@ export function createSingleServiceWebLifecycle(
         }
 
         if (active && sameAssets(active.assets, assets)) {
-          try {
-            return ready(active, active.owner.mintLaunchUrl());
-          } catch {
-            return unavailable(active, 'web_readiness_failed');
-          }
+          return ready(active);
         }
 
         if (active) {
@@ -134,9 +129,8 @@ export function createSingleServiceWebLifecycle(
           return unavailable(active, 'web_readiness_failed');
         }
         try {
-          const launchUrl = owner.mintLaunchUrl();
           active = Object.freeze({ assets, owner });
-          return ready(active, launchUrl);
+          return ready(active);
         } catch {
           try {
             await owner.close();
@@ -189,12 +183,12 @@ function sameAssets(
   return left.root === right.root && left.digest === right.digest;
 }
 
-function ready(active: ActiveWebRoutes, launchUrl: string): SingleServiceWebEnsureResult {
+function ready(active: ActiveWebRoutes): SingleServiceWebEnsureResult {
   return Object.freeze({
     outcome: 'ready',
     state: 'ready',
     origin: active.owner.origin,
-    launchUrl,
+    launchUrl: active.owner.origin,
     assetDigest: active.assets.digest,
   });
 }

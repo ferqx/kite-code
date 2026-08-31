@@ -483,10 +483,6 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         let routeClosing: Promise<void> | undefined;
         const attachedGateway: WebGatewayCarrier = Object.freeze({
           origin: gateway.origin,
-          get launchUrl() {
-            return gateway.launchUrl;
-          },
-          mintLaunchUrl: () => gateway.mintLaunchUrl(),
           close: () => {
             routeClosing ??= gateway.close().finally(() => {
               if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;

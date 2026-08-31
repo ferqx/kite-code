@@ -31,7 +31,7 @@ const liveEvent: RuntimeClientEvent = {
 };
 
 describe('real Web transport → Gateway → Observer composition', () => {
-  test('bootstraps cookie/tab, reads path-free data, streams live, and only releases Observer state', async () => {
+  test('bootstraps a tab without credentials, reads path-free data, streams live, and only releases Observer state', async () => {
     let tabDisconnects = 0;
     const carrier = createWebGatewayCarrier({
       staticAssetRoot: '/private/not-browser-visible',
@@ -81,39 +81,20 @@ describe('real Web transport → Gateway → Observer composition', () => {
     });
     carriers.push(carrier);
 
-    let cookie = '';
     const rawFrames: unknown[] = [];
-    const clearedFragments: string[] = [];
     const origin = new URL(carrier.origin);
     const transport = createWebObserverTransport({
       location: {
-        hash: new URL(carrier.launchUrl).hash,
         host: origin.host,
         origin: carrier.origin,
-        pathname: '/',
         protocol: origin.protocol,
-        search: '',
       },
-      history: {
-        replaceState: (_state, _unused, url) => clearedFragments.push(String(url)),
-      },
-      fetch: (input, init) =>
-        browserFetch(
-          carrier.origin,
-          input,
-          init,
-          () => cookie,
-          (next) => {
-            cookie = next;
-          },
-        ),
-      webSocketFactory: (url) => browserSocket(url, carrier.origin, () => cookie, rawFrames),
+      fetch: (input, init) => browserFetch(carrier.origin, input, init),
+      webSocketFactory: (url) => browserSocket(url, carrier.origin, rawFrames),
     });
 
     const connection = await transport.connect();
     expect(connection.tabHandle).toMatch(/^[A-Za-z0-9_-]{32}$/u);
-    expect(clearedFragments).toEqual(['/']);
-    expect(cookie).toMatch(/^kite_web_[a-f0-9]{24}=/u);
 
     const directory = await transport.listDirectory();
     expect(directory.workspaces[0]?.sessions[0]?.sessionId).toBe('session-1');
@@ -158,30 +139,17 @@ async function browserFetch(
   origin: string,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
-  currentCookie: () => string,
-  setCookie: (value: string) => void,
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set('origin', origin);
   headers.set('sec-fetch-site', 'same-origin');
   headers.set('sec-fetch-mode', 'cors');
-  const cookie = currentCookie();
-  if (cookie) headers.set('cookie', cookie);
-  const response = await fetch(new URL(String(input), origin), { ...init, headers });
-  const issued = response.headers.get('set-cookie')?.split(';', 1)[0];
-  if (issued) setCookie(issued);
-  return response;
+  return fetch(new URL(String(input), origin), { ...init, headers });
 }
 
-function browserSocket(
-  url: string,
-  origin: string,
-  currentCookie: () => string,
-  frames: unknown[],
-): WebObserverWebSocket {
+function browserSocket(url: string, origin: string, frames: unknown[]): WebObserverWebSocket {
   const socket = new WebSocket(url, {
     headers: {
-      Cookie: currentCookie(),
       Origin: origin,
       'Sec-Fetch-Mode': 'websocket',
       'Sec-Fetch-Site': 'same-origin',

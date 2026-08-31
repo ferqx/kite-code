@@ -28,12 +28,12 @@ describe('Web Gateway native control link', () => {
           gatewayInstanceId: 'gateway-instance-1',
           buildId: 'gateway-build-1',
           origin,
-          ...(operation === 'mint_launch' ? { launchUrl: `${origin}/#${'a'.repeat(43)}` } : {}),
+          ...(operation === 'mint_launch' ? { launchUrl: origin } : {}),
         });
       },
     });
 
-    await expect(link.mintLaunchUrl()).resolves.toBe(`${origin}/#${'a'.repeat(43)}`);
+    await expect(link.mintLaunchUrl()).resolves.toBe(origin);
     await expect(link.stop()).resolves.toBeUndefined();
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
       KITE_WEB_NATIVE_MINT_PATH,

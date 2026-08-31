@@ -183,7 +183,7 @@ describe('Web Gateway process state and native host', () => {
 });
 
 describe('Web Gateway process manager', () => {
-  test('single-flights ensure, preserves path-free registration, and mints fresh URLs after discovery', async () => {
+  test('single-flights ensure, preserves path-free registration, and reuses the loopback URL', async () => {
     const root = makeRoot();
     const state = createWebGatewayProcessStatePort(createKiteHomeIdentity(root));
     const fake = createFakeRuntime(state, root);
@@ -192,7 +192,7 @@ describe('Web Gateway process manager', () => {
     expect(fake.spawnCount).toBe(1);
     expect(one.registration.endpoint).toEqual({ origin: 'http://127.0.0.1:43177' });
     expect(JSON.stringify(one)).not.toContain(root);
-    expect(one.launchUrl).not.toBe(two.launchUrl);
+    expect(one.launchUrl).toBe(two.launchUrl);
     expect(fake.registrations).toHaveLength(2);
 
     const restarted = createWebGatewayProcessManager({
@@ -201,7 +201,7 @@ describe('Web Gateway process manager', () => {
     });
     const discovered = await restarted.discover();
     expect(discovered?.registration.identity.instanceId).toBe('gateway-process-1');
-    expect(discovered?.launchUrl).not.toBe(one.launchUrl);
+    expect(discovered?.launchUrl).toBe(one.launchUrl);
     expect(fake.spawnCount).toBe(1);
 
     await restarted.stop();
@@ -352,8 +352,6 @@ describe('Web Gateway process main', () => {
     let ready: WebGatewayReadySignal | undefined;
     const carrier = {
       origin: 'http://127.0.0.1:43178',
-      launchUrl: `http://127.0.0.1:43178/#${'a'.repeat(43)}`,
-      mintLaunchUrl: () => `http://127.0.0.1:43178/#${'b'.repeat(43)}`,
       close: async () => {
         closed += 1;
       },
@@ -419,8 +417,6 @@ describe('Web Gateway process main', () => {
         requestShutdown = stop;
         return {
           origin: 'http://127.0.0.1:43179',
-          launchUrl: `http://127.0.0.1:43179/#${'a'.repeat(43)}`,
-          mintLaunchUrl: () => `http://127.0.0.1:43179/#${'b'.repeat(43)}`,
           close: async () => {
             closed += 1;
           },
@@ -481,13 +477,11 @@ function createFakeRuntime(state: WebGatewayProcessStatePort, root: string) {
   let nextReadinessFailure: 'dead' | 'uncertain' | undefined;
   let spawnCount = 0;
   let stopCount = 0;
-  let launchCount = 0;
   let instanceLease: Awaited<ReturnType<WebGatewayProcessStatePort['acquireLock']>>;
   const registrations: CoordinatorGatewayRegistration[] = [];
   const control = {
     async mintLaunchUrl() {
-      launchCount += 1;
-      return `http://127.0.0.1:43177/#${String.fromCharCode(96 + launchCount)}${'a'.repeat(42)}`;
+      return 'http://127.0.0.1:43177';
     },
     async stop() {
       stopCount += 1;

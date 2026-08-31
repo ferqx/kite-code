@@ -22,7 +22,7 @@ import {
 import type { WebObserverCore } from '../../apps/kite-service/src/web-observer';
 
 describe('real Gateway carrier ↔ process manager restart', () => {
-  test('discovers a live instance, mints a fresh launch, and stops only the Gateway', async () => {
+  test('discovers a live instance, reuses its loopback URL, and stops only the Gateway', async () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-gateway-process-carrier-'));
     const staticRoot = join(root, 'web');
     mkdirSync(staticRoot, { mode: 0o700 });
@@ -168,7 +168,7 @@ describe('real Gateway carrier ↔ process manager restart', () => {
         spawn: { spawn: async () => Promise.reject(new Error('must not respawn')) },
       });
       const discovered = await restarted.discover();
-      expect(discovered?.launchUrl).not.toBe(ensured.launchUrl);
+      expect(discovered?.launchUrl).toBe(ensured.launchUrl);
       await expect(bootstrap(discovered!.launchUrl)).resolves.toBe(200);
       expect(spawnCount).toBe(1);
 
@@ -193,7 +193,7 @@ async function bootstrap(launchUrl: string): Promise<number> {
       'sec-fetch-site': 'same-origin',
       'sec-fetch-mode': 'cors',
     },
-    body: JSON.stringify({ launchToken: url.hash.slice(1) }),
+    body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
   });
   return response.status;
 }

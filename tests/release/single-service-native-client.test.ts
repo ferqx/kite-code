@@ -25,7 +25,7 @@ describe('single-Service release client target', () => {
           operation: 'web_ensure',
           outcome: 'ready',
           origin: 'http://127.0.0.1:43170',
-          launchUrl: `http://127.0.0.1:43170/#${'a'.repeat(43)}`,
+          launchUrl: 'http://127.0.0.1:43170',
           assetDigest: '1'.repeat(64),
         };
       },
@@ -43,7 +43,7 @@ describe('single-Service release client target', () => {
 
     expect(first.endpoint.homeDigest).not.toBe(second.endpoint.homeDigest);
     expect(first.web.staticAssetRoot).toBe('/bundle/web');
-    await expect(first.discoverWeb()).resolves.toBe(`http://127.0.0.1:43170/#${'a'.repeat(43)}`);
+    await expect(first.discoverWeb()).resolves.toBe('http://127.0.0.1:43170');
     expect(operations).toEqual(['web_ensure']);
   });
 

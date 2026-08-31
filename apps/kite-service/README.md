@@ -23,8 +23,9 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
   receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
 - native Runtime command在admission时复核当前Controller generation与connection/client identity；执行复用现有Runtime/Host的per-Session
   mailbox、transaction、receipt与recovery，不增加第二套Workspace command registry或跨home OS lease。
-- 同一Service listener同时承载Native/Runtime、Agent API和Browser Observer route。Browser cookie不能访问Native/Controller/mutation route，
-  Native authorization也不能进入Browser route；`web stop`只撤销Browser session，不停止Service或Runtime。
+- 同一Service listener同时承载Native/Runtime、Agent API和Browser Observer route。本地Browser route不使用Cookie、launch token或
+  WebSocket认证ticket；tab handle只用于连接隔离与Observer资源释放。Browser仍没有Controller/mutation route；`web stop`只卸载
+  Browser route，不停止Service或Runtime。
 - 项目采用未发布clean cutover。Service只打开current `kite.sqlite`，不扫描、迁移或删除旧DB/layout/Artifact/process state及
   `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
 - Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成

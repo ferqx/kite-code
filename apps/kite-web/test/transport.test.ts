@@ -83,7 +83,6 @@ function harness(
   readonly transport: WebObserverTransport;
   readonly sockets: MockWebSocket[];
   readonly requests: Array<{ readonly path: string; readonly init: RequestInit | undefined }>;
-  readonly replaceState: ReturnType<typeof vi.fn>;
 } {
   const sockets: MockWebSocket[] = [];
   const requests: Array<{ readonly path: string; readonly init: RequestInit | undefined }> = [];
@@ -136,18 +135,13 @@ function harness(
     }
     return response({ schema: 'kite.app.web.disconnect-response.v1', disconnected: true });
   });
-  const replaceState = vi.fn();
   const transport = createWebObserverTransport({
     fetch: fetchMock,
     location: {
-      hash: `#${'a'.repeat(43)}`,
       host: '127.0.0.1:4242',
       origin: 'http://127.0.0.1:4242',
-      pathname: '/',
       protocol: 'http:',
-      search: '',
     },
-    history: { replaceState },
     webSocketFactory: () => {
       if (options.webSocketFailure) throw new Error('WebSocket unavailable');
       const socket = new MockWebSocket();
@@ -155,7 +149,7 @@ function harness(
       return socket;
     },
   });
-  return { transport, sockets, requests, replaceState };
+  return { transport, sockets, requests };
 }
 
 async function flush(): Promise<void> {
@@ -196,11 +190,10 @@ describe('Web Observer browser transport', () => {
     expect(fixture.requests.filter((entry) => entry.path.endsWith('/directory'))).toHaveLength(2);
   });
 
-  test('exchanges launch fragment, creates tab, sends tab header, and speaks closed WS methods', async () => {
+  test('bootstraps directly, creates tab, sends tab header, and speaks closed WS methods', async () => {
     const fixture = harness();
     const connection = await fixture.transport.connect();
     expect(connection).toMatchObject({ tabHandle: 'tab-1', generation: 1 });
-    expect(fixture.replaceState).toHaveBeenCalledWith(null, '', '/');
 
     await fixture.transport.listDirectory();
     const directoryRequest = fixture.requests.find((entry) => entry.path.endsWith('/directory'));
@@ -457,14 +450,10 @@ describe('Web Observer browser transport', () => {
             }),
         ) as typeof fetch,
         location: {
-          hash: `#${'a'.repeat(43)}`,
           host: '127.0.0.1:4242',
           origin: 'http://127.0.0.1:4242',
-          pathname: '/',
           protocol: 'http:',
-          search: '',
         },
-        history: { replaceState: vi.fn() },
       });
       const connecting = transport.connect();
       const rejectedConnect = expect(connecting).rejects.toMatchObject({

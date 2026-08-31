@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('Single-Service Web lifecycle', () => {
-  test('returns web_assets_missing without creating route or auth state, then retries cleanly', async () => {
+  test('returns web_assets_missing without creating route state, then retries cleanly', async () => {
     const root = makeRoot(false);
     let creates = 0;
     const lifecycle = createSingleServiceWebLifecycle({
@@ -42,7 +42,7 @@ describe('Single-Service Web lifecycle', () => {
     await lifecycle[Symbol.asyncDispose]();
   });
 
-  test('single-flights concurrent ensure and returns a fresh in-memory launch URL to each caller', async () => {
+  test('single-flights concurrent ensure and returns the stable loopback URL', async () => {
     const root = makeRoot();
     let creates = 0;
     let closes = 0;
@@ -61,7 +61,8 @@ describe('Single-Service Web lifecycle', () => {
     expect(first.outcome).toBe('ready');
     expect(second.outcome).toBe('ready');
     if (first.outcome !== 'ready' || second.outcome !== 'ready') throw new Error('expected ready');
-    expect(first.launchUrl).not.toBe(second.launchUrl);
+    expect(first.launchUrl).toBe('http://127.0.0.1:43171');
+    expect(second.launchUrl).toBe(first.launchUrl);
     expect(first.assetDigest).toBe(second.assetDigest);
     expect(JSON.stringify(first)).not.toContain(root);
     const status = await lifecycle.status();
@@ -153,30 +154,6 @@ describe('Single-Service Web lifecycle', () => {
       state: 'absent',
     });
   });
-
-  test('closes an exact route owner when launch readiness fails', async () => {
-    const root = makeRoot();
-    let closes = 0;
-    const lifecycle = createSingleServiceWebLifecycle({
-      createRouteOwner: () => ({
-        origin: 'http://127.0.0.1:43175',
-        mintLaunchUrl: () => {
-          throw new Error('injected launch failure');
-        },
-        close: () => {
-          closes += 1;
-        },
-      }),
-    });
-
-    await expect(lifecycle.ensure(root)).resolves.toEqual({
-      outcome: 'unavailable',
-      state: 'absent',
-      diagnostic: 'web_readiness_failed',
-    });
-    expect(closes).toBe(1);
-    expect(lifecycle.state).toBe('absent');
-  });
 });
 
 function makeRoot(complete = true): string {
@@ -194,10 +171,8 @@ function fakeOwner(
   origin: string,
   close: () => void = () => undefined,
 ): SingleServiceWebRouteOwner {
-  let launch = 0;
   return Object.freeze({
     origin,
-    mintLaunchUrl: () => `${origin}/#launch-${++launch}`,
     close,
   });
 }

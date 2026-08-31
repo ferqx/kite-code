@@ -30,7 +30,7 @@ export interface WebGatewayMainSignalPort {
 export interface WebGatewayMainDependencies {
   /** Explicit manager-provided environment; ambient process.env is never consulted implicitly. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
-  /** Service-owned carrier composition. The carrier itself owns the listener and browser auth. */
+  /** Service-owned carrier composition. The carrier itself owns the loopback listener. */
   readonly createCarrier?: (
     environment: WebGatewayMainEnvironment,
     requestShutdown: () => void,

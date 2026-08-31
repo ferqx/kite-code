@@ -167,7 +167,7 @@ entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标
 resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
 
 Web source/installed ensure在任何Service lifecycle访问前执行fixed asset preflight；缺失返回`web_assets_missing`，不得创建DB、socket或
-Browser route。asset有效后才ensure同一Service并在其HTTP listener内注册Browser session。status不mint launch token；
+Browser route。asset有效后才ensure同一Service并在其HTTP listener内注册Browser route；本地Web不创建Browser认证状态，status不mint token；
 `bun run web:dev`依次build、preflight并ensure single-Service。这些路径不让Browser或Vite dev server取得Native
 lifecycle authority。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得

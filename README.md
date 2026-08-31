@@ -46,19 +46,18 @@ For all options, run `bun run agent --help`.
 
 ## Local Web Observer
 
-From a source checkout, one command builds and validates the Web assets, ensures the Coordinator
-and Web Gateway, and prints a one-shot loopback URL:
+From a source checkout, one command builds and validates the Web assets, ensures the Local Service
+and Web routes, and prints their loopback URL:
 
 ```bash
 bun run web:dev
 ```
 
-The terminal TUI/CLI ensures a Coordinator and the selected Workspace Worker only when needed.
-`kite web` ensures the Coordinator plus the single local Web Gateway. Opening a browser URL never
-starts a local server; the page is only a Gateway client. `bun run --cwd apps/kite-web dev` is a
-Vite asset server for frontend work, not the complete authenticated Gateway. If a failed launch
-left exact process-bound recovery evidence, run `bun run agent web recover`; uncertain or live
-process identity remains fail-closed.
+The terminal TUI/CLI ensures the single Local Service only when needed. `kite web` ensures that
+Service and attaches its Browser routes to the same loopback listener. Opening a browser URL never
+starts a local server; the page is only a Gateway client. The current local Web surface uses no
+Cookie, launch token, or WebSocket authentication ticket. `bun run --cwd apps/kite-web dev` is only
+a Vite asset server and does not connect to the Runtime.
 
 ## Documentation
 

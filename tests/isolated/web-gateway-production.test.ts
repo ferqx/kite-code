@@ -100,20 +100,10 @@ describe('production Web Gateway composition', () => {
 
     const rawFrames: unknown[] = [];
     const closeReasons: string[] = [];
-    let cookie = '';
-    const transport = createBrowserTransport(
-      gateway,
-      () => cookie,
-      (next) => {
-        cookie = next;
-      },
-      rawFrames,
-      closeReasons,
-    );
+    const transport = createBrowserTransport(gateway, rawFrames, closeReasons);
     const connection = await transport.connect();
     expect(connection.gatewayInstanceId).toBe(environment.instanceId);
     expect(connection.tabHandle).toMatch(/^[A-Za-z0-9_-]{32}$/u);
-    expect(cookie).toMatch(/^kite_web_[a-f0-9]{24}=/u);
 
     const directory = await transport.listDirectory();
     expect(directory.workspaces).toEqual([
@@ -167,14 +157,13 @@ describe('production Web Gateway composition', () => {
       expectedBuildId: environment.buildId,
     });
     const launch = await control.mintLaunchUrl();
-    expect(launch).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#[-_A-Za-z0-9]{43}$/u);
+    expect(launch).toBe(gateway.origin);
     await control.stop();
     await Bun.sleep(60);
     expect(shutdownRequests).toBe(1);
     expect(fixture.calls.runtimeCommands).toBe(0);
     expect(fixture.calls.workerStopRequests).toBe(0);
 
-    const staleCookie = cookie;
     const staleTab = connection.tabHandle;
     await gateway.close();
     const restartedRoot = createStaticRoot();
@@ -185,19 +174,18 @@ describe('production Web Gateway composition', () => {
         () => undefined,
       ),
     );
-    const staleCookieResponse = await fetch(`${restarted.origin}${KITE_WEB_TABS_PATH}`, {
+    const directTabResponse = await fetch(`${restarted.origin}${KITE_WEB_TABS_PATH}`, {
       method: 'POST',
-      headers: browserHeaders(restarted.origin, staleCookie),
+      headers: browserHeaders(restarted.origin),
       body: JSON.stringify({ schema: 'kite.app.web.tab-create-request.v1' }),
     });
-    expect(staleCookieResponse.status).toBe(401);
-    const fresh = await bootstrapGateway(restarted);
+    expect(directTabResponse.status).toBe(200);
     const staleTabResponse = await fetch(`${restarted.origin}${KITE_WEB_DIRECTORY_PATH}`, {
       method: 'POST',
-      headers: browserHeaders(restarted.origin, fresh.cookie, staleTab),
+      headers: browserHeaders(restarted.origin, undefined, staleTab),
       body: JSON.stringify({ schema: 'kite.app.web.directory-request.v1' }),
     });
-    expect(staleTabResponse.status).toBe(401);
+    expect(staleTabResponse.status).toBe(404);
   });
 });
 
@@ -505,25 +493,18 @@ function createGatewayEnvironment(
 
 function createBrowserTransport(
   gateway: WebGatewayCarrier,
-  currentCookie: () => string,
-  setCookie: (value: string) => void,
   rawFrames: unknown[],
   closeReasons: string[],
 ): WebObserverTransport {
   const origin = new URL(gateway.origin);
   return createWebObserverTransport({
     location: {
-      hash: new URL(gateway.launchUrl).hash,
       host: origin.host,
       origin: gateway.origin,
-      pathname: '/',
       protocol: origin.protocol,
-      search: '',
     },
-    history: { replaceState: () => undefined },
-    fetch: (input, init) => browserFetch(gateway.origin, input, init, currentCookie, setCookie),
-    webSocketFactory: (url) =>
-      browserSocket(url, gateway.origin, currentCookie, rawFrames, closeReasons),
+    fetch: (input, init) => browserFetch(gateway.origin, input, init),
+    webSocketFactory: (url) => browserSocket(url, gateway.origin, rawFrames, closeReasons),
   });
 }
 
@@ -531,31 +512,22 @@ async function browserFetch(
   origin: string,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
-  currentCookie: () => string,
-  setCookie: (value: string) => void,
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set('origin', origin);
   headers.set('sec-fetch-site', 'same-origin');
   headers.set('sec-fetch-mode', 'cors');
-  const cookie = currentCookie();
-  if (cookie) headers.set('cookie', cookie);
-  const response = await fetch(new URL(String(input), origin), { ...init, headers });
-  const issued = response.headers.get('set-cookie')?.split(';', 1)[0];
-  if (issued) setCookie(issued);
-  return response;
+  return fetch(new URL(String(input), origin), { ...init, headers });
 }
 
 function browserSocket(
   url: string,
   origin: string,
-  currentCookie: () => string,
   rawFrames: unknown[],
   closeReasons: string[],
 ): WebObserverWebSocket {
   const socket = new WebSocket(url, {
     headers: {
-      Cookie: currentCookie(),
       Origin: origin,
       'Sec-Fetch-Mode': 'websocket',
       'Sec-Fetch-Site': 'same-origin',
@@ -570,21 +542,6 @@ function browserSocket(
   });
   socket.addEventListener('close', (event) => closeReasons.push(event.reason));
   return socket as unknown as WebObserverWebSocket;
-}
-
-async function bootstrapGateway(
-  gateway: WebGatewayCarrier,
-): Promise<{ readonly cookie: string; readonly origin: string }> {
-  const token = new URL(gateway.launchUrl).hash.slice(1);
-  const response = await fetch(`${gateway.origin}/_kite/web/bootstrap`, {
-    method: 'POST',
-    headers: browserHeaders(gateway.origin),
-    body: JSON.stringify({ launchToken: token }),
-  });
-  expect(response.status).toBe(200);
-  const setCookie = response.headers.get('set-cookie');
-  if (!setCookie) throw new Error('Gateway bootstrap omitted cookie.');
-  return { cookie: setCookie.split(';', 1)[0]!, origin: gateway.origin };
 }
 
 function browserHeaders(origin: string, cookie?: string, tabHandle?: string): HeadersInit {

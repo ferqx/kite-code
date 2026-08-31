@@ -41,10 +41,6 @@ export function createProductionWebGatewayCarrier(
     get origin() {
       return carrier.origin;
     },
-    get launchUrl() {
-      return carrier.launchUrl;
-    },
-    mintLaunchUrl: () => carrier.mintLaunchUrl(),
     close() {
       closePromise ??= closeAll(carrier, upstream);
       return closePromise;

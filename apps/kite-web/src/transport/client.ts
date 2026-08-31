@@ -27,7 +27,6 @@ const WS_REQUEST_DEADLINE_MS = 5_000;
 const HTTP_REQUEST_DEADLINE_MS = 5_000;
 const MAX_HISTORY_PAGES = 32;
 const MAX_HISTORY_MESSAGES = 4_096;
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
 export type WebObserverTransportFailure =
   | 'gateway_unavailable'
@@ -70,11 +69,7 @@ export interface WebObserverTransportOptions {
   /** Browser Fetch call shape only; Bun-specific static helpers are not part of this port. */
   readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readonly webSocketFactory?: (url: string) => WebObserverWebSocket;
-  readonly location?: Pick<
-    Location,
-    'hash' | 'host' | 'origin' | 'pathname' | 'protocol' | 'search'
-  >;
-  readonly history?: Pick<History, 'replaceState'>;
+  readonly location?: Pick<Location, 'host' | 'origin' | 'protocol'>;
 }
 
 export interface WebObserverConnection {
@@ -107,11 +102,7 @@ export interface WebObserverTransport {
   disconnect(): Promise<void>;
 }
 
-/**
- * Browser-only adapter for the closed Web Gateway surface. The launch token
- * is captured and the fragment is cleared synchronously at construction; no
- * token is retained after the one-shot bootstrap request is started.
- */
+/** Browser-only adapter for the closed, unauthenticated loopback Web Gateway surface. */
 export function createWebObserverTransport(
   options: WebObserverTransportOptions = {},
 ): WebObserverTransport {
@@ -121,15 +112,10 @@ export function createWebObserverTransport(
     (typeof window === 'undefined'
       ? undefined
       : {
-          hash: window.location.hash,
           host: window.location.host,
           origin: window.location.origin,
-          pathname: window.location.pathname,
           protocol: window.location.protocol,
-          search: window.location.search,
         });
-  const launchToken = captureLaunchToken(browserLocation, options.history);
-  let pendingLaunchToken: string | undefined = launchToken;
   let bootstrapResponse: WebBootstrapResponse | undefined;
   let connection: WebObserverConnection | undefined;
   let socket: WebObserverWebSocket | undefined;
@@ -185,12 +171,9 @@ export function createWebObserverTransport(
 
   async function ensureBootstrap(): Promise<WebBootstrapResponse> {
     if (bootstrapResponse !== undefined) return bootstrapResponse;
-    const token = pendingLaunchToken;
-    pendingLaunchToken = undefined;
-    if (token === undefined || !TOKEN_PATTERN.test(token)) {
-      throw new WebObserverTransportError('gateway_unavailable');
-    }
-    const response = await postJson('/_kite/web/bootstrap', { launchToken: token });
+    const response = await postJson('/_kite/web/bootstrap', {
+      schema: 'kite.app.web.bootstrap-request.v1',
+    });
     try {
       bootstrapResponse = webBootstrapResponseCodec.decode(response);
     } catch {
@@ -733,28 +716,6 @@ interface PendingResponse {
   readonly resolve: (value: unknown) => void;
   readonly reject: (reason: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
-}
-
-function captureLaunchToken(
-  location: Pick<Location, 'hash' | 'pathname' | 'search'> | undefined,
-  history: Pick<History, 'replaceState'> | undefined,
-): string | undefined {
-  if (location === undefined) return undefined;
-  const hash = location.hash;
-  const token = hash.startsWith('#') ? hash.slice(1) : undefined;
-  if (hash.length > 0) {
-    try {
-      (history ?? (typeof window === 'undefined' ? undefined : window.history))?.replaceState(
-        null,
-        '',
-        `${location.pathname}${location.search}`,
-      );
-    } catch {
-      // The fragment is still excluded from every request; failure to mutate
-      // browser history does not turn it into an authorization header/query.
-    }
-  }
-  return token;
 }
 
 function createWebSocket(

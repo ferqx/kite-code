@@ -9,7 +9,7 @@ adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
 Web lifecycle由release注入的`KiteSingleServiceClient`承载。CLI的`kite web [--json]`先做asset preflight再ensure Service，status/stop在
-absent时不spawn；status只返回state/origin/asset digest，不创建launch token。TUI `/web`通过ensure/open取得一次性URL。正式CLI不组合legacy
+absent时不spawn；status只返回state/origin/asset digest。本地Web不创建launch token，TUI `/web`通过ensure/open取得普通loopback URL。正式CLI不组合legacy
 Coordinator、Store migration或`web recover`；该parser/adapter contract与tests不代表hosted Web qualification。
 
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；

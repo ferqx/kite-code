@@ -184,25 +184,22 @@ describe('Kite Service Native loopback carrier', () => {
     expect(first.outcome).toBe('ready');
     if (first.outcome !== 'ready') throw new Error('expected Browser routes to be ready');
     expect(first.origin).toBe(carrier.origin);
-    expect(new URL(first.launchUrl).origin).toBe(carrier.origin);
+    expect(first.launchUrl).toBe(carrier.origin);
     expect(await fetch(`${carrier.origin}/`).then((response) => response.text())).toBe(
       '<html>single service</html>',
     );
     expect(await fetch(`${carrier.origin}/healthz`).then((response) => response.text())).toBe('ok');
 
-    const launchToken = new URL(first.launchUrl).hash.slice(1);
     const bootstrap = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
       method: 'POST',
       headers: browserJsonHeaders(carrier.origin),
-      body: JSON.stringify({ launchToken }),
+      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
     });
     expect(bootstrap.status).toBe(200);
-    const setCookie = bootstrap.headers.get('set-cookie');
-    if (!setCookie) throw new Error('Browser bootstrap omitted its cookie');
-    const cookie = setCookie.split(';', 1)[0]!;
+    expect(bootstrap.headers.get('set-cookie')).toBeNull();
     const tabResponse = await fetch(`${carrier.origin}/_kite/web/tabs`, {
       method: 'POST',
-      headers: browserJsonHeaders(carrier.origin, cookie),
+      headers: browserJsonHeaders(carrier.origin),
       body: JSON.stringify({ schema: 'kite.app.web.tab-create-request.v1' }),
     });
     expect(tabResponse.status).toBe(200);
@@ -215,7 +212,7 @@ describe('Kite Service Native loopback carrier', () => {
       `${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`,
       {
         method: 'POST',
-        headers: browserJsonHeaders(carrier.origin, cookie),
+        headers: browserJsonHeaders(carrier.origin),
         body: '{}',
       },
     );
@@ -231,12 +228,12 @@ describe('Kite Service Native loopback carrier', () => {
     expect(nativeOnBrowser.status).toBe(403);
     const mutation = await fetch(`${carrier.origin}/_kite/web/mutate`, {
       method: 'POST',
-      headers: browserJsonHeaders(carrier.origin, cookie, tab.tabHandle),
+      headers: browserJsonHeaders(carrier.origin, undefined, tab.tabHandle),
       body: '{}',
     });
     expect(mutation.status).toBe(404);
 
-    const browserSocket = await openBrowserSocket(carrier, cookie);
+    const browserSocket = await openBrowserSocket(carrier);
     const browserMessages = new SocketMessages(browserSocket);
     browserSocket.send(JSON.stringify({ type: 'initialize', tabHandle: tab.tabHandle }));
     await expect(browserMessages.next()).resolves.toEqual({
@@ -1453,11 +1450,10 @@ function browserJsonHeaders(
   };
 }
 
-async function openBrowserSocket(carrier: KiteServiceCarrier, cookie: string): Promise<WebSocket> {
+async function openBrowserSocket(carrier: KiteServiceCarrier): Promise<WebSocket> {
   return new Promise<WebSocket>((resolvePromise, reject) => {
     const socket = new WebSocket(`${carrier.origin.replace('http:', 'ws:')}/_kite/web/client`, {
       headers: {
-        Cookie: cookie,
         Origin: carrier.origin,
         'Sec-Fetch-Mode': 'websocket',
         'Sec-Fetch-Site': 'same-origin',

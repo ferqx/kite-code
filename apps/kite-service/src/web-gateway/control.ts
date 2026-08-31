@@ -58,10 +58,7 @@ export function createWebGatewayControlLink(
           'origin',
           'schema',
         ]) ||
-        typeof response.launchUrl !== 'string' ||
-        !new RegExp(`^${escapePattern(options.origin)}/#[A-Za-z0-9_-]{43}$`, 'u').test(
-          response.launchUrl,
-        )
+        response.launchUrl !== options.origin
       ) {
         throw unavailable();
       }
@@ -168,10 +165,6 @@ function safeIdentity(value: string): void {
   if (!value || value.length > 512 || /\p{Cc}/u.test(value)) {
     throw new TypeError('Web Gateway control identity is invalid.');
   }
-}
-
-function escapePattern(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
 function unavailable(): Error {

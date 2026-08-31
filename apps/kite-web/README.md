@@ -12,8 +12,7 @@ History、live、reconnect 与 resync 都进入 `src/presentation/reducer.ts` �
 `@kite-ai/kite-app-contract` 的 browser-safe DTO，不导入 CLI/TUI、Native local-runtime、Runtime Host、Store、
 SQLite 或 raw Runtime event。
 
-`src/transport/client.ts` 是唯一生产 Browser adapter：它同步捕获 launch URL fragment 并用
-`history.replaceState` 清除 fragment，随后通过 `POST /_kite/web/bootstrap`、`POST /_kite/web/tabs` 和
+`src/transport/client.ts` 是唯一生产 Browser adapter：它直接通过 `POST /_kite/web/bootstrap`、`POST /_kite/web/tabs` 和
 `x-kite-web-tab` 访问 closed Gateway routes。bootstrap/tab成功后Directory与History立即走HTTP snapshot，不等待或依赖live
 WebSocket；因此live unavailable不能清空server已返回的Workspace/Session列表。只有选中running Session时才懒建立
 `/_kite/web/client` 的 closed WebSocket
@@ -28,9 +27,9 @@ unavailable 状态，而不是无限循环。
 也不会直接读取本地文件。
 
 角色与启动顺序保持分离：TUI/CLI Native client按需ensure唯一Local Service；`kite web`先做asset preflight，再ensure同一Service并attach
-Browser route。Browser打开launch URL只连接已存在Service，不负责启动任何本机server。`bun run --cwd apps/kite-web dev`只是Vite静态资源
-开发服务器，不包含Browser认证或Runtime连接。源码开发推荐`bun run web:dev`，它依次完成Vite build、fixed asset preflight和
-single-Service Web ensure并打印URL。
+Browser route。Browser打开普通loopback URL只连接已存在Service，不负责启动任何本机server。当前本地Web没有Cookie、launch token或
+WebSocket认证ticket；tab handle只隔离连接与释放Observer资源。`bun run --cwd apps/kite-web dev`只是Vite静态资源开发服务器，不包含
+Runtime连接。源码开发推荐`bun run web:dev`，它依次完成Vite build、fixed asset preflight和single-Service Web ensure并打印URL。
 
 release candidate由同一`kite-service` listener提供loopback BFF，并把`payload/web`作为immutable candidate asset绑定到Web slot；Observer从
 Store 9/Runtime safe ports读取current History/live，只向Browser返回presentation DTO。Web asset、source entrypoint与本地smoke只证明闭集

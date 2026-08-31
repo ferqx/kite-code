@@ -16,8 +16,8 @@ Kite Home。POSIX每home runtime只允许`service.sock`和`service.lock`，Windo
 data/state、跨home lease或另一套coordination目录。
 
 Service拥有一个Runtime Host、一个Store 9 writer connection和一个loopback HTTP listener。Workspace仍是Trust、配置、Skill、MCP、
-Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的observer route；`web stop`撤销
-Browser session/ticket，不停止Service或Agent API。
+Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的observer route；该route不建立
+Browser认证状态，`web stop`只卸载route并关闭tab/socket，不停止Service或Agent API。
 
 Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以及`kite.sqlite`/WAL/SHM。运行期不得新建
 `runtime-service/`、`coordinator/`、`workspace-worker/`、`web-gateway/`、`layouts/`或filesystem Artifact root。
@@ -27,8 +27,7 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 - `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。
 - `kite web`先验证fixed asset root、`index.html`、OpenAPI和hashed JS/CSS，再ensure Service。缺失返回
   `web_assets_missing`，不读取lifecycle、不spawn、不创建DB/socket/token。
-- `web_status`只返回`absent|ready`、origin与asset digest，不mint launch token；只有`web_ensure`返回一次性launch URL。TUI `/web`
-  使用ensure/open语义。
+- `web_status`只返回`absent|ready`、origin与asset digest；`web_ensure`返回同一普通loopback URL，不mint token。TUI `/web`使用ensure/open语义。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不重放stop。
 
 Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。`bun run web:dev`执行build、asset preflight、Service ensure并原样

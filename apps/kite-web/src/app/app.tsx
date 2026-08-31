@@ -349,7 +349,7 @@ function DirectoryState({
           {loading
             ? 'Loading the read-only Workspace directory…'
             : unavailable
-              ? 'Start the local Kite Web Gateway, then reopen its one-shot launch URL.'
+              ? 'Start the local Kite Web Gateway, then reopen its loopback URL.'
               : sessionCount === 0
                 ? 'Existing Workspace sessions will appear here when the server publishes them.'
                 : 'Choose an existing Session from the Workspace list to view its History.'}

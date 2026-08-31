@@ -612,12 +612,6 @@ export function createWebGatewayProcessManager(
     } catch {
       throw new WebGatewayProcessManagerError('outcome_unknown', 'Gateway launch URL mint failed.');
     }
-    if (!/^http:\/\/127\.0\.0\.1:\d{1,5}\/#[A-Za-z0-9_-]{43}$/u.test(value)) {
-      throw new WebGatewayProcessManagerError(
-        'outcome_unknown',
-        'Gateway returned an invalid launch URL.',
-      );
-    }
     const parsed = new URL(value);
     if (
       parsed.origin !== gateway.descriptor.endpoint.origin ||
@@ -626,7 +620,7 @@ export function createWebGatewayProcessManager(
       parsed.search !== '' ||
       parsed.username !== '' ||
       parsed.password !== '' ||
-      parsed.hash.length !== 44
+      parsed.hash !== ''
     ) {
       throw new WebGatewayProcessManagerError(
         'outcome_unknown',

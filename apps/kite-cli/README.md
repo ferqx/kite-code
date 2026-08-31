@@ -13,12 +13,12 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
-- CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的一次性URL，
-  `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。status不mint
-  launch token；lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
+- CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的普通loopback URL，
+  `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。本地Web不mint token；
+  lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
 - KHSS-02的单Service Web client已由release/source默认入口选择：同一parser/output接受release注入的`KiteSingleServiceClient +
   staticAssetRoot`，`web/status/stop`直接走per-home native IPC并使用“Kite Web”术语；`web_assets_missing`等typed diagnostic原样输出，
-  `/web` TUI callback调用同一ensure/open语义取得一次性URL，不通过status创建认证状态。
+  `/web` TUI callback调用同一ensure/open语义取得普通loopback URL，不通过status创建认证状态。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS

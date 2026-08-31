@@ -24,13 +24,13 @@ fallback或兼容source。
 `packages/kite-app-contract/src/web.ts`是Browser-safe semantic contract。Browser只取得opaque Workspace/Session summary、safe History和
 observer stream；绝不返回canonical Workspace path、Store path、native capability、credential、Controller或mutation route。
 
-Service-owned Web carrier只bind `127.0.0.1`，验证Host、Origin、Fetch Metadata、body/queue bound、CSP与content type。认证保持
-fragment launch token → HttpOnly/SameSite cookie → one-shot WebSocket ticket；这些材料只存在于内存，不写Kite Home。tab/socket replacement
-只关闭旧Observer binding，不取消Turn、effect或Controller。
+Service-owned Web carrier只bind `127.0.0.1`，验证Host、Origin、Fetch Metadata、body/queue bound、CSP与content type。本地Service以
+OS用户与loopback作为当前信任边界，Browser route不使用fragment launch token、Cookie或WebSocket认证ticket。tab handle只是有界连接标识；
+tab/socket replacement只关闭旧Observer binding，不取消Turn、effect或Controller。
 
-`kite web`在任何Service lifecycle或Browser auth状态前验证static root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
-`web_assets_missing`且不spawn、不创建DB/socket/token。`web_ensure`attach同一listener并mint一次性URL；`web_status`只读返回
-`absent|ready`、origin和asset digest；`web_stop`只撤销Browser session/ticket。
+`kite web`在任何Service lifecycle状态前验证static root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
+`web_assets_missing`且不spawn、不创建DB/socket。`web_ensure`attach同一listener并返回稳定的普通loopback URL；`web_status`只读返回
+`absent|ready`、origin和asset digest；`web_stop`只卸载Browser route并关闭其tab/socket。
 
 Browser打开URL不能启动本机server。Vite dev server只服务前端asset；`bun run web:dev`执行build、preflight和single-Service ensure。
 remote/LAN/public Web、多租户、Browser mutation与server-side credential custody不受支持。
