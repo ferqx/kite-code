@@ -3,6 +3,7 @@ import {
   WEB_DISCONNECT_RESPONSE_SCHEMA_,
   WEB_HISTORY_RESPONSE_SCHEMA_,
   WEB_LIVE_EVENT_SCHEMA_,
+  WEB_OBSERVER_CONTRACT_REVISION_,
   WEB_STREAM_EVENT_SCHEMA_,
   WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
   WEB_TAB_CREATE_RESPONSE_SCHEMA_,
@@ -48,7 +49,7 @@ import {
   type WebPresentationState,
 } from './presentation';
 
-export const WEB_OBSERVER_CONTRACT_REVISION_ = 'kite-app-web-observer-v1' as const;
+export { WEB_OBSERVER_CONTRACT_REVISION_ };
 
 /** Path-free owner-supplied Workspace grouping for the Web left rail. */
 export interface WebObserverDirectoryPort {

@@ -3,6 +3,7 @@ import {
   WEB_DIRECTORY_RESPONSE_SCHEMA_,
   WEB_HISTORY_RESPONSE_SCHEMA_,
   WEB_LIVE_EVENT_SCHEMA_,
+  WEB_OBSERVER_CONTRACT_REVISION_,
   WEB_SUBSCRIBE_REQUEST_SCHEMA_,
   WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
   WEB_UNSUBSCRIBE_REQUEST_SCHEMA_,
@@ -76,6 +77,7 @@ function messageFixture() {
 
 function harness(
   options: {
+    readonly contractRevision?: string;
     readonly historyPages?: readonly WebHistoryResponse[];
     readonly webSocketFailure?: boolean;
   } = {},
@@ -94,7 +96,7 @@ function harness(
       return response({
         schema: WEB_BOOTSTRAP_RESPONSE_SCHEMA_,
         gatewayInstanceId: 'gateway-1',
-        contractRevision: 'contract-1',
+        contractRevision: options.contractRevision ?? WEB_OBSERVER_CONTRACT_REVISION_,
       });
     }
     if (path.endsWith('/tabs')) {
@@ -169,6 +171,12 @@ async function waitForSocket(sockets: readonly MockWebSocket[]): Promise<MockWeb
 }
 
 describe('Web Observer browser transport', () => {
+  test('rejects a bootstrap from an incompatible Web contract before creating a tab', async () => {
+    const fixture = harness({ contractRevision: 'kite-app-web-observer-v1' });
+    await expect(fixture.transport.connect()).rejects.toMatchObject({ reason: 'protocol_error' });
+    expect(fixture.requests.filter((entry) => entry.path.endsWith('/tabs'))).toHaveLength(0);
+  });
+
   test('coalesces concurrent HTTP connect calls into one tab without opening live WS', async () => {
     const fixture = harness();
     const first = fixture.transport.connect();

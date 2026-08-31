@@ -28,6 +28,10 @@ malformed以及instance/server/build identity mismatch均fail closed `identity_u
 被拒绝，expected build drift返回`incompatible + build_mismatch`。以上结果都不授权cleanup alive/uncertain state、
 spawn replacement或把caller descriptor回显成握手成功。
 
+single-Service owner-only Native IPC v2不使用上述legacy descriptor probe判断source热开发兼容：protocol/client-contract exact且
+Service/caller build identity同为`dev:`时，build drift允许复用同一resident owner；installed或source↔installed仍拒绝。
+`web_ensure`还必须匹配独立`kite-app-web-observer-v2`revision。
+
 Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime WebSocket前使用access token，但只有
 Service返回trusted canonical identity后connect route才签发ticket。request path/cwd/clientInfo不产生Trust authority。
 

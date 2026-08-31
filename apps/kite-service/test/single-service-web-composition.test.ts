@@ -1,6 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { WEB_DIRECTORY_REQUEST_SCHEMA_ } from '@kite-ai/kite-app-contract';
+import {
+  WEB_DIRECTORY_REQUEST_SCHEMA_,
+  WEB_OBSERVER_CONTRACT_REVISION_,
+} from '@kite-ai/kite-app-contract';
 import type { RuntimeAccess } from '@kite-ai/runtime-contract';
 import { RUNTIME_PROJECTION_SCHEMA_ } from '@kite-ai/runtime-contract';
 import {
@@ -35,9 +38,9 @@ test('binds the Store 9 Directory to the in-process Web Observer only at the Ser
       loadSession: async (sessionId) => ({ sessionId, lastSequence: 0, records: [] }),
     },
     serviceInstanceId: 'service-1',
-    contractRevision: 'kite-app-web-observer-v1',
+    contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
   });
-  expect(Object.keys(target)).toEqual(['createObserver']);
+  expect(Object.keys(target)).toEqual(['contractRevision', 'createObserver']);
   const observer = target.createObserver({ tabHandle: 'tab-1', connectionGeneration: 1 });
   const directory = await observer.listDirectory({ schema: WEB_DIRECTORY_REQUEST_SCHEMA_ });
   expect(directory.workspaces).toEqual([

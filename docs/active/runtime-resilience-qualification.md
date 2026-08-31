@@ -92,6 +92,8 @@ manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access
 identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`；descriptor/expected build mismatch返回
 `incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
 与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
+single-Service Native IPC v2对source开发作更窄的例外：protocol/client-contract exact且双方build identity均为`dev:`时允许build drift并
+复用resident owner；installed/candidate、source↔installed或Web semantic revision drift仍fail closed。该例外不授权cleanup、spawn或mutation replay。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待

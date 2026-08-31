@@ -51,7 +51,9 @@ export interface SingleServiceInfrastructureOptions {
   readonly processStartIdentity: string;
   readonly pid?: number;
   readonly startedAt?: string;
-  readonly webGateway?: Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'>;
+  readonly webGateway?: Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'> & {
+    readonly contractRevision: string;
+  };
   readonly readiness?: KiteServiceReadinessPort;
   readonly signals?: KiteServiceSignalPort;
   readonly startupTimeoutMs?: number;
@@ -105,8 +107,9 @@ export function createSingleServiceInfrastructure(
     ? createSingleServiceWebLifecycle({
         createRouteOwner: (assets) => {
           if (!carrier || !publishedReady) throw new Error('Service listener is not ready.');
+          const { contractRevision: _contractRevision, ...routeOptions } = options.webGateway!;
           return carrier.attachWebGateway({
-            ...options.webGateway!,
+            ...routeOptions,
             staticAssetRoot: assets.root,
           });
         },
@@ -266,7 +269,10 @@ export function createSingleServiceInfrastructure(
   async function dispatchNativeRequest(
     request: KiteLocalNativeRequest,
   ): Promise<KiteLocalNativeResponse> {
-    if (request.expectedBuildId !== options.buildId) {
+    if (
+      request.expectedBuildId !== options.buildId &&
+      !(isDevelopmentBuild(options.buildId) && isDevelopmentBuild(request.expectedBuildId))
+    ) {
       return rejected(request.requestId, 'incompatible');
     }
     if (!publishedReady || !carrier || !accessToken) {
@@ -301,6 +307,9 @@ export function createSingleServiceInfrastructure(
             state: 'absent',
             diagnostic: 'web_readiness_failed',
           };
+        }
+        if (request.expectedWebContractRevision !== options.webGateway?.contractRevision) {
+          return rejected(request.requestId, 'incompatible');
         }
         const result = await web.ensure(request.staticAssetRoot);
         return result.outcome === 'ready'
@@ -352,6 +361,10 @@ export function createSingleServiceInfrastructure(
       }
     }
   }
+}
+
+function isDevelopmentBuild(buildId: string): boolean {
+  return /^dev:[A-Za-z0-9:._-]+$/u.test(buildId);
 }
 
 function rejected(

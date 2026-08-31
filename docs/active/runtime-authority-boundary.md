@@ -138,6 +138,8 @@ Protocol/client-contract/serverVersion/build identity一致。server identity dr
 `unavailable/identity_uncertain`；descriptor/expected build mismatch返回`incompatible/build_mismatch`。两类都保留state、
 `spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
 该instance proof也不创建persisted Project authority或跨Host Store fence。
+当前single-Service Native IPC v2只在protocol/client-contract exact且Service/caller build identity同为`dev:`时把build drift视为可复用；
+installed/candidate、source↔installed与Web semantic revision仍要求exact compatibility。build ID是部署/诊断身份，不替代wire revision。
 
 ## Authority sequence
 

@@ -22,6 +22,7 @@ import {
  */
 export const WEB_BOOTSTRAP_REQUEST_SCHEMA_ = 'kite.app.web.bootstrap-request.v1' as const;
 export const WEB_BOOTSTRAP_RESPONSE_SCHEMA_ = 'kite.app.web.bootstrap-response.v1' as const;
+export const WEB_OBSERVER_CONTRACT_REVISION_ = 'kite-app-web-observer-v2' as const;
 export const WEB_TAB_CREATE_REQUEST_SCHEMA_ = 'kite.app.web.tab-create-request.v1' as const;
 export const WEB_TAB_CREATE_RESPONSE_SCHEMA_ = 'kite.app.web.tab-create-response.v1' as const;
 export const WEB_DIRECTORY_REQUEST_SCHEMA_ = 'kite.app.web.directory-request.v1' as const;

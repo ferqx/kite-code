@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_ = 'kite.local-runtime-service.v1' as const;
 export const LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_ = 'kite.local-service-lock.v1' as const;
 export const LOCAL_RUNTIME_SERVICE_TOKEN_SCHEMA_ = 'kite.local-runtime-token.v1' as const;
-export const LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ = 'kite-local-runtime-contract-v1' as const;
+export const LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ = 'kite-local-runtime-contract-v2' as const;
 
 const MAX_IDENTITY_LENGTH = 512;
 const MAX_URL_LENGTH = 512;

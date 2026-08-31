@@ -262,7 +262,7 @@ function fakeRuntime(): {
           pid: 42_001,
           startedAt: '2026-08-30T00:00:00.000Z',
           protocolVersion: 1,
-          clientContractRevision: 'kite-local-runtime-contract-v1',
+          clientContractRevision: 'kite-local-runtime-contract-v2',
           serverVersion: 'service-1',
           buildId: 'build-1',
           httpOrigin: 'http://127.0.0.1:43170',

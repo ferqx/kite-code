@@ -52,7 +52,7 @@ describe('single-Service real child target', () => {
         interactionMode: 'auto',
       }),
     );
-    const buildId = 'single-child-build-1';
+    const buildId = 'dev:single-child-build-1';
     const composition = createManagedSingleServiceNativeComposition({
       home: createKiteHomeIdentity(homeRoot),
       runtimeParent,
@@ -81,6 +81,36 @@ describe('single-Service real child target', () => {
       expect(first).toMatchObject({ outcome: 'applied', state: 'ready' });
       const second = await composition.manager.ensure({ requestId: 'ensure-2' });
       expect(second).toMatchObject({ outcome: 'applied', state: 'ready' });
+      const compatibleSourceClient = createManagedSingleServiceNativeComposition({
+        home: createKiteHomeIdentity(homeRoot),
+        runtimeParent,
+        expectedBuildId: 'dev:single-child-build-2',
+        staticAssetRoot: staticRoot,
+        executable: {
+          path: resolve(import.meta.dir, '../../scripts/release/entrypoints/service.ts'),
+          mode: 'source',
+          buildId: 'dev:single-child-build-2',
+        },
+        cwd: neutral,
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+          HOME: osHome,
+          KITE_CODE_HOME: homeRoot,
+          KITE_SERVICE_BUILD_ID: 'dev:single-child-build-2',
+          KITE_SINGLE_SERVICE_RUNTIME_PARENT: runtimeParent,
+          NODE_ENV: 'production',
+        },
+        startupTimeoutMs: 2_000,
+        stopTimeoutMs: 2_000,
+        childStderr: 'inherit',
+      });
+      expect(
+        await compatibleSourceClient.manager.ensure({ requestId: 'ensure-compatible-source' }),
+      ).toMatchObject({ outcome: 'applied', state: 'ready' });
+      expect(await compatibleSourceClient.client.describe()).toMatchObject({
+        outcome: 'ready',
+        service: { buildId },
+      });
       expect(await composition.client.describe()).toMatchObject({
         outcome: 'ready',
         service: { buildId },

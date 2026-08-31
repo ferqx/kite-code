@@ -27,6 +27,8 @@ observer stream；绝不返回canonical Workspace path、Store path、native cap
 Service-owned Web carrier只bind `127.0.0.1`，验证Host、Origin、Fetch Metadata、body/queue bound、CSP与content type。本地Service以
 OS用户与loopback作为当前信任边界，Browser route不使用fragment launch token、Cookie或WebSocket认证ticket。tab handle只是有界连接标识；
 tab/socket replacement只关闭旧Observer binding，不取消Turn、effect或Controller。
+当前无认证Browser wire的semantic revision为`kite-app-web-observer-v2`；Browser在tab create前核对bootstrap revision，Native
+`web_ensure`在route attach前核对同一revision。revision drift不能用source build兼容复用或样例fallback掩盖。
 
 `kite web`在任何Service lifecycle状态前验证static root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
 `web_assets_missing`且不spawn、不创建DB/socket。`web_ensure`attach同一listener并返回稳定的普通loopback URL；`web_status`只读返回

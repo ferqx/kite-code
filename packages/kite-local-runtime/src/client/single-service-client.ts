@@ -28,6 +28,7 @@ export class KiteSingleServiceClientError extends Error {
 export interface KiteSingleServiceClientOptions {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly expectedBuildId: string;
+  readonly webContractRevision: string;
   readonly requestId?: () => string;
   readonly request?: typeof requestKiteLocalNativeEndpoint;
   readonly requestOptions?: KiteLocalNativeRequestOptions;
@@ -70,13 +71,24 @@ export function createKiteSingleServiceClient(
     requestId: boundedRequestId(requestId()),
     protocolVersion: KITE_LOCAL_NATIVE_PROTOCOL_VERSION,
     clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    expectedBuildId: boundedBuildId(options.expectedBuildId),
+    expectedBuildId: boundedIdentity(options.expectedBuildId, 'expected build identity'),
   });
 
   return Object.freeze({
     describe: () => invoke({ ...base(), operation: 'describe' }, 'describe'),
     ensureWeb: (staticAssetRoot: string) =>
-      invoke({ ...base(), operation: 'web_ensure', staticAssetRoot }, 'web_ensure'),
+      invoke(
+        {
+          ...base(),
+          operation: 'web_ensure',
+          staticAssetRoot,
+          expectedWebContractRevision: boundedIdentity(
+            options.webContractRevision,
+            'Web contract revision',
+          ),
+        },
+        'web_ensure',
+      ),
     statusWeb: () => invoke({ ...base(), operation: 'web_status' }, 'web_status'),
     stopWeb: () => invoke({ ...base(), operation: 'web_stop' }, 'web_stop'),
     stopService: () => invoke({ ...base(), operation: 'service_stop' }, 'service_stop'),
@@ -90,9 +102,9 @@ function boundedRequestId(value: string): string {
   return value;
 }
 
-function boundedBuildId(value: string): string {
+function boundedIdentity(value: string, label: string): string {
   if (value.length < 1 || value.length > 512 || /\p{Cc}/u.test(value)) {
-    throw new TypeError('Single-Service expected build identity is invalid.');
+    throw new TypeError(`Single-Service ${label} is invalid.`);
   }
   return value;
 }

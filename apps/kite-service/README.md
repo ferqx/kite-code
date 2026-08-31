@@ -19,6 +19,8 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
   readiness fd启动；stdout不承载readiness。
 - `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；
   access/control capability与process identity只在进程内和IPC握手中存在，不写入Kite Home。
+- Native IPC v2以protocol/client-contract revision判断兼容；双方均为`dev:` build时允许source build drift复用resident Service，
+  installed/source边界保持exact。Web route另校验`kite-app-web-observer-v2`revision，不能被source复用规则绕过。
 - `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/
   receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
 - native Runtime command在admission时复核当前Controller generation与connection/client identity；执行复用现有Runtime/Host的per-Session

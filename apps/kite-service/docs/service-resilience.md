@@ -12,6 +12,10 @@ listener → reconcile旧Service instance的Controller lease → 发布ready。
 任一步失败都不伪ready。manager只在exact child PID/start identity confirmed dead后清理本次reservation/socket；alive或identity uncertain保留
 证据并fail closed。concurrent ensure由同一reservation串行化，只允许一个spawn。
 
+ready owner的复用先要求Native IPC protocol/client-contract revision精确兼容。source开发Service与source caller都使用`dev:` build identity时，
+build drift只表示内存中仍运行旧source build，不再阻断TUI/CLI复用或触发第二Service；installed candidate以及source↔installed drift仍
+保持exact build fail closed。Web还有独立semantic revision，`web_ensure`不接受revision drift，因此Browser wire变化不能被source复用规则掩盖。
+
 Kite Home不保存descriptor、token、lock、launch intent或socket。POSIX每home runtime只允许`service.sock`与`service.lock`；
 Windows endpoint使用named pipe。不同custom home相互独立，不另建跨home lease或coordination目录。
 access/control capability在Service进程内生成并通过native握手返回，不形成durable credential file。

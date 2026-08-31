@@ -74,6 +74,7 @@ export const kiteLocalNativeRequestSchema = z.discriminatedUnion('operation', [
     .extend({
       operation: z.literal('web_ensure'),
       staticAssetRoot: absolutePath,
+      expectedWebContractRevision: identifier,
     })
     .strict(),
   baseRequest.extend({ operation: z.literal('web_status') }).strict(),

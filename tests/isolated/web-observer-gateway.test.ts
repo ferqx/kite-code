@@ -40,7 +40,7 @@ describe('real Web transport → Gateway → Observer composition', () => {
       createObserver: (binding) => {
         const core = createWebObserverCore({
           gatewayInstanceId: 'gateway-combination-1',
-          contractRevision: 'contract-1',
+          contractRevision: 'kite-app-web-observer-v2',
           createTabBinding: () => binding,
           directory: {
             list: () => [

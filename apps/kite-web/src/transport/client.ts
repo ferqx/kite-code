@@ -1,6 +1,7 @@
 import {
   WEB_DISCONNECT_REQUEST_SCHEMA_,
   WEB_HISTORY_REQUEST_SCHEMA_,
+  WEB_OBSERVER_CONTRACT_REVISION_,
   WEB_SUBSCRIBE_REQUEST_SCHEMA_,
   WEB_UNSUBSCRIBE_REQUEST_SCHEMA_,
   type WebBootstrapResponse,
@@ -177,6 +178,10 @@ export function createWebObserverTransport(
     try {
       bootstrapResponse = webBootstrapResponseCodec.decode(response);
     } catch {
+      throw new WebObserverTransportError('protocol_error');
+    }
+    if (bootstrapResponse.contractRevision !== WEB_OBSERVER_CONTRACT_REVISION_) {
+      bootstrapResponse = undefined;
       throw new WebObserverTransportError('protocol_error');
     }
     return bootstrapResponse;

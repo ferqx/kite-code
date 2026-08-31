@@ -45,6 +45,7 @@ import {
   preflightWebGatewayStaticAssets,
   WebGatewayStaticAssetsError,
 } from '../../apps/kite-service/src/web-gateway/static-assets';
+import { WEB_OBSERVER_CONTRACT_REVISION_ } from '../../apps/kite-service/src/web-observer/core';
 import {
   explicitKiteHomeArgument,
   installedBuildIdentity,
@@ -136,6 +137,7 @@ export function createSingleServiceNativeClientComposition(
   const client = createKiteSingleServiceClient({
     endpoint,
     expectedBuildId: options.expectedBuildId,
+    webContractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
     ...(options.request ? { request: options.request } : {}),
   });
   return Object.freeze({

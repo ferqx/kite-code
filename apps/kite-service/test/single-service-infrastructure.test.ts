@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import {
+  type KiteAppControlClient,
+  type KiteWorkspaceIdentity,
+  WEB_OBSERVER_CONTRACT_REVISION_,
+} from '@kite-ai/kite-app-contract';
 import { requestKiteLocalNativeEndpoint } from '@kite-ai/kite-local-runtime/client';
 import {
   createKiteHomeIdentity,
@@ -82,6 +86,16 @@ describe('Single-Service native infrastructure target', () => {
       });
       expect(JSON.stringify(described)).not.toContain(homeRoot);
 
+      const compatibleSourceBuild = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+        ...request('describe', 'compatible-source-build'),
+        expectedBuildId: 'dev:new-source-build',
+      });
+      expect(compatibleSourceBuild).toMatchObject({
+        operation: 'describe',
+        outcome: 'ready',
+        service: { buildId: BUILD_ID },
+      });
+
       const missing = await requestKiteLocalNativeEndpoint(owner.endpoint, {
         ...request('web_ensure', 'web-missing'),
         staticAssetRoot: missingAssets,
@@ -93,6 +107,17 @@ describe('Single-Service native infrastructure target', () => {
         outcome: 'unavailable',
         state: 'absent',
         diagnostic: 'web_assets_missing',
+      });
+
+      const incompatibleWeb = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+        ...request('web_ensure', 'web-contract-mismatch'),
+        staticAssetRoot: assets,
+        expectedWebContractRevision: 'kite-app-web-observer-v1',
+      });
+      expect(incompatibleWeb).toMatchObject({
+        operation: 'rejected',
+        outcome: 'rejected',
+        diagnostic: 'incompatible',
       });
 
       const first = await requestKiteLocalNativeEndpoint(owner.endpoint, {
@@ -235,6 +260,7 @@ function createTarget(
     processStartIdentity: `test-process-${instanceId}`,
     ...(onEndpointReserved ? { onEndpointReserved } : {}),
     webGateway: {
+      contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
       createObserver: (binding) =>
         createWebObserverCore({
           directory: { list: () => [] },
@@ -253,7 +279,7 @@ function createTarget(
             }),
           },
           gatewayInstanceId: instanceId,
-          contractRevision: 'kite-app-web-observer-v1',
+          contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
           createTabBinding: () => binding,
         }),
     },
@@ -284,6 +310,9 @@ function request(
     protocolVersion: KITE_LOCAL_NATIVE_PROTOCOL_VERSION,
     clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
     expectedBuildId: BUILD_ID,
+    ...(operation === 'web_ensure'
+      ? { expectedWebContractRevision: WEB_OBSERVER_CONTRACT_REVISION_ }
+      : {}),
   } as Omit<KiteLocalNativeRequest, 'staticAssetRoot'>;
 }
 

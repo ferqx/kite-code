@@ -140,8 +140,11 @@ export function createKiteSingleServiceWebGatewayTarget(input: {
   readonly history: WebObserverHistoryPort;
   readonly serviceInstanceId: string;
   readonly contractRevision: string;
-}): Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'> {
+}): Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'> & {
+  readonly contractRevision: string;
+} {
   return Object.freeze({
+    contractRevision: input.contractRevision,
     createObserver: createSingleServiceWebObserverFactory({
       runtime: input.runtime,
       directory: input.directory,

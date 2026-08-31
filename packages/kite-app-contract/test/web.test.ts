@@ -9,6 +9,7 @@ import {
   WEB_HISTORY_REQUEST_SCHEMA_,
   WEB_HISTORY_RESPONSE_SCHEMA_,
   WEB_LIVE_EVENT_SCHEMA_,
+  WEB_OBSERVER_CONTRACT_REVISION_,
   WEB_STREAM_EVENT_SCHEMA_,
   WEB_SUBSCRIBE_REQUEST_SCHEMA_,
   WEB_SUBSCRIBE_RESPONSE_SCHEMA_,
@@ -111,6 +112,7 @@ describe('Kite Web Observer contract', () => {
     expect(webUnsubscribeResponseCodec.schema).toBe(WEB_UNSUBSCRIBE_RESPONSE_SCHEMA_);
     expect(webDisconnectRequestCodec.schema).toBe(WEB_DISCONNECT_REQUEST_SCHEMA_);
     expect(webDisconnectResponseCodec.schema).toBe(WEB_DISCONNECT_RESPONSE_SCHEMA_);
+    expect(WEB_OBSERVER_CONTRACT_REVISION_).toBe('kite-app-web-observer-v2');
 
     const bootstrapRequest = { schema: WEB_BOOTSTRAP_REQUEST_SCHEMA_ } as const;
     expect(

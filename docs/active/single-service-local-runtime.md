@@ -25,8 +25,11 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 ## 启动与Web
 
 - `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。
+- Native IPC contract当前为`kite-local-runtime-contract-v2`。protocol/client-contract revision相同且双方build identity均为`dev:`时，
+  source build drift复用现有ready Service；installed或source↔installed drift继续拒绝。build ID不替代wire compatibility。
 - `kite web`先验证fixed asset root、`index.html`、OpenAPI和hashed JS/CSS，再ensure Service。缺失返回
   `web_assets_missing`，不读取lifecycle、不spawn、不创建DB/socket/token。
+- `web_ensure`额外校验`kite-app-web-observer-v2` semantic revision；revision drift返回incompatible，不把新Browser asset挂到旧Web wire。
 - `web_status`只返回`absent|ready`、origin与asset digest；`web_ensure`返回同一普通loopback URL，不mint token。TUI `/web`使用ensure/open语义。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不重放stop。
 

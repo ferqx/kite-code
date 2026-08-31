@@ -107,6 +107,10 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   单请求的Native IPC codec/client，封闭为`describe/web_ensure/web_status/web_stop/service_stop`五个operation；Service identity与HTTP access token
   只通过owner-only endpoint内存响应返回，Web diagnostic保持typed，unknown field/build/request identity mismatch fail closed。上层
   `KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop或Web lifecycle mutation。
+  Native IPC client contract当前为`kite-local-runtime-contract-v2`。Service先用protocol/client-contract revision判断wire兼容；
+  只有Service与caller的build identity都以`dev:`标识时，纯source build drift才允许复用同一ready owner。installed/candidate与
+  source↔installed build drift继续返回`incompatible/build_mismatch`。`web_ensure`另携带exact Web semantic revision，当前为
+  `kite-app-web-observer-v2`；不匹配时不得attach混合版本Browser route。
   同阶段的`createKiteSingleServiceManager`只从endpoint与最小lifecycle reservation判断owner：同进程ensure single-flight，alive exact
   PID/start-token等待ready，dead exact owner才清理匹配的socket inode/lock并spawn，uncertain/corrupt/drift全部阻断。Native probe比较OS
   process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。

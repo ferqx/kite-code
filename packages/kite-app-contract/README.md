@@ -54,7 +54,8 @@ Web Observer contract 使用独立的 `kite.app.web.*.v1` route schemas。其
 `WebGatewayObserverClient` 只列出 bootstrap、tab、directory、history、subscribe、
 unsubscribe 与 disconnect；`WebObserverStreamEvent` 只允许 browser-safe message、typed
 unavailable 或 typed resync-required。它不授权任何 Runtime mutation，也不携带 Native I/O、
-Host、Store 或 Browser transport 类型。
+Host、Store 或 Browser transport 类型。当前Browser semantic revision为`kite-app-web-observer-v2`：v2固定本地
+loopback无Cookie/launch token/WebSocket ticket语义；Browser在创建tab前必须核对bootstrap返回的exact revision。
 
 ## 公开入口
 

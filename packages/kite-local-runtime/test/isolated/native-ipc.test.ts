@@ -95,6 +95,7 @@ describe('Single-Service Native IPC contract', () => {
         ...base,
         operation: 'web_ensure',
         staticAssetRoot: `/${'x'.repeat(KITE_LOCAL_NATIVE_MAX_FRAME_BYTES)}`,
+        expectedWebContractRevision: 'kite-app-web-observer-v2',
       }),
     ).toThrow(RangeError);
   });
