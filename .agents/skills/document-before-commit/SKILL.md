@@ -51,7 +51,7 @@ recovery:
 # Synchronize documentation before commit
 
 1. Read `AGENTS.md`, `docs/AGENTS.md`, and `docs/documentation-map.json`.
-2. Confirm this is a task-isolated branch/worktree with one Git owner. Run `bun run check:docs-impact` with its default `all` scope so staged, unstaged, deleted, renamed and untracked paths are considered together. Also inspect `git diff --cached --name-status`, `git diff --name-status` and `git status --short`. Preserve unrelated dirty files and return `blocked` instead of absorbing them with `git add -A`.
+2. Confirm the current working tree has one Git owner and contains only this task's changes. A separate branch/worktree is required only for unrelated dirty files, concurrent writable tasks, explicit user-requested isolation, or a long-lived independent branch. Run `bun run check:docs-impact` with its default `all` scope so staged, unstaged, deleted, renamed and untracked paths are considered together. Also inspect `git diff --cached --name-status`, `git diff --name-status` and `git status --short`. Preserve unrelated dirty files and return `blocked` instead of absorbing them with `git add -A`.
 3. Match changed implementation files against every V2 mapping rule. Read each matched workspace README, workspace-local current document or `docs/active/` authority before deciding whether it needs an update. Historical ADR、book、plan、completed、design 与 deprecated 不能满足影响门禁。
 4. Update documentation when behavior, contracts, architecture, configuration, user interaction, validation, or lifecycle changed:
    - update the owning workspace README or workspace-local document for module-local behavior;

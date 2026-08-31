@@ -72,9 +72,10 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 
 ## 并发开发
 
-每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree
-的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority 不能由两个任务并发拥有；
-后开始的任务必须等待、rebase 并重新验证。不得建立文档锁服务、临时 authority 副本或兼容重定向来规避冲突。
+可写任务可直接使用只有本任务改动、唯一 Git owner且没有authority冲突的当前工作树。独立 branch/worktree只用于隔离无关dirty状态、
+并发写入、用户明确要求或长期独立分支；它不是默认前置步骤。临时worktree完成验证后默认fast-forward合并并清理，不能安全合并时再请求方向。
+默认 `all` 作用域检查当前任务工作树的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority不能由两个任务并发拥有；
+后开始的任务必须等待、rebase并重新验证。不得建立文档锁服务、临时authority副本或兼容重定向来规避冲突。
 
 ## 目录职责
 
