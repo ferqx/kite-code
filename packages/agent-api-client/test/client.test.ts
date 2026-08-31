@@ -63,6 +63,61 @@ describe('Agent API Browser client', () => {
     expect(() => client.listHistory('session-1', { afterSequence: -1 })).toThrow(TypeError);
   });
 
+  test('reads the bounded diagnostic log surface with the same sequence boundary', async () => {
+    let url = '';
+    const client = createAgentApiBrowserClient({
+      fetch: async (input) => {
+        url = String(input);
+        return new Response(
+          JSON.stringify({
+            schema: 'kite.agent-api.log-page.v1',
+            session_id: 'session-1',
+            through_sequence: 7,
+            items: [],
+          }),
+          { status: 200, headers },
+        );
+      },
+    });
+    await client.listLogs('session-1', { afterSequence: 6, limit: 20 });
+    expect(url).toBe('/v1/sessions/session-1/logs?limit=20&after_sequence=6');
+  });
+
+  test('reads one Browser-only Model Context by exact invocation identity', async () => {
+    let url = '';
+    const client = createAgentApiBrowserClient({
+      fetch: async (input) => {
+        url = String(input);
+        return new Response(
+          JSON.stringify({
+            schema: 'kite.agent-api.model-context.v1',
+            session_id: 'session-1',
+            invocation_id: 'invocation-1',
+            sequence: 3,
+            purpose: 'primary_agent',
+            model: { provider: 'openai', name: 'model-1' },
+            system_prompt: { text: 'System prompt', truncated: false },
+            messages: [],
+            messages_truncated: false,
+            tools: [],
+            tools_truncated: false,
+            request_settings: {
+              transport: 'stream',
+              temperature: 0,
+              max_output_tokens: 4096,
+              stop_policy: { kind: 'single_step', max_steps: 1 },
+              message_count: 0,
+              tool_count: 0,
+            },
+          }),
+          { status: 200, headers },
+        );
+      },
+    });
+    await client.getModelContext('session-1', 'invocation-1');
+    expect(url).toBe('/v1/sessions/session-1/model-invocations/invocation-1/context');
+  });
+
   test('decodes closed Problem responses and rejects contract drift', async () => {
     const client = createAgentApiBrowserClient({
       fetch: async () =>

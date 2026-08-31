@@ -14,7 +14,7 @@ import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
 import { projectRuntimeClientEvent, projectRuntimeModelResponseRequestId } from './event-projector';
-import { projectRuntimeClientText } from './safe-text';
+import { projectRuntimeClientText, projectRuntimeSessionTitle } from './safe-text';
 
 type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
@@ -113,7 +113,7 @@ function allCurrentSessions(
             eventTypes: ['user.message_appended'],
           }).entries[0]?.event;
           if (first?.type !== 'user.message_appended') return projected;
-          const displayName = projectRuntimeClientText(first.content, 80).trim();
+          const displayName = projectRuntimeSessionTitle(first.content);
           return displayName.length === 0
             ? projected
             : { ...projected, displayName, needsSmartName: false };

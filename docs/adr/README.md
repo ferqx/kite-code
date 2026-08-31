@@ -153,10 +153,11 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0149](0149-stable-local-agent-api-facade.md) | partially superseded by ADR-0155 | Stable local REST/SSE façade与no remote/mutation保留；Browser可通过独立cookie principal消费只读`/v1` |
 | [0150](0150-store-8-canonical-runtime-run-index.md) | accepted | Store 8以canonical Run index、receipt resource result与coverage boundary支撑first-class Run；Store 7历史不推断回填 |
 | [0151](0151-web-gateway-preflight-and-exact-launch-recovery.md) | accepted | Web Gateway在state/spawn前验证asset，并以PID/start-token绑定launch intent与显式recover |
-| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154 | 每个Kite Home收敛为单Service、单SQLite、DB-backed typed Artifact与最小OS runtime endpoint |
+| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154/0159 | 每个Kite Home收敛为单Service、单SQLite、DB-backed typed Artifact与最小OS runtime endpoint；client expected build连接门禁由ADR-0159调整 |
 | [0153](0153-filesystem-preimage-remains-a-private-artifact-domain.md) | accepted | Filesystem mutation preimage保持独立typed Artifact表，不与Runtime checkpoint preimage或Capability result混用 |
 | [0154](0154-pre-release-store9-clean-cutover.md) | accepted | 未发布Store 9采用clean cutover；正式路径不迁移或清理旧布局，Web status保持只读 |
-| [0155](0155-single-service-web-rest-client-convergence.md) | partially superseded by ADR-0156 | 保留per-home single Service与TUI Native client；Web通过cookie-authenticated只读`/v1`消费Workspace/Session/History并删除重复BFF；独立Web lifecycle由ADR-0156删除 |
+| [0155](0155-single-service-web-rest-client-convergence.md) | partially superseded by ADR-0156/0159 | 保留per-home single Service与TUI Native client；Web通过cookie-authenticated只读`/v1`消费Workspace/Session/History并删除重复BFF；独立Web lifecycle由ADR-0156删除，跨build兼容复用由ADR-0159调整 |
 | [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157 | Service启动即挂载同源Web根页面；删除独立Web ensure/status/stop lifecycle；根路径302机制由ADR-0157替代 |
 | [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158 | 保留`GET /`直接返回Web并建立只读HttpOnly Browser session；launch token与exchange由ADR-0158删除 |
 | [0158](0158-local-web-root-session-without-launch-token.md) | accepted | 本地只读Web固定使用Service根地址与root-created HttpOnly session；删除launch token、exchange与Native `web_launch` |
+| [0159](0159-compatible-clients-share-single-service.md) | accepted | 兼容TUI/Web/Desktop跨build复用同一ready Service；build只保留provenance与exact lifecycle control边界 |

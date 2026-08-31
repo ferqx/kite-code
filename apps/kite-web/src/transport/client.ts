@@ -3,12 +3,19 @@ import {
   AgentApiClientError,
   createAgentApiBrowserClient,
 } from '@kite-ai/agent-api-client';
-import type { AgentApiHistoryItem, AgentApiSession } from '@kite-ai/agent-api-contract';
+import type {
+  AgentApiHistoryItem,
+  AgentApiLogItem,
+  AgentApiModelContext,
+  AgentApiSession,
+} from '@kite-ai/agent-api-contract';
 import type {
   WebCheckpointSnapshot,
   WebDirectorySnapshot,
   WebHistorySnapshot,
+  WebModelContextSnapshot,
   WebPresentationMessage,
+  WebSessionLogSnapshot,
   WebSessionStatus,
 } from '../presentation/types';
 
@@ -17,6 +24,8 @@ const MAX_PAGES = 32;
 export type WebRestTransportFailure =
   | 'service_unavailable'
   | 'history_unavailable'
+  | 'logs_unavailable'
+  | 'model_context_unavailable'
   | 'session_unavailable'
   | 'protocol_error';
 
@@ -47,6 +56,8 @@ export interface WebRestTransport {
   listWorkspaceSessions(workspaceId: string): Promise<readonly ReturnType<typeof projectSession>[]>;
   getSession(sessionId: string): Promise<ReturnType<typeof projectSession>>;
   loadHistory(sessionId: string, afterSequence?: number): Promise<WebHistorySnapshot>;
+  loadLogs(sessionId: string, afterSequence?: number): Promise<WebSessionLogSnapshot>;
+  loadModelContext(sessionId: string, invocationId: string): Promise<WebModelContextSnapshot>;
   loadCheckpoints(sessionId: string): Promise<WebCheckpointSnapshot>;
   disconnect(): Promise<void>;
 }
@@ -153,6 +164,47 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error, 'history_unavailable');
+      }
+    },
+    async loadLogs(sessionId: string, afterSequence?: number) {
+      requireConnected(connected);
+      try {
+        const entries: WebSessionLogSnapshot['entries'][number][] = [];
+        let cursor: string | undefined;
+        let observedLastSequence = 0;
+        for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+          const page = await client.listLogs(sessionId, {
+            cursor,
+            limit: 200,
+            ...(cursor === undefined && afterSequence !== undefined ? { afterSequence } : {}),
+          });
+          if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+          observedLastSequence = page.through_sequence;
+          entries.push(...page.items.map(projectLogItem));
+          if (!page.next_cursor) {
+            return {
+              sessionId,
+              entries: entries.sort((left, right) => left.sequence - right.sequence),
+              observedLastSequence,
+            };
+          }
+          cursor = page.next_cursor;
+        }
+        throw new WebRestTransportError('protocol_error');
+      } catch (error) {
+        throw normalizeError(error, 'logs_unavailable');
+      }
+    },
+    async loadModelContext(sessionId: string, invocationId: string) {
+      requireConnected(connected);
+      try {
+        const context = await client.getModelContext(sessionId, invocationId);
+        if (context.session_id !== sessionId || context.invocation_id !== invocationId) {
+          throw new WebRestTransportError('protocol_error');
+        }
+        return projectModelContext(context);
+      } catch (error) {
+        throw normalizeError(error, 'model_context_unavailable');
       }
     },
     async loadCheckpoints(sessionId: string) {
@@ -287,6 +339,72 @@ function projectHistoryItem(item: AgentApiHistoryItem): WebPresentationMessage {
         ],
       };
   }
+}
+
+function projectLogItem(item: AgentApiLogItem): WebSessionLogSnapshot['entries'][number] {
+  const occurredAt = Date.parse(item.occurred_at);
+  return {
+    sequence: item.sequence,
+    occurredAt: Number.isFinite(occurredAt) ? occurredAt : 0,
+    eventType: item.event_type,
+    category: item.category,
+    status: item.status,
+    ...(item.summary ? { summary: item.summary } : {}),
+    detail: {
+      kind: item.detail.kind,
+      fields: item.detail.fields,
+      ...(item.detail.artifact ? { artifact: item.detail.artifact } : {}),
+    },
+  };
+}
+
+function projectModelContext(context: AgentApiModelContext): WebModelContextSnapshot {
+  return {
+    sessionId: context.session_id,
+    invocationId: context.invocation_id,
+    sequence: context.sequence,
+    purpose: context.purpose,
+    model: context.model,
+    systemPrompt: context.system_prompt,
+    messages: context.messages.map((message) => ({
+      index: message.index,
+      role: message.role,
+      parts: message.parts.map((part) => {
+        if (part.type === 'text' || part.type === 'reasoning') return part;
+        if (part.type === 'tool_call') {
+          return {
+            type: part.type,
+            toolCallId: part.tool_call_id,
+            toolName: part.tool_name,
+            inputJson: part.input_json,
+            truncated: part.truncated,
+          };
+        }
+        return {
+          type: part.type,
+          toolCallId: part.tool_call_id,
+          toolName: part.tool_name,
+          output: part.output,
+          truncated: part.truncated,
+        };
+      }),
+    })),
+    messagesTruncated: context.messages_truncated,
+    tools: context.tools.map((tool) => ({
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      inputSchemaJson: tool.input_schema_json,
+      truncated: tool.truncated,
+    })),
+    toolsTruncated: context.tools_truncated,
+    requestSettings: {
+      transport: context.request_settings.transport,
+      temperature: context.request_settings.temperature,
+      maxOutputTokens: context.request_settings.max_output_tokens,
+      messageCount: context.request_settings.message_count,
+      toolCount: context.request_settings.tool_count,
+    },
+  };
 }
 
 function runStatus(status: string): WebSessionStatus {

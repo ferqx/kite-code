@@ -105,9 +105,10 @@ surface，不把control token或process/state authority交给普通Runtime conne
 Native manager把`GET /readyz`只作为liveness precheck，随后用restart-scoped access token执行exact
 `POST /_kite/instance`与`{}` body。它严格验证content type、大小、closed keys以及
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`，并比较descriptor/PID/
-Protocol/client contract/server version/build identity。malformed、server identity drift或无关listener返回
-`unavailable/identity_uncertain`；descriptor/expected build不匹配返回`incompatible/build_mismatch`。两类都保留state、
-`spawn=0`，且绝不从调用者descriptor回显或重建健康身份。
+Protocol/client contract/server version与Service自身build identity。malformed、server identity drift或无关listener返回
+`unavailable/identity_uncertain`；single-Service只读Native `describe`允许兼容客户端跨expected build复用ready owner，跨build
+`service stop/restart`才返回`incompatible/build_mismatch`。所有不兼容或不确定结果都保留state、`spawn=0`，且绝不从调用者
+descriptor/build回显或重建健康身份。
 
 ## Runtime Kernel
 

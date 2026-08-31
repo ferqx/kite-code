@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-31-web-ui-design-system.md`](2026-08-31-web-ui-design-system.md) | completed | P1 | single-Service Web REST client、Kite Web current authority | 只收敛视觉系统与Agent-operable view，不新增数据面或控制能力 | semantic token、Light/Dark、Sidebar/Header/Timeline视觉与3 viewport真实Browser验收 |
 | [`2026-08-31-web-rest-client-convergence.md`](2026-08-31-web-rest-client-convergence.md) | completed | P0 | ADR-0155、single-Service/Store 9、Agent API read与Web Observer current authority | 局部替代KASAPI的static-docs-only Browser边界；保留TUI Native client，本阶段不做SSE/WebSocket/mutation/multi-Server | Browser auth + Workspace/Session/History/Checkpoint REST read、Web cutover、旧BFF/WebSocket删除、TUI-first/Web-first/concurrent ensure qualification |
 | [`2026-08-31-service-owned-web-root.md`](2026-08-31-service-owned-web-root.md) | completed | P0 | ADR-0156/0157/0158、single-Service Web REST client | 替代独立Web lifecycle、根路径302及launch token/exchange | Service ready即提供同源Web根页面与root cookie；CLI/TUI返回稳定根地址；完整Browser/release验证通过 |
 | [`2026-08-30-kite-home-and-local-runtime-simplification.md`](2026-08-30-kite-home-and-local-runtime-simplification.md) | active | P0 | ADR-0152/0153、State 27 / Store 8与当前Runtime/Controller/effect/Artifact/Web authority | 替代多companion、Catalog+Workspace DB、generation sidecar与filesystem Artifact；保留typed schema、Observer-only Web和durable recovery语义 | 单Service、单`kite.sqlite`、专用Artifact表、最小OS runtime、离线clean cutover与三平台qualification |

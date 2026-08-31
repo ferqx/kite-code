@@ -119,6 +119,10 @@ production Service composition 使用由 manager 验证并显式注入的 exact 
 Workspace cwd、dotenv 或 ambient `HOME` 改写该 root。仅未注入 Service identity 的 library fallback 保留
 `~/.kite-code`；显式参数始终优先。模型 Artifact 不创建或加载 installation key。既有 Artifact 缺失、损坏或
 路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
+
+本机Browser的Model Context诊断只读取已经冻结并持久化的provider-neutral Model Surface；它不参与dispatch/replay，也不读取Provider response或
+Provider-native options。读取必须绑定可见Session的prepared invocation并通过同一Builtin Artifact reader和交叉identity验证；Public投影只允许
+bounded system/messages/tools与safe request settings，禁止endpoint、credential、route fingerprint和Artifact identity。
 Runtime 使用 State 27/SAQ epoch；
 `modelInvocations` 是当前格式的必需 evidence 投影，字段缺失属于 corruption，不从旧 transcript/config
 反推历史 Surface。同一 schema/epoch 内已列明的旧 Provider admission 事件形状仍可回放；未知 source 不进入

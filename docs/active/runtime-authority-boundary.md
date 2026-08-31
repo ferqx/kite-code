@@ -138,8 +138,9 @@ no-follow/owner-only primitive，以及Windows current-user SID、protected owne
 Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用的dead-only stale manager。manager先用
 `GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
-Protocol/client-contract/serverVersion/build identity一致。server identity drift、malformed或无关listener返回
-`unavailable/identity_uncertain`；descriptor/expected build mismatch返回`incompatible/build_mismatch`。两类都保留state、
+Protocol/client-contract/serverVersion及Service自身build identity一致。server identity drift、malformed或无关listener返回
+`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨expected build取得Service真实identity并复用ready
+owner；Protocol/client-contract不兼容仍fail closed，跨build lifecycle mutation返回`incompatible/build_mismatch`。这些结果都保留state、
 `spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
 该instance proof也不创建persisted Project authority或跨Host Store fence。
 

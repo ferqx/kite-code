@@ -258,7 +258,10 @@ export function createSingleServiceInfrastructure(
   async function dispatchNativeRequest(
     request: KiteLocalNativeRequest,
   ): Promise<KiteLocalNativeResponse> {
-    if (request.expectedBuildId !== options.buildId) {
+    // A ready per-home Service is the shared data-plane authority for compatible clients.
+    // Build identity remains an exact control-plane fence so an older checkout cannot stop or
+    // replace a Service that another checkout started.
+    if (request.operation !== 'describe' && request.expectedBuildId !== options.buildId) {
       return rejected(request.requestId, 'incompatible');
     }
     if (!publishedReady || !carrier || !accessToken) {

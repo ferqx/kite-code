@@ -143,6 +143,17 @@ export function projectRuntimeLogEvent(
     case 'model.invocation_completed':
     case 'model.invocation_interrupted':
       return { ...base, detail: { kind: 'model' } };
+    case 'model.invocation_prepared':
+      return {
+        ...base,
+        detail: {
+          kind: 'model',
+          fields: {
+            invocation_id: event.invocationId,
+            purpose: event.purpose,
+          },
+        },
+      };
     case 'user_input.requested':
     case 'user_input.answered':
     case 'user_input.cancelled':

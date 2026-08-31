@@ -27,8 +27,9 @@ App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI tran
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留
 普通 reasoning、tool label、path/pattern/command/arguments 与 result。State 27 的
 `approval.batch_released` 与 `approval.session_grants_cleared` 均作为 interaction detail 投影，不回显 grant
-subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。当前没有 Artifact reader，因此不会
-宣称 Artifact 可用，也不会输出 locator。
+subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。Runtime Log projector自身没有Artifact reader，因此不会
+宣称 Artifact 正文可用，也不会输出 locator。Browser-only Model Context是独立的显式诊断route：它从prepared event取得private ref后交给
+Builtin `ModelArtifactStore`严格readback，只投影有界Public DTO；Runtime Log projector本身仍不取得Artifact reader或通用正文读取能力。
 
 当前 writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 与
 State 27 / Store 5（`kite-runtime-saq-v1-2026-08-25`）都只是 no-follow、只读、隔离的 source-only

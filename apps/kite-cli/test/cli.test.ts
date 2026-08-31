@@ -62,13 +62,13 @@ describe('cli argument parsing', () => {
     const result = {
       schema: 'kite.local-runtime-lifecycle-result.v1' as const,
       requestId: 'status-1',
-      operation: 'status' as const,
-      outcome: 'applied' as const,
+      operation: 'stop' as const,
+      outcome: 'incompatible' as const,
       state: 'ready' as const,
       diagnostic: 'build_mismatch' as const,
     };
     expect(formatServiceLifecycleResult(result)).toBe(
-      'Service status: applied [ready] (build_mismatch)',
+      'Service stop: incompatible [ready] (build_mismatch)',
     );
     expect(JSON.parse(formatServiceLifecycleResult(result, true))).toEqual(result);
   });

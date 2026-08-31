@@ -68,6 +68,19 @@ describe('Agent API read-only conformance and fault Gate', () => {
     expect(historySecond.items.map((item) => item.sequence)).toEqual([2, 3]);
     expect(historySecond.items.every((item) => item.sequence < 4)).toBeTrue();
 
+    const logs = await observer.logs('session-2', '?limit=4');
+    expect(logs.through_sequence).toBe(4);
+    expect(logs.items.map((item) => item.event_type)).toEqual([
+      'user.message_appended',
+      'model.responded',
+      'tool.finished',
+      'user.message_appended',
+    ]);
+    expect(logs.items[0]).toMatchObject({
+      category: 'turn',
+      detail: { kind: 'message' },
+    });
+
     const checkpointFirst = await observer.checkpoints('session-2', '?limit=1');
     expect(checkpointFirst.items.map((checkpoint) => checkpoint.checkpoint_id)).toEqual([
       'checkpoint-1',
@@ -105,6 +118,7 @@ describe('Agent API read-only conformance and fault Gate', () => {
       second,
       historyFirst,
       historySecond,
+      logs,
       checkpointFirst,
       checkpointSecond,
       preview,

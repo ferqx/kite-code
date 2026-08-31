@@ -6,7 +6,7 @@ import {
 } from '../../scripts/release/single-service-native-client';
 
 describe('single-Service release client target', () => {
-  test('binds custom homes to distinct endpoints and derives the stable Web root', async () => {
+  test('binds custom homes to distinct endpoints and discovers another compatible build', async () => {
     const operations: string[] = [];
     const first = createSingleServiceNativeClientComposition({
       home: createKiteHomeIdentity('/tmp/kite-home-a'),
@@ -15,6 +15,7 @@ describe('single-Service release client target', () => {
       expectedBuildId: 'build-1',
       request: async (_endpoint, request) => {
         operations.push(request.operation);
+        expect(request.expectedBuildId).toBe('build-1');
         return {
           schema: 'kite.local-native.response.v1',
           requestId: request.requestId,
@@ -27,7 +28,7 @@ describe('single-Service release client target', () => {
             protocolVersion: 1,
             clientContractRevision: 'kite-local-runtime-contract-v1',
             serverVersion: 'service-1',
-            buildId: 'build-1',
+            buildId: 'build-2',
             httpOrigin: 'http://127.0.0.1:43170',
           },
           accessToken: 'a'.repeat(43),

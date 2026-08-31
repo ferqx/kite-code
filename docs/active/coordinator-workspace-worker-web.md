@@ -46,4 +46,5 @@ Service在发布ready前验证release composition提供的immutable static root�
 URL与Vite dev server均无本机进程启动authority。
 
 unknown route、credential混用、Origin/Fetch Metadata错误、Directory scope漂移、History cursor/boundary失效、Controller generation漂移、
-build mismatch与process identity不确定继续fail closed；这些规则不授权第二Service、第二Store、兼容BFF或旧Coordinator恢复路径。
+Protocol/client-contract不兼容与process identity不确定继续fail closed。兼容客户端的build drift允许复用同一个ready Service及其Web assets，
+但跨build lifecycle mutation仍拒绝；这些规则不授权第二Service、第二Store、兼容BFF或旧Coordinator恢复路径。

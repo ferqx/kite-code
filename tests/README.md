@@ -78,7 +78,8 @@ Worker HTTP listener，验证两种role、capability incompatibility/replay、co
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
 `POST /_kite/instance`，包括strict schema/keys/values/content-type/size、malformed与instance/server/build identity
-mismatch fail closed、Protocol/client-contract incompatibility，以及expected build的`incompatible + build_mismatch`。
+mismatch fail closed与Protocol/client-contract incompatibility。single-Service focused suite另验证兼容客户端跨expected build执行
+`describe/ensure/status`时复用ready owner且spawn=0，以及跨build `service stop/restart`返回`incompatible + build_mismatch`。
 
 KLSV1-06 clean cutover后，`apps/kite-service/test/`拥有真实Runtime Application/Host/Store/Builtin、History/App Control与
 carrier composition tests；`apps/kite-cli/test/`只验证default managed client/presentation、两阶段Workspace Trust、

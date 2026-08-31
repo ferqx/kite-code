@@ -6,7 +6,7 @@
 
 验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts tests/release/single-service-native-client.test.ts tests/release/single-service-real-child.test.ts apps/kite-service/test/kite-home-artifact-backends.test.ts apps/kite-service/test/single-service-infrastructure.test.ts`、`bun test tests/release`、`bun run typecheck`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
+相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
 
 ## 当前边界
 
@@ -31,7 +31,9 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 - Native IPC只保留`describe/service_stop`；`kite web`与TUI `/web`先ensure Service，再从`describe.httpOrigin`返回稳定的`origin/`，不挂载
   资源或改变lifecycle。`web_launch/web_ensure/web_status/web_stop`不属于当前协议或CLI。
 - TUI-first、Web-first和同home并发ensure都经过同一manager/reservation，只产生一个ready Service；一个客户端退出不停止另一个。custom
-  `--kite-home`只在同canonical profile内复用，build mismatch保持incompatible且不并行spawn。
+  `--kite-home`只在同canonical profile内复用。兼容客户端即使`expectedBuildId`不同也通过只读Native `describe`复用ready Service及其
+  Web assets；Protocol/client-contract/identity不兼容仍fail closed且不spawn。跨build `service stop/restart`保持
+  `incompatible/build_mismatch`，只能由owner build执行。
 - Native socket只固定Client/connection/Workspace identity；每条mutation再从Store 9读取目标Session当前Controller并把generation绑定进
   opaque command context。Controller晚于socket创建或TUI切换Session不会沿用旧ticket快照，旧connection generation仍被拒绝。
 - `GET /`创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime

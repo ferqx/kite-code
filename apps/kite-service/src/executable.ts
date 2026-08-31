@@ -173,6 +173,8 @@ export async function runKiteServiceMain(
     directory: singleStore.directory,
     runtime: composition.runtime,
     history: createKiteRuntimeObserverHistoryFromStorage(singleStore.storage),
+    storage: singleStore.storage,
+    artifactStore: singleStore.artifactStore,
     checkpoints: singleStore.storage.checkpoints,
   });
   const agentApi = createAgentApiRouteHandler({

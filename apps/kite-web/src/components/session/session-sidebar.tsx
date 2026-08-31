@@ -1,5 +1,5 @@
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
-import { ChevronDown, CircleDot, FolderKanban, Radio } from 'lucide-react';
+import { ChevronDown, CircleDot, FolderKanban, Radio, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -28,33 +28,38 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-border bg-sidebar">
-      <header className="flex h-16 shrink-0 items-center justify-between px-5">
+      <header className="flex h-16 shrink-0 items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-xl bg-accent text-accent-foreground shadow-glow">
-            <Radio className="size-4" strokeWidth={2.4} />
+          <span className="grid size-8 place-items-center rounded-[10px] bg-foreground text-canvas shadow-soft">
+            <Radio className="size-[15px]" strokeWidth={2.3} />
           </span>
           <div>
-            <p className="text-sm font-semibold tracking-tight">Kite Observer</p>
-            <p className="text-[11px] text-muted-foreground">Local · read only</p>
+            <p className="text-[13px] font-semibold tracking-[-0.01em]">Kite</p>
+            <p className="text-[10px] text-muted-foreground">Observer</p>
           </div>
         </div>
-        <Badge>V1</Badge>
+        <span className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+          <ShieldCheck className="size-3" />
+          Local
+        </span>
       </header>
-      <div className="px-5 pb-3 pt-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="flex items-center justify-between px-4 pb-2 pt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           Workspaces
         </p>
+        <Badge>{workspaces.length}</Badge>
       </div>
-      <ScrollArea className="min-h-0 flex-1 px-3 pb-5">
+      <ScrollArea className="min-h-0 flex-1 px-2.5 pb-5">
         {workspaces.length === 0 ? (
           <div className="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">
             No Workspace sessions are available.
           </div>
         ) : (
-          <nav aria-label="Workspace sessions" className="space-y-2">
+          <nav aria-label="Workspace sessions" className="min-w-0 max-w-full space-y-1.5">
             {workspaces.map((workspace) => (
               <CollapsiblePrimitive.Root
                 key={workspace.workspaceId}
+                className="min-w-0 max-w-full"
                 defaultOpen={workspace.sessionState === 'loaded'}
                 onOpenChange={(open) => {
                   if (open && workspace.sessionState === 'idle') {
@@ -62,13 +67,13 @@ export function SessionSidebar({
                   }
                 }}
               >
-                <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-surface">
-                  <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
-                  <FolderKanban className="size-3.5" />
+                <CollapsiblePrimitive.Trigger className="group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-2 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground">
+                  <ChevronDown className="size-3 transition-transform group-data-[state=closed]:-rotate-90" />
+                  <FolderKanban className="size-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{workspace.label}</span>
                   <span className="text-[10px] tabular-nums">{workspace.sessionCount}</span>
                 </CollapsiblePrimitive.Trigger>
-                <CollapsiblePrimitive.Content className="mt-1 space-y-1">
+                <CollapsiblePrimitive.Content className="mt-0.5 min-w-0 max-w-full space-y-0.5 overflow-hidden">
                   {workspace.sessionState === 'loading' ? (
                     <p className="px-3 py-2 text-[10px] text-muted-foreground">Loading sessions…</p>
                   ) : null}
@@ -93,17 +98,18 @@ export function SessionSidebar({
                         onClick={() => onSelect(session.sessionId)}
                         aria-current={selected ? 'page' : undefined}
                         aria-label={`View ${session.displayName}`}
+                        title={session.displayName}
                         className={cn(
-                          'group relative w-full rounded-xl border px-3 py-3 text-left transition-colors',
+                          'group relative w-full min-w-0 max-w-full overflow-hidden rounded-[10px] border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow]',
                           selected
-                            ? 'border-border-strong bg-surface-raised shadow-soft'
-                            : 'border-transparent hover:border-border hover:bg-surface',
+                            ? 'border-border-strong bg-surface-selected shadow-[inset_3px_0_0_var(--accent)]'
+                            : 'border-transparent hover:border-border hover:bg-surface-subtle',
                         )}
                       >
                         <div className="flex items-start gap-2.5">
                           <CircleDot
                             className={cn(
-                              'mt-0.5 size-3.5 shrink-0',
+                              'mt-0.5 size-3 shrink-0',
                               session.status === 'running'
                                 ? 'text-running'
                                 : 'text-muted-foreground/60',
@@ -112,13 +118,13 @@ export function SessionSidebar({
                           <div className="min-w-0 flex-1">
                             <p
                               className={cn(
-                                'truncate text-xs font-medium',
+                                'truncate text-[12px] font-medium tracking-[-0.005em]',
                                 selected && 'text-foreground',
                               )}
                             >
                               {session.displayName}
                             </p>
-                            <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
                               <span className="capitalize">{session.status}</span>
                               <time>{relativeTime(session.updatedAt)}</time>
                             </div>

@@ -123,13 +123,29 @@ describe('Single-Service native infrastructure target', () => {
       });
       expect((await fetch(`${ownerOrigin}/_kite/web/bootstrap`)).status).toBe(404);
 
-      const incompatible = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+      const compatibleOtherBuild = await requestKiteLocalNativeEndpoint(owner.endpoint, {
         ...request('describe', 'wrong-build'),
         expectedBuildId: 'different-build',
       });
-      expect(incompatible).toEqual({
-        schema: 'kite.local-native.response.v1',
+      expect(compatibleOtherBuild).toMatchObject({
         requestId: 'wrong-build',
+        operation: 'describe',
+        outcome: 'ready',
+        service: {
+          instanceId: 'single-service-instance',
+          buildId: BUILD_ID,
+          httpOrigin: owner.httpOrigin,
+        },
+        accessToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      });
+
+      const incompatibleControl = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+        ...request('service_stop', 'wrong-build-stop'),
+        expectedBuildId: 'different-build',
+      });
+      expect(incompatibleControl).toEqual({
+        schema: 'kite.local-native.response.v1',
+        requestId: 'wrong-build-stop',
         operation: 'rejected',
         outcome: 'rejected',
         diagnostic: 'incompatible',

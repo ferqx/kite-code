@@ -4,6 +4,8 @@ import {
   type AgentApiCheckpointPage,
   type AgentApiCheckpointPreview,
   type AgentApiHistoryPage,
+  type AgentApiLogPage,
+  type AgentApiModelContext,
   type AgentApiProblem,
   type AgentApiServerInfo,
   type AgentApiSession,
@@ -12,6 +14,8 @@ import {
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
   agentApiHistoryPageSchema,
+  agentApiLogPageSchema,
+  agentApiModelContextSchema,
   agentApiProblemSchema,
   agentApiServerInfoSchema,
   agentApiSessionPageSchema,
@@ -53,6 +57,12 @@ export interface AgentApiBrowserClient {
     sessionId: string,
     options?: AgentApiHistoryPageOptions,
   ): Promise<AgentApiHistoryPage>;
+  listLogs(sessionId: string, options?: AgentApiHistoryPageOptions): Promise<AgentApiLogPage>;
+  getModelContext(
+    sessionId: string,
+    invocationId: string,
+    signal?: AbortSignal,
+  ): Promise<AgentApiModelContext>;
   listCheckpoints(
     sessionId: string,
     options?: AgentApiPageOptions,
@@ -109,6 +119,18 @@ export function createAgentApiBrowserClient(
         `/v1/sessions/${identifier(sessionId)}/history${historyPageQuery(page)}`,
         agentApiHistoryPageSchema,
         { method: 'GET', signal: page.signal },
+      ),
+    listLogs: (sessionId, page = {}) =>
+      requestJson(
+        `/v1/sessions/${identifier(sessionId)}/logs${historyPageQuery(page)}`,
+        agentApiLogPageSchema,
+        { method: 'GET', signal: page.signal },
+      ),
+    getModelContext: (sessionId, invocationId, signal) =>
+      requestJson(
+        `/v1/sessions/${identifier(sessionId)}/model-invocations/${identifier(invocationId)}/context`,
+        agentApiModelContextSchema,
+        { method: 'GET', signal },
       ),
     listCheckpoints: (sessionId, page = {}) =>
       requestJson(

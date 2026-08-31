@@ -7,6 +7,7 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
+import { canonicalModelJson, ModelArtifactStore } from '@kite-ai/builtin-runtime/model';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import { ensureLocalRuntimeServiceHome } from '@kite-ai/kite-local-runtime/service';
 import {
@@ -87,7 +88,11 @@ import {
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
-import type { AgentApiReadContext } from './agent-api';
+import type {
+  AgentApiModelContextReadPort,
+  AgentApiModelContextSourcePart,
+  AgentApiReadContext,
+} from './agent-api';
 import type { KiteInProcessAppControlComposition } from './app-control';
 import { createKiteHomeBuiltinArtifactBackends } from './bootstrap/kite-home-artifact-backends';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
@@ -128,11 +133,17 @@ export function createKiteSingleServiceAgentApiReadContext(input: {
   readonly directory: KiteHomeDirectoryQueryPort;
   readonly runtime: RuntimeAccess;
   readonly history: RuntimeHistoryClient;
+  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  readonly artifactStore: KiteHomeArtifactStore;
   readonly checkpoints: Pick<
     RuntimeStorage<RuntimeEvent, RuntimeState>['checkpoints'],
     'getNamedSnapshotEntry' | 'listNamedSnapshots'
   >;
 }): AgentApiReadContext {
+  const modelArtifacts = new ModelArtifactStore({
+    backend: createKiteHomeBuiltinArtifactBackends(input.artifactStore).model,
+  });
+  const modelContexts = createSingleServiceModelContextReadPort(input.storage, modelArtifacts);
   const checkpoints: AgentApiReadContext['checkpoints'] = Object.freeze({
     list(request: Parameters<AgentApiReadContext['checkpoints']['list']>[0]) {
       const entries = input.checkpoints
@@ -188,10 +199,86 @@ export function createKiteSingleServiceAgentApiReadContext(input: {
     query: (query: RuntimeQuery) => input.runtime.query(query),
     history: input.history,
     checkpoints,
+    modelContexts,
     directory: input.directory,
     close: async () => undefined,
     [Symbol.asyncDispose]: async () => undefined,
   });
+}
+
+function createSingleServiceModelContextReadPort(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+  artifacts: Pick<ModelArtifactStore, 'readSurface'>,
+): AgentApiModelContextReadPort {
+  return Object.freeze({
+    get(sessionId: string, invocationId: string) {
+      const record = storage.sessions
+        .loadEventsStrict(sessionId)
+        .find(
+          (candidate) =>
+            candidate.event.type === 'model.invocation_prepared' &&
+            candidate.event.invocationId === invocationId,
+        );
+      if (record?.event.type !== 'model.invocation_prepared') return undefined;
+      const event = record.event;
+      const surface = artifacts.readSurface(event.surfaceArtifact);
+      if (
+        event.surfaceArtifact.integrityIdentifier !== event.surfaceIntegrityIdentifier ||
+        surface.route.routeFingerprint !== event.routeFingerprint ||
+        surface.purpose !== event.purpose
+      ) {
+        throw new Error('Model Context evidence binding is invalid.');
+      }
+      return {
+        sessionId,
+        invocationId,
+        sequence: record.id,
+        purpose: surface.purpose,
+        provider: surface.route.providerKind,
+        model: surface.route.modelName,
+        systemPrompt: surface.request.system,
+        messages: surface.request.messages.map((message) => ({
+          role: message.role,
+          parts: message.content.map(projectModelContextSourcePart),
+        })),
+        tools: surface.request.tools.map((tool) => ({
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          inputSchemaJson: canonicalModelJson(tool.inputSchema),
+        })),
+        settings: {
+          transport: surface.request.transport,
+          temperature: surface.request.temperature,
+          maxOutputTokens: surface.request.maxOutputTokens,
+          stopPolicy: surface.request.stopPolicy,
+        },
+      };
+    },
+  });
+}
+
+function projectModelContextSourcePart(
+  part:
+    | import('@kite-ai/runtime-spi').CanonicalModelMessage['content'][number]
+    | import('@kite-ai/runtime-spi').CanonicalModelToolResultPart,
+): AgentApiModelContextSourcePart {
+  if (part.type === 'text' || part.type === 'reasoning') {
+    return { type: part.type, text: part.text };
+  }
+  if (part.type === 'tool_call') {
+    return {
+      type: 'tool_call',
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      inputJson: canonicalModelJson(part.input),
+    };
+  }
+  return {
+    type: 'tool_result',
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    output: part.output.value,
+  };
 }
 
 interface KiteRuntimeClientAccess extends RuntimeAccess {

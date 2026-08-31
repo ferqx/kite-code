@@ -124,6 +124,8 @@ describe('Agent API generated artifacts', () => {
         '/v1/sessions/{session_id}/events',
         '/v1/sessions/{session_id}/forks',
         '/v1/sessions/{session_id}/history',
+        '/v1/sessions/{session_id}/logs',
+        '/v1/sessions/{session_id}/model-invocations/{invocation_id}/context',
         '/v1/sessions/{session_id}/interactions',
         '/v1/sessions/{session_id}/interactions/{interaction_id}/responses',
         '/v1/sessions/{session_id}/resume',
@@ -185,13 +187,15 @@ describe('Agent API generated artifacts', () => {
     expect(declarations).toContain('export type AgentApiRun =');
     expect(declarations).toContain('export type AgentApiProblem =');
     expect(declarations).toContain('export type AgentApiWorkspace =');
+    expect(declarations).toContain('export type AgentApiLogPage =');
+    expect(declarations).toContain('export type AgentApiModelContext =');
   });
 
   test('emits valid draft 2020-12 JSON Schemas', () => {
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     const committed = committedFiles();
     const schemaPaths = [...committed.keys()].filter((path) => path.startsWith('schema/'));
-    expect(schemaPaths).toHaveLength(35);
+    expect(schemaPaths).toHaveLength(38);
     for (const path of schemaPaths) {
       const schema = JSON.parse(committed.get(path) ?? '{}');
       expect(ajv.validateSchema(schema), `${path}: ${ajv.errorsText()}`).toBeTrue();

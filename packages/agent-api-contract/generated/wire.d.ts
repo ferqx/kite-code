@@ -518,6 +518,116 @@ export type AgentApiInteractionResponseRequest = {
   readonly "schema": "kite.agent-api.interaction-response.v1";
 };
 
+export type AgentApiLogItem = {
+  readonly "category": "session" | "turn" | "model" | "tool" | "interaction" | "subagent" | "verification" | "recovery" | "other";
+  readonly "detail": {
+    readonly "artifact"?: {
+      readonly "availability": "available" | "unavailable";
+      readonly "kind": string;
+    };
+    readonly "fields": readonly ({
+      readonly "name": string;
+      readonly "value": string;
+    })[];
+    readonly "kind": "message" | "model" | "tool" | "interaction" | "subagent" | "verification" | "artifact" | "unavailable";
+  };
+  readonly "event_type": string;
+  readonly "occurred_at": string;
+  readonly "schema": "kite.agent-api.log-item.v1";
+  readonly "sequence": number;
+  readonly "session_id": string;
+  readonly "status": "ok" | "running" | "waiting" | "cancelled" | "failed" | "unknown";
+  readonly "summary"?: string;
+};
+
+export type AgentApiLogPage = {
+  readonly "items": readonly ({
+    readonly "category": "session" | "turn" | "model" | "tool" | "interaction" | "subagent" | "verification" | "recovery" | "other";
+    readonly "detail": {
+      readonly "artifact"?: {
+        readonly "availability": "available" | "unavailable";
+        readonly "kind": string;
+      };
+      readonly "fields": readonly ({
+        readonly "name": string;
+        readonly "value": string;
+      })[];
+      readonly "kind": "message" | "model" | "tool" | "interaction" | "subagent" | "verification" | "artifact" | "unavailable";
+    };
+    readonly "event_type": string;
+    readonly "occurred_at": string;
+    readonly "schema": "kite.agent-api.log-item.v1";
+    readonly "sequence": number;
+    readonly "session_id": string;
+    readonly "status": "ok" | "running" | "waiting" | "cancelled" | "failed" | "unknown";
+    readonly "summary"?: string;
+  })[];
+  readonly "next_cursor"?: string;
+  readonly "schema": "kite.agent-api.log-page.v1";
+  readonly "session_id": string;
+  readonly "through_sequence": number;
+};
+
+export type AgentApiModelContext = {
+  readonly "invocation_id": string;
+  readonly "messages": readonly ({
+    readonly "index": number;
+    readonly "parts": readonly ({
+      readonly "text": string;
+      readonly "truncated": boolean;
+      readonly "type": "text";
+    } | {
+      readonly "text": string;
+      readonly "truncated": boolean;
+      readonly "type": "reasoning";
+    } | {
+      readonly "input_json": string;
+      readonly "tool_call_id": string;
+      readonly "tool_name": string;
+      readonly "truncated": boolean;
+      readonly "type": "tool_call";
+    } | {
+      readonly "output": string;
+      readonly "tool_call_id": string;
+      readonly "tool_name": string;
+      readonly "truncated": boolean;
+      readonly "type": "tool_result";
+    })[];
+    readonly "role": "user" | "assistant" | "tool";
+  })[];
+  readonly "messages_truncated": boolean;
+  readonly "model": {
+    readonly "name": string;
+    readonly "provider": string;
+  };
+  readonly "purpose": "primary_agent" | "context_compaction" | "auto_review" | "subagent";
+  readonly "request_settings": {
+    readonly "max_output_tokens": number | null;
+    readonly "message_count": number;
+    readonly "stop_policy": {
+      readonly "kind": "single_step";
+      readonly "max_steps": 1;
+    };
+    readonly "temperature": number;
+    readonly "tool_count": number;
+    readonly "transport": "stream" | "generate";
+  };
+  readonly "schema": "kite.agent-api.model-context.v1";
+  readonly "sequence": number;
+  readonly "session_id": string;
+  readonly "system_prompt": {
+    readonly "text": string;
+    readonly "truncated": boolean;
+  };
+  readonly "tools": readonly ({
+    readonly "description"?: string;
+    readonly "input_schema_json": string;
+    readonly "name": string;
+    readonly "truncated": boolean;
+  })[];
+  readonly "tools_truncated": boolean;
+};
+
 export type AgentApiMutationHeaders = {
   readonly "idempotency_key": string;
   readonly "if_match"?: string;

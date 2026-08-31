@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   agentApiContextSchema,
+  agentApiModelContextSchema,
   agentApiProblemSchema,
   agentApiServerInfoSchema,
   decodeAgentApiResponse,
@@ -125,7 +126,44 @@ describe('Agent API context and route shell', () => {
         listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
       },
       checkpoints: { list: () => ({ entries: [], hasMore: false }), get: () => undefined },
-      directory: { list: () => [] },
+      directory: {
+        list: () => [
+          {
+            workspaceId: 'workspace-1',
+            displayName: 'Workspace one',
+            sessions: [
+              {
+                sessionId: 'session-1',
+                name: 'Session one',
+                updatedAt: 1,
+                lastSequence: 3,
+              },
+            ],
+          },
+        ],
+      },
+      modelContexts: {
+        get: (sessionId, invocationId) =>
+          sessionId === 'session-1' && invocationId === 'invocation-1'
+            ? {
+                sessionId,
+                invocationId,
+                sequence: 3,
+                purpose: 'primary_agent',
+                provider: 'openai',
+                model: 'model-1',
+                systemPrompt: 'Browser-only prompt.',
+                messages: [],
+                tools: [],
+                settings: {
+                  transport: 'stream',
+                  temperature: 0,
+                  maxOutputTokens: 4096,
+                  stopPolicy: { kind: 'single_step', maxSteps: 1 },
+                },
+              }
+            : undefined,
+      },
       close: async () => undefined,
       [Symbol.asyncDispose]: async () => undefined,
     } as AgentApiReadContext;
@@ -194,6 +232,24 @@ describe('Agent API context and route shell', () => {
       browserAuth,
     );
     expect(globalSessions.status).toBe(404);
+
+    const modelContext = await f.handler.handle(
+      new Request(
+        'http://127.0.0.1:43123/v1/sessions/session-1/model-invocations/invocation-1/context',
+        {
+          headers: {
+            ...browserHeaders,
+            cookie: 'kite_web_test=session',
+            accept: 'application/json',
+          },
+        },
+      ),
+      browserAuth,
+    );
+    expect(modelContext.status).toBe(200);
+    expect(
+      decodeAgentApiResponse(agentApiModelContextSchema, await modelContext.json()).system_prompt,
+    ).toEqual({ text: 'Browser-only prompt.', truncated: false });
 
     const logout = await f.handler.handle(
       new Request('http://127.0.0.1:43123/v1/auth/browser/session', {

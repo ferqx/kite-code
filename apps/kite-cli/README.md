@@ -70,7 +70,9 @@ executable、release entrypoint与slot均已删除。
 - first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
 - release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
-  corrupt identity不替换。manager mutation不自动重放，且不会回退legacy Coordinator/Worker或embedded backend。
+  corrupt identity不替换。兼容的其他build可复用ready owner与其Web root；Protocol/client-contract/identity不兼容保持fail closed。
+  跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`，manager mutation不自动重放，也不会回退legacy
+  Coordinator/Worker或embedded backend。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
 - TUI启动只ensure唯一Service；Web assets已经是Service readiness的一部分。`/web`调用可选的`discoverWeb` callback，通过Native

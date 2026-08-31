@@ -90,9 +90,10 @@ ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与f
 manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access`、exact`{}`body调用
 `POST /_kite/instance`。response的content type、4 KiB上限、closed keys及
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
-identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`；descriptor/expected build mismatch返回
-`incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
-与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
+identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
+expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
+`incompatible/build_mismatch`。这些结果都保留state且`spawn=0`，不能从caller build或descriptor合成健康结果。restart后
+descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待

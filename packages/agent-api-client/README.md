@@ -9,7 +9,7 @@
 
 - Browser logout；
 - ServerInfo capability读取；
-- Workspace、Workspace Session、Session、History、Checkpoint list/preview request；
+- Workspace、Workspace Session、Session、History、诊断Log、Browser-only Model Context、Checkpoint list/preview request；
 - identifier、page cursor、filter与非负`after_sequence`编码；
 - success/Problem Public codec及API version、artifact digest、content type、`no-store`响应校验；
 - `AbortSignal`透传。
@@ -33,7 +33,7 @@
 
 - fetch固定`credentials: include`、`cache: no-store`、`redirect: error`与`referrerPolicy: no-referrer`；
 - Browser凭据只由HttpOnly cookie自动携带，源码不读取或保存cookie；
-- `afterSequence`必须是非负safe integer；分页续页只发送cursor，不与`after_sequence`混用；
+- History与Log的`afterSequence`必须是非负safe integer；分页续页只发送cursor，不与`after_sequence`混用；
 - response contract header或codec漂移立即失败，不silent fallback。
 
 ## 测试

@@ -10,7 +10,6 @@ import type {
 export type WebConnectionState =
   | { readonly status: 'loading' }
   | { readonly status: 'connected' }
-  | { readonly status: 'disconnected' }
   | { readonly status: 'unavailable'; readonly reason: string };
 
 export type WebHistoryState = 'idle' | 'loading' | 'content' | 'empty' | 'unavailable' | 'error';
@@ -95,8 +94,7 @@ export type WebPresentationAction =
       readonly type: 'connection';
       readonly connection: WebConnectionState;
       readonly generation?: number;
-    }
-  | { readonly type: 'disconnect' };
+    };
 
 export const initialWebPresentationState: WebPresentationState = Object.freeze({
   generation: 0,
@@ -249,8 +247,6 @@ export function webPresentationReducer(
       return matchesGeneration(state, action.generation)
         ? { ...state, connection: action.connection }
         : state;
-    case 'disconnect':
-      return { ...state, connection: { status: 'disconnected' } };
   }
 }
 

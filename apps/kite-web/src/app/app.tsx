@@ -1,17 +1,32 @@
-import { BookOpen, Circle, History, Menu, PlugZap, Radio, Unplug } from 'lucide-react';
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  BookOpen,
+  Circle,
+  History,
+  ListTree,
+  Menu,
+  MessageSquareText,
+  Moon,
+  Radio,
+  Sun,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { ModelContextInspector } from '@/components/session/model-context-inspector';
+import { SessionLogList, type WebLogState } from '@/components/session/session-log-list';
 import { SessionSidebar } from '@/components/session/session-sidebar';
 import { MessageList } from '@/components/timeline/message-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import {
   initialWebPresentationState,
   selectedSession,
   type WebHistoryState,
   webPresentationReducer,
 } from '@/presentation/reducer';
-import type { WebCheckpointSummary } from '@/presentation/types';
+import type {
+  WebCheckpointSummary,
+  WebModelContextSnapshot,
+  WebSessionLogEntry,
+} from '@/presentation/types';
 import type { WebRestTransport } from '@/transport/client';
 import { createWebRestTransport, WebRestTransportError } from '@/transport/client';
 
@@ -23,11 +38,59 @@ export interface AppProps {
 export function App(props: AppProps = {}) {
   const [state, dispatch] = useReducer(webPresentationReducer, initialWebPresentationState);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [activeSessionView, setActiveSessionView] = useState<'history' | 'logs'>('history');
+  const [logState, setLogState] = useState<WebLogState>('idle');
+  const [logEntries, setLogEntries] = useState<readonly WebSessionLogEntry[]>([]);
+  const [logThroughSequence, setLogThroughSequence] = useState(0);
+  const [logReason, setLogReason] = useState<string | null>(null);
+  const [modelContextView, setModelContextView] = useState<{
+    readonly invocationId: string;
+    readonly status: 'loading' | 'loaded' | 'error';
+    readonly context?: WebModelContextSnapshot;
+    readonly reason: string | null;
+  } | null>(null);
   const transport = useMemo(() => props.transport ?? createWebRestTransport(), [props.transport]);
   const lifecycle = useRef(0);
+  const logLifecycle = useRef(0);
+  const modelContextLifecycle = useRef(0);
+  const diagnosticScope = useRef<{
+    readonly generation: number;
+    readonly sessionId: string | null;
+  }>({ generation: 0, sessionId: null });
+  const currentDiagnosticScope = useRef(diagnosticScope.current);
+  currentDiagnosticScope.current = {
+    generation: state.generation,
+    sessionId: state.selectedSessionId,
+  };
   const observedSequence = useRef(0);
   const deferredDisconnect = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const session = selectedSession(state);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    if (
+      diagnosticScope.current.generation === state.generation &&
+      diagnosticScope.current.sessionId === state.selectedSessionId
+    ) {
+      return;
+    }
+    diagnosticScope.current = {
+      generation: state.generation,
+      sessionId: state.selectedSessionId,
+    };
+    logLifecycle.current += 1;
+    modelContextLifecycle.current += 1;
+    setModelContextView(null);
+    setActiveSessionView('history');
+    setLogState('idle');
+    setLogEntries([]);
+    setLogThroughSequence(0);
+    setLogReason(null);
+  }, [state.generation, state.selectedSessionId]);
 
   const expandWorkspace = async (workspaceId: string) => {
     const workspace = state.workspaces.find((item) => item.workspaceId === workspaceId);
@@ -140,6 +203,85 @@ export function App(props: AppProps = {}) {
     };
   }, [state.generation, state.historyReloadToken, state.selectedSessionId, transport]);
 
+  const loadSessionLogs = async () => {
+    const sessionId = state.selectedSessionId;
+    const generation = state.generation;
+    if (!sessionId || generation === 0) return;
+    const requestId = ++logLifecycle.current;
+    setLogState('loading');
+    setLogReason(null);
+    try {
+      const snapshot = await transport.loadLogs(sessionId);
+      if (
+        requestId !== logLifecycle.current ||
+        snapshot.sessionId !== sessionId ||
+        currentDiagnosticScope.current.generation !== generation ||
+        currentDiagnosticScope.current.sessionId !== sessionId
+      ) {
+        return;
+      }
+      setLogEntries(snapshot.entries);
+      setLogThroughSequence(snapshot.observedLastSequence);
+      setLogState(snapshot.entries.length > 0 ? 'content' : 'empty');
+    } catch (error) {
+      if (
+        requestId !== logLifecycle.current ||
+        currentDiagnosticScope.current.generation !== generation ||
+        currentDiagnosticScope.current.sessionId !== sessionId
+      ) {
+        return;
+      }
+      const reason = failureReason(error);
+      setLogReason(reason);
+      setLogState(reason === 'protocol_error' ? 'error' : 'unavailable');
+    }
+  };
+
+  const selectSessionView = (view: 'history' | 'logs') => {
+    setActiveSessionView(view);
+    if (view === 'logs') void loadSessionLogs();
+  };
+
+  const openModelContext = useCallback(
+    async (invocationId: string) => {
+      const sessionId = state.selectedSessionId;
+      const generation = state.generation;
+      if (!sessionId || generation === 0) return;
+      const requestId = ++modelContextLifecycle.current;
+      setModelContextView({ invocationId, status: 'loading', reason: null });
+      try {
+        const context = await transport.loadModelContext(sessionId, invocationId);
+        if (
+          requestId !== modelContextLifecycle.current ||
+          currentDiagnosticScope.current.generation !== generation ||
+          currentDiagnosticScope.current.sessionId !== sessionId
+        ) {
+          return;
+        }
+        setModelContextView({ invocationId, status: 'loaded', context, reason: null });
+      } catch (error) {
+        if (
+          requestId !== modelContextLifecycle.current ||
+          currentDiagnosticScope.current.generation !== generation ||
+          currentDiagnosticScope.current.sessionId !== sessionId
+        ) {
+          return;
+        }
+        setModelContextView({
+          invocationId,
+          status: 'error',
+          reason: failureReason(error),
+        });
+      }
+    },
+    [state.generation, state.selectedSessionId, transport],
+  );
+
+  const closeModelContext = useCallback(() => {
+    modelContextLifecycle.current += 1;
+    setModelContextView(null);
+  }, []);
+
   useEffect(() => {
     const sessionId = state.selectedSessionId;
     const generation = state.generation;
@@ -192,19 +334,8 @@ export function App(props: AppProps = {}) {
     transport,
   ]);
 
-  const disconnect = async () => {
-    try {
-      await transport.disconnect();
-    } catch {
-      // The browser is already leaving the Observer surface; do not expose a
-      // transport diagnostic or invent a Runtime failure for this action.
-    } finally {
-      dispatch({ type: 'disconnect' });
-    }
-  };
-
   return (
-    <main className="grid h-dvh grid-cols-[320px_minmax(0,1fr)] overflow-hidden max-lg:grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-1">
+    <main className="grid h-dvh grid-cols-[304px_minmax(0,1fr)] overflow-hidden bg-canvas max-lg:grid-cols-[272px_minmax(0,1fr)] max-md:grid-cols-1">
       <div className="h-full max-md:hidden">
         <SessionSidebar
           workspaces={state.workspaces}
@@ -227,13 +358,13 @@ export function App(props: AppProps = {}) {
           <button
             type="button"
             aria-label="Close workspace list"
-            className="bg-black/55 backdrop-blur-sm"
+            className="bg-overlay backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
           />
         </div>
       ) : null}
       <section className="flex min-h-0 flex-col bg-canvas">
-        <header className="flex h-16 shrink-0 items-center gap-4 border-b border-border bg-canvas/90 px-5 backdrop-blur">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-canvas/92 px-5 backdrop-blur-xl">
           <Button
             aria-label="Open workspace list"
             aria-expanded={mobileSidebarOpen}
@@ -243,17 +374,27 @@ export function App(props: AppProps = {}) {
             <Menu className="size-4" />
           </Button>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-sm font-semibold tracking-tight">
+            <div className="flex items-center gap-2.5">
+              <h1 className="truncate text-[15px] font-semibold tracking-[-0.015em]">
                 {session?.displayName ?? 'Select a session'}
               </h1>
-              {session ? <Badge className="capitalize">{session.status}</Badge> : null}
+              {session ? (
+                <Badge
+                  className={
+                    session.status === 'running'
+                      ? 'border-running/25 bg-running/10 text-running'
+                      : 'capitalize'
+                  }
+                >
+                  {session.status}
+                </Badge>
+              ) : null}
             </div>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              Read-only presentation · no Runtime controls
+              Local · {state.connection.status.replace('_', ' ')} · read only
             </p>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="flex h-8 items-center gap-2 rounded-lg border border-border bg-surface-subtle px-2.5 text-[11px] text-muted-foreground">
             <Circle
               className={
                 state.connection.status === 'connected'
@@ -263,37 +404,36 @@ export function App(props: AppProps = {}) {
             />
             <span className="hidden sm:inline">{state.connection.status.replace('_', ' ')}</span>
           </div>
+          <Button
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            className="size-9 px-0"
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+          </Button>
           <a
             href="/api-docs"
-            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-surface hover:text-foreground"
+            aria-label="Open API documentation"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground"
           >
             <BookOpen className="size-3.5" />
             <span className="max-sm:hidden">API docs</span>
           </a>
-          <Separator className="h-6 w-px" />
-          <Button
-            onClick={() => void disconnect()}
-            disabled={state.connection.status === 'disconnected'}
-          >
-            {state.connection.status === 'disconnected' ? (
-              <PlugZap className="size-3.5" />
-            ) : (
-              <Unplug className="size-3.5" />
-            )}
-            <span className="max-sm:hidden">Disconnect</span>
-          </Button>
         </header>
         {state.connection.status === 'unavailable' &&
         (state.historyState === 'content' || state.historyState === 'empty') ? (
           <div
             role="status"
-            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
+            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-warning/25 bg-warning/8 px-4 py-3 text-xs text-muted-foreground"
           >
             <Radio className="size-4 shrink-0 text-muted-foreground" />
             <span>Automatic refresh is unavailable. Showing the latest REST snapshot.</span>
           </div>
         ) : null}
         {state.selectedSessionId ? (
+          <SessionViewTabs value={activeSessionView} onChange={selectSessionView} />
+        ) : null}
+        {state.selectedSessionId && activeSessionView === 'history' ? (
           <CheckpointStrip checkpoints={state.checkpoints} status={state.checkpointState} />
         ) : null}
         {state.selectedSessionId === null ? (
@@ -304,18 +444,93 @@ export function App(props: AppProps = {}) {
             )}
             connection={state.connection.status}
           />
+        ) : activeSessionView === 'history' ? (
+          <div
+            id="session-panel-history"
+            role="tabpanel"
+            aria-labelledby="session-tab-history"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <MessageList
+              messages={state.messages}
+              status={state.historyState}
+              reason={state.historyReason}
+              sessionName={session?.displayName}
+              onRetry={() => dispatch({ type: 'history_retry', generation: state.generation })}
+            />
+          </div>
         ) : (
-          <MessageList
-            messages={state.messages}
-            status={state.historyState}
-            reason={state.historyReason}
-            sessionName={session?.displayName}
-            onRetry={() => dispatch({ type: 'history_retry', generation: state.generation })}
+          <SessionLogList
+            entries={logEntries}
+            status={logState}
+            reason={logReason}
+            throughSequence={logThroughSequence}
+            onRefresh={() => void loadSessionLogs()}
+            onViewModelContext={(invocationId) => void openModelContext(invocationId)}
           />
         )}
       </section>
+      {modelContextView ? (
+        <ModelContextInspector
+          key={modelContextView.invocationId}
+          invocationId={modelContextView.invocationId}
+          context={modelContextView.context}
+          status={modelContextView.status}
+          reason={modelContextView.reason}
+          onClose={closeModelContext}
+          onRetry={() => void openModelContext(modelContextView.invocationId)}
+        />
+      ) : null}
     </main>
   );
+}
+
+function SessionViewTabs({
+  value,
+  onChange,
+}: {
+  readonly value: 'history' | 'logs';
+  readonly onChange: (value: 'history' | 'logs') => void;
+}) {
+  return (
+    <div className="flex h-11 shrink-0 items-end border-b border-border bg-canvas px-6">
+      <div role="tablist" aria-label="Session detail views" className="flex h-full items-end gap-5">
+        <button
+          id="session-tab-history"
+          type="button"
+          role="tab"
+          aria-selected={value === 'history'}
+          aria-controls="session-panel-history"
+          className={sessionTabClassName(value === 'history')}
+          onClick={() => onChange('history')}
+        >
+          <MessageSquareText className="size-3.5" />
+          Conversation history
+        </button>
+        <button
+          id="session-tab-logs"
+          type="button"
+          role="tab"
+          aria-selected={value === 'logs'}
+          aria-controls="session-panel-logs"
+          className={sessionTabClassName(value === 'logs')}
+          onClick={() => onChange('logs')}
+        >
+          <ListTree className="size-3.5" />
+          Runtime logs
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function sessionTabClassName(active: boolean): string {
+  return [
+    'relative flex h-full items-center gap-2 border-b-2 px-0.5 text-[11px] font-medium transition-colors',
+    active
+      ? 'border-accent text-foreground'
+      : 'border-transparent text-muted-foreground hover:text-foreground',
+  ].join(' ');
 }
 
 function CheckpointStrip({
@@ -326,7 +541,7 @@ function CheckpointStrip({
   readonly status: 'idle' | 'loading' | 'loaded' | 'unavailable';
 }) {
   return (
-    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-6 text-[11px] text-muted-foreground">
+    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-surface-subtle/35 px-6 text-[11px] text-muted-foreground">
       <History className="size-3.5" />
       <span>
         {status === 'loading'

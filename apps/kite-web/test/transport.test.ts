@@ -66,6 +66,57 @@ function client(): AgentApiBrowserClient {
         },
       ],
     })),
+    listLogs: vi.fn(async () => ({
+      schema: 'kite.agent-api.log-page.v1',
+      session_id: 'session-one',
+      through_sequence: 2,
+      items: [
+        {
+          schema: 'kite.agent-api.log-item.v1',
+          session_id: 'session-one',
+          sequence: 1,
+          occurred_at: '2026-08-31T00:00:00.000Z',
+          event_type: 'user.message_appended',
+          category: 'turn',
+          status: 'unknown',
+          summary: 'hello',
+          detail: {
+            kind: 'message',
+            fields: [
+              { name: 'content', value: 'hello' },
+              { name: 'message_id', value: 'message-one' },
+            ],
+          },
+        },
+      ],
+    })),
+    getModelContext: vi.fn(async () => ({
+      schema: 'kite.agent-api.model-context.v1',
+      session_id: 'session-one',
+      invocation_id: 'invocation-one',
+      sequence: 2,
+      purpose: 'primary_agent',
+      model: { provider: 'openai-compatible', name: 'model-one' },
+      system_prompt: { text: 'You are Kite.', truncated: false },
+      messages: [
+        {
+          index: 0,
+          role: 'user',
+          parts: [{ type: 'text', text: 'hello', truncated: false }],
+        },
+      ],
+      messages_truncated: false,
+      tools: [],
+      tools_truncated: false,
+      request_settings: {
+        transport: 'stream',
+        temperature: 0,
+        max_output_tokens: 4096,
+        stop_policy: { kind: 'single_step', max_steps: 1 },
+        message_count: 1,
+        tool_count: 0,
+      },
+    })),
     listCheckpoints: vi.fn(async () => ({
       schema: 'kite.agent-api.checkpoint-page.v1',
       session_id: 'session-one',
@@ -119,6 +170,30 @@ describe('Web REST transport', () => {
       afterSequence: 2,
       cursor: undefined,
       limit: 200,
+    });
+    await expect(transport.loadLogs('session-one')).resolves.toMatchObject({
+      sessionId: 'session-one',
+      observedLastSequence: 2,
+      entries: [
+        {
+          sequence: 1,
+          eventType: 'user.message_appended',
+          detail: {
+            fields: [
+              { name: 'content', value: 'hello' },
+              { name: 'message_id', value: 'message-one' },
+            ],
+          },
+        },
+      ],
+    });
+    await expect(
+      transport.loadModelContext('session-one', 'invocation-one'),
+    ).resolves.toMatchObject({
+      sessionId: 'session-one',
+      invocationId: 'invocation-one',
+      systemPrompt: { text: 'You are Kite.', truncated: false },
+      messages: [{ role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
     });
     await transport.disconnect();
     expect(api.revokeBrowser).toHaveBeenCalledOnce();

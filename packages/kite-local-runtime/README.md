@@ -85,10 +85,10 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   contract revision、server version与build ID；token、Workspace、Store/executable path、credential与Session字段fail closed。
 - authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
-  content-type缺失、malformed/extra field或instance/server/build identity mismatch统一`identity_uncertain`；
-  Protocol/client-contract不兼容被拒绝，expected build drift返回`incompatible + build_mismatch`。以上状态都不授权
-  清理alive/uncertain owner或spawn replacement。Native connector必须把`build_mismatch`呈现为可操作的不同构建冲突，
-  并指向启动该Service的原checkout/build，不能退化成泛化的Service未就绪错误。
+  content-type缺失、malformed/extra field或同一次发现中的instance/server/build identity drift统一`identity_uncertain`；
+  Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build，
+  因此ensure/status可复用同home ready owner且不spawn replacement；`service_stop/restart`仍以exact build为control fence，不匹配返回
+  `incompatible + build_mismatch`并保持Service ready。
 - access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。

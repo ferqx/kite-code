@@ -58,6 +58,11 @@ reader重新readback canonical bytes。Plan的既有path字段在DB backend中�
 - Sandbox allocating prepare 保存 exact plan/cleanup recovery payload，ready ack 前不得 spawn；restore 先严格回读并绑定外层 invocation facts。
 - Subagent request/task/continuation/lifecycle handle 只以 private ref 进入 Runtime；正文、child message 与完整 continuation 不进入 Event、Session Logger 或遥测。
 
+Browser Model Context Inspector是`model_surface`的额外read-only生产消费者，但不成为Artifact reader：Service先从可见Session的exact
+`model.invocation_prepared` event取得ref，继续使用Builtin `ModelArtifactStore.readSurface`验证ref、canonical JSON与schema，再交叉绑定integrity、
+route fingerprint和purpose，最后投影有界Public DTO。Browser不取得ref、Artifact body通用读取能力、path或GC authority；response/Provider-options
+Artifact也不由该入口读取。
+
 ## Reachability 与 GC
 
 GC 只接受 `complete=true` 的可达性 union，必须覆盖所有 retained Session 与 fork。扫描先完整验证 reachable ref、目录身份和 entry budget，再按稳定顺序删除超过 minimum retention 的 unreachable Artifact。缺失 reachable ref、未知条目、symlink/hardlink、身份漂移、scan limit 或不完整快照都会在任何删除前 fail closed。

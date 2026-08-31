@@ -25,8 +25,10 @@ terminal/Web data plane；独立Web Gateway process/control/state实现已经删
   generation进入opaque command binding reference，不固化为socket建连快照，因此同一TUI可在多个Session间切换且旧connection generation仍
   fail closed。执行复用现有Runtime/Host的per-Session mailbox、transaction、receipt与recovery，不增加第二套command registry。
 - 同一Service listener同时承载Native/Runtime、Agent API `/v1`和Browser static route。Service发布ready前验证并挂载fixed Web assets，
-  `GET /`直接返回index并创建或复用read-only HttpOnly Browser session；Web只读Workspace/Session/History/Checkpoint。cookie不能访问
+  `GET /`直接返回index并创建或复用read-only HttpOnly Browser session；Web只读Workspace/Session/History/Log/Model Context/Checkpoint。cookie不能访问
   Native/Controller/mutation route，Native authorization也不能混入Browser request；Web route只随Service关闭。
+- Browser Model Context诊断复用同一Store 9 Artifact backend和Builtin schema-aware reader，只能从可见Session的exact prepared invocation读取
+  bounded provider-neutral system/messages/tools；不打开第二DB、不提供通用Artifact读取，也不暴露ref、Provider options、endpoint或Credential。
 - 项目采用未发布clean cutover。Service只打开current `kite.sqlite`，不扫描、迁移或删除旧DB/layout/Artifact/process state及
   `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
 - Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成
@@ -71,6 +73,8 @@ contract asset；installed mode只从launcher固定的immutable candidate root�
 - Controller恢复绑定client/service identity、connection generation与rotating capability。Service restart只在取得新exact reservation后把旧
   instance lease转为detached；同一logical client恢复到新generation，不启动Worker process。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不自动重放mutation。
+- Native `describe`允许Protocol/client-contract兼容的其他build发现并连接ready Service；返回值始终携带Service真实build与其自身Web origin。
+  `service_stop/restart`仍要求client expected build与owner build一致，不匹配时保持Service ready且拒绝控制操作。
 - 正常Service从不删除legacy source；旧开发数据保持原样且不作为current fallback。
 - Windows owner/DACL/reparse、named pipe ACL与locked-directory evidence必须由真实Windows qualification证明；macOS/Linux结果不能代替。
 

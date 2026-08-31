@@ -54,7 +54,8 @@ managed release/source composition构造neutral child environment时只复制固
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一single-Service bundle所需的CLI/TUI/Service/Web、package/root build
 inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
-摘要不可用或越界时fail closed，dirty source不能复用旧Service。
+摘要不可用或越界时fail closed。dirty source产生不同build identity，但Protocol/client-contract兼容时可连接同home既有ready Service并使用
+该Service自己的Web assets；它不能以新build执行`service stop/restart`，也不会隐式替换owner。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装器写入 v2 managed-install marker 与唯一 `active` regular-file
