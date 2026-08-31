@@ -93,7 +93,17 @@ describe('Agent API generated artifacts', () => {
     const openapi = JSON.parse(openapiText) as {
       openapi?: string;
       'x-kite-contract-limits'?: unknown;
-      paths?: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
+      paths?: Record<
+        string,
+        Record<
+          string,
+          {
+            responses?: Record<string, unknown>;
+            security?: readonly Readonly<Record<string, readonly unknown[]>>[];
+            parameters?: readonly unknown[];
+          }
+        >
+      >;
       components?: { securitySchemes?: Record<string, unknown> };
     };
     expect(openapi.openapi).toBe('3.1.0');
@@ -102,7 +112,10 @@ describe('Agent API generated artifacts', () => {
       [
         '/v1',
         '/v1/auth/exchange',
+        '/v1/auth/browser/session',
         '/v1/auth/session',
+        '/v1/workspaces',
+        '/v1/workspaces/{workspace_id}/sessions',
         '/v1/sessions',
         '/v1/sessions/{session_id}',
         '/v1/sessions/{session_id}/checkpoints',
@@ -138,8 +151,18 @@ describe('Agent API generated artifacts', () => {
     ).toEqual(['200', '202']);
     expect(Object.keys(openapi.components?.securitySchemes ?? {}).sort()).toEqual([
       'AgentApiContext',
+      'BrowserSession',
       'WorkerConnectionCapability',
     ]);
+    expect(openapi.paths?.['/v1/sessions/{session_id}']?.get?.security).toContainEqual({
+      BrowserSession: [],
+    });
+    expect(openapi.paths?.['/v1/sessions']?.get?.security).not.toContainEqual({
+      BrowserSession: [],
+    });
+    expect(
+      JSON.stringify(openapi.paths?.['/v1/sessions/{session_id}/history']?.get?.parameters),
+    ).toContain('after_sequence');
     expect(openapiText).not.toContain('/healthz');
     expect(openapiText).not.toContain('/readyz');
     expect(openapiText).not.toContain('/api-docs');
@@ -161,13 +184,14 @@ describe('Agent API generated artifacts', () => {
     expect(parsed.parseDiagnostics).toEqual([]);
     expect(declarations).toContain('export type AgentApiRun =');
     expect(declarations).toContain('export type AgentApiProblem =');
+    expect(declarations).toContain('export type AgentApiWorkspace =');
   });
 
   test('emits valid draft 2020-12 JSON Schemas', () => {
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     const committed = committedFiles();
     const schemaPaths = [...committed.keys()].filter((path) => path.startsWith('schema/'));
-    expect(schemaPaths).toHaveLength(33);
+    expect(schemaPaths).toHaveLength(35);
     for (const path of schemaPaths) {
       const schema = JSON.parse(committed.get(path) ?? '{}');
       expect(ajv.validateSchema(schema), `${path}: ${ajv.errorsText()}`).toBeTrue();

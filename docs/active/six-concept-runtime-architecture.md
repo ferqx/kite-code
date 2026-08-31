@@ -36,9 +36,9 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server 与 Local Service client contract：十四个核心workspace、一个当前 concrete composition
+## Runtime Server 与 Local Service client contract：十六个workspace、一个当前 concrete composition
 
-Runtime package Gate当前检查十五个workspace（含private Web App）：`agent-api-contract`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
+Runtime package Gate当前检查十六个workspace（含private Web App）：`agent-api-contract`、`agent-api-client`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
 `runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
 `runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli`、private `apps/kite-service`与`apps/kite-web`。核心graph不把Web App算作
 Runtime composition owner；它们不是可互换Runtime。依赖和authority必须
@@ -47,6 +47,7 @@ Runtime composition owner；它们不是可互换Runtime。依赖和authority必
 ```text
 runtime-contract ─────────────────────────────────────────→ ∅
 agent-api-contract ───────────────────────────────────────→ ∅（仅external zod）
+agent-api-client ─────────────────────────────────────────→ agent-api-contract
 runtime-protocol ─────────────────────────────────────────→ runtime-contract
 runtime-client ───────────────────────────────────────────→ runtime-contract + runtime-protocol
 runtime-server ───────────────────────────────────────────→ runtime-contract + runtime-protocol
@@ -59,6 +60,7 @@ runtime-storage-sqlite ───────────────────
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
 apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + contract
 apps/kite-service ─────────────────────────────────────────→ agent-api-contract + app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
+apps/kite-web ─────────────────────────────────────────────→ agent-api-client + agent-api-contract
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
@@ -70,10 +72,10 @@ I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` �
 codec并实现Native connector；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
 任一 App source。
 
-`@kite-ai/agent-api-contract`是zero-workspace-dependency的browser-safe Public wire contract；Service只有`src/agent-api/**`可导入其root。
-当前Worker composition复用既有listener注入认证与bounded Session/History/Checkpoint read façade，不创建第二Runtime/Store/listener；每个
-Agent context只拥有一条query-only private Runtime logical connection，Store 7 page source复用already-open SQLite connection而不增加DDL/index。
-Coordinator只mint purpose-bound capability且不代理data plane，Web App不依赖Agent API contract/client。
+`@kite-ai/agent-api-contract`是zero-workspace-dependency的browser-safe Public wire contract；`@kite-ai/agent-api-client`只依赖该contract并
+封装Browser cookie REST read。single-Service复用既有listener注入Agent bearer与Browser cookie认证，以及bounded Workspace/Session/History/
+Checkpoint façade，不创建第二Runtime/Store/listener。Agent context拥有query-only private Runtime logical connection；Browser read context直接复用
+同一Store 9 Directory/Runtime/History/Checkpoint authority。Web只依赖client与contract，不依赖Service或Runtime package。
 
 `apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
 SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App
@@ -256,7 +258,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
 - `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
-- `check:runtime-packages`：十五个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
+- `check:runtime-packages`：十六个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
 

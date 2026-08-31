@@ -106,7 +106,7 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
-  onDiscoverWeb?: () => Promise<string | undefined>,
+  onDiscoverWeb?: () => Promise<string>,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -203,8 +203,7 @@ export function useSlashCommand(
             .then((url) => {
               dispatch({
                 type: 'LOCAL_TEXT',
-                text: url ? `  ⎿  ${url}` : '  ⎿  Kite Web is not running. Run `kite-code web`.',
-                ...(url ? {} : { isError: true }),
+                text: `  ⎿  ${url}`,
               });
             })
             .catch(() => {

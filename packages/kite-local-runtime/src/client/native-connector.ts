@@ -883,6 +883,12 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
     if (value === undefined) return undefined;
     const descriptor = extractEnsuredDescriptor(value);
     if (descriptor === undefined && isNonAppliedLifecycleResult(value)) {
+      if (value.outcome === 'incompatible' && value.diagnostic === 'build_mismatch') {
+        throw new LocalRuntimeConnectionError(
+          'protocol_error',
+          'Local Runtime Service is ready for a different build (build_mismatch). Stop it from the checkout or build that started it, or use a different --kite-home.',
+        );
+      }
       throw new LocalRuntimeConnectionError(
         value.outcome === 'incompatible' ? 'protocol_error' : 'service_unavailable',
         'Local Runtime Service did not become ready.',

@@ -1,14 +1,15 @@
-import type { WebWorkspaceSummary } from '@kite-ai/kite-app-contract/web';
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import { ChevronDown, CircleDot, FolderKanban, Radio } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import type { WebWorkspaceSummary } from '@/presentation/types';
 
 interface SessionSidebarProps {
   readonly workspaces: readonly WebWorkspaceSummary[];
   readonly selectedSessionId: string | null;
   readonly onSelect: (sessionId: string) => void;
+  readonly onExpandWorkspace: (workspaceId: string) => void;
 }
 
 function relativeTime(timestamp: number): string {
@@ -19,7 +20,12 @@ function relativeTime(timestamp: number): string {
   return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
-export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: SessionSidebarProps) {
+export function SessionSidebar({
+  workspaces,
+  selectedSessionId,
+  onSelect,
+  onExpandWorkspace,
+}: SessionSidebarProps) {
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-border bg-sidebar">
       <header className="flex h-16 shrink-0 items-center justify-between px-5">
@@ -47,14 +53,37 @@ export function SessionSidebar({ workspaces, selectedSessionId, onSelect }: Sess
         ) : (
           <nav aria-label="Workspace sessions" className="space-y-2">
             {workspaces.map((workspace) => (
-              <CollapsiblePrimitive.Root key={workspace.workspaceId} defaultOpen>
+              <CollapsiblePrimitive.Root
+                key={workspace.workspaceId}
+                defaultOpen={workspace.sessionState === 'loaded'}
+                onOpenChange={(open) => {
+                  if (open && workspace.sessionState === 'idle') {
+                    onExpandWorkspace(workspace.workspaceId);
+                  }
+                }}
+              >
                 <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-surface">
                   <ChevronDown className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
                   <FolderKanban className="size-3.5" />
                   <span className="min-w-0 flex-1 truncate">{workspace.label}</span>
-                  <span className="text-[10px] tabular-nums">{workspace.sessions.length}</span>
+                  <span className="text-[10px] tabular-nums">{workspace.sessionCount}</span>
                 </CollapsiblePrimitive.Trigger>
                 <CollapsiblePrimitive.Content className="mt-1 space-y-1">
+                  {workspace.sessionState === 'loading' ? (
+                    <p className="px-3 py-2 text-[10px] text-muted-foreground">Loading sessions…</p>
+                  ) : null}
+                  {workspace.sessionState === 'unavailable' ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-lg px-3 py-2 text-left text-[10px] text-muted-foreground hover:bg-surface"
+                      onClick={() => onExpandWorkspace(workspace.workspaceId)}
+                    >
+                      Sessions unavailable · retry
+                    </button>
+                  ) : null}
+                  {workspace.sessionState === 'loaded' && workspace.sessions.length === 0 ? (
+                    <p className="px-3 py-2 text-[10px] text-muted-foreground">No sessions</p>
+                  ) : null}
                   {workspace.sessions.map((session) => {
                     const selected = session.sessionId === selectedSessionId;
                     return (

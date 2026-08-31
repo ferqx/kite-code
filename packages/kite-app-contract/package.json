@@ -6,11 +6,10 @@
   "module": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./web": "./src/web.ts",
     "./worker-controller": "./src/worker-controller.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/web.ts --outdir ./dist --target browser",
+    "build": "bun build ./src/index.ts --outdir ./dist --target browser",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

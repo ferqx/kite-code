@@ -68,6 +68,8 @@
   `runtime_session_tombstones.workspace_id`保留。Session `format_epoch`必须显式使用Runtime State epoch，不能误用Store 9物理epoch。
   `createKiteHomeRuntimeRunStore`继续保留Store 8的coverage、单active Run、immutable identity、lifecycle、pagination、rewind/fork规则；
   Run insert/transition现与State/event/snapshot及digest-bound start receipt同事务，Store 9 DDL也保留queued/start、terminal/finish的exact CHECK。
+  Host在start decision提交后执行的same-phase `queued→running`是独立row-only activation；Store 9 aggregate Run port在没有外层transaction时
+  通过同一个`KiteHomeWriteTransactionPort`开启`BEGIN IMMEDIATE`，已有外层commit时则直接复用，既不允许nested transaction也不绕过唯一writer。
 - 历史 source reader 不进入 current execution port。
 
 ## 允许依赖

@@ -30,6 +30,7 @@ function fixture(
     readonly admitWorkspace?: () => Promise<'admitted' | 'untrusted' | 'unavailable'>;
     readonly openReadContext?: (binding: AgentApiCapabilityBinding) => Promise<AgentApiReadContext>;
     readonly capabilities?: readonly ('checkpoints' | 'history' | 'sessions')[];
+    readonly browserReadContext?: AgentApiReadContext;
   } = {},
 ) {
   let now = Date.parse('2026-08-30T00:00:00.000Z');
@@ -51,6 +52,12 @@ function fixture(
     isClientGenerationCurrent: (clientId, generation) => current.has(`${clientId}:${generation}`),
     ...(options.openReadContext ? { openReadContext: options.openReadContext } : {}),
     capabilities: options.capabilities ?? [],
+    ...(options.browserReadContext
+      ? {
+          browserReadContext: options.browserReadContext,
+          browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+        }
+      : {}),
     ...(options.maxContexts === undefined ? {} : { maxContexts: options.maxContexts }),
   });
   return {
@@ -106,6 +113,99 @@ function bearerRequest(path: string, token: string, method = 'GET'): Request {
 }
 
 describe('Agent API context and route shell', () => {
+  test('serves read-only Browser info from a root-created session and rejects retired exchange', async () => {
+    const readContext = {
+      query: async () => ({
+        status: 'not_found',
+        queryType: 'get_session_projection',
+        code: 'session_not_found',
+      }),
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      },
+      checkpoints: { list: () => ({ entries: [], hasMore: false }), get: () => undefined },
+      directory: { list: () => [] },
+      close: async () => undefined,
+      [Symbol.asyncDispose]: async () => undefined,
+    } as AgentApiReadContext;
+    const f = fixture({ browserReadContext: readContext });
+    let active = true;
+    const browserAuth = {
+      cookieName: 'kite_web_test',
+      inspectCookie(cookie: string | null) {
+        return active && cookie === 'kite_web_test=session'
+          ? ({
+              status: 'valid',
+              record: { cookieHash: 'hash', expiresAt: Date.now() + 1_000 },
+            } as const)
+          : ({ status: cookie ? 'invalid' : 'absent' } as const);
+      },
+      revokeSession() {
+        active = false;
+      },
+    };
+    const browserHeaders = {
+      origin: 'http://127.0.0.1:43123',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+    };
+    const retiredExchange = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1/auth/browser/exchange', {
+        method: 'POST',
+        headers: { ...browserHeaders, cookie: 'kite_web_test=session' },
+      }),
+      browserAuth,
+    );
+    expect(retiredExchange.status).toBe(404);
+
+    const info = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1', {
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          'sec-fetch-mode': 'cors',
+          cookie: 'kite_web_test=session',
+          accept: 'application/json',
+        },
+      }),
+      browserAuth,
+    );
+    expect(info.status).toBe(200);
+    expect(
+      decodeAgentApiResponse(agentApiServerInfoSchema, await info.json()).capabilities,
+    ).toEqual(['checkpoints', 'history', 'sessions', 'workspaces']);
+
+    const crossSite = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1', {
+        headers: {
+          'sec-fetch-site': 'cross-site',
+          'sec-fetch-mode': 'cors',
+          cookie: 'kite_web_test=session',
+        },
+      }),
+      browserAuth,
+    );
+    expect(crossSite.status).toBe(403);
+
+    const globalSessions = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1/sessions', {
+        headers: { ...browserHeaders, cookie: 'kite_web_test=session', accept: 'application/json' },
+      }),
+      browserAuth,
+    );
+    expect(globalSessions.status).toBe(404);
+
+    const logout = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1/auth/browser/session', {
+        method: 'DELETE',
+        headers: { ...browserHeaders, cookie: 'kite_web_test=session' },
+      }),
+      browserAuth,
+    );
+    expect(logout.status).toBe(204);
+    expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+  });
+
   test('consumes one capability, returns a hash-only context, and serves ServerInfo', async () => {
     const f = fixture();
     f.issue('A'.repeat(43));

@@ -31,7 +31,8 @@ bun install
 bun run tui
 ```
 
-On first launch, follow the interface to configure a model provider.
+`bun run tui` builds the Web assets and ensures the one Local Service before opening the terminal
+UI. On first launch, follow the interface to configure a model provider.
 
 Headless CLI:
 
@@ -44,21 +45,23 @@ bun run agent run \
 
 For all options, run `bun run agent --help`.
 
-## Local Web Observer
+## Local Server and Web
 
-From a source checkout, one command builds and validates the Web assets, ensures the Coordinator
-and Web Gateway, and prints a one-shot loopback URL:
+To start the Server without opening the TUI:
 
 ```bash
-bun run web:dev
+bun run server
 ```
 
-The terminal TUI/CLI ensures a Coordinator and the selected Workspace Worker only when needed.
-`kite web` ensures the Coordinator plus the single local Web Gateway. Opening a browser URL never
-starts a local server; the page is only a Gateway client. `bun run --cwd apps/kite-web dev` is a
-Vite asset server for frontend work, not the complete authenticated Gateway. If a failed launch
-left exact process-bound recovery evidence, run `bun run agent web recover`; uncertain or live
-process identity remains fail-closed.
+This builds the Web assets, ensures the same Local Service used by the TUI, and prints its stable
+loopback root URL. The Service root address is the Web entrypoint; the same origin serves `/v1` and
+`/api-docs`. `bun run agent web` ensures the Service and prints the same root URL.
+
+TUI/CLI and Browser reuse one Service, Runtime, listener and `kite.sqlite`. Visiting `/` establishes
+an HttpOnly read-only session, then the Browser reads Workspace, Session, History and Checkpoint data from
+the Service `/v1` REST API. Use `bun run agent service status|stop|restart` for the only lifecycle;
+there is no separate Web service to start or stop. `bun run --cwd apps/kite-web dev` remains only a
+Vite asset server.
 
 ## Documentation
 

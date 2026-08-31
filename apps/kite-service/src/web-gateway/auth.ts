@@ -1,8 +1,6 @@
 import { createHash, randomBytes as systemRandomBytes } from 'node:crypto';
 
-export const WEB_LAUNCH_TOKEN_TTL_MS = 30_000;
 export const WEB_SESSION_TTL_MS = 5 * 60_000;
-export const WEB_MAX_LAUNCH_TOKENS = 128;
 export const WEB_MAX_SESSIONS = 128;
 
 const TOKEN_BYTES = 32;
@@ -10,40 +8,21 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
 export interface WebGatewayAuthOptions {
   readonly instanceId: string;
-  readonly origin: string;
   readonly cookiePath?: string;
   readonly now?: () => number;
   readonly randomBytes?: (size: number) => Uint8Array;
-  readonly maxLaunchTokens?: number;
   readonly maxSessions?: number;
-}
-
-export interface WebGatewayLaunch {
-  readonly url: string;
-  mintLaunchUrl(): string;
-  consume(token: string, replaceCookieHash?: string): WebGatewaySessionMaterial | undefined;
-  close(): void;
-}
-
-export interface WebGatewaySessionMaterial {
-  readonly cookieName: string;
-  readonly cookieValue: string;
-  readonly cookieHash: string;
-  readonly setCookie: string;
-  readonly expiresAt: number;
 }
 
 export interface WebGatewaySessionRegistry {
   readonly cookieName: string;
-  authorize(cookieHeader: string | null): WebGatewaySessionRecord | undefined;
+  createSession(): string | undefined;
   inspectCookie(
     cookieHeader: string | null,
   ):
     | { readonly status: 'absent' | 'invalid' }
     | { readonly status: 'valid'; readonly record: WebGatewaySessionRecord };
-  consumeLaunch(token: string, replaceCookieHash?: string): WebGatewaySessionMaterial | undefined;
   revokeSession(cookieHash: string): void;
-  cleanup(): void;
   close(): void;
 }
 
@@ -53,61 +32,32 @@ export interface WebGatewaySessionRecord {
 }
 
 /**
- * Hash-only launch/session authority for one Gateway instance. Plain launch
- * and cookie values are never retained in the registry; the launch value is
- * only present in the caller-owned URL fragment and request body exchange.
+ * Hash-only Browser-session authority for one Service instance. Plain cookie
+ * values are never retained in the registry.
  */
-export function createWebGatewayAuth(
-  options: WebGatewayAuthOptions,
-): WebGatewaySessionRegistry & WebGatewayLaunch {
+export function createWebGatewayAuth(options: WebGatewayAuthOptions): WebGatewaySessionRegistry {
   const now = options.now ?? Date.now;
   const random = options.randomBytes ?? ((size: number) => systemRandomBytes(size));
-  const maxLaunchTokens = positiveBound(
-    options.maxLaunchTokens,
-    WEB_MAX_LAUNCH_TOKENS,
-    'maxLaunchTokens',
-  );
   const maxSessions = positiveBound(options.maxSessions, WEB_MAX_SESSIONS, 'maxSessions');
   const cookiePath = options.cookiePath ?? '/_kite/web';
   if (!/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/u.test(cookiePath)) {
     throw new TypeError('Web Gateway cookie path is invalid.');
   }
   const instanceId = boundedBinding(options.instanceId, 'instanceId');
-  const origin = boundedBinding(options.origin, 'origin');
   const cookieName = `kite_web_${digest(instanceId).slice(0, 24)}`;
-  const launches = new Map<string, number>();
   const sessions = new Map<string, WebGatewaySessionRecord>();
   let closed = false;
-  let launchUrl = '';
 
-  issueLaunch();
-
-  const authority: WebGatewaySessionRegistry & WebGatewayLaunch = {
-    get url() {
-      return launchUrl;
-    },
+  const authority: WebGatewaySessionRegistry = {
     cookieName,
-    mintLaunchUrl: issueLaunch,
-    consume(token, replaceCookieHash) {
-      return consumeLaunch(token, replaceCookieHash);
-    },
-    consumeLaunch,
-    authorize(cookieHeader) {
-      const inspected = inspectCookie(cookieHeader);
-      return inspected.status === 'valid' ? inspected.record : undefined;
-    },
+    createSession: () => createSession(safeNow(now)),
     inspectCookie,
     revokeSession(cookieHash) {
       sessions.delete(cookieHash);
     },
-    cleanup() {
-      cleanupExpired(safeNow(now));
-    },
     close() {
       closed = true;
-      launches.clear();
       sessions.clear();
-      launchUrl = '';
     },
   };
   return Object.freeze(authority);
@@ -130,61 +80,18 @@ export function createWebGatewayAuth(
     return { status: 'valid', record };
   }
 
-  function issueLaunch(): string {
-    const current = safeNow(now);
+  function createSession(current: number): string | undefined {
+    if (closed) return undefined;
     cleanupExpired(current);
-    if (launches.size >= maxLaunchTokens) {
-      throw new RangeError('Web Gateway launch registry is full.');
-    }
-    const token = createToken(random);
-    const expiresAt = expiry(current, WEB_LAUNCH_TOKEN_TTL_MS);
-    const launchHash = digest(`${instanceId}\0launch\0${token}`);
-    if (launches.has(launchHash)) {
-      throw new Error('Web Gateway launch token source repeated material.');
-    }
-    launches.set(launchHash, expiresAt);
-    launchUrl = `${origin}/#${token}`;
-    return launchUrl;
-  }
-
-  function consumeLaunch(
-    token: string,
-    replaceCookieHash?: string,
-  ): WebGatewaySessionMaterial | undefined {
-    if (closed || !TOKEN_PATTERN.test(token)) return undefined;
-    const current = safeNow(now);
-    cleanupExpired(current);
-    const launchHash = digest(`${instanceId}\0launch\0${token}`);
-    const launchExpiry = launches.get(launchHash);
-    if (launchExpiry === undefined || current >= launchExpiry) {
-      if (launchExpiry !== undefined) launches.delete(launchHash);
-      return undefined;
-    }
-    if (
-      sessions.size >= maxSessions &&
-      (replaceCookieHash === undefined || !sessions.has(replaceCookieHash))
-    ) {
-      return undefined;
-    }
-    launches.delete(launchHash);
-    if (replaceCookieHash !== undefined) sessions.delete(replaceCookieHash);
+    if (sessions.size >= maxSessions) return undefined;
     const cookieValue = createToken(random);
     const expiresAt = expiry(current, WEB_SESSION_TTL_MS);
     const cookieHash = digest(`${instanceId}\0session\0${cookieValue}`);
     sessions.set(cookieHash, { cookieHash, expiresAt });
-    return {
-      cookieName,
-      cookieValue,
-      cookieHash,
-      expiresAt,
-      setCookie: cookieHeader(cookieName, cookieValue, cookiePath, expiresAt),
-    };
+    return cookieHeader(cookieName, cookieValue, cookiePath, expiresAt);
   }
 
   function cleanupExpired(current: number): void {
-    for (const [hash, expiresAt] of launches) {
-      if (current >= expiresAt) launches.delete(hash);
-    }
     for (const [hash, record] of sessions) {
       if (current >= record.expiresAt) sessions.delete(hash);
     }

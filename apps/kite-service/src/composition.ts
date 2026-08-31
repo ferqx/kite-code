@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { discoverSandboxBackendCandidate } from '@kite-ai/builtin-runtime/sandbox';
@@ -390,12 +390,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
             connectionKind === 'native_client' &&
             authorityForWorkspace
           ) {
-            if (
-              !sessionId ||
-              !binding ||
-              binding.controllerSessionId !== sessionId ||
-              binding.controllerGeneration === undefined
-            ) {
+            if (!sessionId || !binding || binding.workerInstanceId !== instanceId) {
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
             const state = authorityForWorkspace(workspace).controller.read(sessionId);
@@ -403,11 +398,27 @@ function createKiteServiceRuntimeCompositionUnchecked(
               state.status !== 'active' ||
               state.clientId !== binding.clientId ||
               state.connectionGeneration !== binding.connectionGeneration ||
-              state.controllerGeneration !== binding.controllerGeneration ||
               state.workerInstanceId !== instanceId
             ) {
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
+            const bindingReference = `service-command-${createHash('sha256')
+              .update('kite.single-service-command-binding.v1\0', 'utf8')
+              .update(workspace.workspaceDigest, 'utf8')
+              .update('\0', 'utf8')
+              .update(request.connectionId, 'utf8')
+              .update('\0', 'utf8')
+              .update(request.requestId, 'utf8')
+              .update('\0', 'utf8')
+              .update(sessionId, 'utf8')
+              .update('\0', 'utf8')
+              .update(String(state.controllerGeneration), 'utf8')
+              .digest('hex')}`;
+            return {
+              allowed: true as const,
+              workspace: workspace.canonicalPath,
+              bindingReference,
+            };
           }
           return {
             allowed: true as const,

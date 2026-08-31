@@ -35,11 +35,6 @@ export interface KiteSingleServiceClientOptions {
 
 export interface KiteSingleServiceClient {
   describe(): Promise<Extract<KiteLocalNativeResponse, { operation: 'describe' }>>;
-  ensureWeb(
-    staticAssetRoot: string,
-  ): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_ensure' }>>;
-  statusWeb(): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_status' }>>;
-  stopWeb(): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_stop' }>>;
   stopService(): Promise<Extract<KiteLocalNativeResponse, { operation: 'service_stop' }>>;
 }
 
@@ -75,10 +70,6 @@ export function createKiteSingleServiceClient(
 
   return Object.freeze({
     describe: () => invoke({ ...base(), operation: 'describe' }, 'describe'),
-    ensureWeb: (staticAssetRoot: string) =>
-      invoke({ ...base(), operation: 'web_ensure', staticAssetRoot }, 'web_ensure'),
-    statusWeb: () => invoke({ ...base(), operation: 'web_status' }, 'web_status'),
-    stopWeb: () => invoke({ ...base(), operation: 'web_stop' }, 'web_stop'),
     stopService: () => invoke({ ...base(), operation: 'service_stop' }, 'service_stop'),
   });
 }

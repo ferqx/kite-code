@@ -65,12 +65,10 @@ import {
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
-  createSqliteWorkspaceRuntimeLogQueryPort,
   discoverSqliteRuntimeCompatibilitySource,
   type KiteHomeArtifactStore,
   type KiteHomeDirectoryQueryPort,
   openKiteHomeRuntimeStorage,
-  readSqliteActiveLayoutPointer,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
@@ -89,6 +87,7 @@ import {
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
+import type { AgentApiReadContext } from './agent-api';
 import type { KiteInProcessAppControlComposition } from './app-control';
 import { createKiteHomeBuiltinArtifactBackends } from './bootstrap/kite-home-artifact-backends';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
@@ -111,7 +110,6 @@ import {
   createKiteSingleServiceSessionCreationCoordinator,
   type KiteSingleServiceSessionCreationCoordinator,
 } from './bootstrap/single-service-session-creation';
-import type { KiteServiceWebGatewayRouteOptions } from './carrier';
 import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
@@ -121,34 +119,78 @@ import {
   createRuntimeWorkspaceContextFactory,
   type RuntimeOperationGate,
 } from './runtime-application';
-import {
-  createKiteRuntimeHistoryClient,
-  createKiteRuntimeObserverHistoryPort,
-} from './runtime-client/history-adapter';
+import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
-import { createSingleServiceWebObserverFactory, type WebObserverHistoryPort } from './web-observer';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
-/**
- * Store 9 target composition for Browser routes. The exact Service composition root is the only
- * App module allowed to bind the concrete SQLite Directory query to in-process Runtime/History.
- */
-export function createKiteSingleServiceWebGatewayTarget(input: {
+export function createKiteSingleServiceAgentApiReadContext(input: {
   readonly directory: KiteHomeDirectoryQueryPort;
   readonly runtime: RuntimeAccess;
-  readonly history: WebObserverHistoryPort;
-  readonly serviceInstanceId: string;
-  readonly contractRevision: string;
-}): Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'> {
+  readonly history: RuntimeHistoryClient;
+  readonly checkpoints: Pick<
+    RuntimeStorage<RuntimeEvent, RuntimeState>['checkpoints'],
+    'getNamedSnapshotEntry' | 'listNamedSnapshots'
+  >;
+}): AgentApiReadContext {
+  const checkpoints: AgentApiReadContext['checkpoints'] = Object.freeze({
+    list(request: Parameters<AgentApiReadContext['checkpoints']['list']>[0]) {
+      const entries = input.checkpoints
+        .listNamedSnapshots(request.sessionId)
+        .map((entry) => ({
+          checkpointId: entry.snapshotId,
+          sessionId: request.sessionId,
+          revision: entry.eventPosition,
+          eventPosition: entry.eventPosition,
+          createdAt: entry.createdAt,
+          affectedFileCount: entry.affectedFileCount ?? 0,
+        }))
+        .sort(
+          (left, right) =>
+            left.revision - right.revision || left.checkpointId.localeCompare(right.checkpointId),
+        );
+      const start = request.cursor
+        ? entries.findIndex(
+            (entry) =>
+              entry.revision === request.cursor!.revision &&
+              entry.checkpointId === request.cursor!.checkpointId,
+          ) + 1
+        : 0;
+      if (request.cursor && start === 0) {
+        return { entries: [], hasMore: false };
+      }
+      const selected = entries.slice(start, start + request.limit);
+      const hasMore = start + selected.length < entries.length;
+      const last = selected.at(-1);
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && last
+          ? { nextCursor: { revision: last.revision, checkpointId: last.checkpointId } }
+          : {}),
+      };
+    },
+    get(sessionId: string, checkpointId: string) {
+      const entry = input.checkpoints.getNamedSnapshotEntry(sessionId, checkpointId);
+      return entry
+        ? {
+            checkpointId: entry.snapshotId,
+            sessionId,
+            revision: entry.eventPosition,
+            eventPosition: entry.eventPosition,
+            createdAt: entry.createdAt,
+            affectedFileCount: entry.affectedFileCount ?? 0,
+          }
+        : undefined;
+    },
+  });
   return Object.freeze({
-    createObserver: createSingleServiceWebObserverFactory({
-      runtime: input.runtime,
-      directory: input.directory,
-      history: input.history,
-      serviceInstanceId: input.serviceInstanceId,
-      contractRevision: input.contractRevision,
-    }),
+    query: (query: RuntimeQuery) => input.runtime.query(query),
+    history: input.history,
+    checkpoints,
+    directory: input.directory,
+    close: async () => undefined,
+    [Symbol.asyncDispose]: async () => undefined,
   });
 }
 
@@ -835,59 +877,6 @@ export function createKiteRuntimeHistory(checkpointPath: string): RuntimeHistory
   );
 }
 
-/**
- * Browser/Observer History is current-format and query-only. It intentionally
- * omits the compatibility importer used by the native terminal journey.
- */
-export function createKiteRuntimeObserverHistory(
-  checkpointPath: string,
-): import('./web-observer').WebObserverHistoryPort {
-  return createKiteRuntimeObserverHistoryPort(() =>
-    createSqliteRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
-      databasePath: sqliteCurrentRuntimeStorePath(checkpointPath),
-      codec: STATE_STORAGE_BINDING_.codec,
-      currentEventTypes: runtimeHostCurrentStateEventTypes(),
-    }),
-  );
-}
-
-/**
- * Query-only Observer History for an active Store 8 Workspace. The caller
- * supplies server-owned layout authority and an opaque Worker scope; no
- * Browser path or compatibility importer is accepted.
- */
-export function createKiteRuntimeObserverHistoryFromWorkspaceLayout(input: {
-  readonly layout: SqliteRuntimeLayoutPaths;
-  readonly layoutGeneration: string;
-  readonly workerScopeId: string;
-}): import('./web-observer').WebObserverHistoryPort {
-  return createKiteRuntimeObserverHistoryPort(() =>
-    createSqliteWorkspaceRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
-      layout: input.layout,
-      layoutGeneration: input.layoutGeneration,
-      workerScopeId: input.workerScopeId,
-      codec: STATE_STORAGE_BINDING_.codec,
-      currentEventTypes: runtimeHostCurrentStateEventTypes(),
-      targetStore: 'run',
-    }),
-  );
-}
-
-/** Resolve the active Store 8 generation inside the Service composition root. */
-export function createKiteRuntimeObserverHistoryFromActiveWorkspace(input: {
-  readonly kiteHomeRoot: string;
-  readonly workerScopeId: string;
-}): import('./web-observer').WebObserverHistoryPort {
-  const layout = resolveSqliteRuntimeLayoutPaths(input.kiteHomeRoot);
-  const pointer = readSqliteActiveLayoutPointer(layout);
-  if (!pointer) throw new Error('Active Workspace layout is unavailable.');
-  return createKiteRuntimeObserverHistoryFromWorkspaceLayout({
-    layout,
-    layoutGeneration: pointer.generation,
-    workerScopeId: input.workerScopeId,
-  });
-}
-
 const MAX_INJECTED_STORE_SESSION_SCAN = 100_000;
 
 /**
@@ -901,13 +890,6 @@ export function createKiteRuntimeObserverHistoryFromStorage(
   storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
 ): RuntimeHistoryClient {
   return createKiteRuntimeHistoryClient(() => createInjectedStoreLogQueryPort(storage));
-}
-
-/** Browser-safe Store 9 History over the same injected connection; no compatibility importer. */
-export function createKiteRuntimeWebObserverHistoryFromStorage(
-  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
-): WebObserverHistoryPort {
-  return createKiteRuntimeObserverHistoryPort(() => createInjectedStoreLogQueryPort(storage));
 }
 
 function createInjectedStoreLogQueryPort(

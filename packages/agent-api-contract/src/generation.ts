@@ -35,6 +35,8 @@ import {
   agentApiSessionSchema,
   agentApiStreamQuerySchema,
   agentApiWaitQuerySchema,
+  agentApiWorkspacePageSchema,
+  agentApiWorkspaceSchema,
 } from './schemas';
 
 type JsonPrimitive = null | boolean | number | string;
@@ -58,6 +60,8 @@ const schemaRegistry = Object.freeze([
   ['AgentApiServerInfo', 'server-info', agentApiServerInfoSchema],
   ['AgentApiExchangeRequest', 'exchange-request', agentApiExchangeRequestSchema],
   ['AgentApiContext', 'context', agentApiContextSchema],
+  ['AgentApiWorkspace', 'workspace', agentApiWorkspaceSchema],
+  ['AgentApiWorkspacePage', 'workspace-page', agentApiWorkspacePageSchema],
   ['AgentApiSession', 'session', agentApiSessionSchema],
   ['AgentApiSessionPage', 'session-page', agentApiSessionPageSchema],
   ['AgentApiRun', 'run', agentApiRunSchema],
@@ -204,6 +208,7 @@ function createOpenApiDocument(
     tags: [
       { name: 'Authentication' },
       { name: 'System' },
+      { name: 'Workspaces' },
       { name: 'Sessions' },
       { name: 'Runs' },
       { name: 'Interactions' },
@@ -227,6 +232,12 @@ function createOpenApiDocument(
           name: 'Authorization',
           description: 'Exact form: Kite-Connection <one-shot-token>. Exchange route only.',
         },
+        BrowserSession: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'kite_web_session',
+          description: 'HttpOnly loopback Browser session created by one-shot launch exchange.',
+        },
       },
       headers: commonHeaderComponents(),
       responses: problemResponseComponents(),
@@ -240,6 +251,9 @@ function createOpenApiDocument(
 
 function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): JsonObject {
   const bearer = [{ AgentApiContext: [] }];
+  const browser = [{ BrowserSession: [] }];
+  const authenticated = [...bearer, ...browser];
+  const workspacePath = pathParameter('workspace_id', 'Opaque Workspace identity');
   const sessionPath = pathParameter('session_id', 'Session identity');
   const runPath = pathParameter('run_id', 'Run identity scoped by Session');
   const interactionPath = pathParameter('interaction_id', 'Interaction identity');
@@ -268,16 +282,54 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         errors: [401, 403, 429, 503],
       }),
     },
+    '/v1/auth/browser/session': {
+      delete: operation({
+        id: 'revokeAgentApiBrowserSession',
+        tag: 'Authentication',
+        summary: 'Revoke the current Browser session',
+        security: browser,
+        success: { 204: emptyResponse('Browser session revoked') },
+        errors: [401, 403, 429, 503],
+      }),
+    },
     '/v1': {
       get: operation({
         id: 'getAgentApiServerInfo',
         tag: 'System',
         summary: 'Read API version and admitted capabilities',
-        security: bearer,
+        security: authenticated,
         success: {
           200: jsonResponse('AgentApiServerInfo', 'Server information', examples['server-info']),
         },
         errors: [401, 403, 406, 429, 503],
+      }),
+    },
+    '/v1/workspaces': {
+      get: operation({
+        id: 'listAgentApiWorkspaces',
+        tag: 'Workspaces',
+        summary: 'List path-free Workspaces visible to the current principal',
+        security: authenticated,
+        parameters: [limitParameter(), cursorParameter()],
+        success: { 200: jsonResponse('AgentApiWorkspacePage', 'Workspace page') },
+        errors: [400, 401, 403, 406, 429, 503],
+      }),
+    },
+    '/v1/workspaces/{workspace_id}/sessions': {
+      parameters: [workspacePath],
+      get: operation({
+        id: 'listAgentApiWorkspaceSessions',
+        tag: 'Sessions',
+        summary: 'List Sessions for one visible Workspace',
+        security: authenticated,
+        parameters: [
+          queryParameter('lifecycle', 'open, closed or unavailable'),
+          queryParameter('status', 'Closed Session status filter'),
+          limitParameter(),
+          cursorParameter(),
+        ],
+        success: { 200: jsonResponse('AgentApiSessionPage', 'Workspace Session page') },
+        errors: [400, 401, 403, 404, 406, 429, 503],
       }),
     },
     '/v1/sessions': {
@@ -317,7 +369,7 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         id: 'getAgentApiSession',
         tag: 'Sessions',
         summary: 'Get the closed Session projection without triggering recovery',
-        security: bearer,
+        security: authenticated,
         success: { 200: jsonResponse('AgentApiSession', 'Session', undefined, { etag: true }) },
         errors: [400, 401, 403, 404, 406, 429, 503],
       }),
@@ -494,8 +546,8 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         id: 'listAgentApiHistory',
         tag: 'History',
         summary: 'Read a bounded durable client-safe History page',
-        security: bearer,
-        parameters: [limitParameter(), cursorParameter()],
+        security: authenticated,
+        parameters: [afterSequenceParameter(), limitParameter(), cursorParameter()],
         success: { 200: jsonResponse('AgentApiHistoryPage', 'History page') },
         errors: [400, 401, 403, 404, 406, 409, 429, 503],
       }),
@@ -506,7 +558,7 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         id: 'listAgentApiCheckpoints',
         tag: 'Checkpoints',
         summary: 'List safe Checkpoint metadata',
-        security: bearer,
+        security: authenticated,
         parameters: [limitParameter(), cursorParameter()],
         success: { 200: jsonResponse('AgentApiCheckpointPage', 'Checkpoint page') },
         errors: [400, 401, 403, 404, 406, 409, 429, 503],
@@ -518,7 +570,7 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         id: 'previewAgentApiCheckpoint',
         tag: 'Checkpoints',
         summary: 'Read a bounded rewind preview',
-        security: bearer,
+        security: authenticated,
         success: {
           200: jsonResponse('AgentApiCheckpointPreview', 'Checkpoint preview', undefined, {
             etag: true,
@@ -721,6 +773,16 @@ function cursorParameter(): JsonObject {
     in: 'query',
     required: false,
     schema: { type: 'string', pattern: '^[A-Za-z0-9_-]+$', maxLength: 1024 },
+  };
+}
+
+function afterSequenceParameter(): JsonObject {
+  return {
+    name: 'after_sequence',
+    in: 'query',
+    required: false,
+    description: 'Return durable History strictly after this sequence',
+    schema: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
   };
 }
 

@@ -357,7 +357,9 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
     },
     transition(transition) {
       const journal = journalForSession(transition.sessionId);
-      return journal?.runs.transition(transition) ?? 'missing';
+      if (!journal) return 'missing';
+      const apply = () => journal.runs.transition(transition);
+      return writer.inTransaction ? apply() : writer.run(apply);
     },
     rewindSession(sessionId, revision) {
       const journal = journalForSession(sessionId);

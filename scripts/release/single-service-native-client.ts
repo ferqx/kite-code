@@ -42,10 +42,6 @@ import {
 } from '@kite-ai/kite-local-runtime/service';
 import type { RuntimeClientInfo } from '@kite-ai/runtime-client';
 import {
-  preflightWebGatewayStaticAssets,
-  WebGatewayStaticAssetsError,
-} from '../../apps/kite-service/src/web-gateway/static-assets';
-import {
   explicitKiteHomeArgument,
   installedBuildIdentity,
   resolveInstalledReleaseExecutable,
@@ -67,22 +63,18 @@ export interface SingleServiceNativeClientCompositionOptions {
   readonly runtimeParent?: string;
   readonly platform?: NodeJS.Platform;
   readonly expectedBuildId: string;
-  readonly staticAssetRoot: string;
   readonly request?: KiteSingleServiceClientOptions['request'];
 }
 
 export interface SingleServiceNativeClientComposition {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly client: KiteSingleServiceClient;
-  readonly web: {
-    readonly client: KiteSingleServiceClient;
-    readonly staticAssetRoot: string;
-  };
-  readonly discoverWeb: () => Promise<string | undefined>;
+  readonly discoverWeb: () => Promise<string>;
 }
 
 export interface ManagedSingleServiceNativeCompositionOptions
   extends SingleServiceNativeClientCompositionOptions {
+  readonly staticAssetRoot: string;
   readonly executable: KiteServiceManagerExecutable;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -117,7 +109,7 @@ export interface ManagedLocalSingleServiceCompositionOptions {
 }
 
 /**
- * Target-only release binding. Home/runtime/build/asset identities are supplied by the release
+ * Target-only release binding. Home/runtime/build identities are supplied by the release
  * owner; App code receives only typed client operations and never resolves a socket or token.
  */
 export function createSingleServiceNativeClientComposition(
@@ -129,10 +121,6 @@ export function createSingleServiceNativeClientComposition(
     platform,
     ...(platform === 'win32' ? {} : { runtimeParent: options.runtimeParent }),
   });
-  if (!isAbsolute(options.staticAssetRoot)) {
-    throw new TypeError('Single-Service Web asset root must be absolute.');
-  }
-  const staticAssetRoot = resolve(options.staticAssetRoot);
   const client = createKiteSingleServiceClient({
     endpoint,
     expectedBuildId: options.expectedBuildId,
@@ -141,10 +129,9 @@ export function createSingleServiceNativeClientComposition(
   return Object.freeze({
     endpoint,
     client,
-    web: Object.freeze({ client, staticAssetRoot }),
     discoverWeb: async () => {
-      const response = await client.ensureWeb(staticAssetRoot);
-      return response.outcome === 'ready' ? response.launchUrl : undefined;
+      const response = await client.describe();
+      return `${response.service.httpOrigin}/`;
     },
   });
 }
@@ -153,6 +140,13 @@ export function createSingleServiceNativeClientComposition(
 export function createManagedSingleServiceNativeComposition(
   options: ManagedSingleServiceNativeCompositionOptions,
 ): ManagedSingleServiceNativeComposition {
+  if (!isAbsolute(options.staticAssetRoot)) {
+    throw new TypeError('Single-Service Web asset root must be absolute.');
+  }
+  const staticAssetRoot = resolve(options.staticAssetRoot);
+  if (options.env.KITE_SERVICE_WEB_STATIC_ROOT !== staticAssetRoot) {
+    throw new Error('Single-Service child Web asset root does not match release composition.');
+  }
   const base = createSingleServiceNativeClientComposition(options);
   const manager = createKiteSingleServiceManager({
     endpoint: base.endpoint,
@@ -169,66 +163,6 @@ export function createManagedSingleServiceNativeComposition(
       ? {}
       : { startupTimeoutMs: options.startupTimeoutMs }),
     ...(options.stopTimeoutMs === undefined ? {} : { stopTimeoutMs: options.stopTimeoutMs }),
-  });
-  const managedWebClient: KiteSingleServiceClient = Object.freeze({
-    describe: base.client.describe,
-    async ensureWeb(staticAssetRoot: string) {
-      let exactRoot: string;
-      try {
-        exactRoot = preflightWebGatewayStaticAssets(staticAssetRoot);
-      } catch (error) {
-        if (!(error instanceof WebGatewayStaticAssetsError)) throw error;
-        return {
-          schema: 'kite.local-native.response.v1',
-          requestId: 'web-assets-preflight',
-          operation: 'web_ensure',
-          outcome: 'unavailable',
-          state: 'absent',
-          diagnostic: 'web_assets_missing',
-        } as const;
-      }
-      if (exactRoot !== base.web.staticAssetRoot) {
-        throw new Error('Single-Service Web asset root changed after release composition.');
-      }
-      const ensured = await manager.ensure();
-      if (ensured.outcome !== 'applied' || ensured.state !== 'ready') {
-        throw new Error(`Single-Service ensure failed: ${ensured.diagnostic ?? ensured.outcome}.`);
-      }
-      return base.client.ensureWeb(exactRoot);
-    },
-    async statusWeb() {
-      const status = await manager.status();
-      if (status.outcome === 'applied' && status.state === 'absent') {
-        return {
-          schema: 'kite.local-native.response.v1',
-          requestId: status.requestId,
-          operation: 'web_status',
-          outcome: 'ready',
-          state: 'absent',
-        } as const;
-      }
-      if (status.outcome !== 'applied' || status.state !== 'ready') {
-        throw new Error(`Single-Service status failed: ${status.diagnostic ?? status.outcome}.`);
-      }
-      return base.client.statusWeb();
-    },
-    async stopWeb() {
-      const status = await manager.status();
-      if (status.outcome === 'applied' && status.state === 'absent') {
-        return {
-          schema: 'kite.local-native.response.v1',
-          requestId: status.requestId,
-          operation: 'web_stop',
-          outcome: 'noop',
-          state: 'absent',
-        } as const;
-      }
-      if (status.outcome !== 'applied' || status.state !== 'ready') {
-        throw new Error(`Single-Service status failed: ${status.diagnostic ?? status.outcome}.`);
-      }
-      return base.client.stopWeb();
-    },
-    stopService: base.client.stopService,
   });
   let descriptor:
     | import('@kite-ai/kite-local-runtime/client').LocalRuntimeServiceDescriptor
@@ -363,13 +297,13 @@ export function createManagedSingleServiceNativeComposition(
   });
   return Object.freeze({
     ...base,
-    web: Object.freeze({
-      client: managedWebClient,
-      staticAssetRoot: base.web.staticAssetRoot,
-    }),
     discoverWeb: async () => {
-      const response = await managedWebClient.ensureWeb(base.web.staticAssetRoot);
-      return response.outcome === 'ready' ? response.launchUrl : undefined;
+      const ensured = await manager.ensure();
+      if (ensured.outcome !== 'applied' || ensured.state !== 'ready') {
+        throw new Error(`Single-Service ensure failed: ${ensured.diagnostic ?? ensured.outcome}.`);
+      }
+      const response = await base.client.describe();
+      return `${response.service.httpOrigin}/`;
     },
     manager,
     connector,
@@ -414,6 +348,7 @@ export function createManagedLocalSingleServiceComposition(
   if (process.platform === 'win32') env.USERPROFILE = systemHome;
   env.KITE_CODE_HOME = home.root;
   env.KITE_SERVICE_BUILD_ID = expectedBuildId;
+  env.KITE_SERVICE_WEB_STATIC_ROOT = staticAssetRoot;
   env.NODE_ENV = 'production';
   if (process.platform !== 'win32') env.KITE_SINGLE_SERVICE_RUNTIME_PARENT = runtimeParent;
   return createManagedSingleServiceNativeComposition({

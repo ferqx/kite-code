@@ -16,17 +16,16 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('import.meta.main');
   });
 
-  test('developer Web startup builds and preflights assets before single-Service ensure', () => {
+  test('developer Server and TUI build Web assets before the Service-owned preflight', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
       readonly scripts?: Readonly<Record<string, string>>;
     };
     const source = readFileSync('scripts/development/ensure-web.ts', 'utf8');
+    expect(manifest.scripts?.server).toBe('bun run scripts/development/ensure-web.ts');
     expect(manifest.scripts?.['web:dev']).toBe('bun run scripts/development/ensure-web.ts');
-    expect(source.indexOf("'build'")).toBeLessThan(
-      source.lastIndexOf('preflightWebGatewayStaticAssets'),
-    );
-    expect(source.lastIndexOf('preflightWebGatewayStaticAssets')).toBeLessThan(
-      source.indexOf("'agent', 'web'"),
-    );
+    expect(source.indexOf("'build'")).toBeLessThan(source.indexOf("'agent', 'web'"));
+    expect(source).not.toContain('preflightWebGatewayStaticAssets');
+    expect(manifest.scripts?.tui).toContain('apps/kite-web build');
+    expect(manifest.scripts?.tui).toContain('entrypoints/tui.ts');
   });
 });

@@ -1,4 +1,4 @@
-import { BookOpen, Circle, Menu, PlugZap, Radio, Unplug } from 'lucide-react';
+import { BookOpen, Circle, History, Menu, PlugZap, Radio, Unplug } from 'lucide-react';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { SessionSidebar } from '@/components/session/session-sidebar';
 import { MessageList } from '@/components/timeline/message-list';
@@ -11,26 +11,38 @@ import {
   type WebHistoryState,
   webPresentationReducer,
 } from '@/presentation/reducer';
-import type { WebObserverTransport } from '@/transport/client';
-import { createWebObserverTransport, WebObserverTransportError } from '@/transport/client';
+import type { WebCheckpointSummary } from '@/presentation/types';
+import type { WebRestTransport } from '@/transport/client';
+import { createWebRestTransport, WebRestTransportError } from '@/transport/client';
 
 export interface AppProps {
   /** Test/composition seam; production creates the closed browser transport. */
-  readonly transport?: WebObserverTransport;
+  readonly transport?: WebRestTransport;
 }
-
-const MAX_RESYNC_RECONNECT_ATTEMPTS = 3;
 
 export function App(props: AppProps = {}) {
   const [state, dispatch] = useReducer(webPresentationReducer, initialWebPresentationState);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const transport = useMemo(
-    () => props.transport ?? createWebObserverTransport(),
-    [props.transport],
-  );
+  const transport = useMemo(() => props.transport ?? createWebRestTransport(), [props.transport]);
   const lifecycle = useRef(0);
+  const observedSequence = useRef(0);
   const deferredDisconnect = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const session = selectedSession(state);
+
+  const expandWorkspace = async (workspaceId: string) => {
+    const workspace = state.workspaces.find((item) => item.workspaceId === workspaceId);
+    if (!workspace || workspace.sessionState === 'loading' || workspace.sessionState === 'loaded') {
+      return;
+    }
+    const generation = state.generation;
+    dispatch({ type: 'workspace_sessions_loading', workspaceId, generation });
+    try {
+      const sessions = await transport.listWorkspaceSessions(workspaceId);
+      dispatch({ type: 'workspace_sessions_loaded', workspaceId, sessions, generation });
+    } catch {
+      dispatch({ type: 'workspace_sessions_failed', workspaceId, generation });
+    }
+  };
 
   useEffect(() => {
     const lifecycleId = ++lifecycle.current;
@@ -74,24 +86,23 @@ export function App(props: AppProps = {}) {
   useEffect(() => {
     const sessionId = state.selectedSessionId;
     const generation = state.generation;
-    const selectedStatus = session?.status;
     if (!sessionId || generation === 0) {
       return;
     }
     let active = true;
-    let subscription: Awaited<ReturnType<typeof transport.subscribe>> | undefined;
+    observedSequence.current = 0;
     dispatch({ type: 'connection', connection: { status: 'loading' }, generation });
     dispatch({
       type: 'history_loading',
       generation,
       requestToken: state.historyReloadToken,
     });
-    const load = async () => {
-      let history: Awaited<ReturnType<typeof transport.loadHistory>>;
+    const loadHistory = async () => {
       try {
-        history = await transport.loadHistory(sessionId, undefined, 200);
+        const history = await transport.loadHistory(sessionId);
         if (!active) return;
-        dispatch({ type: 'history_loaded', history, reset: true, generation });
+        observedSequence.current = history.observedLastSequence;
+        dispatch({ type: 'history_loaded', history, generation });
       } catch (error) {
         if (!active) return;
         dispatch({
@@ -105,35 +116,56 @@ export function App(props: AppProps = {}) {
           connection: { status: 'unavailable', reason: failureReason(error) },
           generation,
         });
-        return;
       }
-      if (!active) return;
+    };
+    const loadCheckpoints = async () => {
       try {
-        if (selectedStatus !== 'running') return;
-        const nextSubscription = await transport.subscribe({
-          sessionId,
-          afterSequence: history.observedLastSequence,
-          onEvent: (event, eventGeneration) => {
-            if (active) dispatch({ type: 'live_event', event, generation: eventGeneration });
-          },
-          onState: (connection, eventGeneration) => {
-            if (active) {
-              dispatch({
-                type: 'connection',
-                connection:
-                  connection === 'unavailable'
-                    ? { status: 'unavailable', reason: 'gateway_unavailable' }
-                    : { status: connection },
-                generation: eventGeneration,
-              });
-            }
-          },
-        });
-        if (!active) {
-          await nextSubscription.unsubscribe();
-          return;
+        const snapshot = await transport.loadCheckpoints(sessionId);
+        if (active) {
+          dispatch({
+            type: 'checkpoints_loaded',
+            sessionId,
+            checkpoints: snapshot.checkpoints,
+            generation,
+          });
         }
-        subscription = nextSubscription;
+      } catch {
+        if (active) dispatch({ type: 'checkpoints_failed', sessionId, generation });
+      }
+    };
+    void loadHistory();
+    void loadCheckpoints();
+    return () => {
+      active = false;
+    };
+  }, [state.generation, state.historyReloadToken, state.selectedSessionId, transport]);
+
+  useEffect(() => {
+    const sessionId = state.selectedSessionId;
+    const generation = state.generation;
+    if (
+      !sessionId ||
+      generation === 0 ||
+      state.connection.status !== 'connected' ||
+      (state.historyState !== 'content' && state.historyState !== 'empty') ||
+      (session?.status !== 'running' && session?.status !== 'waiting')
+    ) {
+      return;
+    }
+    let active = true;
+    let polling = false;
+    const poll = async () => {
+      if (polling || document.visibilityState !== 'visible') return;
+      polling = true;
+      try {
+        const [history, refreshedSession] = await Promise.all([
+          transport.loadHistory(sessionId, observedSequence.current),
+          transport.getSession(sessionId),
+        ]);
+        if (!active) return;
+        observedSequence.current = history.observedLastSequence;
+        dispatch({ type: 'history_increment_loaded', history, generation });
+        dispatch({ type: 'session_refreshed', session: refreshedSession, generation });
       } catch (error) {
         if (active) {
           dispatch({
@@ -142,55 +174,23 @@ export function App(props: AppProps = {}) {
             generation,
           });
         }
+      } finally {
+        polling = false;
       }
     };
-    void load();
+    const timer = setInterval(() => void poll(), 2_000);
     return () => {
       active = false;
-      void subscription?.unsubscribe().catch(() => undefined);
+      clearInterval(timer);
     };
   }, [
     session?.status,
+    state.connection.status,
     state.generation,
-    state.historyReloadToken,
+    state.historyState,
     state.selectedSessionId,
     transport,
   ]);
-
-  useEffect(() => {
-    const terminalStream =
-      state.connection.status === 'resync_required' ||
-      (state.connection.status === 'unavailable' && state.historyResetRequired);
-    if (!terminalStream || state.generation === 0) {
-      return;
-    }
-    let active = true;
-    const reconnect = async () => {
-      for (let attempt = 0; attempt < MAX_RESYNC_RECONNECT_ATTEMPTS; attempt += 1) {
-        try {
-          const connection = await transport.connect();
-          if (!active) return;
-          dispatch({ type: 'transport_connected', generation: connection.generation });
-          const directory = await transport.listDirectory();
-          if (active) {
-            dispatch({ type: 'directory_loaded', directory, generation: connection.generation });
-          }
-          return;
-        } catch {
-          if (!active) return;
-        }
-      }
-      dispatch({
-        type: 'resync_stopped',
-        generation: state.generation,
-        reason: 'resync_retry_limit',
-      });
-    };
-    void reconnect();
-    return () => {
-      active = false;
-    };
-  }, [state.connection.status, state.generation, state.historyResetRequired, transport]);
 
   const disconnect = async () => {
     try {
@@ -210,6 +210,7 @@ export function App(props: AppProps = {}) {
           workspaces={state.workspaces}
           selectedSessionId={state.selectedSessionId}
           onSelect={(sessionId) => dispatch({ type: 'select_session', sessionId })}
+          onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
         />
       </div>
       {mobileSidebarOpen ? (
@@ -221,6 +222,7 @@ export function App(props: AppProps = {}) {
               dispatch({ type: 'select_session', sessionId });
               setMobileSidebarOpen(false);
             }}
+            onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
           />
           <button
             type="button"
@@ -288,18 +290,11 @@ export function App(props: AppProps = {}) {
             className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
           >
             <Radio className="size-4 shrink-0 text-muted-foreground" />
-            <span>Live updates are unavailable. Showing the latest History snapshot.</span>
+            <span>Automatic refresh is unavailable. Showing the latest REST snapshot.</span>
           </div>
         ) : null}
-        {state.connection.status === 'resync_required' &&
-        (state.historyState === 'content' || state.historyState === 'empty') ? (
-          <div
-            role="status"
-            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground"
-          >
-            <Radio className="size-4 shrink-0 animate-pulse text-running" />
-            <span>Refreshing this session before live updates resume.</span>
-          </div>
+        {state.selectedSessionId ? (
+          <CheckpointStrip checkpoints={state.checkpoints} status={state.checkpointState} />
         ) : null}
         {state.selectedSessionId === null ? (
           <DirectoryState
@@ -320,6 +315,34 @@ export function App(props: AppProps = {}) {
         )}
       </section>
     </main>
+  );
+}
+
+function CheckpointStrip({
+  checkpoints,
+  status,
+}: {
+  readonly checkpoints: readonly WebCheckpointSummary[];
+  readonly status: 'idle' | 'loading' | 'loaded' | 'unavailable';
+}) {
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-6 text-[11px] text-muted-foreground">
+      <History className="size-3.5" />
+      <span>
+        {status === 'loading'
+          ? 'Loading checkpoints…'
+          : status === 'unavailable'
+            ? 'Checkpoints unavailable'
+            : `${checkpoints.length} checkpoint${checkpoints.length === 1 ? '' : 's'}`}
+      </span>
+      {status === 'loaded'
+        ? checkpoints.slice(-3).map((checkpoint) => (
+            <Badge key={checkpoint.checkpointId} className="font-mono text-[9px]">
+              {checkpoint.label ?? `r${checkpoint.revision}`}
+            </Badge>
+          ))
+        : null}
+    </div>
   );
 }
 
@@ -349,7 +372,7 @@ function DirectoryState({
           {loading
             ? 'Loading the read-only Workspace directory…'
             : unavailable
-              ? 'Start the local Kite Web Gateway, then reopen its one-shot launch URL.'
+              ? 'Start the local Kite Service, then reopen its Web URL.'
               : sessionCount === 0
                 ? 'Existing Workspace sessions will appear here when the server publishes them.'
                 : 'Choose an existing Session from the Workspace list to view its History.'}
@@ -360,16 +383,14 @@ function DirectoryState({
 }
 
 function failureReason(error: unknown): string {
-  return error instanceof WebObserverTransportError ? error.reason : 'gateway_unavailable';
+  return error instanceof WebRestTransportError ? error.reason : 'service_unavailable';
 }
 
 function historyFailureStatus(error: unknown): Extract<WebHistoryState, 'unavailable' | 'error'> {
-  if (!(error instanceof WebObserverTransportError)) return 'error';
-  return error.reason === 'protocol_error' || error.reason === 'resync_required'
-    ? 'error'
-    : 'unavailable';
+  if (!(error instanceof WebRestTransportError)) return 'error';
+  return error.reason === 'protocol_error' ? 'error' : 'unavailable';
 }
 
 function historyFailureReason(error: unknown): string {
-  return error instanceof WebObserverTransportError ? error.reason : 'history_error';
+  return error instanceof WebRestTransportError ? error.reason : 'history_error';
 }

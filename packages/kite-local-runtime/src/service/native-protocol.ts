@@ -9,12 +9,7 @@ export const KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_ =
   'kite.local-service-lifecycle-reservation.v1' as const;
 
 const identifier = z.string().min(1).max(512).refine(noControlCharacters);
-const absolutePath = identifier.refine(
-  (value) => value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value),
-  'expected an absolute path',
-);
 const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
-const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const origin = z
   .string()
   .url()
@@ -70,14 +65,6 @@ const baseRequest = z
 
 export const kiteLocalNativeRequestSchema = z.discriminatedUnion('operation', [
   baseRequest.extend({ operation: z.literal('describe') }).strict(),
-  baseRequest
-    .extend({
-      operation: z.literal('web_ensure'),
-      staticAssetRoot: absolutePath,
-    })
-    .strict(),
-  baseRequest.extend({ operation: z.literal('web_status') }).strict(),
-  baseRequest.extend({ operation: z.literal('web_stop') }).strict(),
   baseRequest.extend({ operation: z.literal('service_stop') }).strict(),
 ]);
 
@@ -110,67 +97,6 @@ export const kiteLocalNativeResponseSchema = z.union([
       accessToken: token,
     })
     .strict(),
-  baseResponse
-    .extend({
-      operation: z.literal('web_ensure'),
-      outcome: z.literal('ready'),
-      origin,
-      launchUrl: z
-        .string()
-        .url()
-        .refine((value) => /#[A-Za-z0-9_-]{43}$/u.test(value)),
-      assetDigest: digest,
-    })
-    .strict(),
-  baseResponse
-    .extend({
-      operation: z.literal('web_status'),
-      outcome: z.literal('ready'),
-      state: z.literal('absent'),
-    })
-    .strict(),
-  baseResponse
-    .extend({
-      operation: z.literal('web_status'),
-      outcome: z.literal('ready'),
-      state: z.literal('ready'),
-      origin,
-      assetDigest: digest,
-    })
-    .strict(),
-  baseResponse
-    .extend({
-      operation: z.literal('web_ensure'),
-      outcome: z.literal('unavailable'),
-      state: z.enum(['absent', 'ready']),
-      diagnostic: z.enum(['web_assets_missing', 'web_readiness_failed', 'web_stop_failed']),
-    })
-    .strict(),
-  baseResponse
-    .extend({
-      operation: z.literal('web_stop'),
-      outcome: z.enum(['applied', 'noop', 'unavailable']),
-      state: z.enum(['absent', 'ready']),
-      diagnostic: z.literal('web_stop_failed').optional(),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      if ((value.outcome === 'unavailable') !== (value.diagnostic !== undefined)) {
-        context.addIssue({
-          code: 'custom',
-          message: 'web stop diagnostic mismatch',
-        });
-      }
-      if (
-        (value.outcome === 'unavailable' && value.state !== 'ready') ||
-        (value.outcome !== 'unavailable' && value.state !== 'absent')
-      ) {
-        context.addIssue({
-          code: 'custom',
-          message: 'web stop state mismatch',
-        });
-      }
-    }),
   baseResponse
     .extend({
       operation: z.literal('service_stop'),

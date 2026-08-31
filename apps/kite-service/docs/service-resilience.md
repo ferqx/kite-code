@@ -39,9 +39,9 @@ rollback。Session删除同事务清理namespaced Controller/effect/resource/rec
 
 ## Web
 
-`kite web`在任何lifecycle访问前验证fixed asset root、`index.html`、OpenAPI和hashed JS/CSS。缺失返回`web_assets_missing`，不得创建DB、
-endpoint或Browser session。asset有效后才ensure同一Service并attach Browser-only route；`web stop`只撤销route/session，不停止Service、
-Runtime或Agent API。Vite dev server只服务前端资源，Browser打开URL也不拥有启动本机Service的权限。
+source入口先构建fixed Web assets；Service在发布ready前验证`index.html`、OpenAPI和hashed JS/CSS并挂载Browser route。缺失时整个
+Service启动失败，不发布部分ready状态。`kite web`只ensure Service并返回稳定根地址；Browser logout只撤销session，route随Service stop
+关闭。Vite dev server只服务前端资源，Browser打开URL也不拥有启动本机Service的权限。
 
 ## Release
 

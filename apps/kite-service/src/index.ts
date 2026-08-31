@@ -1,3 +1,4 @@
+export * from './agent-api';
 export * from './carrier';
 export * from './composition';
 export * from './native-endpoint';

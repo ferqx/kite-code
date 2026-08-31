@@ -40,7 +40,7 @@ export interface AgentApiCapabilityBinding {
 }
 
 export interface AgentApiRouteHandler extends AsyncDisposable {
-  handle(request: Request): Response | Promise<Response>;
+  handle(request: Request, browserAuth?: AgentApiBrowserSessionPort): Response | Promise<Response>;
   revokeClientGeneration(clientId: string, connectionGeneration: number): void;
   close(): Promise<void>;
 }
@@ -59,6 +59,20 @@ export interface AgentApiRouteHandlerOptions {
   readonly maxContexts?: number;
   /** KASAPI-02B+ replaces this empty set only when each advertised route is implemented. */
   readonly capabilities?: readonly AgentApiCapability[];
+  /** Service-scoped read context used only after exact Browser cookie admission. */
+  readonly browserReadContext?: AgentApiReadContext;
+  readonly browserCapabilities?: readonly AgentApiCapability[];
+}
+
+export interface AgentApiBrowserSessionPort {
+  readonly cookieName: string;
+  inspectCookie(cookieHeader: string | null):
+    | { readonly status: 'absent' | 'invalid' }
+    | {
+        readonly status: 'valid';
+        readonly record: { readonly cookieHash: string; readonly expiresAt: number };
+      };
+  revokeSession(cookieHash: string): void;
 }
 
 interface ContextRecord {
@@ -96,6 +110,13 @@ export function createAgentApiRouteHandler(
     server_version: options.serverVersion,
     build_id: options.buildId,
     capabilities: [...(options.capabilities ?? [])].sort(),
+  });
+  const browserServerInfo = encodeAgentApiResponse(agentApiServerInfoSchema, {
+    schema: 'kite.agent-api.server-info.v1',
+    api_version: AGENT_API_VERSION,
+    server_version: options.serverVersion,
+    build_id: options.buildId,
+    capabilities: [...(options.browserCapabilities ?? [])].sort(),
   });
   const contexts = new Map<string, ContextRecord>();
   const pendingDigests = new Set<string>();
@@ -143,7 +164,7 @@ export function createAgentApiRouteHandler(
   };
 
   const handler: AgentApiRouteHandler = {
-    async handle(request: Request) {
+    async handle(request: Request, browserAuth?: AgentApiBrowserSessionPort) {
       const requestId = `req_${randomToken(randomBytes, 16, 'request identity')}`;
       try {
         if (closed) {
@@ -151,12 +172,12 @@ export function createAgentApiRouteHandler(
             retryAfter: 1,
           });
         }
-        if (hasBrowserCredentialSignals(request)) {
-          return problemResponse(403, 'forbidden', requestId, false);
-        }
         const url = new URL(request.url);
         if (!requestWithinLimits(request, url)) {
           return problemResponse(400, 'invalid_request', requestId, false);
+        }
+        if (hasBrowserCredentialSignals(request)) {
+          return await handleBrowserRequest(request, url, requestId, browserAuth);
         }
         if (url.pathname === '/v1/auth/exchange') {
           return await exchange(request, requestId);
@@ -426,6 +447,66 @@ export function createAgentApiRouteHandler(
       pendingReadContexts.delete(pendingRead);
     }
   }
+
+  async function handleBrowserRequest(
+    request: Request,
+    url: URL,
+    requestId: string,
+    browserAuth: AgentApiBrowserSessionPort | undefined,
+  ): Promise<Response> {
+    if (!browserAuth || !options.browserReadContext || !browserRequestAllowed(request, url)) {
+      return problemResponse(403, 'forbidden', requestId, false);
+    }
+    const inspected = browserAuth.inspectCookie(request.headers.get('cookie'));
+    if (inspected.status !== 'valid') {
+      return problemResponse(401, 'unauthorized', requestId, false);
+    }
+    if (url.pathname === '/v1/auth/browser/session') {
+      if (url.search.length !== 0) {
+        return problemResponse(400, 'invalid_request', requestId, false);
+      }
+      if (request.method !== 'DELETE') {
+        return problemResponse(405, 'method_not_allowed', requestId, false, { allow: 'DELETE' });
+      }
+      browserAuth.revokeSession(inspected.record.cookieHash);
+      return emptyResponse(204, requestId, {
+        'set-cookie': `${browserAuth.cookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict`,
+      });
+    }
+    if (request.method !== 'GET') {
+      return problemResponse(404, 'not_found', requestId, false);
+    }
+    if (request.headers.get('accept') !== null && !acceptsJson(request.headers.get('accept'))) {
+      return problemResponse(406, 'not_acceptable', requestId, false);
+    }
+    if (url.pathname === '/v1') {
+      return jsonResponse(200, browserServerInfo, requestId);
+    }
+    if (url.pathname === '/v1/sessions') {
+      return problemResponse(404, 'not_found', requestId, false);
+    }
+    if (!isAgentApiReadRequest(request, url)) {
+      return problemResponse(404, 'not_found', requestId, false);
+    }
+    const read = await dispatchAgentApiReadRequest({
+      request,
+      url,
+      context: options.browserReadContext,
+    });
+    if (!read.matched) return problemResponse(404, 'not_found', requestId, false);
+    if (!read.result.ok) {
+      return problemResponse(
+        read.result.status,
+        read.result.code,
+        requestId,
+        read.result.retryable,
+        read.result.status === 503 ? { retryAfter: 1 } : {},
+      );
+    }
+    return jsonResponse(200, read.result.body, requestId, {
+      ...(read.result.etag ? { etag: read.result.etag } : {}),
+    });
+  }
 }
 
 function mintUniqueContextToken(
@@ -526,8 +607,12 @@ async function recheckWorkspaceAdmission(
   }
 }
 
-function emptyResponse(status: number, requestId: string): Response {
-  return new Response(null, { status, headers: responseHeaders(requestId) });
+function emptyResponse(
+  status: number,
+  requestId: string,
+  extra: Readonly<Record<string, string>> = {},
+): Response {
+  return new Response(null, { status, headers: responseHeaders(requestId, undefined, extra) });
 }
 
 function responseHeaders(
@@ -607,6 +692,19 @@ function hasBrowserCredentialSignals(request: Request): boolean {
     if (name.toLowerCase().startsWith('sec-fetch-')) return true;
   }
   return false;
+}
+
+function browserRequestAllowed(request: Request, url: URL): boolean {
+  if (request.headers.get('authorization') !== null) return false;
+  const origin = request.headers.get('origin');
+  if (request.method === 'GET') {
+    if (origin !== null && origin !== url.origin) return false;
+  } else if (origin !== url.origin) {
+    return false;
+  }
+  if (request.headers.get('sec-fetch-site') !== 'same-origin') return false;
+  const mode = request.headers.get('sec-fetch-mode');
+  return mode === 'cors' || mode === 'same-origin';
 }
 
 function requestWithinLimits(request: Request, url: URL): boolean {

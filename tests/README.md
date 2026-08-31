@@ -13,10 +13,9 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 - `apps/kite-cli/test/`：CLI/TUI presentation、client preference、managed Native adapter与fake/client conformance；不得
   创建default Host/Store composition。
 - `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
-  sandbox/session logging、Service shell与carriers；Coordinator/Worker/Web Gateway/Web Observer production composition、
-  idle Worker的active Store 8 query-only History（含source字节/sidecar不变与wrong-scope负测）、
-  process、Store 8、observer-only 与 carrier tests也归该 owner；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
-- `apps/kite-web/test/`：Browser observer presentation/reducer、browser-safe DTO consumer与静态Agent API reference；后者固定验证
+  sandbox/session logging、Service shell、Agent API与carriers；退役Browser BFF/WebObserver不保留production composition或owner test。旧
+  Coordinator/Worker/Store 8只作为明确历史/离线机制测试；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
+- `apps/kite-web/test/`：Browser REST presentation/reducer、browser-safe Agent API client consumer与静态Agent API reference；后者固定验证
   `/api-docs` routing、无form/execute control、same-origin no-credential artifact读取及availability未确认状态。该workspace不得引入
   Native、Host、Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
 - `packages/kite-local-runtime/test/manager/`：manager lifecycle、Native process/state/lock/environment与authenticated
@@ -63,19 +62,18 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
-默认workspace/build runner当前覆盖十五个workspace。`packages/agent-api-contract/test/`验证Public snake_case DTO、closed request、
+默认workspace typecheck runner覆盖当前Runtime workspace集合。`packages/agent-api-contract/test/`验证Public snake_case DTO、closed request、
 forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants，以及OpenAPI/JSON Schema/wire/example/digest
-byte-exact generation；独立
-`check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`apps/kite-web/test/`验证Browser observer presentation reducer；
-`apps/kite-service/test/agent-api/`验证one-shot capability exchange、Workspace Trust重验、hash-only context、role/TTL/generation/revoke与
-bounded Session/History/Checkpoint adapter，包括page-local Runtime join、cursor checksum/filter、History through/boundary invalidation、
-Checkpoint path non-disclosure与pending logical connection drain；Worker application/foreground和isolated carrier tests证明每个context复用private
-in-process Runtime Client/Server、HTTP仍复用同一listener且private routes不接受Public context。SQLite owner tests另验证same-connection
-Session/History/Checkpoint page、advancing keyset与corrupt snapshot fail closed。Web Gateway isolated carrier test另固定验证
-`/api-docs` HTML deep link、精确OpenAPI JSON allowlist、CSP/no-store/content-type与未知deep link 404；release tests拒绝缺少该contract asset的候选包。
+byte-exact generation；独立`check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`packages/agent-api-client/test/`
+验证cookie REST、contract header/Problem、path/cursor与`after_sequence`编码。`apps/kite-web/test/`验证Workspace懒加载、Session/History/
+Checkpoint presentation、generation隔离与可见性敏感增量轮询；`apps/kite-service/test/agent-api/`验证Agent capability与Browser launch exchange、
+Workspace Trust/Directory scope、hash-only context/session、role/TTL/generation/revoke及bounded Workspace/Session/History/Checkpoint adapter，
+包括cursor checksum/filter、History through/boundary/after-sequence、Checkpoint path non-disclosure与drain。isolated carrier tests证明HTTP复用
+同一listener且credential route不混用；static carrier test固定验证退役`/_kite/web/*`业务route 404以及`/api-docs`精确allowlist。
 KASAPI-02D的`apps/kite-service/test/agent-api/reference-client.ts`是test-only Public codec client；conformance suite用它同时驱动handler与真实
 Worker HTTP listener，验证两种role、capability incompatibility/replay、concurrent keyset page、fixed-through History、1 MiB body/response、
-16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；Gateway restart继续由独立process/carrier tests拥有。
+16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；当前Web只有Service-owned static/auth carrier测试，
+不再保留独立Gateway process restart矩阵。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
 filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
@@ -86,6 +84,11 @@ KLSV1-06 clean cutover后，`apps/kite-service/test/`拥有真实Runtime Applica
 carrier composition tests；`apps/kite-cli/test/`只验证default managed client/presentation、两阶段Workspace Trust、
 disconnect/exit不shutdown owner及无embedded fallback。`apps/kite-service/test/isolated/process-harness/`仍是KLSV1-05
 fake-application detached-child fixture，不能代替当前default Store持久恢复或release evidence。
+
+`tests/release/single-service-real-child.test.ts`使用同一custom home与真实source child固定TUI-first、Web-launch-first和并发ensure只得到一个
+ready Service；Service ready时根页面、Browser auth与`/v1`已经同源可用。它还在Controller创建后发送真实受控Runtime command、启动Run，并用Browser
+fragment/cookie读取同一Session与History boundary，复核Kite Home只有一个`kite.sqlite`及允许的runtime endpoint文件。TUI persisted
+observer只读这个Store 9路径，不再探测Store 7/8 layout或`checkpoints.sqlite`fallback。
 
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 
@@ -109,8 +112,8 @@ mechanism evidence，不替代02B migration、03A production composition或relea
 KRSRUN-02B的Store7→Store8 migration是未发布历史机制；ADR-0154 clean cutover后不再由`tests/release`或正式CLI验证/组合。current release
 只验证single-Service、Store 9与retired companion absence。
 
-KRSRUN-03A由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
-`process-foreground.test.ts`、`web-gateway/offline-history.test.ts`及Store Catalog layout tests固定Store8-only Worker readiness/reopen、
+KRSRUN-03A的历史证据由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
+`process-foreground.test.ts`及Store Catalog layout tests固定Store8-only Worker readiness/reopen、
 Controller/read/Run façade、first-write fence、fresh layout/new Workspace、private Run query与Store7 no-fallback。Public `runs`与三平台hosted
 candidate仍由后续Gate拥有。
 

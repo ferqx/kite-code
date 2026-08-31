@@ -97,8 +97,8 @@ export interface TuiBootstrapProps {
     forWorkspace(workspace: KiteWorkspaceIdentity): KiteAppControlClient;
   };
   credentialClient?: NativeProviderCredentialClient;
-  /** Discovery only: `/web` never starts a Gateway. */
-  discoverWebGateway?: () => Promise<string | undefined>;
+  /** Ensures the one Service and returns its stable Web root. */
+  discoverWeb?: () => Promise<string>;
 }
 
 interface TuiAppProps {
@@ -109,7 +109,7 @@ interface TuiAppProps {
   appControl: KiteAppControlClient;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
-  discoverWebGateway?: () => Promise<string | undefined>;
+  discoverWeb?: () => Promise<string>;
 }
 
 interface TuiInitialConfig {
@@ -141,7 +141,7 @@ export function TuiBootstrap({
   createSessionManager,
   appControlGateway,
   credentialClient,
-  discoverWebGateway,
+  discoverWeb,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
   _serviceModeForExit = serviceMode ?? null;
@@ -324,7 +324,7 @@ export function TuiBootstrap({
       appControl={effectiveAppControlGateway.forWorkspace(workspaceIdentity)}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
-      discoverWebGateway={discoverWebGateway}
+      discoverWeb={discoverWeb}
     />,
   );
 }
@@ -337,7 +337,7 @@ function TuiApp({
   appControl,
   languagePreference,
   onLanguageSelect,
-  discoverWebGateway,
+  discoverWeb,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
@@ -1246,7 +1246,7 @@ function TuiApp({
           });
         });
     },
-    discoverWebGateway,
+    discoverWeb,
   );
 
   // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal

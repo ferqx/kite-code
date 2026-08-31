@@ -59,7 +59,7 @@ export type AgentApiCloseSessionRequest = {
 export type AgentApiContext = {
   readonly "access_token": string;
   readonly "api_version": "v1";
-  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions")[];
+  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "expires_at": string;
   readonly "role": "observer" | "controller";
   readonly "schema": "kite.agent-api.context.v1";
@@ -186,6 +186,7 @@ export type AgentApiEvent = {
       readonly "active_run_id"?: string;
       readonly "created_at"?: string;
       readonly "display_name"?: string;
+      readonly "last_sequence"?: number;
       readonly "lifecycle": "open" | "closed" | "unavailable";
       readonly "model"?: {
         readonly "name": string;
@@ -208,7 +209,7 @@ export type AgentApiEvent = {
 
 export type AgentApiExchangeRequest = {
   readonly "api_version": "v1";
-  readonly "required_capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions")[];
+  readonly "required_capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "schema": "kite.agent-api.exchange.v1";
 };
 
@@ -536,6 +537,7 @@ export type AgentApiMutationResult = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -564,6 +566,7 @@ export type AgentApiMutationResult = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -592,6 +595,7 @@ export type AgentApiMutationResult = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -620,6 +624,7 @@ export type AgentApiMutationResult = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -777,6 +782,7 @@ export type AgentApiMutationResult = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -804,7 +810,7 @@ export type AgentApiProblem = {
   readonly "detail"?: string;
   readonly "field"?: string;
   readonly "limit_bytes"?: number;
-  readonly "missing_capabilities"?: readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions")[];
+  readonly "missing_capabilities"?: readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "recovery_entry"?: "none" | "retry" | "reconcile" | "new_run" | "operator_action";
   readonly "request_id": string;
   readonly "required_header"?: "If-Match";
@@ -901,6 +907,7 @@ export type AgentApiResync = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -969,7 +976,7 @@ export type AgentApiRunPage = {
 export type AgentApiServerInfo = {
   readonly "api_version": "v1";
   readonly "build_id": string;
-  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions")[];
+  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "schema": "kite.agent-api.server-info.v1";
   readonly "server_version": string;
 };
@@ -983,6 +990,7 @@ export type AgentApiSession = {
   readonly "active_run_id"?: string;
   readonly "created_at"?: string;
   readonly "display_name"?: string;
+  readonly "last_sequence"?: number;
   readonly "lifecycle": "open" | "closed" | "unavailable";
   readonly "model"?: {
     readonly "name": string;
@@ -1013,6 +1021,7 @@ export type AgentApiSessionPage = {
     readonly "active_run_id"?: string;
     readonly "created_at"?: string;
     readonly "display_name"?: string;
+    readonly "last_sequence"?: number;
     readonly "lifecycle": "open" | "closed" | "unavailable";
     readonly "model"?: {
       readonly "name": string;
@@ -1027,6 +1036,7 @@ export type AgentApiSessionPage = {
   })[];
   readonly "next_cursor"?: string;
   readonly "schema": "kite.agent-api.session-page.v1";
+  readonly "workspace_id"?: string;
 };
 
 export type AgentApiStreamQuery = {
@@ -1035,4 +1045,22 @@ export type AgentApiStreamQuery = {
 
 export type AgentApiWaitQuery = {
   readonly "timeout_ms": number;
+};
+
+export type AgentApiWorkspace = {
+  readonly "display_name": string;
+  readonly "schema": "kite.agent-api.workspace.v1";
+  readonly "session_count": number;
+  readonly "workspace_id": string;
+};
+
+export type AgentApiWorkspacePage = {
+  readonly "items": readonly ({
+    readonly "display_name": string;
+    readonly "schema": "kite.agent-api.workspace.v1";
+    readonly "session_count": number;
+    readonly "workspace_id": string;
+  })[];
+  readonly "next_cursor"?: string;
+  readonly "schema": "kite.agent-api.workspace-page.v1";
 };

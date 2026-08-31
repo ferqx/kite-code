@@ -16,10 +16,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
-默认 Service composition 当前仍是 State 27 / Store 6。`workspace-worker/production.ts` 是另一条显式 production path：它只接收
-Coordinator/layout owner 已 materialize/admit 的 Store 8 owner、Workspace binding 与 generation，随后在同一 Worker 内组合唯一
-Host/Application/Controller/effect/Run authority；Worker 不创建 manifest、不打开第二 Store，也不把 Store 8 隐式回退为 Store 7/6。Coordinator
-和 Web Gateway 是独立 companion process owner，不能通过本页的 Service composition 推导为同一进程。
+当前source/release只组合Store 9 single-Service路径。Coordinator、per-Workspace Worker与独立Web Gateway都不是普通启动拓扑；Web static
+surface在Service发布ready前挂到同一个loopback listener，并与Runtime/API一起随Service关闭。
 
 ## Workspace、Trust 与 routing
 
@@ -90,14 +88,15 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 execution authority；Service不得让TUI从事件相邻关系反推该归属。
 
 Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
-Worker binding reference）。Worker application 的 effect composition 只接受该已固定 context，并由 Store 8 authority、Controller
+opaque Controller binding reference）。single-Service从每条command的已认证client/connection generation读取Store 9当前Session Controller，
+不把Controller Session固定到可能早于Controller创建的socket ticket。Worker application 的 effect composition 只接受已固定context，并由Store authority、Controller
 generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
-Protocol wire frame，也不向 Web Observer 暴露。
+Protocol wire frame，也不向Browser REST projection暴露。
 
 ## Clean-cutover non-goals
 
-没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private
-Web Observer/Gateway 是独立的只读 companion，不把 Browser 变成 Controller；remote/LAN Web、Desktop/public SDK 仍不属于 V1。
+没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private Web是同一
+Service `/v1`的只读客户端，不拥有独立BFF、Runtime或Store，也不把Browser变成Controller；remote/LAN Web、Desktop/public SDK仍不属于V1。
 Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
 Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
 schema fallback。

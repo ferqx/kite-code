@@ -12,6 +12,7 @@ import {
 const root = resolve(import.meta.dir, '..');
 const workspaces = [
   'packages/agent-api-contract',
+  'packages/agent-api-client',
   'packages/runtime-contract',
   'packages/runtime-protocol',
   'packages/runtime-server',

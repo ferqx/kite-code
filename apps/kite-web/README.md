@@ -1,52 +1,51 @@
-# Kite Web Observer
+# Kite Web
 
-`@kite-ai/kite-web` 是本地、private、只读的 Browser presentation workspace。它使用 React 19、strict
-TypeScript、Vite、按需纳入的 shadcn/ui + Radix primitives、Tailwind CSS v4 与 Lucide。
+`@kite-ai/kite-web`是本地、private、只读的Browser presentation workspace。它使用React、strict
+TypeScript与Vite，只显示path-free Workspace、既有Session、History和Checkpoint；不提供prompt、Session create、
+Interaction/approval reply、cancel、rewind、fork、配置或Controller操作。
 
-Observer页面只有按 path-free Workspace 分组的既有 Session 列表、选中 Session 的消息列表、running Session
-实时展示状态与主动断连。固定`/api-docs`入口另提供release-bundled、只读的Agent API OpenAPI参考；它不渲染Observer
-App，也不执行Worker discovery、保存credential或发送Agent API data-plane request。两个页面都不存在 prompt、Session create、
-approval/interaction reply、cancel、interrupt、rewind、fork、mode/config mutation 或 Controller use case。
+## 唯一业务通道
 
-History、live、reconnect 与 resync 都进入 `src/presentation/reducer.ts` 的同一纯 reducer。组件只消费
-`@kite-ai/kite-app-contract` 的 browser-safe DTO，不导入 CLI/TUI、Native local-runtime、Runtime Host、Store、
-SQLite 或 raw Runtime event。
+`src/transport/client.ts`是唯一生产Browser adapter。访问Service `/`时，index响应已经建立HttpOnly/SameSite Browser session，
+client直接验证`GET /v1`；Browser JavaScript不捕获或兑换启动token。此后业务数据只来自同一Service listener的typed REST：
 
-`src/transport/client.ts` 是唯一生产 Browser adapter：它同步捕获 launch URL fragment 并用
-`history.replaceState` 清除 fragment，随后通过 `POST /_kite/web/bootstrap`、`POST /_kite/web/tabs` 和
-`x-kite-web-tab` 访问 closed Gateway routes。bootstrap/tab成功后Directory与History立即走HTTP snapshot，不等待或依赖live
-WebSocket；因此live unavailable不能清空server已返回的Workspace/Session列表。只有选中running Session时才懒建立
-`/_kite/web/client` 的 closed WebSocket
-`initialize`、`subscribe`、`unsubscribe`、`disconnect` 帧接入。WebSocket terminal unavailable/resync 会停止旧
-generation 的事件归约，重新建立 tab、读取 bounded History，再恢复 live；不会把 transport error 静默替换为样例数据。
-点击左侧既有 Session 会按该 `sessionId` 重新读取 bounded History，并在消息区明确显示 loading、empty、content、unavailable
-或 error 状态；History 请求失败可在页面内重试。实时流失败时会保留已显示的 History，并单独提示 live updates 不可用。
-切换 Session 时，旧请求的迟到响应不会覆盖当前选择；terminal resync 的自动重连固定最多三次，随后停在可重试的
-unavailable 状态，而不是无限循环。
+- `GET /v1`验证当前Browser principal的`workspaces/sessions/history/checkpoints`capability；
+- `GET /v1/workspaces`读取独立、path-free Workspace page；只预取首个Workspace的Session，其余在展开时读取；
+- `GET /v1/workspaces/{workspace_id}/sessions`读取该Workspace的bounded Session page；
+- 选择Session后读取`History`与Checkpoint metadata；
+- 只有选中Session为`running/waiting`且页面可见时，按2秒单飞读取`after_sequence`增量History并重新读取Session projection；
+- logout调用`DELETE /v1/auth/browser/session`，只撤销Browser session。
 
-开发与 production 使用同一 Gateway transport；transport 失败只显示 unavailable，不会打包或回退到样例，
-也不会直接读取本地文件。
+Web不调用`/_kite/web/bootstrap|tabs|directory|history|client`，不建立业务WebSocket，也没有BFF fallback、SSE、offline cache、后台同步
+engine或持久client state。迟到结果以connection generation和Session identity隔离；轮询失败保留最后REST snapshot并停止把错误伪装成空数据。
 
-角色与启动顺序保持分离：TUI/CLI Native client按需ensure唯一Local Service；`kite web`先做asset preflight，再ensure同一Service并attach
-Browser route。Browser打开launch URL只连接已存在Service，不负责启动任何本机server。`bun run --cwd apps/kite-web dev`只是Vite静态资源
-开发服务器，不包含Browser认证或Runtime连接。源码开发推荐`bun run web:dev`，它依次完成Vite build、fixed asset preflight和
-single-Service Web ensure并打印URL。
+## 依赖与安全边界
 
-release candidate由同一`kite-service` listener提供loopback BFF，并把`payload/web`作为immutable candidate asset绑定到Web slot；Observer从
-Store 9/Runtime safe ports读取current History/live，只向Browser返回presentation DTO。Web asset、source entrypoint与本地smoke只证明闭集
-composition，不证明Windows/Linux hosted process、remote/LAN或public Web支持。
+组件只消费本地presentation type。transport只依赖browser-safe `@kite-ai/agent-api-client`，该client只依赖
+`@kite-ai/agent-api-contract`；Web不得导入Service、CLI/TUI、Native local-runtime、Runtime Protocol/Host、Store、SQLite、Node或Bun I/O。
+Browser JavaScript不持有Agent bearer、Native access token、canonical Workspace path或Store path。
 
-Vite构建从`packages/agent-api-contract/generated/openapi.json`逐字节生成固定
-`payload/web/api-docs/openapi.json`；Gateway只把`/api-docs`与`/api-docs/`映射到同一immutable HTML入口，并只额外允许该精确JSON路径。
-renderer没有form、Try it或execute control，只显示placeholder endpoint、已声明operation和“availability未确认”；规范加载使用
-same-origin `GET`、`credentials: omit`、`no-store`，且不依赖remote CDN/script。Gateway继续应用self-only CSP、`no-store`与
-`nosniff`，未知docs deep link保持404。
+固定`/api-docs`入口展示release-bundled canonical OpenAPI；renderer没有form、Try it或execute control，规范使用same-origin、
+no-credential、`no-store`读取。页面存在不表示当前principal拥有尚未ready的mutation/SSE operation。
 
-验证：
+## 启动与release
+
+TUI/CLI与`kite web`都通过同一个canonical Kite Home manager ensure唯一Local Service。Browser打开URL不能启动本机进程；
+`bun run --cwd apps/kite-web dev`只是Vite资源服务器。源码开发使用根命令`bun run server`或`bun run tui`：它们先build assets，
+Service在ready前完成preflight并把`/`、`/index.html`、`/assets/*`与`/api-docs`挂到同一个listener。`kite web`只ensure Service并
+打印稳定的`origin/`；`GET /`直接返回index而不暴露物理文件名。Browser关闭或logout不停止Service。
+
+release candidate把同一Vite产物放入`payload/web`。Service的一个loopback listener同时提供static assets、`/api-docs`与`/v1`；Web
+不拥有第二listener、Runtime、Store、数据库或独立lifecycle。
+
+## 验证
 
 ```text
 bun run --cwd apps/kite-web typecheck
 bun run --cwd apps/kite-web test
 bun run --cwd apps/kite-web build
 cmp apps/kite-web/dist/api-docs/openapi.json packages/agent-api-contract/generated/openapi.json
+rg '_kite/web/(bootstrap|tabs|directory|history|client)' apps/kite-web/dist
 ```
+
+最后一条必须无匹配。

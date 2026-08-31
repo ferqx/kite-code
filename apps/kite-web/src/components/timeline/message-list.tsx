@@ -1,4 +1,3 @@
-import type { WebPresentationBlock, WebPresentationMessage } from '@kite-ai/kite-app-contract/web';
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -15,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { WebHistoryState } from '@/presentation/reducer';
+import type { WebPresentationBlock, WebPresentationMessage } from '@/presentation/types';
 
 function Block({ block }: { readonly block: WebPresentationBlock }) {
   switch (block.kind) {

@@ -270,15 +270,6 @@ function fakeRuntime(): {
         accessToken: 'a'.repeat(43),
       };
     },
-    ensureWeb: async () => {
-      throw new Error('not used');
-    },
-    statusWeb: async () => {
-      throw new Error('not used');
-    },
-    stopWeb: async () => {
-      throw new Error('not used');
-    },
     stopService: async () => {
       runtime.stopCalls += 1;
       if (runtime.stopOutcome === 'service_busy') {

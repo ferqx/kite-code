@@ -8,7 +8,7 @@ import {
   WebGatewayStaticAssetsError,
 } from '../../src/web-gateway/static-assets';
 
-test('requires the complete fixed Web Gateway asset surface', () => {
+test('requires the complete fixed Service Web asset surface', () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-web-assets-')));
   try {
     expect(() => preflightWebGatewayStaticAssets(root)).toThrow(WebGatewayStaticAssetsError);

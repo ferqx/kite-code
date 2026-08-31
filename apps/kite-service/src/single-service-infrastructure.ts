@@ -11,6 +11,7 @@ import {
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   resolveKiteLocalRuntimeEndpoint,
 } from '@kite-ai/kite-local-runtime/service';
+import type { AgentApiRouteHandler } from './agent-api';
 import {
   createKiteServiceCarrier,
   type KiteServiceApplicationPort,
@@ -34,10 +35,6 @@ import type {
   KiteServiceTransportPort,
 } from './ports';
 import { createKiteServiceShell } from './shell';
-import {
-  createSingleServiceWebLifecycle,
-  type SingleServiceWebLifecycle,
-} from './web-gateway/service-lifecycle';
 
 export interface SingleServiceInfrastructureOptions {
   readonly home: KiteHomeIdentity;
@@ -51,7 +48,8 @@ export interface SingleServiceInfrastructureOptions {
   readonly processStartIdentity: string;
   readonly pid?: number;
   readonly startedAt?: string;
-  readonly webGateway?: Omit<KiteServiceWebGatewayRouteOptions, 'staticAssetRoot'>;
+  readonly webGateway?: KiteServiceWebGatewayRouteOptions;
+  readonly agentApi?: AgentApiRouteHandler;
   readonly readiness?: KiteServiceReadinessPort;
   readonly signals?: KiteServiceSignalPort;
   readonly startupTimeoutMs?: number;
@@ -66,7 +64,6 @@ export interface SingleServiceInfrastructureOptions {
 export interface SingleServiceInfrastructure extends AsyncDisposable {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly shell: KiteServiceShell;
-  readonly web: SingleServiceWebLifecycle | undefined;
   readonly httpOrigin: string | undefined;
   start(): Promise<KiteServiceLifecycleResult>;
   stop(): Promise<KiteServiceLifecycleResult>;
@@ -100,18 +97,6 @@ export function createSingleServiceInfrastructure(
   let nativeEndpoint: KiteNativeEndpointServer | undefined;
   let publishedReady = false;
   let shell!: KiteServiceShell;
-
-  const web = options.webGateway
-    ? createSingleServiceWebLifecycle({
-        createRouteOwner: (assets) => {
-          if (!carrier || !publishedReady) throw new Error('Service listener is not ready.');
-          return carrier.attachWebGateway({
-            ...options.webGateway!,
-            staticAssetRoot: assets.root,
-          });
-        },
-      })
-    : undefined;
 
   const carrierApplication: KiteServiceApplicationPort = {
     server: options.application.server,
@@ -181,13 +166,14 @@ export function createSingleServiceInfrastructure(
       if (carrier || !accessToken || !controlToken) {
         throw new Error('Single-Service transport state is invalid.');
       }
-      carrier = createKiteServiceCarrier({
+      const created = createKiteServiceCarrier({
         application: carrierApplication,
         instanceId: options.instanceId,
         serverVersion: options.serverVersion,
         buildId: options.buildId,
         accessToken,
         controlToken,
+        ...(options.agentApi ? { agentApi: options.agentApi } : {}),
         isReady: () => publishedReady,
         ...(options.carrierLimits ? { limits: options.carrierLimits } : {}),
         ...(options.now ? { now: options.now } : {}),
@@ -225,12 +211,19 @@ export function createSingleServiceInfrastructure(
           });
         },
       });
+      try {
+        if (options.webGateway) created.attachWebGateway(options.webGateway);
+        carrier = created;
+      } catch (error) {
+        await created.close().catch(() => undefined);
+        throw error;
+      }
     },
     async stop() {
       const current = carrier;
       if (!current) return;
-      if (web) await web.stop();
       await current.close();
+      await options.agentApi?.close();
       carrier = undefined;
     },
   };
@@ -252,7 +245,6 @@ export function createSingleServiceInfrastructure(
   const infrastructure: SingleServiceInfrastructure = {
     endpoint,
     shell,
-    web,
     get httpOrigin() {
       return carrier?.origin;
     },
@@ -291,55 +283,6 @@ export function createSingleServiceInfrastructure(
           },
           accessToken,
         };
-      case 'web_ensure': {
-        if (!web) {
-          return {
-            schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-            requestId: request.requestId,
-            operation: 'web_ensure',
-            outcome: 'unavailable',
-            state: 'absent',
-            diagnostic: 'web_readiness_failed',
-          };
-        }
-        const result = await web.ensure(request.staticAssetRoot);
-        return result.outcome === 'ready'
-          ? {
-              schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-              requestId: request.requestId,
-              operation: 'web_ensure',
-              outcome: 'ready',
-              origin: result.origin,
-              launchUrl: result.launchUrl,
-              assetDigest: result.assetDigest,
-            }
-          : {
-              schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-              requestId: request.requestId,
-              operation: 'web_ensure',
-              outcome: 'unavailable',
-              state: result.state,
-              diagnostic: result.diagnostic,
-            };
-      }
-      case 'web_status': {
-        const result = web ? await web.status() : ({ outcome: 'ready', state: 'absent' } as const);
-        return {
-          schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-          requestId: request.requestId,
-          operation: 'web_status',
-          ...result,
-        };
-      }
-      case 'web_stop': {
-        const result = web ? await web.stop() : ({ outcome: 'noop', state: 'absent' } as const);
-        return {
-          schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-          requestId: request.requestId,
-          operation: 'web_stop',
-          ...result,
-        };
-      }
       case 'service_stop': {
         const result = await shell.requestStop();
         return {

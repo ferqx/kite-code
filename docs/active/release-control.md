@@ -18,7 +18,7 @@ G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitH
 构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
-候选支持入口包括本地TUI、用户在场的foreground CLI，以及 private loopback Web Observer；三者按canonical Kite Home复用唯一Local
+候选支持入口包括本地TUI、用户在场的foreground CLI，以及private loopback Web REST client；三者按canonical Kite Home复用唯一Local
 Service、Store 9与loopback HTTP listener。Coordinator、Workspace Worker和独立Gateway只保留内部源码测试，不存在release entrypoint、
 migration command或`web recover`。internal stdio、development loopback WebSocket、
 browser与Desktop reference只作内部child或conformance，不能写成remote/public支持。KLSV1-06仅有
@@ -45,7 +45,7 @@ Ubuntu/Windows hosted evidence仍未完成。
 
 候选中的`kite`与`kite-tui`由release entrypoint注入managed single-Service connector；前台`run/resume`、TUI、`service *`和
 `web`默认ensure/复用同一Service。CLI不构造legacy Coordinator或Store migration owner。
-Web命令先做asset preflight，再通过native IPC注册/status/stop同Service listener中的Browser route；TUI `/web`调用ensure/open；connector/manager失败直接暴露，不
+Service在ready前验证并挂载candidate Web assets；`web`与TUI `/web`只ensure同一Service并从native `describe`返回稳定根地址。connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
 source/installed client只ensure每个canonical Kite Home唯一的Service；每个logical connection使用独立client identity与generation，
 Service restart时通过rotating capability恢复Controller，不启动Workspace Worker。Manager的spawn/readiness outcome-unknown由native
@@ -87,7 +87,7 @@ installer contract fixture同样默认使用当前runner的native target与execu
 stub时由该runner原生编译测试executable。跨target拒绝测试必须显式构造另一target，不能让固定macOS fixture在
 Linux/Windows抢先触发target gate并掩盖待测安装不变量；busy upgrade对旧payload与stable launcher的identity断言也必须使用该
 native suffix，不能在Windows读取无后缀的伪路径。
-Standalone resolver 必须覆盖十五个 workspace package（含`agent-api-contract`）的全部 public export，并直接解析到仓库 source；候选构建
+Standalone resolver必须覆盖十六个workspace package（含`agent-api-contract`与`agent-api-client`）的全部public export，并直接解析到仓库source；候选构建
 不得穿过 `apps/kite-cli/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
@@ -166,10 +166,9 @@ CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层
 entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标；launcher传入的`KITE_CODE_RELEASE_ROOT`是installed Service
 resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
 
-Web source/installed ensure在任何Service lifecycle访问前执行fixed asset preflight；缺失返回`web_assets_missing`，不得创建DB、socket或
-Browser route。asset有效后才ensure同一Service并在其HTTP listener内注册Browser session。status不mint launch token；
-`bun run web:dev`依次build、preflight并ensure single-Service。这些路径不让Browser或Vite dev server取得Native
-lifecycle authority。
+source `server`/`tui`先build fixed assets；source/installed Service child在发布ready前执行preflight并把Browser surface挂到同一个
+HTTP listener。缺失时Service启动失败，不存在独立Browser route status/stop或Web专用Native operation；这些路径不让Browser或Vite dev
+server取得Native lifecycle authority。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；

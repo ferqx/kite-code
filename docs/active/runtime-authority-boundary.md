@@ -76,17 +76,21 @@ Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
-Public Agent API当前在同一Worker listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。one-shot capability由Worker
+Public Agent API当前在同一single-Service listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
 hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
-initialize/query-only in-process Runtime Client/Server logical connection。ServerInfo只发布`checkpoints/history/sessions`，Session list/get、
-History page与Checkpoint list/preview经Service-owned safe ports可达，其他resource/mutation仍404。same-connection Store 8 page port只做bounded
-keyset/sequence read，不开放SQLite/State concrete或新connection/DDL。context close/Trust撤销/expiry/generation fence不取消Runtime work；
-controller role不绕过Store 8 Controller lease或`bindingReference`。
+initialize/query-only in-process Runtime Client/Server logical connection。Service根页面另建HttpOnly cookie与service-scoped read-only
+principal。ServerInfo按principal发布`checkpoints/history/sessions/workspaces`；Workspace、Workspace Session、Session get、History page与
+Checkpoint list/preview经同一个Store 9 Directory/Runtime/History authority可达，其他resource/mutation仍404。History的`after_sequence`只做
+bounded增量读取且与cursor互斥。两类principal都不开放SQLite/State concrete或新connection/DDL；context/session close不取消Runtime work，
+controller role不绕过Store 9 Controller lease或binding authority。
+single-Service Native Runtime socket只认证Workspace、Client与connection generation；每条command用目标Session重新读取Store 9当前Controller，
+并将Workspace/connection/request/Session/Controller generation摘要为in-process binding reference。该reference不持久化、不成为credential或
+第二registry；旧connection generation和非当前Controller仍在Host之前拒绝。
 每context的16-request admission与drain只约束Public HTTP资源；它不成为domain mailbox。已认证read在异步Trust重验后还必须复核context current，
 revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-02D static/conformance Gate同时证明adapter没有direct
 `RuntimeAccess`或Agent Kernel/Runtime Host/SQLite concrete import；1 MiB History response提前分页仍只消费同一safe page port。
-Web Gateway的`/api-docs`只读取candidate内固定OpenAPI静态资产，不建立Agent context、Runtime logical connection、Coordinator/Worker
-discovery或Store query，也不提供execute control；因此该参考页不是新的RuntimeAccess、data plane或Browser Controller surface。
+static Web carrier的`/api-docs`只读取candidate内固定OpenAPI资产，不建立Agent context、Runtime logical connection或Store query，也不提供
+execute control；Browser业务数据只经cookie-authenticated `/v1`，不是Controller surface。
 
 KRSRUN-01B已把unpublished Store 8 capability接入Host transaction机制：start的State/event/snapshot/revision、queued Run与original
 resource receipt同一commit；activation在publish/schedule前推进running，interaction/terminal/cancel/recovery State batch同步推进waiting/

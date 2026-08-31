@@ -46,11 +46,11 @@
 
 ## Kite Web 打开
 
-`/web`调用可选的`discoverWeb` callback完成asset preflight和single-Service `web_ensure`，成功时显示release owner返回的一次性launch URL；
-callback缺失或ensure失败时显示固定unavailable文案。该动作可以按需启动唯一Service并attach同listener Browser route，但不启动第二进程、
-不创建Runtime Session、不发送Runtime command，也不取得Controller capability。
+TUI启动时唯一Service已经验证并挂载同源Web assets。`/web`调用可选的`discoverWeb` callback，通过Native `describe`显示稳定的
+Service根地址；callback缺失或发现失败时显示固定unavailable文案。该动作不attach route、不创建Runtime Session、不发送Runtime
+command，也不取得Controller capability。
 
-`web_status`保持纯只读，不由`/web`用于mint token。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
+当前没有`web_ensure/web_status/web_stop`。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
 Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
 
 ## 单一交互表面

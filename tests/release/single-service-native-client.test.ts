@@ -1,7 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
 import {
   createManagedSingleServiceNativeComposition,
@@ -9,24 +6,31 @@ import {
 } from '../../scripts/release/single-service-native-client';
 
 describe('single-Service release client target', () => {
-  test('binds custom homes to distinct endpoints and supplies CLI/TUI Web adapters', async () => {
+  test('binds custom homes to distinct endpoints and derives the stable Web root', async () => {
     const operations: string[] = [];
     const first = createSingleServiceNativeClientComposition({
       home: createKiteHomeIdentity('/tmp/kite-home-a'),
       runtimeParent: '/tmp/runtime-owner',
       platform: 'linux',
       expectedBuildId: 'build-1',
-      staticAssetRoot: '/bundle/web',
       request: async (_endpoint, request) => {
         operations.push(request.operation);
         return {
           schema: 'kite.local-native.response.v1',
           requestId: request.requestId,
-          operation: 'web_ensure',
+          operation: 'describe',
           outcome: 'ready',
-          origin: 'http://127.0.0.1:43170',
-          launchUrl: `http://127.0.0.1:43170/#${'a'.repeat(43)}`,
-          assetDigest: '1'.repeat(64),
+          service: {
+            instanceId: 'instance-1',
+            pid: 42,
+            startedAt: '2026-08-31T00:00:00.000Z',
+            protocolVersion: 1,
+            clientContractRevision: 'kite-local-runtime-contract-v1',
+            serverVersion: 'service-1',
+            buildId: 'build-1',
+            httpOrigin: 'http://127.0.0.1:43170',
+          },
+          accessToken: 'a'.repeat(43),
         };
       },
     });
@@ -35,56 +39,40 @@ describe('single-Service release client target', () => {
       runtimeParent: '/tmp/runtime-owner',
       platform: 'linux',
       expectedBuildId: 'build-1',
-      staticAssetRoot: '/bundle/web',
       request: async () => {
         throw new Error('not used');
       },
     });
 
     expect(first.endpoint.homeDigest).not.toBe(second.endpoint.homeDigest);
-    expect(first.web.staticAssetRoot).toBe('/bundle/web');
-    await expect(first.discoverWeb()).resolves.toBe(`http://127.0.0.1:43170/#${'a'.repeat(43)}`);
-    expect(operations).toEqual(['web_ensure']);
+    await expect(first.discoverWeb()).resolves.toBe('http://127.0.0.1:43170/');
+    expect(operations).toEqual(['describe']);
   });
 
-  test('rejects an implicit relative asset root', () => {
+  test('rejects a managed relative or mismatched Service asset root', () => {
     expect(() =>
-      createSingleServiceNativeClientComposition({
+      createManagedSingleServiceNativeComposition({
         home: createKiteHomeIdentity('/tmp/kite-home-a'),
         runtimeParent: '/tmp/runtime-owner',
         platform: 'linux',
         expectedBuildId: 'build-1',
         staticAssetRoot: 'apps/kite-web/dist',
+        executable: { path: '/missing/service', mode: 'source' },
+        cwd: '/tmp/runtime-owner',
+        env: {},
       }),
     ).toThrow('must be absolute');
-  });
-
-  test('returns web_assets_missing before any endpoint request or child spawn', async () => {
-    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-web-preflight-')));
-    let requests = 0;
-    try {
-      const composition = createManagedSingleServiceNativeComposition({
-        home: createKiteHomeIdentity(join(root, 'home')),
-        runtimeParent: root,
+    expect(() =>
+      createManagedSingleServiceNativeComposition({
+        home: createKiteHomeIdentity('/tmp/kite-home-a'),
+        runtimeParent: '/tmp/runtime-owner',
         platform: 'linux',
         expectedBuildId: 'build-1',
-        staticAssetRoot: root,
+        staticAssetRoot: '/bundle/web',
         executable: { path: '/missing/service', mode: 'source' },
-        cwd: root,
-        env: {},
-        request: async () => {
-          requests += 1;
-          throw new Error('must not request endpoint');
-        },
-      });
-      await expect(composition.web.client.ensureWeb(root)).resolves.toMatchObject({
-        outcome: 'unavailable',
-        state: 'absent',
-        diagnostic: 'web_assets_missing',
-      });
-      expect(requests).toBe(0);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+        cwd: '/tmp/runtime-owner',
+        env: { KITE_SERVICE_WEB_STATIC_ROOT: '/different/web' },
+      }),
+    ).toThrow('does not match');
   });
 });

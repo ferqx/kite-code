@@ -21,6 +21,11 @@ function repositoryFixture(): string {
       recursive: true,
     },
   );
+  cpSync(
+    join(repositoryRoot, 'packages', 'agent-api-client'),
+    join(root, 'packages', 'agent-api-client'),
+    { recursive: true },
+  );
   for (const path of [
     'package.json',
     'scripts/run-default-tests.ts',

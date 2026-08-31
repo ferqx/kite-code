@@ -163,10 +163,10 @@ export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>>
   '@kite-ai/kite-cli/tui': 'apps/kite-cli/src/tui/executable.tsx',
   '@kite-ai/kite-service': 'apps/kite-service/src/index.ts',
   '@kite-ai/agent-api-contract': 'packages/agent-api-contract/src/index.ts',
+  '@kite-ai/agent-api-client': 'packages/agent-api-client/src/index.ts',
   '@kite-ai/kite-app-contract': 'packages/kite-app-contract/src/index.ts',
   '@kite-ai/kite-app-contract/worker-controller':
     'packages/kite-app-contract/src/worker-controller.ts',
-  '@kite-ai/kite-app-contract/web': 'packages/kite-app-contract/src/web.ts',
   '@kite-ai/kite-local-runtime/client': 'packages/kite-local-runtime/src/client/index.ts',
   '@kite-ai/kite-local-runtime/coordinator': 'packages/kite-local-runtime/src/coordinator/index.ts',
   '@kite-ai/kite-local-runtime/manager': 'packages/kite-local-runtime/src/manager/index.ts',

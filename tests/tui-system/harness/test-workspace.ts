@@ -4,7 +4,7 @@
  * Each PTY test gets its own:
  * - Temp HOME directory with minimal kite-code.jsonc config
  * - Temp workspace directory (for file operations)
- * - Temp checkpoint database path (isolated SQLite)
+ * - Temp Store 9 `kite.sqlite` path
  *
  * Reuses the temp-home isolation pattern previously used by the old TUI harness.
  */
@@ -26,13 +26,6 @@ import {
   createKiteHomeIdentity,
   ensureLocalRuntimeServiceHome,
 } from '@kite-ai/kite-local-runtime/service';
-import {
-  readSqliteActiveLayoutPointer,
-  readSqliteRuntimeLayoutManifest,
-  resolveSqliteRuntimeLayoutPaths,
-  resolveSqliteWorkspaceStorePath,
-  sqliteCurrentRuntimeStorePath,
-} from '@kite-ai/runtime-storage-sqlite';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -114,21 +107,7 @@ function persistedRuntimeObservationFailure(
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  const kiteHome = join(workspace.home, '.kite-code');
-  const layout = resolveSqliteRuntimeLayoutPaths(kiteHome);
-  const pointer = readSqliteActiveLayoutPointer(layout);
-  if (pointer) {
-    const manifest = readSqliteRuntimeLayoutManifest(layout, pointer.generation);
-    if (!manifest) throw new Error('Active Runtime layout manifest is unavailable.');
-    if (manifest.workspaceStores.length > 1) {
-      throw new Error('TUI fixture Runtime Store identity is ambiguous.');
-    }
-    const store = manifest.workspaceStores[0];
-    if (store) {
-      return resolveSqliteWorkspaceStorePath(layout, pointer.generation, store.workerScopeId);
-    }
-  }
-  return sqliteCurrentRuntimeStorePath(join(kiteHome, 'checkpoints.sqlite'));
+  return join(workspace.home, '.kite-code', 'kite.sqlite');
 }
 
 /**

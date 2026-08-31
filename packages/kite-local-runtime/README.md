@@ -87,7 +87,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
   content-type缺失、malformed/extra field或instance/server/build identity mismatch统一`identity_uncertain`；
   Protocol/client-contract不兼容被拒绝，expected build drift返回`incompatible + build_mismatch`。以上状态都不授权
-  清理alive/uncertain owner或spawn replacement。
+  清理alive/uncertain owner或spawn replacement。Native connector必须把`build_mismatch`呈现为可操作的不同构建冲突，
+  并指向启动该Service的原checkout/build，不能退化成泛化的Service未就绪错误。
 - access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。
@@ -104,9 +105,9 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   注入已验证的OS runtime parent并为每home只得到`service.sock`与`service.lock`，Windows只得到按digest隔离的named pipe identity。
   不同custom home是独立profile；local-runtime不为它们增加共享lease、locator或coordination state。
   helper不读取、创建或删除路径，也不从ambient environment猜测runtime parent。KHSS-02在该identity上新增exact、32 KiB、每连接
-  单请求的Native IPC codec/client，封闭为`describe/web_ensure/web_status/web_stop/service_stop`五个operation；Service identity与HTTP access token
-  只通过owner-only endpoint内存响应返回，Web diagnostic保持typed，unknown field/build/request identity mismatch fail closed。上层
-  `KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop或Web lifecycle mutation。
+  单请求的Native IPC codec/client，当前封闭为`describe/service_stop`两个operation；Service identity、HTTP origin与access token
+  只通过owner-only endpoint内存响应返回。上层从`describe.httpOrigin`派生稳定Web根地址，不存在Web专用Native operation；
+  unknown field/build/request identity mismatch fail closed。上层`KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop。
   同阶段的`createKiteSingleServiceManager`只从endpoint与最小lifecycle reservation判断owner：同进程ensure single-flight，alive exact
   PID/start-token等待ready，dead exact owner才清理匹配的socket inode/lock并spawn，uncertain/corrupt/drift全部阻断。Native probe比较OS
   process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。

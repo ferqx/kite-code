@@ -167,6 +167,9 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/agent-api-contract/src/schemas.ts')).toEqual([
       'agent-api-contract',
     ]);
+    expect(triggeredRepositoryRules('packages/agent-api-client/src/index.ts')).toEqual([
+      'agent-api-client',
+    ]);
     expect(triggeredRepositoryRules('scripts/check-agent-api-packages.ts')).toEqual([
       'agent-api-contract',
     ]);

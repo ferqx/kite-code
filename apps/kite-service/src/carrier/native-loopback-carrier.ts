@@ -102,24 +102,13 @@ const MAX_TICKETS = 1_024;
 const HEARTBEAT_POLL_INTERVAL_MS = 10;
 
 type RequestIp = Readonly<{ address: string }> | null;
-type SocketData = Readonly<{ session: ServiceSocketSession }> | Readonly<{ connection: unknown }>;
-
-type BrowserSocketData = Readonly<{ connection: unknown }>;
+type SocketData = Readonly<{ session: ServiceSocketSession }>;
 
 interface AttachedWebGatewayRoutes {
   readonly fetch: (
     request: Request,
-    server: Bun.Server<BrowserSocketData>,
+    server: Bun.Server<SocketData>,
   ) => Response | Promise<Response> | undefined | Promise<undefined>;
-  readonly websocket: {
-    readonly open?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
-    readonly message?: (
-      socket: Bun.ServerWebSocket<BrowserSocketData>,
-      message: string | Buffer,
-    ) => void;
-    readonly drain?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
-    readonly close?: (socket: Bun.ServerWebSocket<BrowserSocketData>) => void;
-  };
   readonly leaseId: symbol;
 }
 
@@ -155,7 +144,10 @@ export interface KiteServiceCarrierOptions {
   readonly controlToken: string;
   /** Stable Public Agent API façade; the carrier owns only loopback dispatch and drain framing. */
   readonly agentApi?: {
-    handle(request: Request): Response | Promise<Response>;
+    handle(
+      request: Request,
+      browserAuth?: import('../agent-api').AgentApiBrowserSessionPort,
+    ): Response | Promise<Response>;
   };
   /** Optional Worker capability verifier; fixed access-token comparison remains the default. */
   readonly accessTokenVerifier?: (input: {
@@ -270,14 +262,18 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       }
       const url = new URL(request.url);
       if (webGatewayRoutes && isWebGatewayPath(url.pathname)) {
-        return webGatewayRoutes.fetch(request, server as unknown as Bun.Server<BrowserSocketData>);
+        if (!(options.isReady?.() ?? true)) return fixedResponse(503, 'unavailable');
+        return webGatewayRoutes.fetch(request, server);
       }
       if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
         if (!(options.isReady?.() ?? true) || !options.agentApi) {
           emitDiagnostic(options.onDiagnostic, 'route_unavailable');
           return fixedResponse(404, 'not_found');
         }
-        return afterDispatchCloseBarrier(options.agentApi.handle(request), () => closed);
+        return afterDispatchCloseBarrier(
+          options.agentApi.handle(request, webGatewayCarrier?.browserAuth),
+          () => closed,
+        );
       }
       if (url.search.length !== 0) {
         emitDiagnostic(options.onDiagnostic, 'route_rejected');
@@ -353,52 +349,27 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
       closeOnBackpressureLimit: false,
       sendPings: false,
       open(socket) {
-        if (isServiceSocketData(socket.data)) {
-          socket.data.session.open(
-            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
-          );
-          return;
-        }
-        webGatewayRoutes?.websocket.open?.(
-          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        socket.data.session.open(
+          socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
         );
       },
       message(socket, message) {
-        if (isServiceSocketData(socket.data)) {
-          socket.data.session.message(
-            socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
-            message,
-          );
-          return;
-        }
-        webGatewayRoutes?.websocket.message?.(
-          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
+        socket.data.session.message(
+          socket as Bun.ServerWebSocket<Readonly<{ session: ServiceSocketSession }>>,
           message,
         );
       },
       drain(socket) {
-        if (isServiceSocketData(socket.data)) {
-          socket.data.session.drain();
-          return;
-        }
-        webGatewayRoutes?.websocket.drain?.(
-          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
-        );
+        socket.data.session.drain();
       },
       ping(socket, data) {
-        if (isServiceSocketData(socket.data)) socket.pong(data);
+        socket.pong(data);
       },
       pong(socket) {
-        if (isServiceSocketData(socket.data)) socket.data.session.heartbeat();
+        socket.data.session.heartbeat();
       },
       close(socket) {
-        if (isServiceSocketData(socket.data)) {
-          socket.data.session.closedByPeer();
-          return;
-        }
-        webGatewayRoutes?.websocket.close?.(
-          socket as unknown as Bun.ServerWebSocket<BrowserSocketData>,
-        );
+        socket.data.session.closedByPeer();
       },
     },
   });
@@ -438,21 +409,13 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         let attached = false;
         const sharedServe = ((serveOptions: {
           readonly fetch?: AttachedWebGatewayRoutes['fetch'];
-          readonly websocket?: AttachedWebGatewayRoutes['websocket'];
         }) => {
-          if (
-            attached ||
-            !serveOptions.fetch ||
-            !serveOptions.websocket ||
-            webGatewayRoutes ||
-            !bunServer
-          ) {
+          if (attached || !serveOptions.fetch || webGatewayRoutes || !bunServer) {
             throw new Error('Service Web Gateway route attachment is invalid.');
           }
           attached = true;
           webGatewayRoutes = Object.freeze({
             fetch: serveOptions.fetch,
-            websocket: serveOptions.websocket,
             leaseId,
           });
           return Object.freeze({
@@ -460,7 +423,7 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
             stop: async () => {
               if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
             },
-          }) as unknown as Bun.Server<BrowserSocketData>;
+          }) as unknown as Bun.Server<undefined>;
         }) as unknown as typeof Bun.serve;
         let gateway: WebGatewayCarrier;
         try {
@@ -483,10 +446,7 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         let routeClosing: Promise<void> | undefined;
         const attachedGateway: WebGatewayCarrier = Object.freeze({
           origin: gateway.origin,
-          get launchUrl() {
-            return gateway.launchUrl;
-          },
-          mintLaunchUrl: () => gateway.mintLaunchUrl(),
+          browserAuth: gateway.browserAuth,
           close: () => {
             routeClosing ??= gateway.close().finally(() => {
               if (webGatewayRoutes?.leaseId === leaseId) webGatewayRoutes = undefined;
@@ -548,20 +508,14 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
 
-function isServiceSocketData(value: SocketData): value is Readonly<{
-  session: ServiceSocketSession;
-}> {
-  return 'session' in value;
-}
-
 function isWebGatewayPath(pathname: string): boolean {
   return (
     pathname === '/' ||
+    pathname === '/index.html' ||
     pathname === '/api-docs' ||
     pathname === '/api-docs/' ||
     pathname === '/api-docs/openapi.json' ||
-    pathname.startsWith('/assets/') ||
-    pathname.startsWith('/_kite/web/')
+    pathname.startsWith('/assets/')
   );
 }
 

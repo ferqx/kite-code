@@ -18,7 +18,10 @@ if (process.argv.includes('--version')) {
               argv: process.argv,
               executableMode,
             });
-            return runCliMain({ serviceManager: localService.manager });
+            return runCliMain({
+              serviceManager: localService.manager,
+              singleServiceWeb: { discover: localService.discoverWeb },
+            });
           })()
         : command.startsWith('web-')
           ? (() => {
@@ -26,7 +29,7 @@ if (process.argv.includes('--version')) {
                 argv: process.argv,
                 executableMode,
               });
-              return runCliMain({ singleServiceWeb: localService.web });
+              return runCliMain({ singleServiceWeb: { discover: localService.discoverWeb } });
             })()
           : (() => {
               const localService = createManagedLocalSingleServiceComposition({

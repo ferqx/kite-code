@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-30（激活Kite Home单一化方案：单Service、单SQLite、DB-backed typed Artifact与最小OS runtime）
+最后更新：2026-08-31（激活Web REST客户端收敛：保留single Service/TUI Native client，Web只读数据面切换到`/v1`）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,8 +19,10 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-31-web-rest-client-convergence.md`](2026-08-31-web-rest-client-convergence.md) | completed | P0 | ADR-0155、single-Service/Store 9、Agent API read与Web Observer current authority | 局部替代KASAPI的static-docs-only Browser边界；保留TUI Native client，本阶段不做SSE/WebSocket/mutation/multi-Server | Browser auth + Workspace/Session/History/Checkpoint REST read、Web cutover、旧BFF/WebSocket删除、TUI-first/Web-first/concurrent ensure qualification |
+| [`2026-08-31-service-owned-web-root.md`](2026-08-31-service-owned-web-root.md) | completed | P0 | ADR-0156/0157/0158、single-Service Web REST client | 替代独立Web lifecycle、根路径302及launch token/exchange | Service ready即提供同源Web根页面与root cookie；CLI/TUI返回稳定根地址；完整Browser/release验证通过 |
 | [`2026-08-30-kite-home-and-local-runtime-simplification.md`](2026-08-30-kite-home-and-local-runtime-simplification.md) | active | P0 | ADR-0152/0153、State 27 / Store 8与当前Runtime/Controller/effect/Artifact/Web authority | 替代多companion、Catalog+Workspace DB、generation sidecar与filesystem Artifact；保留typed schema、Observer-only Web和durable recovery语义 | 单Service、单`kite.sqlite`、专用Artifact表、最小OS runtime、离线clean cutover与三平台qualification |
-| [`2026-08-29-kite-agent-server-api-v1.md`](2026-08-29-kite-agent-server-api-v1.md) | active | P1 | ADR-0149/0150、KRSV1/KCWW 与当前 Runtime/Store/Controller/Web authority | 在 private Runtime Protocol 之上新增 stable local REST/SSE façade；不开放 remote、Browser mutation、public `/rpc` 或第二 Runtime/Store | KASAPI-00A～02D与KRSRUN-01A～03A已完成；Store 8 production cutover已闭合。当前进入KRSRUN-03B current/release handoff；Public Run mutation与`runs`capability继续blocked |
+| [`2026-08-29-kite-agent-server-api-v1.md`](2026-08-29-kite-agent-server-api-v1.md) | active | P1 | ADR-0149/0150/0155、KRSV1/KCWW 与当前 Runtime/Store/Controller/Web authority | stable local REST/SSE façade历史主线保留；static-docs-only Browser边界由Web REST收敛方案局部替代，未完成mutation/SSE/SDK任务须在KWR完成后rebase | KASAPI-00A～02D与KRSRUN-01A～03A已完成；Store 8 production cutover已闭合。Public Run mutation与`runs`capability继续blocked |
 | [`2026-08-29-kite-runtime-run-store-v1.md`](2026-08-29-kite-runtime-run-store-v1.md) | active | P1 | ADR-0150、KASAPI-00C/02D、Store 8 current authority | KASAPI-03A子计划：State 27 / Store 8 canonical Run index、receipt resource result、coverage boundary与offline generation migration | KRSRUN-00A～03A已完成；当前执行03B current authority/release handoff。migration不回填历史Run，production Worker不fallback Store 7且Public capability关闭 |
 | [`2026-08-28-kite-coordinator-workspace-worker-web-v1.md`](2026-08-28-kite-coordinator-workspace-worker-web-v1.md) | active | P1 | KLSV1/KRSV1、ADR-0147/0148、当前 Runtime/Store/Workspace Trust/Release/TUI authority | Coordinator control plane、per-Workspace Store7 Worker/Controller/effect authority、atomic Session create、默认 CLI/TUI cutover与永久只读 Web Observer/Gateway 已实现；macOS arm64 installed candidate smoke通过 | KCWW-01～08实现与本地Gate已闭合；Web无任何mutation/Controller surface。Linux/Windows hosted process/filesystem/release qualification仍待远端证据，不能用本机结果替代 |
 | [`2026-08-27-kite-local-runtime-service-v1.md`](2026-08-27-kite-local-runtime-service-v1.md) | active | P1 | KRSV1 completion、ADR-0053/0129/0139/0140/0141/0142/0143/0144、当前 Runtime/Workspace Trust/Log Query/Release authority | 将 `apps/kite` 拆为 terminal-only `kite-cli` 与唯一 Runtime root `kite-service`，新增 browser-safe App contract 和 Native local-runtime substrate；不实现 Browser/Desktop、通用多 Store 或 OS Service | KLSV1-00～06 已完成至唯一owner/default Store clean cutover；KLSV1-07本地fault/soak/PTY/macOS arm64 release Gate已通过，等待当前实现head的GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025真实evidence；KLSV1-08未开始 |

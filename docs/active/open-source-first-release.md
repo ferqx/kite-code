@@ -37,7 +37,8 @@ legacy companion entrypoint或启动期source cleanup。Store 9 reopen与single-
 evidence完成前仍不计入G1；旧内部source不作为runtime fallback，也不会被正常Service自动删除。
 
 首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，默认唯一
-Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web Observer由同一Service listener组合；
+Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web static与cookie-authenticated只读`/v1`由同一
+Service listener组合；
 Service-owned internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
@@ -57,8 +58,8 @@ GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime
 该 SHA 完全一致；不得把临时 merge ref 登记为最终候选提交。fork PR 只以只读权限构建其自身 head repository。
 归档 writer 会规范化 tar entry 时间戳并重算 header checksum；相同 target、manifest 和文件内容
 必须生成字节一致的 `.tar.gz`，不能让构建墙钟改变候选 SHA-256。
-Standalone build resolver机械覆盖十五个workspace package的全部public export，包括Service当前消费的browser-safe
-`agent-api-contract`；resolver直接指向repository source，不能经`node_modules/@kite-ai/*` workspace symlink解析。
+Standalone build resolver机械覆盖十六个workspace package的全部public export，包括browser-safe `agent-api-contract`与
+`agent-api-client`；resolver直接指向repository source，不能经`node_modules/@kite-ai/*` workspace symlink解析。
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
@@ -95,7 +96,7 @@ marker/pointer/checksum不一致fail closed；installer不把hosted虚拟磁盘�
   继续通过运行时 admission。
 - Auto Compaction 首版不受支持并默认关闭；未来若要启用必须重新立项。
 - remote/LAN Web、多租户、托管 runner、服务端 credential custody、无人值守共享 writer 和远程发布控制面明确不受首版支持；
-  private loopback Web Observer只复用同一Service listener，并仍需hosted qualification闭合后宣称三平台支持。
+  private loopback Web REST client只复用同一Service listener，并仍需hosted qualification闭合后宣称三平台支持。
 
 ## 明确移出路线图
 

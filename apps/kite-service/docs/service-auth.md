@@ -17,7 +17,7 @@ access/control token采用constant-time compare且不能相等。ticket只保存
 observability；replay、expiry、wrong instance与unknown ticket统一unauthorized。control拒绝access token，普通connector
 不读取control token。
 
-Agent API capability与private access/ticket/control token不互换。Web Gateway peer只能mint`web_observer`；Native peer才可mint
+Agent API capability与private access/ticket/control token不互换。只有Native peer可mint
 `agent_api_observer|agent_api_controller`。Exchange通过hash匹配恢复已签发binding，不接受caller提供的Client/generation header；成功后
 原capability立即删除。context只保存digest，explicit logout、TTL、generation supersede、Native connection close或Worker close撤销。
 `controller` role不等于Controller lease，当前02A没有mutation route。

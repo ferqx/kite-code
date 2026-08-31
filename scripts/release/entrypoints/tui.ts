@@ -11,6 +11,6 @@ if (process.argv.includes('--version')) {
   });
   runTui({
     connectService: localService.connector,
-    discoverWebGateway: localService.discoverWeb,
+    discoverWeb: localService.discoverWeb,
   });
 }

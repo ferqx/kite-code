@@ -4,7 +4,6 @@ import {
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import {
-  type KiteSingleServiceClient,
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   type LocalRuntimeLifecycleResult,
 } from '@kite-ai/kite-local-runtime/client';
@@ -44,10 +43,9 @@ export interface CliMainDependencies {
   readonly serviceConnector?: KiteServiceModeConnector;
   /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
   readonly serviceManager?: KiteServiceManager;
-  /** Accepted target Web lifecycle over the one Service native IPC endpoint. */
+  /** Ensures the one Service and returns its stable Web root URL. */
   readonly singleServiceWeb?: {
-    readonly client: KiteSingleServiceClient;
-    readonly staticAssetRoot: string;
+    readonly discover: () => Promise<string>;
   };
   readonly commandIds?: RuntimeCommandIdAllocator;
 }
@@ -65,9 +63,7 @@ export interface ParsedArgs {
     | 'service-status'
     | 'service-stop'
     | 'service-restart'
-    | 'web-ensure'
-    | 'web-status'
-    | 'web-stop';
+    | 'web-open';
   task?: string;
   threadId: string;
   userId: string;
@@ -121,22 +117,19 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     throw new Error('Runtime stdio is a Service-owned internal entrypoint.');
   }
   if (isServiceLifecycleCommand(args.command)) {
-    await runServiceLifecycleCommand(dependencies.serviceManager, args.command, args.serviceJson);
+    await runServiceLifecycleCommand(
+      dependencies.serviceManager,
+      args.command,
+      args.serviceJson,
+      dependencies.singleServiceWeb?.discover,
+    );
     return;
   }
-  if (
-    args.command === 'web-ensure' ||
-    args.command === 'web-status' ||
-    args.command === 'web-stop'
-  ) {
+  if (args.command === 'web-open') {
     if (!dependencies.singleServiceWeb) {
       throw new Error('Kite Web single-Service client is unavailable.');
     }
-    await runSingleServiceWebLifecycleCommand(
-      dependencies.singleServiceWeb,
-      args.command,
-      args.webJson,
-    );
+    await runSingleServiceWebCommand(dependencies.singleServiceWeb.discover, args.webJson);
     return;
   }
   if (args.command === 'resume' && !args.task?.trim()) {
@@ -644,6 +637,7 @@ async function runServiceLifecycleCommand(
   manager: KiteServiceManager | undefined,
   command: ServiceLifecycleCommand,
   json: boolean,
+  discoverWeb?: () => Promise<string>,
 ): Promise<void> {
   if (!manager) {
     throw new Error('Managed Local Runtime Service lifecycle manager is unavailable.');
@@ -659,45 +653,18 @@ async function runServiceLifecycleCommand(
   if (!serviceLifecycleSucceeded(result)) {
     throw new Error(`Service ${result.operation} failed: ${result.outcome}.`);
   }
+  if ((command === 'service-ensure' || command === 'service-restart') && discoverWeb) {
+    const url = await discoverWeb();
+    console.log(`Kite Web: ${url}`);
+  }
 }
 
-async function runSingleServiceWebLifecycleCommand(
-  target: NonNullable<CliMainDependencies['singleServiceWeb']>,
-  command: 'web-ensure' | 'web-status' | 'web-stop',
+async function runSingleServiceWebCommand(
+  discoverWeb: () => Promise<string>,
   json: boolean,
 ): Promise<void> {
-  if (command === 'web-stop') {
-    const response = await target.client.stopWeb();
-    if (response.outcome === 'unavailable') {
-      throw new Error(`Kite Web stop failed: ${response.diagnostic}.`);
-    }
-    console.log('Kite Web stopped.');
-    return;
-  }
-  if (command === 'web-status') {
-    const response = await target.client.statusWeb();
-    if (response.state === 'absent') {
-      console.log(json ? JSON.stringify({ state: 'not_running' }) : 'Kite Web is not running.');
-      return;
-    }
-    console.log(
-      json
-        ? JSON.stringify({
-            state: 'ready',
-            origin: response.origin,
-            assetDigest: response.assetDigest,
-          })
-        : `Kite Web is ready at ${response.origin}.`,
-    );
-    return;
-  }
-  const response = await target.client.ensureWeb(target.staticAssetRoot);
-  if (response.outcome === 'unavailable') {
-    throw new Error(`Kite Web ensure failed: ${response.diagnostic}.`);
-  }
-  console.log(
-    json ? JSON.stringify({ state: 'ready', launchUrl: response.launchUrl }) : response.launchUrl,
-  );
+  const url = await discoverWeb();
+  console.log(json ? JSON.stringify({ state: 'ready', url }) : url);
 }
 
 // ── Argument parsing (unchanged from original cli.ts) ──
@@ -707,34 +674,28 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const command: ParsedArgs['command'] =
     commandArgv[0] === 'web' &&
     (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
-      ? 'web-ensure'
-      : commandArgv[0] === 'web' &&
-          commandArgv[1] === 'status' &&
-          (commandArgv.length === 2 || (commandArgv.length === 3 && commandArgv[2] === '--json'))
-        ? 'web-status'
-        : commandArgv[0] === 'web' && commandArgv[1] === 'stop' && commandArgv.length === 2
-          ? 'web-stop'
-          : argv[0] === 'service' && argv[1] === 'ensure'
-            ? 'service-ensure'
-            : argv[0] === 'service' && argv[1] === 'status'
-              ? 'service-status'
-              : argv[0] === 'service' && argv[1] === 'stop'
-                ? 'service-stop'
-                : argv[0] === 'service' && argv[1] === 'restart'
-                  ? 'service-restart'
-                  : argv[0] === 'sandbox' && argv[1] === 'setup'
-                    ? 'sandbox-setup'
-                    : argv[0] === 'sandbox' && argv[1] === 'status'
-                      ? 'sandbox-status'
-                      : argv[0] === 'server' && argv[1] === '--stdio'
-                        ? 'server-stdio'
-                        : argv[0] === 'resume'
-                          ? 'resume'
-                          : argv[0] === 'run'
-                            ? 'run'
-                            : argv[0] === 'trace'
-                              ? 'trace'
-                              : 'help';
+      ? 'web-open'
+      : argv[0] === 'service' && argv[1] === 'ensure'
+        ? 'service-ensure'
+        : argv[0] === 'service' && argv[1] === 'status'
+          ? 'service-status'
+          : argv[0] === 'service' && argv[1] === 'stop'
+            ? 'service-stop'
+            : argv[0] === 'service' && argv[1] === 'restart'
+              ? 'service-restart'
+              : argv[0] === 'sandbox' && argv[1] === 'setup'
+                ? 'sandbox-setup'
+                : argv[0] === 'sandbox' && argv[1] === 'status'
+                  ? 'sandbox-status'
+                  : argv[0] === 'server' && argv[1] === '--stdio'
+                    ? 'server-stdio'
+                    : argv[0] === 'resume'
+                      ? 'resume'
+                      : argv[0] === 'run'
+                        ? 'run'
+                        : argv[0] === 'trace'
+                          ? 'trace'
+                          : 'help';
   rejectUnsupportedOptions(argv, command);
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
@@ -836,7 +797,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     releaseStatus: argv.includes('--release-status'),
     telemetryStatus: argv.includes('--telemetry-status'),
     serviceJson: command === 'service-status' && argv.includes('--json'),
-    webJson: (command === 'web-ensure' || command === 'web-status') && argv.includes('--json'),
+    webJson: command === 'web-open' && argv.includes('--json'),
   };
 }
 
@@ -886,12 +847,7 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
       throw new Error('Interaction mode flags are supported only by run and resume.');
     }
   }
-  if (
-    argv.includes('--json') &&
-    command !== 'service-status' &&
-    command !== 'web-ensure' &&
-    command !== 'web-status'
-  ) {
+  if (argv.includes('--json') && command !== 'service-status' && command !== 'web-open') {
     throw new Error('The --json option is unsupported for this command.');
   }
 }
@@ -938,8 +894,6 @@ function printHelp(): void {
   bun run agent service stop
   bun run agent service restart
   bun run agent web [--json]
-  bun run agent web status [--json]
-  bun run agent web stop
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup

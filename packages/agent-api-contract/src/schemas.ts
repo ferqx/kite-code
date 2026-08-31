@@ -30,6 +30,7 @@ export const AGENT_API_CAPABILITIES = [
   'runs',
   'session_stream',
   'sessions',
+  'workspaces',
 ] as const;
 export const agentApiCapabilitySchema = z.enum(AGENT_API_CAPABILITIES);
 export type AgentApiCapability = z.infer<typeof agentApiCapabilitySchema>;
@@ -42,6 +43,7 @@ const capabilityListSchema = z
 export const AGENT_API_SERVER_INFO_SCHEMA = 'kite.agent-api.server-info.v1' as const;
 export const AGENT_API_CONTEXT_SCHEMA = 'kite.agent-api.context.v1' as const;
 export const AGENT_API_EXCHANGE_SCHEMA = 'kite.agent-api.exchange.v1' as const;
+export const AGENT_API_WORKSPACE_SCHEMA = 'kite.agent-api.workspace.v1' as const;
 export const AGENT_API_SESSION_SCHEMA = 'kite.agent-api.session.v1' as const;
 export const AGENT_API_RUN_SCHEMA = 'kite.agent-api.run.v1' as const;
 export const AGENT_API_INTERACTION_SCHEMA = 'kite.agent-api.interaction.v1' as const;
@@ -69,6 +71,14 @@ export const agentApiExchangeRequestSchema = z.object({
   required_capabilities: capabilityListSchema,
 });
 export type AgentApiExchangeRequest = z.infer<typeof agentApiExchangeRequestSchema>;
+
+export const agentApiWorkspaceSchema = z.object({
+  schema: z.literal(AGENT_API_WORKSPACE_SCHEMA),
+  workspace_id: agentApiIdentifierSchema,
+  display_name: agentApiShortTextSchema,
+  session_count: agentApiRevisionSchema,
+});
+export type AgentApiWorkspace = z.infer<typeof agentApiWorkspaceSchema>;
 
 export const agentApiContextSchema = z.object({
   schema: z.literal(AGENT_API_CONTEXT_SCHEMA),
@@ -228,6 +238,7 @@ export const agentApiSessionSchema = z
       .optional(),
     created_at: agentApiTimestampSchema.optional(),
     updated_at: agentApiTimestampSchema.optional(),
+    last_sequence: agentApiRevisionSchema.optional(),
   })
   .superRefine((value, context) => {
     if (
@@ -480,7 +491,13 @@ const pageBase = {
 };
 export const agentApiSessionPageSchema = z.object({
   schema: z.literal('kite.agent-api.session-page.v1'),
+  workspace_id: agentApiIdentifierSchema.optional(),
   items: z.array(agentApiSessionSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  ...pageBase,
+});
+export const agentApiWorkspacePageSchema = z.object({
+  schema: z.literal('kite.agent-api.workspace-page.v1'),
+  items: z.array(agentApiWorkspaceSchema).max(AGENT_API_LIMITS.maxPageLimit),
   ...pageBase,
 });
 export const agentApiRunPageSchema = z
@@ -525,6 +542,7 @@ export const agentApiCheckpointPageSchema = z
     }
   });
 export type AgentApiSessionPage = z.infer<typeof agentApiSessionPageSchema>;
+export type AgentApiWorkspacePage = z.infer<typeof agentApiWorkspacePageSchema>;
 export type AgentApiRunPage = z.infer<typeof agentApiRunPageSchema>;
 export type AgentApiHistoryPage = z.infer<typeof agentApiHistoryPageSchema>;
 export type AgentApiCheckpointPage = z.infer<typeof agentApiCheckpointPageSchema>;

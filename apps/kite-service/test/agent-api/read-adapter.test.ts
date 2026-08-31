@@ -160,6 +160,22 @@ function fixture(
             }
           : undefined,
     },
+    directory: {
+      list: () => [
+        {
+          workspaceId: 'workspace-1',
+          displayName: 'Workspace one',
+          sessions: [
+            {
+              sessionId: 'session-1',
+              name: 'Session one',
+              updatedAt: 1_777_680_000,
+              lastSequence: 2,
+            },
+          ],
+        },
+      ],
+    },
     async close() {
       closed += 1;
     },
@@ -176,6 +192,44 @@ async function dispatch(context: AgentApiReadContext, path: string, method = 'GE
 }
 
 describe('Agent API bounded read adapter', () => {
+  test('lists path-free Workspaces and their projected Sessions from one directory authority', async () => {
+    const f = fixture();
+    const workspaces = await dispatch(f.context, '/v1/workspaces?limit=10');
+    expect(workspaces).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.workspace-page.v1',
+          items: [
+            {
+              workspace_id: 'workspace-1',
+              display_name: 'Workspace one',
+              session_count: 1,
+            },
+          ],
+        },
+      },
+    });
+    expect(JSON.stringify(workspaces)).not.toContain('/');
+
+    const sessions = await dispatch(
+      f.context,
+      '/v1/workspaces/workspace-1/sessions?limit=10&status=running',
+    );
+    expect(sessions).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.session-page.v1',
+          workspace_id: 'workspace-1',
+          items: [{ session_id: 'session-1', status: 'running' }],
+        },
+      },
+    });
+  });
+
   test('joins a bounded Session page through the private Runtime query client', async () => {
     const f = fixture();
     const result = await dispatch(f.context, '/v1/sessions?limit=1&status=running');
@@ -253,6 +307,48 @@ describe('Agent API bounded read adapter', () => {
       direction: 'forward',
       limit: 1,
     });
+  });
+
+  test('reads only durable History after the requested sequence for bounded polling', async () => {
+    const f = fixture();
+    const incremental = await dispatch(
+      f.context,
+      '/v1/sessions/session-1/history?after_sequence=1&limit=10',
+    );
+    expect(incremental).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          through_sequence: 2,
+          items: [
+            { sequence: 2, content: { type: 'model.reasoning' } },
+            { sequence: 2, content: { type: 'model.message' } },
+          ],
+        },
+      },
+    });
+    expect(f.eventPages).toContainEqual({
+      sessionId: 'session-1',
+      afterSequence: 1,
+      direction: 'forward',
+      limit: 10,
+    });
+    expect(
+      await dispatch(
+        f.context,
+        '/v1/sessions/session-1/history?after_sequence=1&cursor=eyJub3QiOiJ2YWxpZCJ9',
+      ),
+    ).toMatchObject({ matched: true, result: { ok: false, status: 400 } });
+  });
+
+  test('hides Session reads outside the Browser directory authority', async () => {
+    const f = fixture();
+    expect(await dispatch(f.context, '/v1/sessions/session-hidden')).toMatchObject({
+      matched: true,
+      result: { ok: false, status: 404, code: 'not_found' },
+    });
+    expect(f.queries).toEqual([]);
   });
 
   test('rejects cursor corruption and boundary replacement without disclosing event identity', async () => {

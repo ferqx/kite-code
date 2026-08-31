@@ -13,6 +13,7 @@ import {
   agentApiServerInfoSchema,
   agentApiSessionListQuerySchema,
   agentApiSessionSchema,
+  agentApiWorkspaceSchema,
   assertAgentApiJsonValue,
   decodeAgentApiRequest,
   decodeAgentApiResponse,
@@ -45,6 +46,11 @@ describe('Agent API V1 contract', () => {
     expect(
       JSON.parse(JSON.stringify(decodeAgentApiResponse(agentApiProblemSchema, problem))),
     ).toEqual(problem);
+
+    const workspace = await fixture('workspace.json');
+    expect(
+      JSON.parse(JSON.stringify(decodeAgentApiResponse(agentApiWorkspaceSchema, workspace))),
+    ).toEqual(workspace);
   });
 
   test('keeps requests recursively closed and materializes only declared defaults', () => {

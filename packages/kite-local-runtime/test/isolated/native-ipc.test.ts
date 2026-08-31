@@ -11,7 +11,7 @@ import {
 } from '../../src/service';
 
 describe('Single-Service Native IPC contract', () => {
-  test('round-trips exact discovery and typed Web diagnostics', () => {
+  test('round-trips exact discovery', () => {
     const request = decodeKiteLocalNativeRequest({
       schema: KITE_LOCAL_NATIVE_REQUEST_SCHEMA_,
       requestId: 'request-1',
@@ -41,20 +41,9 @@ describe('Single-Service Native IPC contract', () => {
         accessToken: 'a'.repeat(43),
       }),
     ).toMatchObject({ operation: 'describe', outcome: 'ready' });
-
-    expect(
-      decodeKiteLocalNativeResponse({
-        schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-        requestId: 'request-2',
-        operation: 'web_ensure',
-        outcome: 'unavailable',
-        state: 'absent',
-        diagnostic: 'web_assets_missing',
-      }),
-    ).toMatchObject({ diagnostic: 'web_assets_missing' });
   });
 
-  test('rejects unknown fields, path confusion, mismatched stop diagnostics, and oversized frames', () => {
+  test('rejects unknown fields, retired Web lifecycle operations, and oversized frames', () => {
     const base = {
       schema: KITE_LOCAL_NATIVE_REQUEST_SCHEMA_,
       requestId: 'request-1',
@@ -78,23 +67,12 @@ describe('Single-Service Native IPC contract', () => {
         operation: 'web_stop',
         outcome: 'applied',
         state: 'absent',
-        diagnostic: 'web_stop_failed',
-      }),
-    ).toThrow();
-    expect(() =>
-      decodeKiteLocalNativeResponse({
-        schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-        requestId: 'request-2',
-        operation: 'web_stop',
-        outcome: 'noop',
-        state: 'ready',
       }),
     ).toThrow();
     expect(() =>
       encodeKiteLocalNativeFrame({
         ...base,
-        operation: 'web_ensure',
-        staticAssetRoot: `/${'x'.repeat(KITE_LOCAL_NATIVE_MAX_FRAME_BYTES)}`,
+        expectedBuildId: `build-${'x'.repeat(KITE_LOCAL_NATIVE_MAX_FRAME_BYTES)}`,
       }),
     ).toThrow(RangeError);
   });
