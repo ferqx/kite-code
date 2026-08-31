@@ -217,8 +217,10 @@ function inspectSource(path: string): void {
     ) {
       const specifier = node.moduleSpecifier.text;
       const allowedContract =
-        specifier === '@kite-ai/kite-app-contract' ||
-        specifier.startsWith('@kite-ai/kite-app-contract/');
+        specifier === '@kite-ai/agent-api-client' ||
+        specifier.startsWith('@kite-ai/agent-api-client/') ||
+        specifier === '@kite-ai/agent-api-contract' ||
+        specifier.startsWith('@kite-ai/agent-api-contract/');
       const forbidden =
         specifier === 'node' ||
         specifier.startsWith('node:') ||
@@ -230,33 +232,6 @@ function inspectSource(path: string): void {
         const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
         violations.push(
           `${relativePath}:${position.line + 1}: Kite Web may not import Node/Bun or Runtime authority ${specifier}`,
-        );
-      }
-    }
-    if (
-      relativePath === 'apps/kite-service/src/coordinator/production.ts' &&
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-      const specifier = node.moduleSpecifier.text;
-      const allowedManagedProcessImports = new Set([
-        '../web-gateway/control',
-        '../web-gateway/process-host',
-        '../web-gateway/process-manager',
-        '../web-gateway/process-state',
-        '../workspace-worker/process-host',
-        '../workspace-worker/process-manager',
-        '../workspace-worker/process-state',
-        '../workspace-worker/reservation',
-        '../workspace-worker/workspace-identity',
-      ]);
-      if (
-        (specifier.startsWith('../workspace-worker') || specifier.startsWith('../web-gateway')) &&
-        !allowedManagedProcessImports.has(specifier)
-      ) {
-        const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-        violations.push(
-          `${relativePath}:${position.line + 1}: Coordinator production imports a data-plane or barrel module ${specifier}`,
         );
       }
     }
@@ -273,7 +248,7 @@ function inspectSource(path: string): void {
     }
     if (
       (relativePath.startsWith('apps/kite-web/src/') ||
-        relativePath === 'packages/kite-app-contract/src/web.ts') &&
+        relativePath.startsWith('packages/agent-api-client/src/')) &&
       ts.isIdentifier(node) &&
       forbiddenWebAuthorityIdentifiers.has(node.text)
     ) {

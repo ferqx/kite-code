@@ -1,7 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
+import {
+  createRuntimeRunStartResourceResult,
+  createRuntimeStoredCommandReceipt,
+  type RuntimeStoredRun,
+} from '@kite-ai/runtime-host/storage';
 import {
   createKiteHomeRuntimeStorageForConnection,
   initializeKiteHomeStoreSchema,
@@ -138,6 +142,59 @@ describe('global Kite Home RuntimeStorage owner', () => {
     expect(() => owner.storage.sessions.loadSnapshot('source')).toThrow('closed');
     expect(() => owner.admissions.get(admitted.workspaceId)).toThrow('closed');
     expect(() => owner.artifactStore.readModel(ref)).toThrow('closed');
+  });
+
+  test('commits same-phase queued Run activation through the one Store writer', () => {
+    using database = preparedDatabase();
+    const owner = createKiteHomeRuntimeStorageForConnection<Event, State>({
+      database,
+      codec,
+      stateSchemaVersion: 27,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    });
+    const admitted = workspace('run', 'ignored');
+    owner.admissions.admit(admitted);
+    const queued: RuntimeStoredRun = Object.freeze({
+      sessionId: 'session-run',
+      runId: 'run-1',
+      startCommandId: 'start-1',
+      phase: 'building',
+      status: 'queued',
+      createdRevision: 1,
+      lastRevision: 1,
+      createdAtMs: 1_000,
+    });
+    owner.storage.transactions.commitDecision({
+      sessionId: 'session-run',
+      events: [{ type: 'created' }],
+      metadata: [{ eventId: 'event-1', revision: 1 }],
+      snapshot: state(admitted, 1),
+      commandReceipt: createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'session-run',
+          commandId: 'start-1',
+          requestDigest: 'a'.repeat(64),
+          targetSessionId: 'session-run',
+          committedAt: 1_000,
+          resourceResult: createRuntimeRunStartResourceResult(queued),
+        },
+        1,
+      ),
+      runMutation: { type: 'insert', run: queued },
+    });
+
+    expect(
+      owner.storage.runs.transition({
+        sessionId: 'session-run',
+        runId: 'run-1',
+        expectedLastRevision: 1,
+        next: Object.freeze({ ...queued, status: 'running', startedAtMs: 1_001 }),
+      }),
+    ).toBe('applied');
+    expect(owner.storage.runs.get('session-run', 'run-1')).toMatchObject({
+      status: 'running',
+      startedAtMs: 1_001,
+    });
   });
 
   test('commits initial Session, recovery identity and Controller together and rolls back together', () => {

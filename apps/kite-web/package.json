@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@kite-ai/kite-app-contract": "workspace:*",
+    "@kite-ai/agent-api-client": "workspace:*",
+    "@kite-ai/agent-api-contract": "workspace:*",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tooltip": "^1.2.8",

@@ -49,8 +49,6 @@ import {
 } from '../../../src/carrier';
 import { KITE_SERVICE_INSTANCE_HANDSHAKE_PATH } from '../../../src/carrier/native-loopback-carrier';
 import type { KiteServiceApplicationPort } from '../../../src/carrier/ports';
-import { createSingleServiceWebLifecycle } from '../../../src/web-gateway/service-lifecycle';
-import { createWebObserverCore } from '../../../src/web-observer';
 
 const ACCESS_TOKEN = 'A'.repeat(43);
 const CONTROL_TOKEN = 'B'.repeat(43);
@@ -168,100 +166,31 @@ describe('Kite Service Native loopback carrier', () => {
     expect(cookie.status).toBe(401);
   });
 
-  test('attaches Browser routes to the exact Service listener and Web stop leaves Native routes alive', async () => {
+  test('attaches Browser routes once to the exact Service listener', async () => {
     const root = createWebAssets();
     const fixture = createFixture();
     const carrier = track(fixture.carrier);
-    const web = createSingleServiceWebLifecycle({
-      createRouteOwner: (assets) =>
-        carrier.attachWebGateway({
-          staticAssetRoot: assets.root,
-          createObserver: createEmptyWebObserver,
-        }),
+    const web = carrier.attachWebGateway({
+      staticAssetRoot: root,
     });
 
-    const first = await web.ensure(root);
-    expect(first.outcome).toBe('ready');
-    if (first.outcome !== 'ready') throw new Error('expected Browser routes to be ready');
-    expect(first.origin).toBe(carrier.origin);
-    expect(first.launchUrl).toBe(carrier.origin);
-    expect(await fetch(`${carrier.origin}/`).then((response) => response.text())).toBe(
+    expect(web.origin).toBe(carrier.origin);
+    expect(await fetch(`${carrier.origin}/index.html`).then((response) => response.text())).toBe(
       '<html>single service</html>',
     );
+    const rootResponse = await fetch(`${carrier.origin}/`);
+    expect(rootResponse.status).toBe(200);
+    expect(rootResponse.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(rootResponse.headers.get('set-cookie')).toContain('Path=/;');
     expect(await fetch(`${carrier.origin}/healthz`).then((response) => response.text())).toBe('ok');
 
-    const bootstrap = await fetch(`${carrier.origin}/_kite/web/bootstrap`, {
-      method: 'POST',
-      headers: browserJsonHeaders(carrier.origin),
-      body: JSON.stringify({ schema: 'kite.app.web.bootstrap-request.v1' }),
-    });
-    expect(bootstrap.status).toBe(200);
-    expect(bootstrap.headers.get('set-cookie')).toBeNull();
-    const tabResponse = await fetch(`${carrier.origin}/_kite/web/tabs`, {
-      method: 'POST',
-      headers: browserJsonHeaders(carrier.origin),
-      body: JSON.stringify({ schema: 'kite.app.web.tab-create-request.v1' }),
-    });
-    expect(tabResponse.status).toBe(200);
-    const tab = (await tabResponse.json()) as {
-      readonly tabHandle: string;
-      readonly connectionGeneration: number;
-    };
-
-    const browserOnNative = await fetch(
-      `${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`,
-      {
-        method: 'POST',
-        headers: browserJsonHeaders(carrier.origin),
-        body: '{}',
-      },
-    );
-    expect(browserOnNative.status).toBe(401);
-    const nativeOnBrowser = await fetch(`${carrier.origin}/_kite/web/directory`, {
-      method: 'POST',
-      headers: {
-        ...browserJsonHeaders(carrier.origin),
-        authorization: `${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`,
-      },
-      body: JSON.stringify({ schema: 'kite.app.web.directory-request.v1' }),
-    });
-    expect(nativeOnBrowser.status).toBe(403);
-    const mutation = await fetch(`${carrier.origin}/_kite/web/mutate`, {
-      method: 'POST',
-      headers: browserJsonHeaders(carrier.origin, undefined, tab.tabHandle),
-      body: '{}',
-    });
-    expect(mutation.status).toBe(404);
-
-    const browserSocket = await openBrowserSocket(carrier);
-    const browserMessages = new SocketMessages(browserSocket);
-    browserSocket.send(JSON.stringify({ type: 'initialize', tabHandle: tab.tabHandle }));
-    await expect(browserMessages.next()).resolves.toEqual({
-      schema: 'kite.app.web.ws-initialized.v1',
-      type: 'initialized',
-      connectionGeneration: tab.connectionGeneration,
-    });
-    browserSocket.close(1000, 'done');
+    expect((await fetch(`${carrier.origin}/_kite/web/bootstrap`)).status).toBe(404);
+    expect((await fetch(`${carrier.origin}/_kite/web/directory`)).status).toBe(404);
     expect(() =>
       carrier.attachWebGateway({
         staticAssetRoot: root,
-        createObserver: createEmptyWebObserver,
       }),
     ).toThrow('already has');
-
-    await expect(web.stop()).resolves.toEqual({
-      outcome: 'applied',
-      state: 'absent',
-    });
-    expect(await fetch(`${carrier.origin}/`).then((response) => response.status)).toBe(404);
-    expect(await fetch(`${carrier.origin}/readyz`).then((response) => response.text())).toBe(
-      'ready',
-    );
-
-    const restarted = await web.ensure(root);
-    expect(restarted.outcome).toBe('ready');
-    expect(restarted.outcome === 'ready' ? restarted.origin : '').toBe(carrier.origin);
-    await web[Symbol.asyncDispose]();
   });
 
   test('serves an authenticated exact instance handshake and stops serving it after close', async () => {
@@ -1435,53 +1364,6 @@ function jsonHeaders(authorization: string): Record<string, string> {
   return { authorization, 'content-type': 'application/json' };
 }
 
-function browserJsonHeaders(
-  origin: string,
-  cookie?: string,
-  tabHandle?: string,
-): Record<string, string> {
-  return {
-    origin,
-    'content-type': 'application/json',
-    'sec-fetch-site': 'same-origin',
-    'sec-fetch-mode': 'cors',
-    ...(cookie ? { cookie } : {}),
-    ...(tabHandle ? { 'x-kite-web-tab': tabHandle } : {}),
-  };
-}
-
-async function openBrowserSocket(carrier: KiteServiceCarrier): Promise<WebSocket> {
-  return new Promise<WebSocket>((resolvePromise, reject) => {
-    const socket = new WebSocket(`${carrier.origin.replace('http:', 'ws:')}/_kite/web/client`, {
-      headers: {
-        Origin: carrier.origin,
-        'Sec-Fetch-Mode': 'websocket',
-        'Sec-Fetch-Site': 'same-origin',
-      },
-    } as unknown as string[]);
-    const timer = setTimeout(
-      () => reject(new Error('Single-Service Browser socket open timed out')),
-      1_000,
-    );
-    socket.addEventListener(
-      'open',
-      () => {
-        clearTimeout(timer);
-        resolvePromise(socket);
-      },
-      { once: true },
-    );
-    socket.addEventListener(
-      'error',
-      () => {
-        clearTimeout(timer);
-        reject(new Error('Single-Service Browser socket failed to open'));
-      },
-      { once: true },
-    );
-  });
-}
-
 function initializeRequest() {
   return {
     jsonrpc: '2.0' as const,
@@ -1723,30 +1605,4 @@ function createWebAssets(): string {
   writeFileSync(join(root, 'api-docs', 'openapi.json'), '{}');
   writeFileSync(join(root, 'assets', 'app.js'), 'export {};');
   return root;
-}
-
-function createEmptyWebObserver(binding: {
-  readonly tabHandle: string;
-  readonly connectionGeneration: number;
-}) {
-  return createWebObserverCore({
-    directory: { list: () => [] },
-    history: {
-      loadSession: async (sessionId) => ({
-        sessionId,
-        lastSequence: 0,
-        records: [],
-      }),
-    },
-    live: {
-      subscribe: () => ({
-        [Symbol.asyncIterator]: () => ({
-          next: async () => ({ done: true, value: undefined as never }),
-        }),
-      }),
-    },
-    gatewayInstanceId: 'instance-1',
-    contractRevision: 'kite-app-web-observer-v1',
-    createTabBinding: () => binding,
-  });
 }

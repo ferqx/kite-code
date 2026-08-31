@@ -13,15 +13,12 @@ import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
-import type { WebObserverHistoryPort } from '../web-observer/core';
 import { projectRuntimeClientEvent, projectRuntimeModelResponseRequestId } from './event-projector';
-import { projectRuntimeClientText } from './safe-text';
+import { projectRuntimeClientText, projectRuntimeSessionTitle } from './safe-text';
 
 type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
   | (() => RuntimeLogQueryPort<RuntimeEvent>);
-
-const MAX_OBSERVER_HISTORY_RECORDS = 4_096;
 
 export interface KiteRuntimeHistoryCompatibilitySession {
   readonly threadId: string;
@@ -116,7 +113,7 @@ function allCurrentSessions(
             eventTypes: ['user.message_appended'],
           }).entries[0]?.event;
           if (first?.type !== 'user.message_appended') return projected;
-          const displayName = projectRuntimeClientText(first.content, 80).trim();
+          const displayName = projectRuntimeSessionTitle(first.content);
           return displayName.length === 0
             ? projected
             : { ...projected, displayName, needsSmartName: false };
@@ -268,66 +265,6 @@ export function projectRuntimeHistoryEvents(
   const terminal = projectRuntimeClientEvent(event, { sessionRevision });
   if (terminal) projected.push(terminal);
   return projected;
-}
-
-/**
- * Current-format Web Observer History retains each durable source sequence.
- * It has no compatibility parameter, so a read can never import or write a
- * legacy Session as a side effect.
- */
-export function createKiteRuntimeObserverHistoryPort(
-  logs: RuntimeLogQuerySource,
-): WebObserverHistoryPort {
-  return Object.freeze({
-    async loadSession(sessionId: string) {
-      return withLogs(logs, (reader) => {
-        const all: Array<{
-          readonly sequence: number;
-          readonly events: readonly RuntimeClientEvent[];
-        }> = [];
-        let afterSequence: number | undefined;
-        let observedLastSequence: number | undefined;
-        for (;;) {
-          const page = reader.listEvents({
-            sessionId,
-            ...(afterSequence === undefined ? {} : { afterSequence }),
-            direction: 'forward',
-            limit: 200,
-          });
-          if (
-            observedLastSequence !== undefined &&
-            page.observedLastSequence !== observedLastSequence
-          ) {
-            throw new Error('Runtime observer history changed during the pinned read.');
-          }
-          observedLastSequence = page.observedLastSequence;
-          for (const record of page.entries) {
-            if (afterSequence !== undefined && record.sequence <= afterSequence) {
-              throw new Error('Runtime observer history pagination did not advance.');
-            }
-            afterSequence = record.sequence;
-            all.push({
-              sequence: record.sequence,
-              events: projectRuntimeHistoryEvents(record.event, record.sequence),
-            });
-            if (all.length > MAX_OBSERVER_HISTORY_RECORDS) {
-              throw new Error('Runtime observer History exceeds its bounded record limit.');
-            }
-          }
-          if (!page.hasMore) {
-            return Object.freeze({
-              sessionId,
-              lastSequence: observedLastSequence,
-              records: Object.freeze(all),
-            });
-          }
-          if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
-            throw new Error('Runtime observer history pagination cursor is invalid.');
-          }
-        }
-      });
-    },
-  });
 }
 
 /** App-owned bridge from the raw decoded log port to fixed client-safe history DTOs. */

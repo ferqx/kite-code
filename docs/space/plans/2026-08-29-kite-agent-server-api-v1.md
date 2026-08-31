@@ -6,6 +6,11 @@
 
 优先级：P1
 
+局部替代（2026-08-31）：ADR-0155与
+[`Web REST客户端收敛实施方案`](2026-08-31-web-rest-client-convergence.md)已替代本计划中“Web只展示静态API docs、Browser不进入data plane”的
+未来边界。KASAPI-00A～02D及Run Store已完成证据继续有效；未完成mutation、SSE、SDK与release任务必须在KWR完成后rebase。本计划不得再按
+ADR-0147/0149旧Browser companion-only结论扩展Web。
+
 方案来源：[`Kite Agent Server API V1 RFC`](../../design/2026-08-29-kite-agent-server-api-v1-rfc.md)
 
 实施基线：`feat/kite-coordinator-workspace-worker-web-v1@e4ab1c374b2fdfa9f9a0958c1ffd38f9ed1cd16b`

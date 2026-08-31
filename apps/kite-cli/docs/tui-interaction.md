@@ -44,29 +44,19 @@
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
-## Local Service 与 Kite Web 状态
+## Service 与 Kite Web 状态
 
-TUI只保留`/status`：先读取当前Service descriptor与source/release composition expected build，再调用可选的`discoverWeb` callback完成asset
-preflight和single-Service `web_ensure`；一条结果同时显示PID、startedAt、actual/expected build与release owner返回的launch URL。
-callback缺失或ensure失败时Web字段显示固定unavailable文案。该动作可以按需attach同listener Browser route，但不启动第二进程、
-不创建Runtime Session、不发送Runtime command，也不取得Controller capability。
+TUI启动时唯一Service已经验证并挂载同源Web assets。`/status`在同一输出中显示Service PID、启动时间、actual/expected build
+与Kite Web稳定根地址；Web地址由可选的`discoverWeb` callback通过Native `describe`取得。callback缺失或发现失败时显示固定
+unavailable文案。该动作不attach route、不创建Runtime Session、不发送Runtime command，也不取得Controller capability；不再提供
+单独的TUI `/web`命令。
 
-`/web`不再解析、不出现在补全或帮助中，也不保留alias。`web_status`保持CLI纯只读；TUI `/status`的ensure/open不mint Browser认证token。
-candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
+当前没有`web_ensure/web_status/web_stop`。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
 Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
-
-## 开发态刷新
-
-- `/status`不发送Runtime/App Control mutation，也不把build比较提升为admission authority；Web ensure/open只管理同一Service的Browser observer route。
-- source模式允许普通`bun run tui`复用wire-compatible resident `dev:` Service；actual/expected不一致时首次进入主界面显示一次warning，
-  `/status`持续保留完整identity用于复核。installed模式仍由manager exact build gate拒绝漂移，不能降级为warning。
-- `bun run tui:fresh`通过同一manager显式restart，只有`applied + ready`才进入TUI；busy、uncertain或失败直接停止，不能强杀、删除Store、
-  重放mutation或静默回退普通ensure。
 
 ## 单一交互表面
 
-- Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界；`/status`只写入本地消息区，
-  不新增Overlay或交互authority。
+- Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。
 - Slash suggestion 只拥有 partial completion；已经精确匹配的命令由主输入的 Enter 路径提交一次。
   Esc 可关闭当前 suggestion，后续输入变化才重新打开，不能由 suggestion 与 TextInput 各提交一次或互相吞掉。
 - Modal 可见时隐藏主输入提示、Footer 状态栏和 slash suggestion，不允许两个交互表面同时取得键盘 authority。

@@ -46,7 +46,7 @@ describe('runtime workspace package gate', () => {
   test('accepts the authoritative package and two-App graph', () => {
     const analysis = analyzeRuntimePackages(process.cwd());
     expect(analysis.violations).toEqual([]);
-    expect(analysis.packages).toHaveLength(15);
+    expect(analysis.packages).toHaveLength(16);
     expect(analysis.compositionRoots).toEqual(['apps/kite-service/src/bootstrap.ts']);
   });
 

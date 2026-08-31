@@ -18,6 +18,7 @@ describe('repository knowledge system', () => {
   test('keeps every workspace README on the V2 owner-authority template', () => {
     const readmes = [
       'packages/agent-api-contract/README.md',
+      'packages/agent-api-client/README.md',
       'packages/runtime-contract/README.md',
       'packages/agent-kernel/README.md',
       'packages/runtime-spi/README.md',

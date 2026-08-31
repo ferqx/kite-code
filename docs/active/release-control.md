@@ -18,7 +18,7 @@ G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitH
 构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
-候选支持入口包括本地TUI、用户在场的foreground CLI，以及 private loopback Web Observer；三者按canonical Kite Home复用唯一Local
+候选支持入口包括本地TUI、用户在场的foreground CLI，以及private loopback Web REST client；三者按canonical Kite Home复用唯一Local
 Service、Store 9与loopback HTTP listener。Coordinator、Workspace Worker和独立Gateway只保留内部源码测试，不存在release entrypoint、
 migration command或`web recover`。internal stdio、development loopback WebSocket、
 browser与Desktop reference只作内部child或conformance，不能写成remote/public支持。KLSV1-06仅有
@@ -45,7 +45,8 @@ Ubuntu/Windows hosted evidence仍未完成。
 
 候选中的`kite`与`kite-tui`由release entrypoint注入managed single-Service connector；前台`run/resume`、TUI、`service *`和
 `web`默认ensure/复用同一Service。CLI不构造legacy Coordinator或Store migration owner。
-Web命令先做asset preflight，再通过native IPC注册/status/stop同Service listener中的Browser route；TUI `/web`调用ensure/open；connector/manager失败直接暴露，不
+Service在ready前验证并挂载candidate Web assets；CLI `web`与TUI `/status`只ensure同一Service并从native `describe`返回稳定根地址；
+`/status`同时展示Service PID、启动时间和actual/expected build，不保留单独的TUI `/web`。connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
 source/installed client只ensure每个canonical Kite Home唯一的Service；每个logical connection使用独立client identity与generation，
 Service restart时通过rotating capability恢复Controller，不启动Workspace Worker。Manager的spawn/readiness outcome-unknown由native
@@ -54,7 +55,8 @@ managed release/source composition构造neutral child environment时只复制固
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一single-Service bundle所需的CLI/TUI/Service/Web、package/root build
 inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
-摘要不可用或越界时fail closed，dirty source不能复用旧Service。
+摘要不可用或越界时fail closed。dirty source产生不同build identity，但Protocol/client-contract兼容时可连接同home既有ready Service并使用
+该Service自己的Web assets；它不能以新build执行`service stop/restart`，也不会隐式替换owner。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装器写入 v2 managed-install marker 与唯一 `active` regular-file
@@ -87,7 +89,7 @@ installer contract fixture同样默认使用当前runner的native target与execu
 stub时由该runner原生编译测试executable。跨target拒绝测试必须显式构造另一target，不能让固定macOS fixture在
 Linux/Windows抢先触发target gate并掩盖待测安装不变量；busy upgrade对旧payload与stable launcher的identity断言也必须使用该
 native suffix，不能在Windows读取无后缀的伪路径。
-Standalone resolver 必须覆盖十五个 workspace package（含`agent-api-contract`）的全部 public export，并直接解析到仓库 source；候选构建
+Standalone resolver必须覆盖十六个workspace package（含`agent-api-contract`与`agent-api-client`）的全部public export，并直接解析到仓库source；候选构建
 不得穿过 `apps/kite-cli/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
@@ -129,11 +131,7 @@ root 的 previous candidate。uninstall 在删除前
 立即停止，不删除任何内容，也不扩大删除范围。
 
 upgrade/rollback 不停止、不 force-kill、也不删除仍在运行的旧 candidate；pointer 切换只影响后续新启动进程，
-并要求 target candidate 已完整校验。切换后首次由新candidate启动的managed client负责内部收敛旧Service：它使用reservation绑定的旧build
-identity精确验证/stop旧owner，确认退出后启动当前companion；installer本身不取得该进程authority，也不要求用户手工结束旧进程。
-managed manager每次换代前重新读取marker/active pointer并要求caller build仍是current candidate；切换前已启动的旧CLI/TUI不能反向停止
-新Service或重新拉起旧companion。
-只有 destructive uninstall 才在删除前调用当前 candidate 的普通
+并要求 target candidate 已完整校验。只有 destructive uninstall 才在删除前调用当前 candidate 的普通
 `kite service stop`、确认 `service status --json` 为 `applied + absent`，随后取得同一 Native lifecycle fence。
 `service_busy`、identity uncertain、state 残留或任何 stop/status 失败都保持 active candidate 与 managed tree 不变；
 installer 不手工清 state。
@@ -170,10 +168,9 @@ CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层
 entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标；launcher传入的`KITE_CODE_RELEASE_ROOT`是installed Service
 resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
 
-Web source/installed ensure在任何Service lifecycle访问前执行fixed asset preflight；缺失返回`web_assets_missing`，不得创建DB、socket或
-Browser route。asset有效后才ensure同一Service并在其HTTP listener内注册Browser route；本地Web不创建Browser认证状态，status不mint token；
-`bun run web:dev`依次build、preflight并ensure single-Service。这些路径不让Browser或Vite dev server取得Native
-lifecycle authority。
+source `server`/`tui`先build fixed assets；source/installed Service child在发布ready前执行preflight并把Browser surface挂到同一个
+HTTP listener。缺失时Service启动失败，不存在独立Browser route status/stop或Web专用Native operation；这些路径不让Browser或Vite dev
+server取得Native lifecycle authority。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；

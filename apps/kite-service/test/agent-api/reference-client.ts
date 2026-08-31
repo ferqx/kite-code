@@ -4,6 +4,7 @@ import {
   type AgentApiCheckpointPreview,
   type AgentApiContext,
   type AgentApiHistoryPage,
+  type AgentApiLogPage,
   type AgentApiProblem,
   type AgentApiServerInfo,
   type AgentApiSession,
@@ -12,6 +13,7 @@ import {
   agentApiCheckpointPreviewSchema,
   agentApiContextSchema,
   agentApiHistoryPageSchema,
+  agentApiLogPageSchema,
   agentApiProblemSchema,
   agentApiServerInfoSchema,
   agentApiSessionPageSchema,
@@ -76,6 +78,14 @@ export class AgentApiReferenceClient {
       await this.raw(`/v1/sessions/${sessionId}/history${query}`),
       200,
       agentApiHistoryPageSchema,
+    );
+  }
+
+  async logs(sessionId: string, query = ''): Promise<AgentApiLogPage> {
+    return decodeSuccess(
+      await this.raw(`/v1/sessions/${sessionId}/logs${query}`),
+      200,
+      agentApiLogPageSchema,
     );
   }
 

@@ -1,44 +1,50 @@
-# Coordinator、Workspace Worker 与 Web 模块边界
+# Coordinator、Workspace 与 Web 当前边界
 
 状态：active
 
 读取时机：修改`packages/kite-local-runtime/src/coordinator/`、`apps/kite-service/src/workspace-worker/`、
-`apps/kite-service/src/web-observer/`、`apps/kite-service/src/web-gateway/`、`packages/kite-app-contract/src/web.ts`或`apps/kite-web/`时。
+`apps/kite-service/src/web-gateway/`、`apps/kite-service/src/agent-api/`、`packages/agent-api-client/`或`apps/kite-web/`时。
 
-验证：`bun test packages/kite-local-runtime/test/coordinator.test.ts apps/kite-service/test/workspace-worker apps/kite-service/test/web-observer apps/kite-service/test/web-gateway packages/kite-app-contract/test/web.test.ts`、`bun run --cwd apps/kite-web typecheck`、`bun run --cwd apps/kite-web test`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
+验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts apps/kite-service/test/agent-api
+apps/kite-service/test/web-gateway tests/release/single-service-real-child.test.ts`、`bun run --cwd apps/kite-web test`、
+`bun run --cwd apps/kite-web typecheck`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`、
+`bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
-相关：ADR-0147、ADR-0148、ADR-0152、ADR-0154、[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
+相关：ADR-0147、ADR-0148、ADR-0152、ADR-0154、ADR-0155、ADR-0156、
+[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
 
 ## 当前拓扑
 
-正式source/release只有一个Local Service、一个Store 9和一个loopback HTTP listener。Coordinator、per-Workspace Worker与独立Web Gateway
-不再是可执行拓扑；对应release entrypoint、client composition、migration命令和`web recover`均不存在。`packages/kite-local-runtime/src/coordinator/`
-以及Service内旧process/layout模块只保留尚未删除的内部源码和测试，不得被普通startup、CLI/TUI、release connector或Browser选择。
+正式source/release每个canonical Kite Home只有一个Local Service、一个Store 9、一个`kite.sqlite`和一个loopback HTTP listener。TUI、
+CLI、`service *`与`web`共用同一个manager/reservation。Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
+process/control/state与Coordinator production glue已经删除，不能由普通startup、release connector或Browser恢复。
 
-`apps/kite-service/src/workspace-worker/`中仍被单Service复用的Workspace identity、Controller adapter、Trust、effect和execution组件是
-in-process领域模块，不拥有Worker process、per-Workspace DB、idle lifecycle或第二writer。Store 7/8 layout与Catalog不是current Store 9的
-fallback或兼容source。
+Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
+`apps/kite-service/src/workspace-worker/`中仍被single-Service消费的identity、Trust、effect与execution组件是in-process领域模块。
 
-## Web Observer与Browser边界
+## Web REST边界
 
-`packages/kite-app-contract/src/web.ts`是Browser-safe semantic contract。Browser只取得opaque Workspace/Session summary、safe History和
-observer stream；绝不返回canonical Workspace path、Store path、native capability、credential、Controller或mutation route。
+Web是同一Service `/v1`的薄只读客户端：访问`GET /`时Service创建或复用短期HttpOnly cookie；Workspace、Session、
+History与Checkpoint通过`@kite-ai/agent-api-contract`定义的bounded、path-free REST读取。Browser principal是service-scoped read-only
+principal，Session direct read仍必须属于Store 9 Directory可见范围。Browser cookie不能进入Native/Controller/mutation route，Agent bearer
+也不能混入Browser请求。
 
-Service-owned Web carrier只bind `127.0.0.1`，验证Host、Origin、Fetch Metadata、body/queue bound、CSP与content type。本地Service以
-OS用户与loopback作为当前信任边界，Browser route不使用fragment launch token、Cookie或WebSocket认证ticket。tab handle只是有界连接标识；
-tab/socket replacement只关闭旧Observer binding，不取消Turn、effect或Controller。
-当前无认证Browser wire的semantic revision为`kite-app-web-observer-v2`；Browser在tab create前核对bootstrap revision，Native
-`web_ensure`在route attach前核对同一revision。revision drift不能用source build兼容复用或样例fallback掩盖。
+Service-owned static carrier随Service启动固定提供`/`、`/index.html`、`/assets/*`、`/api-docs`与精确OpenAPI asset；Browser业务BFF
+`/_kite/web/tabs|directory|history|client`、业务WebSocket与WebObserver projection已删除。Browser logout只撤销当前session；Web route
+只有在Service stop时关闭。
 
-`kite web`在任何Service lifecycle状态前验证static root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
-`web_assets_missing`且不spawn、不创建DB/socket。`web_ensure`attach同一listener并返回稳定的普通loopback URL；`web_status`只读返回
-`absent|ready`、origin和asset digest；`web_stop`只卸载Browser route并关闭其tab/socket。
+`GET /`直接返回index并创建或复用短期read-only HttpOnly Browser session；CLI/TUI ensure同一Service并从Native `describe`返回稳定的
+`origin/`。规范入口不暴露`/index.html`，也不存在launch token或Browser exchange route。
 
-Browser打开URL不能启动本机server。Vite dev server只服务前端asset；`bun run web:dev`执行build、preflight和single-Service ensure。
-remote/LAN/public Web、多租户、Browser mutation与server-side credential custody不受支持。
+运行中Session只使用页面可见时的单一有界REST增量轮询；当前没有SSE、业务WebSocket、offline cache、Browser mutation、remote/LAN、
+多租户或server-side Provider credential custody。后续事件transport必须由实测需求和新决策驱动，不能恢复dual read。
 
-## Fail-closed边界
+## 启动与fail-closed边界
 
-unknown/malformed frame、Trust drift、Workspace identity drift、Controller generation mismatch、Browser/native route confusion、Gateway route
-draining和History gap/overflow继续fail closed。该安全边界不授权恢复旧Coordinator/Worker/Gateway process、Store layout、credential file或
-filesystem Artifact root。
+Service在发布ready前验证release composition提供的immutable static root、`index.html`、OpenAPI及hashed JS/CSS；失败则整个Service
+启动失败。TUI-first、`kite web`-first与并发ensure都复用同一ready Service；custom home只在相同canonical profile内复用。Browser打开
+URL与Vite dev server均无本机进程启动authority。
+
+unknown route、credential混用、Origin/Fetch Metadata错误、Directory scope漂移、History cursor/boundary失效、Controller generation漂移、
+Protocol/client-contract不兼容与process identity不确定继续fail closed。兼容客户端的build drift允许复用同一个ready Service及其Web assets，
+但跨build lifecycle mutation仍拒绝；这些规则不授权第二Service、第二Store、兼容BFF或旧Coordinator恢复路径。

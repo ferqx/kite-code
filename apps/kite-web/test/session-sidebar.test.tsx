@@ -12,6 +12,8 @@ test('keeps a long Session display name inside the sidebar item', () => {
         {
           workspaceId: 'workspace-1',
           label: 'Workspace',
+          sessionCount: 1,
+          sessionState: 'loaded',
           sessions: [
             {
               sessionId: 'session-1',
@@ -25,6 +27,7 @@ test('keeps a long Session display name inside the sidebar item', () => {
       ]}
       selectedSessionId={null}
       onSelect={() => undefined}
+      onExpandWorkspace={() => undefined}
     />,
   );
 

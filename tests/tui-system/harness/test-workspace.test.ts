@@ -6,7 +6,6 @@ import {
   createSqliteRuntimeStorage,
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-  sqliteCurrentRuntimeStorePath,
 } from '@kite-ai/runtime-storage-sqlite';
 import {
   createTestWorkspace,
@@ -79,6 +78,10 @@ function writeStoreObserverFixture(
   return storage;
 }
 
+function runtimePath(workspace: Pick<TestWorkspace, 'home'>): string {
+  return join(workspace.home, '.kite-code', 'kite.sqlite');
+}
+
 describe('TUI persisted Runtime observers', () => {
   let workspace: TestWorkspace | undefined;
 
@@ -110,10 +113,8 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteCurrentRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
-    mkdirSync(runtimePath);
+    const databasePath = runtimePath(workspace);
+    mkdirSync(databasePath);
 
     expect(() => observePersistedSessionIds(workspace!)).toThrow(
       'Failed to observe isolated Runtime Store',
@@ -122,10 +123,8 @@ describe('TUI persisted Runtime observers', () => {
 
   test('treats an existing database without Runtime schema as not ready', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteCurrentRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
-    new Database(runtimePath).close();
+    const databasePath = runtimePath(workspace);
+    new Database(databasePath).close();
 
     expect(observePersistedSessionIds(workspace)).toMatchObject({ status: 'initializing' });
     expect(observePersistedSessionSummaries(workspace)).toMatchObject({ status: 'initializing' });
@@ -145,10 +144,8 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database is corrupt', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteCurrentRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
-    writeFileSync(runtimePath, 'not a sqlite database');
+    const databasePath = runtimePath(workspace);
+    writeFileSync(databasePath, 'not a sqlite database');
 
     expect(() => observePersistedSessionSummaries(workspace!)).toThrow(
       'Failed to observe isolated Runtime Store',
@@ -157,11 +154,9 @@ describe('TUI persisted Runtime observers', () => {
 
   test('reads exact persistence evidence without competing with the child writer', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteCurrentRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
+    const databasePath = runtimePath(workspace);
     const store = writeStoreObserverFixture(
-      runtimePath,
+      databasePath,
       'thread-a',
       [
         {
@@ -200,7 +195,7 @@ describe('TUI persisted Runtime observers', () => {
     // BEGIN IMMEDIATE holds the single writer slot. A harness observer that
     // reran RuntimeStore initialization would contend here; readonly queries
     // must remain available while the real child owns that slot.
-    const writer = new Database(runtimePath);
+    const writer = new Database(databasePath);
     writer.run('PRAGMA journal_mode = WAL');
     writer.run('BEGIN IMMEDIATE');
     try {
@@ -276,10 +271,8 @@ describe('TUI persisted Runtime observers', () => {
 
   test('matches RuntimeStore name fallback when the first user message is empty', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteCurrentRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
-    const store = writeStoreObserverFixture(runtimePath, 'thread-empty', [
+    const databasePath = runtimePath(workspace);
+    const store = writeStoreObserverFixture(databasePath, 'thread-empty', [
       {
         type: 'user.message_appended',
         messageId: 'message-empty',

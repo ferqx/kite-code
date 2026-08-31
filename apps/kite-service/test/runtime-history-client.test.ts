@@ -10,7 +10,6 @@ import type { RuntimeEvent } from '../src/bootstrap/runtime/state-runtime';
 import {
   createKiteRuntimeHistoryClient,
   createKiteRuntimeObserverHistoryClient,
-  createKiteRuntimeObserverHistoryPort,
 } from '../src/runtime-client/history-adapter';
 
 describe('Kite Runtime History Client adapter', () => {
@@ -336,60 +335,6 @@ describe('Kite Runtime History Client adapter', () => {
     );
     expect(listCalls).toBeGreaterThan(0);
     expect(eventCalls).toBe(0);
-  });
-
-  test('retains durable source sequence in the Web Observer History port', async () => {
-    const logs: RuntimeLogQueryPort<RuntimeEvent> = {
-      listSessions: () => ({
-        entries: [
-          {
-            sessionId: 'observer-session',
-            name: 'Observer',
-            updatedAt: 42,
-            lastSequence: 7,
-          },
-        ],
-        hasMore: false,
-      }),
-      listEvents: () => ({
-        entries: [
-          {
-            sessionId: 'observer-session',
-            sequence: 7,
-            eventId: 'event-7',
-            createdAt: 42,
-            event: {
-              type: 'user.message_appended',
-              messageId: 'message-7',
-              content: 'observer message',
-            } as RuntimeEvent,
-          },
-        ],
-        hasMore: false,
-        observedLastSequence: 7,
-      }),
-      close: () => undefined,
-    };
-
-    await expect(
-      createKiteRuntimeObserverHistoryPort(logs).loadSession('observer-session'),
-    ).resolves.toEqual({
-      sessionId: 'observer-session',
-      lastSequence: 7,
-      records: [
-        {
-          sequence: 7,
-          events: [
-            {
-              type: 'user.message',
-              messageId: 'message-7',
-              kind: 'task',
-              text: 'observer message',
-            },
-          ],
-        },
-      ],
-    });
   });
 
   test('forwards receipt-bearing deletion input through the App storage owner proxy', () => {

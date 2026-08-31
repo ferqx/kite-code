@@ -21,7 +21,9 @@ const sessionProjection = {
 function fixture(
   options: {
     readonly boundaryEventId?: string;
+    readonly directorySessionName?: string;
     readonly events?: readonly RuntimeLogEventEntry[];
+    readonly projectionDisplayName?: string;
   } = {},
 ) {
   const queries: RuntimeQuery[] = [];
@@ -72,7 +74,10 @@ function fixture(
               status: 'ok',
               queryType: query.type,
               revision: sessionProjection.revision,
-              session: sessionProjection,
+              session: {
+                ...sessionProjection,
+                displayName: options.projectionDisplayName ?? sessionProjection.displayName,
+              },
             }
           : { status: 'not_found', queryType: query.type, code: 'session_not_found' };
       }
@@ -123,7 +128,8 @@ function fixture(
         const candidates = events.filter(
           (entry) =>
             entry.sequence > (request.afterSequence ?? 0) &&
-            entry.sequence < (request.beforeSequence ?? Number.MAX_SAFE_INTEGER),
+            entry.sequence < (request.beforeSequence ?? Number.MAX_SAFE_INTEGER) &&
+            (!request.eventTypes || request.eventTypes.includes(entry.type)),
         );
         const selected = candidates.slice(0, request.limit);
         return {
@@ -160,6 +166,63 @@ function fixture(
             }
           : undefined,
     },
+    modelContexts: {
+      get: (sessionId, invocationId) =>
+        sessionId === 'session-1' && invocationId === 'invocation-1'
+          ? {
+              sessionId,
+              invocationId,
+              sequence: 3,
+              purpose: 'primary_agent',
+              provider: 'openai-compatible',
+              model: 'model-1',
+              systemPrompt: 'You are Kite.\n\nUse the available tools carefully.',
+              messages: [
+                { role: 'user', parts: [{ type: 'text', text: 'Inspect this workspace.' }] },
+                {
+                  role: 'assistant',
+                  parts: [
+                    {
+                      type: 'tool_call',
+                      toolCallId: 'tool-call-1',
+                      toolName: 'read_file',
+                      inputJson: '{"path":"README.md"}',
+                    },
+                  ],
+                },
+              ],
+              tools: [
+                {
+                  name: 'read_file',
+                  description: 'Read a file.',
+                  inputSchemaJson: '{"type":"object"}',
+                },
+              ],
+              settings: {
+                transport: 'stream',
+                temperature: 0,
+                maxOutputTokens: 4_096,
+                stopPolicy: { kind: 'single_step', maxSteps: 1 },
+              },
+            }
+          : undefined,
+    },
+    directory: {
+      list: () => [
+        {
+          workspaceId: 'workspace-1',
+          displayName: 'Workspace one',
+          sessions: [
+            {
+              sessionId: 'session-1',
+              name: options.directorySessionName ?? 'Session one',
+              updatedAt: 1_777_680_000,
+              lastSequence: 2,
+            },
+          ],
+        },
+      ],
+    },
     async close() {
       closed += 1;
     },
@@ -176,6 +239,84 @@ async function dispatch(context: AgentApiReadContext, path: string, method = 'GE
 }
 
 describe('Agent API bounded read adapter', () => {
+  test('lists path-free Workspaces and their projected Sessions from one directory authority', async () => {
+    const f = fixture();
+    const workspaces = await dispatch(f.context, '/v1/workspaces?limit=10');
+    expect(workspaces).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.workspace-page.v1',
+          items: [
+            {
+              workspace_id: 'workspace-1',
+              display_name: 'Workspace one',
+              session_count: 1,
+            },
+          ],
+        },
+      },
+    });
+    expect(JSON.stringify(workspaces)).not.toContain('/');
+
+    const sessions = await dispatch(
+      f.context,
+      '/v1/workspaces/workspace-1/sessions?limit=10&status=running',
+    );
+    expect(sessions).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.session-page.v1',
+          workspace_id: 'workspace-1',
+          items: [{ session_id: 'session-1', status: 'running' }],
+        },
+      },
+    });
+  });
+
+  test('derives an unnamed Workspace Session title from its first user message', async () => {
+    const f = fixture({ directorySessionName: '', projectionDisplayName: '' });
+    const sessions = await dispatch(f.context, '/v1/workspaces/workspace-1/sessions?limit=10');
+    expect(sessions).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          items: [{ session_id: 'session-1', display_name: 'hello' }],
+        },
+      },
+    });
+    expect(f.eventPages).toEqual([
+      {
+        sessionId: 'session-1',
+        direction: 'forward',
+        limit: 1,
+        eventTypes: ['user.message_appended'],
+      },
+    ]);
+  });
+
+  test('falls back to the Session ID when an unnamed Session has no user message', async () => {
+    const f = fixture({
+      directorySessionName: '',
+      projectionDisplayName: '',
+      events: [],
+    });
+    const sessions = await dispatch(f.context, '/v1/workspaces/workspace-1/sessions?limit=10');
+    expect(sessions).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          items: [{ session_id: 'session-1', display_name: 'session-1' }],
+        },
+      },
+    });
+  });
+
   test('joins a bounded Session page through the private Runtime query client', async () => {
     const f = fixture();
     const result = await dispatch(f.context, '/v1/sessions?limit=1&status=running');
@@ -253,6 +394,167 @@ describe('Agent API bounded read adapter', () => {
       direction: 'forward',
       limit: 1,
     });
+  });
+
+  test('lists developer-readable safe logs without exposing raw event objects', async () => {
+    const f = fixture();
+    const first = await dispatch(f.context, '/v1/sessions/session-1/logs?limit=1');
+    if (!first.matched || !first.result.ok) throw new Error('Log page was unavailable.');
+    const firstBody = first.result.body as {
+      through_sequence: number;
+      items: Array<{
+        sequence: number;
+        event_type: string;
+        category: string;
+        status: string;
+        detail: { kind: string; fields: Array<{ name: string; value: string }> };
+      }>;
+      next_cursor: string;
+    };
+    expect(firstBody).toMatchObject({
+      through_sequence: 2,
+      items: [
+        {
+          sequence: 1,
+          event_type: 'user.message_appended',
+          category: 'turn',
+          status: 'unknown',
+          detail: {
+            kind: 'message',
+            fields: [
+              { name: 'content', value: 'hello' },
+              { name: 'message_id', value: 'message-1' },
+            ],
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(firstBody)).not.toContain('eventId');
+
+    const second = await dispatch(
+      f.context,
+      `/v1/sessions/session-1/logs?limit=1&cursor=${firstBody.next_cursor}`,
+    );
+    expect(second).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          through_sequence: 2,
+          items: [{ sequence: 2, event_type: 'model.responded', category: 'model' }],
+        },
+      },
+    });
+  });
+
+  test('reads a bounded Browser-only Model Context without Artifact identity', async () => {
+    const f = fixture();
+    const result = await dispatch(
+      f.context,
+      '/v1/sessions/session-1/model-invocations/invocation-1/context',
+    );
+    expect(result).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.model-context.v1',
+          session_id: 'session-1',
+          invocation_id: 'invocation-1',
+          sequence: 3,
+          purpose: 'primary_agent',
+          model: { provider: 'openai-compatible', name: 'model-1' },
+          system_prompt: {
+            text: 'You are Kite.\n\nUse the available tools carefully.',
+            truncated: false,
+          },
+          messages: [
+            {
+              index: 0,
+              role: 'user',
+              parts: [{ type: 'text', text: 'Inspect this workspace.', truncated: false }],
+            },
+            {
+              index: 1,
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'tool_call',
+                  tool_call_id: 'tool-call-1',
+                  tool_name: 'read_file',
+                  input_json: '{"path":"README.md"}',
+                  truncated: false,
+                },
+              ],
+            },
+          ],
+          tools: [
+            {
+              name: 'read_file',
+              description: 'Read a file.',
+              input_schema_json: '{"type":"object"}',
+              truncated: false,
+            },
+          ],
+          request_settings: { message_count: 2, tool_count: 1 },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/artifact|integrity|credential|api[_-]?key/iu);
+  });
+
+  test('hides Model Context from an Agent bearer read context', async () => {
+    const f = fixture();
+    const result = await dispatch(
+      { ...f.context, directory: undefined },
+      '/v1/sessions/session-1/model-invocations/invocation-1/context',
+    );
+    expect(result).toMatchObject({
+      matched: true,
+      result: { ok: false, status: 404, code: 'not_found' },
+    });
+  });
+
+  test('reads only durable History after the requested sequence for bounded polling', async () => {
+    const f = fixture();
+    const incremental = await dispatch(
+      f.context,
+      '/v1/sessions/session-1/history?after_sequence=1&limit=10',
+    );
+    expect(incremental).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          through_sequence: 2,
+          items: [
+            { sequence: 2, content: { type: 'model.reasoning' } },
+            { sequence: 2, content: { type: 'model.message' } },
+          ],
+        },
+      },
+    });
+    expect(f.eventPages).toContainEqual({
+      sessionId: 'session-1',
+      afterSequence: 1,
+      direction: 'forward',
+      limit: 10,
+    });
+    expect(
+      await dispatch(
+        f.context,
+        '/v1/sessions/session-1/history?after_sequence=1&cursor=eyJub3QiOiJ2YWxpZCJ9',
+      ),
+    ).toMatchObject({ matched: true, result: { ok: false, status: 400 } });
+  });
+
+  test('hides Session reads outside the Browser directory authority', async () => {
+    const f = fixture();
+    expect(await dispatch(f.context, '/v1/sessions/session-hidden')).toMatchObject({
+      matched: true,
+      result: { ok: false, status: 404, code: 'not_found' },
+    });
+    expect(f.queries).toEqual([]);
   });
 
   test('rejects cursor corruption and boundary replacement without disclosing event identity', async () => {

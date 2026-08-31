@@ -28,8 +28,9 @@ App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI tran
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留
 普通 reasoning、tool label、path/pattern/command/arguments 与 result。State 27 的
 `approval.batch_released` 与 `approval.session_grants_cleared` 均作为 interaction detail 投影，不回显 grant
-subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。当前没有 Artifact reader，因此不会
-宣称 Artifact 可用，也不会输出 locator。
+subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。Runtime Log projector自身没有Artifact reader，因此不会
+宣称 Artifact 正文可用，也不会输出 locator。Browser-only Model Context是独立的显式诊断route：它从prepared event取得private ref后交给
+Builtin `ModelArtifactStore`严格readback，只投影有界Public DTO；Runtime Log projector本身仍不取得Artifact reader或通用正文读取能力。
 
 当前 writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 与
 State 27 / Store 5（`kite-runtime-saq-v1-2026-08-25`）都只是 no-follow、只读、隔离的 source-only
@@ -52,12 +53,13 @@ history projector与三个authenticated exact History HTTP handler。handler只�
 Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
 `apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
 
-active Workspace Worker的Agent API read journey不打开上述offline snapshot或第二SQLite connection。Store 8 adapter在同一writer connection上
-窄提供bounded Session keyset与History sequence-window log port；Service仍通过`RuntimeHistoryClient` safe projector消费，不把raw event交给
-Agent adapter。Public History first page固定`through_sequence`，后续同时使用exclusive after/before window并复核boundary event digest；durable
+当前single-Service Agent API与Browser read journey不打开上述offline snapshot或第二SQLite connection。Store 9 composition把同一Directory、
+Runtime query、History client与Checkpoint owner直接注入bounded read adapter；不把raw event或SQLite concrete交给HTTP层。Public History first
+page固定`through_sequence`，cursor续页同时使用exclusive after/before window并复核boundary event digest；`after_sequence`提供与cursor互斥的
+running Session增量读取；durable
 `model.responded`最多展开reasoning/message两个`public_ordinal`，cursor可在同sequence内续读。selected Checkpoint metadata按revision/id keyset并
 逐个验证current schema/epoch/checksum，preview只经Runtime query返回计数。不存在全Workspace transcript物化、compatibility import、path投影、
-DDL/index变化或Store writer替代。
+DDL/index变化、Browser cache或Store writer替代。
 Public History page还受1 MiB encoded response上限：adapter只在已取得的bounded source page内逐项计算Public body，达到上限即以最后
 `sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
 或把超限安全前缀整体降成503。

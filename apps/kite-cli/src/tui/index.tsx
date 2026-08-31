@@ -101,8 +101,8 @@ export interface TuiBootstrapProps {
     forWorkspace(workspace: KiteWorkspaceIdentity): KiteAppControlClient;
   };
   credentialClient?: NativeProviderCredentialClient;
-  /** Discovery only: `/web` never starts a Gateway. */
-  discoverWebGateway?: () => Promise<string | undefined>;
+  /** Discovery only: `/status` reads the stable Web root from the one Service. */
+  discoverWeb?: () => Promise<string>;
   /** Client composition build identity used only for local status/drift presentation. */
   expectedServiceBuildId?: string;
 }
@@ -115,7 +115,7 @@ interface TuiAppProps {
   appControl: KiteAppControlClient;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
-  discoverWebGateway?: () => Promise<string | undefined>;
+  discoverWeb?: () => Promise<string>;
   readServiceRuntime?: () => Readonly<{
     pid: number;
     startedAt: string;
@@ -153,7 +153,7 @@ export function TuiBootstrap({
   createSessionManager,
   appControlGateway,
   credentialClient,
-  discoverWebGateway,
+  discoverWeb,
   expectedServiceBuildId,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
@@ -337,7 +337,7 @@ export function TuiBootstrap({
       appControl={effectiveAppControlGateway.forWorkspace(workspaceIdentity)}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
-      discoverWebGateway={discoverWebGateway}
+      discoverWeb={discoverWeb}
       readServiceRuntime={
         serviceMode
           ? () => ({
@@ -362,7 +362,7 @@ function TuiApp({
   appControl,
   languagePreference,
   onLanguageSelect,
-  discoverWebGateway,
+  discoverWeb,
   readServiceRuntime,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
@@ -1289,9 +1289,9 @@ function TuiApp({
       dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/status' });
       void (async () => {
         let web = translate('serviceStatus.webUnavailable');
-        if (discoverWebGateway) {
+        if (discoverWeb) {
           try {
-            web = (await discoverWebGateway()) ?? translate('serviceStatus.webUnavailable');
+            web = await discoverWeb();
           } catch {
             web = translate('serviceStatus.webDiscoveryUnavailable');
           }

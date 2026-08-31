@@ -12,10 +12,11 @@ import {
   runMcpStdioChildRuntime,
   runPosixSupervisorChild,
 } from '@kite-ai/runtime-host';
+import { createAgentApiRouteHandler } from './agent-api';
 import {
   createKiteHomeRuntimeStorageComposition,
-  createKiteRuntimeWebObserverHistoryFromStorage,
-  createKiteSingleServiceWebGatewayTarget,
+  createKiteRuntimeObserverHistoryFromStorage,
+  createKiteSingleServiceAgentApiReadContext,
 } from './bootstrap';
 import { createKiteServiceRuntimeComposition } from './composition';
 import type {
@@ -29,7 +30,7 @@ import type {
 import { createKiteServiceShell } from './shell';
 import { createProcessSignalPort } from './signals';
 import { createSingleServiceInfrastructure } from './single-service-infrastructure';
-import { WEB_OBSERVER_CONTRACT_REVISION_ } from './web-observer/core';
+import { preflightWebGatewayStaticAssets } from './web-gateway/static-assets';
 
 /** Internal executable input. Runtime/Application ownership is always supplied by the caller. */
 export interface KiteServiceExecutableOptions {
@@ -75,6 +76,7 @@ export interface KiteServiceMainEnvironment {
   readonly codeRoot: string;
   readonly osHome: string;
   readonly buildId: string;
+  readonly webStaticRoot: string;
   readonly readinessFd?: string;
   readonly runtimeParent?: string;
 }
@@ -88,10 +90,12 @@ export function resolveKiteServiceMainEnvironment(
     process.platform === 'win32' ? 'USERPROFILE' : 'HOME',
   );
   const buildId = requiredEnvironmentValue(source, 'KITE_SERVICE_BUILD_ID');
+  const webStaticRoot = requiredAbsoluteEnvironmentValue(source, 'KITE_SERVICE_WEB_STATIC_ROOT');
   return Object.freeze({
     codeRoot,
     osHome,
     buildId,
+    webStaticRoot,
     ...(source.KITE_SERVICE_READINESS_FD === undefined
       ? {}
       : { readinessFd: source.KITE_SERVICE_READINESS_FD }),
@@ -140,6 +144,7 @@ export async function runKiteServiceMain(
   if (process.platform !== 'win32' && runtimeParent === undefined) {
     throw new Error('Single-Service child requires KITE_SINGLE_SERVICE_RUNTIME_PARENT.');
   }
+  const webStaticRoot = preflightWebGatewayStaticAssets(environment.webStaticRoot);
   const singleStore = createKiteHomeRuntimeStorageComposition(environment.codeRoot);
   let composition: ReturnType<typeof createKiteServiceRuntimeComposition>;
   try {
@@ -164,6 +169,24 @@ export async function runKiteServiceMain(
       ? undefined
       : createProcessReadinessPort(instanceId, Number(readinessFd));
   const home = createKiteHomeIdentity(environment.codeRoot, 'explicit_argument');
+  const browserReadContext = createKiteSingleServiceAgentApiReadContext({
+    directory: singleStore.directory,
+    runtime: composition.runtime,
+    history: createKiteRuntimeObserverHistoryFromStorage(singleStore.storage),
+    storage: singleStore.storage,
+    artifactStore: singleStore.artifactStore,
+    checkpoints: singleStore.storage.checkpoints,
+  });
+  const agentApi = createAgentApiRouteHandler({
+    serverVersion: 'kite-service-v1',
+    buildId: environment.buildId,
+    consumeCapability: () => undefined,
+    admitWorkspace: async () => 'unavailable',
+    isClientGenerationCurrent: () => false,
+    capabilities: [],
+    browserReadContext,
+    browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+  });
   const infrastructure = createSingleServiceInfrastructure({
     home,
     ...(process.platform === 'win32'
@@ -180,13 +203,10 @@ export async function runKiteServiceMain(
       (() => {
         throw new Error('Single-Service process start identity is unavailable.');
       })(),
-    webGateway: createKiteSingleServiceWebGatewayTarget({
-      directory: singleStore.directory,
-      runtime: composition.runtime,
-      history: createKiteRuntimeWebObserverHistoryFromStorage(singleStore.storage),
-      serviceInstanceId: instanceId,
-      contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
-    }),
+    webGateway: {
+      staticAssetRoot: webStaticRoot,
+    },
+    agentApi,
     signals: createProcessSignalPort(),
     onEndpointReserved: () => {
       singleStore.reconcileControllerAuthority?.(instanceId);

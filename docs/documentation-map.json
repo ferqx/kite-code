@@ -38,6 +38,11 @@
       "authorities": ["packages/agent-api-contract/README.md", "docs/active/agent-api-contract.md"]
     },
     {
+      "id": "agent-api-client",
+      "sources": ["packages/agent-api-client/src/**", "packages/agent-api-client/package.json"],
+      "authorities": ["packages/agent-api-client/README.md", "docs/active/agent-api-contract.md"]
+    },
+    {
       "id": "runtime-contract",
       "sources": ["packages/runtime-contract/src/**", "packages/runtime-contract/package.json"],
       "authorities": [
@@ -200,7 +205,6 @@
         "apps/kite-service/src/session-logger/**",
         "apps/kite-service/src/workspace/**",
         "apps/kite-service/src/web-gateway/**",
-        "apps/kite-service/src/web-observer/**",
         "apps/kite-service/src/workspace-worker/**"
       ],
       "excludeSources": [

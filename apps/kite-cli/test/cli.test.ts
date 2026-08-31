@@ -6,10 +6,7 @@ import {
   WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import type {
-  KiteSingleServiceClient,
-  LocalKiteConnection,
-} from '@kite-ai/kite-local-runtime/client';
+import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
 
@@ -23,92 +20,40 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
   });
 
-  test('recognizes only the closed Web Gateway lifecycle commands', () => {
-    expect(parseArgs(['web']).command).toBe('web-ensure');
+  test('recognizes only the single-Service Web root command', () => {
+    expect(parseArgs(['web']).command).toBe('web-open');
     expect(parseArgs(['web', '--json'])).toMatchObject({
-      command: 'web-ensure',
+      command: 'web-open',
       webJson: true,
     });
-    expect(parseArgs(['web', 'status'])).toMatchObject({
-      command: 'web-status',
-      webJson: false,
-    });
-    expect(parseArgs(['web', 'status', '--json'])).toMatchObject({
-      command: 'web-status',
-      webJson: true,
-    });
-    expect(parseArgs(['web', 'stop']).command).toBe('web-stop');
+    expect(parseArgs(['web', 'status']).command).toBe('help');
+    expect(parseArgs(['web', 'stop']).command).toBe('help');
     expect(parseArgs(['web', 'recover']).command).toBe('help');
     expect(parseArgs(['web', 'stop', 'now']).command).toBe('help');
     expect(parseArgs(['web', 'status', 'verbose']).command).toBe('help');
     expect(parseArgs(['web', 'prompt']).command).toBe('help');
     expect(parseArgs(['web', 'create']).command).toBe('help');
-    expect(parseArgs(['web', '--kite-home', '/tmp/kite-home']).command).toBe('web-ensure');
-    expect(parseArgs(['web', 'status', '--json', '--kite-home', '/tmp/kite-home']).command).toBe(
-      'web-status',
-    );
+    expect(parseArgs(['web', '--kite-home', '/tmp/kite-home']).command).toBe('web-open');
   });
 
-  test('uses the single-Service Web client without Coordinator or Gateway terminology', async () => {
+  test('prints the stable single-Service Web root', async () => {
     const originalArgv = process.argv;
     const output = spyOn(console, 'log').mockImplementation(() => undefined);
     const calls: string[] = [];
-    const client = singleServiceWebClient(calls);
+    const discover = async () => {
+      calls.push('discover');
+      return 'http://127.0.0.1:43125/';
+    };
     try {
       process.argv = ['bun', 'kite', 'web'];
       await main({
-        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
+        singleServiceWeb: { discover },
       });
-      expect(output.mock.calls.at(-1)).toEqual(['http://127.0.0.1:43125']);
-
-      process.argv = ['bun', 'kite', 'web', 'status', '--json'];
-      await main({
-        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
-      });
-      expect(output.mock.calls.at(-1)).toEqual([
-        JSON.stringify({
-          state: 'ready',
-          origin: 'http://127.0.0.1:43125',
-          assetDigest: '1'.repeat(64),
-        }),
-      ]);
-
-      process.argv = ['bun', 'kite', 'web', 'stop'];
-      await main({
-        singleServiceWeb: { client, staticAssetRoot: '/bundle/web' },
-      });
-      expect(output.mock.calls.at(-1)).toEqual(['Kite Web stopped.']);
-      expect(calls).toEqual(['ensure:/bundle/web', 'status', 'stop']);
+      expect(output.mock.calls.at(-1)).toEqual(['http://127.0.0.1:43125/']);
+      expect(calls).toEqual(['discover']);
     } finally {
       process.argv = originalArgv;
       output.mockRestore();
-    }
-  });
-
-  test('surfaces the single-Service typed asset diagnostic without a generic ensure error', async () => {
-    const originalArgv = process.argv;
-    process.argv = ['bun', 'kite', 'web'];
-    try {
-      await expect(
-        main({
-          singleServiceWeb: {
-            staticAssetRoot: '/bundle/missing',
-            client: {
-              ...singleServiceWebClient([]),
-              ensureWeb: async () => ({
-                schema: 'kite.local-native.response.v1',
-                requestId: 'web-missing',
-                operation: 'web_ensure',
-                outcome: 'unavailable',
-                state: 'absent',
-                diagnostic: 'web_assets_missing',
-              }),
-            },
-          },
-        }),
-      ).rejects.toThrow('Kite Web ensure failed: web_assets_missing.');
-    } finally {
-      process.argv = originalArgv;
     }
   });
 
@@ -117,13 +62,13 @@ describe('cli argument parsing', () => {
     const result = {
       schema: 'kite.local-runtime-lifecycle-result.v1' as const,
       requestId: 'status-1',
-      operation: 'status' as const,
-      outcome: 'applied' as const,
+      operation: 'stop' as const,
+      outcome: 'incompatible' as const,
       state: 'ready' as const,
       diagnostic: 'build_mismatch' as const,
     };
     expect(formatServiceLifecycleResult(result)).toBe(
-      'Service status: applied [ready] (build_mismatch)',
+      'Service stop: incompatible [ready] (build_mismatch)',
     );
     expect(JSON.parse(formatServiceLifecycleResult(result, true))).toEqual(result);
   });
@@ -400,69 +345,6 @@ describe('cli argument parsing', () => {
     expect(result.skills).toEqual([]);
   });
 });
-
-function singleServiceWebClient(calls: string[]): KiteSingleServiceClient {
-  return {
-    describe: async () => ({
-      schema: 'kite.local-native.response.v1',
-      requestId: 'describe-1',
-      operation: 'describe',
-      outcome: 'ready',
-      service: {
-        instanceId: 'service-1',
-        pid: 42,
-        startedAt: '2026-08-30T00:00:00.000Z',
-        protocolVersion: 1,
-        clientContractRevision: 'kite-local-runtime-contract-v2',
-        serverVersion: 'service-1',
-        buildId: 'build-1',
-        httpOrigin: 'http://127.0.0.1:43125',
-      },
-      accessToken: 'a'.repeat(43),
-    }),
-    ensureWeb: async (root) => {
-      calls.push(`ensure:${root}`);
-      return {
-        schema: 'kite.local-native.response.v1',
-        requestId: 'ensure-1',
-        operation: 'web_ensure',
-        outcome: 'ready',
-        origin: 'http://127.0.0.1:43125',
-        launchUrl: 'http://127.0.0.1:43125',
-        assetDigest: '1'.repeat(64),
-      };
-    },
-    statusWeb: async () => {
-      calls.push('status');
-      return {
-        schema: 'kite.local-native.response.v1',
-        requestId: 'status-1',
-        operation: 'web_status',
-        outcome: 'ready',
-        state: 'ready',
-        origin: 'http://127.0.0.1:43125',
-        assetDigest: '1'.repeat(64),
-      };
-    },
-    stopWeb: async () => {
-      calls.push('stop');
-      return {
-        schema: 'kite.local-native.response.v1',
-        requestId: 'stop-1',
-        operation: 'web_stop',
-        outcome: 'applied',
-        state: 'absent',
-      };
-    },
-    stopService: async () => ({
-      schema: 'kite.local-native.response.v1',
-      requestId: 'service-stop-1',
-      operation: 'service_stop',
-      outcome: 'applied',
-      state: 'draining',
-    }),
-  };
-}
 
 function createCliConnection(input: {
   calls: string[];

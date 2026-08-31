@@ -15,12 +15,8 @@ const endpoint = resolveKiteLocalRuntimeEndpoint({
 });
 
 describe('Single-Service native client', () => {
-  test('sends one exact request per operation and preserves typed Web diagnostics', async () => {
-    const requests: Array<{
-      operation: string;
-      requestId: string;
-      expectedWebContractRevision?: string;
-    }> = [];
+  test('sends one exact request per discovery operation', async () => {
+    const requests: Array<{ operation: string; requestId: string }> = [];
     const responses: KiteLocalNativeResponse[] = [
       {
         schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
@@ -39,59 +35,20 @@ describe('Single-Service native client', () => {
         },
         accessToken: 'a'.repeat(43),
       },
-      {
-        schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-        requestId: 'request-2',
-        operation: 'web_ensure',
-        outcome: 'unavailable',
-        state: 'absent',
-        diagnostic: 'web_assets_missing',
-      },
-      {
-        schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-        requestId: 'request-3',
-        operation: 'web_stop',
-        outcome: 'noop',
-        state: 'absent',
-      },
     ];
     let identity = 0;
     const client = createKiteSingleServiceClient({
       endpoint,
       expectedBuildId: 'build-1',
-      webContractRevision: 'kite-app-web-observer-v2',
       requestId: () => `request-${++identity}`,
       request: async (_endpoint, request) => {
-        requests.push({
-          operation: request.operation,
-          requestId: request.requestId,
-          ...('expectedWebContractRevision' in request
-            ? { expectedWebContractRevision: request.expectedWebContractRevision }
-            : {}),
-        });
+        requests.push({ operation: request.operation, requestId: request.requestId });
         return responses.shift()!;
       },
     });
 
     await expect(client.describe()).resolves.toMatchObject({ outcome: 'ready' });
-    await expect(client.ensureWeb('/absolute/web')).resolves.toEqual({
-      schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-      requestId: 'request-2',
-      operation: 'web_ensure',
-      outcome: 'unavailable',
-      state: 'absent',
-      diagnostic: 'web_assets_missing',
-    });
-    await expect(client.stopWeb()).resolves.toMatchObject({ outcome: 'noop' });
-    expect(requests).toEqual([
-      { operation: 'describe', requestId: 'request-1' },
-      {
-        operation: 'web_ensure',
-        requestId: 'request-2',
-        expectedWebContractRevision: 'kite-app-web-observer-v2',
-      },
-      { operation: 'web_stop', requestId: 'request-3' },
-    ]);
+    expect(requests).toEqual([{ operation: 'describe', requestId: 'request-1' }]);
   });
 
   test('does not retry rejected or operation-confused responses', async () => {
@@ -99,7 +56,6 @@ describe('Single-Service native client', () => {
     const client = createKiteSingleServiceClient({
       endpoint,
       expectedBuildId: 'build-1',
-      webContractRevision: 'kite-app-web-observer-v2',
       requestId: () => 'request-rejected',
       request: async () => {
         calls += 1;
@@ -120,13 +76,12 @@ describe('Single-Service native client', () => {
     const confused = createKiteSingleServiceClient({
       endpoint,
       expectedBuildId: 'build-1',
-      webContractRevision: 'kite-app-web-observer-v2',
       requestId: () => 'request-confused',
       request: async () => ({
         schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
         requestId: 'request-confused',
-        operation: 'web_stop',
-        outcome: 'noop',
+        operation: 'service_stop',
+        outcome: 'applied',
         state: 'absent',
       }),
     });

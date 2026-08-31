@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { discoverSandboxBackendCandidate } from '@kite-ai/builtin-runtime/sandbox';
@@ -390,25 +390,35 @@ function createKiteServiceRuntimeCompositionUnchecked(
             connectionKind === 'native_client' &&
             authorityForWorkspace
           ) {
-            if (!sessionId || !binding) {
+            if (!sessionId || !binding || binding.workerInstanceId !== instanceId) {
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
-            // A Native Runtime socket is established before the TUI creates or
-            // acquires a Session Controller. The Store is the current lease
-            // authority for the command's exact Session; controller headers
-            // captured at WebSocket open are only a stale client claim and
-            // must not override this lookup.
             const state = authorityForWorkspace(workspace).controller.read(sessionId);
             if (
               state.status !== 'active' ||
               state.clientId !== binding.clientId ||
               state.connectionGeneration !== binding.connectionGeneration ||
-              (binding.controllerSessionId === sessionId &&
-                binding.controllerGeneration !== state.controllerGeneration) ||
               state.workerInstanceId !== instanceId
             ) {
               return { allowed: false as const, reason: 'unauthorized' as const };
             }
+            const bindingReference = `service-command-${createHash('sha256')
+              .update('kite.single-service-command-binding.v1\0', 'utf8')
+              .update(workspace.workspaceDigest, 'utf8')
+              .update('\0', 'utf8')
+              .update(request.connectionId, 'utf8')
+              .update('\0', 'utf8')
+              .update(request.requestId, 'utf8')
+              .update('\0', 'utf8')
+              .update(sessionId, 'utf8')
+              .update('\0', 'utf8')
+              .update(String(state.controllerGeneration), 'utf8')
+              .digest('hex')}`;
+            return {
+              allowed: true as const,
+              workspace: workspace.canonicalPath,
+              bindingReference,
+            };
           }
           return {
             allowed: true as const,

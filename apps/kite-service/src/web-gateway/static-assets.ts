@@ -17,7 +17,7 @@ export class WebGatewayStaticAssetsError extends Error {
   readonly diagnostic = WEB_GATEWAY_ASSET_DIAGNOSTIC_;
 
   constructor() {
-    super('Web Gateway static assets are missing or invalid.');
+    super('Service Web assets are missing or invalid.');
     this.name = 'WebGatewayStaticAssetsError';
   }
 }

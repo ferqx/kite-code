@@ -8,10 +8,9 @@ adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
-Web lifecycle由release注入的`KiteSingleServiceClient`承载。CLI的`kite web [--json]`先做asset preflight再ensure Service，status/stop在
-absent时不spawn；status只返回state/origin/asset digest。本地Web不创建launch token，TUI `/status`通过ensure/open取得普通loopback URL并与
-Service identity合并展示；TUI不再提供独立`/web`。正式CLI不组合legacy
-Coordinator、Store migration或`web recover`；该parser/adapter contract与tests不代表hosted Web qualification。
+Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
+`kite web [--json]`和TUI `/status`返回稳定根地址；TUI同时展示Service identity，不保留单独的`/web`。它不接收asset root，也没有独立status/stop。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
+parser/adapter contract与tests不代表hosted Web qualification。
 
 连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
 TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败
@@ -20,20 +19,8 @@ TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Wo
 reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
 再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
 snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
-正常的Controller创建/取得发生在Runtime socket建立之后时不触发reconnect：Service按每条mutation的exact Session从Store读取当前lease，
-再核对该socket的client/connection identity；socket握手时尚不存在或指向其他Session的Controller header不能成为静态授权快照。
 TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
 Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。
-
-开发态普通TUI允许复用wire-compatible的`dev:` resident Service，但TUI从release composition取得expected build identity并与descriptor中的
-实际build比较；不一致时首次进入主界面显示一次可操作警告，`/status`始终显示PID、startedAt、actual/expected build，并在每次执行时从
-当前connection descriptor读取，Service reconnect或内部换代后不复用首次渲染快照。该比较只用于展示，
-不成为新的admission authority。`bun run tui:fresh`显式调用同一manager restart，只有结果为`applied + ready`才继续启动TUI；busy、uncertain
-或失败一律停止，不强杀、不删除Store、不隐式重放。installed模式不使用warning替代兼容检查：POSIX用reservation记录的旧build identity
-精确describe/stop，Windows用exact contract与installed identity限定跨build stop，等待owner退出后启动当前companion；用户不需要手动结束旧Service。明确`service_busy`
-可在stop deadline内等待并重试，identity drift、source↔installed或ambiguous stop仍fail closed。
-根package中的`bun run tui`与`bun run tui:fresh`只在源码开发入口先执行`apps/kite-web` build，防止ignored `dist/`陈旧；installed standalone
-不运行源码构建，继续使用candidate内manifest绑定的Web assets。
 
 Native subscription按canonical Server顺序串行消费notification。前台`reasoning.activity(state=completed)` dispatch后先等待
 注入的Ink presentation flush，再读取下一条text、interaction或terminal；background session只缓冲event。该等待以1秒为上限：正常路径仍

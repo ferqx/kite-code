@@ -13,15 +13,10 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
-- TUI只保留`/status`作为本机状态入口：显示当前Local Service的PID、启动时间、实际/预期build identity，并通过同一
-  Web ensure/open callback附上Kite Web URL。source模式发现resident Service build drift时在首次主界面显式警告；
-  根`bun run tui`与`bun run tui:fresh`在进入entrypoint前都先构建当前Kite Web assets；后者再通过同一manager执行安全restart，成功ready后才启动TUI。
-- CLI parser/main已实现封闭的Kite Web lifecycle surface：`kite web [--json]`先做asset preflight并打印Service返回的普通loopback URL，
-  `kite web status [--json]`只报告已有Browser route的state/origin/asset digest，`kite web stop`请求显式stop。本地Web不mint token；
-  lifecycle error输出闭集diagnostic（包括`web_assets_missing`），不再丢成笼统的ensure failed。
-- KHSS-02的单Service Web client已由release/source默认入口选择：同一parser/output接受release注入的`KiteSingleServiceClient +
-  staticAssetRoot`，`web/status/stop`直接走per-home native IPC并使用“Kite Web”术语；`web_assets_missing`等typed diagnostic原样输出，
-  TUI `/status`调用同一ensure/open语义取得普通loopback URL，不创建Browser认证状态。
+- CLI parser/main只保留`kite web [--json]`：它ensure唯一Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
+  ready前验证和挂载，不存在独立`web status/stop`、asset root客户端注入或Web lifecycle diagnostic。
+- single-Service Web callback由release/source默认入口选择；`/status`在同一状态输出中展示Service identity与稳定Web根地址。TUI启动只ensure Service，
+  不额外attach route、启动进程或取得Browser/Controller authority。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
@@ -47,7 +42,7 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   fallback。managed Service 不可用时直接失败。
 - 不拥有Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart`与默认run/resume/TUI使用同一
   single-Service manager/connector；CLI不自行discover、spawn、kill或清理owner state。
-- `scripts/release/entrypoints/cli.ts`只注入single-Service manager/connector/Web client，不组合legacy Coordinator或Store migration。
+- `scripts/release/entrypoints/cli.ts`只注入single-Service manager/connector/Web root discovery，不组合legacy Coordinator或Store migration。
   任一owner不可用时fail closed。parser/main contract与本地tests不等于三平台qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
   parent-owned test/internal、显式非默认 Store 场景。
@@ -75,14 +70,13 @@ executable、release entrypoint与slot均已删除。
 - first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
 - release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
-  corrupt identity不替换。manager mutation不自动重放，且不会回退legacy Coordinator/Worker或embedded backend。
-- source build drift允许普通`bun run tui`继续复用wire-compatible resident Service，但必须可见且可通过`/status`复核；只有显式
-  `bun run tui:fresh`可请求restart。installed build drift不降级为开发态warning，也不交给用户清理：manager使用受保护reservation中的
-  上一build identity精确确认旧owner，等待安全stop后自动启动当前installed companion；busy超时与任何身份/结果不确定仍fail closed。
+  corrupt identity不替换。兼容的其他build可复用ready owner与其Web root；Protocol/client-contract/identity不兼容保持fail closed。
+  跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`，manager mutation不自动重放，也不会回退legacy
+  Coordinator/Worker或embedded backend。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
-- TUI `/status`调用可选的`discoverWeb` callback执行asset preflight与同一Service的Web ensure/open并与Service identity一并展示；它不启动第二进程、
-  不取得Controller，也不能把本地asset/entrypoint smoke写成hosted support。
+- TUI启动只ensure唯一Service；Web assets已经是Service readiness的一部分。`/status`调用可选的`discoverWeb` callback，通过Native
+  `describe`取得稳定的`origin/`；它不attach route、不启动第二进程、不取得Controller。
 
 ## 本地文档
 

@@ -17,20 +17,20 @@ access/control token采用constant-time compare且不能相等。ticket只保存
 observability；replay、expiry、wrong instance与unknown ticket统一unauthorized。control拒绝access token，普通connector
 不读取control token。
 
-Agent API capability与private access/ticket/control token不互换。Web Gateway peer只能mint`web_observer`；Native peer才可mint
+Agent API capability与private access/ticket/control token不互换。只有Native peer可mint
 `agent_api_observer|agent_api_controller`。Exchange通过hash匹配恢复已签发binding，不接受caller提供的Client/generation header；成功后
 原capability立即删除。context只保存digest，explicit logout、TTL、generation supersede、Native connection close或Worker close撤销。
 `controller` role不等于Controller lease，当前02A没有mutation route。
 
-manager不能只信PID、`/readyz`或磁盘descriptor。它必须用access token请求`POST /_kite/instance`，严格解码schema、
-instance、Protocol、client-contract、server version与build identity；response缺失content-type、unknown key、超限、
-malformed以及instance/server/build identity mismatch均fail closed `identity_uncertain`。Protocol/client-contract不兼容
-被拒绝，expected build drift返回`incompatible + build_mismatch`。以上结果都不授权cleanup alive/uncertain state、
-spawn replacement或把caller descriptor回显成握手成功。
+manager不能只信PID、`/readyz`或磁盘descriptor。它必须严格解码schema、instance、Protocol、client-contract、server version与
+Service build identity；response缺失content-type、unknown key、超限、malformed以及同一次发现中的instance/server/build identity drift
+均fail closed `identity_uncertain`。single-Service Native `describe`允许兼容客户端跨expected build取得Service真实descriptor和access
+capability；Protocol/client-contract仍在Runtime连接前严格验证。跨build `service_stop/restart`返回
+`incompatible + build_mismatch`。以上失败都不授权cleanup alive/uncertain state、spawn replacement或把caller build回显成Service identity。
 
 single-Service owner-only Native IPC v2不使用上述legacy descriptor probe判断source热开发兼容：protocol/client-contract exact且
 Service/caller build identity同为`dev:`时，build drift允许复用同一resident owner；installed或source↔installed仍拒绝。
-`web_ensure`还必须匹配独立`kite-app-web-observer-v2`revision。
+Web root属于同一Service readiness和build identity，不再比较独立Web Observer revision。
 
 Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime WebSocket前使用access token，但只有
 Service返回trusted canonical identity后connect route才签发ticket。request path/cwd/clientInfo不产生Trust authority。

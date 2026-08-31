@@ -14,5 +14,4 @@ export * from './provider-model';
 export * from './skills';
 export * from './status';
 export * from './validation';
-export * from './web';
 export * from './workspace-trust';

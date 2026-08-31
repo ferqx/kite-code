@@ -2,11 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type KiteAppControlClient,
-  type KiteWorkspaceIdentity,
-  WEB_OBSERVER_CONTRACT_REVISION_,
-} from '@kite-ai/kite-app-contract';
+import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import { requestKiteLocalNativeEndpoint } from '@kite-ai/kite-local-runtime/client';
 import {
   createKiteHomeIdentity,
@@ -19,11 +15,12 @@ import {
 import type { RuntimeAccess } from '@kite-ai/runtime-contract';
 import { RuntimeServer } from '@kite-ai/runtime-server';
 import {
+  type AgentApiReadContext,
+  createAgentApiRouteHandler,
   createSingleServiceInfrastructure,
   type NativeKiteServiceApplicationPort,
   type SingleServiceInfrastructure,
 } from '../src';
-import { createWebObserverCore } from '../src/web-observer';
 
 const BUILD_ID = 'dev:single-service-build-1';
 const roots: string[] = [];
@@ -47,11 +44,15 @@ describe('Single-Service native infrastructure target', () => {
       const fixtureRoot = makeRoot();
       const homeRoot = join(fixtureRoot, 'home');
       const runtimeParent = join(fixtureRoot, 'runtime');
-      const missingAssets = join(fixtureRoot, 'missing-web');
       const assets = makeWebAssets(fixtureRoot);
       mkdirSync(homeRoot);
-      mkdirSync(missingAssets);
-      const owner = createTarget(homeRoot, runtimeParent);
+      const owner = createTarget(
+        homeRoot,
+        runtimeParent,
+        'single-service-instance',
+        undefined,
+        assets,
+      );
       owners.push(owner);
 
       await expect(owner.start()).resolves.toMatchObject({
@@ -86,106 +87,71 @@ describe('Single-Service native infrastructure target', () => {
       });
       expect(JSON.stringify(described)).not.toContain(homeRoot);
 
-      const compatibleSourceBuild = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('describe', 'compatible-source-build'),
-        expectedBuildId: 'dev:new-source-build',
-      });
-      expect(compatibleSourceBuild).toMatchObject({
-        operation: 'describe',
-        outcome: 'ready',
-        service: { buildId: BUILD_ID },
-      });
-
-      const missing = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('web_ensure', 'web-missing'),
-        staticAssetRoot: missingAssets,
-      });
-      expect(missing).toEqual({
-        schema: 'kite.local-native.response.v1',
-        requestId: 'web-missing',
-        operation: 'web_ensure',
-        outcome: 'unavailable',
-        state: 'absent',
-        diagnostic: 'web_assets_missing',
-      });
-
-      const incompatibleWeb = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('web_ensure', 'web-contract-mismatch'),
-        staticAssetRoot: assets,
-        expectedWebContractRevision: 'kite-app-web-observer-v1',
-      });
-      expect(incompatibleWeb).toMatchObject({
-        operation: 'rejected',
-        outcome: 'rejected',
-        diagnostic: 'incompatible',
-      });
-
-      const first = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('web_ensure', 'web-1'),
-        staticAssetRoot: assets,
-      });
-      const second = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('web_ensure', 'web-2'),
-        staticAssetRoot: assets,
-      });
-      expect(first).toMatchObject({
-        operation: 'web_ensure',
-        outcome: 'ready',
-      });
-      expect(second).toMatchObject({
-        operation: 'web_ensure',
-        outcome: 'ready',
-      });
-      if (
-        first.operation !== 'web_ensure' ||
-        first.outcome !== 'ready' ||
-        second.operation !== 'web_ensure' ||
-        second.outcome !== 'ready'
-      ) {
-        throw new Error('expected ready Web responses');
-      }
       const ownerOrigin = owner.httpOrigin;
       if (!ownerOrigin) throw new Error('Service HTTP origin is unavailable');
-      expect(first.origin).toBe(ownerOrigin);
-      expect(second.origin).toBe(first.origin);
-      expect(first.launchUrl).toBe(first.origin);
-      expect(second.launchUrl).toBe(first.launchUrl);
-      expect(await fetch(`${first.origin}/`).then((response) => response.text())).toBe(
+      const root = await fetch(`${ownerOrigin}/`);
+      expect(root.status).toBe(200);
+      expect(root.headers.get('set-cookie')).toContain('HttpOnly');
+      expect(await root.text()).toBe('<html>single service target</html>');
+      const rootCookie = root.headers.get('set-cookie')?.split(';', 1)[0];
+      if (!rootCookie) throw new Error('Service root omitted its Browser session.');
+      expect(
+        await fetch(`${ownerOrigin}/v1/workspaces`, {
+          headers: {
+            origin: ownerOrigin,
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'cors',
+            cookie: rootCookie,
+          },
+        }).then((response) => response.status),
+      ).toBe(200);
+      expect(await fetch(`${ownerOrigin}/index.html`).then((response) => response.text())).toBe(
         '<html>single service target</html>',
       );
-      const webStatus = await requestKiteLocalNativeEndpoint(
-        owner.endpoint,
-        request('web_status', 'web-status'),
-      );
-      expect(webStatus).toMatchObject({
-        operation: 'web_status',
-        outcome: 'ready',
-        state: 'ready',
-        origin: first.origin,
+      const browserHeaders = {
+        origin: ownerOrigin,
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+      };
+      const workspaces = await fetch(`${ownerOrigin}/v1/workspaces`, {
+        headers: { ...browserHeaders, cookie: rootCookie, accept: 'application/json' },
       });
+      expect(workspaces.status).toBe(200);
+      expect(await workspaces.json()).toEqual({
+        schema: 'kite.agent-api.workspace-page.v1',
+        items: [],
+      });
+      expect((await fetch(`${ownerOrigin}/_kite/web/bootstrap`)).status).toBe(404);
 
-      const incompatible = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+      const compatibleOtherBuild = await requestKiteLocalNativeEndpoint(owner.endpoint, {
         ...request('describe', 'wrong-build'),
         expectedBuildId: 'different-build',
       });
-      expect(incompatible).toEqual({
-        schema: 'kite.local-native.response.v1',
+      expect(compatibleOtherBuild).toMatchObject({
         requestId: 'wrong-build',
+        operation: 'describe',
+        outcome: 'ready',
+        service: {
+          instanceId: 'single-service-instance',
+          buildId: BUILD_ID,
+          httpOrigin: owner.httpOrigin,
+        },
+        accessToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      });
+
+      const incompatibleControl = await requestKiteLocalNativeEndpoint(owner.endpoint, {
+        ...request('service_stop', 'wrong-build-stop'),
+        expectedBuildId: 'different-build',
+      });
+      expect(incompatibleControl).toEqual({
+        schema: 'kite.local-native.response.v1',
+        requestId: 'wrong-build-stop',
         operation: 'rejected',
         outcome: 'rejected',
         diagnostic: 'incompatible',
       });
 
-      const stoppedWeb = await requestKiteLocalNativeEndpoint(
-        owner.endpoint,
-        request('web_stop', 'web-stop'),
-      );
-      expect(stoppedWeb).toMatchObject({
-        operation: 'web_stop',
-        outcome: 'applied',
-        state: 'absent',
-      });
-      expect(await fetch(`${owner.httpOrigin}/`).then((response) => response.status)).toBe(404);
+      expect(await fetch(`${owner.httpOrigin}/`).then((response) => response.status)).toBe(200);
       expect(await fetch(`${owner.httpOrigin}/readyz`).then((response) => response.text())).toBe(
         'ready',
       );
@@ -242,40 +208,6 @@ describe('Single-Service native infrastructure target', () => {
       });
     },
   );
-
-  test.skipIf(process.platform === 'win32')(
-    'allows an exact-contract installed client to stop the previous installed build',
-    async () => {
-      const fixtureRoot = makeRoot();
-      const homeRoot = join(fixtureRoot, 'home');
-      const runtimeParent = join(fixtureRoot, 'runtime');
-      mkdirSync(homeRoot);
-      const previousBuild = '1'.repeat(24);
-      const owner = createTarget(
-        homeRoot,
-        runtimeParent,
-        'installed-service-instance',
-        undefined,
-        previousBuild,
-      );
-      owners.push(owner);
-      await owner.start();
-
-      const stopped = await requestKiteLocalNativeEndpoint(owner.endpoint, {
-        ...request('service_stop', 'installed-cross-build-stop'),
-        expectedBuildId: '2'.repeat(24),
-      });
-      expect(stopped).toMatchObject({
-        operation: 'service_stop',
-        outcome: 'applied',
-        state: 'draining',
-      });
-      await expect(owner.shell.waitForShutdown()).resolves.toMatchObject({
-        outcome: 'applied',
-        state: 'absent',
-      });
-    },
-  );
 });
 
 function createTarget(
@@ -283,41 +215,43 @@ function createTarget(
   runtimeParent: string,
   instanceId = 'single-service-instance',
   onEndpointReserved?: () => void,
-  buildId = BUILD_ID,
+  staticAssetRoot = makeWebAssets(join(homeRoot, '..')),
 ): SingleServiceInfrastructure {
+  const browserReadContext: AgentApiReadContext = {
+    query: async (query) => ({
+      status: 'not_found',
+      queryType: query.type,
+      code: 'session_not_found',
+    }),
+    history: {
+      listSessions: async () => ({ entries: [], hasMore: false }),
+      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+    },
+    checkpoints: { list: () => ({ entries: [], hasMore: false }), get: () => undefined },
+    directory: { list: () => [] },
+    close: async () => undefined,
+    [Symbol.asyncDispose]: async () => undefined,
+  };
+  const agentApi = createAgentApiRouteHandler({
+    serverVersion: 'single-service-test',
+    buildId: BUILD_ID,
+    consumeCapability: () => undefined,
+    admitWorkspace: async () => 'unavailable',
+    isClientGenerationCurrent: () => false,
+    browserReadContext,
+    browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+  });
   return createSingleServiceInfrastructure({
     home: createKiteHomeIdentity(homeRoot),
     runtimeParent,
     application: createApplication(),
     instanceId,
     serverVersion: 'single-service-test',
-    buildId,
+    buildId: BUILD_ID,
     processStartIdentity: `test-process-${instanceId}`,
     ...(onEndpointReserved ? { onEndpointReserved } : {}),
-    webGateway: {
-      contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
-      createObserver: (binding) =>
-        createWebObserverCore({
-          directory: { list: () => [] },
-          history: {
-            loadSession: async (sessionId) => ({
-              sessionId,
-              lastSequence: 0,
-              records: [],
-            }),
-          },
-          live: {
-            subscribe: () => ({
-              [Symbol.asyncIterator]: () => ({
-                next: async () => ({ done: true, value: undefined as never }),
-              }),
-            }),
-          },
-          gatewayInstanceId: instanceId,
-          contractRevision: WEB_OBSERVER_CONTRACT_REVISION_,
-          createTabBinding: () => binding,
-        }),
-    },
+    webGateway: { staticAssetRoot },
+    agentApi,
     carrierLimits: {
       heartbeatIntervalMs: 50,
       heartbeatDeadlineMs: 150,
@@ -327,17 +261,9 @@ function createTarget(
 }
 
 function request(
-  operation: 'describe' | 'web_status' | 'web_stop' | 'service_stop',
-  requestId: string,
-): KiteLocalNativeRequest;
-function request(
-  operation: 'web_ensure',
-  requestId: string,
-): Omit<Extract<KiteLocalNativeRequest, { operation: 'web_ensure' }>, 'staticAssetRoot'>;
-function request(
   operation: KiteLocalNativeRequest['operation'],
   requestId: string,
-): Omit<KiteLocalNativeRequest, 'staticAssetRoot'> {
+): KiteLocalNativeRequest {
   return {
     schema: KITE_LOCAL_NATIVE_REQUEST_SCHEMA_,
     requestId,
@@ -345,10 +271,7 @@ function request(
     protocolVersion: KITE_LOCAL_NATIVE_PROTOCOL_VERSION,
     clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
     expectedBuildId: BUILD_ID,
-    ...(operation === 'web_ensure'
-      ? { expectedWebContractRevision: WEB_OBSERVER_CONTRACT_REVISION_ }
-      : {}),
-  } as Omit<KiteLocalNativeRequest, 'staticAssetRoot'>;
+  } as KiteLocalNativeRequest;
 }
 
 function makeRoot(): string {
@@ -360,7 +283,7 @@ function makeRoot(): string {
 function makeWebAssets(root: string): string {
   const assets = join(root, 'web');
   mkdirSync(join(assets, 'api-docs'), { recursive: true });
-  mkdirSync(join(assets, 'assets'));
+  mkdirSync(join(assets, 'assets'), { recursive: true });
   writeFileSync(join(assets, 'index.html'), '<html>single service target</html>');
   writeFileSync(join(assets, 'api-docs', 'openapi.json'), '{}');
   writeFileSync(join(assets, 'assets', 'app.js'), 'export {};');

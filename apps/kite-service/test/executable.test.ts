@@ -146,6 +146,7 @@ describe('Kite Service internal executable adapter', () => {
       KITE_CODE_HOME: '/tmp/kite-service-code',
       [osHomeKey]: '/tmp/kite-service-os-home',
       KITE_SERVICE_BUILD_ID: 'dev:test',
+      KITE_SERVICE_WEB_STATIC_ROOT: '/tmp/kite-service-web',
       KITE_SINGLE_SERVICE_RUNTIME_PARENT: '/tmp',
     } satisfies Record<string, string>;
 
@@ -193,6 +194,7 @@ describe('Kite Service internal executable adapter', () => {
       KITE_CODE_HOME: '/tmp/kite-service-code',
       [osHomeKey]: '/tmp/kite-service-os-home',
       KITE_SERVICE_BUILD_ID: 'installed:2026-08-27',
+      KITE_SERVICE_WEB_STATIC_ROOT: '/tmp/kite-service-web',
     } satisfies Record<string, string>;
     await expect(runKiteServiceMain(['service', 'run'], { environment })).rejects.toThrow(
       'run-single',
@@ -201,6 +203,28 @@ describe('Kite Service internal executable adapter', () => {
       codeRoot: environment.KITE_CODE_HOME,
       osHome: environment[osHomeKey]!,
       buildId: environment.KITE_SERVICE_BUILD_ID,
+      webStaticRoot: environment.KITE_SERVICE_WEB_STATIC_ROOT,
     });
+  });
+
+  test('rejects missing Web assets before constructing Runtime or Store composition', async () => {
+    let composed = false;
+    await expect(
+      runKiteServiceMain(['service', 'run-single'], {
+        environment: {
+          KITE_CODE_HOME: '/tmp/kite-service-missing-web-home',
+          [process.platform === 'win32' ? 'USERPROFILE' : 'HOME']:
+            '/tmp/kite-service-missing-web-os-home',
+          KITE_SERVICE_BUILD_ID: 'dev:missing-web',
+          KITE_SERVICE_WEB_STATIC_ROOT: '/tmp/kite-service-missing-web-assets',
+          KITE_SINGLE_SERVICE_RUNTIME_PARENT: '/tmp',
+        },
+        createComposition: () => {
+          composed = true;
+          throw new Error('composition must not be constructed');
+        },
+      }),
+    ).rejects.toThrow('Service Web assets are missing or invalid.');
+    expect(composed).toBe(false);
   });
 });

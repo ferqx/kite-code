@@ -39,23 +39,22 @@ carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime
 fixture。后续新增 Service 或 package 时，只有在 source 与 owner README 实际存在的同一改动中才加入 V2
 规则，不以无效 future path 或空 workspace 预占 documentation owner。
 
-当前 Browser observer workspace 的规范路径是 `apps/kite-web`。它是独立的 private presentation workspace，
-只消费 browser-safe `@kite-ai/kite-app-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
+当前Browser Web workspace的规范路径是`apps/kite-web`。它是独立的private presentation workspace，
+只消费 browser-safe `@kite-ai/agent-api-client`与`@kite-ai/agent-api-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
 Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
 源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、fixed asset preflight和single-Service Web
 ensure。`apps/kite-web`的Vite dev server只是资源开发入口，Browser也不拥有启动本机Service的authority；当前角色见
 [`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)，旧Gateway恢复仅见transition文档。
-KASAPI-01A后，根build、test、typecheck discovery覆盖15个实际workspace；新增的
-`packages/agent-api-contract`是zero-workspace-dependency、browser-safe Public wire contract，当前由Service Agent API façade消费。Runtime
-package owner gate当前覆盖15个workspace并检查Service→contract唯一依赖边，独立`check:agent-api-packages`继续强化Public contract/consumer
-边界；`apps/kite-web`仍不成为Runtime
+Agent API contract是zero-workspace-dependency的browser-safe Public wire owner；`packages/agent-api-client`是只被Web消费的typed HTTP read
+client。Runtime package owner gate检查Service→contract与Web→client→contract依赖边，独立`check:agent-api-packages`强化Public
+contract/client/consumer边界；`apps/kite-web`仍不成为Runtime
 composition owner。KASAPI-01B后，该owner rule同时覆盖package-local generator script与committed `generated/**`，确保artifact变化命中同一
 current authority；generator不成为runtime export。KASAPI-02C后，Web build逐字节把canonical OpenAPI装入固定
 `payload/web/api-docs/openapi.json`，只读`/api-docs` renderer不发现Worker、不保存credential也不提供在线执行。Agent API跨包当前边界见
 [`active/agent-api-contract.md`](active/agent-api-contract.md)。
 
-Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
-`kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
+Local Runtime Service 的客户端边界已经分成browser-safe Agent API client、terminal App Control contract与Bun/Node-only
+`kite-local-runtime`；App Control使用独立source owner，Native client与Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
 当前默认单Service、单SQLite、最小OS runtime与legacy migration边界见
 [`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)。

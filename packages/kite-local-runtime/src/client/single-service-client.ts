@@ -28,7 +28,6 @@ export class KiteSingleServiceClientError extends Error {
 export interface KiteSingleServiceClientOptions {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly expectedBuildId: string;
-  readonly webContractRevision: string;
   readonly requestId?: () => string;
   readonly request?: typeof requestKiteLocalNativeEndpoint;
   readonly requestOptions?: KiteLocalNativeRequestOptions;
@@ -36,11 +35,6 @@ export interface KiteSingleServiceClientOptions {
 
 export interface KiteSingleServiceClient {
   describe(): Promise<Extract<KiteLocalNativeResponse, { operation: 'describe' }>>;
-  ensureWeb(
-    staticAssetRoot: string,
-  ): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_ensure' }>>;
-  statusWeb(): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_status' }>>;
-  stopWeb(): Promise<Extract<KiteLocalNativeResponse, { operation: 'web_stop' }>>;
   stopService(): Promise<Extract<KiteLocalNativeResponse, { operation: 'service_stop' }>>;
 }
 
@@ -71,26 +65,11 @@ export function createKiteSingleServiceClient(
     requestId: boundedRequestId(requestId()),
     protocolVersion: KITE_LOCAL_NATIVE_PROTOCOL_VERSION,
     clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    expectedBuildId: boundedIdentity(options.expectedBuildId, 'expected build identity'),
+    expectedBuildId: boundedBuildId(options.expectedBuildId),
   });
 
   return Object.freeze({
     describe: () => invoke({ ...base(), operation: 'describe' }, 'describe'),
-    ensureWeb: (staticAssetRoot: string) =>
-      invoke(
-        {
-          ...base(),
-          operation: 'web_ensure',
-          staticAssetRoot,
-          expectedWebContractRevision: boundedIdentity(
-            options.webContractRevision,
-            'Web contract revision',
-          ),
-        },
-        'web_ensure',
-      ),
-    statusWeb: () => invoke({ ...base(), operation: 'web_status' }, 'web_status'),
-    stopWeb: () => invoke({ ...base(), operation: 'web_stop' }, 'web_stop'),
     stopService: () => invoke({ ...base(), operation: 'service_stop' }, 'service_stop'),
   });
 }
@@ -102,9 +81,9 @@ function boundedRequestId(value: string): string {
   return value;
 }
 
-function boundedIdentity(value: string, label: string): string {
+function boundedBuildId(value: string): string {
   if (value.length < 1 || value.length > 512 || /\p{Cc}/u.test(value)) {
-    throw new TypeError(`Single-Service ${label} is invalid.`);
+    throw new TypeError('Single-Service expected build identity is invalid.');
   }
   return value;
 }

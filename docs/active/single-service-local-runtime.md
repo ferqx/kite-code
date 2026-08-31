@@ -4,43 +4,45 @@
 
 读取时机：修改CLI/TUI本机连接、Service lifecycle/native IPC、Store 9、Web启动、Kite Home文件或release companion内容时。
 
-验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts tests/release/single-service-native-client.test.ts tests/release/single-service-real-child.test.ts apps/kite-service/test/kite-home-artifact-backends.test.ts apps/kite-service/test/web-gateway/service-lifecycle.test.ts`、`bun test tests/release`、`bun run typecheck`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts tests/release/single-service-native-client.test.ts tests/release/single-service-real-child.test.ts apps/kite-service/test/kite-home-artifact-backends.test.ts apps/kite-service/test/single-service-infrastructure.test.ts`、`bun test tests/release`、`bun run typecheck`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0152、ADR-0153、ADR-0154、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
+相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
 
 ## 当前边界
 
 source/release entrypoint中的TUI、CLI `run/resume`、`service *`和`web`共用每个canonical Kite Home唯一的Local Service。客户端只通过
-按home digest隔离的Unix socket或Windows named pipe发现Service；descriptor、access/control token、HTTP origin与Web launch session均不写
+按home digest隔离的Unix socket或Windows named pipe发现Service；descriptor、access/control token、HTTP origin与Browser session均不写
 Kite Home。POSIX每home runtime只允许`service.sock`和`service.lock`，Windows endpoint不创建对应文件。除此之外不建立OS app
 data/state、跨home lease或另一套coordination目录。
 
 Service拥有一个Runtime Host、一个Store 9 writer connection和一个loopback HTTP listener。Workspace仍是Trust、配置、Skill、MCP、
-Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的observer route；该route不建立
-Browser认证状态，`web stop`只卸载route并关闭tab/socket，不停止Service或Agent API。
+Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的static asset与只读`/v1` REST；
+Web route与Service同生共死，Browser logout只撤销当前HttpOnly session。
 
 Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以及`kite.sqlite`/WAL/SHM。运行期不得新建
 `runtime-service/`、`coordinator/`、`workspace-worker/`、`web-gateway/`、`layouts/`或filesystem Artifact root。
 
 ## 启动与Web
 
-- `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。
-- Native IPC contract当前为`kite-local-runtime-contract-v2`。protocol/client-contract revision相同且双方build identity均为`dev:`时，
-  source build drift复用现有ready Service，但TUI必须显式显示drift warning并由`/status`投影PID、startedAt、actual/expected build；
-  `bun run tui:fresh`是source owner显式请求manager restart的入口，只有`applied + ready`才启动TUI。installed drift不复用混合构建：POSIX manager从
-  exact lifecycle reservation取得上一installed build identity，以该身份重新验证instance/PID/startedAt/build；Windows named pipe没有
-  filesystem reservation，因此Service只对protocol/client-contract exact且双方均为24位installed identity的`service_stop`放行跨build请求。
-  两端都只请求安全stop，`service_busy`仅因明确表示未应用而可在stop deadline内重试；owner退出后才启动当前immutable companion。source↔installed、identity uncertainty、
-  unavailable与outcome-unknown一律不强制替换。发起方还必须由managed install marker/active pointer证明自己是当前active candidate；已退役
-  candidate不能反向停止新Service或重新启动旧build。build ID不替代wire compatibility，warning也不提升admission authority。
-- `kite web`先验证fixed asset root、`index.html`、OpenAPI和hashed JS/CSS，再ensure Service。缺失返回
-  `web_assets_missing`，不读取lifecycle、不spawn、不创建DB/socket/token。
-- `web_ensure`额外校验`kite-app-web-observer-v2` semantic revision；revision drift返回incompatible，不把新Browser asset挂到旧Web wire。
-- `web_status`只返回`absent|ready`、origin与asset digest；`web_ensure`返回同一普通loopback URL，不mint token。TUI `/web`使用ensure/open语义。
+- source入口先构建Web；Service child从release composition取得exact static root，在发布ready前验证`index.html`、OpenAPI和hashed
+  JS/CSS并挂载到唯一listener。资源缺失时Service启动失败，不存在Web absent/API ready的部分状态。
+- `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。`GET /`直接返回Web index并创建或复用
+  read-only HttpOnly Browser session，同origin继续提供`/v1`与`/api-docs`。
+- Native IPC只保留`describe/service_stop`；`kite web`与TUI `/status`先ensure Service，再从`describe.httpOrigin`返回稳定的`origin/`，
+  `/status`同时展示Service identity且不保留单独的TUI `/web`。这些只读操作不挂载资源或改变lifecycle；
+  `web_launch/web_ensure/web_status/web_stop`不属于当前协议或CLI。
+- TUI-first、Web-first和同home并发ensure都经过同一manager/reservation，只产生一个ready Service；一个客户端退出不停止另一个。custom
+  `--kite-home`只在同canonical profile内复用。兼容客户端即使`expectedBuildId`不同也通过只读Native `describe`复用ready Service及其
+  Web assets；Protocol/client-contract/identity不兼容仍fail closed且不spawn。跨build `service stop/restart`保持
+  `incompatible/build_mismatch`，只能由owner build执行。
+- Native socket只固定Client/connection/Workspace identity；每条mutation再从Store 9读取目标Session当前Controller并把generation绑定进
+  opaque command context。Controller晚于socket创建或TUI切换Session不会沿用旧ticket快照，旧connection generation仍被拒绝。
+- `GET /`创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime
+  authority。Browser不持有Native/Agent bearer，也不通过旧BFF或业务WebSocket读取。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不重放stop。
 
-Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。`bun run web:dev`执行build、asset preflight、Service ensure并原样
-输出typed diagnostic。
+Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。source `bun run server`和`bun run tui`先build Web assets，
+再ensure唯一Service；installed candidate只从immutable release root解析Service executable与payload。
 
 ## Store 9
 
@@ -53,10 +55,7 @@ continuation。Builtin schema-aware store由single-Service production注入DB ba
 
 Store 9只保存current schema/format metadata和有生产消费者的领域事实，不保存migration phase、first-write rollback marker或旧Coordinator
 operation receipt。所有mutation直接复用一个`BEGIN IMMEDIATE` transaction；普通Runtime command仍复核当前Controller generation并使用
-现有Runtime/Host per-Session mailbox、receipt与recovery语义。Native command admission按command的exact Session读取当前Controller lease，
-并核对Service instance、client identity与connection generation；不得把WebSocket建立时的Controller Session/generation header当作后续
-mutation的静态authority。因此Runtime socket可以先于首个Controller建立，同一连接切换到其持有的其他Session lease也不需要重连；
-不匹配当前Store lease的外来client仍固定拒绝。
+现有Runtime/Host per-Session mailbox、receipt与recovery语义。
 
 ## Clean cutover
 

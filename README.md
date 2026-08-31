@@ -31,19 +31,10 @@ bun install
 bun run tui
 ```
 
-This source-development command builds the current Kite Web assets before launching the TUI, so
-the URL shown by `/status` always serves the current checkout. On first launch, follow the
-interface to configure a model provider.
-
-During source development, `/status` shows the resident Local Service PID, start time, and build
-identity. If the TUI reports source build drift, restart the Service safely and launch the TUI with:
-
-```bash
-bun run tui:fresh
-```
-
-Installed releases reconcile a resident Service from the previous release internally; users do
-not need to find, kill, or restart the old process.
+`bun run tui` builds the Web assets and ensures the one Local Service before opening the terminal
+UI. `/status` shows the Service PID, start time, actual/expected build identity, and stable Kite Web
+URL. Use `bun run tui:fresh` when the source Service itself must be restarted onto the current build.
+On first launch, follow the interface to configure a model provider.
 
 Headless CLI:
 
@@ -56,20 +47,23 @@ bun run agent run \
 
 For all options, run `bun run agent --help`.
 
-## Local Web Observer
+## Local Server and Web
 
-From a source checkout, one command builds and validates the Web assets, ensures the Local Service
-and Web routes, and prints their loopback URL:
+To start the Server without opening the TUI:
 
 ```bash
-bun run web:dev
+bun run server
 ```
 
-The terminal TUI/CLI ensures the single Local Service only when needed. `kite web` ensures that
-Service and attaches its Browser routes to the same loopback listener. Opening a browser URL never
-starts a local server; the page is only a Gateway client. The current local Web surface uses no
-Cookie, launch token, or WebSocket authentication ticket. `bun run --cwd apps/kite-web dev` is only
-a Vite asset server and does not connect to the Runtime.
+This builds the Web assets, ensures the same Local Service used by the TUI, and prints its stable
+loopback root URL. The Service root address is the Web entrypoint; the same origin serves `/v1` and
+`/api-docs`. `bun run agent web` ensures the Service and prints the same root URL.
+
+TUI/CLI and Browser reuse one Service, Runtime, listener and `kite.sqlite`. Visiting `/` establishes
+an HttpOnly read-only session, then the Browser reads Workspace, Session, History and Checkpoint data from
+the Service `/v1` REST API. Use `bun run agent service status|stop|restart` for the only lifecycle;
+there is no separate Web service to start or stop. `bun run --cwd apps/kite-web dev` remains only a
+Vite asset server.
 
 ## Documentation
 

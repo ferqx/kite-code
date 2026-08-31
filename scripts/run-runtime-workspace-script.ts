@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const WORKSPACES = [
   'packages/agent-api-contract',
+  'packages/agent-api-client',
   'packages/runtime-contract',
   'packages/runtime-protocol',
   'packages/runtime-server',

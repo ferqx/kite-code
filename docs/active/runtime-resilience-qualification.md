@@ -23,11 +23,11 @@ invalidated，不把新History拼到旧watermark。response loss后Client必须�
 每context最多16个in-flight request；第17个返回retryable 429。logout、Trust撤销、generation fence、drain与replacement先阻止新admission，
 等待已认证read（包括pending Trust重验）收敛后关闭一次private connection；迟到admission复核closed/revoked事实并返回503/401，不能进入owner。
 History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
-覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；Gateway restart仍由独立process/carrier suite证明且不代理`/v1`。
+覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；当前Web static/auth surface随single-Service restart
+重建，由同listener carrier与真实child suite证明且不代理`/v1`。
 
 KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和
-digest-bound original resource receipt；Run/receipt任一fault完整rollback。queued到running的activation必须先提交`attempt_start` transaction，
-transaction失败保留queued且不进入publish/schedule；waiting/running与terminal/cancel由deterministic
+digest-bound original resource receipt；Run/receipt任一fault完整rollback。activation、waiting/running与terminal/cancel由deterministic
 commit clock推进，Store writer拒绝同Session第二个active Run。response loss/restart retry从persistent lookup直接返回同一original
 queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
 Run keyset page，SQLite query plan命中专用index且不扫event journal。
@@ -90,15 +90,10 @@ ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与f
 manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access`、exact`{}`body调用
 `POST /_kite/instance`。response的content type、4 KiB上限、closed keys及
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
-identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`；descriptor/expected build mismatch返回
-`incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
-与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
-single-Service Native IPC v2对source开发作更窄的例外：protocol/client-contract exact且双方build identity均为`dev:`时允许build drift并
-复用resident owner；installed/candidate普通request仍exact fail closed。POSIX manager用reservation中的上一installed build identity重新验证；
-Windows Service仅对exact contract和双方installed candidate identity的`service_stop`允许跨build。confirmed absent后才启动当前companion。
-manager还必须从managed marker/active pointer动态证明caller是current candidate，阻止退役client反向换代。该路径仅对明确未应用的
-`service_busy`重试；ambiguous stop只做exact状态查询，
-source↔installed、identity uncertainty与Web semantic revision drift仍阻断。source例外不授权cleanup、spawn或mutation replay。
+identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
+expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
+`incompatible/build_mismatch`。这些结果都保留state且`spawn=0`，不能从caller build或descriptor合成健康结果。restart后
+descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待

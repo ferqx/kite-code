@@ -85,9 +85,10 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   contract revision、server version与build ID；token、Workspace、Store/executable path、credential与Session字段fail closed。
 - authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
-  content-type缺失、malformed/extra field或instance/server/build identity mismatch统一`identity_uncertain`；
-  Protocol/client-contract不兼容被拒绝，expected build drift返回`incompatible + build_mismatch`。以上状态都不授权
-  清理alive/uncertain owner或spawn replacement。
+  content-type缺失、malformed/extra field或同一次发现中的instance/server/build identity drift统一`identity_uncertain`；
+  Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build，
+  因此ensure/status可复用同home ready owner且不spawn replacement；`service_stop/restart`仍以exact build为control fence，不匹配返回
+  `incompatible + build_mismatch`并保持Service ready。
 - access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。
@@ -104,24 +105,15 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   注入已验证的OS runtime parent并为每home只得到`service.sock`与`service.lock`，Windows只得到按digest隔离的named pipe identity。
   不同custom home是独立profile；local-runtime不为它们增加共享lease、locator或coordination state。
   helper不读取、创建或删除路径，也不从ambient environment猜测runtime parent。KHSS-02在该identity上新增exact、32 KiB、每连接
-  单请求的Native IPC codec/client，封闭为`describe/web_ensure/web_status/web_stop/service_stop`五个operation；Service identity与HTTP access token
-  只通过owner-only endpoint内存响应返回，Web diagnostic保持typed，unknown field/build/request identity mismatch fail closed。上层
-  `KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop或Web lifecycle mutation。
-  Native IPC client contract当前为`kite-local-runtime-contract-v2`。Service先用protocol/client-contract revision判断wire兼容；
-  只有Service与caller的build identity都以`dev:`标识时，纯source build drift才允许复用同一ready owner。installed/candidate与
-  source↔installed build drift继续返回`incompatible/build_mismatch`。production manager只对installed→installed drift执行内部换代：POSIX从
-  strict lifecycle reservation取得旧build ID，创建该旧build绑定的Native client并重新核对instance/PID/startedAt/build；Windows没有filesystem
-  reservation，Native Service只对exact protocol/client-contract且双方均为24位installed identity的`service_stop`允许跨build，其他operation仍保持
-  exact build gate。manager在进入该路径前还必须动态验证caller build仍是managed install active pointer指向的candidate，退役进程不能
-  反向停止新Service并形成版本争抢。这兼容既有POSIX旧Service且不允许source参与换代。`web_ensure`另携带exact Web semantic revision，当前为
-  `kite-app-web-observer-v2`；不匹配时不得attach混合版本Browser route。
+  单请求的Native IPC codec/client，当前封闭为`describe/service_stop`两个operation；Service identity、HTTP origin与access token
+  只通过owner-only endpoint内存响应返回。上层从`describe.httpOrigin`派生稳定Web根地址，不存在Web专用Native operation；
+  unknown field/build/request identity mismatch fail closed。上层`KiteSingleServiceClient`每个方法只进行一次exchange，不自动重放stop。
   同阶段的`createKiteSingleServiceManager`只从endpoint与最小lifecycle reservation判断owner：同进程ensure single-flight，alive exact
   PID/start-token等待ready，dead exact owner才清理匹配的socket inode/lock并spawn，uncertain/corrupt/drift全部阻断。Native probe比较OS
   process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。
   `createKiteSingleServiceNativeSpawnPort`现通过dedicated fd3启动真实source/installed child；真实macOS journey覆盖ensure复用、exact
-  reservation、Home内无`runtime-service/`、authenticated stop以及旧installed build到当前build的真实子进程换代。普通stop收到accepted后即使
-  endpoint先关闭造成一次半关闭exchange，manager也只在同一PID/start-token/reservation边界内继续等待；installed换代仅在明确
-  `service_busy`（未应用）时于deadline内重试，accepted/ambiguous stop不重放，identity drift/uncertain仍立即blocked。
+  reservation、Home内无`runtime-service/`以及authenticated stop。stop收到accepted后即使endpoint先关闭造成一次半关闭exchange，manager也只
+  在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。
   single-Service manager现是CLI/TUI/Web默认production path；正式release不再组合旧descriptor/token、Coordinator manager、Store migration或
   `web recover`。clean cutover不会从legacy source恢复，也不会在普通ensure中扫描或删除它们。
 

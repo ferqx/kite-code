@@ -76,6 +76,27 @@ describe('Native Local Runtime connector', () => {
     ).toHaveLength(1);
   });
 
+  test('reports an actionable error when another build owns the managed Service', async () => {
+    const fixture = createFixture();
+    const connection = createLocalKiteConnection({
+      ...fixture.options,
+      manager: {
+        ensure: async () => ({
+          outcome: 'incompatible',
+          state: 'ready',
+          diagnostic: 'build_mismatch',
+        }),
+      },
+    });
+    clients.push(connection);
+
+    await expect(connection.prepareAppControl()).rejects.toMatchObject({
+      code: 'protocol_error',
+      message:
+        'Local Runtime Service is ready for a different build (build_mismatch). Stop it from the checkout or build that started it, or use a different --kite-home.',
+    });
+  });
+
   test('refreshes an expired pre-Runtime capability once before a Trust decision', async () => {
     let unauthorized = true;
     let decisionDispatches = 0;

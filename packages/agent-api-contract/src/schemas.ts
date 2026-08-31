@@ -30,6 +30,7 @@ export const AGENT_API_CAPABILITIES = [
   'runs',
   'session_stream',
   'sessions',
+  'workspaces',
 ] as const;
 export const agentApiCapabilitySchema = z.enum(AGENT_API_CAPABILITIES);
 export type AgentApiCapability = z.infer<typeof agentApiCapabilitySchema>;
@@ -42,6 +43,7 @@ const capabilityListSchema = z
 export const AGENT_API_SERVER_INFO_SCHEMA = 'kite.agent-api.server-info.v1' as const;
 export const AGENT_API_CONTEXT_SCHEMA = 'kite.agent-api.context.v1' as const;
 export const AGENT_API_EXCHANGE_SCHEMA = 'kite.agent-api.exchange.v1' as const;
+export const AGENT_API_WORKSPACE_SCHEMA = 'kite.agent-api.workspace.v1' as const;
 export const AGENT_API_SESSION_SCHEMA = 'kite.agent-api.session.v1' as const;
 export const AGENT_API_RUN_SCHEMA = 'kite.agent-api.run.v1' as const;
 export const AGENT_API_INTERACTION_SCHEMA = 'kite.agent-api.interaction.v1' as const;
@@ -49,6 +51,8 @@ export const AGENT_API_INTERACTION_QUEUE_SCHEMA = 'kite.agent-api.interaction-qu
 export const AGENT_API_CHECKPOINT_SCHEMA = 'kite.agent-api.checkpoint.v1' as const;
 export const AGENT_API_CHECKPOINT_PREVIEW_SCHEMA = 'kite.agent-api.checkpoint-preview.v1' as const;
 export const AGENT_API_HISTORY_ITEM_SCHEMA = 'kite.agent-api.history-item.v1' as const;
+export const AGENT_API_LOG_ITEM_SCHEMA = 'kite.agent-api.log-item.v1' as const;
+export const AGENT_API_MODEL_CONTEXT_SCHEMA = 'kite.agent-api.model-context.v1' as const;
 export const AGENT_API_EVENT_SCHEMA = 'kite.agent-api.event.v1' as const;
 export const AGENT_API_RESYNC_SCHEMA = 'kite.agent-api.resync.v1' as const;
 export const AGENT_API_PROBLEM_SCHEMA = 'kite.agent-api.problem.v1' as const;
@@ -69,6 +73,14 @@ export const agentApiExchangeRequestSchema = z.object({
   required_capabilities: capabilityListSchema,
 });
 export type AgentApiExchangeRequest = z.infer<typeof agentApiExchangeRequestSchema>;
+
+export const agentApiWorkspaceSchema = z.object({
+  schema: z.literal(AGENT_API_WORKSPACE_SCHEMA),
+  workspace_id: agentApiIdentifierSchema,
+  display_name: agentApiShortTextSchema,
+  session_count: agentApiRevisionSchema,
+});
+export type AgentApiWorkspace = z.infer<typeof agentApiWorkspaceSchema>;
 
 export const agentApiContextSchema = z.object({
   schema: z.literal(AGENT_API_CONTEXT_SCHEMA),
@@ -228,6 +240,7 @@ export const agentApiSessionSchema = z
       .optional(),
     created_at: agentApiTimestampSchema.optional(),
     updated_at: agentApiTimestampSchema.optional(),
+    last_sequence: agentApiRevisionSchema.optional(),
   })
   .superRefine((value, context) => {
     if (
@@ -392,6 +405,128 @@ export const agentApiHistoryItemSchema = z.object({
 });
 export type AgentApiHistoryItem = z.infer<typeof agentApiHistoryItemSchema>;
 
+const agentApiLogDetailSchema = z.object({
+  kind: z.enum([
+    'message',
+    'model',
+    'tool',
+    'interaction',
+    'subagent',
+    'verification',
+    'artifact',
+    'unavailable',
+  ]),
+  fields: z
+    .array(
+      z.object({
+        name: agentApiIdentifierSchema,
+        value: boundedText(65_536),
+      }),
+    )
+    .max(32),
+  artifact: z
+    .object({
+      kind: agentApiShortTextSchema,
+      availability: z.enum(['available', 'unavailable']),
+    })
+    .optional(),
+});
+
+export const agentApiLogItemSchema = z.object({
+  schema: z.literal(AGENT_API_LOG_ITEM_SCHEMA),
+  session_id: agentApiIdentifierSchema,
+  sequence: agentApiPositiveRevisionSchema,
+  occurred_at: agentApiTimestampSchema,
+  event_type: boundedText(160, { minimumBytes: 1 }),
+  category: z.enum([
+    'session',
+    'turn',
+    'model',
+    'tool',
+    'interaction',
+    'subagent',
+    'verification',
+    'recovery',
+    'other',
+  ]),
+  status: z.enum(['ok', 'running', 'waiting', 'cancelled', 'failed', 'unknown']),
+  summary: agentApiDetailTextSchema.optional(),
+  detail: agentApiLogDetailSchema,
+});
+export type AgentApiLogItem = z.infer<typeof agentApiLogItemSchema>;
+
+const agentApiModelContextPartSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text'),
+    text: boundedText(65_536),
+    truncated: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('reasoning'),
+    text: boundedText(65_536),
+    truncated: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('tool_call'),
+    tool_call_id: agentApiIdentifierSchema,
+    tool_name: agentApiShortTextSchema,
+    input_json: boundedText(32_768),
+    truncated: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('tool_result'),
+    tool_call_id: agentApiIdentifierSchema,
+    tool_name: agentApiShortTextSchema,
+    output: boundedText(65_536),
+    truncated: z.boolean(),
+  }),
+]);
+
+const agentApiModelContextMessageSchema = z.object({
+  index: agentApiRevisionSchema,
+  role: z.enum(['user', 'assistant', 'tool']),
+  parts: z.array(agentApiModelContextPartSchema).max(AGENT_API_LIMITS.maxArrayLength),
+});
+
+const agentApiModelContextToolSchema = z.object({
+  name: agentApiShortTextSchema,
+  description: boundedText(4_096).optional(),
+  input_schema_json: boundedText(32_768),
+  truncated: z.boolean(),
+});
+
+export const agentApiModelContextSchema = z.object({
+  schema: z.literal(AGENT_API_MODEL_CONTEXT_SCHEMA),
+  session_id: agentApiIdentifierSchema,
+  invocation_id: agentApiIdentifierSchema,
+  sequence: agentApiPositiveRevisionSchema,
+  purpose: z.enum(['primary_agent', 'context_compaction', 'auto_review', 'subagent']),
+  model: z.object({
+    provider: agentApiShortTextSchema,
+    name: agentApiShortTextSchema,
+  }),
+  system_prompt: z.object({
+    text: boundedText(AGENT_API_LIMITS.maxRunInputBytes),
+    truncated: z.boolean(),
+  }),
+  messages: z.array(agentApiModelContextMessageSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  messages_truncated: z.boolean(),
+  tools: z.array(agentApiModelContextToolSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  tools_truncated: z.boolean(),
+  request_settings: z.object({
+    transport: z.enum(['stream', 'generate']),
+    temperature: z.number().finite(),
+    max_output_tokens: agentApiRevisionSchema.nullable(),
+    stop_policy: z.object({
+      kind: z.literal('single_step'),
+      max_steps: z.literal(1),
+    }),
+    message_count: agentApiRevisionSchema,
+    tool_count: agentApiRevisionSchema,
+  }),
+});
+export type AgentApiModelContext = z.infer<typeof agentApiModelContextSchema>;
+
 export const AGENT_API_SSE_CHANNELS = [
   'interactions',
   'lifecycle',
@@ -480,7 +615,13 @@ const pageBase = {
 };
 export const agentApiSessionPageSchema = z.object({
   schema: z.literal('kite.agent-api.session-page.v1'),
+  workspace_id: agentApiIdentifierSchema.optional(),
   items: z.array(agentApiSessionSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  ...pageBase,
+});
+export const agentApiWorkspacePageSchema = z.object({
+  schema: z.literal('kite.agent-api.workspace-page.v1'),
+  items: z.array(agentApiWorkspaceSchema).max(AGENT_API_LIMITS.maxPageLimit),
   ...pageBase,
 });
 export const agentApiRunPageSchema = z
@@ -512,6 +653,23 @@ export const agentApiHistoryPageSchema = z
       context.addIssue({ code: 'custom', message: 'History page exceeds its Session watermark' });
     }
   });
+export const agentApiLogPageSchema = z
+  .object({
+    schema: z.literal('kite.agent-api.log-page.v1'),
+    session_id: agentApiIdentifierSchema,
+    through_sequence: agentApiRevisionSchema,
+    items: z.array(agentApiLogItemSchema).max(AGENT_API_LIMITS.maxHistoryItems),
+    ...pageBase,
+  })
+  .superRefine((value, context) => {
+    if (
+      value.items.some(
+        (item) => item.session_id !== value.session_id || item.sequence > value.through_sequence,
+      )
+    ) {
+      context.addIssue({ code: 'custom', message: 'Log page exceeds its Session watermark' });
+    }
+  });
 export const agentApiCheckpointPageSchema = z
   .object({
     schema: z.literal('kite.agent-api.checkpoint-page.v1'),
@@ -525,8 +683,10 @@ export const agentApiCheckpointPageSchema = z
     }
   });
 export type AgentApiSessionPage = z.infer<typeof agentApiSessionPageSchema>;
+export type AgentApiWorkspacePage = z.infer<typeof agentApiWorkspacePageSchema>;
 export type AgentApiRunPage = z.infer<typeof agentApiRunPageSchema>;
 export type AgentApiHistoryPage = z.infer<typeof agentApiHistoryPageSchema>;
+export type AgentApiLogPage = z.infer<typeof agentApiLogPageSchema>;
 export type AgentApiCheckpointPage = z.infer<typeof agentApiCheckpointPageSchema>;
 
 export const AGENT_API_PROBLEM_CODES = [

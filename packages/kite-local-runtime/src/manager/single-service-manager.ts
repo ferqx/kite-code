@@ -220,7 +220,10 @@ export function createKiteSingleServiceManager(
       if (stopped.outcome !== 'applied') {
         return result(id, operation, 'unavailable', stopped.state, 'identity_uncertain');
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof KiteSingleServiceClientError && error.diagnostic === 'incompatible') {
+        return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
+      }
       return result(id, operation, 'outcome_unknown', 'draining', 'identity_uncertain');
     }
     const absent = await waitUntilAbsent(

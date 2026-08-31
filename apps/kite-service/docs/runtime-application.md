@@ -8,7 +8,7 @@ Runtime root；CLI只通过Native client seam消费结果。
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
 Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable
-对default canonical home使用 `<kite-home>/checkpoints.sqlite`；CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
+对default canonical home使用 `<kite-home>/kite.sqlite`；CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
 InProcess composition调用点。
 composition在打开前以realpath parent + filename建立process-local Store claim；相同路径或canonical alias的第二owner
 fail closed，dispose完成后才释放claim。internal/test stdio绕过此default composition时必须使用显式isolated nondefault path。
@@ -16,10 +16,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
-默认 Service composition 当前仍是 State 27 / Store 6。`workspace-worker/production.ts` 是另一条显式 production path：它只接收
-Coordinator/layout owner 已 materialize/admit 的 Store 8 owner、Workspace binding 与 generation，随后在同一 Worker 内组合唯一
-Host/Application/Controller/effect/Run authority；Worker 不创建 manifest、不打开第二 Store，也不把 Store 8 隐式回退为 Store 7/6。Coordinator
-和 Web Gateway 是独立 companion process owner，不能通过本页的 Service composition 推导为同一进程。
+当前source/release只组合Store 9 single-Service路径。Coordinator、per-Workspace Worker与独立Web Gateway都不是普通启动拓扑；Web static
+surface在Service发布ready前挂到同一个loopback listener，并与Runtime/API一起随Service关闭。
 
 ## Workspace、Trust 与 routing
 
@@ -65,7 +63,8 @@ resource receipt和State decision共同提交。bridge activation先调用Coordi
 Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
 current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
 
-History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；carrier与
+History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；未持久化名称的Session在
+History与Agent API中复用同一safe-text规则，从首条用户消息派生最多80字符的只读展示标题，不写入第二份状态。carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
 Workspace Worker另为每个Agent API context打开一条read-only in-process Runtime Client/Server logical connection；admission只允许
@@ -73,6 +72,8 @@ initialize/query，并继续把persisted Session identity与当前Workspace交�
 IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
 same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
 subscribe或recovery。
+single-Service Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
+`model_surface`；read adapter只消费App-owned Model Context read port，不取得Artifact ref/backend或通用正文读取authority。
 operation gate的quiesce线性化关闭新mutation admission后立即返回lease与`activeOperations`观察值；普通stop据此
 立即resume并返回`service_busy`，不会先等待active mutation而退化成manager timeout。只有commit drain与signal owner
 shutdown会等待idle后进入draining。
@@ -90,14 +91,15 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 execution authority；Service不得让TUI从事件相邻关系反推该归属。
 
 Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
-Worker binding reference）。Worker application 的 effect composition 只接受该已固定 context，并由 Store 8 authority、Controller
+opaque Controller binding reference）。single-Service从每条command的已认证client/connection generation读取Store 9当前Session Controller，
+不把Controller Session固定到可能早于Controller创建的socket ticket。Worker application 的 effect composition 只接受已固定context，并由Store authority、Controller
 generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
-Protocol wire frame，也不向 Web Observer 暴露。
+Protocol wire frame，也不向Browser REST projection暴露。
 
 ## Clean-cutover non-goals
 
-没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private
-Web Observer/Gateway 是独立的只读 companion，不把 Browser 变成 Controller；remote/LAN Web、Desktop/public SDK 仍不属于 V1。
+没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private Web是同一
+Service `/v1`的只读客户端，不拥有独立BFF、Runtime或Store，也不把Browser变成Controller；remote/LAN Web、Desktop/public SDK仍不属于V1。
 Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
 Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
 schema fallback。

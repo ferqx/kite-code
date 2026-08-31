@@ -1,4 +1,3 @@
-import type { WebPresentationBlock, WebPresentationMessage } from '@kite-ai/kite-app-contract/web';
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -14,15 +13,19 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 import type { WebHistoryState } from '@/presentation/reducer';
+import type { WebPresentationBlock, WebPresentationMessage } from '@/presentation/types';
 
 function Block({ block }: { readonly block: WebPresentationBlock }) {
   switch (block.kind) {
     case 'text':
-      return <p className="whitespace-pre-wrap text-[14px] leading-7 text-copy">{block.text}</p>;
+      return (
+        <p className="whitespace-pre-wrap text-[14px] leading-[1.75] text-copy">{block.text}</p>
+      );
     case 'thinking':
       return (
-        <CollapsiblePrimitive.Root className="rounded-xl border border-border bg-surface/70">
+        <CollapsiblePrimitive.Root className="rounded-xl border border-border bg-surface-subtle/60">
           <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground">
             {block.complete ? (
               <CheckCircle2 className="size-3.5" />
@@ -40,7 +43,7 @@ function Block({ block }: { readonly block: WebPresentationBlock }) {
       );
     case 'tool_activity':
       return (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs">
+        <div className="flex items-center gap-2 rounded-lg border border-info/20 bg-info/6 px-3 py-2 text-xs">
           <LoaderCircle className="size-3.5 animate-spin text-running" />
           <span className="font-medium">{block.label}</span>
           {block.summary ? (
@@ -50,7 +53,7 @@ function Block({ block }: { readonly block: WebPresentationBlock }) {
       );
     case 'tool_result':
       return (
-        <CollapsiblePrimitive.Root className="overflow-hidden rounded-xl border border-border bg-terminal">
+        <CollapsiblePrimitive.Root className="overflow-hidden rounded-xl border border-border bg-terminal shadow-[inset_0_1px_0_rgb(255_255_255/0.03)]">
           <CollapsiblePrimitive.Trigger className="group flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs">
             <Terminal className="size-3.5 text-muted-foreground" />
             <span className="font-medium">{block.label}</span>
@@ -86,16 +89,31 @@ function Block({ block }: { readonly block: WebPresentationBlock }) {
 function Message({ message }: { readonly message: WebPresentationMessage }) {
   const user = message.role === 'user';
   return (
-    <article className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 py-5">
-      <span className="grid size-8 place-items-center rounded-xl border border-border bg-surface text-muted-foreground">
+    <article
+      className={cn(
+        'grid grid-cols-[32px_minmax(0,1fr)] gap-3 py-5',
+        user && 'ml-auto w-full max-w-[88%]',
+      )}
+    >
+      <span
+        className={cn(
+          'grid size-8 place-items-center rounded-[10px] border border-border bg-surface text-muted-foreground shadow-[0_1px_2px_rgb(0_0_0/0.04)]',
+          user && 'border-accent/20 bg-accent/10 text-accent',
+        )}
+      >
         {user ? <User className="size-4" /> : <Bot className="size-4" />}
       </span>
-      <div className="min-w-0">
+      <div
+        className={cn(
+          'min-w-0',
+          user && 'rounded-2xl rounded-tl-md border border-border bg-surface px-4 py-3 shadow-soft',
+        )}
+      >
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-xs font-semibold">
+          <h2 className="text-[11px] font-semibold text-muted-foreground">
             {user ? 'You' : message.role === 'system' ? 'Kite status' : 'Kite'}
           </h2>
-          <span className="font-mono text-[9px] text-muted-foreground">#{message.sequence}</span>
+          <span className="font-mono text-[9px] text-muted-foreground/70">#{message.sequence}</span>
         </div>
         <div className="space-y-2.5">
           {message.blocks.map((block, index) => (
@@ -132,7 +150,7 @@ export function MessageList({
   }
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto w-full max-w-3xl px-6 pb-16 pt-5">
+      <div className="mx-auto w-full max-w-[780px] px-6 pb-20 pt-6 max-sm:px-4">
         {messages.map((message) => (
           <Message key={message.messageId} message={message} />
         ))}
@@ -156,7 +174,7 @@ function HistoryStatePanel({
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
       <div className="max-w-md">
-        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground">
+        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground shadow-soft">
           <copy.Icon className={copy.iconClassName} />
         </div>
         <h2 className="text-sm font-semibold">{copy.title}</h2>

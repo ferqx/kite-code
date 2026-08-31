@@ -2,84 +2,74 @@
 
 状态：active
 
-读取时机：修改`packages/agent-api-contract`、未来Agent API HTTP/SSE adapter、OpenAPI/schema生成、Public compatibility、Agent API SDK或
-静态`/api-docs` artifact时。
+读取时机：修改`packages/agent-api-contract`、`packages/agent-api-client`、Service Agent API HTTP adapter、Browser `/v1`消费、
+OpenAPI/schema生成、Public compatibility或静态`/api-docs` artifact时。
 
 验证：`bun run check:agent-api-packages`、`bun run --cwd packages/agent-api-contract test`、
 `bun run --cwd packages/agent-api-contract typecheck`、`bun run --cwd packages/agent-api-contract build`、
-`bun test apps/kite-service/test/agent-api/conformance.test.ts`、
-`bun run check:docs-impact`。
+`bun run --cwd packages/agent-api-client test`、`bun run --cwd packages/agent-api-client typecheck`、
+`bun test apps/kite-service/test/agent-api`、`bun run check:docs-impact`。
 
-相关：ADR-0149、ADR-0150，KASAPI-01A；模块局部边界见
-[`packages/agent-api-contract/README.md`](../../packages/agent-api-contract/README.md)。
+相关：ADR-0149、ADR-0150、ADR-0155；owner-local边界见
+[`packages/agent-api-contract/README.md`](../../packages/agent-api-contract/README.md)与
+[`packages/agent-api-client/README.md`](../../packages/agent-api-client/README.md)。
 
 ## 当前实现事实
 
-`@kite-ai/agent-api-contract`是已存在的private、browser-safe Public Agent API V1 wire contract workspace。它当前实现DTO、codec、limits、
-fixtures，以及同源生成的OpenAPI 3.1、JSON Schema、standalone wire declarations、examples、SHA-256 digest和package/static/drift Gate；
-Workspace Worker production listener、auth exchange、ServerInfo与bounded Session/History/Checkpoint read adapter已经实现；canonical OpenAPI
-也已逐字节进入release Web asset并由静态`/api-docs`参考页展示。Agent API SDK、Store 8 Run route、mutation与SSE尚未实现。
-package/artifact、静态参考或ServerInfo存在不表示未发布resource capability ready，也不改变
-private Runtime Protocol、Native CLI/TUI或Browser Observer行为。
+`@kite-ai/agent-api-contract`是private、browser-safe Public Agent API V1 wire contract owner。它从同一Zod source生成OpenAPI 3.1、JSON
+Schema、standalone wire declarations、examples与SHA-256 digest。`@kite-ai/agent-api-client`是唯一production Browser HTTP client，只封装
+已实现的Browser auth、Workspace、Session、History、诊断Log、Browser-only Model Context与Checkpoint read，不拥有discovery、重试daemon、offline cache、SSE或业务WebSocket。
 
-唯一root export提供snake_case的ServerInfo、Context、Session、Run、Interaction/queue、History、Checkpoint、page、mutation result、Problem
-Details、SSE event/resync与request/query schemas。Request decoder先做bounded JSON admission，再递归拒绝unknown field；response decoder允许旧
-Client忽略新增optional field，而Server encoder递归拒绝未声明field。schema tag、discriminant、ID、timestamp、text、page、cursor、array、
-depth、object key与UTF-8 byte上限均由同一package拥有。
+同一个single-Service listener实现两类principal：
 
-package runtime/schema/generation source只允许browser-safe `zod`，workspace dependency为零；filesystem/crypto write只在不导出的package-local
-generator script。它不导入Runtime Contract/Protocol/Client、Kernel、Host、Store、Service、
-Native、React、Bun或Node，不执行I/O、不持有credential、不决定Controller/Workspace admission、不派生command ID、不恢复Session、不查询
-History，也不把private camelCase DTO透传为Public wire。
+- Native/automation one-shot capability换Workspace-scoped Agent bearer context；
+- Service根页面创建service-scoped、HttpOnly/SameSite Browser cookie。
 
-## 当前兼容与安全规则
+两者复用同一read adapter/query authority。Agent context继续绑定exact Workspace、Client/generation与一条private Runtime logical
+connection；Browser只读取Store 9 Directory允许投影的Workspace/Session，不能调用全局`GET /v1/sessions`、mutation或SSE。cookie、bearer、
+Native header混用fail closed。
 
-- request object及嵌套对象closed；unknown/prototype/accessor/cycle/deep/oversize/unsafe number在schema traversal前fail closed；
-- response新增optional展示field可被旧decoder忽略；Server不能借此发送undeclared field；
-- required field、语义或必须理解的discriminant破坏需要新major；当前stable façade的path major精确为`/v1`；
-- timestamp严格为UTC RFC 3339三位毫秒；ID/opaque token为bounded ASCII；text按UTF-8 bytes限制；
-- Interaction response携带完整kind-specific identity并与response kind配对；只传ID的shape不存在；
-- Run lifecycle codec拒绝active Run携带finished/terminal以及terminal Run缺少必要time/detail；
-- resync codec要求Session、Interaction queue与snapshot revision共享identity/revision；
-- Public DTO不包含Workspace/Store path、Worker/Controller/binding reference、credential、Provider正文或raw Runtime event。
+当前Browser-ready surface是`GET /v1`、Browser logout、Workspace page、Workspace-scoped Session page、Session get、History/Log/Model Context page、
+Checkpoint list/preview。History支持`after_sequence`增量边界；它与cursor互斥。Run、Interaction、mutation、SSE与外部SDK尚未ready，
+OpenAPI中存在future contract不等于ServerInfo capability开放。
 
-## Generated artifact当前规则
+## Contract与安全规则
 
-- `generated/openapi.json`只包含contract freeze的20条Worker `/v1` path；不包含health/readiness/Web `/api-docs` carrier route；
-- server URL固定为loopback port 0 placeholder，不携带live endpoint/token；security scheme只描述one-shot exchange和context bearer；
-- 每条mutation success status、If-Match/Idempotency-Key、SSE media type与Problem response由同一operation registry生成；
-- JSON Schema保留closed shape，并以`x-kite-contract-limits`/`x-kite-text-length-unit = utf8-bytes`绑定codec hard limits；
-- `wire.d.ts`从generated JSON Schema转换，不维护手写Public type副本；examples逐byte复制validated fixtures；
-- `digest.json`记录每个non-digest artifact的SHA-256并以domain-separated aggregate绑定完整集合；
-- generator输出canonical key order、无timestamp/absolute path/real endpoint。owner tests逐byte比较committed output并重算digest。
-- Web Vite build通过asset emission逐字节生成固定`api-docs/openapi.json`；candidate verifier、installer preflight与smoke要求
-  `payload/web/api-docs/openapi.json`存在并由manifest checksum绑定，不能从CDN、live endpoint或另一schema source生成。
+- request及嵌套对象closed；unknown/prototype/accessor/cycle/deep/oversize/unsafe number在owner执行前拒绝；
+- response允许旧Client忽略新增optional field，但Server encoder拒绝undeclared field；
+- schema tag、ID、timestamp、text、page、cursor、array、depth、object key与UTF-8 byte均有hard limit；
+- Public DTO不包含Workspace/Store path、Worker/Controller binding、credential、Provider-native options/response或raw Runtime event；唯一模型请求正文
+  例外是Browser-only Model Context的provider-neutral system/messages/tools显式诊断投影；
+- Browser mutation要求exact Origin；Browser只读GET允许Origin缺失但存在时必须exact，且所有Browser请求都要求same-origin Fetch Metadata、
+  cookie principal与无Authorization。Agent请求拒绝Origin/Cookie/Sec-Fetch；
+- 所有response带`no-store`、API version、artifact digest与request ID；Problem不泄漏内部binding或path；
+- Session direct read在Browser context下先验证Directory membership；不存在的或不可见的identity统一404；
+- Browser capability仅发布`checkpoints/history/sessions/workspaces`，不把controller role或contract operation误当ready capability。
 
-## KASAPI-02A～02D 当前carrier/read façade、静态参考与conformance
+## Bounded read与artifact
 
-- `/v1`复用canonical Workspace Worker现有loopback data listener；Coordinator/Gateway不代理，未创建第二listener；
-- Native-only Worker capability purpose增加`agent_api_observer|agent_api_controller`，Web Gateway不能mint；
-- exchange重新验证Workspace Trust后，以one-shot capability换取60分钟、最多1024个、hash-only in-memory context；
-- context绑定WorkerScope/instance/Workspace digest/Client/generation/role与一条read-only private Runtime logical connection；TTL、Trust撤销、
-  generation drift、Native connection close、Worker drain/restart或logout撤销；
-- role只来自capability purpose；`controller`不授予Session Controller lease，所有command/subscribe/mutation route仍固定404；
-- ServerInfo只发布`checkpoints/history/sessions`；Session list/get、History page与Checkpoint list/preview是当前唯一resource routes；
-- Session list使用same-connection bounded keyset page并仅对page内ID做Runtime projection join；History固定through sequence和boundary digest，
-  Checkpoint metadata按revision keyset且preview不投影path。cursor checksum只发现损坏，每次请求仍做context/Workspace/Session admission；
-- Origin/Cookie/Sec-Fetch、CORS/OPTIONS、duplicate/unknown/oversized body与credential混用fail closed，Problem不泄漏内部binding。
-- 每context最多16个in-flight request；overload返回429。revoke/drain从map移除context后等待已认证read收敛，再且仅再关闭一次private
-  connection；迟到Trust admission会复核context/handler current，不能越过replacement。History达到1 MiB encoded body上限时按最后
-  `sequence/public_ordinal`提前分页；未知SSE/mutation route不因`Accept`协商泄漏为已注册route。
-- test-only reference client对所有success/Problem执行Public response codec与artifact header检查，并同时覆盖handler seam及真实Worker HTTP
-  listener；fault matrix包含capability incompatibility/replay、keyset及concurrent update、fixed-through History、body/response limits、
-  observer/controller、Worker replacement、drain与non-disclosure。static Gate拒绝direct RuntimeAccess和Host/Store/Kernel concrete import。
-- Web Gateway固定`/api-docs`及尾斜杠为静态HTML deep link，并只允许精确`/api-docs/openapi.json` artifact；renderer不启动
-  Observer/Worker discovery、不保存credential、不发送Agent API request，也没有form、Try it或execute control。CSP为self-only、cache为
-  `no-store`，placeholder endpoint不代表live endpoint；API或Worker状态只标记availability未确认。
+Workspace来自同一Store 9 Directory，不由Session数组反推；Workspace/Session page使用opaque bounded cursor。Session/History/Log/Checkpoint读取
+复用single-Service已打开的Runtime/History/Store authority，不创建第二SQLite connection、Browser cache或恢复sidecar。History固定
+`through_sequence`并用boundary digest与`sequence/public_ordinal`续页；`after_sequence`只读取更晚durable event，适合可见性敏感轮询。
+Checkpoint preview只返回计数，不返回path。
 
-## 后续Gate
+Log page复用同一History读取authority与固定through boundary，但它不是raw Runtime event出口：每个item只包含sequence/time、event type、
+category、status、bounded summary及closed detail kind/标量fields/artifact availability。Public DTO不携带event ID、path、credential或任意metadata；
+Web只在用户切换到Runtime logs Tab时按需读取，并提供显式刷新，不新增后台同步engine。
 
-KASAPI-03A及以后接入Store 8/SDK时，必须消费当前artifact/digest并同步本记录与对应owner current authority；不得把存在但未实现
-的Run/Interaction/SSE/mutation route提前加入ServerInfo。KRSRUN-02A已关闭Run delete/rewind/fork/restart语义，但Run route仍被
-KRSRUN-03A已关闭Store 8 production Worker composition/reopen Gate，private Runtime query可消费canonical Run port；Public Run route仍被
-KRSRUN-03B current/release handoff与后续mapper/SDK Gate阻断。Store authority切换不等于ServerInfo可以发布`runs`。
+Model Context route只接受Browser principal，并以可见Session与exact invocation绑定。Service从prepared event取得private Surface ref，经Builtin reader
+完成schema/integrity验证后再交叉验证ref integrity、route fingerprint与purpose；Public响应不含Artifact ref/digest、Provider options、endpoint或Credential。
+system prompt、canonical messages与tool declarations使用独立累计byte budget并逐段报告truncated，整体仍受1 MiB response limit。Web只在用户从
+`model.invocation_prepared`显式打开Inspector时读取，不做预取、轮询、缓存或持久化。
+
+Workspace Session的`display_name`优先使用Directory中的持久化名称；名称为空时，Service通过同一History authority从首条用户消息派生只读展示名，
+不存在用户消息或标题读取不可用时回退Session ID。该展示派生不引入第二份标题状态，也不回写Store。
+
+generated artifact使用canonical key order、无timestamp/absolute path/真实endpoint。OpenAPI security同时描述Worker capability、Agent context
+bearer与Browser session cookie；GET resource按principal声明，mutation仍只允许bearer contract。Vite逐字节复制canonical OpenAPI到
+`payload/web/api-docs/openapi.json`，candidate manifest checksum绑定该文件。
+
+## 后续边界
+
+后续Run/mutation/SSE/SDK必须消费当前artifact/digest并新增production capability与consumer证据。不得把SSE、通用poll scheduler、fallback BFF、
+第二Store connection或Browser bearer custody提前加入当前启动路径。

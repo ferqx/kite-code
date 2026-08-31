@@ -6,8 +6,8 @@
 canonical Kite Home复用唯一Local Service；该进程拥有唯一Store 9 writer、Runtime Host、Controller authority、Native endpoint与
 loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope，但不拥有独立进程或数据库。
 
-`apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker、独立Web Gateway及Store 6/7/8代码只可由
-显式离线迁移、legacy recovery或对应测试调用，不得回到普通terminal/Web data plane。
+`apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker进程拓扑及Store 6/7/8代码不得回到普通
+terminal/Web data plane；独立Web Gateway process/control/state实现已经删除。
 
 ## 拥有职责
 
@@ -19,17 +19,16 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
   readiness fd启动；stdout不承载readiness。
 - `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；
   access/control capability与process identity只在进程内和IPC握手中存在，不写入Kite Home。
-- Native IPC v2以protocol/client-contract revision判断兼容；双方均为`dev:` build时允许source build drift复用resident Service，
-  installed/source边界保持exact。Web route另校验`kite-app-web-observer-v2`revision，不能被source复用规则绕过。
 - `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/
   receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
-- native Runtime command在admission时按command的exact Session从Store 9读取当前Controller lease，并复核Service instance、
-  connection generation与client identity；WebSocket建立时携带的Controller Session/generation只是连接期claim，不能覆盖当前Store authority。
-  因此先建立Runtime连接、再创建Controller以及同一连接持有多个Session lease都不要求重连。执行继续复用现有Runtime/Host的per-Session
-  mailbox、transaction、receipt与recovery，不增加第二套Workspace command registry或跨home OS lease。
-- 同一Service listener同时承载Native/Runtime、Agent API和Browser Observer route。本地Browser route不使用Cookie、launch token或
-  WebSocket认证ticket；tab handle只用于连接隔离与Observer资源释放。Browser仍没有Controller/mutation route；`web stop`只卸载
-  Browser route，不停止Service或Runtime。
+- native Runtime command在每次admission时用已认证socket的client/connection generation读取Store 9当前Session Controller；Controller
+  generation进入opaque command binding reference，不固化为socket建连快照，因此同一TUI可在多个Session间切换且旧connection generation仍
+  fail closed。执行复用现有Runtime/Host的per-Session mailbox、transaction、receipt与recovery，不增加第二套command registry。
+- 同一Service listener同时承载Native/Runtime、Agent API `/v1`和Browser static route。Service发布ready前验证并挂载fixed Web assets，
+  `GET /`直接返回index并创建或复用read-only HttpOnly Browser session；Web只读Workspace/Session/History/Log/Model Context/Checkpoint。cookie不能访问
+  Native/Controller/mutation route，Native authorization也不能混入Browser request；Web route只随Service关闭。
+- Browser Model Context诊断复用同一Store 9 Artifact backend和Builtin schema-aware reader，只能从可见Session的exact prepared invocation读取
+  bounded provider-neutral system/messages/tools；不打开第二DB、不提供通用Artifact读取，也不暴露ref、Provider options、endpoint或Credential。
 - 项目采用未发布clean cutover。Service只打开current `kite.sqlite`，不扫描、迁移或删除旧DB/layout/Artifact/process state及
   `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
 - Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成
@@ -42,13 +41,13 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
 - 不拥有terminal CLI/TUI、Ink/React、presentation reducer或client preference，也不导入`apps/kite-cli`。
 - 不提供第二默认Service、第二Store、embedded fallback、dual write、try-new-catch-old、通用多Store或OS Service。
 - 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener。
-- 不提供remote/LAN、多租户或Browser mutation data plane。Web是private loopback observer；Agent API的角色与能力仍受独立contract约束。
+- 不提供remote/LAN、多租户或Browser mutation data plane。Web是private loopback REST observer；Agent API的角色与能力受独立contract约束。
 - manager lifecycle/process primitive由`@kite-ai/kite-local-runtime/manager`提供；Service process不自行扮演client manager。
 
 ## 允许依赖
 
 允许依赖唯一backend composition所需的Builtin Runtime、Runtime Host/Server/SPI/Contract/Protocol、SQLite adapter、browser-safe App
-Contract、browser-safe Agent API Contract与Native-only local-runtime substrate。禁止依赖CLI/TUI或另一个App source。
+Contract、browser-safe Agent API Contract、Browser HTTP client与Native-only local-runtime substrate。禁止依赖CLI/TUI或另一个App source。
 
 ## 公开入口
 
@@ -66,14 +65,16 @@ contract asset；installed mode只从launcher固定的immutable candidate root�
   launch intent、layout sidecar或filesystem Artifact root。
 - POSIX每home runtime只允许`service.sock`与`service.lock`；Windows endpoint使用named pipe。custom home按canonical home digest
   隔离endpoint并作为相互独立的profile，不增加跨home coordination。
-- `kite web`必须在任何DB、endpoint或Service lifecycle访问前验证fixed asset root、`index.html`、OpenAPI与hashed JS/CSS；缺失返回
-  `web_assets_missing`且不留下状态。
+- Web assets是Service的exact启动输入；`index.html`、OpenAPI或hashed JS/CSS缺失时Service不发布ready。客户端不能在Service ready后
+  attach、替换或停止Web route。
 - Store 9 mutation直接使用同一`BEGIN IMMEDIATE` transaction。Session初始State/snapshot/receipt/recovery identity/Controller state与
   receipt共同commit或rollback；Session删除同事务清理namespaced authority。数据库不保存migration phase、first-write marker或旧Coordinator
   operation receipt。
 - Controller恢复绑定client/service identity、connection generation与rotating capability。Service restart只在取得新exact reservation后把旧
   instance lease转为detached；同一logical client恢复到新generation，不启动Worker process。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不自动重放mutation。
+- Native `describe`允许Protocol/client-contract兼容的其他build发现并连接ready Service；返回值始终携带Service真实build与其自身Web origin。
+  `service_stop/restart`仍要求client expected build与owner build一致，不匹配时保持Service ready且拒绝控制操作。
 - 正常Service从不删除legacy source；旧开发数据保持原样且不作为current fallback。
 - Windows owner/DACL/reparse、named pipe ACL与locked-directory evidence必须由真实Windows qualification证明；macOS/Linux结果不能代替。
 

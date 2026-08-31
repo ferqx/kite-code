@@ -33,6 +33,7 @@ describe('ordinary open-source candidate archive', () => {
       'apps/kite-cli',
       'apps/kite-service',
       'packages/agent-api-contract',
+      'packages/agent-api-client',
       'packages/agent-kernel',
       'packages/builtin-runtime',
       'packages/kite-app-contract',

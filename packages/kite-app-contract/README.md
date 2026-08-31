@@ -13,8 +13,6 @@
 - MCP safe snapshot 与当前管理动作；
 - admitted Workspace 的 Skill catalog/status；
 - authoritative execution/release status；
-- read-only Web Observer bootstrap/tab、Workspace 分组 Session directory、
-  history/message page、live projection event 与显式 subscribe/unsubscribe/disconnect；
 - 每个当前 route 独立的 strict JSON codec。
 
 所有 request/response 和嵌套对象都拒绝未知字段、缺失的必需字段、错误类型和越界值。明确声明的向后兼容可选字段
@@ -28,10 +26,6 @@ response 可以表达 `outcome_unknown`；client 必须先查询当前状态，�
 - 不包含 raw API key、OAuth/credential material、service PID、credential-bearing service endpoint、build/process identity；
 - 不包含 Runtime Host/Server/Store/SQLite、Manager、callback、AbortController 或动态 method；
 - 不包含 React、Ink、TUI reducer、Desktop IPC、Browser transport 或 future-only adapter。
-- Web Observer DTO 只包含 path-free Workspace/Session summary 与已经投影的 presentation
-  block；不包含 prompt/create、approval/interaction reply、cancel、rewind、fork、mode/config/
-  controller、raw Runtime event/detail、Worker endpoint、Store path 或任何 token。Browser
-  authentication material 属于 Gateway carrier，不进入此 semantic contract。
 
 MCP snapshot 只允许回传用于终端展示的 source path、transport/config 状态、CAS revision、已发现的
 tool/prompt 摘要和经过 origin-only 脱敏的 HTTP(S) 地址；不得回传 raw command/address、query、fragment、
@@ -50,23 +44,16 @@ raw diagnostic message不进入 contract。Native Provider credential write及�
 可选扩展：当前Service始终发送scope，decoder对缺少scope的旧响应投影empty scope；它不会联动Local Runtime handshake、
 manager lifecycle或整个App Contract不兼容。scope/revision不匹配由query刷新后重新授权收敛。
 
-Web Observer contract 使用独立的 `kite.app.web.*.v1` route schemas。其
-`WebGatewayObserverClient` 只列出 bootstrap、tab、directory、history、subscribe、
-unsubscribe 与 disconnect；`WebObserverStreamEvent` 只允许 browser-safe message、typed
-unavailable 或 typed resync-required。它不授权任何 Runtime mutation，也不携带 Native I/O、
-Host、Store 或 Browser transport 类型。当前Browser semantic revision为`kite-app-web-observer-v2`：v2固定本地
-loopback无Cookie/launch token/WebSocket ticket语义；Browser在创建tab前必须核对bootstrap返回的exact revision。
-
 ## 公开入口
 
 根出口 `src/index.ts` 导出各 exact DTO、codec 和 closed `KiteAppControlClient` method surface；没有
-generic `call(method, payload)`。`@kite-ai/kite-app-contract/web` 是同包的窄 browser entry，只导出
-Web Observer contract，避免其他 App Control/Workspace path codec 进入 Web 静态资产图。
+generic `call(method, payload)`。Browser Workspace/Session/History/Checkpoint contract已经归一到
+`@kite-ai/agent-api-contract`，本package不再提供`./web` entry或Web Observer DTO。
 
 `@kite-ai/kite-app-contract/worker-controller` 是独立的 native-only Controller subpath；它不从
 根出口或 Web entry 导出。其 exact request/response codec 不携带 Worker endpoint、Store path、
 credential 或 raw Runtime payload，Service 只接受经过 authenticated Worker capability 绑定的
-client/generation。Browser Observer 永远不能导入或调用该 surface。
+client/generation。Browser永远不能导入或调用该surface。
 
 ## 依赖与验证
 

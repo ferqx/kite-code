@@ -53,6 +53,7 @@ function imports(source: string): string[] {
 export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackageViolation[] {
   const root = resolve(repositoryRoot);
   const packageRoot = join(root, 'packages', 'agent-api-contract');
+  const clientRoot = join(root, 'packages', 'agent-api-client');
   const violations: AgentApiPackageViolation[] = [];
   const add = (code: string, path: string, message: string): void => {
     violations.push({ code, path, message });
@@ -160,6 +161,61 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
     }
   }
 
+  for (const path of ['package.json', 'README.md', 'tsconfig.json', 'src/index.ts']) {
+    if (!existsSync(join(clientRoot, path))) {
+      add(
+        'CLIENT_REQUIRED_FILE_MISSING',
+        `packages/agent-api-client/${path}`,
+        `${path} is required`,
+      );
+    }
+  }
+  if (existsSync(join(clientRoot, 'package.json'))) {
+    const clientManifest = JSON.parse(
+      readFileSync(join(clientRoot, 'package.json'), 'utf8'),
+    ) as PackageManifest;
+    if (
+      clientManifest.name !== '@kite-ai/agent-api-client' ||
+      clientManifest.private !== true ||
+      clientManifest.type !== 'module' ||
+      clientManifest.module !== './src/index.ts' ||
+      JSON.stringify(clientManifest.exports) !== JSON.stringify({ '.': './src/index.ts' })
+    ) {
+      add(
+        'CLIENT_MANIFEST_IDENTITY_INVALID',
+        'packages/agent-api-client/package.json',
+        'Browser client must be one private ESM root-export package',
+      );
+    }
+    if (
+      JSON.stringify(clientManifest.dependencies ?? {}) !==
+      JSON.stringify({ '@kite-ai/agent-api-contract': 'workspace:*' })
+    ) {
+      add(
+        'CLIENT_DEPENDENCY_BOUNDARY_INVALID',
+        'packages/agent-api-client/package.json',
+        'Browser client may depend only on the Agent API contract workspace',
+      );
+    }
+  }
+  for (const absolute of files(join(clientRoot, 'src'), /\.ts$/u)) {
+    const path = relative(root, absolute).replaceAll('\\', '/');
+    for (const specifier of imports(readFileSync(absolute, 'utf8'))) {
+      if (
+        specifier !== '@kite-ai/agent-api-contract' &&
+        (specifier.startsWith('@kite-ai/') ||
+          specifier.startsWith('node:') ||
+          specifier.startsWith('bun:'))
+      ) {
+        add(
+          'CLIENT_BROWSER_BOUNDARY_IMPORT',
+          path,
+          `browser-safe Agent API client may not import ${specifier}`,
+        );
+      }
+    }
+  }
+
   const rootManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     readonly devDependencies?: Record<string, string>;
     readonly scripts?: Record<string, string>;
@@ -178,8 +234,12 @@ export function analyzeAgentApiPackages(repositoryRoot: string): AgentApiPackage
     add('ROOT_GATE_MISSING', 'package.json', 'root package boundary gate is required');
   }
   for (const path of ['scripts/run-default-tests.ts', 'scripts/run-runtime-workspace-script.ts']) {
-    if (!readFileSync(join(root, path), 'utf8').includes("'packages/agent-api-contract'")) {
+    const runner = readFileSync(join(root, path), 'utf8');
+    if (!runner.includes("'packages/agent-api-contract'")) {
       add('WORKSPACE_RUNNER_MISSING', path, 'contract workspace must be in the root runner');
+    }
+    if (!runner.includes("'packages/agent-api-client'")) {
+      add('CLIENT_WORKSPACE_RUNNER_MISSING', path, 'client workspace must be in the root runner');
     }
   }
 

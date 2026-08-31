@@ -433,18 +433,46 @@ describe('single-Service process manager', () => {
     expect(runtime.stopCalls).toBe(1);
     expect(waits).toBe(1);
   });
+
+  test('reports an exact-build control conflict without treating stop as outcome unknown', async () => {
+    const runtime = fakeRuntime();
+    runtime.ready = true;
+    runtime.stopOutcome = 'incompatible';
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.client,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => reservation,
+      spawn: {
+        spawn: async () => {
+          throw new Error('not used');
+        },
+      },
+      requestId: () => 'stop-other-build',
+    });
+
+    await expect(manager.stop()).resolves.toEqual({
+      schema: 'kite.local-runtime-lifecycle-result.v1',
+      requestId: 'stop-other-build',
+      operation: 'stop',
+      outcome: 'incompatible',
+      state: 'ready',
+      diagnostic: 'build_mismatch',
+    });
+    expect(runtime.stopCalls).toBe(1);
+  });
 });
 
 function fakeRuntime(): {
   ready: boolean;
   stopCalls: number;
-  stopOutcome: 'applied' | 'service_busy';
+  stopOutcome: 'applied' | 'service_busy' | 'incompatible';
   readonly client: KiteSingleServiceClient;
 } {
   const runtime = {
     ready: false,
     stopCalls: 0,
-    stopOutcome: 'applied' as 'applied' | 'service_busy',
+    stopOutcome: 'applied' as 'applied' | 'service_busy' | 'incompatible',
     client: undefined as unknown as KiteSingleServiceClient,
   };
   runtime.client = {
@@ -468,17 +496,11 @@ function fakeRuntime(): {
         accessToken: 'a'.repeat(43),
       };
     },
-    ensureWeb: async () => {
-      throw new Error('not used');
-    },
-    statusWeb: async () => {
-      throw new Error('not used');
-    },
-    stopWeb: async () => {
-      throw new Error('not used');
-    },
     stopService: async () => {
       runtime.stopCalls += 1;
+      if (runtime.stopOutcome === 'incompatible') {
+        throw new KiteSingleServiceClientError('incompatible');
+      }
       if (runtime.stopOutcome === 'service_busy') {
         return {
           schema: 'kite.local-native.response.v1',
@@ -574,9 +596,6 @@ function unusedClient(overrides: Partial<KiteSingleServiceClient> = {}): KiteSin
   };
   return {
     describe: unused,
-    ensureWeb: unused,
-    statusWeb: unused,
-    stopWeb: unused,
     stopService: unused,
     ...overrides,
   };

@@ -4,6 +4,7 @@ import ts from 'typescript';
 
 export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/agent-api-contract', 'packages/agent-api-contract'],
+  ['@kite-ai/agent-api-client', 'packages/agent-api-client'],
   ['@kite-ai/runtime-contract', 'packages/runtime-contract'],
   ['@kite-ai/runtime-protocol', 'packages/runtime-protocol'],
   ['@kite-ai/runtime-server', 'packages/runtime-server'],
@@ -24,6 +25,7 @@ const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
 
 const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   '@kite-ai/agent-api-contract': [],
+  '@kite-ai/agent-api-client': ['@kite-ai/agent-api-contract'],
   '@kite-ai/runtime-contract': [],
   '@kite-ai/runtime-protocol': ['@kite-ai/runtime-contract'],
   '@kite-ai/runtime-server': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
@@ -62,16 +64,23 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-spi',
     '@kite-ai/runtime-storage-sqlite',
   ],
-  // The browser observer is a private application, not a package consumed by
-  // another workspace. Its only internal dependency is the browser-safe DTO
-  // contract; its UI/tooling dependencies are intentionally app-local.
-  '@kite-ai/kite-web': ['@kite-ai/kite-app-contract'],
+  // The Browser is a private presentation application. It consumes only the
+  // typed HTTP client and public DTO contract; UI/tooling remains app-local.
+  '@kite-ai/kite-web': ['@kite-ai/agent-api-client', '@kite-ai/agent-api-contract'],
 });
 
 const NON_EXPORTING_PRIVATE_APPS: ReadonlySet<string> = new Set(['@kite-ai/kite-web']);
 
 const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
   '@kite-ai/agent-api-contract': [
+    /RuntimeHost/,
+    /RuntimeServer/,
+    /Sqlite/,
+    /WorkspacePath/,
+    /ControllerGeneration/,
+    /BindingReference/,
+  ],
+  '@kite-ai/agent-api-client': [
     /RuntimeHost/,
     /RuntimeServer/,
     /Sqlite/,
@@ -790,6 +799,7 @@ function validateExternalImport(
       owner === '@kite-ai/runtime-protocol' ||
       owner === '@kite-ai/runtime-server' ||
       owner === '@kite-ai/runtime-client' ||
+      owner === '@kite-ai/agent-api-client' ||
       owner === '@kite-ai/kite-app-contract' ||
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi' ||
@@ -1359,15 +1369,6 @@ function validateCompositionRoot(
   )) {
     const sourcePath = normalizedRelative(root, edge.source);
     if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite-ai/runtime-contract') {
-      continue;
-    }
-    if (
-      sourcePath === 'apps/kite-service/src/coordinator/production.ts' &&
-      edge.targetPackage?.name === '@kite-ai/runtime-storage-sqlite'
-    ) {
-      // The Coordinator is a second process composition root, but its only concrete Runtime
-      // package is the active-layout/Catalog fence owner. It must never import Host, Server,
-      // Builtin, Runtime Client/Protocol, or Workspace Store data-plane composition here.
       continue;
     }
     const authority = compositionAuthorityBinding(edge);
