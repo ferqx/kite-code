@@ -36,12 +36,12 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       });
     }
     case 'model.requested': {
-      // A model request is the explicit presentation-step boundary. Never let
-      // its reasoning mutate a tool summary left active by the preceding
-      // request; Server replay/reconnect can widen the delivery interval, but
-      // it cannot change request ownership.
-      const next =
-        state.currentModelRequestId === event.requestId ? state : settleCurrentThought(state);
+      // A provider invocation is not itself a visible presentation boundary.
+      // After an exploration-only tool response, the next invocation normally
+      // reasons over those results and still belongs to the same Thought. Keep
+      // that adjacent phase open; visible text, a standalone tool, an
+      // interaction, or a terminal event remains responsible for settling it.
+      const next = continueActiveThought(state, event.requestId);
       return {
         ...next,
         currentModelRequestId: event.requestId,
@@ -94,8 +94,9 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
     case 'tool.finished':
       return finishSafeClientTool(state, event, terminalToolStatus(event));
     case 'tool.failed':
-    case 'tool.rejected':
       return finishSafeClientTool(state, event, 'error');
+    case 'tool.rejected':
+      return finishSafeClientTool(state, event, 'rejected');
     case 'tool.cancelled':
       return projectToolCancelled(state, event.toolId);
     case 'tool.file_changed':
@@ -231,6 +232,16 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         `Runtime update unavailable: ${event.reason}.`,
       );
   }
+}
+
+function continueActiveThought(state: TuiState, requestId: string): TuiState {
+  if (state.currentModelRequestId === requestId) return state;
+  const summary = findSummaryById(state, state.currentThoughtSummaryId);
+  if (summary?.active !== true) return state;
+  return replaceBlockById(state, summary.id, {
+    ...summary,
+    modelRequestId: requestId,
+  });
 }
 
 /** Replace local interaction state with one complete authoritative Runtime queue. */
@@ -890,9 +901,25 @@ function projectModelResponded(
   ) {
     return state;
   }
+  const durationOwnerId = findSummaryById(state, state.currentThoughtSummaryId)?.id;
   let next = addSafeThoughtDuration(state, event.durationMs);
   if (state.currentModelTextStreamed === true) {
     next = reconcileStreamedModelText(next, event);
+    const answer = findModelAnswerText(next, event.requestId);
+    const preceding = answer ? precedingToolSummary(next, answer.id) : undefined;
+    const precedingOwnsReasoning = preceding?.modelRequestId === event.requestId;
+    if (
+      precedingOwnsReasoning &&
+      event.durationMs !== undefined &&
+      preceding.id !== durationOwnerId
+    ) {
+      const modelMs = (preceding.modelMs ?? 0) + event.durationMs;
+      next = replaceBlockById(next, preceding.id, {
+        ...preceding,
+        modelMs,
+        totalElapsedMs: modelMs,
+      });
+    }
     const current = findSummaryById(next, next.currentThoughtSummaryId);
 
     if (event.toolCallCount > 0) {
@@ -927,7 +954,7 @@ function projectModelResponded(
       completed = annotateFirstModelText(
         completed,
         event,
-        current?.tools.length
+        precedingOwnsReasoning || current?.tools.length
           ? {}
           : {
               ...(state.currentModelReasoningRequestId === event.requestId &&
@@ -1488,7 +1515,7 @@ function finishSafeClientTool(
     RuntimeClientEvent,
     { type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled' }
   >,
-  status: Extract<SafeToolStatus, 'done' | 'error' | 'cancelled' | 'exhausted'>,
+  status: Extract<SafeToolStatus, 'done' | 'error' | 'rejected' | 'cancelled' | 'exhausted'>,
 ): TuiState {
   const toolId = event.toolId;
   const toolName = 'toolName' in event ? event.toolName : undefined;
@@ -1535,10 +1562,10 @@ function finishSafeClientTool(
     );
   }
   if (pending) {
-    // A user-rejected or cancelled approval never reached tool.started and
-    // therefore has no visible execution card. The durable interaction notice
-    // is sufficient; materializing `Write ()` here would invent work.
-    if (status === 'cancelled' || event.type === 'tool.rejected') {
+    // Cancellation remains invisible before dispatch. A rejection is retained
+    // as a terminal diagnostic because policy rejection may have no separate
+    // approval notice and must not disappear from the transcript.
+    if (status === 'cancelled') {
       return removePendingTool(state, toolId);
     }
     return updateSafeTool(

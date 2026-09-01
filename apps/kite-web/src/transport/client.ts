@@ -9,6 +9,7 @@ import type {
   AgentApiModelContext,
   AgentApiSession,
 } from '@kite-ai/agent-api-contract';
+import { mergeMessages } from '../presentation/merge-messages';
 import type {
   WebCheckpointSnapshot,
   WebDirectorySnapshot,
@@ -152,10 +153,7 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
           if (!page.next_cursor) {
             return {
               sessionId,
-              messages: messages.sort(
-                (left, right) =>
-                  left.sequence - right.sequence || left.messageId.localeCompare(right.messageId),
-              ),
+              messages: mergeMessages([], messages),
               observedLastSequence,
             };
           }
@@ -233,7 +231,6 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       }
     },
     async disconnect() {
-      if (!connected) return;
       connected = false;
       await client.revokeBrowser().catch(() => undefined);
     },
@@ -300,7 +297,7 @@ function projectHistoryItem(item: AgentApiHistoryItem): WebPresentationMessage {
       };
     case 'tool.lifecycle':
       return {
-        messageId: id,
+        messageId: `tool:${item.content.tool_call_id}`,
         sequence: item.sequence,
         role: 'assistant',
         blocks:
@@ -314,16 +311,25 @@ function projectHistoryItem(item: AgentApiHistoryItem): WebPresentationMessage {
                   ...(item.content.summary ? { summary: item.content.summary } : {}),
                 },
               ]
-            : [
-                {
-                  kind: 'tool_result',
-                  toolId: item.content.tool_call_id,
-                  label: item.content.label,
-                  ok: item.content.status === 'completed',
-                  stdout: item.content.summary ?? '',
-                  stderr: '',
-                },
-              ],
+            : item.content.status === 'rejected'
+              ? [
+                  {
+                    kind: 'tool_rejected',
+                    toolId: item.content.tool_call_id,
+                    label: item.content.label,
+                    ...(item.content.summary ? { summary: item.content.summary } : {}),
+                  },
+                ]
+              : [
+                  {
+                    kind: 'tool_result',
+                    toolId: item.content.tool_call_id,
+                    label: item.content.label,
+                    ok: item.content.status === 'completed',
+                    stdout: item.content.summary ?? '',
+                    stderr: '',
+                  },
+                ],
       };
     case 'run.status':
       return {

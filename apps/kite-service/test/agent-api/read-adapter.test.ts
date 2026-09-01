@@ -396,6 +396,68 @@ describe('Agent API bounded read adapter', () => {
     });
   });
 
+  test('projects a pre-dispatch rejection without collapsing it into execution failure', async () => {
+    const base = {
+      sessionId: 'session-1',
+      occurredAt: '2026-08-30T01:00:00.000Z',
+      createdAt: 1_777_680_000,
+      category: 'tool' as const,
+    };
+    const f = fixture({
+      events: [
+        {
+          ...base,
+          sequence: 1,
+          eventId: 'event-tool-queued',
+          type: 'tool.queued',
+          status: 'waiting',
+          detail: {
+            kind: 'tool',
+            fields: { tool_call_id: 'tool-shell', label: 'shell_execute' },
+          },
+        },
+        {
+          ...base,
+          sequence: 2,
+          eventId: 'event-tool-rejected',
+          type: 'tool.rejected',
+          status: 'failed',
+          detail: {
+            kind: 'tool',
+            fields: {
+              tool_call_id: 'tool-shell',
+              label: 'Tool',
+              reason_code: 'policy_denied',
+              rejection_summary: 'Tool execution was rejected by policy before dispatch.',
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await dispatch(f.context, '/v1/sessions/session-1/history?limit=10');
+
+    expect(result).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          items: [
+            { content: { type: 'tool.lifecycle', status: 'queued' } },
+            {
+              content: {
+                type: 'tool.lifecycle',
+                status: 'rejected',
+                reason_code: 'policy_denied',
+                summary: 'Tool execution was rejected by policy before dispatch.',
+              },
+            },
+          ],
+        },
+      },
+    });
+  });
+
   test('lists developer-readable safe logs without exposing raw event objects', async () => {
     const f = fixture();
     const first = await dispatch(f.context, '/v1/sessions/session-1/logs?limit=1');

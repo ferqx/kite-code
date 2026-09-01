@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  CircleSlash2,
   CloudOff,
   LoaderCircle,
   MessageSquareText,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { WindTrails } from '@/components/ui/wind-trails';
 import { cn } from '@/lib/utils';
 import type { WebHistoryState } from '@/presentation/reducer';
 import type { WebPresentationBlock, WebPresentationMessage } from '@/presentation/types';
@@ -74,6 +76,19 @@ function Block({ block }: { readonly block: WebPresentationBlock }) {
           </CollapsiblePrimitive.Content>
         </CollapsiblePrimitive.Root>
       );
+    case 'tool_rejected':
+      return (
+        <div className="rounded-lg border border-warning/25 bg-warning/8 px-3 py-2.5 text-xs">
+          <div className="flex items-center gap-2">
+            <CircleSlash2 className="size-3.5 text-warning" />
+            <span className="font-medium">{block.label}</span>
+            <span className="text-muted-foreground">rejected before execution</span>
+          </div>
+          {block.summary ? (
+            <p className="mt-1.5 pl-5.5 leading-5 text-muted-foreground">{block.summary}</p>
+          ) : null}
+        </div>
+      );
     case 'error':
       return (
         <div className="flex gap-2 rounded-lg border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
@@ -97,7 +112,7 @@ function Message({ message }: { readonly message: WebPresentationMessage }) {
     >
       <span
         className={cn(
-          'grid size-8 place-items-center rounded-[10px] border border-border bg-surface text-muted-foreground shadow-[0_1px_2px_rgb(0_0_0/0.04)]',
+          'grid size-8 place-items-center rounded-[10px] border border-border/70 bg-surface/80 text-muted-foreground',
           user && 'border-accent/20 bg-accent/10 text-accent',
         )}
       >
@@ -172,9 +187,10 @@ function HistoryStatePanel({
 }) {
   const copy = historyStateCopy(status, reason, sessionName);
   return (
-    <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
-      <div className="max-w-md">
-        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground shadow-soft">
+    <div className="relative isolate grid min-h-0 flex-1 place-items-center overflow-hidden p-8 text-center">
+      <WindTrails className="opacity-55 [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]" />
+      <div className="relative z-10 max-w-md">
+        <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/70 bg-surface/75 text-muted-foreground">
           <copy.Icon className={copy.iconClassName} />
         </div>
         <h2 className="text-sm font-semibold">{copy.title}</h2>

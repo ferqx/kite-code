@@ -112,4 +112,40 @@ describe('RuntimeLogPresentationProjector', () => {
     expect(JSON.stringify(entry)).not.toContain('private-artifact-id');
     expect(JSON.stringify(entry)).not.toContain(privateDigest);
   });
+
+  test('projects a stable pre-dispatch rejection without exposing its private reason', () => {
+    const entry = projectRuntimeLogEvent({
+      sessionId: 'session-1',
+      sequence: 4,
+      eventId: 'event-rejected',
+      createdAt: 4,
+      event: {
+        type: 'tool.rejected',
+        toolCallId: 'tool-shell',
+        reason: 'Policy denied access to /private/secret.',
+        failure: {
+          kind: 'policy_denied',
+          message: 'Policy denied access to /private/secret.',
+          retryable: false,
+          modelFixable: true,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: true,
+        },
+      },
+    });
+
+    expect(entry).toMatchObject({
+      summary: 'Tool execution was rejected by policy before dispatch.',
+      detail: {
+        kind: 'tool',
+        fields: {
+          tool_call_id: 'tool-shell',
+          reason_code: 'policy_denied',
+          rejection_summary: 'Tool execution was rejected by policy before dispatch.',
+        },
+      },
+    });
+    expect(JSON.stringify(entry)).not.toContain('/private/secret');
+  });
 });

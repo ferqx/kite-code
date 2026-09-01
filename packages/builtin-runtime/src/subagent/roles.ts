@@ -96,7 +96,7 @@ const CODE_SYSTEM_PROMPT = [
   '- If a command pauses for approval, preserve the requested action and wait for the Runtime continuation. A rejection is final for that request; do not disguise or reroute the same side effect.',
   '- rg exit code 1 = no matches (normal, do not retry).',
   '- On failure: diagnose root cause before retrying. Retry at most once.',
-  '- When the Runtime discloses git_inspect, use that typed broker route for local Git. Never reroute Git through shell_execute; Git mutations are not available.',
+  '- Run every Git command through shell_execute. Read-only roles may use only commands that the Shell classifier proves read-only; Git mutations are not available.',
   '',
   '### Concurrency',
   '- Issue independent reads in the same turn.',

@@ -39,6 +39,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
   Contract-to-wire mapping materializes independent closed values so JSON/WebSocket and in-process logical messages have
   identical ownership and cycle behavior.
 - Approval interactions admit the same optional, control-filtered command projection in notifications, session projections, and `respond_interaction` commands. The wire value is bounded to 16,384 UTF-16 code units; cwd, sandbox evidence, grant subjects, credentials, and hidden execution arguments remain excluded.
+- Approval response只接纳`approve_once|same_command|reject`；未知grant在路由前fail closed，不使用
+  compatibility alias或字符串fallback。
 - Session deletion is admitted only as the explicit `delete_session` V1 command with scoped command identity and revision fencing. It does not expose a Store/SQLite operation or an alternate App delete path.
 - Workspace identity is App-injected at the command mapper and never accepted on the wire.
 - Run pages are capped at 200 entries and use the exact `(createdRevision, runId)` cursor; unknown fields, invalid lifecycle values and

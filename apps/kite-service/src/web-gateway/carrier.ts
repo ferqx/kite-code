@@ -13,6 +13,7 @@ import { createWebGatewayAuth, type WebGatewaySessionRegistry } from './auth';
 export const KITE_WEB_LOOPBACK_HOST = '127.0.0.1' as const;
 
 const DEFAULT_DRAIN_DEADLINE_MS = 1_000;
+const SESSION_SHELL_PATH = /^\/sessions\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/?$/u;
 const SECURITY_HEADERS = Object.freeze({
   'cache-control': 'no-store',
   'content-security-policy':
@@ -89,7 +90,7 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
         return secureResponse(request.method === 'GET' ? 403 : 405, 'forbidden');
       }
       let setCookie: string | undefined;
-      if (url.pathname === '/') {
+      if (isWebShellPath(url.pathname)) {
         const current = auth.inspectCookie(request.headers.get('cookie'));
         if (current.status !== 'valid') {
           setCookie = auth.createSession();
@@ -153,22 +154,19 @@ function bindingFor(port: number): { readonly host: string; readonly origin: str
   return { host, origin: `http://${host}` };
 }
 
+function isWebShellPath(pathname: string): boolean {
+  const decoded = decodePathname(pathname);
+  return decoded !== undefined && isDecodedWebShellPath(decoded);
+}
+
 function defaultRequestIp(request: Request, server: Bun.Server<SocketData>): RequestIp {
   return server.requestIP(request);
 }
 
 function safeAssetPath(root: string, pathname: string): string | undefined {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return undefined;
-  }
-  if (decoded.includes('\0') || decoded.includes('\\')) return undefined;
-  const name =
-    decoded === '/' || decoded === '/api-docs' || decoded === '/api-docs/'
-      ? 'index.html'
-      : decoded.replace(/^\/+/, '');
+  const decoded = decodePathname(pathname);
+  if (decoded === undefined) return undefined;
+  const name = isDecodedWebShellPath(decoded) ? 'index.html' : decoded.replace(/^\/+/, '');
   if (
     name !== 'index.html' &&
     name !== 'api-docs/openapi.json' &&
@@ -181,6 +179,24 @@ function safeAssetPath(root: string, pathname: string): string | undefined {
   if (child === '..' || child.startsWith(`..${sep}`) || child.includes(`..${sep}`))
     return undefined;
   return candidate;
+}
+
+function decodePathname(pathname: string): string | undefined {
+  try {
+    const decoded = decodeURIComponent(pathname);
+    return decoded.includes('\0') || decoded.includes('\\') ? undefined : decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDecodedWebShellPath(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/api-docs' ||
+    pathname === '/api-docs/' ||
+    SESSION_SHELL_PATH.test(pathname)
+  );
 }
 
 function secureStaticAssetRoot(path: string): string {

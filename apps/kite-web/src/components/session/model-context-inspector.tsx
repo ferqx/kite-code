@@ -71,7 +71,7 @@ export function ModelContextInspector({
         className="relative flex h-full w-[min(760px,92vw)] flex-col border-l border-border bg-canvas shadow-[-18px_0_48px_rgb(0_0_0/0.18)] max-sm:w-full"
       >
         <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-border px-5">
-          <div className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-surface-subtle text-muted-foreground">
+          <div className="grid size-8 shrink-0 place-items-center rounded-[10px] border border-border/70 bg-surface-subtle/70 text-muted-foreground">
             <Bot className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -88,7 +88,7 @@ export function ModelContextInspector({
           <Button
             autoFocus
             aria-label="Close model context inspector"
-            className="size-9 px-0"
+            className="size-8 px-0"
             onClick={onClose}
           >
             <X className="size-4" />
@@ -111,7 +111,7 @@ export function ModelContextInspector({
                   aria-selected={tab === id}
                   aria-controls={`model-context-panel-${id}`}
                   className={cn(
-                    'flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[10px] font-medium transition-colors',
+                    'flex h-8 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[10px] font-medium transition-colors',
                     tab === id
                       ? 'border-accent text-foreground'
                       : 'border-transparent text-muted-foreground hover:text-foreground',
@@ -392,7 +392,7 @@ function InspectorState({
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
       <div className="max-w-sm">
-        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground">
+        <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/70 bg-surface/75 text-muted-foreground">
           {status === 'loading' ? (
             <LoaderCircle className="size-5 animate-spin text-running" />
           ) : (

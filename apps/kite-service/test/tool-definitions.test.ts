@@ -9,6 +9,7 @@ import {
   buildDescription,
   digestCapabilityBindingValue,
   isReadOnlyShellCommand,
+  shellReadOnlyUncertaintyCode,
   TOOL_CONTRACTS,
   toolContractSection,
   WRITE_PLAN_CONTRACT,
@@ -156,7 +157,7 @@ describe('code agent tool definitions', () => {
       ).toBe(false);
     }
   });
-  test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
+  test('keeps brokered Git internal even when its execution surface is available', () => {
     const gitBroker = {
       featureRevision: 'brokered-git-r1' as const,
       inspect: async () => ({ ok: true, output: '' }),
@@ -183,7 +184,7 @@ describe('code agent tool definitions', () => {
     const inspectOnly = toolNames(
       createAgentTools({ workspace: '/workspace', config: sealedConfig, gitBroker }),
     );
-    expect(inspectOnly).toContain('git_inspect');
+    expect(inspectOnly).not.toContain('git_inspect');
     expect(
       toolNames(
         createAgentTools({
@@ -578,6 +579,21 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('sort --random-source seed input.txt')).toBe(true);
     expect(isReadOnlyShellCommand('git status --short')).toBe(true);
     expect(isReadOnlyShellCommand('git log --oneline -10')).toBe(true);
+    expect(isReadOnlyShellCommand('git rev-parse --show-toplevel')).toBe(true);
+    expect(isReadOnlyShellCommand('git ls-files --cached --others --exclude-standard')).toBe(true);
+    expect(isReadOnlyShellCommand('jq -r .name package.json | head -1')).toBe(true);
+    expect(isReadOnlyShellCommand('uname -a && whoami && id && df -h')).toBe(true);
+    expect(isReadOnlyShellCommand('sha256sum package.json')).toBe(true);
+    expect(
+      isReadOnlyShellCommand(
+        'ls -la && echo "---" && git log --oneline -15 && echo "---" && git status --short && echo "---" && git branch -a --no-color | head -20',
+      ),
+    ).toBe(true);
+    expect(
+      isReadOnlyShellCommand(
+        'git status --short | head -60 && echo "=== branch ===" && git branch --show-current && echo "=== remote ===" && git remote -v | head -4',
+      ),
+    ).toBe(true);
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
@@ -603,10 +619,16 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('awk \'BEGIN { system("rm hello.txt") }\'')).toBe(false);
     expect(isReadOnlyShellCommand('git branch new-branch')).toBe(false);
     expect(isReadOnlyShellCommand('git branch -d old-branch')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch -a --no-color feature/new')).toBe(false);
+    expect(isReadOnlyShellCommand('git remote add origin https://example.invalid/repo')).toBe(
+      false,
+    );
+    expect(isReadOnlyShellCommand('git remote set-url origin https://example.invalid/repo')).toBe(
+      false,
+    );
     expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(true);
     expect(isReadOnlyShellCommand('git log -p -1')).toBe(false);
     expect(isReadOnlyShellCommand('git show HEAD')).toBe(false);
-    expect(isReadOnlyShellCommand('git ls-files')).toBe(false);
     expect(isReadOnlyShellCommand('git diff --output=leak.diff')).toBe(false);
     expect(isReadOnlyShellCommand("rg --pre 'touch pwned' needle src")).toBe(false);
     expect(isReadOnlyShellCommand("sed -e 'w leaked.txt' input.txt")).toBe(false);
@@ -636,6 +658,16 @@ describe('code agent tool definitions', () => {
     // && 和 2>&1 仍然允许
     expect(isReadOnlyShellCommand('rg pattern file 2>&1')).toBe(true);
     expect(isReadOnlyShellCommand('cat a.txt && cat b.txt')).toBe(true);
+  });
+
+  test('projects only low-cardinality reasons for unproven Shell shapes', () => {
+    expect(shellReadOnlyUncertaintyCode('custom-project-script --inspect')).toBe(
+      'unregistered_program',
+    );
+    expect(shellReadOnlyUncertaintyCode('git show HEAD')).toBe('unsupported_invocation');
+    expect(shellReadOnlyUncertaintyCode('echo hi > out.txt')).toBe('output_redirect');
+    expect(shellReadOnlyUncertaintyCode('cat $(touch out.txt)')).toBe('dynamic_expansion');
+    expect(shellReadOnlyUncertaintyCode('cat a & cat b')).toBe('background_execution');
   });
 
   // ── Prompt cache: MCP tool ordering / MCP 工具顺序不破坏前缀缓存 ──

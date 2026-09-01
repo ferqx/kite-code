@@ -498,11 +498,30 @@ export function shellBuiltinPolicyRule(
     });
   }
 
-  // The compiler deliberately does not maintain a command-name allowlist. Any
-  // command whose effects are not known to require a scope expansion remains
-  // inside the native workspace baseline. The sandbox, not a lexical allowlist,
-  // constrains unknown commands; this is also why `uncertainEffects` alone is
-  // not an authorization request or an implicit `allow_all` scope.
+  if (policyEffects?.uncertainEffects) {
+    return askRule({
+      risk: shellPolicyRisk(command, policyEffects),
+      effects: policyEffects,
+      reason: 'The shell command could not be proven read-only or assigned complete effects.',
+      userVisibleSummary: `Review shell command with uncertain effects: ${command}`,
+      expectedEffects: [
+        'Runs only after exact user approval',
+        context.phase === 'planning'
+          ? 'Remains constrained to the read-only workspace sandbox baseline'
+          : 'Remains constrained to the workspace sandbox baseline',
+      ],
+      effectiveEffects: shellEffects.effectiveEffects,
+      requiresSandbox: context.interactionMode !== 'full',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+      sandboxScope,
+    });
+  }
+
+  // Reaching this branch means the versioned Shell grammar or the explicit
+  // mutation/network analyzers assigned complete effects without requesting a
+  // scope expansion. Only those known baseline effects may execute directly;
+  // unknown effects were routed to exact approval above.
   return allowRule({
     risk: shellPolicyRisk(command, policyEffects),
     effects: policyEffects,

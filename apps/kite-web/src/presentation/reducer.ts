@@ -1,3 +1,4 @@
+import { mergeMessages } from './merge-messages';
 import type {
   WebCheckpointSummary,
   WebDirectorySnapshot,
@@ -18,6 +19,7 @@ export interface WebPresentationState {
   readonly generation: number;
   readonly workspaces: readonly WebWorkspaceSummary[];
   readonly selectedSessionId: string | null;
+  readonly routeSessionSnapshot: WebSessionSummary | null;
   readonly messages: readonly WebPresentationMessage[];
   readonly checkpoints: readonly WebCheckpointSummary[];
   readonly observedLastSequence: number | null;
@@ -51,7 +53,12 @@ export type WebPresentationAction =
       readonly workspaceId: string;
       readonly generation?: number;
     }
-  | { readonly type: 'select_session'; readonly sessionId: string }
+  | { readonly type: 'select_session'; readonly sessionId: string | null }
+  | {
+      readonly type: 'route_session_loaded';
+      readonly session: WebSessionSummary;
+      readonly generation?: number;
+    }
   | {
       readonly type: 'history_loading';
       readonly generation?: number;
@@ -100,6 +107,7 @@ export const initialWebPresentationState: WebPresentationState = Object.freeze({
   generation: 0,
   workspaces: [],
   selectedSessionId: null,
+  routeSessionSnapshot: null,
   messages: [],
   checkpoints: [],
   observedLastSequence: null,
@@ -121,21 +129,15 @@ export function webPresentationReducer(
         : { ...state, generation: action.generation, connection: { status: 'connected' } };
     case 'directory_loaded': {
       if (!matchesGeneration(state, action.generation)) return state;
-      const selectedSessionId = selectedIdForDirectory(state.selectedSessionId, action.directory);
+      const selectedSessionId = state.selectedSessionId;
+      const directorySession = action.directory.workspaces
+        .flatMap((workspace) => workspace.sessions)
+        .find((session) => session.sessionId === selectedSessionId);
       return {
         ...state,
         workspaces: action.directory.workspaces,
         selectedSessionId,
-        ...(selectedSessionId === state.selectedSessionId
-          ? {}
-          : {
-              messages: [],
-              checkpoints: [],
-              observedLastSequence: null,
-              historyState: selectedSessionId ? ('loading' as const) : ('idle' as const),
-              historyReason: null,
-              checkpointState: selectedSessionId ? ('loading' as const) : ('idle' as const),
-            }),
+        routeSessionSnapshot: directorySession ? null : state.routeSessionSnapshot,
       };
     }
     case 'workspace_sessions_loading':
@@ -161,16 +163,23 @@ export function webPresentationReducer(
           }))
         : state;
     case 'select_session':
+      if (action.sessionId === state.selectedSessionId) return state;
       return {
         ...state,
         selectedSessionId: action.sessionId,
+        routeSessionSnapshot: null,
         messages: [],
         checkpoints: [],
         observedLastSequence: null,
-        historyState: 'loading',
+        historyState: action.sessionId ? 'loading' : 'idle',
         historyReason: null,
-        checkpointState: 'loading',
+        checkpointState: action.sessionId ? 'loading' : 'idle',
       };
+    case 'route_session_loaded':
+      return matchesGeneration(state, action.generation) &&
+        action.session.sessionId === state.selectedSessionId
+        ? { ...state, routeSessionSnapshot: action.session }
+        : state;
     case 'history_loading':
       return matchesGeneration(state, action.generation)
         ? {
@@ -228,6 +237,10 @@ export function webPresentationReducer(
                 session.sessionId === action.session.sessionId ? action.session : session,
               ),
             })),
+            routeSessionSnapshot:
+              action.session.sessionId === state.selectedSessionId
+                ? action.session
+                : state.routeSessionSnapshot,
           }
         : state;
     case 'history_failed':
@@ -263,35 +276,17 @@ function updateWorkspace(
   };
 }
 
-function mergeMessages(
-  current: readonly WebPresentationMessage[],
-  incoming: readonly WebPresentationMessage[],
-): readonly WebPresentationMessage[] {
-  const messages = new Map(current.map((message) => [message.messageId, message]));
-  for (const message of incoming) messages.set(message.messageId, message);
-  return [...messages.values()].sort(
-    (left, right) =>
-      left.sequence - right.sequence || left.messageId.localeCompare(right.messageId),
-  );
-}
-
 export function selectedSession(state: WebPresentationState): WebSessionSummary | undefined {
-  return state.workspaces
-    .flatMap((workspace) => workspace.sessions)
-    .find((session) => session.sessionId === state.selectedSessionId);
+  return (
+    state.workspaces
+      .flatMap((workspace) => workspace.sessions)
+      .find((session) => session.sessionId === state.selectedSessionId) ??
+    (state.routeSessionSnapshot?.sessionId === state.selectedSessionId
+      ? state.routeSessionSnapshot
+      : undefined)
+  );
 }
 
 function matchesGeneration(state: WebPresentationState, generation: number | undefined): boolean {
   return generation === undefined || generation === state.generation;
-}
-
-function selectedIdForDirectory(
-  selectedSessionId: string | null,
-  directory: WebDirectorySnapshot,
-): string | null {
-  const sessions = directory.workspaces.flatMap((workspace) => workspace.sessions);
-  if (sessions.some((session) => session.sessionId === selectedSessionId)) {
-    return selectedSessionId;
-  }
-  return sessions[0]?.sessionId ?? null;
 }

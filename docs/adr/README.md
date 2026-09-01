@@ -42,7 +42,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0038](0038-streaming-markdown-paragraph-components.md)  | accepted   | 流式 Markdown 普通文本按逻辑段落组件更新，空行和结构块封闭段落                    |
 | [0039](0039-streaming-markdown-structural-child-components.md) | accepted | 表格、代码块、列表与引用按稳定子行组件更新                                  |
 | [0040](0040-streaming-markdown-progressive-static-freeze.md) | accepted | 流式 Markdown 在安全组件边界渐进冻结，只保留动态尾段                         |
-| [0041](0041-inspect-ls-thought-aggregation.md)        | accepted   | inspect 模式的单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡          |
+| [0041](0041-inspect-ls-thought-aggregation.md) | superseded by ADR-0163 | TUI命令前缀分类已删除；探索展示改由Service投影 |
 | [0042](0042-file-tool-semantics-and-write-safety.md)   | accepted   | 对齐 Claude Code：edit_file 强制先读后改，write_file 移除 append 自由覆写，checkpoint 兜底 |
 | [0043](0043-tool-spec-registry-and-strict-edit.md)     | accepted   | 工具单一事实源（ToolSpec Registry）：模型表面全部 schema-only，shell 治理参数收敛，Edit 严格化 |
 | [0044](0044-tool-spec-registry-single-path-cutover.md) | accepted   | 六个计算原语以 Registry 单路径收尾，删除从未接线的迁移 flag                         |
@@ -98,7 +98,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0094](0094-prompt-contract-v2-default-migration.md) | superseded by ADR-0098 | 取消固定十四日等待，并因当时最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
 | [0095](0095-runtime-completion-truth.md) | accepted | Runtime CompletionGuard 统一任务与计划完成真值，拒绝 final 文本绕过 canonical lifecycle |
 | [0096](0096-tool-outcome-recovery-and-journey-evaluation.md) | accepted | Runtime 统一 typed outcome/recovery 权威，并以完整 Journey 评测工具质量 |
-| [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |
+| [0097](0097-brokered-git-capability.md) | partially superseded by ADR-0134/0160 | internal Git broker保留；模型Git命令恢复为统一Shell治理入口 |
 | [0098](0098-prompt-contract-v2-default-enabled.md) | accepted | 修正后的真实 A/B、项目规则 effect 与 Runtime 纠错 Journey 通过，Prompt Contract V2 默认启用并保留 legacy 回滚 |
 | [0099](0099-phase-stable-tool-disclosure.md) | accepted | V2 builtin/MCP 声明跨 Planning/Building 稳定，提示词引导只读行为，Runtime Policy 返回 phase 错误并阻止副作用 |
 | [0100](0100-user-approved-external-filesystem-capability.md) | accepted | 用户审批的逐 invocation 外部文件系统能力由原生 sandbox 执行 |
@@ -135,10 +135,10 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0131](0131-whole-workspace-sandbox-admission.md) | accepted | Sandbox 将 canonical Workspace 作为完整授权身份，不再按内部路径名称拒绝 |
 | [0132](0132-sensitive-external-paths-use-exact-approval.md) | accepted | Workspace 外敏感路径进入 exact approval；批准后 native sandbox 不再二次拒绝 |
 | [0133](0133-mode-aware-sensitive-external-authorization.md) | accepted | 外部敏感访问按 Full、Auto 与普通模式分别直接授权、模型三态审查或请求用户审批 |
-| [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136 | status/log grammar 只保留已批准执行的 hardening 用途，不再产生免审授权 |
+| [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136/0160 | status/log grammar恢复可证明只读免审；typed Git不再进入模型工具面 |
 | [0135](0135-mode-aware-workspace-authorization-boundary.md) | partially superseded by ADR-0136 | 文件工具边界保留；Shell/Git 的 Workspace grammar 直通已取消 |
 | [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
-| [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
+| [0137](0137-shell-sandbox-durable-approval-queue.md) | partially superseded by ADR-0160 | durable queue/sandbox保留；未知Shell baseline改为exact真人审批 |
 | [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
 | [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
@@ -161,3 +161,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158 | 保留`GET /`直接返回Web并建立只读HttpOnly Browser session；launch token与exchange由ADR-0158删除 |
 | [0158](0158-local-web-root-session-without-launch-token.md) | accepted | 本地只读Web固定使用Service根地址与root-created HttpOnly session；删除launch token、exchange与Native `web_launch` |
 | [0159](0159-compatible-clients-share-single-service.md) | accepted | 兼容TUI/Web/Desktop跨build复用同一ready Service；build只保留provenance与exact lifecycle control边界 |
+| [0160](0160-uncertain-shell-requires-exact-approval.md) | accepted | 未知Shell effects请求exact用户审批；模型脚本统一走Shell；执行前拒绝不再折叠为失败 |
+| [0161](0161-versioned-shell-semantics-and-read-only-trial.md) | partially superseded by ADR-0162 | 保留revision-bound Shell语义注册表；严格只读试跑grant由ADR-0162删除 |
+| [0162](0162-remove-read-only-trial-grant.md) | accepted | 删除严格只读试跑grant；unknown Shell恢复正常exact审批，registry继续演进 |
+| [0163](0163-service-owned-exploration-presentation.md) | accepted | Service唯一投影探索展示分类；TUI删除Shell前缀解析与历史重聚合路径 |

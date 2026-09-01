@@ -1012,13 +1012,13 @@ function projectHistoryEntry(entry: RuntimeLogEventEntry): AgentApiHistoryItem[]
     const label = stringValue(fields?.label);
     if (!toolCallId || !label) return [];
     const statuses: Readonly<
-      Record<string, 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
+      Record<string, 'queued' | 'running' | 'completed' | 'failed' | 'rejected' | 'cancelled'>
     > = {
       'tool.queued': 'queued',
       'tool.started': 'running',
       'tool.finished': 'completed',
       'tool.failed': 'failed',
-      'tool.rejected': 'failed',
+      'tool.rejected': 'rejected',
       'tool.cancelled': 'cancelled',
     };
     const status = statuses[entry.type];
@@ -1035,6 +1035,12 @@ function projectHistoryEntry(entry: RuntimeLogEventEntry): AgentApiHistoryItem[]
           tool_call_id: toolCallId,
           label: shortText(label),
           status,
+          ...(stringValue(fields?.reason_code)
+            ? { reason_code: shortText(stringValue(fields?.reason_code)!) }
+            : {}),
+          ...(stringValue(fields?.rejection_summary)
+            ? { summary: boundedUtf8(stringValue(fields?.rejection_summary)!, 512) }
+            : {}),
         },
       },
     ];

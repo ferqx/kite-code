@@ -19,7 +19,15 @@ export interface ConsolidatedToolEntry {
   ok: boolean;
   summary: string;
   elapsedMs?: number;
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+  status:
+    | 'queued'
+    | 'running'
+    | 'done'
+    | 'error'
+    | 'rejected'
+    | 'cancelled'
+    | 'timeout'
+    | 'exhausted';
   /** 读取文件时的文件总行数 / Total lines for read_file tool */
   totalLines?: number;
   /** 自动审批失败原因。工具执行成功但审批失败时展示 / Auto-review failure reason. Shown when tool ok but review failed. */
@@ -100,7 +108,15 @@ export type OutputBlock =
       callId: string;
       name: string;
       args: Record<string, unknown>;
-      status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+      status:
+        | 'queued'
+        | 'running'
+        | 'done'
+        | 'error'
+        | 'rejected'
+        | 'cancelled'
+        | 'timeout'
+        | 'exhausted';
       summary: string;
       preview?: string;
       /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */

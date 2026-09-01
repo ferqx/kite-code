@@ -10,9 +10,18 @@
 
 1. **Thought 边界（阶段模型，ADR-0030 / ADR-0036）**：Thought 块 = 一段**只读探索阶段**：从首个 `reason` / 探索工具建块起，跨越任意多次模型调用保持活跃（圆点持续闪烁、时长累加、工具并入），直到阶段边界关闭。`reason/thinking` 不打断 Thought，只更新活动预览并累加调用时长；仅非流式一次完整到达的兼容旁白可按规则 24 吸收为块顶字幕。`model.text_delta` 是明确阶段边界：先冻结当前 Thought，再在其后创建同级文本块，永远不写入 `pendingCaption`。**阶段边界（关闭 Thought）**：`final` / 流式文本的脱离路径、非探索工具、`need_approval` / `need_input` / `need_plan_review`、生命周期边界（重试 / 错误 / 取消 / 中断 / 轮次结束）。`model.requested` **不是边界**——kernel 收齐工具结果后重新调用模型是实现细节（ADR-0030 取代 ADR-0025 的 settle 条款，见规则 21）。纯空白文本整体忽略。纯思考块（整轮无工具）被文本关闭时并入该文本块题头（ADR-0026，见规则 19）；被非探索工具 / 人机等待关闭时保留裸线。
 
-2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在调用实际开始或开始前直接失败而物化时进入 `tool_summary`，永远不创建独立 `tool_card`。`tool.queued` 只缓存 name/args，不物化任何块（ADR-0049）。`shell_execute` 仅在 `intent=inspect` 且满足以下一种情况时纳入 Thought 聚合：(a) 命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头；(b) 命令是单一 `ls` 调用（含参数和目标路径）。`ls` 一旦包含管道、重定向、命令串联、换行或命令替换，就按通用 Bash 处理并渲染为独立 tool_card。其他 `shell_execute` 同样不纳入。
+2. **探索工具不经 tool_card**：Service在仍拥有可信Runtime分类事实时，为`tool.queued`签发closed
+   `presentation=exploration|standalone|hidden`。TUI只消费该值，不解析command、`intent`或工具名前缀。
+   `read_file`、`search_content`、`search_files`、`read_mcp_resource`固定投影为exploration；`shell_execute`只有
+   Runtime事实同时为`effectClass=read_only + sideEffect=false`时才投影为exploration。exploration调用在实际开始或
+   开始前直接失败而物化时进入`tool_summary`，永远不创建独立`tool_card`；standalone Shell始终使用独立卡片。
+   `tool.queued`只缓存name/args/presentation，不物化任何块（ADR-0049、ADR-0163）。
 
-3. **非探索工具 = 阶段边界**：所有未满足规则 2 的 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具关闭当前阶段块（关闭原因 `tool` / `human_wait`），按原有独立块渲染，其后开启新阶段。一个 reasoning 段的 `Thinking Xs` 标签由关闭前的块消费，边界后的探索聚合不得复制该标签；它以纯工具统计标题开始，直到新的真实 `reason` 事件到达（ADR-0047）。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。
+3. **非探索工具 = 阶段边界**：所有`presentation=standalone`的`shell_execute`、写入工具、审批、`ask_user`、
+   `update_plan`、`task`等非探索工具关闭当前阶段块（关闭原因`tool`/`human_wait`），按原有独立块渲染，其后开启
+   新阶段。一个reasoning段的`Thinking Xs`标签由关闭前的块消费，边界后的探索聚合不得复制该标签；它以纯工具
+   统计标题开始，直到新的真实`reason`事件到达（ADR-0047）。`list_mcp_resources`也使用独立tool card，以
+   `Provider · URI`树展示资源目录；真正读取内容的`read_mcp_resource`仍属于探索工具。
 
 4. **跨 thinking 合并**：同一 Thought 内，探索工具之间可以夹着 `reason/thinking`。这些 thinking 不创建新的工具聚合，只更新 `tool_summary.latestActivity`。
 
@@ -38,7 +47,8 @@
 
 15. **settledStatus 从实际状态推导**：settled 状态下 `ToolSummaryBlock` 的结算状态仍从工具状态推导（`hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done'`），不使用 `block.result`，供状态数据与兼容逻辑使用；聚合摘要完成态不再用它渲染圆点或 footer。工具仍 running 时 `closeCurrentThought` 留空 `block.result`（undefined）；所有工具 settled 后由 `tool_done` 路径重新计算为 `'error'` 或 `'done'`。
 
-16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 App/TUI 层，不允许导入 Kernel、Host 或 Builtin authority 模块。
+16. **层边界**：`consolidateTools.ts`只格式化已签发exploration条目的统计文案，不拥有工具分类或历史块重分类。
+    Service projector是唯一presentation owner；TUI不允许导入Kernel、Host或Builtin authority模块来重建该结论。
 
 17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。`write_file` 例外：其卡片动词由 `writeFileActionName(summary, args)` 从结果动态推导——覆写已有文件（diff 统计摘要）显示 Write，新建显示 Create，运行/排队态无 summary 时用中性 Write；append 已由 ADR-0025 §2 移除，历史会话残留的 "Appended …" summary 归入中性 Write。
 
@@ -77,7 +87,7 @@
 - `docs/adr/0027-thought-carryover-non-text-boundary.md` — 历史方案：跨边界继承 Thought 标签（已被 ADR-0047 覆盖）
 - `docs/adr/0047-thought-label-single-consumption.md` — Thought 标签单次消费，边界后不重复继承（规则 3/23）
 - `docs/adr/0030-exploration-phase-block.md` — 只读探索阶段 = 单一存活块、文本吸收为块顶字幕（规则 1/13/21/22/24）
-- `docs/adr/0041-inspect-ls-thought-aggregation.md` — 单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡（规则 2/3）
+- `docs/adr/0041-inspect-ls-thought-aggregation.md` — 历史TUI命令grammar，已由ADR-0163取代
 - `docs/adr/0045-streaming-render-complete-block-commit.md` — Thought 终态展示与完整 Markdown 块提交（规则 25/27/28）
 - `docs/adr/0046-atomic-streaming-component-progress.md` — 结构组件闭合外壳后的内部完整行渐进渲染（规则 27）
 - `docs/space/plans/2026-06-28-context-compaction.md` — M0/M1/M2 三层压缩方案
@@ -86,7 +96,7 @@
 
 修改以下文件时，必须先阅读上述设计文档：
 - `apps/kite-cli/src/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
-- `apps/kite-cli/src/tui/reducers/consolidateTools.ts` — 工具判断 + 合并逻辑
+- `apps/kite-cli/src/tui/reducers/consolidateTools.ts` — 已签发探索条目的统计文案
 - `apps/kite-cli/src/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
 - `apps/kite-cli/src/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染
 - `apps/kite-cli/src/tui/components/BlockRenderer.tsx` — tool_summary case

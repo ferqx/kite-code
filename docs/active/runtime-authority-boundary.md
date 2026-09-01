@@ -78,7 +78,7 @@ Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exa
 
 Public Agent API当前在同一single-Service listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
 hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
-initialize/query-only in-process Runtime Client/Server logical connection。Service根页面另建HttpOnly cookie与service-scoped read-only
+initialize/query-only in-process Runtime Client/Server logical connection。Service的根与API Docs SPA shell另建HttpOnly cookie与service-scoped read-only
 principal。ServerInfo按principal发布`checkpoints/history/sessions/workspaces`；Workspace、Workspace Session、Session get、History page与
 Checkpoint list/preview经同一个Store 9 Directory/Runtime/History authority可达，其他resource/mutation仍404。History的`after_sequence`只做
 bounded增量读取且与cursor互斥。两类principal都不开放SQLite/State concrete或新connection/DDL；context/session close不取消Runtime work，
@@ -89,8 +89,9 @@ single-Service Native Runtime socket只认证Workspace、Client与connection gen
 每context的16-request admission与drain只约束Public HTTP资源；它不成为domain mailbox。已认证read在异步Trust重验后还必须复核context current，
 revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-02D static/conformance Gate同时证明adapter没有direct
 `RuntimeAccess`或Agent Kernel/Runtime Host/SQLite concrete import；1 MiB History response提前分页仍只消费同一safe page port。
-static Web carrier的`/api-docs`只读取candidate内固定OpenAPI资产，不建立Agent context、Runtime logical connection或Store query，也不提供
-execute control；Browser业务数据只经cookie-authenticated `/v1`，不是Controller surface。
+static Web carrier的API Docs与受限Session shell返回SPA index并可建立与根shell相同的短期Browser session；精确OpenAPI JSON仍只读取candidate内固定
+资产，不建立Agent context、Runtime logical connection或Store query，也不提供execute control；Browser业务数据只经cookie-authenticated
+`/v1`，不是Controller surface。
 
 KRSRUN-01B已把unpublished Store 8 capability接入Host transaction机制：start的State/event/snapshot/revision、queued Run与original
 resource receipt同一commit；activation在publish/schedule前通过现有`attempt_start` transaction推进running，不得在Store writer transaction

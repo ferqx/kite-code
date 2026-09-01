@@ -128,7 +128,93 @@ function client(): AgentApiBrowserClient {
   } as AgentApiBrowserClient;
 }
 
+it('revokes a shell-created Browser session before REST connect', async () => {
+  const api = client();
+  const transport = createWebRestTransport({ client: api });
+
+  await transport.disconnect();
+
+  expect(api.revokeBrowser).toHaveBeenCalledOnce();
+});
+
 describe('Web REST transport', () => {
+  it('coalesces each tool lifecycle into one terminal or current message', async () => {
+    const api: AgentApiBrowserClient = {
+      ...client(),
+      listHistory: vi.fn(async () => ({
+        schema: 'kite.agent-api.history-page.v1' as const,
+        session_id: 'session-one',
+        through_sequence: 6,
+        items: [
+          toolLifecycleItem(2, 'tool-read', 'read_file', 'queued'),
+          toolLifecycleItem(3, 'tool-read', 'Tool', 'running'),
+          toolLifecycleItem(4, 'tool-read', 'read_file', 'completed'),
+          toolLifecycleItem(5, 'tool-search', 'search_files', 'queued'),
+          toolLifecycleItem(6, 'tool-search', 'Tool', 'running'),
+        ],
+      })),
+    };
+    const transport = createWebRestTransport({ client: api });
+    await transport.connect();
+
+    const history = await transport.loadHistory('session-one');
+
+    expect(history.messages).toHaveLength(2);
+    expect(history.messages[0]).toMatchObject({
+      messageId: 'tool:tool-read',
+      sequence: 4,
+      blocks: [{ kind: 'tool_result', label: 'read_file', ok: true }],
+    });
+    expect(history.messages[1]).toMatchObject({
+      messageId: 'tool:tool-search',
+      sequence: 6,
+      blocks: [{ kind: 'tool_activity', label: 'search_files', status: 'running' }],
+    });
+  });
+
+  it('presents a pre-dispatch rejection separately from execution failure', async () => {
+    const api: AgentApiBrowserClient = {
+      ...client(),
+      listHistory: vi.fn(async () => ({
+        schema: 'kite.agent-api.history-page.v1' as const,
+        session_id: 'session-one',
+        through_sequence: 3,
+        items: [
+          toolLifecycleItem(2, 'tool-shell', 'shell_execute', 'queued'),
+          {
+            ...toolLifecycleItem(3, 'tool-shell', 'Tool', 'rejected'),
+            content: {
+              type: 'tool.lifecycle' as const,
+              tool_call_id: 'tool-shell',
+              label: 'Tool',
+              status: 'rejected' as const,
+              reason_code: 'policy_denied',
+              summary: 'Tool execution was rejected by policy before dispatch.',
+            },
+          },
+        ],
+      })),
+    };
+    const transport = createWebRestTransport({ client: api });
+    await transport.connect();
+
+    const history = await transport.loadHistory('session-one');
+
+    expect(history.messages).toEqual([
+      expect.objectContaining({
+        messageId: 'tool:tool-shell',
+        sequence: 3,
+        blocks: [
+          expect.objectContaining({
+            kind: 'tool_rejected',
+            label: 'shell_execute',
+            summary: 'Tool execution was rejected by policy before dispatch.',
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it('uses the root-created cookie and loads Workspace, Session and History snapshots', async () => {
     const api = client();
     const transport = createWebRestTransport({ client: api });
@@ -199,3 +285,24 @@ describe('Web REST transport', () => {
     expect(api.revokeBrowser).toHaveBeenCalledOnce();
   });
 });
+
+function toolLifecycleItem(
+  sequence: number,
+  toolCallId: string,
+  label: string,
+  status: 'queued' | 'running' | 'completed' | 'rejected',
+) {
+  return {
+    schema: 'kite.agent-api.history-item.v1' as const,
+    session_id: 'session-one',
+    sequence,
+    public_ordinal: 0,
+    occurred_at: '2026-08-31T00:00:00.000Z',
+    content: {
+      type: 'tool.lifecycle' as const,
+      tool_call_id: toolCallId,
+      label,
+      status,
+    },
+  };
+}

@@ -217,9 +217,14 @@ describe('Runtime Client event projector', () => {
 
   test('projects only closed tool presentation facts from raw tool metadata', () => {
     const context = { sessionRevision: 1 };
-    const queued = (toolCallId: string, name: string, args: unknown) =>
+    const queued = (
+      toolCallId: string,
+      name: string,
+      args: unknown,
+      classification?: { effectClass: 'read_only' | 'workspace_write'; sideEffect: boolean },
+    ) =>
       projectRuntimeClientEvent(
-        { type: 'tool.queued', toolCallId, name, args } as RuntimeEvent,
+        { type: 'tool.queued', toolCallId, name, args, ...classification } as RuntimeEvent,
         context,
       );
 
@@ -230,20 +235,40 @@ describe('Runtime Client event projector', () => {
       presentation: 'exploration',
     });
     expect(
-      queued('shell-1', 'shell_execute', { intent: 'inspect', command: 'rg token .' }),
+      queued(
+        'shell-1',
+        'shell_execute',
+        { command: 'rg token .' },
+        { effectClass: 'read_only', sideEffect: false },
+      ),
     ).toMatchObject({
       presentation: 'exploration',
     });
     expect(
-      queued('ls-1', 'shell_execute', { intent: 'inspect', command: 'ls -la src' }),
+      queued(
+        'ls-1',
+        'shell_execute',
+        { command: 'ls -la src && echo done' },
+        { effectClass: 'read_only', sideEffect: false },
+      ),
     ).toMatchObject({
       presentation: 'exploration',
     });
     expect(
-      queued('compound-1', 'shell_execute', { intent: 'inspect', command: 'ls | tee output' }),
+      queued(
+        'compound-1',
+        'shell_execute',
+        { command: 'ls | tee output' },
+        { effectClass: 'workspace_write', sideEffect: true },
+      ),
     ).toMatchObject({ presentation: 'standalone' });
     expect(
-      queued('write-1', 'shell_execute', { intent: 'inspect', command: 'printf private > out' }),
+      queued(
+        'write-1',
+        'shell_execute',
+        { command: 'printf private > out' },
+        { effectClass: 'workspace_write', sideEffect: true },
+      ),
     ).toMatchObject({ presentation: 'standalone' });
     expect(queued('task-1', 'task', { prompt: 'private' })).toMatchObject({
       presentation: 'hidden',
@@ -251,12 +276,16 @@ describe('Runtime Client event projector', () => {
     expect(queued('subagent-tool:1', 'read_file', { path: '/private/secret' })).toMatchObject({
       presentation: 'hidden',
     });
-    const projected = queued('secret-1', 'shell_execute', {
-      intent: 'inspect',
-      command: 'rg secret /private/workspace',
-    });
+    const projected = queued(
+      'secret-1',
+      'shell_execute',
+      {
+        command: 'rg secret /private/workspace',
+      },
+      { effectClass: 'read_only', sideEffect: false },
+    );
     expect(projected).toMatchObject({
-      arguments: { intent: 'inspect', command: 'rg secret /private/workspace' },
+      arguments: { command: 'rg secret /private/workspace' },
     });
   });
 

@@ -29,6 +29,11 @@ terminal/Web data plane；独立Web Gateway process/control/state实现已经删
   Native/Controller/mutation route，Native authorization也不能混入Browser request；Web route只随Service关闭。
 - Browser Model Context诊断复用同一Store 9 Artifact backend和Builtin schema-aware reader，只能从可见Session的exact prepared invocation读取
   bounded provider-neutral system/messages/tools；不打开第二DB、不提供通用Artifact读取，也不暴露ref、Provider options、endpoint或Credential。
+- Browser History将`tool.rejected`投影为独立pre-dispatch `rejected`状态与稳定reason code，不再伪装为执行失败；
+  Public摘要不携带raw Runtime reason、命令或路径。
+- Native Runtime Client 的 tool queue projector 只把 Runtime 已确认
+  `effectClass=read_only + sideEffect=false` 的 Shell 投影为 `exploration`；未知、写入或有副作用的 Shell
+  保持 `standalone`。CLI/TUI 只消费该 closed presentation fact，不解析命令文本建立第二套分类权威。
 - 项目采用未发布clean cutover。Service只打开current `kite.sqlite`，不扫描、迁移或删除旧DB/layout/Artifact/process state及
   `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
 - Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成

@@ -57,18 +57,21 @@ manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当�
 
 Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen`、`returns`、`constraints`、`recovery` 五类独立事实。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 Builtin operation result projection 或 Kernel-owned user-input normalization 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-20 个 model-visible Builtin catalog entry 已全部绑定唯一的 `ToolContractSection` 结构化事实。不存在旧契约输入、双描述格式或回滚分支；`toolContractSection()` 只验证并返回当前结构。
+19个model-visible Builtin catalog entry已全部绑定唯一的`ToolContractSection`结构化事实。internal `git_inspect`
+不拥有模型工具契约，也不进入模型ToolSet。不存在旧契约输入、双描述格式或回滚分支；`toolContractSection()`只验证并返回当前结构。
 
 ### 契约存放与绑定
 
-- `BUILTIN_TOOL_CONTRACTS`（`packages/builtin-runtime/src/tool-contracts.ts`）是当前 20 个 model-visible builtin 的规范事实表；各 Builtin definition 直接或通过兼容命名常量绑定其中同一对象，Skill runtime 三工具同样不得另写契约。
+- `BUILTIN_TOOL_CONTRACTS`（`packages/builtin-runtime/src/tool-contracts.ts`）是当前19个model-visible builtin的规范事实表；
+  各Builtin definition直接绑定其中同一对象，Skill runtime三工具同样不得另写契约。
 - `buildDescription(contract, style)` 只从同一组独立事实生成 standard 或 catalog 展示；style 不改变 schema、可用性或执行语义。后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 Builtin contract、SPI registry 与生产上下文。
 - App composition bridge 只能投影 Builtin catalog 与独立 dynamic-MCP overlay，不得硬编码另一份 description；它不是 schema authority。
 - 任何失败指导投影都只能读取 Builtin contract 的规范化 `recovery` 结果；禁止维护按工具名分支的第二份 recovery guidance。test-only 兼容体也必须遵守同一规则。
 - 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 - `task` 契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
 - `task` 的 raw 模型输入形态是严格闭合的 `{name, subagent_type, task}`。`name` 是主 Agent 显式提供、用于 TUI 与 Runtime Event 的公开名称，必须简短说明子 Agent 正在做什么；它本来就是展示字段，不按隐私数据处理，也不得再从任务正文第一行推导。Model Controller 必须在 queue commit 前把任务正文写入 private Artifact，durable 形态只允许独立的 `{name, subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。当前格式不恢复已持久化 raw Task，也不把任务正文暴露到模型 schema。
-- `git_inspect` 仅描述 status/diff/log/branch-list 的 typed broker；不能把 raw shell、Git 写操作或 remote Git 写成 fallback。
+- internal `git_inspect`不创建`ToolContractSection`且不得向模型披露；模型发出的Git、构建、测试与其他project script
+  全部使用`shell_execute`。
 - 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
   `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
   路径说明需要 exact mutation approval。Schema/contract 不得继续声称 path 只能相对 Workspace，也不得把
@@ -83,13 +86,13 @@ SPI registry。模型 surface、Runner recovery guidance 与 capability descript
 `apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 Service composition bridge，不能成为第二 authority。
 确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts` 与 schema-parity 测试守护。
 
-Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 8 个 internal entry，并在
+Builtin catalog conformance必须枚举当前19个model-visible entry与9个internal entry，并在
 planning/building 的合法 availability context 中验证 Skill catalog、active frame、task adapter、tool search
 与 phase/role 的真实可用形态；可用集合与 projection 一致，description 来自同一 resolved contract，Builtin parser
 与 model JSON Schema projection 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})`
-结果互相比较。dynamic MCP 仍是独立的 binding/descriptor route，不计入 Builtin 20 个 model tools。
+结果互相比较。dynamic MCP仍是独立的binding/descriptor route，不计入Builtin 19个model tools。
 
-20 个 model-visible entry 还必须逐一执行真实 Builtin projection/result path；`ask_user` 必须验证
+19个model-visible entry还必须逐一执行真实Builtin projection/result path；`ask_user`必须验证
 `normalizeAskUserRequest()` 的 Kernel-owned interrupt 输入路径并保持 catalog dispatch 零调用，再经过 Controller 的 canonical `tool.finished` 投影、Runtime reducer 与 provider context
 projection。`returns.format=json` 的真实顶层 key 必须全部位于 contract fields；`text` 不得虚构
 `ok/stdout/stderr/resultMeta` 字段。Builtin classifier advice 必须随统一执行结果进入同一个 canonical terminal，
@@ -97,7 +100,7 @@ projection。`returns.format=json` 的真实顶层 key 必须全部位于 contra
 public model-content helper；Shell failure 的 production path 必须从
 Host prepared authority 经过 App Tool Pipeline terminal、Kernel reducer 到 provider
 context，逐项等于 Builtin projection。旧 Core `invokeGovernedTool()` 已删除；测试 helper
-只存在于 `tests/helpers/`，production source 不得导入。20/20 closure
+只存在于`tests/helpers/`，production source不得导入。19/19 closure
 不能只靠预折叠 terminal fixture。不得把完整执行结果 JSON 化进 child transcript，也不得额外暴露
 command/path/resultMeta、private recovery guidance 或 canonical-private lineage。`read_file` 的 ENOENT 公共结果固定
 为低信息稳定文本，具体 path 已由原 tool call 表达，不能在 Tool Result 重复泄露。

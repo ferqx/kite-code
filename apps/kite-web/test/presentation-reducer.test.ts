@@ -7,7 +7,11 @@ describe('Web REST presentation reducer', () => {
       type: 'transport_connected',
       generation: 2,
     });
-    const directory = webPresentationReducer(connected, {
+    const routed = webPresentationReducer(connected, {
+      type: 'select_session',
+      sessionId: 'session-one',
+    });
+    const directory = webPresentationReducer(routed, {
       type: 'directory_loaded',
       generation: 2,
       directory: {

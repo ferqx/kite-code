@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { render, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { type AgentApiOpenApiDocument, ApiDocs, loadBundledSpec } from '@/api-docs/api-docs';
-import { isApiDocsPath } from '@/api-docs/routing';
 
 const spec: AgentApiOpenApiDocument = {
   openapi: '3.1.0',
@@ -26,16 +26,12 @@ afterEach(() => {
 });
 
 describe('Agent API reference', () => {
-  test('routes only the fixed API docs entrypoints', () => {
-    expect(isApiDocsPath('/api-docs')).toBe(true);
-    expect(isApiDocsPath('/api-docs/')).toBe(true);
-    expect(isApiDocsPath('/')).toBe(false);
-    expect(isApiDocsPath('/api-docs/openapi.json')).toBe(false);
-    expect(isApiDocsPath('/api-docs/anything')).toBe(false);
-  });
-
   test('renders the bundled contract without interactive request controls', async () => {
-    const view = render(<ApiDocs loadSpec={async () => spec} />);
+    const view = render(
+      <MemoryRouter initialEntries={['/api-docs']}>
+        <ApiDocs loadSpec={async () => spec} />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(view.getByText('Kite Agent Server API')).toBeTruthy());
 
     expect(view.getByText('Reference only')).toBeTruthy();
@@ -48,7 +44,9 @@ describe('Agent API reference', () => {
 
   test('reports only local artifact unavailability when the contract cannot be loaded', async () => {
     const view = render(
-      <ApiDocs loadSpec={async () => Promise.reject(new Error('artifact missing'))} />,
+      <MemoryRouter initialEntries={['/api-docs']}>
+        <ApiDocs loadSpec={async () => Promise.reject(new Error('artifact missing'))} />
+      </MemoryRouter>,
     );
     await waitFor(() =>
       expect(

@@ -3064,6 +3064,28 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('exit: error');
   });
 
+  test('rejected shell tool_card states that execution never started', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-rejected',
+      name: 'shell_execute',
+      args: { command: 'custom-project-script' },
+      status: 'rejected',
+      summary: 'The shell command requires exact user approval.',
+      detail: 'Run: custom-project-script',
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('The shell command requires exact user approval.');
+    expect(frame).toContain('rejected before execution');
+    expect(frame).not.toContain('(No output)');
+    expect(frame).not.toContain('exit: error');
+  });
+
   test('cancelled shell tool_card keeps its command and renders only a cancelled footer', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3264,6 +3286,51 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('searched 1 file pattern');
     expect(lastFrame()).not.toContain('Find package.json');
     expect(lastFrame()).not.toContain('search command failed');
+  });
+
+  test('includes proven read-only Shell commands in the Thinking summary', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 1_000,
+      totalElapsedMs: 1_000,
+      modelMs: 1_000,
+      summaryLine: 'read 2 files, ran 1 shell command',
+      active: false,
+      hasThought: true,
+      hasThinking: true,
+      tools: [
+        {
+          callId: 'read-a',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'read-b',
+          name: 'read_file',
+          args: { path: 'package.json' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'shell-read',
+          name: 'shell_execute',
+          args: { command: 'ls -1' },
+          ok: true,
+          summary: 'src',
+          status: 'done',
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('Thinking 1s · read 2 files, ran 1 shell command');
   });
 
   test('phase block renders confirmed captions and pending caption at the top (ADR-0030)', () => {

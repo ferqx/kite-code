@@ -24,16 +24,22 @@ Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope
 
 ## Web REST边界
 
-Web是同一Service `/v1`的薄只读客户端：访问`GET /`时Service创建或复用短期HttpOnly cookie；Workspace、Session、
+Web是同一Service `/v1`的薄只读客户端：访问`GET /`或`GET /api-docs`SPA shell时Service创建或复用短期HttpOnly cookie；Workspace、Session、
 History与Checkpoint通过`@kite-ai/agent-api-contract`定义的bounded、path-free REST读取。Browser principal是service-scoped read-only
 principal，Session direct read仍必须属于Store 9 Directory可见范围。Browser cookie不能进入Native/Controller/mutation route，Agent bearer
 也不能混入Browser请求。
 
-Service-owned static carrier随Service启动固定提供`/`、`/index.html`、`/assets/*`、`/api-docs`与精确OpenAPI asset；Browser业务BFF
+Service-owned static carrier随Service启动固定提供`/`、`/index.html`、`/assets/*`、`/api-docs`、受限`/sessions/:sessionId` shell与精确OpenAPI
+asset；Web使用React Router Declarative Mode进行History API SPA切换。Session选择push只包含opaque Session identity的短URL；从Docs执行Browser back时
+通过现有Browser direct Session read恢复摘要与History，不暴露Workspace digest，也不扫描Workspace Session page。所有index shell入口都创建或复用
+同一种短期HttpOnly Browser session；OpenAPI JSON和hashed asset请求不创建session。Browser业务BFF
 `/_kite/web/tabs|directory|history|client`、业务WebSocket与WebObserver projection已删除。Browser logout只撤销当前session；Web route
 只有在Service stop时关闭。
 
-`GET /`直接返回index并创建或复用短期read-only HttpOnly Browser session；CLI/TUI ensure同一Service并从Native `describe`返回稳定的
+SPA root持有一个production Browser transport；Observer route unmount只停止该页面的异步投影，不撤销service-scoped Browser session，
+document `pagehide`且不进入back-forward cache时才调用Browser session revoke。路由往返不创建第二transport、后台scheduler或持久client state。
+
+`GET /`、`GET /api-docs`与受限Session shell直接返回同一个index并创建或复用短期read-only HttpOnly Browser session；CLI/TUI ensure同一Service并从Native `describe`返回稳定的
 `origin/`。规范入口不暴露`/index.html`，也不存在launch token或Browser exchange route。
 
 运行中Session只使用页面可见时的单一有界REST增量轮询；当前没有SSE、业务WebSocket、offline cache、Browser mutation、remote/LAN、

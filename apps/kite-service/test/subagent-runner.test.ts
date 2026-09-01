@@ -471,7 +471,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('code child receives the same typed Git availability and broker route as its parent', async () => {
+  test('keeps typed Git internal when a code child attempts to call it', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
     let brokerCalls = 0;
     let modelCalls = 0;
@@ -543,7 +543,7 @@ describe('SubAgentRunner integration', () => {
         },
       });
       expect(result).toMatchObject({ ok: true });
-      expect(brokerCalls).toBe(1);
+      expect(brokerCalls).toBe(0);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -1302,7 +1302,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('inherits full interaction mode for uncertain sub-agent verification', async () => {
+  test('keeps uncertain sub-agent verification behind exact approval even in Full', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-verify-'));
     try {
       const { events, sink } = mockEventSink();
@@ -1350,13 +1350,15 @@ describe('SubAgentRunner integration', () => {
         },
       });
 
-      expect(result.ok).toBe(true);
-      expect(shellExecutions).toBe(1);
-      const shellResult = events.find(
-        (event) => event.type === 'tool_result' && event.data.toolName === 'shell_execute',
-      );
-      expect(shellResult?.data.ok).toBe(true);
-      expect(String(shellResult?.data.summary)).toContain('typecheck ok');
+      expect(result.ok).toBe(false);
+      expect(result.blocked).toMatchObject({
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        toolName: 'shell_execute',
+        toolCallId: 'tc-verify',
+        command: 'bun run typecheck',
+      });
+      expect(shellExecutions).toBe(0);
+      expect(events.find((event) => event.type === 'error')).toBeUndefined();
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

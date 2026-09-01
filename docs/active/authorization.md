@@ -109,16 +109,20 @@ invocation approval；批准后形成 `approved_external`，文件名与宿主�
 identity、read-before-edit、preimage/stale、single-use commit、取消、大小/编码与真实 OS failure 仍由
 Provider 执行。
 
-ADR-0137 部分替代 ADR-0136 的 phase 结论，同时保留其“raw Shell 不使用命令/Git/read-only grammar allowlist”和 hard deny
-结论：Building Workspace read/write baseline 内 direct；Planning 非 Full Workspace read-only baseline 内 direct；已知扩
-scope 的 Accept/Auto 进入 user/reviewer route；Full 直接执行并保持 Plan lifecycle。`ls`、`git status --short`、`bun test` 和未知
-命令不因名字获得额外授权，也不因不在列表而 hard deny。显式 same-command grant 只按完整 Session identity 匹配。
+ADR-0160部分替代ADR-0137的未知Shell结论，同时保留其phase、sandbox与durable queue：可证明只读命令按phase baseline
+direct；Building中效果已知的Workspace mutation继续按当前mode治理；无法证明只读且无法完整确定effects的命令（包括
+`bun test`与任意project script）固定进入exact真人审批，Auto/Full不绕过。命令不因不在列表而hard deny；只有Compiler
+明确`allowed=false`的关键系统规则不可覆盖。显式same-command grant只按完整Session identity匹配。
 
 Planning 非 Full 使用 Workspace read-only baseline 直接运行已知可承载的 Shell；已知扩 scope 按 Accept/Auto 路由审批。Planning
 Full 直接执行并保持 Plan lifecycle。空命令、关键系统递归删除和针对关键系统 repository 的 destructive Git 继续 hard
-deny，任何 mode 都不能覆盖。`isReadOnlyShellCommand` 等 classifier 只可用于批准后的 hardened environment、
-只读 Subagent role ceiling 或 scheduler metadata，不得改变 Policy decision 或跳过 mode review。typed
-`git_inspect` 仍是独立结构化 capability，raw Git token 不产生 hard deny、强制 capability routing或免审资格。
+deny，任何 mode 都不能覆盖。`isReadOnlyShellCommand`同时拥有可证明只读的免审事实、hardened environment、只读
+Subagent role ceiling与scheduler metadata；未命中只能生成`uncertainEffects`真人审批，不能生成destructive deny。
+`git_inspect`只保留为internal Runtime capability，所有模型Git/脚本命令统一通过`shell_execute`。
+
+ADR-0161把只读证明收敛到Builtin-owned、冻结的v1 Shell semantics registry；registry digest必须进入
+`shell_execute` capability revision，语义升级不能复用旧binding。普通只读program由descriptor声明，参数敏感program
+由descriptor选择局部inspector；未注册或未命中只生成低基数本地诊断，不产生allow，也不进入远程telemetry。
 
 RM-12 只迁移该链路的物理 owner，不改变上述授权：五个文件 Builtin catalog entry 与 `git_inspect` 已移除旧的
 `execute/projectResult`，唯一 Builtin Runtime executor 只能消费 Tool Pipeline 在 exact invocation 完成 Policy、
@@ -136,8 +140,8 @@ Plan/child mechanism。Builtin Subagent role ceiling 可收紧 allowed tool 与 
 
 ADR-0131 把同一 identity 规则扩展到 Shell、MCP executable/cwd 与原生 sandbox：canonical Workspace
 内 read/write/execute 不得因 `.git`、`.env`、Agent/MCP 配置、credential-looking 名称或 additional deny
-二次拒绝。typed Git 与 Skill reference 仍有独立 schema、repository/reference integrity 和 capability
-routing；它们不构成 Workspace 名称级 deny。下文的 `externalRead`/sealed
+二次拒绝。internal typed Git broker与Skill reference仍有独立schema、repository/reference integrity和capability
+routing；internal broker不进入模型ToolSet，也不构成Workspace名称级deny。下文的`externalRead`/sealed
 `filesystem=full_access` scope 只描述
 Shell invocation；Workspace 外 destructive、提权、关键系统删除、credential/persistence 等极高风险进程
 操作仍可在审批前 fail closed。
@@ -162,10 +166,12 @@ approval；显式敏感 identity 不允许 same-command 静默复用。明确的
 返回执行失败；“批准后可执行”不伪造命令成功。
 
 Shell 网络授权按 invocation 投影。精确的 `node|npm|pnpm|yarn|bun --version|-v` 与其他可证明本地
-命令在未获授权时使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令及无法证明
-local-only 的 arbitrary script 使用 `effects.network` 或 `uncertainEffects` 进入现有审批；无法证明文件目标的
-arbitrary script 同时投影 `sensitiveExternalAccess`；Full 可直接授权，Auto 由模型三态裁决，其他模式请求
-真人审批，exact same-command grant 可按编译策略复用。
+命令在未获授权时使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令进入scope审批，无法证明
+local-only或无法完整确定effects的arbitrary script使用`uncertainEffects`固定请求exact真人审批。该审批在
+Accept Edits、Auto与Full中都不由reviewer或mode绕过，并保持编译的sealed sandbox scope；只有明确外部/网络facts才能
+请求对应扩scope。exact same-command grant仍按编译策略与完整identity复用。
+按ADR-0162，uncertain Shell不提供额外的只读试跑选项，只使用正常的`approve_once`、符合条件的
+`same_command`与拒绝；不得把classifier或Sandbox实现差异暴露为新的用户决策。
 用户一旦对该 exact invocation 授予 `approve_once`，本次 Shell 只获得该 invocation 的 sealed scope；
 静态 effects 只决定审批文案与 filesystem scope，不能在批准后再次把该调用强制改成 network-disabled。
 拒绝则命令不启动；不能兑现 governed network 的 sealed production consumer 必须在审批前拒绝。

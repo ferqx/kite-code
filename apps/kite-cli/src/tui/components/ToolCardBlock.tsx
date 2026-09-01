@@ -670,6 +670,7 @@ export default function ToolCardBlock({
   const isExpanded =
     block.expanded ??
     (block.status === 'error' ||
+      block.status === 'rejected' ||
       block.status === 'cancelled' ||
       block.status === 'timeout' ||
       block.status === 'exhausted' ||
@@ -802,7 +803,13 @@ export default function ToolCardBlock({
           ) : (
             <>
               {isExpanded &&
-                (block.status === 'cancelled' && !hasShellOutput ? null : hasShellOutput ? (
+                (block.status === 'cancelled' && !hasShellOutput ? null : block.status ===
+                  'rejected' ? (
+                  <Text color={dt.warning}>
+                    {SHELL_PREFIX}
+                    {block.summary || 'Rejected before execution.'}
+                  </Text>
+                ) : hasShellOutput ? (
                   renderShellLines(
                     shellOutput!,
                     dt.dim,
@@ -821,23 +828,25 @@ export default function ToolCardBlock({
                   : SHELL_PREFIX}
                 {block.status === 'exhausted'
                   ? 'blocked (too many repeated failures)'
-                  : isWebFetch
-                    ? block.status === 'cancelled'
-                      ? 'cancelled'
-                      : block.status === 'error'
-                        ? 'fetch failed'
+                  : block.status === 'rejected'
+                    ? 'rejected before execution'
+                    : isWebFetch
+                      ? block.status === 'cancelled'
+                        ? 'cancelled'
+                        : block.status === 'error'
+                          ? 'fetch failed'
+                          : block.status === 'timeout'
+                            ? `timed out after ${block.timeoutMs ?? 15000}ms`
+                            : 'fetched'
+                      : block.status === 'cancelled' ||
+                          block.summary?.startsWith('Command cancelled') ||
+                          block.summary?.includes('"cancelled":true')
+                        ? 'cancelled'
                         : block.status === 'timeout'
-                          ? `timed out after ${block.timeoutMs ?? 15000}ms`
-                          : 'fetched'
-                    : block.status === 'cancelled' ||
-                        block.summary?.startsWith('Command cancelled') ||
-                        block.summary?.includes('"cancelled":true')
-                      ? 'cancelled'
-                      : block.status === 'timeout'
-                        ? block.timeoutMs != null
-                          ? `timed out after ${block.timeoutMs}ms`
-                          : 'timed out'
-                        : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+                          ? block.timeoutMs != null
+                            ? `timed out after ${block.timeoutMs}ms`
+                            : 'timed out'
+                          : `exit: ${block.status === 'error' ? 'error' : '0'}`}
               </Text>
               {'reviewFailure' in block && block.reviewFailure ? (
                 <Text color={dt.error}>

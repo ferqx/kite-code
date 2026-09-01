@@ -32,8 +32,7 @@ test('keeps a long Session display name inside the sidebar item', () => {
   );
 
   const label = view.getByText(displayName);
-  expect(label.className).toContain('line-clamp-2');
-  expect(label.className).toContain('break-all');
+  expect(label.className).toContain('truncate');
   expect(label.getAttribute('title')).toBe(displayName);
   expect(view.getByRole('button', { name: `View ${displayName}` })).toBeTruthy();
 });

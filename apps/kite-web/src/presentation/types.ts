@@ -25,6 +25,12 @@ export type WebPresentationBlock =
       readonly stderr: string;
       readonly exitCode?: number;
     }
+  | {
+      readonly kind: 'tool_rejected';
+      readonly toolId: string;
+      readonly label: string;
+      readonly summary?: string;
+    }
   | { readonly kind: 'error'; readonly code: string; readonly text: string }
   | { readonly kind: 'status'; readonly status: WebSessionStatus; readonly text?: string };
 

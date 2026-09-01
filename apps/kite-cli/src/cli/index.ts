@@ -392,9 +392,15 @@ async function promptForRuntimeInteraction(
         `\n[APPROVAL REQUIRED] ${interaction.command ?? interaction.title ?? 'Runtime operation'}`,
       );
       console.error(
-        interaction.grants.includes('same_command')
-          ? 'Type y/yes to approve once, s/same to approve matching commands, or n to reject:'
-          : 'Type y/yes to approve once, or n to reject:',
+        [
+          interaction.grants.includes('approve_once') ? 'y/yes to approve once' : '',
+          interaction.grants.includes('same_command') ? 's/same to approve matching commands' : '',
+          'n to reject',
+        ]
+          .filter(Boolean)
+          .join(', ')
+          .replace(/^/u, 'Type ')
+          .concat(':'),
       );
       const value = (await readCliStdin()).toLowerCase();
       return {

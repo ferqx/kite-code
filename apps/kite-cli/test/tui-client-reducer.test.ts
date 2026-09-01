@@ -152,6 +152,186 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(JSON.stringify(toolEntries)).not.toContain('super-secret');
   });
 
+  test('aggregates a proven read-only Shell command into the owning Thought', () => {
+    const events: readonly RuntimeClientEvent[] = [
+      { type: 'model.requested', requestId: 'request-explore' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-explore',
+        state: 'completed',
+        segmentId: 'reasoning-explore',
+        text: 'Inspecting the project.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-explore',
+        messageId: 'message-explore',
+        durationMs: 1_000,
+        toolCallCount: 3,
+      },
+      ...(['read-a', 'read-b'] as const).flatMap((toolId, index): RuntimeClientEvent[] => [
+        {
+          type: 'tool.queued',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          presentationGroupId: 'message-explore',
+          arguments: { path: `file-${index}.ts` },
+          summary: 'Queued.',
+        },
+        { type: 'tool.started', toolId },
+        {
+          type: 'tool.finished',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          result: { ok: true, exitCode: 0, stdout: 'content', stderr: '' },
+          summary: 'Completed.',
+        },
+      ]),
+      {
+        type: 'tool.queued',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'exploration',
+        presentationGroupId: 'message-explore',
+        arguments: { command: 'ls -1 && echo done' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'shell-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        result: { ok: true, exitCode: 0, stdout: 'src\ndone', stderr: '' },
+        summary: 'Completed.',
+      },
+    ];
+    let state = createInitialState();
+    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_summary',
+        hasThought: true,
+        hasThinking: true,
+        modelMs: 1_000,
+        summaryLine: 'read 2 files, ran 1 shell command',
+        tools: [
+          expect.objectContaining({ callId: 'read-a', status: 'done' }),
+          expect.objectContaining({ callId: 'read-b', status: 'done' }),
+          expect.objectContaining({ callId: 'shell-read', status: 'done' }),
+        ],
+      }),
+    );
+    expect(
+      blocks.some((block) => block.kind === 'tool_card' && block.callId === 'shell-read'),
+    ).toBe(false);
+  });
+
+  test('keeps terminal exploration and the following model reasoning in one Thought', () => {
+    const events: readonly RuntimeClientEvent[] = [
+      { type: 'model.requested', requestId: 'request-tools' },
+      {
+        type: 'model.responded',
+        requestId: 'request-tools',
+        messageId: 'message-tools',
+        durationMs: 2_000,
+        toolCallCount: 3,
+      },
+      ...(['read-a', 'read-b'] as const).flatMap((toolId, index): RuntimeClientEvent[] => [
+        {
+          type: 'tool.queued',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          presentationGroupId: 'message-tools',
+          arguments: { path: `file-${index}.ts` },
+          summary: 'Queued.',
+        },
+        { type: 'tool.started', toolId },
+        {
+          type: 'tool.finished',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          result: { ok: true, exitCode: 0, stdout: 'content', stderr: '' },
+          summary: 'Completed.',
+        },
+      ]),
+      {
+        type: 'tool.queued',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'exploration',
+        presentationGroupId: 'message-tools',
+        arguments: { command: 'ls -1' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'shell-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        result: { ok: true, exitCode: 0, stdout: 'src', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'request-reasoning' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-reasoning',
+        state: 'completed',
+        segmentId: 'reasoning-after-tools',
+        text: 'Summarizing the inspected project.',
+      },
+      {
+        type: 'model.text_delta',
+        requestId: 'request-reasoning',
+        text: 'Project overview.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-reasoning',
+        messageId: 'message-reasoning',
+        durationMs: 12_000,
+        toolCallCount: 0,
+        summary: 'Project overview.',
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_summary');
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        active: false,
+        hasThinking: true,
+        modelMs: 12_000,
+        summaryLine: 'read 2 files, ran 1 shell command',
+        timeline: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'thinking',
+            text: 'Summarizing the inspected project.',
+          }),
+        ]),
+      }),
+    );
+    const answer = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'text' && block.content === 'Project overview.');
+    expect(answer).toBeDefined();
+    expect(answer?.kind === 'text' ? answer.thoughtContent : undefined).toBeUndefined();
+    expect(answer?.kind === 'text' ? answer.thoughtElapsedMs : undefined).toBeUndefined();
+  });
+
   test('merges adjacent terminal file searches while retaining bounded local arguments', () => {
     const events: readonly RuntimeClientEvent[] = [
       {
@@ -968,7 +1148,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.pendingToolCalls).toEqual({});
   });
 
-  test('drops an approval-rejected tool that never started without inventing a card', () => {
+  test('retains an unstarted rejection as a terminal diagnostic without claiming execution', () => {
     let state = eventReducer(createInitialState(), {
       type: 'RUNTIME_EVENT',
       event: {
@@ -988,7 +1168,15 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'Tool execution rejected.',
       },
     });
-    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
+    expect(state.turns.flatMap((turn) => turn.blocks)).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_card',
+        callId: 'write-rejected',
+        name: 'write_file',
+        status: 'rejected',
+        summary: 'Tool execution rejected.',
+      }),
+    );
     expect(state.pendingToolCalls).toEqual({});
 
     const gapState = eventReducer(createInitialState(), {
@@ -1277,7 +1465,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.currentThoughtSummaryId).toBeUndefined();
   });
 
-  test('settles post-Bash searches before a later model request owns reasoning', () => {
+  test('continues terminal exploration into the following model reasoning', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
       eventReducer(state, { type: 'RUNTIME_EVENT', event });
     let state = createInitialState();
@@ -1385,18 +1573,19 @@ describe('closed RuntimeClientEvent reducer', () => {
         ]),
       }),
     );
-    expect(summaries[0]?.hasThinking).not.toBe(true);
+    expect(summaries[0]?.hasThinking).toBe(true);
+    expect(summaries[0]?.timeline).toContainEqual(
+      expect.objectContaining({ kind: 'thinking', text: 'Summarizing the project.' }),
+    );
     expect(blocks).toContainEqual(
       expect.objectContaining({
         kind: 'text',
         content: 'Project overview.',
-        thoughtElapsedMs: 10_000,
-        thoughtContent: 'Summarizing the project.',
       }),
     );
   });
 
-  test('groups exploration tools only through their exact model presentation identity', () => {
+  test('keeps one exploration phase across adjacent model presentation identities', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
       eventReducer(state, { type: 'RUNTIME_EVENT', event });
     let state = createInitialState();
@@ -1436,12 +1625,20 @@ describe('closed RuntimeClientEvent reducer', () => {
       segmentId: 'group-reasoning-2',
       text: 'A distinct step.',
     });
-    expect(
-      state.turns
-        .flatMap((turn) => turn.blocks)
-        .filter((block) => block.kind === 'tool_summary')
-        .map((block) => block.modelRequestId),
-    ).toEqual(['group-request-1', 'group-request-2']);
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        modelRequestId: 'group-request-2',
+        summaryLine: 'read 1 file',
+        tools: [expect.objectContaining({ callId: 'group-read-1', status: 'running' })],
+        timeline: expect.arrayContaining([
+          expect.objectContaining({ kind: 'thinking', text: 'A distinct step.' }),
+        ]),
+      }),
+    );
   });
 
   test('keeps missing and mismatched tool identities outside the active Thought', () => {
@@ -1503,7 +1700,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(summaries.filter((block) => block.active)).toHaveLength(1);
   });
 
-  test('keeps late final reasoning with its answer instead of the preceding search step', () => {
+  test('keeps adjacent final reasoning with the preceding terminal exploration step', () => {
     const events = [
       {
         type: 'user.message',
@@ -1604,16 +1801,14 @@ describe('closed RuntimeClientEvent reducer', () => {
           summaryLine: 'searched 2 file patterns',
         }),
       );
-      expect(summaries[0]?.hasThinking).not.toBe(true);
-      expect(summaries[0]?.timeline ?? []).not.toContainEqual(
+      expect(summaries[0]?.hasThinking).toBe(true);
+      expect(summaries[0]?.timeline ?? []).toContainEqual(
         expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
       );
       expect(blocks).toContainEqual(
         expect.objectContaining({
           kind: 'text',
           content: 'POST_BASH_RESUME_DONE',
-          thoughtElapsedMs: 14_000,
-          thoughtContent: 'Synthesizing the search results.',
         }),
       );
     };

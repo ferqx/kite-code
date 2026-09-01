@@ -26,8 +26,9 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 
 - source入口先构建Web；Service child从release composition取得exact static root，在发布ready前验证`index.html`、OpenAPI和hashed
   JS/CSS并挂载到唯一listener。资源缺失时Service启动失败，不存在Web absent/API ready的部分状态。
-- `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。`GET /`直接返回Web index并创建或复用
-  read-only HttpOnly Browser session，同origin继续提供`/v1`与`/api-docs`。
+- `run/resume`和TUI在Trust/App Control前按需ensure Service；同一ready owner直接复用。`GET /`、`GET /api-docs`与受限Session shell直接返回同一个SPA index并创建或复用
+  read-only HttpOnly Browser session，同origin继续提供`/v1`与精确OpenAPI asset。
+- Browser SPA root持有一个production transport；route unmount不撤销Browser session，document离开且不进入back-forward cache时才清理。
 - Native IPC只保留`describe/service_stop`；`kite web`与TUI `/status`先ensure Service，再从`describe.httpOrigin`返回稳定的`origin/`，
   `/status`同时展示Service identity且不保留单独的TUI `/web`。这些只读操作不挂载资源或改变lifecycle；
   `web_launch/web_ensure/web_status/web_stop`不属于当前协议或CLI。
@@ -38,7 +39,7 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
   reservation/PID/start/instance一致，previous-build client有界stop确认absent后才spawn当前Service；普通TUI和source↔installed不走该路径。
 - Native socket只固定Client/connection/Workspace identity；每条mutation再从Store 9读取目标Session当前Controller并把generation绑定进
   opaque command context。Controller晚于socket创建或TUI切换Session不会沿用旧ticket快照，旧connection generation仍被拒绝。
-- `GET /`创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime
+- Web SPA的目录、API Docs与受限Session shell入口创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime
   authority。Browser不持有Native/Agent bearer，也不通过旧BFF或业务WebSocket读取。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不重放stop。
 

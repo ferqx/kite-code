@@ -59,7 +59,6 @@ export const KNOWN_TOOL_NAMES = [
   'edit_file',
   'write_file',
   'shell_execute',
-  'git_inspect',
   'search_content',
   'search_files',
   'tool_search',
@@ -147,30 +146,16 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   shell_execute: {
     summary: 'Execute a concrete shell command through the governed execution boundary.',
     useWhen:
-      'Use in building, or during planning only for a proven read-only command. Prefer typed read/search tools when they cover the task.',
+      'Use for every Git, build, test, package-manager, project-script, and other shell command. During planning only for a proven read-only command.',
     returns: {
       format: 'text',
       description:
         'Bounded stdout on success or bounded stderr on failure; a legacy planning deferral reports deferred: true and until_phase: building. Command status, exit code and result metadata remain Runtime-owned.',
     },
     constraints:
-      'The model supplies command plus optional description/timeout_ms only; policy derives effects and approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
+      'The model supplies command plus optional description/timeout_ms only; policy derives effects and exact approval. Commands whose effects cannot be proven require user approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
     recovery:
       'A planning write is deferred until building: do not retry and do not ask for shell approval. Policy/approval denial, timeout, cancellation or unknown effects are never replayed; correct only explicit pre-dispatch argument errors.',
-  },
-  git_inspect: {
-    summary: 'Inspect local Git state through the hardened typed broker.',
-    useWhen:
-      'Use status, diff, log or branch_list instead of shell Git. The broker binds the repository and trusted executable before dispatch.',
-    returns: {
-      format: 'json',
-      description: 'Bounded output plus Runtime-owned operation receipt and stable failure code.',
-      fields: ['ok', 'output', 'failure_code', 'next_capability', 'receipt'],
-    },
-    constraints:
-      'Only fixed operations and bounded paths/revision/record/output/timeout fields are accepted. Arbitrary argv, config, formats, repo roots, remotes and protected paths are forbidden.',
-    recovery:
-      'Hostile repository, protected content, untrusted binary or missing qualification fails closed. Use the returned stable code; never fall back to raw shell Git.',
   },
   search_content: {
     summary: 'Search file contents by regular expression.',
@@ -411,7 +396,6 @@ export const READ_PLAN_CONTRACT = currentToolContract('read_plan');
 export const EDIT_FILE_CONTRACT = currentToolContract('edit_file');
 export const WRITE_FILE_CONTRACT = currentToolContract('write_file');
 export const SHELL_EXECUTE_CONTRACT = currentToolContract('shell_execute');
-export const GIT_INSPECT_CONTRACT = currentToolContract('git_inspect');
 export const SEARCH_CONTENT_CONTRACT = currentToolContract('search_content');
 export const SEARCH_FILES_CONTRACT = currentToolContract('search_files');
 export const TOOL_SEARCH_CONTRACT = currentToolContract('tool_search');

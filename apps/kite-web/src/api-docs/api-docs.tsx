@@ -1,5 +1,6 @@
 import { BookOpen, ChevronLeft, FileJson, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 
 const OPENAPI_PATH = '/api-docs/openapi.json';
 const HTTP_METHODS = ['delete', 'get', 'patch', 'post', 'put'] as const;
@@ -60,13 +61,13 @@ export function ApiDocs({ loadSpec = loadBundledSpec }: ApiDocsProps = {}) {
     <main className="min-h-dvh bg-canvas text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-canvas/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-5">
-          <a
-            href="/"
+          <Link
+            to="/"
             className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="size-4" />
             Observer
-          </a>
+          </Link>
           <div className="h-5 w-px bg-border" />
           <BookOpen className="size-4 text-accent" />
           <div>
@@ -76,7 +77,7 @@ export function ApiDocs({ loadSpec = loadBundledSpec }: ApiDocsProps = {}) {
         </div>
       </header>
       <div className="mx-auto max-w-6xl px-5 py-8">
-        <aside className="mb-8 grid gap-4 rounded-2xl border border-border bg-surface p-5 md:grid-cols-2">
+        <aside className="mb-8 grid gap-4 rounded-xl border border-border bg-surface/75 p-5 md:grid-cols-2">
           <div className="flex gap-3">
             <ShieldCheck className="mt-0.5 size-5 shrink-0 text-accent" />
             <div>
@@ -153,7 +154,7 @@ function Reference({ spec }: { readonly spec: AgentApiOpenApiDocument }) {
             key={`${method}:${path}`}
             className="grid gap-3 rounded-xl border border-border bg-surface px-4 py-4 sm:grid-cols-[72px_minmax(0,1fr)]"
           >
-            <span className="w-fit rounded-md border border-border-strong bg-canvas px-2 py-1 font-mono text-[11px] font-semibold uppercase text-accent">
+            <span className="w-fit rounded-md border border-accent/25 bg-accent/7 px-2 py-1 font-mono text-[11px] font-semibold uppercase text-accent">
               {method}
             </span>
             <div className="min-w-0">

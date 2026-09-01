@@ -1,5 +1,5 @@
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
-import { ChevronDown, CircleDot, FolderKanban, Radio, ShieldCheck } from 'lucide-react';
+import { ChevronDown, CircleDot, FolderKanban, ShieldCheck, Wind } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -30,8 +30,8 @@ export function SessionSidebar({
     <aside className="flex h-full min-h-0 flex-col border-r border-border bg-sidebar">
       <header className="flex h-16 shrink-0 items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-[10px] bg-foreground text-canvas shadow-soft">
-            <Radio className="size-[15px]" strokeWidth={2.3} />
+          <span className="grid size-8 place-items-center rounded-[10px] border border-border/70 bg-surface/80 text-accent">
+            <Wind className="size-[15px]" strokeWidth={2.3} />
           </span>
           <div>
             <p className="text-[13px] font-semibold tracking-[-0.01em]">Kite</p>
@@ -100,16 +100,16 @@ export function SessionSidebar({
                         aria-label={`View ${session.displayName}`}
                         title={session.displayName}
                         className={cn(
-                          'group relative w-full min-w-0 max-w-full overflow-hidden rounded-[10px] border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow]',
+                          'group relative w-full min-w-0 max-w-full overflow-hidden rounded-lg border px-2.5 py-1.5 text-left transition-[background-color,border-color]',
                           selected
-                            ? 'border-border-strong bg-surface-selected shadow-[inset_3px_0_0_var(--accent)]'
-                            : 'border-transparent hover:border-border hover:bg-surface-subtle',
+                            ? 'border-foreground/10 bg-surface-selected/70'
+                            : 'border-transparent hover:border-border/60 hover:bg-surface-subtle/80',
                         )}
                       >
-                        <div className="flex items-start gap-2.5">
+                        <div className="flex items-start gap-2">
                           <CircleDot
                             className={cn(
-                              'mt-0.5 size-3 shrink-0',
+                              'mt-[3px] size-2.5 shrink-0',
                               session.status === 'running'
                                 ? 'text-running'
                                 : 'text-muted-foreground/60',
@@ -118,14 +118,14 @@ export function SessionSidebar({
                           <div className="min-w-0 flex-1">
                             <p
                               className={cn(
-                                'line-clamp-2 max-w-full break-all text-[12px] font-medium tracking-[-0.005em]',
+                                'max-w-full truncate text-[11px] font-medium tracking-[-0.005em]',
                                 selected && 'text-foreground',
                               )}
                               title={session.displayName}
                             >
                               {session.displayName}
                             </p>
-                            <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                            <div className="mt-0.5 flex items-center justify-between text-[9px] leading-3.5 text-muted-foreground">
                               <span className="capitalize">{session.status}</span>
                               <time>{relativeTime(session.updatedAt)}</time>
                             </div>

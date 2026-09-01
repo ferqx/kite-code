@@ -263,7 +263,7 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 28 registered operations and exactly 20 model tools', () => {
+  test('projects all 28 registered operations and keeps internal Git inspection off the model surface', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -277,8 +277,11 @@ describe('builtin runtime package boundary', () => {
       },
     });
     expect(projection.entries).toHaveLength(28);
-    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(20);
-    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(8);
+    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(19);
+    expect(
+      projection.entries.find((entry) => entry.operationId === 'builtin:git_inspect')?.visibility,
+    ).toBe('internal');
+    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(9);
     const expectedMechanisms: Readonly<Record<string, CapabilityExecutionMechanism>> = {
       'builtin:tool_search': 'catalog',
       'builtin:web_fetch': 'web',
@@ -324,7 +327,6 @@ describe('builtin runtime package boundary', () => {
       'ask_user',
       'complete_skill',
       'edit_file',
-      'git_inspect',
       'list_mcp_resources',
       'list_mcp_tools',
       'read_file',
@@ -700,7 +702,7 @@ describe('builtin runtime package boundary', () => {
       shell_execute: {
         effectClass: 'read_only',
         sideEffect: false,
-        reason: 'Shell command matches the conservative read-only allowlist.',
+        reason: 'Shell command matches the versioned conservative read-only grammar.',
       },
     };
     for (const entry of projection.entries.filter(
@@ -829,8 +831,9 @@ describe('builtin runtime package boundary', () => {
     });
     expect(hidden.revision).toBe(fullTurn.revision);
     expect(Object.keys(hidden.toolSet)).toHaveLength(14);
-    expect(Object.keys(fullTurn.toolSet)).toHaveLength(20);
-    expect(git.availability).toBe('hidden');
+    expect(Object.keys(fullTurn.toolSet)).toHaveLength(19);
+    expect(git.visibility).toBe('internal');
+    expect(git.availability).toBe('available');
     const forgedGitTopLevel = createBuiltinToolCatalogProjection(registry.snapshot(), {
       turnContext: {
         hasGitBroker: true,
@@ -839,9 +842,8 @@ describe('builtin runtime package boundary', () => {
       } as unknown as CapabilityTurnContext,
     });
     expect(
-      forgedGitTopLevel.entries.find((entry) => entry.operationId === 'builtin:git_inspect')
-        ?.availability,
-    ).toBe('hidden');
+      forgedGitTopLevel.entries.find((entry) => entry.operationId === 'builtin:git_inspect'),
+    ).toMatchObject({ visibility: 'internal', availability: 'available' });
     expect(
       hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search')?.descriptor
         .availability,

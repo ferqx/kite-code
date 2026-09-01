@@ -13,6 +13,10 @@ client直接验证`GET /v1`；Browser JavaScript不捕获或兑换启动token。
 - `GET /v1/workspaces`读取独立、path-free Workspace page；只预取首个Workspace的Session，其余在展开时读取；
 - `GET /v1/workspaces/{workspace_id}/sessions`读取该Workspace的bounded Session page；
 - 选择Session后默认读取`History`与Checkpoint metadata；用户切换到Runtime logs Tab时读取安全的durable Log snapshot；
+- History中的`tool.lifecycle`按`tool_call_id`折叠成一个稳定展示项：queued/started更新当前态，completed/failed/rejected/cancelled替换前态；
+  terminal到达后不得残留loading卡片，缺少具体label的started/terminal事件沿用同一调用较早的真实工具名；
+- `rejected`表示工具从未dispatch，使用独立提示卡显示脱敏原因，不渲染exit code或`No output`，也不与执行后的
+  `failed`混为一类；
 - `GET /v1/sessions/{session_id}/logs`只包含event type、sequence、time、category、status、summary及closed detail fields，
   Web用可展开的key/value解释展示，不读取raw Store event；
 - 展开`model.invocation_prepared`后可按exact invocation打开Model Context Inspector；Inspector调用Browser-only
@@ -26,7 +30,8 @@ Runtime logs按需读取并由用户显式刷新，不增加第二个后台poll 
 
 ## 视觉与可操控性
 
-Web采用“Quiet Technical Workspace”设计语言：目录紧凑、正文舒适、状态明确，Light/Dark共用semantic token。关键交互具备稳定role与
+Web采用“Quiet Technical Workspace”设计语言：目录紧凑、正文舒适、状态明确，Light/Dark共用semantic token；品牌标记与无长内容竞争的
+空状态使用低对比度Wind Trails表达Kite的空气与方向感。关键交互具备稳定role与
 accessible name，loading/empty/error/selected/connected均保留可读文本，不把关键能力藏在hover或Canvas中。完整规范见
 [`UI Design System`](docs/ui-design-system.md)。
 
@@ -40,12 +45,19 @@ Model Context是敏感本机诊断内容；Inspector不展示Artifact identity�
 固定`/api-docs`入口展示release-bundled canonical OpenAPI；renderer没有form、Try it或execute control，规范使用same-origin、
 no-credential、`no-store`读取。页面存在不表示当前principal拥有尚未ready的mutation/SSE operation。
 
+`src/main.tsx`使用React Router Declarative Mode提供Browser SPA；目录`/`、规范会话`/sessions/:sessionId`与`/api-docs`通过History API
+切换，不触发document reload。Session选择push只包含opaque Session identity的短URL；从Docs执行Browser back时通过现有Browser direct Session read
+恢复摘要与History，不暴露Workspace digest，也不扫描Workspace Session page。
+所有index shell入口都可由Service建立同一种短期HttpOnly Browser session，因此直接打开深链接后无刷新进入Observer仍能读取`/v1`；
+SPA持有一个production transport，route unmount只停止对应页面工作，不撤销Browser session，document `pagehide`才清理session。精确OpenAPI
+JSON与hashed asset请求不创建session。
+
 ## 启动与release
 
 TUI/CLI与`kite web`都通过同一个canonical Kite Home manager ensure唯一Local Service。Browser打开URL不能启动本机进程；
 `bun run --cwd apps/kite-web dev`只是Vite资源服务器。源码开发使用根命令`bun run server`或`bun run tui`：它们先build assets，
 Service在ready前完成preflight并把`/`、`/index.html`、`/assets/*`与`/api-docs`挂到同一个listener。`kite web`只ensure Service并
-打印稳定的`origin/`；`GET /`直接返回index而不暴露物理文件名。Browser关闭或logout不停止Service。
+打印稳定的`origin/`；`GET /`与`GET /api-docs`直接返回同一个index而不暴露物理文件名。Browser关闭或logout不停止Service。
 
 release candidate把同一Vite产物放入`payload/web`。Service的一个loopback listener同时提供static assets、`/api-docs`与`/v1`；Web
 不拥有第二listener、Runtime、Store、数据库或独立lifecycle。

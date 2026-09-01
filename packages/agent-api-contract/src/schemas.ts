@@ -384,7 +384,8 @@ const historyContent = z.discriminatedUnion('type', [
     type: z.literal('tool.lifecycle'),
     tool_call_id: agentApiIdentifierSchema,
     label: agentApiShortTextSchema,
-    status: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']),
+    status: z.enum(['queued', 'running', 'completed', 'failed', 'rejected', 'cancelled']),
+    reason_code: agentApiIdentifierSchema.optional(),
     summary: agentApiDetailTextSchema.optional(),
   }),
   z.object({

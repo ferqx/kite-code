@@ -51,6 +51,8 @@ Workspace cursor按Directory稳定identity续页。Workspace Session page只对�
 through sequence、boundary event digest与`sequence/public_ordinal`；`after_sequence`从指定durable sequence之后开始，不能与cursor同时使用。
 Log page复用同一History authority和boundary digest，一条durable event对应一个Log item，不暴露event ID、raw Runtime object、path或credential；
 detail只允许Runtime log projector的固定kind、标量fields与artifact availability。History与Log达到1 MiB encoded response上限时提前生成cursor。
+`tool.rejected`在History中保持独立`rejected`生命周期，使用稳定reason code和脱敏pre-dispatch摘要；不得映射为`failed`，
+也不得投影raw拒绝reason、exit code或输出。
 Checkpoint cursor按revision/id续页，preview不投影path。
 
 `model.invocation_prepared` Log只公开opaque invocation identity与purpose。Model Context route先要求Browser Directory membership，再从同一Session的

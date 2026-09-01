@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '@/app/app';
 import type { WebRestTransport } from '@/transport/client';
 
 const LONG_SESSION_NAME = 'session-with-a-name-that-must-not-expand-the-sidebar-width';
+
+function CurrentPath() {
+  return <output data-testid="current-path">{useLocation().pathname}</output>;
+}
 
 describe('Web REST App lifecycle', () => {
   it('renders Workspace and Session data from the REST transport', async () => {
@@ -144,11 +149,17 @@ describe('Web REST App lifecycle', () => {
       })),
       disconnect: vi.fn(async () => undefined),
     };
-    render(<App transport={transport} />);
+    render(
+      <MemoryRouter initialEntries={['/sessions/session-one']}>
+        <App transport={transport} />
+        <CurrentPath />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getByText('Workspace one')).toBeTruthy());
     expect((await screen.findAllByText('Session one')).length).toBeGreaterThan(0);
     expect(await screen.findByText('hello REST')).toBeTruthy();
     expect(await screen.findByText('Saved')).toBeTruthy();
+    expect(screen.getByTestId('current-path').textContent).toBe('/sessions/session-one');
     expect(
       screen.getByRole('button', { name: `View ${LONG_SESSION_NAME}` }).getAttribute('title'),
     ).toBe(LONG_SESSION_NAME);
@@ -160,6 +171,9 @@ describe('Web REST App lifecycle', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Runtime logs' }));
     expect(await screen.findByText('user.message_appended')).toBeTruthy();
     fireEvent.click(screen.getByText('user.message_appended'));
+    expect(await screen.findByText('Category')).toBeTruthy();
+    expect(await screen.findByText('Not reported')).toBeTruthy();
+    expect(await screen.findByText('Detail type')).toBeTruthy();
     expect(await screen.findByText('Message content')).toBeTruthy();
     expect(await screen.findByText('hello log detail')).toBeTruthy();
     fireEvent.click(screen.getByText('model.invocation_prepared'));
@@ -182,6 +196,7 @@ describe('Web REST App lifecycle', () => {
     deferSessionOneLogs = true;
     fireEvent.click(screen.getByRole('tab', { name: 'Runtime logs' }));
     fireEvent.click(screen.getByRole('button', { name: `View ${LONG_SESSION_NAME}` }));
+    expect(screen.getByTestId('current-path').textContent).toBe('/sessions/session-long');
     await waitFor(() =>
       expect(
         screen.getByRole('tab', { name: 'Conversation history' }).getAttribute('aria-selected'),

@@ -515,6 +515,7 @@ function isWebGatewayPath(pathname: string): boolean {
     pathname === '/api-docs' ||
     pathname === '/api-docs/' ||
     pathname === '/api-docs/openapi.json' ||
+    pathname.startsWith('/sessions/') ||
     pathname.startsWith('/assets/')
   );
 }

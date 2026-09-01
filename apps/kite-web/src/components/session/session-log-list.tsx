@@ -123,10 +123,12 @@ function LogEntry({
               <code className="font-mono text-foreground">{entry.eventType}</code>
               <span className="text-muted-foreground">sequence #{entry.sequence}</span>
             </div>
-            <DetailLabel>Classification</DetailLabel>
-            <p className="text-copy">
-              {entry.category} · {entry.status} · {entry.detail.kind} detail
-            </p>
+            <DetailLabel>Category</DetailLabel>
+            <p className="text-copy">{humanizeEventType(entry.category)}</p>
+            <DetailLabel>Status</DetailLabel>
+            <p className="text-copy">{humanizeLogStatus(entry.status)}</p>
+            <DetailLabel>Detail type</DetailLabel>
+            <p className="text-copy">{humanizeEventType(entry.detail.kind)}</p>
             <DetailLabel>Occurred at</DetailLabel>
             <time
               className="font-mono text-copy"
@@ -209,7 +211,7 @@ function LogStatePanel({
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
       <div className="max-w-md">
-        <div className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl border border-border bg-surface text-muted-foreground shadow-soft">
+        <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/70 bg-surface/75 text-muted-foreground">
           {loading ? (
             <LoaderCircle className="size-5 animate-spin text-running" />
           ) : failed ? (
@@ -252,6 +254,10 @@ function humanizeEventType(value: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function humanizeLogStatus(value: WebSessionLogEntry['status']): string {
+  return value === 'unknown' ? 'Not reported' : humanizeEventType(value);
 }
 
 function humanizeFieldName(value: string): string {

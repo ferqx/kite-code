@@ -106,6 +106,19 @@ describe('isBlockSettledInRun', () => {
     expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
   });
 
+  test('settles a standalone Shell card without reclassifying its command text', () => {
+    const shell: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-1',
+      name: 'shell_execute',
+      args: { intent: 'inspect', command: 'rg pattern src' },
+      status: 'done',
+      summary: 'Completed.',
+    };
+    expect(isBlockSettledInRun(shell, [shell], 0)).toBe(true);
+  });
+
   test('running tool card is NOT settled', () => {
     const blocks = [toolBlock(1, 'running') as OutputBlock];
     expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);

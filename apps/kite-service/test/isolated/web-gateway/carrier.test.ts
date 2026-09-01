@@ -26,6 +26,13 @@ describe('Web Gateway static REST carrier', () => {
     const carrier = createWebGatewayCarrier({ staticAssetRoot: root, instanceId: 'instance-one' });
     carriers.push(carrier);
 
+    const docsIndex = await fetch(`${carrier.origin}/api-docs`);
+    expect(docsIndex.status).toBe(200);
+    expect(docsIndex.headers.get('set-cookie')).toContain('Path=/; HttpOnly; SameSite=Strict');
+    const sessionIndex = await fetch(`${carrier.origin}/sessions/session-one`);
+    expect(sessionIndex.status).toBe(200);
+    expect(sessionIndex.headers.get('set-cookie')).toContain('Path=/; HttpOnly; SameSite=Strict');
+
     const index = await fetch(`${carrier.origin}/`);
     expect(index.status).toBe(200);
     expect(index.headers.get('content-security-policy')).toContain("default-src 'self'");
@@ -34,8 +41,10 @@ describe('Web Gateway static REST carrier', () => {
     );
     expect(index.headers.get('content-security-policy')).toContain("script-src 'self'");
     expect(await index.text()).toContain('<title>Kite</title>');
-    expect((await fetch(`${carrier.origin}/api-docs`)).status).toBe(200);
-    expect((await fetch(`${carrier.origin}/api-docs/openapi.json`)).status).toBe(200);
+    const openApi = await fetch(`${carrier.origin}/api-docs/openapi.json`);
+    expect(openApi.status).toBe(200);
+    expect(openApi.headers.get('set-cookie')).toBeNull();
+    expect((await fetch(`${carrier.origin}/sessions/session-one/unknown`)).status).toBe(404);
     expect((await fetch(`${carrier.origin}/assets/app.js`)).status).toBe(200);
 
     for (const path of [

@@ -65,23 +65,32 @@
 - `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
   `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
-  乱序仍按 call ID 更新同一个 summary。subscription gap缺少queued metadata时，未started的`tool.rejected`保持
-  不可见并只保留interaction rejection notice；不得凭terminal创建匿名`Tool`执行卡。
+  乱序仍按 call ID 更新同一个 summary。存在queued metadata时，未started的`tool.rejected`保留为error终态诊断，
+  明确表示执行前拒绝；因为策略拒绝可能没有独立interaction notice，不能把它静默删除。subscription gap连queued
+  metadata也缺失时仍不得凭terminal创建匿名`Tool`执行卡。
 - 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
-  统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued arguments 明确 `intent=inspect` 且命令通过
-  只读 grammar 时才归 exploration；终态缺 queued fact 时不猜测。
+  统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued event 已由 Runtime 分类为
+  `effectClass=read_only` 且 `sideEffect=false` 时才归 exploration；TUI 不读取命令文本重新分类。
+  同一 Thought 中的只读 Shell 按 `ran N shell command(s)` 计入题头，例如
+  `Thinking 1s · read 2 files, ran 1 shell command`。terminal event 即使没有重复分类事实也按 call ID
+  更新 queued 时创建的同一条目；缺少 queued fact 时不猜测、不聚合。
+- 已物化的`tool_card`必然来自`presentation=standalone`；达到终态后可直接进入Static。TUI不得再检查其
+  command、`intent`或工具名前缀来延迟冻结，也不保留离线扫描历史block并重新合并的第二条分类路径。
 - standalone Shell运行时持续tail-follow最近5行`tool.progress`；成功终态有stdout/stderr时默认显示Service投影的
   有界完整结果并保留`exit: 0`尾行。短命令即使started/progress/finished落在一个Ink frame内也不能只剩exit状态；
   只有用户主动折叠后才隐藏正文。
 - standalone tool 在 started 时结算它之前的 Thought；其 terminal 只能更新自身 card，不能因为完成较晚而
   结算该 tool started 后新建的 exploration summary。若 durable final text 先于 completed reasoning 到达，
-  只有该summary与文本携带同一`requestId`时reasoning才可回填；相邻但属于下一model request的search summary
-  不能被升级成下一步Thinking。live 与同一 Session 的 `/resume` replay使用相同identity判断。
+  reducer仍按当前可见阶段归属回填；只读探索后紧邻的下一次model reasoning继续进入同一Thought。
+  live 与同一 Session 的 `/resume` replay使用相同阶段判断。
 - 工具的model/presentation identity缺失或与当前Thought不匹配时只形成detached neutral summary；不得同时留下两个
   `active` tool summary。任一时刻只有current Thought可为active，旧/mismatched组不能成为失去owner的dynamic block。
-- `model.requested(requestId)`是明确的presentation step边界：先settle前一request留下的Thought/tool summary，再接受
-  新request的reasoning、旁白与回答；不得因为相邻或同一Turn把多个request合并。一个request内部的reasoning
-  segment、非流式旁白 caption与探索工具仍可进入一个阶段块。reasoning
+- `model.requested(requestId)`不是presentation step边界；它只更新当前active Thought的model identity。模型读取工具结果后
+  发起下一次调用属于同一只读探索阶段，所以相邻的工具统计与后续reasoning必须合并，例如
+  `Thinking 12s · read 2 files, ran 1 shell command`。可见文本、standalone tool、人机交互或Turn终态才结算阶段。
+  最终正文delta可先于携带权威`durationMs`的`model.responded`到达；若正文紧邻同request的工具Thought，terminal
+  必须把时长回填该Thought，不能再给正文生成第二个`Thinking Ns`题头。该规则同样用于history replay。
+  reasoning
   streaming delta 只缓存，completed reasoning 才把完整内容一次性放入 `└─` 活动窗口；后续 read/search 等
   工具活动在同一窗口覆盖 reasoning，下一段 completed reasoning 又可覆盖工具活动。第一条流式文本使块进入
   `awaiting_terminal`，并始终作为 Thought 后的独立 sibling 文本块；terminal 即使声明后续工具，也不得把该文本

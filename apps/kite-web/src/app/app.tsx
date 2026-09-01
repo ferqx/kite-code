@@ -8,14 +8,17 @@ import {
   Moon,
   Radio,
   Sun,
+  Wind,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Link, useMatch, useNavigate } from 'react-router';
 import { ModelContextInspector } from '@/components/session/model-context-inspector';
 import { SessionLogList, type WebLogState } from '@/components/session/session-log-list';
 import { SessionSidebar } from '@/components/session/session-sidebar';
 import { MessageList } from '@/components/timeline/message-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { WindTrails } from '@/components/ui/wind-trails';
 import {
   initialWebPresentationState,
   selectedSession,
@@ -31,11 +34,14 @@ import type { WebRestTransport } from '@/transport/client';
 import { createWebRestTransport, WebRestTransportError } from '@/transport/client';
 
 export interface AppProps {
-  /** Test/composition seam; production creates the closed browser transport. */
+  /** Test/composition seam; the SPA root injects the shared production transport. */
   readonly transport?: WebRestTransport;
 }
 
 export function App(props: AppProps = {}) {
+  const navigate = useNavigate();
+  const sessionRoute = useMatch('/sessions/:sessionId');
+  const routeSessionId = sessionRoute?.params.sessionId ?? null;
   const [state, dispatch] = useReducer(webPresentationReducer, initialWebPresentationState);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
@@ -51,7 +57,7 @@ export function App(props: AppProps = {}) {
     readonly reason: string | null;
   } | null>(null);
   const transport = useMemo(() => props.transport ?? createWebRestTransport(), [props.transport]);
-  const lifecycle = useRef(0);
+  const initialSessionRoute = useRef(routeSessionId);
   const logLifecycle = useRef(0);
   const modelContextLifecycle = useRef(0);
   const diagnosticScope = useRef<{
@@ -64,12 +70,15 @@ export function App(props: AppProps = {}) {
     sessionId: state.selectedSessionId,
   };
   const observedSequence = useRef(0);
-  const deferredDisconnect = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const session = selectedSession(state);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    dispatch({ type: 'select_session', sessionId: routeSessionId });
+  }, [routeSessionId]);
 
   useEffect(() => {
     if (
@@ -108,11 +117,6 @@ export function App(props: AppProps = {}) {
   };
 
   useEffect(() => {
-    const lifecycleId = ++lifecycle.current;
-    if (deferredDisconnect.current !== undefined) {
-      clearTimeout(deferredDisconnect.current);
-      deferredDisconnect.current = undefined;
-    }
     let active = true;
     const load = async () => {
       try {
@@ -120,12 +124,31 @@ export function App(props: AppProps = {}) {
         if (!active) return;
         dispatch({ type: 'transport_connected', generation: connection.generation });
         const directory = await transport.listDirectory();
+        let routeSession: Awaited<ReturnType<WebRestTransport['getSession']>> | undefined;
+        if (initialSessionRoute.current) {
+          try {
+            routeSession = await transport.getSession(initialSessionRoute.current);
+          } catch (error) {
+            if (error instanceof WebRestTransportError && error.status === 404) {
+              if (active) navigate('/', { replace: true });
+            } else {
+              throw error;
+            }
+          }
+        }
         if (active) {
           dispatch({
             type: 'directory_loaded',
             directory,
             generation: connection.generation,
           });
+          if (routeSession) {
+            dispatch({
+              type: 'route_session_loaded',
+              session: routeSession,
+              generation: connection.generation,
+            });
+          }
         }
       } catch (error) {
         if (active) {
@@ -139,12 +162,8 @@ export function App(props: AppProps = {}) {
     void load();
     return () => {
       active = false;
-      deferredDisconnect.current = setTimeout(() => {
-        deferredDisconnect.current = undefined;
-        if (lifecycle.current === lifecycleId) void transport.disconnect().catch(() => undefined);
-      }, 0);
     };
-  }, [transport]);
+  }, [navigate, transport]);
 
   useEffect(() => {
     const sessionId = state.selectedSessionId;
@@ -334,13 +353,17 @@ export function App(props: AppProps = {}) {
     transport,
   ]);
 
+  const openSession = (sessionId: string) => {
+    navigate(`/sessions/${encodeURIComponent(sessionId)}`);
+  };
+
   return (
     <main className="grid h-dvh min-h-0 grid-cols-[304px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-canvas max-lg:grid-cols-[272px_minmax(0,1fr)] max-md:grid-cols-1">
       <div className="h-full min-h-0 overflow-hidden max-md:hidden">
         <SessionSidebar
           workspaces={state.workspaces}
           selectedSessionId={state.selectedSessionId}
-          onSelect={(sessionId) => dispatch({ type: 'select_session', sessionId })}
+          onSelect={openSession}
           onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
         />
       </div>
@@ -350,7 +373,7 @@ export function App(props: AppProps = {}) {
             workspaces={state.workspaces}
             selectedSessionId={state.selectedSessionId}
             onSelect={(sessionId) => {
-              dispatch({ type: 'select_session', sessionId });
+              openSession(sessionId);
               setMobileSidebarOpen(false);
             }}
             onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
@@ -364,11 +387,11 @@ export function App(props: AppProps = {}) {
         </div>
       ) : null}
       <section className="flex min-h-0 flex-col bg-canvas">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-canvas/92 px-5 backdrop-blur-xl">
+        <header className="flex h-16 shrink-0 items-center gap-2.5 border-b border-border bg-canvas/92 px-5 backdrop-blur-xl">
           <Button
             aria-label="Open workspace list"
             aria-expanded={mobileSidebarOpen}
-            className="size-9 px-0 md:hidden"
+            className="size-8 px-0 md:hidden"
             onClick={() => setMobileSidebarOpen(true)}
           >
             <Menu className="size-4" />
@@ -394,7 +417,7 @@ export function App(props: AppProps = {}) {
               Local · {state.connection.status.replace('_', ' ')} · read only
             </p>
           </div>
-          <div className="flex h-8 items-center gap-2 rounded-lg border border-border bg-surface-subtle px-2.5 text-[11px] text-muted-foreground">
+          <div className="flex h-8 items-center gap-2 rounded-[9px] border border-border/70 bg-surface/55 px-2.5 text-[11px] text-muted-foreground">
             <Circle
               className={
                 state.connection.status === 'connected'
@@ -406,19 +429,19 @@ export function App(props: AppProps = {}) {
           </div>
           <Button
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-            className="size-9 px-0"
+            className="size-8 px-0"
             onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
           >
             {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
           </Button>
-          <a
-            href="/api-docs"
+          <Link
+            to="/api-docs"
             aria-label="Open API documentation"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[9px] px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground"
           >
             <BookOpen className="size-3.5" />
             <span className="max-sm:hidden">API docs</span>
-          </a>
+          </Link>
         </header>
         {state.connection.status === 'unavailable' &&
         (state.historyState === 'content' || state.historyState === 'empty') ? (
@@ -571,9 +594,12 @@ function DirectoryState({
   const unavailable = connection === 'unavailable';
   const loading = connection === 'loading' || connection === 'reconnecting';
   return (
-    <div className="grid min-h-0 flex-1 place-items-center p-8 text-center">
-      <div className="max-w-sm">
-        <Radio className="mx-auto mb-4 size-8 text-muted-foreground" />
+    <div className="relative isolate grid min-h-0 flex-1 place-items-center overflow-hidden p-8 text-center">
+      <WindTrails className="opacity-70 [mask-image:radial-gradient(ellipse_at_center,black,transparent_72%)]" />
+      <div className="relative z-10 max-w-sm">
+        <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/65 bg-surface/65 text-accent backdrop-blur-sm">
+          <Wind className="size-5" />
+        </div>
         <h2 className="text-sm font-semibold">
           {loading
             ? 'Connecting to Kite Observer'

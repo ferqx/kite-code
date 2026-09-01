@@ -5497,6 +5497,18 @@ describe('executeTestRuntimeTools', () => {
       filesystemMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['filesystemMode'];
     }> = [];
 
+    for (const toolCallId of ['first', 'second']) {
+      const approvalEvents = await executeTestRuntimeTools({
+        state,
+        toolCallIds: [toolCallId],
+        sandboxAvailable: true,
+        shellExecutor: async () => {
+          throw new Error('Unapproved uncertain Shell must not dispatch.');
+        },
+      });
+      applyExactApprovalFixture(state, toolCallId, approvalEvents);
+    }
+
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['first', 'second'],
@@ -5530,7 +5542,7 @@ describe('executeTestRuntimeTools', () => {
       {
         command: 'node -e "console.log(1)"',
         fullAccess: true,
-        requiresApproval: false,
+        requiresApproval: true,
         expected: { networkMode: 'allow_all' as const, filesystemMode: 'allow_all' as const },
       },
       {

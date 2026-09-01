@@ -168,7 +168,8 @@ describe('SAQ shell policy phase/mode matrix', () => {
   test.each([
     'ls -la',
     'git status',
-    'bun test',
+    'ls -la && echo "---" && git log --oneline -15 && git status --short && git branch -a --no-color | head -20',
+    'git status --short | head -60 && git branch --show-current && git remote -v | head -4',
   ])('Building Accept workspace baseline is direct without a command-name allowlist: %s', (command) => {
     const compiled = compileShell(command, 'building');
     expect(compiled).toMatchObject({
@@ -183,6 +184,20 @@ describe('SAQ shell policy phase/mode matrix', () => {
       },
     });
     expect(compiled.reason).not.toMatch(/fixed command grammar|exact invocation/i);
+  });
+
+  test('Building Accept requests exact approval for an unproven project script', () => {
+    expect(compileShell('bun test', 'building')).toMatchObject({
+      decision: 'ask',
+      allowed: true,
+      requiresApproval: true,
+      effects: { uncertainEffects: true },
+      sandboxScope: {
+        kind: 'baseline',
+        filesystem: 'workspace_write',
+        network: 'disabled',
+      },
+    });
   });
 
   test.each([

@@ -46,6 +46,7 @@ Builtin/App seam 拥有。`packages/builtin-runtime/src/subagent/` 拥有 child 
 Builtin catalog 与 dynamic MCP overlay；App subagent adapter 只注入 callback。旧 Core/legacy production paths、第二
 coordinator、direct model caller 与 fallback 均不存在。RM-16 最终 manifest/docs/journey/fault/soak Gate 已全部通过。
 
+
 已删除的模型 Provider admission 不再有生产者或调用链，但旧会话仍可读。兼容范围只有两个已知旧事实：
 `provider.admission_status` 作为 reducer 无副作用的诊断事件回放，旧 `model.invocation_prepared.admission` 作为
 可选历史证据保留；当前生产者永远不再写二者。当前 schema/epoch 不接受其他未知形状，也没有

@@ -105,7 +105,7 @@ export function projectRuntimeClientEvent(
       return {
         type: 'tool.rejected',
         toolId: event.toolCallId,
-        summary: 'Tool execution rejected.',
+        summary: projectRuntimeClientText(event.reason, 512),
       };
     case 'tool.cancelled':
       return {
@@ -489,25 +489,11 @@ export function projectRuntimeToolPresentation(
   ) {
     return 'exploration' as const;
   }
-  return event.name === 'shell_execute' && isExplorationShell(event.args)
+  return event.name === 'shell_execute' &&
+    event.effectClass === 'read_only' &&
+    event.sideEffect === false
     ? ('exploration' as const)
     : ('standalone' as const);
-}
-
-function isExplorationShell(args: unknown): boolean {
-  if (!isRecord(args) || args.intent !== 'inspect' || typeof args.command !== 'string')
-    return false;
-  const command = args.command.trim();
-  return (
-    isPureLsCommand(command) ||
-    ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find ./', 'find /'].some((prefix) =>
-      command.startsWith(prefix),
-    )
-  );
-}
-
-function isPureLsCommand(command: string): boolean {
-  return /^ls(?:\s|$)/.test(command) && !/[|&;<>\n\r`]|\$\(/.test(command);
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

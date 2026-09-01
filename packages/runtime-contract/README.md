@@ -47,6 +47,8 @@
 - `respond_interaction` 必须携带匹配的 client-safe interaction identity：Session revision，及按 kind
   所需的 approval generation/grants、Plan identity、provider directory revision 或 verification revision。Approval
   interaction可选携带有界原始command供用户作知情决定；它不携带cwd、grant subject或binding digest。
+- Approval grant闭集为`approve_once|same_command`；Contract只绑定用户选择与interaction identity，不解释command
+  effects或自行选择Sandbox scope。
 - `RuntimeSubscriptionSpec` 是唯一可序列化 selector；`AbortSignal` 只属于 local
   `RuntimeSubscription`，不得进入 wire。
 - `RuntimeCommandContext` 必须在 admission 后 strict validate/freeze；`bindingReference` 只能由 App-owned admission

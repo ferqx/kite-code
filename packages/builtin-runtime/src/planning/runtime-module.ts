@@ -17,6 +17,7 @@ import {
 import { projectionDigest, truncateProjectedStreams } from '../filesystem/projection';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
 import { createBuiltinPolicyCompiler, shellBuiltinPolicyRule } from '../policy-compiler';
+import { SHELL_SEMANTICS_REVISION_ } from '../shell-semantics';
 import { builtinToolDescription } from '../tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from '../tool-schemas';
 
@@ -37,6 +38,7 @@ export const PLANNING_CAPABILITY_REVISION_ = digestCapabilityBindingValue({
   operationId: PLANNING_OPERATION_ID_,
   inputSchema: SHELL_EXECUTE_INPUT_SCHEMA_,
   effects: SHELL_EFFECTS_,
+  shellSemanticsRevision: SHELL_SEMANTICS_REVISION_,
 });
 
 export const PLANNING_EXECUTOR_REVISION_ = digestCapabilityBindingValue({

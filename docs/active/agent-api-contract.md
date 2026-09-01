@@ -23,7 +23,7 @@ Schema、standalone wire declarations、examples与SHA-256 digest。`@kite-ai/ag
 同一个single-Service listener实现两类principal：
 
 - Native/automation one-shot capability换Workspace-scoped Agent bearer context；
-- Service根页面创建service-scoped、HttpOnly/SameSite Browser cookie。
+- Service的目录、API Docs与受限Workspace-scoped Session SPA shell创建service-scoped、HttpOnly/SameSite Browser cookie；OpenAPI JSON与hashed assets不创建cookie。
 
 两者复用同一read adapter/query authority。Agent context继续绑定exact Workspace、Client/generation与一条private Runtime logical
 connection；Browser只读取Store 9 Directory允许投影的Workspace/Session，不能调用全局`GET /v1/sessions`、mutation或SSE。cookie、bearer、
@@ -56,6 +56,8 @@ Checkpoint preview只返回计数，不返回path。
 Log page复用同一History读取authority与固定through boundary，但它不是raw Runtime event出口：每个item只包含sequence/time、event type、
 category、status、bounded summary及closed detail kind/标量fields/artifact availability。Public DTO不携带event ID、path、credential或任意metadata；
 Web只在用户切换到Runtime logs Tab时按需读取，并提供显式刷新，不新增后台同步engine。
+History/SSE工具生命周期将`rejected`作为独立terminal状态：它只表示dispatch前拒绝，携带稳定reason code和脱敏摘要，
+不能折叠为`failed`或暴露raw Runtime reason。Web据此不显示exit code与`No output`。
 
 Model Context route只接受Browser principal，并以可见Session与exact invocation绑定。Service从prepared event取得private Surface ref，经Builtin reader
 完成schema/integrity验证后再交叉验证ref integrity、route fingerprint与purpose；Public响应不含Artifact ref/digest、Provider options、endpoint或Credential。

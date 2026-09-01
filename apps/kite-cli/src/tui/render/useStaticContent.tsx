@@ -27,7 +27,6 @@
 // stable refs, so references are constant between genuine state transitions.
 
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
-import { isExplorationTool } from '../reducers/consolidateTools';
 import type { OutputBlock, Turn } from '../types';
 
 export { changePrefix } from '../components/BlockRenderer';
@@ -68,12 +67,12 @@ export function isBlockSettledInRun(
       );
     case 'tool_card':
       return (
-        (block.status === 'done' ||
-          block.status === 'error' ||
-          block.status === 'cancelled' ||
-          block.status === 'timeout' ||
-          block.status === 'exhausted') &&
-        !isExplorationTool(block)
+        block.status === 'done' ||
+        block.status === 'error' ||
+        block.status === 'rejected' ||
+        block.status === 'cancelled' ||
+        block.status === 'timeout' ||
+        block.status === 'exhausted'
       );
     case 'tool_summary':
       return (

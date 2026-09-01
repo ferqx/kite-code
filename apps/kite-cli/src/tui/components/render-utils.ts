@@ -83,6 +83,7 @@ export function toolColor(status: string, t: ThemeColors): string {
       return t.success;
     case 'error':
       return t.error;
+    case 'rejected':
     case 'cancelled':
     case 'timeout':
     case 'exhausted':

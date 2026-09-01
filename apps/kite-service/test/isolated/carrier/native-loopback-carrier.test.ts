@@ -182,6 +182,12 @@ describe('Kite Service Native loopback carrier', () => {
     expect(rootResponse.status).toBe(200);
     expect(rootResponse.headers.get('set-cookie')).toContain('HttpOnly');
     expect(rootResponse.headers.get('set-cookie')).toContain('Path=/;');
+    const apiDocsResponse = await fetch(`${carrier.origin}/api-docs`);
+    expect(apiDocsResponse.status).toBe(200);
+    expect(apiDocsResponse.headers.get('set-cookie')).toContain('HttpOnly');
+    const sessionRouteResponse = await fetch(`${carrier.origin}/sessions/session-one`);
+    expect(sessionRouteResponse.status).toBe(200);
+    expect(sessionRouteResponse.headers.get('set-cookie')).toContain('HttpOnly');
     expect(await fetch(`${carrier.origin}/healthz`).then((response) => response.text())).toBe('ok');
 
     expect((await fetch(`${carrier.origin}/_kite/web/bootstrap`)).status).toBe(404);

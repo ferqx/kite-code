@@ -42,6 +42,8 @@ fixture。后续新增 Service 或 package 时，只有在 source 与 owner READ
 当前Browser Web workspace的规范路径是`apps/kite-web`。它是独立的private presentation workspace，
 只消费 browser-safe `@kite-ai/agent-api-client`与`@kite-ai/agent-api-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
 Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
+Web使用`react-router` Declarative Mode管理目录、Session与API Docs的Browser SPA切换；该展示依赖不改变Web→Agent API client→contract的唯一业务依赖边，
+也不允许Web直接依赖Service或Runtime workspace。
 源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、fixed asset preflight和single-Service Web
 ensure。`apps/kite-web`的Vite dev server只是资源开发入口，Browser也不拥有启动本机Service的authority；当前角色见
 [`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)，旧Gateway恢复仅见transition文档。

@@ -44,6 +44,8 @@ generator是package-local build tool，不从root runtime export导出；consume
 - ID是bounded ASCII identity，opaque cursor/event ID是bounded base64url；
 - Browser projection只包含opaque Workspace identity/safe label与Directory-scoped Session；不包含canonical path；
 - History `after_sequence`是非负safe integer并与page cursor互斥；
+- History/SSE工具生命周期区分`failed`与`rejected`；后者表示dispatch前终止，可携带稳定`reason_code`与脱敏摘要，
+  不能伪造exit code、output或raw Runtime reason；
 - Log page与History共享固定through boundary和`after_sequence`规则，但只携带closed event type/category/status/summary/detail vocabulary，
   不允许raw Runtime event或arbitrary metadata；
 - Model Context必须绑定可见Session与exact invocation，只允许Browser principal；system/messages/tools分别受累计byte budget限制并明确返回truncated，

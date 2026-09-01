@@ -234,7 +234,8 @@ export type AgentApiHistoryItem = {
     readonly "type": "model.reasoning";
   } | {
     readonly "label": string;
-    readonly "status": "queued" | "running" | "completed" | "failed" | "cancelled";
+    readonly "reason_code"?: string;
+    readonly "status": "queued" | "running" | "completed" | "failed" | "rejected" | "cancelled";
     readonly "summary"?: string;
     readonly "tool_call_id": string;
     readonly "type": "tool.lifecycle";
@@ -267,7 +268,8 @@ export type AgentApiHistoryPage = {
       readonly "type": "model.reasoning";
     } | {
       readonly "label": string;
-      readonly "status": "queued" | "running" | "completed" | "failed" | "cancelled";
+      readonly "reason_code"?: string;
+      readonly "status": "queued" | "running" | "completed" | "failed" | "rejected" | "cancelled";
       readonly "summary"?: string;
       readonly "tool_call_id": string;
       readonly "type": "tool.lifecycle";

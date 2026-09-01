@@ -66,6 +66,18 @@ function artifactDetail(event: RuntimeEvent): RuntimeLogEventDetail | undefined 
   return undefined;
 }
 
+function toolRejectionSummary(reasonCode: string | undefined): string {
+  switch (reasonCode) {
+    case 'approval_rejected':
+      return 'Tool execution was rejected by the user before dispatch.';
+    case 'mandatory_policy_unavailable':
+    case 'persistence_unavailable':
+      return 'Tool execution was rejected because a required safety boundary was unavailable.';
+    default:
+      return 'Tool execution was rejected by policy before dispatch.';
+  }
+}
+
 /**
  * App-owned projection boundary for durable Runtime events. It admits the
  * exact current discriminant table and never serializes arbitrary event data.
@@ -128,7 +140,6 @@ export function projectRuntimeLogEvent(
     case 'tool.finished':
     case 'tool.failed':
     case 'tool.cancelled':
-    case 'tool.rejected':
       return {
         ...base,
         detail: {
@@ -139,6 +150,23 @@ export function projectRuntimeLogEvent(
           },
         },
       };
+    case 'tool.rejected': {
+      const reasonCode = event.failure?.kind;
+      const summary = toolRejectionSummary(reasonCode);
+      return {
+        ...base,
+        summary,
+        detail: {
+          kind: 'tool',
+          fields: {
+            tool_call_id: event.toolCallId,
+            label: 'Tool',
+            ...(reasonCode ? { reason_code: reasonCode } : {}),
+            rejection_summary: summary,
+          },
+        },
+      };
+    }
     case 'model.invocation_attempt_started':
     case 'model.invocation_completed':
     case 'model.invocation_interrupted':

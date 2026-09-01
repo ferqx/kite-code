@@ -88,7 +88,9 @@ durable事件、reasoning completion与Turn终结前必须先flush。relocated `
 flush，不能让terminal越过仍在buffer中的reasoning/progress。
 tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentationGroupId`，与closed
 `model.responded.messageId`配对。它只提供模型步骤聚合因果关系，不携带prompt、Provider handle、Kernel State或
-execution authority；Service不得让TUI从事件相邻关系反推该归属。
+execution authority；Service不得让TUI从事件相邻关系反推该归属。queued Shell 只有已携带 Runtime 的
+`effectClass=read_only + sideEffect=false` 事实时才发布 `presentation=exploration`；缺失分类、写入或有副作用均保持
+`standalone`，terminal event 不重新猜测命令语义。
 
 Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
 opaque Controller binding reference）。single-Service从每条command的已认证client/connection generation读取Store 9当前Session Controller，
