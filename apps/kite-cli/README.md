@@ -71,11 +71,14 @@ executable、release entrypoint与slot均已删除。
   Store lifecycle仍由Service决定。
 - first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
-- release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
-  corrupt identity不替换。兼容的其他build可复用ready owner与其Web root；Protocol/client-contract/identity不兼容保持fail closed。
+- release/source connector只ensure一个Service；exact dead owner才清理reservation/socket并spawn，alive/uncertain/corrupt identity不替换。
+  Native `describe`返回兼容Service的actual build；source普通ensure只复用另一`dev:` build及其Web root，installed active candidate对另一installed
+  build执行verified replacement，source↔installed返回typed `build_mismatch`且不替换。Protocol/client-contract/identity不兼容保持fail closed。
   普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`。显式`bun run tui:fresh`只在source→source且双方为
   `dev:` build时，通过旧Service自报build与exact reservation/PID/start identity完成内部安全换代；它不授权source↔installed或不确定
   identity replacement。manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
+- TUI `/status`显示client/service version、actual/expected build与派生version status；只有`dev:`→`dev:` drift显示`tui:fresh`操作建议，
+  installed或source↔installed mismatch不得伪装成开发态drift。该状态只由当前connection identity派生，不新增持久化升级状态。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
 - TUI启动只ensure唯一Service；Web assets已经是Service readiness的一部分。`/status`调用可选的`discoverWeb` callback，通过Native

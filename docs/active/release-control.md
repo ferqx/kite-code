@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、ADR-0152、`open-source-first-release.md`。
+相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、ADR-0152、ADR-0164、`open-source-first-release.md`。
 
 ## 首发权威
 
@@ -57,8 +57,9 @@ Service。source mode的build identity绑定同一single-Service bundle所需的
 inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
 摘要不可用或越界时fail closed。dirty source产生不同build identity，但Protocol/client-contract兼容时可连接同home既有ready Service并使用
 该Service自己的Web assets；普通入口不能以新build执行`service stop/restart`，也不会隐式替换owner。显式`bun run tui:fresh`仅在源码开发中
-通过verified previous `dev:` build执行内部换代。installed candidate恢复active-pointer guard与previous-build client：只有当前active candidate
-能停止verified上一installed build，退役candidate、source↔installed或identity不确定均不能替换owner。
+通过verified previous `dev:` build执行内部换代。Native `describe`成功只证明wire-compatible discovery，manager必须继续比较actual/expected
+build；installed candidate恢复active-pointer guard与previous-build client，只有当前active candidate能停止verified上一installed build并在
+confirmed absent后启动当前build。退役candidate、source↔installed或identity不确定均不能替换owner。
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored

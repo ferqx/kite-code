@@ -95,8 +95,30 @@ export function createKiteSingleServiceManager(
   ): Promise<LocalRuntimeLifecycleResult> {
     const id = checkedRequest(request, requestId);
     const initial = await describe();
-    if (initial === 'ready') return result(id, operation, 'applied', 'ready');
-    if (initial === 'incompatible') {
+    if (initial.kind === 'ready') {
+      const expectedBuildId = options.expectedBuildId;
+      if (expectedBuildId === undefined || initial.buildId === expectedBuildId) {
+        return result(id, operation, 'applied', 'ready');
+      }
+      if (request?.executableMode === 'source') {
+        return isSourceBuildId(expectedBuildId) && isSourceBuildId(initial.buildId)
+          ? result(id, operation, 'applied', 'ready')
+          : result(id, operation, 'incompatible', 'ready', 'build_mismatch');
+      }
+      if (request?.executableMode !== 'installed') {
+        return result(id, operation, 'applied', 'ready');
+      }
+      if (!isInstalledBuildId(initial.buildId) || !isInstalledBuildId(expectedBuildId)) {
+        return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
+      }
+      if (options.canReplaceInstalledBuild?.() !== true) {
+        return result(id, operation, 'applied', 'ready');
+      }
+      const stopped = await stopInstalledBuild(id, operation, initial.buildId);
+      if (stopped.outcome !== 'applied' || stopped.state !== 'absent') return stopped;
+      return ensure({ ...request, requestId: id }, operation);
+    }
+    if (initial.kind === 'incompatible') {
       if (request?.executableMode === 'installed') {
         if (options.canReplaceInstalledBuild?.() !== true) {
           return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
@@ -107,7 +129,7 @@ export function createKiteSingleServiceManager(
       }
       return result(id, operation, 'incompatible', 'absent', 'build_mismatch');
     }
-    if (initial === 'uncertain') {
+    if (initial.kind === 'uncertain') {
       return result(id, operation, 'unavailable', 'absent', 'identity_uncertain');
     }
     const lifecycle = readLifecycle();
@@ -125,11 +147,10 @@ export function createKiteSingleServiceManager(
       }
       if (owner === 'alive') {
         const waited = await waitUntilReady(now() + startupTimeoutMs);
-        return waited === 'ready'
-          ? result(id, operation, 'applied', 'ready')
-          : waited === 'incompatible'
-            ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
-            : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
+        if (waited.kind === 'ready') return ensure({ ...request, requestId: id }, operation);
+        return waited.kind === 'incompatible'
+          ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
+          : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
       }
       const cleanup = await clearDead({
         endpoint: options.endpoint,
@@ -148,30 +169,28 @@ export function createKiteSingleServiceManager(
     } catch {
       // A concurrent manager may have won the endpoint race while this child lost its reservation.
       const raced = await waitUntilReady(now() + startupTimeoutMs);
-      return raced === 'ready'
-        ? result(id, operation, 'applied', 'ready')
-        : raced === 'incompatible'
-          ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
-          : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
+      if (raced.kind === 'ready') return ensure({ ...request, requestId: id }, operation);
+      return raced.kind === 'incompatible'
+        ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
+        : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
     } finally {
       await child?.releaseReadiness().catch(() => undefined);
     }
     const ready = await waitUntilReady(now() + startupTimeoutMs);
-    return ready === 'ready'
-      ? result(id, operation, 'applied', 'ready')
-      : ready === 'incompatible'
-        ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
-        : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
+    if (ready.kind === 'ready') return ensure({ ...request, requestId: id }, operation);
+    return ready.kind === 'incompatible'
+      ? result(id, operation, 'incompatible', 'starting', 'build_mismatch')
+      : result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
   }
 
   async function status(request: KiteServiceManagerRequest | undefined) {
     const id = checkedRequest(request, requestId);
     const current = await describe();
-    if (current === 'ready') return result(id, 'status', 'applied', 'ready');
-    if (current === 'incompatible') {
+    if (current.kind === 'ready') return result(id, 'status', 'applied', 'ready');
+    if (current.kind === 'incompatible') {
       return result(id, 'status', 'incompatible', 'ready', 'build_mismatch');
     }
-    if (current === 'uncertain') {
+    if (current.kind === 'uncertain') {
       return result(id, 'status', 'unavailable', 'starting', 'identity_uncertain');
     }
     const lifecycle = readLifecycle();
@@ -192,13 +211,13 @@ export function createKiteSingleServiceManager(
   ): Promise<LocalRuntimeLifecycleResult> {
     const id = checkedRequest(request, requestId);
     const current = await describe();
-    if (current === 'incompatible') {
+    if (current.kind === 'incompatible') {
       return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
     }
-    if (current === 'uncertain') {
+    if (current.kind === 'uncertain') {
       return result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
     }
-    if (current !== 'ready') {
+    if (current.kind !== 'ready') {
       const lifecycle = readLifecycle();
       if (lifecycle === 'corrupt') {
         return result(id, operation, 'unavailable', 'starting', 'identity_uncertain');
@@ -243,15 +262,31 @@ export function createKiteSingleServiceManager(
   async function stopInstalledBuild(
     id: string,
     operation: 'ensure' | 'restart',
+    observedBuildId?: string,
   ): Promise<LocalRuntimeLifecycleResult> {
     const lifecycle = readLifecycle();
     if (lifecycle === 'corrupt') {
       return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
     }
     if (lifecycle === null) {
-      return options.endpoint.kind === 'named_pipe'
-        ? stopInstalledClient(id, operation, options.client)
-        : result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+      if (
+        options.endpoint.kind !== 'named_pipe' ||
+        observedBuildId === undefined ||
+        !isInstalledBuildId(observedBuildId) ||
+        options.clientForBuild === undefined
+      ) {
+        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+      }
+      const previousClient = options.clientForBuild(observedBuildId);
+      try {
+        const current = await previousClient.describe();
+        if (current.service.buildId !== observedBuildId) {
+          return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+        }
+      } catch {
+        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
+      }
+      return stopInstalledClient(id, operation, previousClient);
     }
     if (!isInstalledBuildId(lifecycle.buildId) || options.clientForBuild === undefined) {
       return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
@@ -386,29 +421,32 @@ export function createKiteSingleServiceManager(
     }
   }
 
-  async function describe(): Promise<'ready' | 'absent' | 'incompatible' | 'uncertain'> {
+  async function describe(): Promise<
+    | { readonly kind: 'ready'; readonly buildId: string }
+    | { readonly kind: 'absent' | 'incompatible' | 'uncertain' }
+  > {
     try {
-      await options.client.describe();
-      return 'ready';
+      const current = await options.client.describe();
+      return { kind: 'ready', buildId: current.service.buildId };
     } catch (error) {
       if (error instanceof KiteSingleServiceClientError && error.diagnostic === 'incompatible') {
-        return 'incompatible';
+        return { kind: 'incompatible' };
       }
       if (
         (error instanceof KiteLocalNativeConnectionError && error.code === 'unavailable') ||
         (error instanceof KiteSingleServiceClientError && error.diagnostic === 'unavailable')
       ) {
-        return 'absent';
+        return { kind: 'absent' };
       }
-      return 'uncertain';
+      return { kind: 'uncertain' };
     }
   }
 
   async function waitUntilReady(deadlineAt: number) {
     for (;;) {
       const current = await describe();
-      if (current !== 'absent') return current;
-      if (now() >= deadlineAt) return 'absent' as const;
+      if (current.kind !== 'absent') return current;
+      if (now() >= deadlineAt) return { kind: 'absent' } as const;
       await wait(Math.min(pollIntervalMs, Math.max(1, deadlineAt - now())));
     }
   }
@@ -420,7 +458,7 @@ export function createKiteSingleServiceManager(
     for (;;) {
       const current = await describe();
       const lifecycle = readLifecycle();
-      if (current === 'absent' && lifecycle === null) return true;
+      if (current.kind === 'absent' && lifecycle === null) return true;
       if (lifecycle === 'corrupt') return false;
       if (expected) {
         if (lifecycle && !sameLifecycle(lifecycle, expected)) return false;
@@ -444,7 +482,7 @@ export function createKiteSingleServiceManager(
         // A just-accepted compatibility stop may leave the exact previous-build endpoint
         // observable until shutdown settles. The unchanged lifecycle identity authorizes waiting,
         // never cleanup or a second stop after an ambiguous response.
-      } else if (current === 'uncertain') {
+      } else if (current.kind === 'uncertain') {
         return false;
       }
       if (now() >= deadlineAt) return false;

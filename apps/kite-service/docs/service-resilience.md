@@ -21,9 +21,13 @@ current Store 9 fallback。
 
 ## 状态与停止
 
-`status`和`stop`在Service absent时不spawn。普通stop先quiesce mutation gate：存在active operation时返回`service_busy`并恢复admission；
-空闲时commit drain，control caller先收到accepted response，Service再停止新连接、等待有界response flush、关闭Browser/Runtime/Host/Store，
+`status`和`stop`在Service absent时不spawn。普通stop先quiesce mutation gate，再读取Host-owned长生命周期Session operation：存在active
+mutation或queued/running/waiting Turn时返回`service_busy`并恢复admission；空闲时commit drain，control caller先收到accepted response，Service再停止新连接、等待有界response flush、关闭Browser/Runtime/Host/Store，
 最后释放endpoint与reservation。
+同一Service收到并发authenticated control stop时共享一个request-stop flight；该flight进行中到达的ordinary stop或signal也加入同一barrier，
+只执行一次quiesce/commit/owner cleanup；busy/ready结果释放flight供
+后续显式重试，accepted draining保持共享，若延迟cleanup最终失败则terminal unavailable覆盖早先accepted结果。并发busy callers共享同一
+结果；active work结束后的第一个retry创建一个新flight并只执行一次后续quiesce/cleanup。
 
 stop response丢失不授权自动重放。manager只沿原PID/start identity/reservation有界查询；confirmed absent收敛为成功，仍ready、alive/uncertain或
 proof drift返回`outcome_unknown`。signal shutdown同样执行recovery-safe cancel/drain/dispose，但不是client disconnect。

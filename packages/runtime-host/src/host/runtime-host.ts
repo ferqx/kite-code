@@ -63,6 +63,8 @@ export interface RuntimeHostCoordinatorPort extends RuntimeAccess, AsyncDisposab
   removeSessionProjection(sessionId: string): boolean;
   waitForSessionIdle(sessionId: string): Promise<void>;
   isSessionOperationActive(sessionId: string): boolean;
+  /** Service lifecycle reads this aggregate after mutation admission is quiesced. */
+  hasActiveSessionOperations(): boolean;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -496,6 +498,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   isSessionOperationActive(sessionId: string): boolean {
     return this.#lifecycle.isActive(sessionId);
+  }
+
+  hasActiveSessionOperations(): boolean {
+    return this.#lifecycle.sessionIds().some((sessionId) => this.#lifecycle.isActive(sessionId));
   }
 
   [Symbol.asyncDispose](): Promise<void> {

@@ -6,7 +6,7 @@
 
 验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts tests/release/single-service-native-client.test.ts tests/release/single-service-real-child.test.ts apps/kite-service/test/kite-home-artifact-backends.test.ts apps/kite-service/test/single-service-infrastructure.test.ts`、`bun test tests/release`、`bun run typecheck`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
+相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、ADR-0164、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
 
 ## 当前边界
 
@@ -33,8 +33,11 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
   `/status`同时展示Service identity且不保留单独的TUI `/web`。这些只读操作不挂载资源或改变lifecycle；
   `web_launch/web_ensure/web_status/web_stop`不属于当前协议或CLI。
 - TUI-first、Web-first和同home并发ensure都经过同一manager/reservation，只产生一个ready Service；一个客户端退出不停止另一个。custom
-  `--kite-home`只在同canonical profile内复用。兼容客户端即使`expectedBuildId`不同也通过只读Native `describe`复用ready Service及其
-  Web assets；Protocol/client-contract/identity不兼容仍fail closed且不spawn。普通跨build `service stop/restart`保持
+  `--kite-home`只在同canonical profile内复用。只读Native `describe`即使`expectedBuildId`不同也返回兼容Service的真实identity；manager保留
+  该actual build作部署决策，不能把describe成功等同于build已收敛。source普通ensure只复用`dev:`→`dev:` drift及该Service自己的Web assets；
+  installed active candidate发现另一installed build时验证active pointer与旧owner并安全换代，source↔installed则返回
+  `incompatible/build_mismatch`且不替换。仍运行的inactive installed TUI可在Protocol/client-contract兼容时显式reconnect当前installed
+  Service，但不能通过exact-build `service stop/restart`停止或降级它。Protocol/client-contract/identity不兼容仍fail closed且不spawn。普通跨build `service stop/restart`保持
   `incompatible/build_mismatch`，只能由owner build执行。显式source `tui:fresh`只对`dev:`→`dev:`开放一次内部换代：旧Service自报build必须与
   reservation/PID/start/instance一致，previous-build client有界stop确认absent后才spawn当前Service；普通TUI和source↔installed不走该路径。
 - Native socket只固定Client/connection/Workspace identity；每条mutation再从Store 9读取目标Session当前Controller并把generation绑定进
@@ -42,6 +45,10 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 - Web SPA的目录、API Docs与受限Session shell入口创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime
   authority。Browser不持有Native/Agent bearer，也不通过旧BFF或业务WebSocket读取。
 - status/stop在Service absent时不spawn。stop response丢失只沿原PID/start identity/reservation有界确认，不重放stop。
+- 普通stop的busy事实同时覆盖mutation gate临界区与Host-owned queued/running/waiting Session operation；真实TUI Turn未terminal时active
+  candidate换代必须保持旧build/instance且`spawn=0`，Turn terminal后的后续ensure才允许收敛。
+- busy response必须resume mutation admission；其他已连接TUI继续允许query与正常Session mutation。running model request和waiting interaction
+  都属于busy，换代后全部Protocol/client-contract兼容的旧TUI通过各自generation显式reconnect。
 
 Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。source `bun run server`和`bun run tui`先build Web assets，
 再ensure唯一Service；installed candidate只从immutable release root解析Service executable与payload。

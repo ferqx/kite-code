@@ -44,5 +44,6 @@ if (process.argv.includes('--version')) {
     connectService: localService.connector,
     discoverWeb: localService.discoverWeb,
     expectedServiceBuildId: localService.expectedBuildId,
+    clientVersion: packageJson.version,
   });
 }

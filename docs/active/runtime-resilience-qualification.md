@@ -6,7 +6,7 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、Task 1C.7。
 
 ## 两级运行契约
 
@@ -94,8 +94,27 @@ identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain
 expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
 `incompatible/build_mismatch`。显式source `tui:fresh`另行覆盖verified `dev:` previous-build stop：必须验证旧Service自报build与
 reservation/PID/start/instance，busy有界等待、lost response只按exact absence收敛且不得重放stop；普通source restart与source↔installed仍
-保持`spawn=0`。这些结果不能从caller build或descriptor合成健康身份。restart后
+保持`spawn=0`。installed qualification还用门控Provider证明真实TUI Turn active期间换代返回`service_busy`并保持old build/instance，
+terminal后第二次ensure才替换且兼容旧TUI可reconnect。这些结果不能从caller build或descriptor合成健康身份。restart后
 descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
+source↔installed双向矩阵均已覆盖：任一方向只要actual/expected mode不同就返回`incompatible/build_mismatch`，且stop=0、spawn=0；
+不能只验证source client面对installed owner而遗漏installed client面对source owner。
+同一journey还覆盖两个旧TUI并发连接：一个Turn active时另一个仍可query，manager收到busy后第二个TUI可创建Session证明admission已resume；
+同一active Turn上的连续外部ensure都稳定返回busy且不遗留quiesce lease；换代后两者都显式reconnect。后续candidate面对approval waiting
+interaction仍返回busy，取消并terminal后才允许再次换代。
+同一V2→V3真实endpoint journey在V2接受`service_stop`并返回`applied`后由测试transport丢弃响应；manager只观察exact
+reservation/PID/start/instance absence，previous-build stop请求在丢失后保持0次重发，随后启动V3且两个旧TUI以新generation重连。
+对称模拟响应丢失但old PID/start/reservation仍alive时，manager返回`outcome_unknown/identity_uncertain`并保持old owner，单次ensure内
+previous-build stop仍只发送一次且`spawn=0`；只有confirmed absence才能把同一不确定响应收敛为成功。
+两个独立active-candidate manager并发V1→V2时各自最多发送一次authenticated previous-build stop；Service shell将并发请求合并为一个
+quiesce/commit/cleanup flight。两边随后都可尝试spawn，但native reservation只允许一个instance ready，loser观察同一winner并返回applied。
+并发busy control requests同样共享一个quiesce结果；control flight进行中到达的ordinary stop或signal加入同一barrier。busy settlement释放flight，
+active work结束后的下一次stop创建新flight并完成唯一cleanup，不存在残留busy Promise吞掉retry或重复owner disposal。
+deterministic Application race另证明：Session work刚terminal但interaction settlement mutation仍在gate临界区时，quiesce继续报告busy；
+resume后settlement完成，下一次quiesce才允许drain。因此Host active事实与mutation gate任一方都不能单独冒充全局idle。
+模拟current candidate首次`waitForReady`失败时，manager返回typed unavailable而不伪造ready；旧installed stop保持一次且不重放，ensure flight释放，
+下一次ensure只重试current spawn并收敛唯一ready owner。若失败child已写入current lifecycle reservation，后续ensure只在PID/start identity确认dead
+后清理该exact reservation，再spawn一次；不会清理不匹配证据或重放旧stop。该证据不承诺自动回滚已停止的旧Service。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待

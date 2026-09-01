@@ -467,6 +467,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
       ? appControl.gateway.forWorkspace(defaultWorkspace)
       : appControl.gateway.discovery,
     operationGate,
+    hasActiveOperations: () => owner.host.hasActiveSessionOperations(),
     cancelAll: owner.cancelAllSessions,
     dispose: async () => {
       try {

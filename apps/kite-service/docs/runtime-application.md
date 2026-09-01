@@ -74,9 +74,9 @@ same-connection keyset port且preview仍走Runtime query。Agent adapter不取�
 subscribe或recovery。
 single-Service Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
 `model_surface`；read adapter只消费App-owned Model Context read port，不取得Artifact ref/backend或通用正文读取authority。
-operation gate的quiesce线性化关闭新mutation admission后立即返回lease与`activeOperations`观察值；普通stop据此
-立即resume并返回`service_busy`，不会先等待active mutation而退化成manager timeout。只有commit drain与signal owner
-shutdown会等待idle后进入draining。
+operation gate的quiesce线性化关闭新mutation admission后，Application在同一lease中合并gate临界区与Host
+`SessionLifecycleSupervisor`投影的长生命周期Session operation；普通stop发现任一active都立即resume并返回`service_busy`，不会等待active
+Turn或退化成manager timeout。只有两者均idle才允许commit drain；signal owner shutdown仍通过cancel/drain进入draining。
 动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一投影为
 `mcp:dynamic_tool`，具体工具名只从独立有界safe summary展示。
 

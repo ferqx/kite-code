@@ -106,9 +106,10 @@ Native manager把`GET /readyz`只作为liveness precheck，随后用restart-scop
 `POST /_kite/instance`与`{}` body。它严格验证content type、大小、closed keys以及
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`，并比较descriptor/PID/
 Protocol/client contract/server version与Service自身build identity。malformed、server identity drift或无关listener返回
-`unavailable/identity_uncertain`；single-Service只读Native `describe`允许兼容客户端跨expected build复用ready owner，跨build
-`service stop/restart`才返回`incompatible/build_mismatch`。所有不兼容或不确定结果都保留state、`spawn=0`，且绝不从调用者
-descriptor/build回显或重建健康身份。
+`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端发现跨expected build的ready owner；source
+`dev:` drift和非active installed candidate可复用该owner，但只有active installed candidate能在验证旧owner identity后通过旧build
+client执行stop并收敛到当前candidate。source与installed owner互不复用、互不替换；显式跨build `service stop/restart`仍返回
+`incompatible/build_mismatch`。所有不兼容或不确定结果都保留state、`spawn=0`，且绝不从调用者descriptor/build回显或重建健康身份。
 
 ## Runtime Kernel
 

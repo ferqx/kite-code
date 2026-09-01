@@ -48,8 +48,10 @@
 
 ## Service 与 Kite Web 状态
 
-TUI启动时唯一Service已经验证并挂载同源Web assets。`/status`在同一输出中显示Service PID、启动时间、actual/expected build
-与Kite Web稳定根地址；Web地址由可选的`discoverWeb` callback通过Native `describe`取得。callback缺失或发现失败时显示固定
+TUI启动时唯一Service已经验证并挂载同源Web assets。`/status`在同一输出中显示Service PID、启动时间、client/service version、
+actual/expected build、派生version status与Kite Web稳定根地址。version status只由封闭build identity shape派生：exact为aligned，
+双方`dev:`差异为source drift，其余为build mismatch；只有source drift建议`tui:fresh`，不能从译文或任意版本字符串推断。
+Web地址由可选的`discoverWeb` callback通过Native `describe`取得。callback缺失或发现失败时显示固定
 unavailable文案。该动作不attach route、不创建Runtime Session、不发送Runtime command，也不取得Controller capability；不再提供
 单独的TUI `/web`命令。
 

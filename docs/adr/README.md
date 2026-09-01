@@ -160,8 +160,9 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157 | Service启动即挂载同源Web根页面；删除独立Web ensure/status/stop lifecycle；根路径302机制由ADR-0157替代 |
 | [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158 | 保留`GET /`直接返回Web并建立只读HttpOnly Browser session；launch token与exchange由ADR-0158删除 |
 | [0158](0158-local-web-root-session-without-launch-token.md) | accepted | 本地只读Web固定使用Service根地址与root-created HttpOnly session；删除launch token、exchange与Native `web_launch` |
-| [0159](0159-compatible-clients-share-single-service.md) | accepted | 兼容TUI/Web/Desktop跨build复用同一ready Service；build只保留provenance与exact lifecycle control边界 |
+| [0159](0159-compatible-clients-share-single-service.md) | partially superseded by ADR-0164 | 保留跨build只读发现与source dev drift复用；installed active candidate改由ADR-0164收敛actual build |
 | [0160](0160-uncertain-shell-requires-exact-approval.md) | accepted | 未知Shell effects请求exact用户审批；模型脚本统一走Shell；执行前拒绝不再折叠为失败 |
 | [0161](0161-versioned-shell-semantics-and-read-only-trial.md) | partially superseded by ADR-0162 | 保留revision-bound Shell语义注册表；严格只读试跑grant由ADR-0162删除 |
 | [0162](0162-remove-read-only-trial-grant.md) | accepted | 删除严格只读试跑grant；unknown Shell恢复正常exact审批，registry继续演进 |
 | [0163](0163-service-owned-exploration-presentation.md) | accepted | Service唯一投影探索展示分类；TUI删除Shell前缀解析与历史重聚合路径 |
+| [0164](0164-active-candidate-service-build-convergence.md) | accepted | installed active candidate基于actual build安全换代；source dev drift继续显式复用 |

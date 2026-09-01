@@ -6,7 +6,7 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164。
 
 ## 当前可信域
 
@@ -36,7 +36,8 @@ Workspace。connection close释放admission/subscription/interaction binding，�
 
 `RuntimeWorkspaceContextFactory`按完整identity缓存per-Workspace config/model/MCP/Skill/shell context，Router按Session
 identity选择context；同digest不同canonical facts、跨Workspace改绑和fork均fail closed。Runtime Application的
-operation gate统一Runtime与App Control mutation，quiesce阻止新admission并等待active临界区。App Control mutation
+operation gate统一Runtime与App Control mutation；普通stop先线性化关闭新admission，再合并gate临界区与Host唯一
+`SessionLifecycleSupervisor`的active Session operation事实，任一active都resume并返回`service_busy`。App Control mutation
 保留exact revision CAS，lost response/`outcome_unknown`只允许query state后显式决定，不能自动重放。
 只有`apps/kite-service/src/composition.ts`组合Host、Server、Store、Builtin、carrier与local auth。它还拥有raw History
 projector/SQLite readonly reader、Workspace-scoped App Control与default Store lifecycle。TUI与foreground CLI只有Native
@@ -141,8 +142,11 @@ Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用�
 `GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
 Protocol/client-contract/serverVersion及Service自身build identity一致。server identity drift、malformed或无关listener返回
-`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨expected build取得Service真实identity并复用ready
-owner；Protocol/client-contract不兼容仍fail closed，跨build lifecycle mutation返回`incompatible/build_mismatch`。这些结果都保留state、
+`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨expected build取得Service真实identity；manager必须保留
+actual build作部署决策，只有source `dev:`→`dev:`普通ensure把build drift视为可复用，installed active candidate对另一installed build执行
+verified replacement；inactive installed TUI只可兼容复用与显式reconnect，不能取得replacement authority；source↔installed不复用也不替换。
+Protocol/client-contract不兼容仍fail closed，跨build lifecycle mutation返回
+`incompatible/build_mismatch`。这些结果都保留state、
 `spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
 该instance proof也不创建persisted Project authority或跨Host Store fence。
 当前single-Service Native IPC v2只在protocol/client-contract exact且Service/caller build identity同为`dev:`时把build drift视为可复用；

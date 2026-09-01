@@ -105,6 +105,8 @@ export interface TuiBootstrapProps {
   discoverWeb?: () => Promise<string>;
   /** Client composition build identity used only for local status/drift presentation. */
   expectedServiceBuildId?: string;
+  /** TUI candidate version used only for local status presentation. */
+  clientVersion?: string;
 }
 
 interface TuiAppProps {
@@ -120,6 +122,8 @@ interface TuiAppProps {
     pid: number;
     startedAt: string;
     buildId: string;
+    serviceVersion?: string;
+    clientVersion?: string;
     expectedBuildId?: string;
   }>;
 }
@@ -155,6 +159,7 @@ export function TuiBootstrap({
   credentialClient,
   discoverWeb,
   expectedServiceBuildId,
+  clientVersion,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
   _serviceModeForExit = serviceMode ?? null;
@@ -344,6 +349,8 @@ export function TuiBootstrap({
               pid: serviceMode.service.pid,
               startedAt: serviceMode.service.startedAt,
               buildId: serviceMode.service.buildId,
+              serviceVersion: serviceMode.service.serverVersion,
+              ...(clientVersion === undefined ? {} : { clientVersion }),
               ...(expectedServiceBuildId === undefined
                 ? {}
                 : { expectedBuildId: expectedServiceBuildId }),
@@ -1310,8 +1317,13 @@ function TuiApp({
               pid: translate('serviceStatus.pid'),
               startedAt: translate('serviceStatus.startedAt'),
               buildId: translate('serviceStatus.buildId'),
+              serviceVersion: translate('serviceStatus.serviceVersion'),
+              clientVersion: translate('serviceStatus.clientVersion'),
               expectedBuildId: translate('serviceStatus.expectedBuildId'),
-              driftWarning: translate('serviceStatus.driftWarning'),
+              versionStatus: translate('serviceStatus.versionStatus'),
+              aligned: translate('serviceStatus.aligned'),
+              sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
+              buildMismatch: translate('serviceStatus.buildMismatch'),
             })
           : `  ⎿  ${translate('serviceStatus.unavailable')}`;
         if (

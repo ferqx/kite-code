@@ -2,6 +2,8 @@ export interface ServiceRuntimePresentation {
   readonly pid: number;
   readonly startedAt: string;
   readonly buildId: string;
+  readonly serviceVersion?: string;
+  readonly clientVersion?: string;
   readonly expectedBuildId?: string;
 }
 
@@ -9,12 +11,34 @@ export interface ServiceRuntimeStatusLabels {
   readonly pid: string;
   readonly startedAt: string;
   readonly buildId: string;
+  readonly serviceVersion: string;
+  readonly clientVersion: string;
   readonly expectedBuildId: string;
-  readonly driftWarning: string;
+  readonly versionStatus: string;
+  readonly aligned: string;
+  readonly sourceBuildDrift: string;
+  readonly buildMismatch: string;
+}
+
+export type ServiceRuntimeVersionStatus =
+  | 'aligned'
+  | 'source_build_drift'
+  | 'build_mismatch'
+  | 'unknown';
+
+export function serviceRuntimeVersionStatus(
+  service: ServiceRuntimePresentation,
+): ServiceRuntimeVersionStatus {
+  if (service.expectedBuildId === undefined) return 'unknown';
+  if (service.expectedBuildId === service.buildId) return 'aligned';
+  if (service.expectedBuildId.startsWith('dev:') && service.buildId.startsWith('dev:')) {
+    return 'source_build_drift';
+  }
+  return 'build_mismatch';
 }
 
 export function hasServiceBuildDrift(service: ServiceRuntimePresentation): boolean {
-  return service.expectedBuildId !== undefined && service.expectedBuildId !== service.buildId;
+  return serviceRuntimeVersionStatus(service) === 'source_build_drift';
 }
 
 export function formatServiceRuntimeStatus(
@@ -29,8 +53,21 @@ export function formatServiceRuntimeStatus(
   if (service.expectedBuildId !== undefined) {
     lines.push(`     ${labels.expectedBuildId}: ${service.expectedBuildId}`);
   }
-  if (hasServiceBuildDrift(service)) {
-    lines.push(`     ${labels.driftWarning}`);
+  if (service.clientVersion !== undefined) {
+    lines.push(`     ${labels.clientVersion}: ${service.clientVersion}`);
+  }
+  if (service.serviceVersion !== undefined) {
+    lines.push(`     ${labels.serviceVersion}: ${service.serviceVersion}`);
+  }
+  const status = serviceRuntimeVersionStatus(service);
+  if (status !== 'unknown') {
+    const value =
+      status === 'aligned'
+        ? labels.aligned
+        : status === 'source_build_drift'
+          ? labels.sourceBuildDrift
+          : labels.buildMismatch;
+    lines.push(`     ${labels.versionStatus}: ${value}`);
   }
   return lines.join('\n');
 }

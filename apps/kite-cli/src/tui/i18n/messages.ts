@@ -131,7 +131,13 @@ export const enUS = {
   'serviceStatus.startedAt': 'Started',
   'serviceStatus.buildId': 'Build',
   'serviceStatus.expectedBuildId': 'Expected',
-  'serviceStatus.driftWarning': 'Warning: resident Service build differs; run `bun run tui:fresh`.',
+  'serviceStatus.clientVersion': 'Client version',
+  'serviceStatus.serviceVersion': 'Service version',
+  'serviceStatus.versionStatus': 'Version status',
+  'serviceStatus.aligned': 'Aligned',
+  'serviceStatus.sourceBuildDrift':
+    'Source build drift; run `bun run tui:fresh` to load the current source build.',
+  'serviceStatus.buildMismatch': 'Build mismatch; restart the current installed client.',
   'serviceStatus.driftStartup':
     'Development Service build drift detected. Run `bun run tui:fresh` to load the current source build.',
   'serviceStatus.unavailable': 'Local Service identity is unavailable.',
@@ -396,7 +402,13 @@ export const zhCN: { [K in MessageKey]: string } = {
   'serviceStatus.startedAt': '启动时间',
   'serviceStatus.buildId': '实际 Build',
   'serviceStatus.expectedBuildId': '预期 Build',
-  'serviceStatus.driftWarning': '警告：常驻 Service build 不一致；请运行 `bun run tui:fresh`。',
+  'serviceStatus.clientVersion': '客户端版本',
+  'serviceStatus.serviceVersion': 'Service 版本',
+  'serviceStatus.versionStatus': '版本状态',
+  'serviceStatus.aligned': '已对齐',
+  'serviceStatus.sourceBuildDrift':
+    '源码 build drift；请运行 `bun run tui:fresh` 加载当前源码 build。',
+  'serviceStatus.buildMismatch': 'Build 不一致；请重启当前已安装客户端。',
   'serviceStatus.driftStartup':
     '检测到开发态 Service build drift。请运行 `bun run tui:fresh` 加载当前源码 build。',
   'serviceStatus.unavailable': '本地 Service 身份不可用。',

@@ -86,8 +86,10 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 - authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
   content-type缺失、malformed/extra field或同一次发现中的instance/server/build identity drift统一`identity_uncertain`；
-  Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build，
-  因此ensure/status可复用同home ready owner且不spawn replacement；`service_stop/restart`仍以exact build为control fence，不匹配返回
+  Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build；
+  manager保留actual build作部署决策：source普通ensure只复用`dev:`→`dev:` drift，installed active candidate发现另一installed build时走
+  verified replacement，inactive installed TUI可兼容复用当前installed Service但不能替换，source↔installed返回
+  `incompatible + build_mismatch`且不替换。`service_stop/restart`仍以exact build为control fence，不匹配返回
   `incompatible + build_mismatch`并保持Service ready。唯一例外是显式source-development `tui:fresh`：manager先用当前client取得旧Service
   自报的`dev:` build，再与exact reservation/PID/start/instance核对，并用该旧build构造一次previous-build client完成有界stop；普通source
   restart、source↔installed、identity不确定与Protocol/client-contract不兼容均不获得replacement authority。
@@ -115,7 +117,9 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   process start identity而不是仅检查PID存在；并发manager即使同时spawn，也只有取得socket/reservation的一个Service可ready，loser随后发现winner。
   `createKiteSingleServiceNativeSpawnPort`现通过dedicated fd3启动真实source/installed child；真实macOS journey覆盖ensure复用、exact
   reservation、Home内无`runtime-service/`以及authenticated stop。stop收到accepted后即使endpoint先关闭造成一次半关闭exchange，manager也只
-  在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。
+  在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。installed active candidate在POSIX
+  从reservation、在Windows从跨build `describe`取得actual old build，并用该build client再次校验后发送exact stop；named pipe没有filesystem
+  reservation不授权使用current-build client猜测停止旧owner。
   single-Service manager现是CLI/TUI/Web默认production path；正式release不再组合旧descriptor/token、Coordinator manager、Store migration或
   `web recover`。clean cutover不会从legacy source恢复，也不会在普通ensure中扫描或删除它们。
 

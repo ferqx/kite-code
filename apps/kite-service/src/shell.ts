@@ -96,6 +96,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
   let disposed = false;
   let startPromise: Promise<KiteServiceLifecycleResult> | undefined;
   let stopPromise: Promise<KiteServiceLifecycleResult> | undefined;
+  let requestStopPromise: Promise<KiteServiceLifecycleResult> | undefined;
   let applicationStartPromise: Promise<void> | undefined;
   let transportStartPromise: Promise<void> | undefined;
   let applicationClosePromise: Promise<void> | undefined;
@@ -486,6 +487,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
   const stop = (): Promise<KiteServiceLifecycleResult> => {
     if (terminalStop) return Promise.resolve(terminalStop);
     if (stopPromise) return stopPromise;
+    if (requestStopPromise) return requestStopPromise;
     if (disposed) return Promise.reject(new Error('Service shell is disposed.'));
     stopPromise = performStop(false).then((result) => {
       if (result.outcome === 'service_busy' || result.state === 'ready') stopPromise = undefined;
@@ -494,7 +496,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
     return stopPromise;
   };
 
-  const requestStop = async (): Promise<KiteServiceLifecycleResult> => {
+  const performRequestStop = async (): Promise<KiteServiceLifecycleResult> => {
     const shutdownDeadline = Date.now() + shutdownTimeoutMs;
     if (terminalStop) return terminalStop;
     if (acceptedStop) return acceptedStop;
@@ -602,6 +604,25 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
     }
   };
 
+  const requestStop = (): Promise<KiteServiceLifecycleResult> => {
+    if (terminalStop) return Promise.resolve(terminalStop);
+    if (requestStopPromise) return requestStopPromise;
+    const attempt = performRequestStop();
+    requestStopPromise = attempt.then(
+      (result) => {
+        if (result.outcome === 'service_busy' || result.state === 'ready') {
+          requestStopPromise = undefined;
+        }
+        return result;
+      },
+      (error) => {
+        requestStopPromise = undefined;
+        throw error;
+      },
+    );
+    return requestStopPromise;
+  };
+
   const resolveSignal = (result: KiteServiceLifecycleResult): KiteServiceLifecycleResult => {
     const signalResult = asSignalResult(result);
     signalResolve?.(signalResult);
@@ -629,6 +650,14 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
           return resolveSignal(result);
         }
         stopPromise = undefined;
+        return signal(signalName);
+      });
+    }
+    if (requestStopPromise) {
+      return requestStopPromise.then((result) => {
+        if (result.outcome === 'applied' || result.state === 'draining') {
+          return stopPromise ? stopPromise.then(resolveSignal) : resolveSignal(result);
+        }
         return signal(signalName);
       });
     }

@@ -167,6 +167,7 @@ describe('single-Service process manager', () => {
         expect(buildId).toBe(previousInstalledReservation.buildId);
         return runtime.previousClient;
       },
+      expectedBuildId: '2'.repeat(24),
       canReplaceInstalledBuild: () => true,
       process: { inspect: async () => 'alive' },
       readReservation: () => (runtime.previousReady ? previousInstalledReservation : undefined),
@@ -205,6 +206,7 @@ describe('single-Service process manager', () => {
       endpoint,
       client: runtime.currentClient,
       clientForBuild: () => runtime.previousClient,
+      expectedBuildId: '2'.repeat(24),
       canReplaceInstalledBuild: () => true,
       process: { inspect: async () => 'alive' },
       readReservation: () => previousInstalledReservation,
@@ -239,6 +241,7 @@ describe('single-Service process manager', () => {
       endpoint,
       client: runtime.currentClient,
       clientForBuild: () => runtime.previousClient,
+      expectedBuildId: '2'.repeat(24),
       canReplaceInstalledBuild: () => true,
       process: { inspect: async () => (runtime.previousReady ? 'alive' : 'dead') },
       readReservation: () => (runtime.previousReady ? previousInstalledReservation : undefined),
@@ -264,15 +267,181 @@ describe('single-Service process manager', () => {
     expect(runtime.spawns).toBe(1);
   });
 
+  test('installed ensure preserves a live previous owner after an unconfirmed lost stop response', async () => {
+    const runtime = installedUpgradeRuntime([]);
+    runtime.previousClient = unusedClient({
+      describe: async () => described(previousInstalledReservation.buildId, 'service-1'),
+      stopService: async () => {
+        runtime.stopCalls += 1;
+        throw new Error('stop response lost before acceptance was confirmed');
+      },
+    });
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      expectedBuildId: '2'.repeat(24),
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => previousInstalledReservation,
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          throw new Error('must not spawn');
+        },
+      },
+      now: () => runtime.time,
+      wait: async (milliseconds) => {
+        runtime.time += milliseconds;
+      },
+      pollIntervalMs: 1,
+      stopTimeoutMs: 2,
+      requestId: () => 'installed-live-response-loss',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'outcome_unknown',
+      state: 'draining',
+      diagnostic: 'identity_uncertain',
+    });
+    expect(runtime.previousReady).toBe(true);
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(0);
+  });
+
+  test('installed replacement startup failure is visible and the next ensure retries without replaying stop', async () => {
+    const runtime = installedUpgradeRuntime(['applied']);
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      expectedBuildId: '2'.repeat(24),
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => (runtime.previousReady ? 'alive' : 'dead') },
+      readReservation: () => (runtime.previousReady ? previousInstalledReservation : undefined),
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          return {
+            waitForReady: async () => {
+              if (runtime.spawns === 1) throw new Error('current candidate startup failed');
+              runtime.currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      now: () => runtime.time,
+      wait: async (milliseconds) => {
+        runtime.time += milliseconds;
+      },
+      pollIntervalMs: 1,
+      startupTimeoutMs: 2,
+      requestId: () => `installed-startup-retry-${runtime.spawns}`,
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'unavailable',
+      diagnostic: 'identity_uncertain',
+    });
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(1);
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(2);
+  });
+
+  test('the next ensure clears only an exact dead current reservation left before ready', async () => {
+    const runtime = installedUpgradeRuntime(['applied']);
+    const currentBuildId = '2'.repeat(24);
+    const failedCurrentReservation: KiteLocalRuntimeLifecycleReservation = {
+      ...reservation,
+      pid: 42_002,
+      processStartIdentity: 'failed-current-start',
+      instanceId: 'failed-current-instance',
+      buildId: currentBuildId,
+      startedAt: '2026-08-30T00:01:00.000Z',
+    };
+    let failedReservationPresent = false;
+    let clearCalls = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: runtime.currentClient,
+      clientForBuild: () => runtime.previousClient,
+      expectedBuildId: currentBuildId,
+      canReplaceInstalledBuild: () => true,
+      process: {
+        inspect: async (pid, startIdentity) =>
+          pid === failedCurrentReservation.pid &&
+          startIdentity === failedCurrentReservation.processStartIdentity
+            ? 'dead'
+            : 'alive',
+      },
+      readReservation: () => {
+        if (runtime.previousReady) return previousInstalledReservation;
+        return failedReservationPresent ? failedCurrentReservation : undefined;
+      },
+      clearDead: async ({ expected }) => {
+        expect(expected).toEqual(failedCurrentReservation);
+        clearCalls += 1;
+        failedReservationPresent = false;
+        return { outcome: 'cleared' };
+      },
+      spawn: {
+        async spawn() {
+          runtime.spawns += 1;
+          return {
+            waitForReady: async () => {
+              if (runtime.spawns === 1) {
+                failedReservationPresent = true;
+                throw new Error('current child crashed before ready');
+              }
+              runtime.currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      now: () => runtime.time,
+      wait: async (milliseconds) => {
+        runtime.time += milliseconds;
+      },
+      pollIntervalMs: 1,
+      startupTimeoutMs: 2,
+      requestId: () => `installed-dead-reservation-${runtime.spawns}`,
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'unavailable',
+      diagnostic: 'identity_uncertain',
+    });
+    expect(failedReservationPresent).toBe(true);
+    expect(runtime.stopCalls).toBe(1);
+    expect(clearCalls).toBe(0);
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(clearCalls).toBe(1);
+    expect(runtime.stopCalls).toBe(1);
+    expect(runtime.spawns).toBe(2);
+  });
+
   test('Windows installed ensure replaces the previous build without a filesystem reservation', async () => {
     const runtime = installedUpgradeRuntime(['applied']);
-    runtime.currentClient = {
-      ...runtime.currentClient,
-      stopService: runtime.previousClient.stopService,
-    };
     const manager = createKiteSingleServiceManager({
       endpoint: windowsEndpoint,
       client: runtime.currentClient,
+      clientForBuild: (buildId) => {
+        expect(buildId).toBe(previousInstalledReservation.buildId);
+        return runtime.previousClient;
+      },
+      expectedBuildId: '2'.repeat(24),
       canReplaceInstalledBuild: () => true,
       process: { inspect: async () => 'uncertain' },
       readReservation: () => undefined,
@@ -298,12 +467,13 @@ describe('single-Service process manager', () => {
     expect(runtime.spawns).toBe(1);
   });
 
-  test('an inactive installed candidate cannot replace the current Service', async () => {
+  test('an inactive installed candidate reuses but cannot replace the current Service', async () => {
     const runtime = installedUpgradeRuntime(['applied']);
     const manager = createKiteSingleServiceManager({
       endpoint,
       client: runtime.currentClient,
       clientForBuild: () => runtime.previousClient,
+      expectedBuildId: '2'.repeat(24),
       canReplaceInstalledBuild: () => false,
       process: { inspect: async () => 'alive' },
       readReservation: () => previousInstalledReservation,
@@ -312,12 +482,100 @@ describe('single-Service process manager', () => {
     });
 
     await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
-      outcome: 'incompatible',
+      outcome: 'applied',
       state: 'ready',
-      diagnostic: 'build_mismatch',
     });
     expect(runtime.stopCalls).toBe(0);
     expect(runtime.spawns).toBe(0);
+  });
+
+  test('an incompatible simulated TUI client keeps the current Service and never spawns', async () => {
+    for (const diagnostic of ['invalid_request', 'invalid_response'] as const) {
+      let spawns = 0;
+      let stopCalls = 0;
+      const manager = createKiteSingleServiceManager({
+        endpoint,
+        client: unusedClient({
+          describe: async () => {
+            throw new KiteSingleServiceClientError(diagnostic);
+          },
+          stopService: async () => {
+            stopCalls += 1;
+            throw new Error('must not stop');
+          },
+        }),
+        expectedBuildId: '2'.repeat(24),
+        canReplaceInstalledBuild: () => true,
+        process: { inspect: async () => 'alive' },
+        readReservation: () => previousInstalledReservation,
+        spawn: {
+          async spawn() {
+            spawns += 1;
+            throw new Error('must not spawn');
+          },
+        },
+        requestId: () => `incompatible-tui-${diagnostic}`,
+      });
+
+      await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+        outcome: 'unavailable',
+        diagnostic: 'identity_uncertain',
+      });
+      expect(stopCalls).toBe(0);
+      expect(spawns).toBe(0);
+    }
+  });
+
+  test('installed ensure reuses the exact current build without lifecycle mutation', async () => {
+    const expectedBuildId = '2'.repeat(24);
+    let stopCalls = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: unusedClient({
+        describe: async () => described(expectedBuildId, 'service-2'),
+        stopService: async () => {
+          stopCalls += 1;
+          throw new Error('must not stop');
+        },
+      }),
+      expectedBuildId,
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => ({ ...previousInstalledReservation, buildId: expectedBuildId }),
+      spawn: { spawn: async () => Promise.reject(new Error('must not spawn')) },
+      requestId: () => 'installed-exact-build',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(stopCalls).toBe(0);
+  });
+
+  test('ordinary source ensure reuses a compatible previous dev build without replacing it', async () => {
+    let stopCalls = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: unusedClient({
+        describe: async () => described('dev:previous-source-build', 'service-1'),
+        stopService: async () => {
+          stopCalls += 1;
+          throw new Error('must not stop');
+        },
+      }),
+      expectedBuildId: 'dev:current-source-build',
+      process: { inspect: async () => 'alive' },
+      readReservation: () => ({ ...reservation, buildId: 'dev:previous-source-build' }),
+      spawn: { spawn: async () => Promise.reject(new Error('must not spawn')) },
+      requestId: () => 'source-compatible-drift',
+    });
+
+    await expect(manager.ensure({ executableMode: 'source' })).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(stopCalls).toBe(0);
   });
 
   test('an explicit fresh source restart stops the verified previous dev build and launches current', async () => {
@@ -431,6 +689,7 @@ describe('single-Service process manager', () => {
         compatibilityClients += 1;
         return runtime.previousClient;
       },
+      expectedBuildId: 'dev:current-source-build',
       process: { inspect: async () => 'alive' },
       readReservation: () => previousInstalledReservation,
       spawn: { spawn: async () => Promise.reject(new Error('must not spawn')) },
@@ -443,6 +702,40 @@ describe('single-Service process manager', () => {
     });
     expect(compatibilityClients).toBe(0);
     expect(runtime.stopCalls).toBe(0);
+  });
+
+  test('installed ensure does not replace or reuse a source owner', async () => {
+    let stopCalls = 0;
+    let spawns = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: unusedClient({
+        describe: async () => described('dev:source-owner', 'source-service'),
+        stopService: async () => {
+          stopCalls += 1;
+          throw new Error('must not stop');
+        },
+      }),
+      expectedBuildId: '2'.repeat(24),
+      canReplaceInstalledBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => ({ ...reservation, buildId: 'dev:source-owner' }),
+      spawn: {
+        async spawn() {
+          spawns += 1;
+          throw new Error('must not spawn');
+        },
+      },
+      requestId: () => 'installed-source-owner-mismatch',
+    });
+
+    await expect(manager.ensure({ executableMode: 'installed' })).resolves.toMatchObject({
+      outcome: 'incompatible',
+      state: 'ready',
+      diagnostic: 'build_mismatch',
+    });
+    expect(stopCalls).toBe(0);
+    expect(spawns).toBe(0);
   });
 
   test('keeps uncertain identity and does not spawn or replay stop', async () => {
@@ -639,7 +932,9 @@ function installedUpgradeRuntime(
   runtime.currentClient = unusedClient({
     describe: async () => {
       if (runtime.currentReady) return described('2'.repeat(24), 'service-2');
-      if (runtime.previousReady) throw new KiteSingleServiceClientError('incompatible');
+      if (runtime.previousReady) {
+        return described(previousInstalledReservation.buildId, 'service-1');
+      }
       throw new KiteLocalNativeConnectionError('unavailable');
     },
   });

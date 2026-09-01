@@ -215,6 +215,133 @@ describe('Kite Service lifecycle shell', () => {
     expect(log.slice(-3)).toEqual(['transport.stop', 'application.dispose', 'state.clear']);
   });
 
+  test('concurrent control stops share one quiesce and one owner cleanup', async () => {
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const ports = createRecordingPorts(log);
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state: ports.state,
+      transport: ports.transport,
+      signals: ports.signals,
+    });
+    await shell.start();
+
+    const first = shell.requestStop();
+    const second = shell.requestStop();
+    expect(second).toBe(first);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { operation: 'stop', outcome: 'applied', state: 'draining' },
+      { operation: 'stop', outcome: 'applied', state: 'draining' },
+    ]);
+    expect(fake.counts.quiesce).toBe(1);
+
+    await expect(shell.stop()).resolves.toMatchObject({ outcome: 'applied', state: 'absent' });
+    expect(fake.counts.dispose).toBe(1);
+    expect(log.filter((entry) => entry === 'transport.stop')).toHaveLength(1);
+    expect(log.filter((entry) => entry === 'state.clear')).toHaveLength(1);
+  });
+
+  test('ordinary and signal shutdown join an in-flight control-stop barrier', async () => {
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const quiesce = deferred<KiteRuntimeApplicationQuiesceLease>();
+    const application: KiteRuntimeApplicationPort = {
+      ...fake.application,
+      async quiesceMutations() {
+        fake.counts.quiesce += 1;
+        return quiesce.promise;
+      },
+    };
+    const ports = createRecordingPorts(log);
+    const cleanup = deferred<void>();
+    const transport: KiteServiceTransportPort = {
+      ...ports.transport,
+      async stop() {
+        await ports.transport.stop();
+        await cleanup.promise;
+      },
+    };
+    const shell = createKiteServiceShell({
+      application,
+      state: ports.state,
+      transport,
+      signals: ports.signals,
+    });
+    await shell.start();
+
+    const requested = shell.requestStop();
+    await Promise.resolve();
+    const stopped = shell.stop();
+    const signaled = shell.signal('SIGTERM');
+    expect(stopped).toBe(requested);
+    quiesce.resolve({
+      activeOperations: false,
+      resume() {},
+      async commitDrain() {},
+    });
+
+    await expect(requested).resolves.toMatchObject({ outcome: 'applied', state: 'draining' });
+    let signalSettled = false;
+    void signaled.finally(() => {
+      signalSettled = true;
+    });
+    await Promise.resolve();
+    expect(signalSettled).toBe(false);
+    cleanup.resolve();
+    await expect(signaled).resolves.toMatchObject({
+      operation: 'signal_shutdown',
+      outcome: 'applied',
+    });
+    await expect(shell.waitForShutdown()).resolves.toMatchObject({ state: 'absent' });
+    expect(fake.counts.quiesce).toBe(1);
+    expect(fake.counts.dispose).toBe(1);
+    expect(log.filter((entry) => entry === 'state.clear')).toHaveLength(1);
+  });
+
+  test('a shared busy control-stop flight releases before one idle retry', async () => {
+    const log: string[] = [];
+    const fake = createFakeApplication(log, true);
+    const ports = createRecordingPorts(log);
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state: ports.state,
+      transport: ports.transport,
+      signals: ports.signals,
+    });
+    await shell.start();
+
+    const first = shell.requestStop();
+    const second = shell.requestStop();
+    expect(second).toBe(first);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      {
+        operation: 'stop',
+        outcome: 'service_busy',
+        state: 'ready',
+        diagnostic: 'service_busy',
+      },
+      {
+        operation: 'stop',
+        outcome: 'service_busy',
+        state: 'ready',
+        diagnostic: 'service_busy',
+      },
+    ]);
+    expect(fake.counts.quiesce).toBe(1);
+
+    fake.setActive(false);
+    await expect(shell.requestStop()).resolves.toMatchObject({
+      outcome: 'applied',
+      state: 'draining',
+    });
+    expect(fake.counts.quiesce).toBe(2);
+    await expect(shell.stop()).resolves.toMatchObject({ outcome: 'applied', state: 'absent' });
+    expect(fake.counts.dispose).toBe(1);
+    expect(log.filter((entry) => entry === 'transport.stop')).toHaveLength(1);
+    expect(log.filter((entry) => entry === 'state.clear')).toHaveLength(1);
+  });
+
   test('signal shutdown cancels through the injected application and closes each owner once', async () => {
     const log: string[] = [];
     const fake = createFakeApplication(log);

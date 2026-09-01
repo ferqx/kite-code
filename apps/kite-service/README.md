@@ -38,8 +38,10 @@ terminal/Web data plane；独立Web Gateway process/control/state实现已经删
   `.kite-code-coordination`；正式release不组合legacy companion或migration owner。
 - Workspace Trust先由App Control canonicalize并持久化revision CAS；只有trusted后才建立Runtime execution context。Provider未配置时可完成
   neutral first-run配置，但不创建第二Host、第二Store或fallback backend。
-- 普通stop先quiesce mutation admission；busy返回`service_busy`，空闲才commit drain。signal shutdown执行recovery-safe
-  cancel/drain/dispose。
+- 普通stop先线性化quiesce mutation admission，再同时检查gate临界区与Host-owned长生命周期Session operation；任一active都恢复admission并
+  返回`service_busy`，空闲才commit drain。signal shutdown执行recovery-safe cancel/drain/dispose。
+- 并发Native control stop在Service shell内single-flight，只产生一次quiesce/commit/cleanup；不同manager不共享进程内Promise，但native
+  reservation确保换代spawn只有一个winner，loser只观察ready owner。
 
 ## 不拥有职责
 

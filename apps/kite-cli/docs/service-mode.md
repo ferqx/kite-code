@@ -13,6 +13,10 @@ fresh authority，manager验证旧Service自报`dev:` build、exact reservation/
 source Service。普通`bun run tui`只复用兼容owner；source↔installed或identity不确定时仍fail closed。
 CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
 
+`/status`从当前Native connection展示client/service version、Service actual build、client expected build和派生version status。只有双方build
+均为`dev:`时把差异显示为source drift并建议`tui:fresh`；installed或source↔installed mismatch显示重启/不兼容诊断，不新增第二套
+lifecycle状态或持久化pending-upgrade事实。
+
 Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
 `kite web [--json]`和TUI `/status`返回稳定根地址；TUI同时展示Service identity，不保留单独的`/web`。它不接收asset root，也没有独立status/stop。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
 parser/adapter contract与tests不代表hosted Web qualification。
@@ -24,6 +28,8 @@ TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Wo
 reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
 再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
 snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
+升级前仍运行的inactive installed TUI在Protocol/client-contract兼容时可通过该路径连接current installed Service；其manager不执行
+replacement，Native exact-build control fence也不允许它停止或降级current owner。不兼容client诊断保持fail closed且`spawn=0/stop=0`。
 TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
 Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。
 
