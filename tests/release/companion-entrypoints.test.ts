@@ -8,6 +8,7 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('migrate-run-store');
     expect(source).not.toContain('migrate-single-store');
     expect(source).not.toContain('web-recover');
+    expect(source).toContain('serviceExecutableMode: executableMode');
   });
 
   test('stable launcher enters its main without relying on standalone import.meta.main', () => {
@@ -27,5 +28,20 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('preflightWebGatewayStaticAssets');
     expect(manifest.scripts?.tui).toContain('apps/kite-web build');
     expect(manifest.scripts?.tui).toContain('entrypoints/tui.ts');
+    expect(manifest.scripts?.['tui:fresh']).toContain('--fresh-service');
+    const tui = readFileSync('scripts/release/entrypoints/tui.ts', 'utf8');
+    expect(tui).toContain('freshService,');
+    expect(tui).toContain('restart({ executableMode })');
+    expect(tui.match(/manager\.restart\(/gu)).toHaveLength(1);
+    expect(tui).toContain('manager.status({ executableMode })');
+    expect(tui).toContain('manager.ensure({ executableMode })');
+  });
+
+  test('release composition carries executable mode and previous-build clients into lifecycle', () => {
+    const source = readFileSync('scripts/release/single-service-native-client.ts', 'utf8');
+    expect(source).toContain('clientForBuild: (buildId) =>');
+    expect(source).toContain('canReplaceInstalledBuild');
+    expect(source).toContain('canReplaceSourceBuild');
+    expect(source).toContain('executableMode: options.executable.mode');
   });
 });

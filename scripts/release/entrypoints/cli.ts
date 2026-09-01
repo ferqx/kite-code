@@ -20,6 +20,7 @@ if (process.argv.includes('--version')) {
             });
             return runCliMain({
               serviceManager: localService.manager,
+              serviceExecutableMode: executableMode,
               singleServiceWeb: { discover: localService.discoverWeb },
             });
           })()

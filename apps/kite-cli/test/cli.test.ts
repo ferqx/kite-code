@@ -57,6 +57,47 @@ describe('cli argument parsing', () => {
     }
   });
 
+  test('passes the release-selected executable mode to Service lifecycle commands', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const requests: unknown[] = [];
+    const result = {
+      schema: 'kite.local-runtime-lifecycle-result.v1' as const,
+      requestId: 'restart-installed',
+      operation: 'restart' as const,
+      outcome: 'applied' as const,
+      state: 'ready' as const,
+    };
+    const unavailable = async () => {
+      throw new Error('unexpected lifecycle operation');
+    };
+    try {
+      process.argv = ['bun', 'kite', 'service', 'restart'];
+      await main({
+        serviceExecutableMode: 'installed',
+        serviceManager: {
+          ensure: unavailable,
+          status: unavailable,
+          stop: unavailable,
+          restart: async (request) => {
+            requests.push(request);
+            return result;
+          },
+        },
+      });
+      expect(requests).toEqual([
+        {
+          clientContractRevision: 'kite-local-runtime-contract-v2',
+          executableMode: 'installed',
+        },
+      ]);
+      expect(output.mock.calls.at(-1)).toEqual(['Service restart: applied [ready]']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
   test('keeps service run private and renders lifecycle results without secrets', () => {
     expect(parseArgs(['service', 'run']).command).toBe('help');
     const result = {

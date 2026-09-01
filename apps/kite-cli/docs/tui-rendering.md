@@ -7,6 +7,8 @@
 - TUI 使用终端主屏缓冲区，已完成消息进入 `<Static>` 并保留在原生 scrollback。
 - `<Static>` 必须位于 OutputArea 的 `Box(height={0} overflow="hidden")` 内，不外置到 App root。
 - 活跃 streaming/running/interrupt block 留在 dynamic tree；已提交相邻文本是 append-only 前缀。
+- presentation-only slash echo通过`LOCAL_COMMAND`追加到当前dynamic tail，不创建新的user turn。它不能仅因执行`/status`、
+  `/context`或其他本地命令就把仍可见的末轮回答提升进`<Static>`，否则原生scrollback会再次写出已有消息。
 - OutputArea 不实现 focused viewport、行数估算或历史裁剪；Overlay 固定高度列表可以使用 VirtualList。
 - 并发 Subagent 使用一个聚合卡片和有界步骤尾；聚合只影响展示，不删除 Runtime/TUI state 中的步骤。
 

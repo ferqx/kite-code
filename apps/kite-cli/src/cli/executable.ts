@@ -8,6 +8,7 @@ export interface KiteCliExecutableOptions {
   readonly serviceConnector?: KiteServiceModeConnector;
   /** Explicit lifecycle manager supplied by release composition; no ambient discovery is allowed. */
   readonly serviceManager?: KiteServiceManager;
+  readonly serviceExecutableMode?: 'source' | 'installed';
 }
 
 export async function runCli(options: KiteCliExecutableOptions = {}): Promise<void> {
@@ -18,6 +19,7 @@ export async function runCli(options: KiteCliExecutableOptions = {}): Promise<vo
   await main({
     serviceConnector: options.serviceConnector,
     serviceManager: options.serviceManager,
+    serviceExecutableMode: options.serviceExecutableMode,
   });
 }
 

@@ -44,6 +44,55 @@ function Harness({
 }
 
 describe('useStaticContent session remount promotion', () => {
+  test('does not promote the visible answer when a local command is appended', () => {
+    const runningTurn: Turn = {
+      blocks: [
+        { id: 1, kind: 'user', content: '你好' },
+        { id: 2, kind: 'text', content: '你好！', streaming: true },
+      ],
+    };
+    const view = render(
+      React.createElement(Harness, {
+        turns: [runningTurn],
+        running: true,
+        sessionKey: 6,
+      }),
+    );
+
+    const completedTurn: Turn = {
+      blocks: [
+        runningTurn.blocks[0]!,
+        { ...runningTurn.blocks[1]!, streaming: false } as OutputBlock,
+      ],
+    };
+    view.rerender(
+      React.createElement(Harness, {
+        turns: [completedTurn],
+        running: false,
+        sessionKey: 6,
+      }),
+    );
+
+    const localCommandTurn: Turn = {
+      blocks: [
+        ...completedTurn.blocks,
+        { id: 3, kind: 'user', content: '/status' },
+        { id: 4, kind: 'text', content: 'Service PID: 42', streaming: false },
+      ],
+    };
+    view.rerender(
+      React.createElement(Harness, {
+        turns: [localCommandTurn],
+        running: false,
+        sessionKey: 6,
+      }),
+    );
+
+    const frame = view.lastFrame();
+    expect(frame).toContain('staticIds=1');
+    expect(frame).toContain('dynamicIds=2,3,4');
+  });
+
   test('single-turn idle session is fully promoted to Static after remount', async () => {
     const turns = [makeTurn([1, 2], 'text')];
     const { lastFrame } = render(

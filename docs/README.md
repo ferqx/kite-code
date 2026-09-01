@@ -79,7 +79,8 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 本地TUI开发中，`bun run tui`和`bun run tui:fresh`都先执行当前`apps/kite-web` Vite build，再进入TUI，因此`/status`的Kite Web URL不会
 继续提供旧的ignored `dist/` bundle。普通`bun run tui`仍允许复用wire-compatible的常驻`dev:` Service并在build drift时显示警告；使用
 `/status`核对Service PID、启动时间和actual/expected build。需要确保Service本身加载当前源码时使用`bun run tui:fresh`，它通过现有manager
-安全restart后再启动TUI。
+验证旧Service自报`dev:` build与exact reservation/PID/start/instance，再用旧build identity安全stop并启动当前源码Service；用户无需手动
+查找或结束进程。
 
 ## 目录职责
 

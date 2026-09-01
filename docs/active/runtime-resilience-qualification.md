@@ -92,7 +92,9 @@ manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
 identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
 expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
-`incompatible/build_mismatch`。这些结果都保留state且`spawn=0`，不能从caller build或descriptor合成健康结果。restart后
+`incompatible/build_mismatch`。显式source `tui:fresh`另行覆盖verified `dev:` previous-build stop：必须验证旧Service自报build与
+reservation/PID/start/instance，busy有界等待、lost response只按exact absence收敛且不得重放stop；普通source restart与source↔installed仍
+保持`spawn=0`。这些结果不能从caller build或descriptor合成健康身份。restart后
 descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；

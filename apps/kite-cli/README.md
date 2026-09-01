@@ -15,6 +15,8 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
 - CLI parser/main只保留`kite web [--json]`：它ensure唯一Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
   ready前验证和挂载，不存在独立`web status/stop`、asset root客户端注入或Web lifecycle diagnostic。
+- release entrypoint把已选择的`source|installed` executable mode显式注入`service ensure/status/stop/restart`请求；CLI不从cwd、argv形状或
+  Service返回值猜部署形态，因此installed active-candidate换代不会因mode丢失退化为`build_mismatch`。
 - single-Service Web callback由release/source默认入口选择；`/status`在同一状态输出中展示Service identity与稳定Web根地址。TUI启动只ensure Service，
   不额外attach route、启动进程或取得Browser/Controller authority。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
@@ -71,8 +73,9 @@ executable、release entrypoint与slot均已删除。
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
 - release/source connector只ensure一个Service；ready owner直接复用，exact dead owner才清理reservation/socket并spawn，alive/uncertain/
   corrupt identity不替换。兼容的其他build可复用ready owner与其Web root；Protocol/client-contract/identity不兼容保持fail closed。
-  跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`，manager mutation不自动重放，也不会回退legacy
-  Coordinator/Worker或embedded backend。
+  普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`。显式`bun run tui:fresh`只在source→source且双方为
+  `dev:` build时，通过旧Service自报build与exact reservation/PID/start identity完成内部安全换代；它不授权source↔installed或不确定
+  identity replacement。manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
 - TUI启动只ensure唯一Service；Web assets已经是Service readiness的一部分。`/status`调用可选的`discoverWeb` callback，通过Native

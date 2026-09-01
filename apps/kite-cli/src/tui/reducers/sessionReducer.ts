@@ -1,7 +1,7 @@
-// ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
+// ── 会话管理（登录/切换/删除）、本地命令回显、模型选择 ──
 import type { OutputBlock, SessionSnapshot, TuiState } from '../types';
 import type { Action } from './actions';
-import { appendUserMessage, maxBlockIdInTurns, reconstructTurns } from './helpers';
+import { appendBlock, maxBlockIdInTurns, reconstructTurns } from './helpers';
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
@@ -361,13 +361,16 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         },
       };
     }
-    case 'USER_MESSAGE': {
+    case 'LOCAL_COMMAND': {
       const block: OutputBlock = {
         id: state.nextBlockId,
         kind: 'user',
         content: action.text,
       };
-      return appendUserMessage(state, block);
+      // Slash commands are presentation-only echoes, not Runtime user turns.
+      // Keep them in the current mutable tail so an idle answer is not promoted
+      // into Ink Static and written to terminal scrollback a second time.
+      return appendBlock(state, block);
     }
     default:
       return null;

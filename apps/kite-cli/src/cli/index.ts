@@ -43,6 +43,8 @@ export interface CliMainDependencies {
   readonly serviceConnector?: KiteServiceModeConnector;
   /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
   readonly serviceManager?: KiteServiceManager;
+  /** Release-selected executable identity used by lifecycle replacement policy. */
+  readonly serviceExecutableMode?: 'source' | 'installed';
   /** Ensures the one Service and returns its stable Web root URL. */
   readonly singleServiceWeb?: {
     readonly discover: () => Promise<string>;
@@ -122,6 +124,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       args.command,
       args.serviceJson,
       dependencies.singleServiceWeb?.discover,
+      dependencies.serviceExecutableMode,
     );
     return;
   }
@@ -638,6 +641,7 @@ async function runServiceLifecycleCommand(
   command: ServiceLifecycleCommand,
   json: boolean,
   discoverWeb?: () => Promise<string>,
+  executableMode?: 'source' | 'installed',
 ): Promise<void> {
   if (!manager) {
     throw new Error('Managed Local Runtime Service lifecycle manager is unavailable.');
@@ -645,6 +649,7 @@ async function runServiceLifecycleCommand(
   const operation = serviceOperation(command);
   const result = await manager[operation]({
     clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+    ...(executableMode === undefined ? {} : { executableMode }),
   });
   console.log(formatServiceLifecycleResult(result, command === 'service-status' && json));
   if (result.diagnostic !== undefined) {

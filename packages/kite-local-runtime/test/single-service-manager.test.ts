@@ -320,6 +320,107 @@ describe('single-Service process manager', () => {
     expect(runtime.spawns).toBe(0);
   });
 
+  test('an explicit fresh source restart stops the verified previous dev build and launches current', async () => {
+    const previousSourceReservation: KiteLocalRuntimeLifecycleReservation = {
+      ...reservation,
+      buildId: 'dev:previous-source-build',
+    };
+    const expectedBuildId = 'dev:current-source-build';
+    let previousReady = true;
+    let currentReady = false;
+    let currentStopCalls = 0;
+    let previousStopCalls = 0;
+    let spawns = 0;
+    const currentClient = unusedClient({
+      describe: async () => {
+        if (currentReady) return described(expectedBuildId, 'service-2');
+        if (previousReady) return described(previousSourceReservation.buildId, 'service-1');
+        throw new KiteLocalNativeConnectionError('unavailable');
+      },
+      stopService: async () => {
+        currentStopCalls += 1;
+        throw new KiteSingleServiceClientError('incompatible');
+      },
+    });
+    const previousClient = unusedClient({
+      describe: async () => described(previousSourceReservation.buildId, 'service-1'),
+      stopService: async () => {
+        previousStopCalls += 1;
+        previousReady = false;
+        return {
+          schema: 'kite.local-native.response.v1',
+          requestId: 'source-stop',
+          operation: 'service_stop',
+          outcome: 'applied',
+          state: 'draining',
+        };
+      },
+    });
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: currentClient,
+      clientForBuild: (buildId) => {
+        expect(buildId).toBe(previousSourceReservation.buildId);
+        return previousClient;
+      },
+      expectedBuildId,
+      canReplaceSourceBuild: () => true,
+      process: { inspect: async () => 'alive' },
+      readReservation: () => (previousReady ? previousSourceReservation : undefined),
+      spawn: {
+        async spawn() {
+          spawns += 1;
+          return {
+            waitForReady: async () => {
+              currentReady = true;
+            },
+            releaseReadiness: async () => undefined,
+          };
+        },
+      },
+      requestId: () => 'fresh-source-restart',
+    });
+
+    await expect(manager.restart({ executableMode: 'source' })).resolves.toMatchObject({
+      operation: 'restart',
+      outcome: 'applied',
+      state: 'ready',
+    });
+    expect(currentStopCalls).toBe(1);
+    expect(previousStopCalls).toBe(1);
+    expect(spawns).toBe(1);
+  });
+
+  test('ordinary source restart cannot stop another dev build', async () => {
+    let spawns = 0;
+    const manager = createKiteSingleServiceManager({
+      endpoint,
+      client: unusedClient({
+        describe: async () => described('dev:previous-source-build', 'service-1'),
+        stopService: async () => {
+          throw new KiteSingleServiceClientError('incompatible');
+        },
+      }),
+      expectedBuildId: 'dev:current-source-build',
+      process: { inspect: async () => 'alive' },
+      readReservation: () => ({ ...reservation, buildId: 'dev:previous-source-build' }),
+      spawn: {
+        async spawn() {
+          spawns += 1;
+          throw new Error('must not spawn');
+        },
+      },
+      requestId: () => 'ordinary-source-restart',
+    });
+
+    await expect(manager.restart({ executableMode: 'source' })).resolves.toMatchObject({
+      outcome: 'incompatible',
+      state: 'ready',
+      diagnostic: 'build_mismatch',
+    });
+    expect(spawns).toBe(0);
+  });
+
   test('source ensure does not replace an incompatible installed owner', async () => {
     const runtime = installedUpgradeRuntime(['applied']);
     let compatibilityClients = 0;

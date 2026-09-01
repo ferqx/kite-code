@@ -13,6 +13,33 @@ function blocks(state: TuiState) {
 }
 
 describe('TUI RuntimeClientEvent reducer', () => {
+  test('keeps a local slash command in the current presentation turn', () => {
+    let state = createInitialState();
+    state = apply(state, {
+      type: 'user.message',
+      messageId: 'user-1',
+      kind: 'task',
+      text: '你好',
+    });
+    state = apply(state, {
+      type: 'model.responded',
+      requestId: 'request-1',
+      messageId: 'message-1',
+      toolCallCount: 0,
+      summary: '你好！',
+    });
+    const turnCount = state.turns.length;
+
+    state = eventReducer(state, { type: 'LOCAL_COMMAND', text: '/status' });
+    state = eventReducer(state, { type: 'LOCAL_TEXT', text: '  ⎿  Service PID: 42' });
+
+    expect(state.turns).toHaveLength(turnCount);
+    expect(state.turns.at(-1)?.blocks.slice(-2)).toEqual([
+      expect.objectContaining({ kind: 'user', content: '/status' }),
+      expect.objectContaining({ kind: 'text', content: '  ⎿  Service PID: 42' }),
+    ]);
+  });
+
   test('renders safe user, model, tool, and terminal facts', () => {
     let state = createInitialState();
     const events: readonly RuntimeClientEvent[] = [

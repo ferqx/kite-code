@@ -1227,7 +1227,7 @@ function TuiApp({
       setThemePreset(p);
       process.stdout.write(osc4Apply(p));
       saveColorPreset(p);
-      dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
+      dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: `/theme ${p}` });
       dispatchSessionLoad({
         type: 'LOCAL_TEXT',
         text: `  ⎿  Theme set to ${p}`,
@@ -1250,14 +1250,15 @@ function TuiApp({
     // PR 9: /context handler — display context usage breakdown
     () => {
       const targetThreadId = threadIdRef.current;
-      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/context' });
+      dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/context' });
       const text = sessionManager.handleContextDisplay(targetThreadId);
       dispatchSessionLoad({ type: 'LOCAL_TEXT', text });
     },
     // PR 9: /compact reset handler — preflight + clear active checkpoint
     () => {
       const targetThreadId = threadIdRef.current;
-      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/compact reset' });
+      const targetTurnCount = Math.max(1, stateRef.current.turns.length);
+      dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/compact reset' });
       void sessionManager
         .handleContextReset(targetThreadId)
         .then((result: ContextCompactionResult) => {
@@ -1269,6 +1270,7 @@ function TuiApp({
           for (const event of result.events) {
             dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
           }
+          if (stateRef.current.turns.length !== targetTurnCount) return;
           dispatchSessionLoad({
             type: 'LOCAL_TEXT',
             text: `  ⎿  ${result.text}`,
@@ -1276,7 +1278,12 @@ function TuiApp({
           });
         })
         .catch(() => {
-          if (threadIdRef.current !== targetThreadId) return;
+          if (
+            threadIdRef.current !== targetThreadId ||
+            stateRef.current.turns.length !== targetTurnCount
+          ) {
+            return;
+          }
           dispatchSessionLoad({
             type: 'LOCAL_TEXT',
             text: '  ⎿  Context reset failed; the active checkpoint was preserved.',
@@ -1285,8 +1292,10 @@ function TuiApp({
         });
     },
     () => {
+      const targetThreadId = threadIdRef.current;
+      const targetTurnCount = Math.max(1, stateRef.current.turns.length);
       const serviceRuntime = readServiceRuntime?.();
-      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/status' });
+      dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/status' });
       void (async () => {
         let web = translate('serviceStatus.webUnavailable');
         if (discoverWeb) {
@@ -1305,6 +1314,12 @@ function TuiApp({
               driftWarning: translate('serviceStatus.driftWarning'),
             })
           : `  ⎿  ${translate('serviceStatus.unavailable')}`;
+        if (
+          threadIdRef.current !== targetThreadId ||
+          stateRef.current.turns.length !== targetTurnCount
+        ) {
+          return;
+        }
         dispatchSessionLoad({
           type: 'LOCAL_TEXT',
           text: `${identity}\n     ${translate('serviceStatus.web')}: ${web}`,

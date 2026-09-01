@@ -83,7 +83,7 @@ export type Action =
     }
   | { type: 'SELECT_MODEL'; provider: string; modelName: string; reasoningEnabled?: boolean }
   | { type: 'NEW_SESSION'; threadId: string }
-  | { type: 'USER_MESSAGE'; text: string }
+  | { type: 'LOCAL_COMMAND'; text: string }
   | { type: 'SHOW_MCP' }
   | { type: 'HIDE_MCP' }
   | { type: 'INJECT_MCP_PROMPT'; server: string; promptName: string }

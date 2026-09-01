@@ -81,6 +81,8 @@ export interface ManagedSingleServiceNativeCompositionOptions
   readonly env: Readonly<Record<string, string>>;
   readonly args?: readonly string[];
   readonly childStderr?: 'ignore' | 'inherit';
+  readonly canReplaceInstalledBuild?: () => boolean;
+  readonly canReplaceSourceBuild?: () => boolean;
   readonly startupTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly fetch?: LocalRuntimeFetch;
@@ -107,6 +109,8 @@ export interface ManagedLocalSingleServiceCompositionOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly systemHome?: string;
   readonly executableMode?: 'source' | 'installed';
+  /** Explicit source-development restart authority used only by `tui:fresh`. */
+  readonly freshService?: boolean;
 }
 
 /**
@@ -153,6 +157,19 @@ export function createManagedSingleServiceNativeComposition(
   const manager = createKiteSingleServiceManager({
     endpoint: base.endpoint,
     client: base.client,
+    clientForBuild: (buildId) =>
+      createKiteSingleServiceClient({
+        endpoint: base.endpoint,
+        expectedBuildId: buildId,
+        ...(options.request ? { request: options.request } : {}),
+      }),
+    expectedBuildId: options.expectedBuildId,
+    ...(options.canReplaceInstalledBuild
+      ? { canReplaceInstalledBuild: options.canReplaceInstalledBuild }
+      : {}),
+    ...(options.canReplaceSourceBuild
+      ? { canReplaceSourceBuild: options.canReplaceSourceBuild }
+      : {}),
     process: createKiteSingleServiceNativeProcessIdentityProbe(options.platform),
     spawn: createKiteSingleServiceNativeSpawnPort({
       executable: options.executable,
@@ -230,12 +247,13 @@ export function createManagedSingleServiceNativeComposition(
       });
       const connection = createLocalKiteConnection({
         manager: {
-          async ensure(options) {
+          async ensure(ensureOptions) {
             const previousServiceInstanceId = state.serviceInstanceId;
             const controllerRecovery = state.controllerBinding;
             const result = await manager.ensure({
-              ...(options?.clientContractRevision
-                ? { clientContractRevision: options.clientContractRevision }
+              executableMode: options.executable.mode,
+              ...(ensureOptions?.clientContractRevision
+                ? { clientContractRevision: ensureOptions.clientContractRevision }
                 : {}),
             });
             if (result.outcome !== 'applied' || result.state !== 'ready') return result;
@@ -300,7 +318,7 @@ export function createManagedSingleServiceNativeComposition(
   return Object.freeze({
     ...base,
     discoverWeb: async () => {
-      const ensured = await manager.ensure();
+      const ensured = await manager.ensure({ executableMode: options.executable.mode });
       if (ensured.outcome !== 'applied' || ensured.state !== 'ready') {
         throw new Error(`Single-Service ensure failed: ${ensured.diagnostic ?? ensured.outcome}.`);
       }
@@ -372,6 +390,20 @@ export function createManagedLocalSingleServiceComposition(
           },
     cwd: runtimeParent,
     env,
+    ...(executableMode === 'installed'
+      ? {
+          canReplaceInstalledBuild: () => {
+            try {
+              return installedBuildIdentity(process.execPath) === expectedBuildId;
+            } catch {
+              return false;
+            }
+          },
+        }
+      : {}),
+    ...(executableMode === 'source' && options.freshService === true
+      ? { canReplaceSourceBuild: () => true }
+      : {}),
   });
 }
 

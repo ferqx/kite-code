@@ -88,7 +88,9 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   content-type缺失、malformed/extra field或同一次发现中的instance/server/build identity drift统一`identity_uncertain`；
   Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build，
   因此ensure/status可复用同home ready owner且不spawn replacement；`service_stop/restart`仍以exact build为control fence，不匹配返回
-  `incompatible + build_mismatch`并保持Service ready。
+  `incompatible + build_mismatch`并保持Service ready。唯一例外是显式source-development `tui:fresh`：manager先用当前client取得旧Service
+  自报的`dev:` build，再与exact reservation/PID/start/instance核对，并用该旧build构造一次previous-build client完成有界stop；普通source
+  restart、source↔installed、identity不确定与Protocol/client-contract不兼容均不获得replacement authority。
 - access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。

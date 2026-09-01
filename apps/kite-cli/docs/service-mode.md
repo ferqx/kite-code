@@ -8,6 +8,11 @@ adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
+普通跨build lifecycle mutation保持owner-build fence。source开发的`bun run tui:fresh`是唯一显式例外：release composition只为该入口注入
+fresh authority，manager验证旧Service自报`dev:` build、exact reservation/PID/start/instance后，用previous-build client有界stop并启动当前
+source Service。普通`bun run tui`只复用兼容owner；source↔installed或identity不确定时仍fail closed。
+CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
+
 Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
 `kite web [--json]`和TUI `/status`返回稳定根地址；TUI同时展示Service identity，不保留单独的`/web`。它不接收asset root，也没有独立status/stop。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
 parser/adapter contract与tests不代表hosted Web qualification。

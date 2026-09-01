@@ -272,7 +272,7 @@ export function useStaticContent({
     }
   }
 
-  // A new run (SET_RUNNING fires before USER_MESSAGE in the same tick) ends
+  // A new run (SET_RUNNING fires before the durable user.message in the same tick) ends
   // the remount all-settled window: the freshly appended user turn becomes the
   // live tail and older turns remain immutable.
   if (running && !prevRunningRef.current) {

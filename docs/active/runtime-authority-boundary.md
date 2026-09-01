@@ -149,7 +149,10 @@ installed/candidate、source↔installed与Web semantic revision仍要求exact r
 installed→installed drift换代：POSIX使用strict reservation中的旧build identity重新验证旧owner，Windows只允许exact contract且双方installed
 identity的跨build`service_stop`；confirmed absent后才spawn当前companion。
 manager还要动态验证caller build与managed active pointer一致，退役candidate不能反向停止current Service。它不放宽普通Service gate，
-也不把source或uncertain identity提升为replacement authority。build ID是部署/诊断身份，不替代wire revision。
+也不把普通source或uncertain identity提升为replacement authority。显式source-development `tui:fresh`是单独的本地入口authority：只允许
+`dev:`→`dev:`，必须把旧Service `describe`的build/instance/PID/start与strict reservation核对，再以旧build client发送一次有界stop；
+confirmed absent后才spawn当前source。它不适用于普通restart、source↔installed或Protocol/client-contract drift。build ID是部署/诊断身份，
+不替代wire revision。
 
 ## Authority sequence
 
