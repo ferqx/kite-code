@@ -37,7 +37,8 @@ export function runTui(props: KiteTuiProps = {}): void {
         serviceMode: createKiteServiceModeAdapter(connection),
       });
     })
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
+      await props.disposeRuntime?.().catch(() => undefined);
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
     });

@@ -51,7 +51,7 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 `tests/release/single-service-real-child.test.ts`使用真实child Service与本地模型fixture覆盖Runtime socket先于Controller、首条`start_turn`、
 模型dispatch/terminal、同连接多Session、外来client拒绝及旧installed build→当前build自动换代；
 `packages/kite-local-runtime/test/single-service-manager.test.ts`固定验证transient/permanent busy、source隔离与精确旧build stop，旧descriptor manager
-suite继续验证restart在busy、outcome-unknown与成功replacement下不重放control mutation，`bun run tui:fresh`只复用该现有manager语义。
+suite继续验证restart在busy、outcome-unknown与成功replacement下不重放control mutation；source TUI默认standalone，因此不再保留`tui:fresh`跨build mutation路径。
 
 ## 稳定命令
 

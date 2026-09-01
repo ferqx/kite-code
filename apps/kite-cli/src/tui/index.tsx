@@ -66,6 +66,7 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
 let _serviceModeForExit: KiteServiceModeAdapter | null = null;
+let _disposeRuntimeForExit: (() => Promise<void>) | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -107,6 +108,8 @@ export interface TuiBootstrapProps {
   expectedServiceBuildId?: string;
   /** TUI candidate version used only for local status presentation. */
   clientVersion?: string;
+  /** Release composition cleanup for an invocation-scoped source Service. */
+  disposeRuntime?: () => Promise<void>;
 }
 
 interface TuiAppProps {
@@ -160,9 +163,11 @@ export function TuiBootstrap({
   discoverWeb,
   expectedServiceBuildId,
   clientVersion,
+  disposeRuntime,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
   _serviceModeForExit = serviceMode ?? null;
+  _disposeRuntimeForExit = disposeRuntime ?? null;
   const effectiveAppControlGateway = React.useMemo(() => {
     if (serviceMode) {
       return {
@@ -1710,14 +1715,21 @@ export function runTui(props: TuiBootstrapProps): void {
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   let unmountTui: (() => void) | null = null;
   const exitCoordinator = createTuiExitCoordinator({
-    getSessionLifecycle: () =>
-      _sessionManagerForExit ??
-      (_serviceModeForExit
-        ? {
-            shutdownObservability: async () => undefined,
-            dispose: () => _serviceModeForExit?.close('tui_exit'),
-          }
-        : null),
+    getSessionLifecycle: () => {
+      const session = _sessionManagerForExit;
+      const serviceMode = _serviceModeForExit;
+      const disposeRuntime = _disposeRuntimeForExit;
+      if (!session && !serviceMode && !disposeRuntime) return null;
+      return {
+        shutdownObservability: (timeoutMs: number) =>
+          session?.shutdownObservability(timeoutMs) ?? Promise.resolve(),
+        dispose: async () => {
+          if (session) await session.dispose();
+          else await serviceMode?.close('tui_exit');
+          await disposeRuntime?.();
+        },
+      };
+    },
     getShellExecutor: () => null,
     unmount: () => unmountTui?.(),
     exit: (code) => process.exit(code),

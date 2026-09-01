@@ -1,20 +1,19 @@
 # Managed Local Service mode
 
 本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。该目录承载 terminal 使用的 Native client adapter；
-当前release/source默认connector直接ensure每个canonical Kite Home唯一的Local Service；run/resume/TUI、`service *`与Web复用同一
-native endpoint、Store 9和HTTP listener。CLI不导入Service App，也不持有process或Store authority。
+当前installed connector直接ensure每个canonical Kite Home唯一的shared Local Service；source TUI默认使用invocation-scoped standalone
+endpoint，只有显式`--server shared`才连接canonical owner。两者仍使用同一Kite Home配置。CLI不导入Service App，也不持有Store authority。
 
 adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、owner status与
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
-普通跨build lifecycle mutation保持owner-build fence。source开发的`bun run tui:fresh`是唯一显式例外：release composition只为该入口注入
-fresh authority，manager验证旧Service自报`dev:` build、exact reservation/PID/start/instance后，用previous-build client有界stop并启动当前
-source Service。普通`bun run tui`只复用兼容owner；source↔installed或identity不确定时仍fail closed。
+普通跨build lifecycle mutation保持owner-build fence。source已删除previous-build replacement authority；standalone TUI退出只停止自己的
+exact-build owner，显式shared source发生drift时不替换owner。source↔installed或identity不确定时仍fail closed。
 CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
 
 `/status`从当前Native connection展示client/service version、Service actual build、client expected build和派生version status。只有双方build
-均为`dev:`时把差异显示为source drift并建议`tui:fresh`；installed或source↔installed mismatch显示重启/不兼容诊断，不新增第二套
+均为`dev:`时把差异显示为显式shared source drift事实；installed或source↔installed mismatch显示重启/不兼容诊断，不新增第二套
 lifecycle状态或持久化pending-upgrade事实。
 
 Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI

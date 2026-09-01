@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、ADR-0152、ADR-0164、`open-source-first-release.md`。
+相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、ADR-0152、ADR-0164、ADR-0165、`open-source-first-release.md`。
 
 ## 首发权威
 
@@ -48,16 +48,16 @@ Ubuntu/Windows hosted evidence仍未完成。
 Service在ready前验证并挂载candidate Web assets；CLI `web`与TUI `/status`只ensure同一Service并从native `describe`返回稳定根地址；
 `/status`同时展示Service PID、启动时间和actual/expected build，不保留单独的TUI `/web`。connector/manager失败直接暴露，不
 导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
-source/installed client只ensure每个canonical Kite Home唯一的Service；每个logical connection使用独立client identity与generation，
+installed与显式shared source client只ensure每个canonical Kite Home唯一的Service；默认source TUI使用临时Runtime Home与invocation-scoped
+Service。每个logical connection使用独立client identity与generation，
 Service restart时通过rotating capability恢复Controller，不启动Workspace Worker。Manager的spawn/readiness outcome-unknown由native
 reservation阻止第二次spawn；alive/uncertain identity保持fail closed，confirmed dead才清理exact socket/reservation并启动replacement。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
 Service。source mode的build identity绑定同一single-Service bundle所需的CLI/TUI/Service/Web、package/root build
 inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
-摘要不可用或越界时fail closed。dirty source产生不同build identity，但Protocol/client-contract兼容时可连接同home既有ready Service并使用
-该Service自己的Web assets；普通入口不能以新build执行`service stop/restart`，也不会隐式替换owner。显式`bun run tui:fresh`仅在源码开发中
-通过verified previous `dev:` build执行内部换代。Native `describe`成功只证明wire-compatible discovery，manager必须继续比较actual/expected
+摘要不可用或越界时fail closed。默认source TUI不连接canonical owner；只有显式`--server shared`才可在Protocol/client-contract兼容时连接
+既有ready Service并使用其Web assets。source不能以新build执行`service stop/restart`，也不会隐式替换owner。Native `describe`成功只证明wire-compatible discovery，manager必须继续比较actual/expected
 build；installed candidate恢复active-pointer guard与previous-build client，只有当前active candidate能停止verified上一installed build并在
 confirmed absent后启动当前build。退役candidate、source↔installed或identity不确定均不能替换owner。
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。

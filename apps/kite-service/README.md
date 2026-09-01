@@ -67,9 +67,12 @@ contract asset；installed mode只从launcher固定的immutable candidate root�
 
 ## 关键不变量
 
-- 每个canonical Kite Home最多一个Service、一个Runtime Host、一个Store 9 writer与一个`kite.sqlite`。
+- installed/shared topology中每个canonical Kite Home最多一个Service、一个Runtime Host、一个Store 9 writer与一个`kite.sqlite`；source
+  standalone为每次TUI调用分配独立临时Runtime Home，不共享该Store owner。
 - Kite Home只保存用户配置、`skills/`、`sessions/`和`kite.sqlite`及SQLite companion；不得写process descriptor、token、socket、lock、
   launch intent、layout sidecar或filesystem Artifact root。
+- source standalone通过`KITE_CODE_CONFIG_HOME`从canonical Home读取配置、Trust、MCP与Skills，`KITE_CODE_HOME`只指向临时Runtime Home；
+  Service成功停止后release composition删除临时Home，停止不确定时保留现场且不删除活跃Store。
 - POSIX每home runtime只允许`service.sock`与`service.lock`；Windows endpoint使用named pipe。custom home按canonical home digest
   隔离endpoint并作为相互独立的profile，不增加跨home coordination。
 - Web assets是Service的exact启动输入；`index.html`、OpenAPI或hashed JS/CSS缺失时Service不发布ready。客户端不能在Service ready后

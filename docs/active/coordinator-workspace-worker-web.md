@@ -15,8 +15,8 @@ apps/kite-service/test/web-gateway tests/release/single-service-real-child.test.
 
 ## 当前拓扑
 
-正式source/release每个canonical Kite Home只有一个Local Service、一个Store 9、一个`kite.sqlite`和一个loopback HTTP listener。TUI、
-CLI、`service *`与`web`共用同一个manager/reservation。Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
+正式installed/release与显式shared source每个canonical Kite Home只有一个Local Service、一个Store 9、一个`kite.sqlite`和一个loopback
+HTTP listener。source TUI默认使用独立临时Runtime Home、Store与invocation endpoint。Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
 process/control/state与Coordinator production glue已经删除，不能由普通startup、release connector或Browser恢复。
 
 Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
@@ -48,11 +48,11 @@ document `pagehide`且不进入back-forward cache时才调用Browser session rev
 ## 启动与fail-closed边界
 
 Service在发布ready前验证release composition提供的immutable static root、`index.html`、OpenAPI及hashed JS/CSS；失败则整个Service
-启动失败。TUI-first、`kite web`-first与并发ensure都复用同一ready Service；custom home只在相同canonical profile内复用。Browser打开
+启动失败。installed TUI-first、`kite web`-first与并发ensure复用同一ready Service；source standalone不加入该owner，custom home只在相同canonical profile内复用。Browser打开
 URL与Vite dev server均无本机进程启动authority。
 
 unknown route、credential混用、Origin/Fetch Metadata错误、Directory scope漂移、History cursor/boundary失效、Controller generation漂移、
-Protocol/client-contract不兼容与process identity不确定继续fail closed。兼容客户端可跨build只读发现ready Service；source `dev:` drift和
+Protocol/client-contract不兼容与process identity不确定继续fail closed。兼容客户端可跨build只读发现ready Service；显式shared source `dev:` drift和
 非active installed candidate可继续复用其Web assets，active installed candidate则验证旧owner后安全替换并收敛到当前candidate。
 source与installed owner互不复用、互不替换，显式跨build lifecycle mutation仍拒绝；这些规则不授权第二Service、第二Store、兼容BFF
 或旧Coordinator恢复路径。

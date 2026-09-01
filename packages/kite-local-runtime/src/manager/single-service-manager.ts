@@ -36,7 +36,6 @@ export interface KiteSingleServiceManagerOptions {
   readonly clientForBuild?: (buildId: string) => KiteSingleServiceClient;
   readonly expectedBuildId?: string;
   readonly canReplaceInstalledBuild?: () => boolean;
-  readonly canReplaceSourceBuild?: () => boolean;
   readonly process: KiteLocalRuntimeProcessIdentityProbe;
   readonly spawn: KiteSingleServiceSpawnPort;
   readonly startupTimeoutMs?: number;
@@ -243,9 +242,6 @@ export function createKiteSingleServiceManager(
       }
     } catch (error) {
       if (error instanceof KiteSingleServiceClientError && error.diagnostic === 'incompatible') {
-        if (request?.executableMode === 'source' && options.canReplaceSourceBuild?.() === true) {
-          return stopSourceBuild(id, operation);
-        }
         return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
       }
       return result(id, operation, 'outcome_unknown', 'draining', 'identity_uncertain');
@@ -322,69 +318,6 @@ export function createKiteSingleServiceManager(
     }
 
     return stopInstalledClient(id, operation, previousClient, lifecycle);
-  }
-
-  async function stopSourceBuild(
-    id: string,
-    operation: 'stop' | 'restart',
-  ): Promise<LocalRuntimeLifecycleResult> {
-    const expectedBuildId = options.expectedBuildId;
-    if (
-      expectedBuildId === undefined ||
-      !isSourceBuildId(expectedBuildId) ||
-      options.clientForBuild === undefined
-    ) {
-      return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
-    }
-
-    let current: Awaited<ReturnType<KiteSingleServiceClient['describe']>>;
-    try {
-      current = await options.client.describe();
-    } catch {
-      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-    }
-    if (!isSourceBuildId(current.service.buildId) || current.service.buildId === expectedBuildId) {
-      return result(id, operation, 'incompatible', 'ready', 'build_mismatch');
-    }
-
-    const lifecycle = readLifecycle();
-    if (lifecycle === 'corrupt') {
-      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-    }
-    if (lifecycle === null && options.endpoint.kind === 'unix') {
-      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-    }
-    if (lifecycle) {
-      if (
-        lifecycle.instanceId !== current.service.instanceId ||
-        lifecycle.pid !== current.service.pid ||
-        lifecycle.startedAt !== current.service.startedAt ||
-        lifecycle.buildId !== current.service.buildId
-      ) {
-        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-      }
-      const owner = await options.process.inspect(lifecycle.pid, lifecycle.processStartIdentity);
-      if (owner !== 'alive') {
-        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-      }
-    }
-
-    const previousClient = options.clientForBuild(current.service.buildId);
-    try {
-      const previous = await previousClient.describe();
-      if (
-        previous.service.instanceId !== current.service.instanceId ||
-        previous.service.pid !== current.service.pid ||
-        previous.service.startedAt !== current.service.startedAt ||
-        previous.service.buildId !== current.service.buildId
-      ) {
-        return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-      }
-    } catch {
-      return result(id, operation, 'unavailable', 'ready', 'identity_uncertain');
-    }
-
-    return stopInstalledClient(id, operation, previousClient, lifecycle ?? undefined);
   }
 
   async function stopInstalledClient(

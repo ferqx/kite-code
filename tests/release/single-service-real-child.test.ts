@@ -549,8 +549,10 @@ describe('single-Service real child target', () => {
         ),
       ).toEqual([]);
 
-      const stopped = await composition.manager.stop({ requestId: 'stop-1' });
-      expect(stopped).toMatchObject({ outcome: 'applied', state: 'absent' });
+      await composition.dispose();
+      await expect(composition.client.describe()).rejects.toBeInstanceOf(
+        KiteLocalNativeConnectionError,
+      );
     } finally {
       await composition.manager.stop({ requestId: 'cleanup' }).catch(() => undefined);
       rmSync(root, { recursive: true, force: true });

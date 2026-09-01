@@ -78,12 +78,10 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 默认 `all` 作用域检查当前任务工作树的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority不能由两个任务并发拥有；
 后开始的任务必须等待、rebase并重新验证。不得建立文档锁服务、临时authority副本或兼容重定向来规避冲突。
 
-本地TUI开发中，`bun run tui`和`bun run tui:fresh`都先执行当前`apps/kite-web` Vite build，再进入TUI，因此`/status`的Kite Web URL不会
-继续提供旧的ignored `dist/` bundle。普通`bun run tui`仍允许复用wire-compatible的常驻`dev:` Service并把版本状态显示为source build
-drift；使用`/status`核对client/Service version、Service PID、启动时间和actual/expected build。需要确保Service本身加载当前源码时使用
-`bun run tui:fresh`，它通过现有manager验证旧Service自报`dev:` build与exact reservation/PID/start/instance，再用旧build identity安全
-stop并启动当前源码Service。installed active candidate会自动验证并收敛兼容旧build；installed/mixed mismatch不会错误提示`tui:fresh`，
-用户无需手动查找或结束进程。
+本地TUI开发中，`bun run tui`先执行当前`apps/kite-web` Vite build，再启动invocation-scoped standalone Service，因此不会复用旧`dev:`或
+installed owner，也不需要`tui:fresh`。standalone使用临时Runtime Home隔离SQLite、Artifact和endpoint，同时从canonical Kite Home读取配置与
+Skills；TUI退出时先关闭connection，再停止Service并删除临时Home。只有显式`--server shared`才连接canonical shared开发Service，此时`/status`
+展示client/Service version与actual/expected build，但drift只作为事实，不授权跨build替换。installed active candidate仍自动安全收敛兼容旧build。
 
 ## 目录职责
 

@@ -87,12 +87,11 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
   content-type缺失、malformed/extra field或同一次发现中的instance/server/build identity drift统一`identity_uncertain`；
   Protocol/client-contract不兼容被拒绝。single-Service Native `describe`允许兼容客户端的expected build drift并返回Service真实build；
-  manager保留actual build作部署决策：source普通ensure只复用`dev:`→`dev:` drift，installed active candidate发现另一installed build时走
+  manager保留actual build作部署决策：显式shared source只复用`dev:`→`dev:` drift，installed active candidate发现另一installed build时走
   verified replacement，inactive installed TUI可兼容复用当前installed Service但不能替换，source↔installed返回
   `incompatible + build_mismatch`且不替换。`service_stop/restart`仍以exact build为control fence，不匹配返回
-  `incompatible + build_mismatch`并保持Service ready。唯一例外是显式source-development `tui:fresh`：manager先用当前client取得旧Service
-  自报的`dev:` build，再与exact reservation/PID/start/instance核对，并用该旧build构造一次previous-build client完成有界stop；普通source
-  restart、source↔installed、identity不确定与Protocol/client-contract不兼容均不获得replacement authority。
+  `incompatible + build_mismatch`并保持Service ready。source默认standalone且不再具有previous-build stop authority；普通source restart、
+  source↔installed、identity不确定与Protocol/client-contract不兼容均不获得replacement authority。
 - access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
 - Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
   stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。

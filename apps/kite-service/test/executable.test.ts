@@ -201,10 +201,17 @@ describe('Kite Service internal executable adapter', () => {
     );
     expect(resolveKiteServiceMainEnvironment(environment)).toEqual({
       codeRoot: environment.KITE_CODE_HOME,
+      configRoot: environment.KITE_CODE_HOME,
       osHome: environment[osHomeKey]!,
       buildId: environment.KITE_SERVICE_BUILD_ID,
       webStaticRoot: environment.KITE_SERVICE_WEB_STATIC_ROOT,
     });
+    expect(
+      resolveKiteServiceMainEnvironment({
+        ...environment,
+        KITE_CODE_CONFIG_HOME: '/tmp/kite-service-config',
+      }).configRoot,
+    ).toBe('/tmp/kite-service-config');
   });
 
   test('rejects missing Web assets before constructing Runtime or Store composition', async () => {

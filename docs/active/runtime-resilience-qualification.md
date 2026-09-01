@@ -6,7 +6,7 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、ADR-0165、Task 1C.7。
 
 ## 两级运行契约
 
@@ -92,9 +92,8 @@ manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
 identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
 expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
-`incompatible/build_mismatch`。显式source `tui:fresh`另行覆盖verified `dev:` previous-build stop：必须验证旧Service自报build与
-reservation/PID/start/instance，busy有界等待、lost response只按exact absence收敛且不得重放stop；普通source restart与source↔installed仍
-保持`spawn=0`。installed qualification还用门控Provider证明真实TUI Turn active期间换代返回`service_busy`并保持old build/instance，
+`incompatible/build_mismatch`。source TUI默认standalone并删除previous-build stop路径；qualification验证invocation endpoint、临时Runtime Home
+隔离与退出cleanup，普通source restart与source↔installed仍保持`spawn=0`。installed qualification还用门控Provider证明真实TUI Turn active期间换代返回`service_busy`并保持old build/instance，
 terminal后第二次ensure才替换且兼容旧TUI可reconnect。这些结果不能从caller build或descriptor合成健康身份。restart后
 descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 source↔installed双向矩阵均已覆盖：任一方向只要actual/expected mode不同就返回`incompatible/build_mismatch`，且stop=0、spawn=0；

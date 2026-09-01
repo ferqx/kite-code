@@ -71,13 +71,13 @@ executable、release entrypoint与slot均已删除。
   Store lifecycle仍由Service决定。
 - first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
-- release/source connector只ensure一个Service；exact dead owner才清理reservation/socket并spawn，alive/uncertain/corrupt identity不替换。
-  Native `describe`返回兼容Service的actual build；source普通ensure只复用另一`dev:` build及其Web root，installed active candidate对另一installed
+- installed connector只ensure canonical shared Service；source TUI默认使用invocation-scoped standalone endpoint，并在退出时关闭connection后停止
+  composition-owned Service。source只有显式`--server shared`才使用canonical endpoint。exact dead owner才清理reservation/socket并spawn，alive/uncertain/corrupt identity不替换。
+  Native `describe`返回兼容Service的actual build；显式shared source只读复用另一`dev:` build及其Web root，installed active candidate对另一installed
   build执行verified replacement，source↔installed返回typed `build_mismatch`且不替换。Protocol/client-contract/identity不兼容保持fail closed。
-  普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`。显式`bun run tui:fresh`只在source→source且双方为
-  `dev:` build时，通过旧Service自报build与exact reservation/PID/start identity完成内部安全换代；它不授权source↔installed或不确定
-  identity replacement。manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
-- TUI `/status`显示client/service version、actual/expected build与派生version status；只有`dev:`→`dev:` drift显示`tui:fresh`操作建议，
+  普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`；source不再拥有previous-build replacement authority。
+  manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
+- TUI `/status`显示client/service version、actual/expected build与派生version status；显式shared source的`dev:`→`dev:` drift只显示事实，
   installed或source↔installed mismatch不得伪装成开发态drift。该状态只由当前connection identity派生，不新增持久化升级状态。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。

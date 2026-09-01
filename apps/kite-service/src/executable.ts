@@ -74,6 +74,7 @@ export interface KiteServiceMainDependencies {
 
 export interface KiteServiceMainEnvironment {
   readonly codeRoot: string;
+  readonly configRoot: string;
   readonly osHome: string;
   readonly buildId: string;
   readonly webStaticRoot: string;
@@ -85,6 +86,10 @@ export function resolveKiteServiceMainEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): KiteServiceMainEnvironment {
   const codeRoot = requiredAbsoluteEnvironmentValue(source, 'KITE_CODE_HOME');
+  const configRoot =
+    source.KITE_CODE_CONFIG_HOME === undefined
+      ? codeRoot
+      : requiredAbsoluteEnvironmentValue(source, 'KITE_CODE_CONFIG_HOME');
   const osHome = requiredAbsoluteEnvironmentValue(
     source,
     process.platform === 'win32' ? 'USERPROFILE' : 'HOME',
@@ -93,6 +98,7 @@ export function resolveKiteServiceMainEnvironment(
   const webStaticRoot = requiredAbsoluteEnvironmentValue(source, 'KITE_SERVICE_WEB_STATIC_ROOT');
   return Object.freeze({
     codeRoot,
+    configRoot,
     osHome,
     buildId,
     webStaticRoot,
@@ -152,11 +158,11 @@ export async function runKiteServiceMain(
       instanceId,
       checkpointPath: join(environment.codeRoot, 'kite.sqlite'),
       storageOwner: singleStore,
-      userConfigPath: join(environment.codeRoot, 'kite-code.jsonc'),
-      workspaceTrustStorePath: join(environment.codeRoot, 'workspace-trust.jsonc'),
-      userMcpConfigPath: join(environment.codeRoot, 'mcp.json'),
-      mcpApprovalPath: join(environment.codeRoot, 'mcp-project-approvals.jsonc'),
-      userKiteCodeSkillsDir: join(environment.codeRoot, 'skills'),
+      userConfigPath: join(environment.configRoot, 'kite-code.jsonc'),
+      workspaceTrustStorePath: join(environment.configRoot, 'workspace-trust.jsonc'),
+      userMcpConfigPath: join(environment.configRoot, 'mcp.json'),
+      mcpApprovalPath: join(environment.configRoot, 'mcp-project-approvals.jsonc'),
+      userKiteCodeSkillsDir: join(environment.configRoot, 'skills'),
       userAgentsSkillsDir: join(environment.osHome, '.agents', 'skills'),
     });
   } catch (error) {

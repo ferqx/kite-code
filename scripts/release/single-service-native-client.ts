@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
@@ -82,7 +82,6 @@ export interface ManagedSingleServiceNativeCompositionOptions
   readonly args?: readonly string[];
   readonly childStderr?: 'ignore' | 'inherit';
   readonly canReplaceInstalledBuild?: () => boolean;
-  readonly canReplaceSourceBuild?: () => boolean;
   readonly startupTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly fetch?: LocalRuntimeFetch;
@@ -98,6 +97,8 @@ export interface ManagedSingleServiceNativeComposition
       readonly clientInfo?: RuntimeClientInfo;
     }): Promise<ManagedSingleServiceNativeConnection>;
   };
+  /** Stops the composition-owned Service after all client connections have closed. */
+  readonly dispose: () => Promise<void>;
 }
 
 export type ManagedSingleServiceNativeConnection = LocalKiteConnection & {
@@ -109,8 +110,8 @@ export interface ManagedLocalSingleServiceCompositionOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly systemHome?: string;
   readonly executableMode?: 'source' | 'installed';
-  /** Explicit source-development restart authority used only by `tui:fresh`. */
-  readonly freshService?: boolean;
+  /** Source TUI defaults to an invocation-scoped endpoint; installed remains shared. */
+  readonly serviceTopology?: 'shared' | 'standalone';
 }
 
 /**
@@ -166,9 +167,6 @@ export function createManagedSingleServiceNativeComposition(
     expectedBuildId: options.expectedBuildId,
     ...(options.canReplaceInstalledBuild
       ? { canReplaceInstalledBuild: options.canReplaceInstalledBuild }
-      : {}),
-    ...(options.canReplaceSourceBuild
-      ? { canReplaceSourceBuild: options.canReplaceSourceBuild }
       : {}),
     process: createKiteSingleServiceNativeProcessIdentityProbe(options.platform),
     spawn: createKiteSingleServiceNativeSpawnPort({
@@ -327,6 +325,14 @@ export function createManagedSingleServiceNativeComposition(
     },
     manager,
     connector,
+    dispose: async () => {
+      const stopped = await manager.stop({ executableMode: options.executable.mode });
+      if (stopped.outcome !== 'applied' || stopped.state !== 'absent') {
+        throw new Error(
+          `Single-Service shutdown failed: ${stopped.diagnostic ?? stopped.outcome}.`,
+        );
+      }
+    },
   });
 }
 
@@ -344,6 +350,10 @@ export function createManagedLocalSingleServiceComposition(
     ),
   );
   const executableMode = options.executableMode ?? 'source';
+  const serviceTopology = options.serviceTopology ?? 'shared';
+  if (executableMode === 'installed' && serviceTopology !== 'shared') {
+    throw new Error('Installed Service topology must remain shared.');
+  }
   const repositoryRoot = resolve(import.meta.dir, '../..');
   const sourceBuildId =
     executableMode === 'source'
@@ -360,51 +370,86 @@ export function createManagedLocalSingleServiceComposition(
       : join(candidateRoot, 'payload', 'web');
   const runtimeParent = singleServiceRuntimeParent(sourceEnvironment);
   const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
+  const standalone = serviceTopology === 'standalone' ? createStandaloneRuntimeHome() : undefined;
+  const standaloneRuntimeRoot = standalone?.root;
+  const runtimeHome = standalone?.home ?? home;
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(selected)) {
     if (value !== undefined) env[key] = value;
   }
   env.HOME = systemHome;
   if (process.platform === 'win32') env.USERPROFILE = systemHome;
-  env.KITE_CODE_HOME = home.root;
+  env.KITE_CODE_HOME = runtimeHome.root;
+  env.KITE_CODE_CONFIG_HOME = home.root;
   env.KITE_SERVICE_BUILD_ID = expectedBuildId;
   env.KITE_SERVICE_WEB_STATIC_ROOT = staticAssetRoot;
   env.NODE_ENV = 'production';
   if (process.platform !== 'win32') env.KITE_SINGLE_SERVICE_RUNTIME_PARENT = runtimeParent;
-  return createManagedSingleServiceNativeComposition({
-    home,
-    runtimeParent,
-    expectedBuildId,
-    staticAssetRoot,
-    executable:
-      executableMode === 'source'
-        ? {
-            path: resolve(import.meta.dir, './entrypoints/service.ts'),
-            mode: 'source',
-            buildId: sourceBuildId,
-          }
-        : {
-            path: resolveInstalledReleaseExecutable('kite-service'),
-            mode: 'installed',
-            buildId: expectedBuildId,
-          },
-    cwd: runtimeParent,
-    env,
-    ...(executableMode === 'installed'
-      ? {
-          canReplaceInstalledBuild: () => {
-            try {
-              return installedBuildIdentity(process.execPath) === expectedBuildId;
-            } catch {
-              return false;
+  let composition: ManagedSingleServiceNativeComposition;
+  try {
+    composition = createManagedSingleServiceNativeComposition({
+      home: runtimeHome,
+      runtimeParent,
+      expectedBuildId,
+      staticAssetRoot,
+      executable:
+        executableMode === 'source'
+          ? {
+              path: resolve(import.meta.dir, './entrypoints/service.ts'),
+              mode: 'source',
+              buildId: sourceBuildId,
             }
-          },
-        }
-      : {}),
-    ...(executableMode === 'source' && options.freshService === true
-      ? { canReplaceSourceBuild: () => true }
-      : {}),
+          : {
+              path: resolveInstalledReleaseExecutable('kite-service'),
+              mode: 'installed',
+              buildId: expectedBuildId,
+            },
+      cwd: runtimeParent,
+      env,
+      ...(executableMode === 'installed'
+        ? {
+            canReplaceInstalledBuild: () => {
+              try {
+                return installedBuildIdentity(process.execPath) === expectedBuildId;
+              } catch {
+                return false;
+              }
+            },
+          }
+        : {}),
+    });
+  } catch (error) {
+    if (standaloneRuntimeRoot !== undefined) {
+      rmSync(standaloneRuntimeRoot, { recursive: true, force: true });
+    }
+    throw error;
+  }
+  if (standaloneRuntimeRoot === undefined) return composition;
+  return Object.freeze({
+    ...composition,
+    dispose: async () => {
+      await composition.dispose();
+      rmSync(standaloneRuntimeRoot, { recursive: true, force: true });
+    },
   });
+}
+
+function createStandaloneRuntimeHome(): {
+  readonly root: string;
+  readonly home: KiteHomeIdentity;
+} {
+  const root = realpathSync.native(
+    mkdtempSync(join(realpathSync.native(tmpdir()), `kite-source-tui-${randomUUID()}-`)),
+  );
+  try {
+    return Object.freeze({
+      root,
+      home: ensureLocalRuntimeServiceHome(createKiteHomeIdentity(root)),
+    });
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 interface SingleServiceConnectionState {

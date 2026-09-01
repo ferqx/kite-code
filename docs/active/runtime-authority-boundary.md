@@ -6,7 +6,7 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164、ADR-0165。
 
 ## 当前可信域
 
@@ -143,7 +143,7 @@ Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用�
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
 Protocol/client-contract/serverVersion及Service自身build identity一致。server identity drift、malformed或无关listener返回
 `unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨expected build取得Service真实identity；manager必须保留
-actual build作部署决策，只有source `dev:`→`dev:`普通ensure把build drift视为可复用，installed active candidate对另一installed build执行
+actual build作部署决策，只有显式shared source `dev:`→`dev:` ensure把build drift视为可复用，installed active candidate对另一installed build执行
 verified replacement；inactive installed TUI只可兼容复用与显式reconnect，不能取得replacement authority；source↔installed不复用也不替换。
 Protocol/client-contract不兼容仍fail closed，跨build lifecycle mutation返回
 `incompatible/build_mismatch`。这些结果都保留state、
@@ -154,9 +154,8 @@ installed/candidate、source↔installed与Web semantic revision仍要求exact r
 installed→installed drift换代：POSIX使用strict reservation中的旧build identity重新验证旧owner，Windows只允许exact contract且双方installed
 identity的跨build`service_stop`；confirmed absent后才spawn当前companion。
 manager还要动态验证caller build与managed active pointer一致，退役candidate不能反向停止current Service。它不放宽普通Service gate，
-也不把普通source或uncertain identity提升为replacement authority。显式source-development `tui:fresh`是单独的本地入口authority：只允许
-`dev:`→`dev:`，必须把旧Service `describe`的build/instance/PID/start与strict reservation核对，再以旧build client发送一次有界stop；
-confirmed absent后才spawn当前source。它不适用于普通restart、source↔installed或Protocol/client-contract drift。build ID是部署/诊断身份，
+也不把source或uncertain identity提升为replacement authority。source TUI默认standalone；显式`--server shared`只取得连接authority，
+不取得previous-build stop authority。它不适用于普通restart、source↔installed或Protocol/client-contract drift。build ID是部署/诊断身份，
 不替代wire revision。
 
 ## Authority sequence

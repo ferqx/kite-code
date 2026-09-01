@@ -23,7 +23,7 @@ const labels = {
   serviceVersion: 'Service version',
   versionStatus: 'Version status',
   aligned: 'Aligned',
-  sourceBuildDrift: 'Source build drift; run `bun run tui:fresh`.',
+  sourceBuildDrift: 'Explicit shared development Service differs from this source build.',
   buildMismatch: 'Build mismatch; restart the installed client.',
 };
 
@@ -49,10 +49,10 @@ describe('TUI Local Service status presentation', () => {
     expect(hasServiceBuildDrift(drifted)).toBe(true);
     expect(serviceRuntimeVersionStatus(drifted)).toBe('source_build_drift');
     expect(formatServiceBuildDriftWarning(drifted, labels.sourceBuildDrift)).toContain(
-      'bun run tui:fresh',
+      'Explicit shared development Service',
     );
     expect(formatServiceRuntimeStatus(drifted, labels)).toContain(
-      'Source build drift; run `bun run tui:fresh`.',
+      'Explicit shared development Service differs from this source build.',
     );
   });
 

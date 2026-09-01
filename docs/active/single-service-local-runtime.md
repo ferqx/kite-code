@@ -6,11 +6,12 @@
 
 验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts tests/release/single-service-native-client.test.ts tests/release/single-service-real-child.test.ts apps/kite-service/test/kite-home-artifact-backends.test.ts apps/kite-service/test/single-service-infrastructure.test.ts`、`bun test tests/release`、`bun run typecheck`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:pre-release-architecture`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、ADR-0164、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
+相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、ADR-0164、ADR-0165、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
 
 ## 当前边界
 
-source/release entrypoint中的TUI、CLI `run/resume`、`service *`和`web`共用每个canonical Kite Home唯一的Local Service。客户端只通过
+installed/release entrypoint中的TUI、CLI `run/resume`、`service *`和`web`共用每个canonical Kite Home唯一的Local Service。source TUI默认
+使用invocation-scoped standalone Service与临时Runtime Home，显式`--server shared`才加入canonical owner。客户端只通过
 按home digest隔离的Unix socket或Windows named pipe发现Service；descriptor、access/control token、HTTP origin与Browser session均不写
 Kite Home。POSIX每home runtime只允许`service.sock`和`service.lock`，Windows endpoint不创建对应文件。除此之外不建立OS app
 data/state、跨home lease或另一套coordination目录。
@@ -19,7 +20,8 @@ Service拥有一个Runtime Host、一个Store 9 writer connection和一个loopba
 Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的static asset与只读`/v1` REST；
 Web route与Service同生共死，Browser logout只撤销当前HttpOnly session。
 
-Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以及`kite.sqlite`/WAL/SHM。运行期不得新建
+canonical Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以及installed/shared Service的`kite.sqlite`/WAL/SHM。
+source standalone的SQLite/Artifact只存在于owner-only临时Runtime Home，成功停止后删除。运行期不得在canonical Home新建
 `runtime-service/`、`coordinator/`、`workspace-worker/`、`web-gateway/`、`layouts/`或filesystem Artifact root。
 
 ## 启动与Web
@@ -32,14 +34,13 @@ Kite Home白名单是用户配置、`skills/`、Session Logger的`sessions/`以�
 - Native IPC只保留`describe/service_stop`；`kite web`与TUI `/status`先ensure Service，再从`describe.httpOrigin`返回稳定的`origin/`，
   `/status`同时展示Service identity且不保留单独的TUI `/web`。这些只读操作不挂载资源或改变lifecycle；
   `web_launch/web_ensure/web_status/web_stop`不属于当前协议或CLI。
-- TUI-first、Web-first和同home并发ensure都经过同一manager/reservation，只产生一个ready Service；一个客户端退出不停止另一个。custom
+- installed TUI-first、Web-first和同home并发ensure都经过同一manager/reservation，只产生一个ready shared Service；一个shared客户端退出不停止另一个。source TUI默认使用invocation-scoped endpoint并在退出时停止自己的Service；只有`--server shared`加入canonical owner。custom
   `--kite-home`只在同canonical profile内复用。只读Native `describe`即使`expectedBuildId`不同也返回兼容Service的真实identity；manager保留
-  该actual build作部署决策，不能把describe成功等同于build已收敛。source普通ensure只复用`dev:`→`dev:` drift及该Service自己的Web assets；
+  该actual build作部署决策，不能把describe成功等同于build已收敛。显式shared source只复用`dev:`→`dev:` drift及该Service自己的Web assets；
   installed active candidate发现另一installed build时验证active pointer与旧owner并安全换代，source↔installed则返回
   `incompatible/build_mismatch`且不替换。仍运行的inactive installed TUI可在Protocol/client-contract兼容时显式reconnect当前installed
   Service，但不能通过exact-build `service stop/restart`停止或降级它。Protocol/client-contract/identity不兼容仍fail closed且不spawn。普通跨build `service stop/restart`保持
-  `incompatible/build_mismatch`，只能由owner build执行。显式source `tui:fresh`只对`dev:`→`dev:`开放一次内部换代：旧Service自报build必须与
-  reservation/PID/start/instance一致，previous-build client有界stop确认absent后才spawn当前Service；普通TUI和source↔installed不走该路径。
+  `incompatible/build_mismatch`，只能由owner build执行。source不再提供`tui:fresh`或previous-build stop路径。
 - Native socket只固定Client/connection/Workspace identity；每条mutation再从Store 9读取目标Session当前Controller并把generation绑定进
   opaque command context。Controller晚于socket创建或TUI切换Session不会沿用旧ticket快照，旧connection generation仍被拒绝。
 - Web SPA的目录、API Docs与受限Session shell入口创建或复用短期read-only HttpOnly cookie；Workspace、Session、History、Checkpoint读同一个Store 9/Runtime

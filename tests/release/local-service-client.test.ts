@@ -115,6 +115,44 @@ test('managed client derives default KiteHome only from the canonical OS identit
   }
 });
 
+test('source standalone endpoints are invocation-scoped while explicit shared remains canonical', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-topology-'));
+  const systemHome = join(root, 'os-home');
+  mkdirSync(systemHome);
+  try {
+    const first = createManagedLocalSingleServiceComposition({
+      argv: ['bun', 'kite'],
+      systemHome,
+      executableMode: 'source',
+      serviceTopology: 'standalone',
+    });
+    const second = createManagedLocalSingleServiceComposition({
+      argv: ['bun', 'kite'],
+      systemHome,
+      executableMode: 'source',
+      serviceTopology: 'standalone',
+    });
+    const shared = createManagedLocalSingleServiceComposition({
+      argv: ['bun', 'kite'],
+      systemHome,
+      executableMode: 'source',
+      serviceTopology: 'shared',
+    });
+
+    try {
+      expect(first.endpoint.homeDigest).not.toBe(second.endpoint.homeDigest);
+      expect(first.endpoint.homeDigest).not.toBe(shared.endpoint.homeDigest);
+      expect(second.endpoint.homeDigest).not.toBe(shared.endpoint.homeDigest);
+      expect(existsSync(join(systemHome, '.kite-code', '.kite-source-standalone'))).toBe(false);
+    } finally {
+      await first.dispose();
+      await second.dispose();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('managed client accepts one explicit absolute non-symlink KiteHome and rejects ambiguous input', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-explicit-home-'));
   const systemHome = join(root, 'os-home');

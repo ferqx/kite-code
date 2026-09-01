@@ -136,10 +136,10 @@ export const enUS = {
   'serviceStatus.versionStatus': 'Version status',
   'serviceStatus.aligned': 'Aligned',
   'serviceStatus.sourceBuildDrift':
-    'Source build drift; run `bun run tui:fresh` to load the current source build.',
+    'Explicit shared development Service differs from the current source build.',
   'serviceStatus.buildMismatch': 'Build mismatch; restart the current installed client.',
   'serviceStatus.driftStartup':
-    'Development Service build drift detected. Run `bun run tui:fresh` to load the current source build.',
+    'The explicitly connected shared development Service differs from the current source build.',
   'serviceStatus.unavailable': 'Local Service identity is unavailable.',
   'serviceStatus.web': 'Kite Web',
   'serviceStatus.webUnavailable': 'Unavailable',
@@ -406,11 +406,9 @@ export const zhCN: { [K in MessageKey]: string } = {
   'serviceStatus.serviceVersion': 'Service 版本',
   'serviceStatus.versionStatus': '版本状态',
   'serviceStatus.aligned': '已对齐',
-  'serviceStatus.sourceBuildDrift':
-    '源码 build drift；请运行 `bun run tui:fresh` 加载当前源码 build。',
+  'serviceStatus.sourceBuildDrift': '显式连接的共享开发态 Service 与当前源码 build 不一致。',
   'serviceStatus.buildMismatch': 'Build 不一致；请重启当前已安装客户端。',
-  'serviceStatus.driftStartup':
-    '检测到开发态 Service build drift。请运行 `bun run tui:fresh` 加载当前源码 build。',
+  'serviceStatus.driftStartup': '显式连接的共享开发态 Service 与当前源码 build 不一致。',
   'serviceStatus.unavailable': '本地 Service 身份不可用。',
   'serviceStatus.web': 'Kite Web',
   'serviceStatus.webUnavailable': '不可用',
