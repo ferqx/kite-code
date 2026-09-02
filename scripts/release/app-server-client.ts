@@ -185,15 +185,19 @@ export function resolveManagedLocalAppServerTarget(
 
 export function prepareManagedLocalAppServerTarget(target: ManagedLocalAppServerTarget): void {
   const home = ensureKiteProfileHome(createKiteHomeIdentity(target.configRoot));
-  if (home.root !== target.configRoot) {
+  if (!sameCanonicalPath(home.root, target.configRoot)) {
     throw new Error('App Server Kite Home identity changed during validation.');
   }
   if (target.mode !== 'source') return;
   const digest = basename(target.runtimeRoot);
   const ensured = ensurePrivateKiteHomeDirectory(home, ['source-profiles', digest]);
-  if (ensured !== target.runtimeRoot) {
+  if (!sameCanonicalPath(ensured, target.runtimeRoot)) {
     throw new Error('Source App Server profile identity changed.');
   }
+}
+
+function sameCanonicalPath(left: string, right: string): boolean {
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 function canonicalRepositoryRoot(path: string): string {
