@@ -24,6 +24,7 @@ test('App Server daemon lifecycle payloads are exact and path-bounded', () => {
       buildId: 'build-1',
       startedAt: '2026-09-02T13:00:00.000Z',
       workspace: '/workspace',
+      webOrigin: 'http://127.0.0.1:43170',
     }),
   ).toBeDefined();
   expect(() =>
@@ -34,7 +35,19 @@ test('App Server daemon lifecycle payloads are exact and path-bounded', () => {
       buildId: 'build-1',
       startedAt: '2026-09-02T13:00:00.000Z',
       workspace: '/workspace',
+      webOrigin: 'http://127.0.0.1:43170',
       pid: 42,
+    }),
+  ).toThrow();
+  expect(() =>
+    KITE_APP_SERVER_DAEMON_STATUS_RESPONSE_CODEC_.parse({
+      schema: KITE_APP_SERVER_DAEMON_STATUS_RESPONSE_SCHEMA_,
+      state: 'ready',
+      instanceId: 'daemon-1',
+      buildId: 'build-1',
+      startedAt: '2026-09-02T13:00:00.000Z',
+      workspace: '/workspace',
+      webOrigin: 'http://0.0.0.0:43170',
     }),
   ).toThrow();
   expect(

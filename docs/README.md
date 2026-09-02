@@ -44,8 +44,8 @@ fixture。后续新增 Service 或 package 时，只有在 source 与 owner READ
 Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
 Web使用`react-router` Declarative Mode管理目录、Session与API Docs的Browser SPA切换；该展示依赖不改变Web→Agent API client→contract的唯一业务依赖边，
 也不允许Web直接依赖Service或Runtime workspace。
-源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、fixed asset preflight和single-Service Web
-ensure。`apps/kite-web`的Vite dev server只是资源开发入口，Browser也不拥有启动本机Service的authority；当前角色见
+源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、显式App Server daemon start和Web origin
+discovery。`apps/kite-web`的Vite dev server只是资源开发入口，Browser与`kite web`都不拥有隐式启动daemon的authority；当前角色见
 [`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)，旧Gateway恢复仅见transition文档。
 Agent API contract是zero-workspace-dependency的browser-safe Public wire owner；`packages/agent-api-client`是只被Web消费的typed HTTP read
 client。Runtime package owner gate检查Service→contract与Web→client→contract依赖边，独立`check:agent-api-packages`强化Public

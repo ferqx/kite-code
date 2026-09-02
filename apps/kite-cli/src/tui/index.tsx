@@ -103,8 +103,6 @@ export interface TuiBootstrapProps {
     forWorkspace(workspace: KiteWorkspaceIdentity): KiteAppControlClient;
   };
   credentialClient?: NativeProviderCredentialClient;
-  /** Discovery only: `/status` reads the stable Web root from the one Service. */
-  discoverWeb?: () => Promise<string>;
   /** Client composition build identity used only for local status/drift presentation. */
   expectedServiceBuildId?: string;
   /** TUI candidate version used only for local status presentation. */
@@ -121,7 +119,6 @@ interface TuiAppProps {
   appControl: KiteAppControlClient;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
-  discoverWeb?: () => Promise<string>;
   readServiceRuntime?: () => Readonly<{
     pid: number;
     startedAt: string;
@@ -162,7 +159,6 @@ export function TuiBootstrap({
   createSessionManager,
   appControlGateway,
   credentialClient,
-  discoverWeb,
   expectedServiceBuildId,
   clientVersion,
   appServerRuntime,
@@ -348,7 +344,6 @@ export function TuiBootstrap({
       appControl={effectiveAppControlGateway.forWorkspace(workspaceIdentity)}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
-      discoverWeb={discoverWeb}
       readAppServerRuntime={appServerRuntime ? () => appServerRuntime : undefined}
       readServiceRuntime={
         runtimeMode?.service
@@ -376,7 +371,6 @@ function TuiApp({
   appControl,
   languagePreference,
   onLanguageSelect,
-  discoverWeb,
   readServiceRuntime,
   readAppServerRuntime,
 }: TuiAppProps) {
@@ -1308,53 +1302,38 @@ function TuiApp({
         });
     },
     () => {
-      const targetThreadId = threadIdRef.current;
       const serviceRuntime = readServiceRuntime?.();
       const appServerRuntime = readAppServerRuntime?.();
       dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/status' });
-      void (async () => {
-        const identity = appServerRuntime
-          ? formatAppServerRuntimeStatus(appServerRuntime, {
-              transport: translate('appServerStatus.transport'),
-              mode: translate('appServerStatus.mode'),
-              buildId: translate('appServerStatus.buildId'),
-              serverVersion: translate('appServerStatus.serverVersion'),
-              clientVersion: translate('appServerStatus.clientVersion'),
-              paired: translate('appServerStatus.paired'),
-              protocolCompatible: translate('appServerStatus.protocolCompatible'),
+      const identity = appServerRuntime
+        ? formatAppServerRuntimeStatus(appServerRuntime, {
+            transport: translate('appServerStatus.transport'),
+            mode: translate('appServerStatus.mode'),
+            buildId: translate('appServerStatus.buildId'),
+            serverVersion: translate('appServerStatus.serverVersion'),
+            clientVersion: translate('appServerStatus.clientVersion'),
+            paired: translate('appServerStatus.paired'),
+            protocolCompatible: translate('appServerStatus.protocolCompatible'),
+          })
+        : serviceRuntime
+          ? formatServiceRuntimeStatus(serviceRuntime, {
+              pid: translate('serviceStatus.pid'),
+              startedAt: translate('serviceStatus.startedAt'),
+              buildId: translate('serviceStatus.buildId'),
+              serviceVersion: translate('serviceStatus.serviceVersion'),
+              clientVersion: translate('serviceStatus.clientVersion'),
+              expectedBuildId: translate('serviceStatus.expectedBuildId'),
+              versionStatus: translate('serviceStatus.versionStatus'),
+              aligned: translate('serviceStatus.aligned'),
+              sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
+              buildMismatch: translate('serviceStatus.buildMismatch'),
             })
-          : serviceRuntime
-            ? formatServiceRuntimeStatus(serviceRuntime, {
-                pid: translate('serviceStatus.pid'),
-                startedAt: translate('serviceStatus.startedAt'),
-                buildId: translate('serviceStatus.buildId'),
-                serviceVersion: translate('serviceStatus.serviceVersion'),
-                clientVersion: translate('serviceStatus.clientVersion'),
-                expectedBuildId: translate('serviceStatus.expectedBuildId'),
-                versionStatus: translate('serviceStatus.versionStatus'),
-                aligned: translate('serviceStatus.aligned'),
-                sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
-                buildMismatch: translate('serviceStatus.buildMismatch'),
-              })
-            : `  ⎿  ${translate('serviceStatus.unavailable')}`;
-        let web: string | undefined;
-        if (!appServerRuntime && discoverWeb) {
-          try {
-            web = await discoverWeb();
-          } catch {
-            web = translate('serviceStatus.webDiscoveryUnavailable');
-          }
-        }
-        if (threadIdRef.current !== targetThreadId) return;
-        dispatchSessionLoad({
-          type: 'LOCAL_TEXT',
-          text:
-            web === undefined
-              ? identity
-              : `${identity}\n     ${translate('serviceStatus.web')}: ${web}`,
-          ...(serviceRuntime || appServerRuntime ? {} : { isError: true }),
-        });
-      })();
+          : `  ⎿  ${translate('serviceStatus.unavailable')}`;
+      dispatchSessionLoad({
+        type: 'LOCAL_TEXT',
+        text: identity,
+        ...(serviceRuntime || appServerRuntime ? {} : { isError: true }),
+      });
     },
   );
 

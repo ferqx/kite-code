@@ -9,10 +9,8 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import {
-  createKiteSessionAppServerStorageComposition,
-  type KiteRuntimeStorageOwner,
-} from './bootstrap';
+import { createKiteSessionAppServerStorageComposition } from './bootstrap';
+import type { KiteSessionAppServerStorageOwner } from './bootstrap/kite-session-app-server-storage';
 import {
   createNodeRuntimeStdioOutput,
   createProcessRuntimeStdioSignals,
@@ -36,7 +34,7 @@ export interface KiteAppServerMainDependencies {
   readonly createStorage?: (input: {
     readonly databasePath: string;
     readonly hostInstanceId: string;
-  }) => KiteRuntimeStorageOwner;
+  }) => KiteSessionAppServerStorageOwner;
   readonly createComposition?: typeof createKiteServiceRuntimeComposition;
   readonly stdin?: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
   readonly stdout?: Parameters<typeof createNodeRuntimeStdioOutput>[0];
@@ -51,6 +49,7 @@ export interface KiteAppServerRuntimeOwner {
   readonly appControl: ReturnType<
     KiteServiceRuntimeComposition['appControl']['gateway']['forWorkspace']
   >;
+  readonly storageOwner: KiteSessionAppServerStorageOwner;
 }
 
 export function resolveKiteAppServerEnvironment(
@@ -161,7 +160,7 @@ export function createKiteAppServerRuntimeOwner(
         : { allowed: false as const, reason: 'unauthorized' as const };
     },
   });
-  return Object.freeze({ instanceId, composition, admission, appControl });
+  return Object.freeze({ instanceId, composition, admission, appControl, storageOwner });
 }
 
 function required(source: Readonly<Record<string, string | undefined>>, name: string): string {

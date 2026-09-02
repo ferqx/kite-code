@@ -74,6 +74,8 @@ Service stdio carrier在消息进入Runtime Server前处理这些App-owned方法
 connection并验证exact server version/capability，`kite-local-runtime/client`组合semantic App adapter、Native credential codec与
 parent-owned child。credential secret不进入App Control、response或diagnostic。默认TUI/CLI使用same-build stdio pairing；显式daemon
 在同一logical protocol上额外声明`server/status|shutdown`，以固定exact daemon version/capability兼容，而不把build ID提升为协议或Store authority。
+KASD-05将daemon exact identity提升为v2：status增加strict loopback `webOrigin`；同进程独立HTTP carrier提供同build static/API Docs与Browser
+read-only `/v1`，默认stdio仍不创建HTTP。
 
 `@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
@@ -83,9 +85,9 @@ codec并实现Native connector；package本身仍不实现listener、spawn、Sto
 任一 App source。
 
 `@kite-ai/agent-api-contract`是zero-workspace-dependency的browser-safe Public wire contract；`@kite-ai/agent-api-client`只依赖该contract并
-封装Browser cookie REST read。single-Service复用既有listener注入Agent bearer与Browser cookie认证，以及bounded Workspace/Session/History/
-Checkpoint façade，不创建第二Runtime/Store/listener。Agent context拥有query-only private Runtime logical connection；Browser read context直接复用
-同一Store 9 Directory/Runtime/History/Checkpoint authority。Web只依赖client与contract，不依赖Service或Runtime package。
+封装Browser cookie REST read。显式daemon listener注入Browser cookie认证与bounded Workspace/Session/History/Checkpoint façade，不创建第二
+Runtime或Store；Browser read context直接复用同一`kite-session.sqlite` Directory/Runtime/History/Checkpoint authority。Agent context仍可由
+内部Worker carrier以query-only private Runtime logical connection承载。Web只依赖client与contract，不依赖Service或Runtime package。
 
 `apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
 SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App

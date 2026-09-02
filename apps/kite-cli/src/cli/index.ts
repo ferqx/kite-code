@@ -51,8 +51,8 @@ export interface CliMainDependencies {
     status(): Promise<Readonly<Record<string, unknown>>>;
     stop(): Promise<Readonly<Record<string, unknown>>>;
   };
-  /** Ensures the one Service and returns its stable Web root URL. */
-  readonly singleServiceWeb?: {
+  /** Reads the already-running explicit App Server daemon's stable Web root URL. */
+  readonly appServerWeb?: {
     readonly discover: () => Promise<string>;
   };
   readonly commandIds?: RuntimeCommandIdAllocator;
@@ -156,16 +156,15 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       dependencies.serviceManager,
       args.command,
       args.serviceJson,
-      dependencies.singleServiceWeb?.discover,
       dependencies.serviceExecutableMode,
     );
     return;
   }
   if (args.command === 'web-open') {
-    if (!dependencies.singleServiceWeb) {
-      throw new Error('Kite Web single-Service client is unavailable.');
+    if (!dependencies.appServerWeb) {
+      throw new Error('Kite Web App Server daemon client is unavailable.');
     }
-    await runSingleServiceWebCommand(dependencies.singleServiceWeb.discover, args.webJson);
+    await runAppServerWebCommand(dependencies.appServerWeb.discover, args.webJson);
     return;
   }
   if (args.command === 'resume' && !args.task?.trim()) {
@@ -693,7 +692,6 @@ async function runServiceLifecycleCommand(
   manager: KiteServiceManager | undefined,
   command: ServiceLifecycleCommand,
   json: boolean,
-  discoverWeb?: () => Promise<string>,
   executableMode?: 'source' | 'installed',
 ): Promise<void> {
   if (!manager) {
@@ -711,13 +709,9 @@ async function runServiceLifecycleCommand(
   if (!serviceLifecycleSucceeded(result)) {
     throw new Error(`Service ${result.operation} failed: ${result.outcome}.`);
   }
-  if ((command === 'service-ensure' || command === 'service-restart') && discoverWeb) {
-    const url = await discoverWeb();
-    console.log(`Kite Web: ${url}`);
-  }
 }
 
-async function runSingleServiceWebCommand(
+async function runAppServerWebCommand(
   discoverWeb: () => Promise<string>,
   json: boolean,
 ): Promise<void> {
@@ -735,7 +729,7 @@ function formatAppServerDaemonResult(result: Readonly<Record<string, unknown>>):
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const commandArgv = withoutKiteHome(argv);
+  const commandArgv = withoutGlobalEndpointOptions(argv);
   const command: ParsedArgs['command'] =
     commandArgv[0] === 'web' &&
     (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
@@ -874,10 +868,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   };
 }
 
-function withoutKiteHome(argv: readonly string[]): string[] {
+function withoutGlobalEndpointOptions(argv: readonly string[]): string[] {
   const output: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--kite-home') {
+    if (argv[index] === '--kite-home' || argv[index] === '--server') {
       index += 1;
       continue;
     }
@@ -930,9 +924,10 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
     command !== 'resume' &&
     command !== 'server-start' &&
     command !== 'server-status' &&
-    command !== 'server-stop'
+    command !== 'server-stop' &&
+    command !== 'web-open'
   ) {
-    throw new Error('--server is supported only by Runtime and server lifecycle commands.');
+    throw new Error('--server is supported only by Runtime, Web, and server lifecycle commands.');
   }
   if (
     argv.includes('--json') &&
@@ -989,7 +984,7 @@ function printHelp(): void {
   bun run agent service status [--json]
   bun run agent service stop
   bun run agent service restart
-  bun run agent web [--json]
+  bun run agent web [--server <endpoint>] [--json]
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup

@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type {
   ExecutionStatusSnapshot,
   KiteAppControlClient,
@@ -65,7 +62,6 @@ const otherWorkspace: KiteWorkspaceIdentity = {
 };
 
 const carriers: KiteServiceCarrier[] = [];
-const webAssetRoots: string[] = [];
 
 function providerSnapshot(): ProviderModelSnapshot {
   return {
@@ -78,9 +74,6 @@ function providerSnapshot(): ProviderModelSnapshot {
 
 afterEach(async () => {
   await Promise.all(carriers.splice(0).map((carrier) => carrier.close()));
-  while (webAssetRoots.length > 0) {
-    rmSync(webAssetRoots.pop()!, { recursive: true, force: true });
-  }
 });
 
 describe('Kite Service Native loopback carrier', () => {
@@ -164,39 +157,6 @@ describe('Kite Service Native loopback carrier', () => {
       body: JSON.stringify({ workspace: workspace.canonicalPath }),
     });
     expect(cookie.status).toBe(401);
-  });
-
-  test('attaches Browser routes once to the exact Service listener', async () => {
-    const root = createWebAssets();
-    const fixture = createFixture();
-    const carrier = track(fixture.carrier);
-    const web = carrier.attachWebGateway({
-      staticAssetRoot: root,
-    });
-
-    expect(web.origin).toBe(carrier.origin);
-    expect(await fetch(`${carrier.origin}/index.html`).then((response) => response.text())).toBe(
-      '<html>single service</html>',
-    );
-    const rootResponse = await fetch(`${carrier.origin}/`);
-    expect(rootResponse.status).toBe(200);
-    expect(rootResponse.headers.get('set-cookie')).toContain('HttpOnly');
-    expect(rootResponse.headers.get('set-cookie')).toContain('Path=/;');
-    const apiDocsResponse = await fetch(`${carrier.origin}/api-docs`);
-    expect(apiDocsResponse.status).toBe(200);
-    expect(apiDocsResponse.headers.get('set-cookie')).toContain('HttpOnly');
-    const sessionRouteResponse = await fetch(`${carrier.origin}/sessions/session-one`);
-    expect(sessionRouteResponse.status).toBe(200);
-    expect(sessionRouteResponse.headers.get('set-cookie')).toContain('HttpOnly');
-    expect(await fetch(`${carrier.origin}/healthz`).then((response) => response.text())).toBe('ok');
-
-    expect((await fetch(`${carrier.origin}/_kite/web/bootstrap`)).status).toBe(404);
-    expect((await fetch(`${carrier.origin}/_kite/web/directory`)).status).toBe(404);
-    expect(() =>
-      carrier.attachWebGateway({
-        staticAssetRoot: root,
-      }),
-    ).toThrow('already has');
   });
 
   test('serves an authenticated exact instance handshake and stops serving it after close', async () => {
@@ -1600,15 +1560,4 @@ function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity
     left.projectId === right.projectId &&
     left.workspaceDigest === right.workspaceDigest
   );
-}
-
-function createWebAssets(): string {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-service-web-routes-')));
-  webAssetRoots.push(root);
-  mkdirSync(join(root, 'api-docs'));
-  mkdirSync(join(root, 'assets'));
-  writeFileSync(join(root, 'index.html'), '<html>single service</html>');
-  writeFileSync(join(root, 'api-docs', 'openapi.json'), '{}');
-  writeFileSync(join(root, 'assets', 'app.js'), 'export {};');
-  return root;
 }

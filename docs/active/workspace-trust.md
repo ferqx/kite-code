@@ -114,8 +114,8 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 
 ## 边界与现状
 
-- TUI与CLI`run/resume`都通过managed Native Service执行two-phase门禁。Service-owned internal stdio只给拥有child
-  lifecycle的Desktop/test父进程，不是terminal fallback；development/reference loopback WebSocket也不能绕过Trust，
+- TUI与CLI`run/resume`都通过parent-owned stdio或显式daemon App Server执行two-phase门禁。default child与daemon复用同一App Control owner；
+  development/reference loopback WebSocket也不能绕过Trust，
   但不是production Web/Desktop入口。
 - workspace 信任是canonical目录及其exact external-read scope的一次性决定，不是逐命令或逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。

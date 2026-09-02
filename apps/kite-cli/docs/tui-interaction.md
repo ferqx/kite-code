@@ -55,6 +55,8 @@ source与installed mismatch都在TUI mount前fail closed，不形成可继续使
 显式`--server <endpoint>`改用调用者选择的owner-only Unix socket/Windows named pipe；状态显示exact-protocol compatible，而daemon
 build只作诊断。daemon固定一个canonical Workspace，连接不同Workspace会在进入TUI前失败。该动作只读取composition注入的已验证identity，
 不创建Runtime Session、不发送Runtime command，也不取得writer authority；默认TUI没有`/web`或隐式daemon/Service发现。
+KASD-05已删除TUI的legacy `discoverWeb` prop与`serviceStatus.web*`异步分支；无论stdio还是显式daemon，`/status`都只同步展示已注入的
+Runtime identity/pairing，不请求HTTP origin。
 
 ## 单一交互表面
 

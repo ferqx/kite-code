@@ -4,8 +4,8 @@
 
 `@kite-ai/kite-service`拥有production backend composition。当前source/release的TUI与CLI `run/resume`各自启动同build、parent-owned
 `app-server run-stdio`，多个App Server通过Durable Session Store共享facts，并由per-Session generation fencing限制execution writer。
-显式legacy `service *`与`web`暂时继续使用canonical single-Service、Store 9与loopback HTTP，等待KASD-04～06迁移或删除；它们不是
-default Runtime fallback。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope。
+显式legacy `service *`暂时继续使用canonical single-Service、Store 9与Native loopback transport，等待KASD-06删除；它不再承载Web。
+`kite web`只读取已显式启动的App Server daemon。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope。
 
 `apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker进程拓扑及Store 6/7/8代码不得回到普通
 terminal/Web data plane；独立Web Gateway process/control/state实现已经删除。
@@ -20,8 +20,9 @@ History/Store/App Control/credential authority。typed parent client会核对由
 
 KASD-04另增加显式`app-server run-daemon`前台子入口。它在独立owner-only Unix socket/Windows named pipe上为多个client打开同一个
 Runtime Server/Store composition；每个connection仍使用同一exact logical-message protocol。daemon固定协议身份
-`kite-app-server-daemon-v1`，build只在status中观察，不参与兼容协商；普通disconnect不停止进程，只有exact`server/shutdown`或OS signal
-进入cancel/drain/cleanup。该endpoint不参与default TUI/CLI发现。
+`kite-app-server-daemon-v2`，build只在status中观察，不参与兼容协商；v2 status携带同进程stable `webOrigin`。daemon另起唯一loopback HTTP
+listener，以同build assets提供static shell、API Docs与Browser read-only `/v1`；普通disconnect不停止进程，只有exact`server/shutdown`或OS signal
+进入Web/Runtime drain与cleanup。该endpoint不参与default TUI/CLI发现。
 
 ## 拥有职责
 
@@ -42,9 +43,9 @@ Runtime Server/Store composition；每个connection仍使用同一exact logical-
 - native Runtime command在每次admission时用已认证socket的client/connection generation读取Store 9当前Session Controller；Controller
   generation进入opaque command binding reference，不固化为socket建连快照，因此同一TUI可在多个Session间切换且旧connection generation仍
   fail closed。执行复用现有Runtime/Host的per-Session mailbox、transaction、receipt与recovery，不增加第二套command registry。
-- 同一Service listener同时承载Native/Runtime、Agent API `/v1`和Browser static route。Service发布ready前验证并挂载fixed Web assets，
+- 显式daemon listener承载Agent API `/v1`和Browser static route。daemon发布ready前验证并挂载fixed Web assets，
   `GET /`直接返回index并创建或复用read-only HttpOnly Browser session；Web只读Workspace/Session/History/Log/Model Context/Checkpoint。cookie不能访问
-  Native/Controller/mutation route，Native authorization也不能混入Browser request；Web route只随Service关闭。
+  Native/Controller/mutation route，Native authorization也不能混入Browser request；Web route只随daemon关闭。
 - Browser Model Context诊断复用同一Store 9 Artifact backend和Builtin schema-aware reader，只能从可见Session的exact prepared invocation读取
   bounded provider-neutral system/messages/tools；不打开第二DB、不提供通用Artifact读取，也不暴露ref、Provider options、endpoint或Credential。
 - Browser History将`tool.rejected`投影为独立pre-dispatch `rejected`状态与稳定reason code，不再伪装为执行失败；
@@ -65,8 +66,8 @@ Runtime Server/Store composition；每个connection仍使用同一exact logical-
 
 - 不拥有terminal CLI/TUI、Ink/React、presentation reducer或client preference，也不导入`apps/kite-cli`。
 - 不提供第二默认Service、第二Store、embedded fallback、dual write、try-new-catch-old、通用多Store或OS Service。
-- 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener；显式daemon是唯一
-  新增的production Native listener，且当前不提供HTTP/Web。
+- 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener；显式daemon拥有
+  owner-only Runtime endpoint与一个loopback Web listener，legacy Service不再挂载Browser route。
 - 不提供remote/LAN、多租户或Browser mutation data plane。Web是private loopback REST observer；Agent API的角色与能力受独立contract约束。
 - manager lifecycle/process primitive由`@kite-ai/kite-local-runtime/manager`提供；Service process不自行扮演client manager。
 
@@ -81,7 +82,7 @@ package根入口只服务repo内部composition/test。compiled `kite-service`只
 `kite service ensure/status/stop/restart`控制窄lifecycle surface。
 
 同一internal executable也接受exact `app-server run-stdio|run-daemon`；default TUI/CLI只通过配套typed launcher调用stdio并提供显式profile、Workspace与
-build identity，不能发现/替换shared Service，也不能产生Web endpoint。
+build identity，不能发现/替换shared Service，也不能产生Web endpoint。只有显式daemon提供stable Web origin。
 
 OSS candidate只输出`bin/kite`、`bin/kite-tui`、`bin/kite-service`（Windows为`.exe`）及`payload/web`。manifest中的
 Coordinator/Worker/Gateway slot必须为null，archive不得包含相应executable或launcher。`payload/web/api-docs/openapi.json`是必需的Agent API
@@ -97,8 +98,8 @@ contract asset；installed mode只从launcher固定的immutable candidate root�
   parent退出后只停止自身child，绝不删除profile或Session facts。
 - POSIX每home runtime只允许`service.sock`与`service.lock`；Windows endpoint使用named pipe。custom home按canonical home digest
   隔离endpoint并作为相互独立的profile，不增加跨home coordination。
-- Web assets是Service的exact启动输入；`index.html`、OpenAPI或hashed JS/CSS缺失时Service不发布ready。客户端不能在Service ready后
-  attach、替换或停止Web route。
+- Web assets是daemon v2的exact启动输入；`index.html`、OpenAPI或hashed JS/CSS缺失时daemon不发布ready。legacy Service启动不读取
+  `KITE_SERVICE_WEB_STATIC_ROOT`，其根与Browser `/v1`保持404。
 - Store 9 mutation直接使用同一`BEGIN IMMEDIATE` transaction。Session初始State/snapshot/receipt/recovery identity/Controller state与
   receipt共同commit或rollback；Session删除同事务清理namespaced authority。数据库不保存migration phase、first-write marker或旧Coordinator
   operation receipt。

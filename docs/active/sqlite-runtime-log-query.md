@@ -19,7 +19,7 @@ exact Store 8 header/DDL/所有ownership rows，query前后再次验证active po
 `observedLastSequence`变化、超过4096 records、binding/layout drift、Store 6/legacy-only或损坏内容都fail closed为unavailable；
 compatibility import不参与该journey。
 
-当前single-Service Web/Native History直接从同一Store 9 `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
+当前daemon Web与Native App Server History直接从同一`kite-session.sqlite` `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
 mirror或Worker discovery。Directory的空Session name只读投影第一条durable `user.message_appended`正文作为Browser展示fallback；它不写回
 `runtime_sessions.name`，不创建命名receipt或第二authority。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
 
@@ -53,7 +53,7 @@ history projector与三个authenticated exact History HTTP handler。handler只�
 Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
 `apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
 
-当前single-Service Agent API与Browser read journey不打开上述offline snapshot或第二SQLite connection。Store 9 composition把同一Directory、
+当前daemon Agent API与Browser read journey不打开上述offline snapshot或第二SQLite connection。App Server composition把同一Directory、
 Runtime query、History client与Checkpoint owner直接注入bounded read adapter；不把raw event或SQLite concrete交给HTTP层。Public History first
 page固定`through_sequence`，cursor续页同时使用exclusive after/before window并复核boundary event digest；`after_sequence`提供与cursor互斥的
 running Session增量读取；durable

@@ -20,10 +20,10 @@ OpenAPI/schema生成、Public compatibility或静态`/api-docs` artifact时。
 Schema、standalone wire declarations、examples与SHA-256 digest。`@kite-ai/agent-api-client`是唯一production Browser HTTP client，只封装
 已实现的Browser auth、Workspace、Session、History、诊断Log、Browser-only Model Context与Checkpoint read，不拥有discovery、重试daemon、offline cache、SSE或业务WebSocket。
 
-同一个single-Service listener实现两类principal：
+当前有两类principal；Browser principal只由显式App Server daemon v2 listener承载，Native/automation principal仍可由内部Worker carrier承载：
 
 - Native/automation one-shot capability换Workspace-scoped Agent bearer context；
-- Service的目录、API Docs与受限Workspace-scoped Session SPA shell创建service-scoped、HttpOnly/SameSite Browser cookie；OpenAPI JSON与hashed assets不创建cookie。
+- daemon的目录、API Docs与受限Workspace-scoped Session SPA shell创建daemon-scoped、HttpOnly/SameSite Browser cookie；OpenAPI JSON与hashed assets不创建cookie。
 
 两者复用同一read adapter/query authority。Agent context继续绑定exact Workspace、Client/generation与一条private Runtime logical
 connection；Browser只读取Store 9 Directory允许投影的Workspace/Session，不能调用全局`GET /v1/sessions`、mutation或SSE。cookie、bearer、
@@ -49,7 +49,7 @@ OpenAPI中存在future contract不等于ServerInfo capability开放。
 ## Bounded read与artifact
 
 Workspace来自同一Store 9 Directory，不由Session数组反推；Workspace/Session page使用opaque bounded cursor。Session/History/Log/Checkpoint读取
-复用single-Service已打开的Runtime/History/Store authority，不创建第二SQLite connection、Browser cache或恢复sidecar。History固定
+复用daemon已打开的Runtime/History/`kite-session.sqlite` authority，不创建第二SQLite connection、Browser cache或恢复sidecar。History固定
 `through_sequence`并用boundary digest与`sequence/public_ordinal`续页；`after_sequence`只读取更晚durable event，适合可见性敏感轮询。
 Checkpoint preview只返回计数，不返回path。
 

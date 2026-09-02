@@ -153,16 +153,23 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
   }
   await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
-  runInstalledAppServerDaemonSmoke(cli);
+  await runInstalledAppServerDaemonSmoke(cli);
 }
 
-function runInstalledAppServerDaemonSmoke(cli: string): void {
+async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
   const homeParent = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-home-')));
   const workspace = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
   const kiteHome = join(homeParent, '.kite-code');
   const common = ['--kite-home', kiteHome];
   let primaryError: unknown;
   try {
+    const absentWeb = Bun.spawnSync([cli, 'web', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (absentWeb.exitCode === 0) {
+      throw installedSmokeError('absent App Server daemon Web', absentWeb);
+    }
     const start = Bun.spawnSync([cli, 'server', 'start', '--workspace', workspace, ...common], {
       stdout: 'pipe',
       stderr: 'pipe',
@@ -175,8 +182,19 @@ function runInstalledAppServerDaemonSmoke(cli: string): void {
       stderr: 'pipe',
     });
     if (status.exitCode !== 0) throw installedSmokeError('App Server daemon status', status);
-    const decoded = JSON.parse(status.stdout.toString()) as { readonly state?: unknown };
-    if (decoded.state !== 'ready') throw new Error('Installed App Server daemon was not ready.');
+    const decoded = JSON.parse(status.stdout.toString()) as {
+      readonly state?: unknown;
+      readonly webOrigin?: unknown;
+    };
+    if (decoded.state !== 'ready' || typeof decoded.webOrigin !== 'string') {
+      throw new Error('Installed App Server daemon was not Web-ready.');
+    }
+    const web = Bun.spawnSync([cli, 'web', ...common], { stdout: 'pipe', stderr: 'pipe' });
+    if (web.exitCode !== 0 || web.stdout.toString().trim() !== `${decoded.webOrigin}/`) {
+      throw installedSmokeError('App Server daemon Web discovery', web);
+    }
+    const shell = await fetch(`${decoded.webOrigin}/`);
+    if (shell.status !== 200) throw new Error('Installed App Server daemon Web shell failed.');
   } catch (error) {
     primaryError = error;
   } finally {

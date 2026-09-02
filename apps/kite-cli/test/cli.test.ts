@@ -56,7 +56,7 @@ describe('cli argument parsing', () => {
     }
   });
 
-  test('recognizes only the single-Service Web root command', () => {
+  test('recognizes only the explicit App Server daemon Web root command', () => {
     expect(parseArgs(['web']).command).toBe('web-open');
     expect(parseArgs(['web', '--json'])).toMatchObject({
       command: 'web-open',
@@ -70,9 +70,10 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['web', 'prompt']).command).toBe('help');
     expect(parseArgs(['web', 'create']).command).toBe('help');
     expect(parseArgs(['web', '--kite-home', '/tmp/kite-home']).command).toBe('web-open');
+    expect(parseArgs(['web', '--server', '/tmp/app-server.sock']).command).toBe('web-open');
   });
 
-  test('prints the stable single-Service Web root', async () => {
+  test('prints the stable explicit App Server daemon Web root', async () => {
     const originalArgv = process.argv;
     const output = spyOn(console, 'log').mockImplementation(() => undefined);
     const calls: string[] = [];
@@ -83,13 +84,31 @@ describe('cli argument parsing', () => {
     try {
       process.argv = ['bun', 'kite', 'web'];
       await main({
-        singleServiceWeb: { discover },
+        appServerWeb: { discover },
       });
       expect(output.mock.calls.at(-1)).toEqual(['http://127.0.0.1:43125/']);
       expect(calls).toEqual(['discover']);
     } finally {
       process.argv = originalArgv;
       output.mockRestore();
+    }
+  });
+
+  test('does not start a daemon when Web discovery reports it absent', async () => {
+    const originalArgv = process.argv;
+    try {
+      process.argv = ['bun', 'kite', 'web'];
+      await expect(
+        main({
+          appServerWeb: {
+            discover: async () => {
+              throw new Error('App Server daemon is unavailable; run `kite server start` first.');
+            },
+          },
+        }),
+      ).rejects.toThrow('kite server start');
+    } finally {
+      process.argv = originalArgv;
     }
   });
 

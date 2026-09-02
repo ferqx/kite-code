@@ -93,11 +93,11 @@ byte-exact generation；独立`check:agent-api-packages`验证zero-workspace dep
 验证cookie REST、contract header/Problem、path/cursor与`after_sequence`编码。`apps/kite-web/test/`验证Workspace懒加载、Session/History/
 Checkpoint presentation、generation隔离与可见性敏感增量轮询；`apps/kite-service/test/agent-api/`验证Agent capability与Browser launch exchange、
 Workspace Trust/Directory scope、hash-only context/session、role/TTL/generation/revoke及bounded Workspace/Session/History/Checkpoint adapter，
-包括cursor checksum/filter、History through/boundary/after-sequence、Checkpoint path non-disclosure与drain。isolated carrier tests证明HTTP复用
-同一listener且credential route不混用；static carrier test固定验证退役`/_kite/web/*`业务route 404以及`/api-docs`精确allowlist。
+包括cursor checksum/filter、History through/boundary/after-sequence、Checkpoint path non-disclosure与drain。daemon Web carrier test证明
+static与Browser `/v1`复用一个listener且credential route不混用；同时固定退役`/_kite/web/*`业务route 404以及`/api-docs`精确allowlist。
 KASAPI-02D的`apps/kite-service/test/agent-api/reference-client.ts`是test-only Public codec client；conformance suite用它同时驱动handler与真实
 Worker HTTP listener，验证两种role、capability incompatibility/replay、concurrent keyset page、fixed-through History、1 MiB body/response、
-16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；当前Web只有Service-owned static/auth carrier测试，
+16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；当前Web由显式daemon-owned static/auth carrier承载，
 不再保留独立Gateway process restart矩阵。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
 exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
@@ -111,10 +111,9 @@ carrier composition tests；`apps/kite-cli/test/`只验证default managed client
 disconnect/exit不shutdown owner及无embedded fallback。`apps/kite-service/test/isolated/process-harness/`仍是KLSV1-05
 fake-application detached-child fixture，不能代替当前default Store持久恢复或release evidence。
 
-`tests/release/single-service-real-child.test.ts`使用同一custom home与真实source child固定TUI-first、Web-launch-first和并发ensure只得到一个
-ready Service；Service ready时根页面、Browser auth与`/v1`已经同源可用。它还在Controller创建后发送真实受控Runtime command、启动Run，并用Browser
-fragment/cookie读取同一Session与History boundary，复核Kite Home只有一个`kite.sqlite`及允许的runtime endpoint文件。TUI persisted
-observer只读这个Store 9路径，不再探测Store 7/8 layout或`checkpoints.sqlite`fallback。
+`tests/release/single-service-real-child.test.ts`只保留legacy build replacement/Native Runtime证据，并明确其根与Browser `/v1`为404。
+`tests/release/app-server-daemon.test.ts`负责Web当前证据：absent discovery不spawn、stable origin/static shell、HttpOnly Browser `/v1`读取
+Native client写入同一`kite-session.sqlite`的Session、v1/v2 mismatch、双client History与stop清理。
 
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 

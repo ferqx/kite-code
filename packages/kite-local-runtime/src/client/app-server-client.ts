@@ -60,7 +60,7 @@ export const KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_ = Object.freeze([
   'server/status',
   'server/shutdown',
 ] as const satisfies readonly RuntimeProtocolMethod[]);
-export const KITE_APP_SERVER_DAEMON_VERSION_ = 'kite-app-server-daemon-v1' as const;
+export const KITE_APP_SERVER_DAEMON_VERSION_ = 'kite-app-server-daemon-v2' as const;
 
 export interface KiteAppServerClientOptions {
   readonly executable: string;

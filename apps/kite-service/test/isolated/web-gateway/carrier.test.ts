@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentApiRouteHandler } from '../../../src/agent-api';
 import { createWebGatewayCarrier, type WebGatewayCarrier } from '../../../src/web-gateway';
 
 const carriers: WebGatewayCarrier[] = [];
@@ -23,7 +24,18 @@ describe('Web Gateway static REST carrier', () => {
     await writeFile(join(root, 'index.html'), '<!doctype html><title>Kite</title>');
     await writeFile(join(root, 'assets', 'app.js'), 'globalThis.kite = true;');
     await writeFile(join(root, 'api-docs', 'openapi.json'), '{"openapi":"3.1.0"}\n');
-    const carrier = createWebGatewayCarrier({ staticAssetRoot: root, instanceId: 'instance-one' });
+    const agentApi = Object.freeze({
+      handle: (_request, browserAuth) =>
+        Response.json({ browserAuthenticated: browserAuth !== undefined }),
+      revokeClientGeneration: () => undefined,
+      close: async () => undefined,
+      [Symbol.asyncDispose]: async () => undefined,
+    } satisfies AgentApiRouteHandler);
+    const carrier = createWebGatewayCarrier({
+      staticAssetRoot: root,
+      instanceId: 'instance-one',
+      agentApi,
+    });
     carriers.push(carrier);
 
     const docsIndex = await fetch(`${carrier.origin}/api-docs`);
@@ -58,5 +70,13 @@ describe('Web Gateway static REST carrier', () => {
     }
 
     expect(index.headers.get('set-cookie')).toContain('Path=/; HttpOnly; SameSite=Strict');
+    const api = await fetch(`${carrier.origin}/v1`, {
+      headers: {
+        cookie: index.headers.get('set-cookie')!,
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'same-origin',
+      },
+    });
+    expect(await api.json()).toEqual({ browserAuthenticated: true });
   });
 });

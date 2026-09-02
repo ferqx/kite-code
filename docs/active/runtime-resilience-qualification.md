@@ -44,7 +44,8 @@ build/verify/install和installed TUI PTY startup；Ubuntu/Windows与完整TUI矩
 
 KASD-04本机资格增加真实Unix socket daemon：start幂等、status只读、普通disconnect保留owner、双client共享History、active Turn stop时先
 cancel再drain并清理endpoint；模拟旧build但相同exact protocol可连接，要求未知capability的client fail closed且不能触发replace/stop。
-当前证据不声称Windows named-pipe或三平台通过，daemon也不提供自动upgrade、background watcher、remote transport或Web listener。
+当前证据不声称Windows named-pipe或三平台通过，daemon也不提供自动upgrade、background watcher或remote transport。KASD-05另加入
+loopback Web listener及Browser/Native Store共享证据。
 
 ## 两级运行契约
 
@@ -61,7 +62,7 @@ invalidated，不把新History拼到旧watermark。response loss后Client必须�
 每context最多16个in-flight request；第17个返回retryable 429。logout、Trust撤销、generation fence、drain与replacement先阻止新admission，
 等待已认证read（包括pending Trust重验）收敛后关闭一次private connection；迟到admission复核closed/revoked事实并返回503/401，不能进入owner。
 History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
-覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；当前Web static/auth surface随single-Service restart
+覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；当前Web static/auth surface随显式daemon lifecycle
 重建，由同listener carrier与真实child suite证明且不代理`/v1`。
 
 KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和

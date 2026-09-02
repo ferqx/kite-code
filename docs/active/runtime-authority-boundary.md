@@ -51,8 +51,9 @@ kill整个组。successor仍必须等Session lease并显式reconcile，不能因
 
 KASD-04的显式daemon只新增process/endpoint lifecycle与logical-message carrier，不新增Session或Store authority。owner-only Unix socket/
 Windows named pipe可承载多个connection；每个connection仍经同一Runtime Server admission，disconnect只释放自身资源。`server/status`与
-`server/shutdown`是固定`kite-app-server-daemon-v1`的exact capability：status只读且不创建endpoint/credential/Session，shutdown由daemon owner
-取消active Turn并bounded drain。daemon build ID不参与compatibility，Store generation/revision仍是唯一writer裁决。
+`server/shutdown`是固定daemon exact capability；KASD-05的v2 status增加strict loopback `webOrigin`，因此v1 client明确mismatch。
+status只读且不创建endpoint/credential/Session，shutdown由daemon owner先关闭Web admission，再取消active Turn并bounded drain。
+daemon build ID不参与compatibility，Store generation/revision仍是唯一writer裁决。
 
 ## 当前可信域
 
@@ -123,7 +124,7 @@ Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
-Public Agent API当前在同一single-Service listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
+Public Agent API Browser route当前只在显式daemon listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
 hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
 initialize/query-only in-process Runtime Client/Server logical connection。Service的根与API Docs SPA shell另建HttpOnly cookie与service-scoped read-only
 principal。ServerInfo按principal发布`checkpoints/history/sessions/workspaces`；Workspace、Workspace Session、Session get、History page与
@@ -290,7 +291,10 @@ Store 6；unknown source静默忽略，corrupt source只隔离该session。sourc
 
 ## Carrier scope
 
-stdio是Service-owned internal child I/O：bounded UTF-8 JSONL从stdin输入，stdout只承载protocol，diagnostics使用stderr；EOF只释放connection，不会创建新的Runtime owner，只有parent capability可以请求composition shutdown。默认terminal入口使用Service-ownedNative loopback carrier：只bind loopback，经restart-scoped token/ticket认证，并接受exact Host/Origin/CSP/no-CORS/frame/heartbeat checks。另有development/reference WebSocket carrier只用于conformance。两者都不改变ADR-0053：不能据此发布`kite server --web`、production Web UI或remote support claim。
+stdio是App Server parent-owned child I/O：bounded UTF-8 JSONL从stdin输入，stdout只承载protocol，diagnostics使用stderr；EOF只释放connection并由
+parent关闭该composition。显式daemon的owner-only socket承载相同logical protocol，另有独立loopback HTTP carrier承载private Browser Web；
+Browser cookie只取得read façade，不能进入Runtime control。legacy Native loopback carrier继续用restart-scoped token/ticket承载旧Runtime，
+但不再挂载static/Browser `/v1`。development/reference WebSocket carrier只用于conformance；remote/LAN support仍未批准。
 
 Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free ref。文件权限、no-follow、atomic rename、fsync、schema readback 与 Runtime receipt identity 共同检测损坏和混淆；不存在 `model-artifacts.key`、key loss 终态或无 Artifact dispatch fallback。
 

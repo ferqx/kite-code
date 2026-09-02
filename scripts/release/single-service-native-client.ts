@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstatSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import {
   WORKER_CONTROLLER_PATH_,
   type WorkerControllerClient,
@@ -70,12 +70,10 @@ export interface SingleServiceNativeClientComposition {
   readonly endpoint: KiteLocalRuntimeEndpoint;
   readonly expectedBuildId: string;
   readonly client: KiteSingleServiceClient;
-  readonly discoverWeb: () => Promise<string>;
 }
 
 export interface ManagedSingleServiceNativeCompositionOptions
   extends SingleServiceNativeClientCompositionOptions {
-  readonly staticAssetRoot: string;
   readonly executable: KiteServiceManagerExecutable;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -136,10 +134,6 @@ export function createSingleServiceNativeClientComposition(
     endpoint,
     expectedBuildId: options.expectedBuildId,
     client,
-    discoverWeb: async () => {
-      const response = await client.describe();
-      return `${response.service.httpOrigin}/`;
-    },
   });
 }
 
@@ -147,13 +141,6 @@ export function createSingleServiceNativeClientComposition(
 export function createManagedSingleServiceNativeComposition(
   options: ManagedSingleServiceNativeCompositionOptions,
 ): ManagedSingleServiceNativeComposition {
-  if (!isAbsolute(options.staticAssetRoot)) {
-    throw new TypeError('Single-Service Web asset root must be absolute.');
-  }
-  const staticAssetRoot = resolve(options.staticAssetRoot);
-  if (options.env.KITE_SERVICE_WEB_STATIC_ROOT !== staticAssetRoot) {
-    throw new Error('Single-Service child Web asset root does not match release composition.');
-  }
   const base = createSingleServiceNativeClientComposition(options);
   const manager = createKiteSingleServiceManager({
     endpoint: base.endpoint,
@@ -315,14 +302,6 @@ export function createManagedSingleServiceNativeComposition(
   });
   return Object.freeze({
     ...base,
-    discoverWeb: async () => {
-      const ensured = await manager.ensure({ executableMode: options.executable.mode });
-      if (ensured.outcome !== 'applied' || ensured.state !== 'ready') {
-        throw new Error(`Single-Service ensure failed: ${ensured.diagnostic ?? ensured.outcome}.`);
-      }
-      const response = await base.client.describe();
-      return `${response.service.httpOrigin}/`;
-    },
     manager,
     connector,
     dispose: async () => {
@@ -361,13 +340,6 @@ export function createManagedLocalSingleServiceComposition(
       : 'dev:installed-placeholder';
   const expectedBuildId =
     executableMode === 'source' ? sourceBuildId : installedBuildIdentity(process.execPath);
-  const candidateRoot = resolve(
-    process.env.KITE_CODE_RELEASE_ROOT ?? dirname(dirname(process.execPath)),
-  );
-  const staticAssetRoot =
-    executableMode === 'source'
-      ? join(repositoryRoot, 'apps', 'kite-web', 'dist')
-      : join(candidateRoot, 'payload', 'web');
   const runtimeParent = resolveLocalRuntimeParent(sourceEnvironment);
   const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
   const standalone = serviceTopology === 'standalone' ? createStandaloneRuntimeHome() : undefined;
@@ -382,7 +354,6 @@ export function createManagedLocalSingleServiceComposition(
   env.KITE_CODE_HOME = runtimeHome.root;
   env.KITE_CODE_CONFIG_HOME = home.root;
   env.KITE_SERVICE_BUILD_ID = expectedBuildId;
-  env.KITE_SERVICE_WEB_STATIC_ROOT = staticAssetRoot;
   env.NODE_ENV = 'production';
   if (process.platform !== 'win32') env.KITE_SINGLE_SERVICE_RUNTIME_PARENT = runtimeParent;
   let composition: ManagedSingleServiceNativeComposition;
@@ -391,7 +362,6 @@ export function createManagedLocalSingleServiceComposition(
       home: runtimeHome,
       runtimeParent,
       expectedBuildId,
-      staticAssetRoot,
       executable:
         executableMode === 'source'
           ? {

@@ -76,7 +76,8 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('| KASD-01 | completed |');
     expect(plan).toContain('| KASD-02 | completed |');
     expect(plan).toContain('| KASD-03 | completed |');
-    expect(plan).toContain('| KASD-04 | in_progress |');
+    expect(plan).toContain('| KASD-04 | completed |');
+    expect(plan).toContain('| KASD-05 | in_progress |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

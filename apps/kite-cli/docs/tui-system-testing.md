@@ -78,6 +78,9 @@ KASD-04新增显式daemon journey：真实`server start`后两个TUI通过同一
 `server stop`取消active Turn、drain连接并清理endpoint。模拟旧build但同exact protocol的client可连接，要求未知capability的future client
 必须fail closed；Windows named-pipe与完整三平台证据仍由KASD-06拥有。
 
+KASD-05把daemon exact identity提升到v2并增加Web，但TUI场景仍只通过owner-only Runtime endpoint连接；`/status`不请求或显示Web origin。
+完整42-file PTY再次通过，证明默认stdio与显式daemon交互未因Web listener改变。Browser/Native共享Store证据由release daemon test拥有。
+
 ## 验证
 
 `bun run test:tui:harness`、`bun run test:tui:system:core`、完整 `bun run test:tui:system`。

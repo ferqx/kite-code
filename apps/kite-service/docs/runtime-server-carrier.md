@@ -5,10 +5,10 @@ stdio implementation与development/reference carrier都在Service workspace；�
 
 ## Native listener 与路由
 
-carrier只绑定 `127.0.0.1:0`，descriptor固定发布同端口HTTP origin与`ws://127.0.0.1:<port>/rpc`。封闭路由为
+legacy Native carrier只绑定 `127.0.0.1:0`，descriptor固定发布同端口HTTP origin与`ws://127.0.0.1:<port>/rpc`。封闭路由为
 health/ready、authenticated instance handshake、connect、Runtime WebSocket、三个History use case、Workspace Trust、
 Provider/model、MCP、Skill、execution/release、Native provider credential与control stop。不存在static assets、
-CORS/OPTIONS授权、cookie session、restart route或generic App/RPC registry。
+CORS/OPTIONS授权、cookie session、Browser static/`/v1` route、restart route或generic App/RPC registry。
 
 除health/ready外，所有route在Service ready前统一503。manager先以unauthenticated exact `GET /readyz`做liveness
 precheck，再以access token发送 exact `POST /_kite/instance`、`Content-Type: application/json`、body `{}`、无query/cookie。
@@ -62,6 +62,10 @@ dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/in
 correlation，随后owner取消active Turn、drain全部connection、关闭endpoint并dispose Store。未知字段、未initialize、缺少capability或协议版本
 不匹配都fail closed，不存在外层lifecycle frame或build negotiation。
 
+daemon v2在endpoint ready前另创建唯一`127.0.0.1:0` Web carrier；status返回strict `webOrigin`。该listener提供同build static/API Docs与
+Browser cookie read-only `/v1`，直接复用daemon的Runtime/History/Directory/Checkpoint owner。Web close先停止新请求并bounded drain，随后
+Runtime shutdown继续；Browser断开不等于daemon stop。legacy Native carrier已删除static route attachment，根与Browser `/v1`保持404。
+
 App Server执行未sandboxed host Shell时，Runtime Host generic process port使用Service内嵌的
 `--kite-internal-process-tree-v1`（source使用同源码child）作为POSIX watchdog；App Server意外死亡会关闭watchdog stdin，watchdog终止
 同process group的实际command。正常EOF/signal仍优先走Host cancel/cleanup。该internal mode不接受普通CLI路由或command args。
@@ -82,8 +86,8 @@ diagnostic或response；response loss继续由mutation ID与`outcome_unknown`规
 
 ## Development reference
 
-development loopback/reference仅用于同一Protocol transport qualification，不进入production support。不存在
-`kite server --web`，ADR-0053 Web No-Go仍有效。
+development loopback/reference仅用于同一Protocol transport qualification，不进入production support。显式daemon的private loopback Web已由
+ADR-0166批准；仍不存在remote/LAN `kite server --web`或把Browser cookie提升为Runtime mutation credential的路径。
 
 ## 验证
 

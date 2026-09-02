@@ -28,6 +28,8 @@ export interface ManagedLocalAppServerOptions {
   readonly executableMode?: 'source' | 'installed';
   readonly repositoryRoot?: string;
   readonly processExecutable?: string;
+  /** Source-mode test/development override; installed mode always uses candidate-pinned assets. */
+  readonly sourceWebStaticRoot?: string;
   /** Isolated release tests only; production leaves child creation to the typed transport. */
   readonly spawn?: BunStdioChildSpawnFactory;
 }
@@ -56,6 +58,7 @@ export interface ManagedLocalAppServerTarget {
   readonly configRoot: string;
   readonly systemHome: string;
   readonly executable: string;
+  readonly webStaticRoot: string;
   readonly argumentsPrefix: readonly string[];
   readonly environment: Readonly<Record<string, string>>;
 }
@@ -160,6 +163,13 @@ export function resolveManagedLocalAppServerTarget(
           executable: processExecutable,
           candidateRoot,
         });
+  if (mode === 'installed' && options.sourceWebStaticRoot !== undefined) {
+    throw new Error('Installed App Server Web assets must remain candidate-pinned.');
+  }
+  const webStaticRoot =
+    mode === 'source'
+      ? resolve(options.sourceWebStaticRoot ?? join(repositoryRoot!, 'apps', 'kite-web', 'dist'))
+      : join(candidateRoot ?? dirname(dirname(processExecutable)), 'payload', 'web');
   return Object.freeze({
     mode,
     buildId,
@@ -167,6 +177,7 @@ export function resolveManagedLocalAppServerTarget(
     configRoot: home.root,
     systemHome,
     executable,
+    webStaticRoot,
     argumentsPrefix: Object.freeze(sourceEntrypoint ? [sourceEntrypoint] : []),
     environment: Object.freeze(environment),
   });

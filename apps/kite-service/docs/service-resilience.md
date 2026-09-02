@@ -2,7 +2,8 @@
 
 本页描述single-Service shell与`@kite-ai/kite-local-runtime/manager`拥有的lifecycle。每个canonical Kite Home最多一个Service；Runtime、
 History、App Control、Controller、Web/Agent API与Store 9均在该进程内组合。Coordinator/Worker/Gateway lifecycle只属于legacy迁移边界。
-显式App Server daemon是独立KASD lifecycle：它不复用本页的Service build replacement、Native control token或Web readiness，见
+显式App Server daemon是独立KASD lifecycle：它不复用本页的Service build replacement或Native control token；其v2 readiness同时包含
+exact static/API Web listener，见
 [`runtime-server-carrier.md`](runtime-server-carrier.md)与仓库[`single-service-local-runtime.md`](../../../docs/active/single-service-local-runtime.md)。
 
 ## 启动
@@ -18,8 +19,9 @@ Kite Home不保存descriptor、token、lock、launch intent或socket。POSIX每h
 Windows endpoint使用named pipe。不同custom home相互独立，不另建跨home lease或coordination目录。
 access/control capability在Service进程内生成并通过native握手返回，不形成durable credential file。
 
-App Server daemon使用独立owner-only endpoint与fixed exact protocol。普通client断开不改变owner；显式stop才取消active Turn、drain carrier并
-清理exact reservation。status/stop在absent时不创建Kite Home或endpoint，start只回收PID/start/socket identity明确dead的旧owner。
+App Server daemon使用独立owner-only endpoint与fixed exact protocol。普通client/Browser断开不改变owner；显式stop才先关闭Web admission，
+取消active Turn、drain Runtime carrier并清理exact reservation。status/stop在absent时不创建Kite Home或endpoint，start只回收
+PID/start/socket identity明确dead的旧owner。legacy Service不再验证或挂载Web assets。
 
 项目采用未发布clean cutover。普通启动不扫描、迁移或删除旧Store/layout/Artifact/process state及`.kite-code-coordination`，旧数据也不作为
 current Store 9 fallback。
@@ -48,9 +50,9 @@ rollback。Session删除同事务清理namespaced Controller/effect/resource/rec
 
 ## Web
 
-source入口先构建fixed Web assets；Service在发布ready前验证`index.html`、OpenAPI和hashed JS/CSS并挂载Browser route。缺失时整个
-Service启动失败，不发布部分ready状态。`kite web`只ensure Service并返回稳定根地址；Browser logout只撤销session，route随Service stop
-关闭。Vite dev server只服务前端资源，Browser打开URL也不拥有启动本机Service的权限。
+legacy Service启动已删除Web asset input/preflight与Browser route，根和Browser `/v1`为404。显式daemon v2在发布endpoint ready前验证
+`index.html`、OpenAPI和hashed JS/CSS并启动同进程loopback Web；`kite web`只读ready status，不隐式start。Browser logout只撤销session，
+route随daemon stop关闭。Vite dev server只服务前端资源，Browser打开URL也不拥有启动本机进程的权限。
 
 ## Release
 

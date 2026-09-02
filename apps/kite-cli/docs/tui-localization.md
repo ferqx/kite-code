@@ -13,6 +13,7 @@
   同一中英文catalog；PID、ISO时间与version/build identity原样显示。稳定的
   稳定语义先于本地化产生，不能从译文反推状态；显式daemon的build只作诊断，`protocolCompatible`必须来自initialize的exact
   version/capability验证。
+- Web origin不属于TUI状态；旧`serviceStatus.web*` catalog key与异步discovery已删除，`kite web`的CLI错误直接来自typed daemon状态。
 - Runtime event、command、failure code、status 枚举和 provider 返回值保持稳定英文机器值，不进入翻译 key。
 - 状态推导先生成稳定语义值，渲染边界再映射当前 locale；禁止从译文反推状态。
 

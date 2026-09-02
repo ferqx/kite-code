@@ -32,6 +32,7 @@ export interface AppServerDaemonStatus {
   readonly instanceId?: string;
   readonly startedAt?: string;
   readonly workspace?: string;
+  readonly webOrigin?: string;
   readonly endpoint: string;
 }
 
@@ -47,6 +48,7 @@ export interface ManagedLocalAppServerDaemon {
   start(workspace: string): Promise<AppServerDaemonStatus>;
   status(): Promise<AppServerDaemonStatus>;
   stop(): Promise<AppServerDaemonStatus>;
+  discoverWeb(): Promise<string>;
 }
 
 export function createManagedLocalAppServerDaemon(
@@ -145,6 +147,7 @@ export function createManagedLocalAppServerDaemon(
           ? { ...existing, state: 'incompatible' }
           : existing;
       }
+      validateWebStaticRoot(target.webStaticRoot);
       prepareManagedLocalAppServerTarget(target);
       await clearDeadEndpoint(endpoint);
       const env = daemonEnvironment(target, endpoint, canonicalWorkspace);
@@ -173,6 +176,19 @@ export function createManagedLocalAppServerDaemon(
       throw new Error('App Server daemon did not become ready.');
     },
     status: readStatus,
+    async discoverWeb(): Promise<string> {
+      const status = await readStatus();
+      if (status.state === 'incompatible') {
+        throw new Error('App Server daemon protocol is incompatible; use its matching client.');
+      }
+      if (status.state === 'unavailable') {
+        throw new Error('App Server daemon identity is unavailable.');
+      }
+      if (status.state !== 'ready' || !status.webOrigin) {
+        throw new Error('App Server daemon is absent; run `kite server start` first.');
+      }
+      return `${status.webOrigin}/`;
+    },
     async stop(): Promise<AppServerDaemonStatus> {
       const current = await readStatus();
       if (
@@ -214,6 +230,7 @@ function daemonEnvironment(
     KITE_CODE_CONFIG_HOME: target.configRoot,
     KITE_APP_SERVER_WORKSPACE: workspace,
     KITE_APP_SERVER_BUILD_ID: target.buildId,
+    KITE_APP_SERVER_WEB_STATIC_ROOT: target.webStaticRoot,
     KITE_APP_SERVER_DAEMON_HOME_DIGEST: endpoint.homeDigest,
     HOME: target.systemHome,
     USERPROFILE: target.systemHome,
@@ -252,6 +269,7 @@ function decodeStatus(
     instanceId: decoded.instanceId,
     startedAt: decoded.startedAt,
     workspace: decoded.workspace,
+    webOrigin: decoded.webOrigin,
     endpoint: endpointLabel(endpoint),
   };
 }
@@ -300,6 +318,19 @@ function pathExists(path: string): boolean {
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
     throw error;
+  }
+}
+
+function validateWebStaticRoot(path: string): void {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || realpathSync.native(path) !== path) {
+      throw new Error();
+    }
+  } catch {
+    throw new Error(
+      'App Server Web assets are unavailable; build the Web bundle before `kite server start`.',
+    );
   }
 }
 

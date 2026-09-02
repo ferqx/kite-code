@@ -5,23 +5,27 @@ import {
   KITE_APP_SERVER_DAEMON_SHUTDOWN_RESPONSE_SCHEMA_,
   KITE_APP_SERVER_DAEMON_STATUS_REQUEST_CODEC_,
   KITE_APP_SERVER_DAEMON_STATUS_RESPONSE_SCHEMA_,
+  KITE_APP_SERVER_DAEMON_VERSION_,
 } from '@kite-ai/kite-local-runtime/client';
 import {
   KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_,
   type KiteLocalRuntimeEndpoint,
   readLocalProcessStartIdentity,
 } from '@kite-ai/kite-local-runtime/service';
+import { createAgentApiRouteHandler } from './agent-api';
 import {
   createKiteAppServerRuntimeOwner,
   type KiteAppServerMainDependencies,
   resolveKiteAppServerEnvironment,
 } from './app-server';
+import { createKiteSingleServiceAgentApiReadContext } from './bootstrap';
 import {
   createNodeRuntimeStdioOutput,
   createRuntimeStdioCarrier,
   type RuntimeStdioCarrier,
 } from './carrier/runtime-server-stdio';
 import { createKiteOwnedLocalEndpointServer } from './native-endpoint';
+import { createWebGatewayCarrier, preflightWebGatewayStaticAssets } from './web-gateway';
 
 export interface KiteAppServerDaemonDependencies
   extends Pick<
@@ -42,6 +46,9 @@ export async function runKiteAppServerDaemonMain(
   const source = dependencies.environment ?? process.env;
   const environment = resolveKiteAppServerEnvironment(source);
   const endpoint = resolveDaemonEndpoint(source);
+  const webStaticRoot = preflightWebGatewayStaticAssets(
+    requiredAbsolute(source, 'KITE_APP_SERVER_WEB_STATIC_ROOT'),
+  );
   const owner = createKiteAppServerRuntimeOwner(environment, dependencies, {
     daemonProtocol: true,
   });
@@ -51,6 +58,14 @@ export async function runKiteAppServerDaemonMain(
     await owner.composition[Symbol.asyncDispose]();
     throw new Error('App Server daemon process identity is unavailable.');
   }
+  let webOwners: Awaited<ReturnType<typeof createDaemonWebOwners>>;
+  try {
+    webOwners = await createDaemonWebOwners(owner, webStaticRoot, environment.buildId);
+  } catch (error) {
+    await Promise.resolve(owner.composition[Symbol.asyncDispose]()).catch(() => undefined);
+    throw error;
+  }
+  const { browserReadContext, agentApi, webGateway } = webOwners;
   const carriers = new Set<RuntimeStdioCarrier>();
   let resolveShutdown!: () => void;
   const shutdownRequested = new Promise<void>((resolve) => {
@@ -76,6 +91,7 @@ export async function runKiteAppServerDaemonMain(
           buildId: environment.buildId,
           startedAt,
           workspace: environment.workspace,
+          webOrigin: webGateway.origin,
         });
       }
       KITE_APP_SERVER_DAEMON_SHUTDOWN_REQUEST_CODEC_.parse(request);
@@ -111,6 +127,9 @@ export async function runKiteAppServerDaemonMain(
   try {
     await endpointServer.start();
     await shutdownRequested;
+    await webGateway.close();
+    await agentApi.close();
+    await browserReadContext.close();
     await owner.composition.application.cancelAll('app_server_daemon_shutdown');
     await Promise.all([...carriers].map((carrier) => carrier.shutdown()));
     await endpointServer.close();
@@ -119,6 +138,15 @@ export async function runKiteAppServerDaemonMain(
   } finally {
     signals.off('SIGINT', onSignal);
     signals.off('SIGTERM', onSignal);
+    await webGateway.close().catch((error) => {
+      primaryError ??= error;
+    });
+    await agentApi.close().catch((error) => {
+      primaryError ??= error;
+    });
+    await browserReadContext.close().catch((error) => {
+      primaryError ??= error;
+    });
     await endpointServer.close().catch((error) => {
       primaryError ??= error;
     });
@@ -127,6 +155,47 @@ export async function runKiteAppServerDaemonMain(
     });
   }
   if (primaryError !== undefined) throw primaryError;
+}
+
+async function createDaemonWebOwners(
+  owner: ReturnType<typeof createKiteAppServerRuntimeOwner>,
+  webStaticRoot: string,
+  buildId: string,
+): Promise<{
+  readonly browserReadContext: ReturnType<typeof createKiteSingleServiceAgentApiReadContext>;
+  readonly agentApi: ReturnType<typeof createAgentApiRouteHandler>;
+  readonly webGateway: ReturnType<typeof createWebGatewayCarrier>;
+}> {
+  const browserReadContext = createKiteSingleServiceAgentApiReadContext({
+    directory: owner.storageOwner.directory,
+    runtime: owner.composition.runtime,
+    history: owner.composition.history,
+    storage: owner.composition.storage,
+    artifactStore: owner.storageOwner.artifactStore,
+    checkpoints: owner.composition.storage.checkpoints,
+  });
+  const agentApi = createAgentApiRouteHandler({
+    serverVersion: KITE_APP_SERVER_DAEMON_VERSION_,
+    buildId,
+    consumeCapability: () => undefined,
+    admitWorkspace: async () => 'unavailable',
+    isClientGenerationCurrent: () => false,
+    capabilities: [],
+    browserReadContext,
+    browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+  });
+  try {
+    const webGateway = createWebGatewayCarrier({
+      staticAssetRoot: webStaticRoot,
+      instanceId: owner.instanceId,
+      agentApi,
+    });
+    return { browserReadContext, agentApi, webGateway };
+  } catch (error) {
+    await agentApi.close().catch(() => undefined);
+    await Promise.resolve(browserReadContext.close()).catch(() => undefined);
+    throw error;
+  }
 }
 
 function createSocketCarrier(

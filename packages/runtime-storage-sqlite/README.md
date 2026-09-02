@@ -65,7 +65,7 @@
   scope：event/snapshot/name/model、delete、checkpoint/rewind/fork、Run/recovery与typed Artifact mutation全部进入同一个generation/revision
   fence；read/list不取lease，constructor深验及App Server复合read可固定在一个SQLite read snapshot。fork target facts、Run/receipt与generation 1同事务，后续copy
   fault共同回滚。新owner不取得旧Workspace process lock，也不要求one-connection Store composition。旧Store 9只服务显式legacy
-  single-Service/Web控制面，不能成为default App Server fallback。
+  legacy single-Service控制面，不能成为default App Server或daemon Web fallback。
 - 新epoch的`runtime_effect_leases`使用独立exact列集合，除attempt-local `lease_revision`外还绑定Session `controller_generation`与
   Host/client/connection identity。`createKiteSessionMutationPort`在同一个`BEGIN IMMEDIATE`内重读这组execution binding、authority revision、
   lease deadline与Session revision后才执行callback；`createKiteSessionEffectPort`只允许该transaction内prepare/renew/terminal/unknown，并在每次

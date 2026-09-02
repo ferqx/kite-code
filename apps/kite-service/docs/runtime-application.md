@@ -73,7 +73,7 @@ initialize/query，并继续把persisted Session identity与当前Workspace交�
 IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
 same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
 subscribe或recovery。
-single-Service Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
+显式daemon Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
 `model_surface`；read adapter只消费App-owned Model Context read port，不取得Artifact ref/backend或通用正文读取authority。
 operation gate的quiesce线性化关闭新mutation admission后，Application在同一lease中合并gate临界区与Host
 `SessionLifecycleSupervisor`投影的长生命周期Session operation；普通stop发现任一active都立即resume并返回`service_busy`，不会等待active

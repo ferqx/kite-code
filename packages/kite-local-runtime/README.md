@@ -19,7 +19,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   version及全部13个App方法，否则关闭child并拒绝连接；credential在dispatch前可取消，dispatch后不以本地Abort伪造未执行；这里不发现
   PATH、daemon或active candidate，也不提供fallback。
 - `./client`另提供显式daemon的Unix socket/Windows named-pipe logical-message transport与typed lifecycle codec。它只连接caller给出的
-  endpoint，不发现、不启动、不升级daemon；daemon使用固定`kite-app-server-daemon-v1`和exact capability集合，build ID只作状态信息。
+  endpoint，不发现、不启动、不升级daemon；daemon使用固定`kite-app-server-daemon-v2`和exact capability集合，build ID只作状态信息。
+  v2 status另外返回strict loopback `webOrigin`，供`kite web`只读发现同daemon的静态资产与Browser `/v1`；absent/incompatible不会spawn。
 - `./config`：CLI与Service共享的per-file mutation primitive。每个目标使用独立`.kite-lock`、PID/start identity、随机nonce与inode
   复核；只有exact owner可release，只有明确dead的owner可reclaim，alive/uncertain/malformed全部fail closed。多文件CAS按canonical path排序取锁，
   普通用户配置以same-directory temp、fsync、atomic rename替换。它不读取配置语义、不建立global lock/daemon，也不接触Runtime Store。
@@ -136,10 +137,11 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。installed active candidate在POSIX
   从reservation、在Windows从跨build `describe`取得actual old build，并用该build client再次校验后发送exact stop；named pipe没有filesystem
   reservation不授权使用current-build client猜测停止旧owner。
-  single-Service manager现只由显式legacy Service/Web命令组合；正式TUI与CLI run/resume不会discover/ensure它，也不会回退该路径。
+  single-Service manager现只由显式legacy `service *`命令组合；正式TUI、CLI run/resume与`kite web`不会discover/ensure它，也不会回退该路径。
   clean cutover不会从legacy source恢复，也不会在普通App Server启动中扫描或删除它们。
-- daemon lifecycle只由显式`server start/status/stop`composition使用；status/stop通过同一Runtime protocol，未知version/capability fail closed，
-  普通client disconnect不停止daemon。Unix stale endpoint只有PID/start identity dead且socket/lock identity复核后才能清理。
+- daemon lifecycle只由显式`server start/status/stop`composition使用；`kite web`只读v2 status中的strict loopback origin。status/Web discovery不
+  spawn，未知version/capability fail closed，普通client/Browser disconnect不停止daemon。Unix stale endpoint只有PID/start identity dead且
+  socket/lock identity复核后才能清理。
 
 ## 测试与 evidence
 

@@ -31,16 +31,16 @@ if (process.argv.includes('--version')) {
               return runCliMain({
                 serviceManager: localService.manager,
                 serviceExecutableMode: executableMode,
-                singleServiceWeb: { discover: localService.discoverWeb },
               });
             })()
           : command.startsWith('web-')
             ? (() => {
-                const localService = createManagedLocalSingleServiceComposition({
+                const daemon = createManagedLocalAppServerDaemon({
                   argv: process.argv,
                   executableMode,
+                  ...(parsed?.serverEndpoint ? { endpoint: parsed.serverEndpoint } : {}),
                 });
-                return runCliMain({ singleServiceWeb: { discover: localService.discoverWeb } });
+                return runCliMain({ appServerWeb: { discover: daemon.discoverWeb } });
               })()
             : (() => {
                 const connector = parsed?.serverEndpoint

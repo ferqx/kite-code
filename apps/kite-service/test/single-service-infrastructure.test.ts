@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
@@ -15,8 +15,6 @@ import {
 import type { RuntimeAccess } from '@kite-ai/runtime-contract';
 import { RuntimeServer } from '@kite-ai/runtime-server';
 import {
-  type AgentApiReadContext,
-  createAgentApiRouteHandler,
   createSingleServiceInfrastructure,
   type NativeKiteServiceApplicationPort,
   type SingleServiceInfrastructure,
@@ -39,20 +37,13 @@ afterEach(async () => {
 
 describe('Single-Service native infrastructure target', () => {
   test.skipIf(process.platform === 'win32')(
-    'keeps discovery credentials in memory and Web on the same HTTP listener',
+    'keeps discovery credentials in memory without owning Web routes',
     async () => {
       const fixtureRoot = makeRoot();
       const homeRoot = join(fixtureRoot, 'home');
       const runtimeParent = join(fixtureRoot, 'runtime');
-      const assets = makeWebAssets(fixtureRoot);
       mkdirSync(homeRoot);
-      const owner = createTarget(
-        homeRoot,
-        runtimeParent,
-        'single-service-instance',
-        undefined,
-        assets,
-      );
+      const owner = createTarget(homeRoot, runtimeParent, 'single-service-instance');
       owners.push(owner);
 
       await expect(owner.start()).resolves.toMatchObject({
@@ -90,37 +81,11 @@ describe('Single-Service native infrastructure target', () => {
       const ownerOrigin = owner.httpOrigin;
       if (!ownerOrigin) throw new Error('Service HTTP origin is unavailable');
       const root = await fetch(`${ownerOrigin}/`);
-      expect(root.status).toBe(200);
-      expect(root.headers.get('set-cookie')).toContain('HttpOnly');
-      expect(await root.text()).toBe('<html>single service target</html>');
-      const rootCookie = root.headers.get('set-cookie')?.split(';', 1)[0];
-      if (!rootCookie) throw new Error('Service root omitted its Browser session.');
-      expect(
-        await fetch(`${ownerOrigin}/v1/workspaces`, {
-          headers: {
-            origin: ownerOrigin,
-            'sec-fetch-site': 'same-origin',
-            'sec-fetch-mode': 'cors',
-            cookie: rootCookie,
-          },
-        }).then((response) => response.status),
-      ).toBe(200);
-      expect(await fetch(`${ownerOrigin}/index.html`).then((response) => response.text())).toBe(
-        '<html>single service target</html>',
+      expect(root.status).toBe(404);
+      expect(root.headers.get('set-cookie')).toBeNull();
+      expect(await fetch(`${ownerOrigin}/v1/workspaces`).then((response) => response.status)).toBe(
+        404,
       );
-      const browserHeaders = {
-        origin: ownerOrigin,
-        'sec-fetch-site': 'same-origin',
-        'sec-fetch-mode': 'cors',
-      };
-      const workspaces = await fetch(`${ownerOrigin}/v1/workspaces`, {
-        headers: { ...browserHeaders, cookie: rootCookie, accept: 'application/json' },
-      });
-      expect(workspaces.status).toBe(200);
-      expect(await workspaces.json()).toEqual({
-        schema: 'kite.agent-api.workspace-page.v1',
-        items: [],
-      });
       expect((await fetch(`${ownerOrigin}/_kite/web/bootstrap`)).status).toBe(404);
 
       const compatibleOtherBuild = await requestKiteLocalNativeEndpoint(owner.endpoint, {
@@ -151,7 +116,7 @@ describe('Single-Service native infrastructure target', () => {
         diagnostic: 'incompatible',
       });
 
-      expect(await fetch(`${owner.httpOrigin}/`).then((response) => response.status)).toBe(200);
+      expect(await fetch(`${owner.httpOrigin}/`).then((response) => response.status)).toBe(404);
       expect(await fetch(`${owner.httpOrigin}/readyz`).then((response) => response.text())).toBe(
         'ready',
       );
@@ -215,32 +180,7 @@ function createTarget(
   runtimeParent: string,
   instanceId = 'single-service-instance',
   onEndpointReserved?: () => void,
-  staticAssetRoot = makeWebAssets(join(homeRoot, '..')),
 ): SingleServiceInfrastructure {
-  const browserReadContext: AgentApiReadContext = {
-    query: async (query) => ({
-      status: 'not_found',
-      queryType: query.type,
-      code: 'session_not_found',
-    }),
-    history: {
-      listSessions: async () => ({ entries: [], hasMore: false }),
-      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
-    },
-    checkpoints: { list: () => ({ entries: [], hasMore: false }), get: () => undefined },
-    directory: { list: () => [] },
-    close: async () => undefined,
-    [Symbol.asyncDispose]: async () => undefined,
-  };
-  const agentApi = createAgentApiRouteHandler({
-    serverVersion: 'single-service-test',
-    buildId: BUILD_ID,
-    consumeCapability: () => undefined,
-    admitWorkspace: async () => 'unavailable',
-    isClientGenerationCurrent: () => false,
-    browserReadContext,
-    browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
-  });
   return createSingleServiceInfrastructure({
     home: createKiteHomeIdentity(homeRoot),
     runtimeParent,
@@ -250,8 +190,6 @@ function createTarget(
     buildId: BUILD_ID,
     processStartIdentity: `test-process-${instanceId}`,
     ...(onEndpointReserved ? { onEndpointReserved } : {}),
-    webGateway: { staticAssetRoot },
-    agentApi,
     carrierLimits: {
       heartbeatIntervalMs: 50,
       heartbeatDeadlineMs: 150,
@@ -278,16 +216,6 @@ function makeRoot(): string {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-single-service-target-')));
   roots.push(root);
   return root;
-}
-
-function makeWebAssets(root: string): string {
-  const assets = join(root, 'web');
-  mkdirSync(join(assets, 'api-docs'), { recursive: true });
-  mkdirSync(join(assets, 'assets'), { recursive: true });
-  writeFileSync(join(assets, 'index.html'), '<html>single service target</html>');
-  writeFileSync(join(assets, 'api-docs', 'openapi.json'), '{}');
-  writeFileSync(join(assets, 'assets', 'app.js'), 'export {};');
-  return assets;
 }
 
 function createApplication(): NativeKiteServiceApplicationPort {

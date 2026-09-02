@@ -61,9 +61,9 @@ confirmed absent后启动当前build。退役candidate、source↔installed或id
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。
 
 KASD-04候选还提供显式`kite server start/status/stop`与`--server <endpoint>`。daemon从同一source checkout或launcher-pinned candidate解析
-`kite-service app-server run-daemon`，但使用固定`kite-app-server-daemon-v1`和exact required capabilities判断兼容；build ID仅用于status。
+`kite-service app-server run-daemon`，KASD-05把exact身份提升为`kite-app-server-daemon-v2`并在status加入strict `webOrigin`；build ID仅用于status。
 普通TUI/CLI不发现或启动daemon。status/stop不会替换不兼容或identity不确定的owner，自定义POSIX endpoint要求现存canonical owner-only parent；
-release smoke必须覆盖start、status、stop并确认清理。Web仍在KASD-05前走legacy Service。
+release smoke覆盖absent `kite web`不spawn、start/status、Web shell/discovery、stop与endpoint清理。
 
 KASD-03已将默认TUI/CLI接到parent-owned App Server release resolver。source只使用当前Bun加checked-in Service entrypoint，build
 identity覆盖该resolver并把Runtime Store放在canonical Kite Home下按repository/worktree digest隔离的owner-only `source-profiles/`；installed
@@ -184,8 +184,8 @@ CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层
 entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标；launcher传入的`KITE_CODE_RELEASE_ROOT`是installed Service
 resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
 
-source `server`仍build fixed assets并进入legacy Web/Service路径；source `tui`不build Web assets。默认source/installed App Server没有HTTP
-listener或static preflight；Web payload继续随candidate发布供后续显式daemon/Web cutover及当前legacy `web`命令使用。
+source `server`先build fixed assets，再显式start daemon并读取Web origin；source `tui`不build Web assets。默认source/installed stdio App Server
+没有HTTP listener或static preflight；Web payload由显式daemon从同candidate固定解析。legacy Service不再读取static root或挂载Browser route。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；

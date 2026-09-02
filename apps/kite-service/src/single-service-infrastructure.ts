@@ -11,13 +11,11 @@ import {
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   resolveKiteLocalRuntimeEndpoint,
 } from '@kite-ai/kite-local-runtime/service';
-import type { AgentApiRouteHandler } from './agent-api';
 import {
   createKiteServiceCarrier,
   type KiteServiceApplicationPort,
   type KiteServiceCarrier,
   type KiteServiceCarrierLimits,
-  type KiteServiceWebGatewayRouteOptions,
 } from './carrier';
 import {
   KITE_SERVICE_CONTROLLER_GENERATION_HEADER,
@@ -48,8 +46,6 @@ export interface SingleServiceInfrastructureOptions {
   readonly processStartIdentity: string;
   readonly pid?: number;
   readonly startedAt?: string;
-  readonly webGateway?: KiteServiceWebGatewayRouteOptions;
-  readonly agentApi?: AgentApiRouteHandler;
   readonly readiness?: KiteServiceReadinessPort;
   readonly signals?: KiteServiceSignalPort;
   readonly startupTimeoutMs?: number;
@@ -173,7 +169,6 @@ export function createSingleServiceInfrastructure(
         buildId: options.buildId,
         accessToken,
         controlToken,
-        ...(options.agentApi ? { agentApi: options.agentApi } : {}),
         isReady: () => publishedReady,
         ...(options.carrierLimits ? { limits: options.carrierLimits } : {}),
         ...(options.now ? { now: options.now } : {}),
@@ -211,19 +206,12 @@ export function createSingleServiceInfrastructure(
           });
         },
       });
-      try {
-        if (options.webGateway) created.attachWebGateway(options.webGateway);
-        carrier = created;
-      } catch (error) {
-        await created.close().catch(() => undefined);
-        throw error;
-      }
+      carrier = created;
     },
     async stop() {
       const current = carrier;
       if (!current) return;
       await current.close();
-      await options.agentApi?.close();
       carrier = undefined;
     },
   };

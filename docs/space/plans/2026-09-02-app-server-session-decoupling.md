@@ -52,8 +52,8 @@ Web -------loopback HTTP------------>       │
 | KASD-02 | completed | stdio/Host/Session generation、完整client面、source/candidate配对与active model/Shell crash已通过 |
 | KASD-03 | completed | TUI/CLI default local cutover、observer/mutation边界、双TUI与installed smoke |
 | KASD-04 | completed | 显式本机daemon、exact protocol、dead-only lifecycle与真实client/PTY/candidate证据 |
-| KASD-05 | in_progress | Web client解耦 |
-| KASD-06 | pending | 旧single-Service控制面删除与qualification |
+| KASD-05 | completed | daemon v2 Web/static/API、显式discovery、legacy Service Web拆除与Browser/Native共享Store证据 |
+| KASD-06 | in_progress | 旧single-Service控制面删除与qualification |
 
 ### KASD-00：冻结契约与迁移基线
 
@@ -218,7 +218,20 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 
 ### KASD-05：Web client解耦
 
-当前子阶段（2026-09-02）：开始实施；KASD-04 daemon不包含HTTP/Web listener，以下变化尚未声明完成。
+完成证据（2026-09-02）：
+
+- daemon exact identity提升为`kite-app-server-daemon-v2`，status增加strict loopback `webOrigin`；v1 client明确`server_mismatch`，相同v2 protocol的
+  不同build仍兼容，build ID不成为协议authority；
+- daemon在endpoint ready前验证同build assets，单一loopback listener承载static/API Docs与Browser read-only `/v1`；read adapter直接复用同一
+  `kite-session.sqlite` Runtime/History/Directory/Checkpoint/Artifact owner，没有第二DB或Runtime；
+- `kite web [--server <endpoint>]`只读已ready daemon status；absent、incompatible、identity uncertain均不spawn/replace/stop。source
+  `bun run server`是显式build + start + discovery组合，默认TUI/CLI保持stdio-only且TUI已删除Web discovery callback；
+- legacy Service production入口已删除Web asset env/preflight、static/Browser route attachment与release Web discovery，根和Browser `/v1`保持404；
+- 真实daemon test证明stable Web origin、HttpOnly cookie、Browser读取Native client刚写入的Session、普通disconnect保活与stop清理；完整42-file
+  TUI PTY、CLI 718 + 3 isolated、Service 1515 + 38 isolated、Web 11、release 198、16-workspace typecheck、architecture/docs Gate与candidate
+  `56a4f157a1f2e7a1b6ce429d` build/verify/smoke通过；
+- 过度设计门禁删除无production caller的legacy Web attach/TUI async discovery，不建立Web registry、持久端口、自动start、v1 compatibility
+  branch、remote/LAN或Browser mutation。
 
 - Web assets从App Server Runtime readiness中移除；default local不启动HTTP；
 - `kite web`只连接已经显式启动的daemon；daemon absent返回typed unavailable，不隐式启动；

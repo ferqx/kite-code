@@ -22,8 +22,9 @@ Browser cookie两种只读principal；Run/Interaction mutation、SSE与外部SDK
 | `GET /v1/sessions/{session_id}/checkpoints/{checkpoint_id}/preview` | 只返回变更/冲突/行数计数，不返回path |
 | 其他`/v1/**` | 固定404 Problem；不存在隐藏mutation、SSE或501 partial route |
 
-carrier完成loopback peer与exact Host校验后把整个`/v1`namespace交给同一个handler；Browser auth authority随Service-owned static surface
-一起创建，不是第二listener、proxy或可独立启停的lifecycle。health/ready、private Runtime/App Control/Controller与`/rpc`继续原路径。
+显式daemon Web carrier完成loopback peer与exact Host校验后把整个`/v1`namespace交给同一个handler；Browser auth authority随daemon-owned
+static surface一起创建，不是第二Runtime/Store或proxy。legacy Native carrier不再注入Browser auth，根与Browser `/v1`保持404；内部Agent
+capability route仍可由Worker listener独立注入。
 
 ## Principal与生命周期
 

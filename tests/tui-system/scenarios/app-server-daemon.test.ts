@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedLocalAppServerDaemon } from '../../../scripts/release/app-server-daemon';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
@@ -17,10 +18,17 @@ describe('TUI PTY System — explicit App Server daemon', () => {
   beforeEach(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    const sourceWebStaticRoot = join(workspace.home, 'daemon-web');
+    mkdirSync(join(sourceWebStaticRoot, 'api-docs'), { recursive: true });
+    mkdirSync(join(sourceWebStaticRoot, 'assets'), { recursive: true });
+    writeFileSync(join(sourceWebStaticRoot, 'index.html'), '<html>Kite daemon</html>');
+    writeFileSync(join(sourceWebStaticRoot, 'api-docs', 'openapi.json'), '{}');
+    writeFileSync(join(sourceWebStaticRoot, 'assets', 'app.js'), 'export {};');
     daemon = createManagedLocalAppServerDaemon({
       argv: ['kite', '--kite-home', join(workspace.home, '.kite-code')],
       systemHome: workspace.home,
       executableMode: 'source',
+      sourceWebStaticRoot,
     });
     await daemon.start(workspace.workspace);
   });

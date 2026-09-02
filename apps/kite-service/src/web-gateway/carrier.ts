@@ -8,6 +8,7 @@ import {
   realpathSync,
 } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
+import type { AgentApiRouteHandler } from '../agent-api';
 import { createWebGatewayAuth, type WebGatewaySessionRegistry } from './auth';
 
 export const KITE_WEB_LOOPBACK_HOST = '127.0.0.1' as const;
@@ -37,6 +38,8 @@ export type WebGatewayAssetReader = (absolutePath: string) => Promise<Response |
 export interface WebGatewayCarrierOptions {
   readonly staticAssetRoot: string;
   readonly instanceId: string;
+  /** Optional Browser read API hosted on this same explicit daemon listener. */
+  readonly agentApi?: AgentApiRouteHandler;
   readonly limits?: WebGatewayLimits;
   readonly now?: () => number;
   readonly randomBytes?: (size: number) => Uint8Array;
@@ -62,7 +65,13 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
   const drainDeadlineMs = boundedDeadline(options.limits?.drainDeadlineMs);
   let closed = false;
   let closing: Promise<void> | undefined;
-  let auth!: ReturnType<typeof createWebGatewayAuth>;
+  const auth = createWebGatewayAuth({
+    instanceId: options.instanceId,
+    cookiePath: '/',
+    now: options.now,
+    randomBytes: options.randomBytes,
+    maxSessions: options.maxSessions,
+  });
   const server = (options.serve ?? Bun.serve)<SocketData>({
     hostname: KITE_WEB_LOOPBACK_HOST,
     port: 0,
@@ -79,6 +88,10 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
         return secureResponse(403, 'forbidden');
       }
       const url = new URL(request.url);
+      if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
+        if (!options.agentApi) return secureResponse(404, 'not_found');
+        return options.agentApi.handle(request, auth);
+      }
       if (
         request.method !== 'GET' ||
         url.search ||
@@ -109,13 +122,6 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
   });
   if (!server.port) throw new Error('Web Gateway did not obtain the Service listener port.');
   const binding = bindingFor(server.port);
-  auth = createWebGatewayAuth({
-    instanceId: options.instanceId,
-    cookiePath: '/',
-    now: options.now,
-    randomBytes: options.randomBytes,
-    maxSessions: options.maxSessions,
-  });
   return Object.freeze({
     origin: binding.origin,
     browserAuth: auth,

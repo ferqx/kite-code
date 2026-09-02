@@ -6,8 +6,8 @@ Interaction/approval reply、cancel、rewind、fork、配置或Controller操作�
 
 ## 唯一业务通道
 
-`src/transport/client.ts`是唯一生产Browser adapter。访问Service `/`时，index响应已经建立HttpOnly/SameSite Browser session，
-client直接验证`GET /v1`；Browser JavaScript不捕获或兑换启动token。此后业务数据只来自同一Service listener的typed REST：
+`src/transport/client.ts`是唯一生产Browser adapter。访问显式App Server daemon `/`时，index响应已经建立HttpOnly/SameSite Browser session，
+client直接验证`GET /v1`；Browser JavaScript不捕获或兑换启动token。此后业务数据只来自同一daemon listener的typed REST：
 
 - `GET /v1`验证当前Browser principal的`workspaces/sessions/history/checkpoints`capability；
 - `GET /v1/workspaces`读取独立、path-free Workspace page；只预取首个Workspace的Session，其余在展开时读取；
@@ -48,18 +48,18 @@ no-credential、`no-store`读取。页面存在不表示当前principal拥有尚
 `src/main.tsx`使用React Router Declarative Mode提供Browser SPA；目录`/`、规范会话`/sessions/:sessionId`与`/api-docs`通过History API
 切换，不触发document reload。Session选择push只包含opaque Session identity的短URL；从Docs执行Browser back时通过现有Browser direct Session read
 恢复摘要与History，不暴露Workspace digest，也不扫描Workspace Session page。
-所有index shell入口都可由Service建立同一种短期HttpOnly Browser session，因此直接打开深链接后无刷新进入Observer仍能读取`/v1`；
+所有index shell入口都可由daemon建立同一种短期HttpOnly Browser session，因此直接打开深链接后无刷新进入Observer仍能读取`/v1`；
 SPA持有一个production transport，route unmount只停止对应页面工作，不撤销Browser session，document `pagehide`才清理session。精确OpenAPI
 JSON与hashed asset请求不创建session。
 
 ## 启动与release
 
-TUI/CLI与`kite web`都通过同一个canonical Kite Home manager ensure唯一Local Service。Browser打开URL不能启动本机进程；
-`bun run --cwd apps/kite-web dev`只是Vite资源服务器。源码开发使用根命令`bun run server`或`bun run tui`：它们先build assets，
-Service在ready前完成preflight并把`/`、`/index.html`、`/assets/*`与`/api-docs`挂到同一个listener。`kite web`只ensure Service并
-打印稳定的`origin/`；`GET /`与`GET /api-docs`直接返回同一个index而不暴露物理文件名。Browser关闭或logout不停止Service。
+默认TUI/CLI不启动或发现Web。Browser打开URL不能启动本机进程，`kite web`也只读取已经显式启动的daemon；absent时提示先执行
+`kite server start`，不会隐式spawn。`bun run --cwd apps/kite-web dev`只是Vite资源服务器。源码开发使用根命令`bun run server`：它先build
+assets、显式启动daemon，再打印稳定`origin/`；`bun run tui`始终保持stdio-only。`GET /`与`GET /api-docs`直接返回同一个index而不暴露
+物理文件名。Browser关闭或logout不停止daemon。
 
-release candidate把同一Vite产物放入`payload/web`。Service的一个loopback listener同时提供static assets、`/api-docs`与`/v1`；Web
+release candidate把同一Vite产物放入`payload/web`。显式daemon的一个loopback listener同时提供static assets、`/api-docs`与`/v1`；Web
 不拥有第二listener、Runtime、Store、数据库或独立lifecycle。
 
 ## 验证

@@ -18,8 +18,8 @@
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
 - CLI parser/main提供显式`kite server start/status/stop`与`run/resume --server <endpoint>`；它们只连接调用者指定或当前profile的
   owner-only Unix socket/Windows named pipe，不参与默认run/TUI发现。daemon启动时固定一个canonical Workspace；另一Workspace连接会
-  fail closed。CLI仍保留`kite web [--json]`过渡入口：它ensure legacy Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
-  ready前验证和挂载，不存在独立`web status/stop`、asset root客户端注入或Web lifecycle diagnostic。
+  fail closed。`kite web [--server <endpoint>] [--json]`只读取已经显式启动的daemon status并打印stable `webOrigin`；absent、incompatible或
+  identity uncertain直接失败，不隐式start/upgrade/stop。不存在独立`web status/stop`或客户端asset root注入。
 - release entrypoint把已选择的`source|installed` executable mode显式注入`service ensure/status/stop/restart`请求；CLI不从cwd、argv形状或
   Service返回值猜部署形态，因此installed active-candidate换代不会因mode丢失退化为`build_mismatch`。
 - 默认TUI `/status`展示`stdio` transport、source/installed profile、build、App Server version与initialize已证明的same-build pairing；
@@ -48,10 +48,11 @@
   repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
 - 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend fallback。
   配套App Server不可用时直接失败，不回退legacy Service。
-- 不拥有Service/Coordinator/Worker process state。daemon lifecycle由release composition中的显式manager持有；普通client断开不停止daemon，
+- 不拥有Service/Coordinator/Worker process state。daemon lifecycle与Web discovery由release composition中的显式manager持有；普通client断开不停止daemon，
   `server stop`取消active Turn并完成bounded drain。`kite service ensure/status/stop/restart`暂由显式legacy manager处理；默认
   run/resume/TUI不discover或ensure该owner。
-- `scripts/release/entrypoints/cli.ts`为run/resume注入App Server connector，仅为显式legacy命令组合single-Service manager/Web discovery；
+- `scripts/release/entrypoints/cli.ts`为run/resume注入App Server connector，为`kite web`注入daemon status discovery，仅为显式legacy
+  `service *`组合single-Service manager；
   不组合legacy Coordinator或Store migration。
   任一owner不可用时fail closed。parser/main contract与本地tests不等于三平台qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
@@ -81,7 +82,7 @@ executable、release entrypoint与slot均已删除。
 - installed默认从launcher-pinned immutable candidate解析同candidate `kite-service`；source默认使用当前Bun与checked-in Service entrypoint。
   两者都spawn parent-owned stdio App Server，以同一build ID和完整capability在initialize精确复核；source使用worktree profile，installed使用
   canonical `kite-session.sqlite`，不查PATH、running Service或fallback。
-  Native `describe`返回兼容Service的actual build；显式shared source只读复用另一`dev:` build及其Web root，installed active candidate对另一installed
+  Native `describe`返回兼容legacy Service的actual build；installed active candidate对另一installed
   build执行verified replacement，source↔installed返回typed `build_mismatch`且不替换。Protocol/client-contract/identity不兼容保持fail closed。
   普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`；source不再拥有previous-build replacement authority。
   manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
@@ -89,7 +90,7 @@ executable、release entrypoint与slot均已删除。
   build drift告警，也不把Web URL当Runtime identity。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
-- TUI启动不构建Web assets、不ensure canonical Service、不监听HTTP；两个默认TUI各有一个child且共享同一durable profile。
+- TUI启动不构建Web assets、不ensure canonical Service/daemon、不监听HTTP；两个默认TUI各有一个child且共享同一durable profile。
 
 ## 本地文档
 
