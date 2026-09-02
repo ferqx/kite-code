@@ -19,9 +19,11 @@ export async function createOssCandidateFixture(
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-oss-candidate-test-'));
   const archivePath = join(root, 'candidate.tar.gz');
-  const cli = await fixtureCliBytes(root, target, argumentLogPath);
   const suffix = target.executableSuffix;
-  const launcher = await fixtureLauncherBytes(root, target);
+  const [cli, launcher] = await Promise.all([
+    fixtureCliBytes(root, target, argumentLogPath),
+    fixtureLauncherBytes(root, target),
+  ]);
   const web = bytes('<!doctype html><html><body><div id="root"></div></body></html>\n');
   const agentApi = bytes('{"openapi":"3.1.0"}\n');
   const files = new Map<string, Uint8Array>([
@@ -192,7 +194,7 @@ appendFileSync(${JSON.stringify(argumentLogPath)}, process.argv.slice(1).join('\
     `use std::env;
 ${argumentLogPath ? 'use std::fs::OpenOptions;\nuse std::io::Write;\n' : ''}
 fn main() {
-    let arguments: Vec<String> = env::args().skip(1).collect();
+${argumentLogPath ? '    let arguments: Vec<String> = env::args().skip(1).collect();\n' : ''}
 ${rustLog}    println!("Kite");
 }
 `,

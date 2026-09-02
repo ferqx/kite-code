@@ -63,6 +63,8 @@ MCP wrapper仍保持authenticated framing与candidate pinning。
 Windows candidate额外包含pinned sandbox runner、manifest和vendored runtime。build固定Rust toolchain、`rust-lld`与path remap；
 workflow在打包前验证committed runner evidence。Windows job在candidate build前运行owner-only endpoint lifecycle、
 `kite-session.sqlite` initialization/execution fencing/mutation和daemon真实process tests。
+Release installer contract test在Windows使用pinned Rust冷编译native CLI/launcher fixture；两个fixture并行构建，Windows test budget为120秒，
+只吸收hosted runner冷工具链成本，不减少manifest、install、upgrade、rollback或uninstall断言。
 
 `release:smoke`覆盖verify、install、CLI help/version、installed TUI PTY、paired App Server、显式daemon start/status/Web/stop、
 retired slot absence、Web payload、MCP wrapper、upgrade、active pointer、immutable roots、rollback与uninstall。单平台smoke不等于G1。

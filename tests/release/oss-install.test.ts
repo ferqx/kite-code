@@ -25,7 +25,8 @@ import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
 
-setDefaultTimeout(60_000);
+// Hosted Windows performs a cold, pinned Rust toolchain compile for two native fixture binaries.
+setDefaultTimeout(process.platform === 'win32' ? 120_000 : 60_000);
 
 function installOssCandidate(input: { archivePath: string; prefix: string }) {
   return installCandidate(input);
