@@ -1,7 +1,27 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { KITE_SERVICE_ENVIRONMENT_ALLOWLIST } from '@kite-ai/kite-local-runtime/manager';
+
+const KITE_SERVICE_ENVIRONMENT_ALLOWLIST = Object.freeze([
+  'PATH',
+  'SHELL',
+  'COMSPEC',
+  'PATHEXT',
+  'SystemRoot',
+  'SYSTEMROOT',
+  'WINDIR',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LC_ALL',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'XDG_CACHE_HOME',
+  'BUN_INSTALL_CACHE_DIR',
+] as const);
 
 const PROVIDER_ENVIRONMENT_KEYS = Object.freeze([
   'DEEPSEEK_API_KEY',
@@ -22,7 +42,6 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
   'scripts/release/entrypoints/tui.ts',
   'scripts/release/app-server-client.ts',
   'scripts/release/local-service-client.ts',
-  'scripts/release/single-service-native-client.ts',
   'package.json',
   'bun.lock',
   'tsconfig.json',
@@ -73,6 +92,26 @@ export function selectKiteServiceEnvironmentSource(
     result[key] = source[key];
   }
   return Object.freeze(result);
+}
+
+/** Resolve the owner-checked OS runtime parent used by explicit local daemon endpoints. */
+export function resolveLocalRuntimeParent(
+  environment: Readonly<Record<string, string | undefined>>,
+): string {
+  const candidate =
+    process.platform === 'linux' && environment.XDG_RUNTIME_DIR
+      ? environment.XDG_RUNTIME_DIR
+      : tmpdir();
+  if (!isAbsolute(candidate)) throw new Error('OS runtime parent must be absolute.');
+  const canonical = realpathSync.native(candidate);
+  const stat = lstatSync(canonical);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error('OS runtime parent must be a real directory.');
+  }
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    if ((stat.mode & 0o002) === 0) throw new Error('OS runtime parent owner is invalid.');
+  }
+  return canonical;
 }
 
 export function sourceServiceBuildIdentity(repositoryRoot: string): string {

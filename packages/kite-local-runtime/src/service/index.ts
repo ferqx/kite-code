@@ -1,6 +1,5 @@
 export * from './codecs';
 export * from './lifecycle-reservation';
-export * from './native-protocol';
 export * from './paths';
 export * from './process-identity';
 export * from './state';

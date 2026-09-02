@@ -26,7 +26,6 @@ if (process.argv.includes('--version')) {
       });
   runTui({
     connectRuntime: appServer.connector,
-    clientVersion: packageJson.version,
     appServerRuntime: {
       transport:
         'endpoint' in appServer

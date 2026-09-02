@@ -4,8 +4,8 @@
 
 ## Runtime 输入与投影边界
 
-- TUI command/query/subscribe 只消费 typed Native client surface；生产路径固定为 terminal
-  `LocalKiteConnection/RuntimeClient → companion kite-service RuntimeServer → Service RuntimeAccess`。TUI 不组合 Server。
+- TUI command/query/subscribe 只消费 typed App Server client surface；生产路径固定为 terminal
+  `KiteAppServerConnection/RuntimeClient → paired kite-service RuntimeServer → RuntimeAccess`。TUI 不组合 Server。
 - reducer、block replay 与 interaction UI 只接收封闭 `RuntimeClientEvent`/client interaction projection。未知或无法安全投影的事实显示固定 unavailable/error 状态，绝不扩张为 `any` 或 raw Runtime event。
 - TUI本地只缓存`model.responded.messageId → requestId`与tool queue的opaque `presentationGroupId`配对；匹配结果只
   决定Presentation step归属，不参与Runtime command、approval或execution identity。新事件不按“当前block/上一条event”

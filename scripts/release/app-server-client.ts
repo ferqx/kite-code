@@ -8,7 +8,7 @@ import {
 } from '@kite-ai/kite-local-runtime/client';
 import {
   createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
+  ensureKiteProfileHome,
   ensurePrivateKiteHomeDirectory,
 } from '@kite-ai/kite-local-runtime/service';
 import type { RuntimeClientInfo } from '@kite-ai/runtime-client';
@@ -184,7 +184,7 @@ export function resolveManagedLocalAppServerTarget(
 }
 
 export function prepareManagedLocalAppServerTarget(target: ManagedLocalAppServerTarget): void {
-  const home = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(target.configRoot));
+  const home = ensureKiteProfileHome(createKiteHomeIdentity(target.configRoot));
   if (home.root !== target.configRoot) {
     throw new Error('App Server Kite Home identity changed during validation.');
   }

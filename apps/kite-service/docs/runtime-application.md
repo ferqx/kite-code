@@ -1,14 +1,14 @@
 # Service Runtime Application 与 App Control
 
 本页是 `apps/kite-service/src/composition.ts`、`src/bootstrap/**`、`src/runtime-application/**` 与
-`src/app-control/**` 的 owner-local current authority。它们同时组合default parent-owned App Server与显式legacy single-Service；CLI/TUI
+`src/app-control/**` 的 owner-local current authority。它们同时组合default parent-owned App Server与显式daemon；CLI/TUI
 只通过typed Runtime/App client seam消费结果。
 
 ## 唯一 Host/Store composition
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
 Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable的default App Server
-按installed/source profile使用`kite-session.sqlite`；显式legacy single-Service使用`<kite-home>/kite.sqlite`。CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
+按installed/source profile使用`kite-session.sqlite`；旧`<kite-home>/kite.sqlite`原样保留但不可见。CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
 InProcess composition调用点。
 composition在打开前以realpath parent + filename建立process-local Store claim；相同路径或canonical alias的第二owner
 fail closed，dispose完成后才释放claim。internal/test stdio绕过此default composition时必须使用显式isolated nondefault path。
@@ -94,7 +94,7 @@ execution authority；Service不得让TUI从事件相邻关系反推该归属。
 `standalone`，terminal event 不重新猜测命令语义。
 
 Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
-opaque Controller binding reference）。single-Service从每条command的已认证client/connection generation读取Store 9当前Session Controller，
+opaque Controller binding reference）。App Server从每条command的已认证client/connection generation读取当前Session execution authority，
 不把Controller Session固定到可能早于Controller创建的socket ticket。Worker application 的 effect composition 只接受已固定context，并由Store authority、Controller
 generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
 Protocol wire frame，也不向Browser REST projection暴露。

@@ -9,10 +9,10 @@ import {
   KITE_APP_SERVER_DAEMON_STATUS_RESPONSE_CODEC_,
   type KiteAppServerConnection,
 } from '@kite-ai/kite-local-runtime/client';
-import { createKiteSingleServiceNativeProcessIdentityProbe } from '@kite-ai/kite-local-runtime/manager';
 import {
   clearDeadKiteLocalRuntimeEndpoint,
   createKiteHomeIdentity,
+  createKiteLocalRuntimeProcessIdentityProbe,
   type KiteLocalRuntimeEndpoint,
   readKiteLocalRuntimeLifecycleReservation,
   resolveKiteAppServerDaemonEndpoint,
@@ -24,7 +24,7 @@ import {
   prepareManagedLocalAppServerTarget,
   resolveManagedLocalAppServerTarget,
 } from './app-server-client';
-import { resolveLocalRuntimeParent } from './single-service-native-client';
+import { resolveLocalRuntimeParent } from './local-service-client';
 
 export interface AppServerDaemonStatus {
   readonly state: 'absent' | 'ready' | 'draining' | 'incompatible' | 'unavailable';
@@ -251,7 +251,7 @@ async function clearDeadEndpoint(endpoint: KiteLocalRuntimeEndpoint): Promise<vo
   const result = await clearDeadKiteLocalRuntimeEndpoint({
     endpoint,
     expected: reservation,
-    process: createKiteSingleServiceNativeProcessIdentityProbe(),
+    process: createKiteLocalRuntimeProcessIdentityProbe(),
   });
   if (result.outcome === 'blocked') {
     throw new Error(`App Server daemon endpoint is blocked: ${result.diagnostic}.`);

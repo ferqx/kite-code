@@ -46,7 +46,7 @@ Web使用`react-router` Declarative Mode管理目录、Session与API Docs的Brow
 也不允许Web直接依赖Service或Runtime workspace。
 源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、显式App Server daemon start和Web origin
 discovery。`apps/kite-web`的Vite dev server只是资源开发入口，Browser与`kite web`都不拥有隐式启动daemon的authority；当前角色见
-[`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)，旧Gateway恢复仅见transition文档。
+[`active/app-server-local-runtime.md`](active/app-server-local-runtime.md)，旧Gateway恢复仅见transition文档。
 Agent API contract是zero-workspace-dependency的browser-safe Public wire owner；`packages/agent-api-client`是只被Web消费的typed HTTP read
 client。Runtime package owner gate检查Service→contract与Web→client→contract依赖边，独立`check:agent-api-packages`强化Public
 contract/client/consumer边界；`apps/kite-web`仍不成为Runtime
@@ -63,17 +63,16 @@ KASD的`apps/kite-service/src/app-server.ts`与`app-server-daemon.ts`由Service 
 二者都不进入legacy local-runtime manager规则。
 CLI与Service共享的per-file config mutation primitive使用独立`kite-local-runtime-config`规则；它从通用local-runtime client rule排除，避免把
 用户配置lock/atomic replacement误写成Runtime connection行为。
-当前default parent-owned App Server、Durable Session Store与显式legacy single-Service边界见
-[`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)。
+当前default parent-owned App Server、Durable Session Store与显式daemon边界见
+[`active/app-server-local-runtime.md`](active/app-server-local-runtime.md)。
 
-KLSV1-06 clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
-MCP、Sandbox、Observability、Session Logger、release 与 process harness 使用互斥 owner；`manager/**` 已迁入
-`kite-local-runtime-manager`。不得添加覆盖整个 Service source 的 generic 通配规则，也不得让已迁出的 CLI 路径
-继续满足 Service authority。Native filesystem primitive 仍由 `kite-local-runtime-service-state` 独占；代表路径测试
+KASD clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
+MCP、Sandbox、Observability、Session Logger与release使用互斥owner；旧`manager/**`与process harness已经删除，不再是映射source。
+不得添加覆盖整个Service source的generic通配规则，也不得让已迁出的CLI路径继续满足Service authority。Native filesystem primitive
+仍由`kite-local-runtime-service-state`独占；代表路径测试
 固定验证每个生产文件只命中一个 owner，并验证 `apps/kite-cli` 仍有真实 package consumer，不能靠放宽 public entry
 消除 consumer gate。
 
-process harness 继续是未公开 fake-application fixture，不能用其 source 满足真实 composition 或 release authority。
 CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager、carrier 或 backend。
 
 ## 并发开发
@@ -86,8 +85,7 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 本地TUI开发中，`bun run tui`直接启动当前源码同build的parent-owned App Server，不预构建Web、不发现shared Service，也不需要
 `tui:fresh`。source按canonical repository/worktree使用持久`source-profiles/<digest>/kite-session.sqlite`，installed使用canonical
 `kite-session.sqlite`；二者共享用户配置root但不共享Runtime Store。TUI退出只回收自身child，不删除durable Session。显式
-`server start/status/stop`与`--server`已提供本机daemon；legacy `service-*`/`web-*`命令暂时保留，后续由KASD-05～06迁移或删除；
-它们都不是默认Runtime fallback。
+`server start/status/stop`与`--server`提供显式本机daemon；`kite web`只发现该daemon。旧`service-*`、独立`web-*`与Runtime fallback均已删除。
 
 ## 目录职责
 

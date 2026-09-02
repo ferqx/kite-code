@@ -2,7 +2,6 @@ import { parseArgs, main as runCliMain } from '../../../apps/kite-cli/src/cli/in
 import packageJson from '../../../package.json' with { type: 'json' };
 import { createManagedLocalAppServerComposition } from '../app-server-client';
 import { createManagedLocalAppServerDaemon } from '../app-server-daemon';
-import { createManagedLocalSingleServiceComposition } from '../single-service-native-client';
 
 if (process.argv.includes('--version')) {
   console.log(`Kite Code ${packageJson.version}`);
@@ -22,41 +21,30 @@ if (process.argv.includes('--version')) {
             });
             return runCliMain({ appServerDaemon: daemon });
           })()
-        : command.startsWith('service-')
+        : command.startsWith('web-')
           ? (() => {
-              const localService = createManagedLocalSingleServiceComposition({
+              const daemon = createManagedLocalAppServerDaemon({
                 argv: process.argv,
                 executableMode,
+                ...(parsed?.serverEndpoint ? { endpoint: parsed.serverEndpoint } : {}),
               });
-              return runCliMain({
-                serviceManager: localService.manager,
-                serviceExecutableMode: executableMode,
-              });
+              return runCliMain({ appServerWeb: { discover: daemon.discoverWeb } });
             })()
-          : command.startsWith('web-')
-            ? (() => {
-                const daemon = createManagedLocalAppServerDaemon({
-                  argv: process.argv,
-                  executableMode,
-                  ...(parsed?.serverEndpoint ? { endpoint: parsed.serverEndpoint } : {}),
-                });
-                return runCliMain({ appServerWeb: { discover: daemon.discoverWeb } });
-              })()
-            : (() => {
-                const connector = parsed?.serverEndpoint
-                  ? createManagedLocalAppServerDaemon({
-                      argv: process.argv,
-                      executableMode,
-                      endpoint: parsed.serverEndpoint,
-                    }).connector
-                  : createManagedLocalAppServerComposition({
-                      argv: process.argv,
-                      executableMode,
-                    }).connector;
-                return runCliMain({
-                  runtimeConnector: connector,
-                });
-              })();
+          : (() => {
+              const connector = parsed?.serverEndpoint
+                ? createManagedLocalAppServerDaemon({
+                    argv: process.argv,
+                    executableMode,
+                    endpoint: parsed.serverEndpoint,
+                  }).connector
+                : createManagedLocalAppServerComposition({
+                    argv: process.argv,
+                    executableMode,
+                  }).connector;
+              return runCliMain({
+                runtimeConnector: connector,
+              });
+            })();
   run.catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

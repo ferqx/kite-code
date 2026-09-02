@@ -38,11 +38,10 @@ describe('current release entrypoints', () => {
     expect(tui).not.toContain('manager.restart(');
   });
 
-  test('release composition carries executable mode and previous-build clients into lifecycle', () => {
-    const source = readFileSync('scripts/release/single-service-native-client.ts', 'utf8');
-    expect(source).toContain('clientForBuild: (buildId) =>');
-    expect(source).toContain('canReplaceInstalledBuild');
-    expect(source).not.toContain('canReplaceSourceBuild');
-    expect(source).toContain('executableMode: options.executable.mode');
+  test('release entrypoints contain no previous-build Service replacement path', () => {
+    const source = readFileSync('scripts/release/entrypoints/cli.ts', 'utf8');
+    expect(source).not.toContain('clientForBuild');
+    expect(source).not.toContain('canReplaceInstalledBuild');
+    expect(source).not.toContain("command.startsWith('service-')");
   });
 });

@@ -6,7 +6,7 @@
 
 决策者：用户直接指令
 
-相关：ADR-0152、ADR-0156、ADR-0159、`docs/active/single-service-local-runtime.md`、
+相关：ADR-0152、ADR-0156、ADR-0159、`docs/deprecated/single-service-local-runtime.md`、
 `docs/active/release-control.md`。
 
 ## 背景

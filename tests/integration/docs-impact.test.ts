@@ -206,9 +206,6 @@ describe('documentation impact gate V2', () => {
     expect(
       triggeredRepositoryRules('apps/kite-service/src/carrier/runtime-server-stdio.ts'),
     ).toEqual(['kite-service-carrier']);
-    expect(triggeredRepositoryRules('apps/kite-service/src/shell.ts')).toEqual([
-      'kite-service-application',
-    ]);
     expect(triggeredRepositoryRules('apps/kite-service/src/agent-api/context.ts')).toEqual([
       'kite-service-agent-api',
     ]);
@@ -219,11 +216,8 @@ describe('documentation impact gate V2', () => {
       'apps/kite-service/package.json',
       'apps/kite-service/src/index.ts',
       'apps/kite-service/src/composition.ts',
-      'apps/kite-service/src/native-infrastructure.ts',
-      'apps/kite-service/src/ports.ts',
-      'apps/kite-service/src/readiness.ts',
-      'apps/kite-service/src/shell.ts',
-      'apps/kite-service/src/signals.ts',
+      'apps/kite-service/src/app-server.ts',
+      'apps/kite-service/src/app-server-daemon.ts',
       'apps/kite-service/src/executable.ts',
     ]) {
       expect(triggeredRepositoryRules(path), path).toEqual(['kite-service-application']);
@@ -252,9 +246,6 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-service/src/session-logger/writer.ts')).toEqual([
       'observability-and-session-logging',
     ]);
-    expect(triggeredRepositoryRules('packages/kite-local-runtime/src/manager/manager.ts')).toEqual([
-      'kite-local-runtime-manager',
-    ]);
     expect(
       triggeredRepositoryRules(
         'packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts',
@@ -263,12 +254,6 @@ describe('documentation impact gate V2', () => {
     expect(
       triggeredRepositoryRules('apps/kite-service/test/isolated/runtime-stdio-child.test.ts'),
     ).toEqual(['runtime-transport-qualification']);
-    expect(triggeredRepositoryRules('apps/kite-service/src/process-harness/harness.ts')).toEqual([
-      'kite-service-process-harness',
-    ]);
-    expect(
-      triggeredRepositoryRules('packages/kite-local-runtime/src/client/native-connector.ts'),
-    ).toEqual(['kite-local-runtime-connector']);
     expect(triggeredRepositoryRules('apps/kite-cli/src/service-mode/adapter.ts')).toEqual([
       'kite-service-mode-adapter',
     ]);
@@ -299,7 +284,7 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('scripts/release/session-log-acl-smoke.ts')).toEqual([
       'observability-and-session-logging',
     ]);
-    expect(triggeredRepositoryRules('scripts/release/single-service-native-client.ts')).toEqual([
+    expect(triggeredRepositoryRules('scripts/release/app-server-client.ts')).toEqual([
       'release-candidate',
     ]);
     expect(triggeredRepositoryRules('scripts/run-default-tests.ts')).toEqual(['test-system']);

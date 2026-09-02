@@ -52,15 +52,14 @@ jobs:
           bun run scripts/release/windows-runner-evidence.ts
           git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
-        name: Verify Windows Service ACL, native IPC, and Store 9 boundary
+        name: Verify Windows App Server endpoint and Session Store fencing
         run: >-
           bun test
-          packages/kite-local-runtime/test/isolated/service-state.test.ts
-          packages/kite-local-runtime/test/isolated/native-ipc.test.ts
-          packages/kite-local-runtime/test/isolated/single-service-runtime-paths.test.ts
-          packages/runtime-storage-sqlite/test/kite-home-store.test.ts
-          packages/runtime-storage-sqlite/test/kite-home-runtime-file.test.ts
-          apps/kite-service/test/single-service-infrastructure.test.ts
+          packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
+          packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts
+          packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts
+          packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
+          tests/release/app-server-daemon.test.ts
       - name: Release contract tests
         run: >-
           bun test

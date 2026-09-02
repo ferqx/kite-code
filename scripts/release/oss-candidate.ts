@@ -170,7 +170,6 @@ export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>>
   '@kite-ai/kite-local-runtime/client': 'packages/kite-local-runtime/src/client/index.ts',
   '@kite-ai/kite-local-runtime/config': 'packages/kite-local-runtime/src/config/index.ts',
   '@kite-ai/kite-local-runtime/coordinator': 'packages/kite-local-runtime/src/coordinator/index.ts',
-  '@kite-ai/kite-local-runtime/manager': 'packages/kite-local-runtime/src/manager/index.ts',
   '@kite-ai/kite-local-runtime/service': 'packages/kite-local-runtime/src/service/index.ts',
   '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
   '@kite-ai/builtin-runtime': 'packages/builtin-runtime/src/index.ts',

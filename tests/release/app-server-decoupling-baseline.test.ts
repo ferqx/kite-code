@@ -8,13 +8,13 @@ import {
 const source = (path: string): string => readFileSync(path, 'utf8');
 
 describe('KASD App Server/Session decoupling transition baseline', () => {
-  test('freezes the current single-Service Store and process owners before fencing work', () => {
+  test('preserves the retired Store file without restoring its process owner', () => {
     expect(KITE_HOME_STORE_FORMAT_EPOCH).toBe('kite-home-single-service-v1-2026-08-30');
     expect(source('packages/runtime-storage-sqlite/src/kite-home-runtime-file.ts')).toContain(
       "expectedBasename = 'kite.sqlite'",
     );
-    expect(source('apps/kite-service/src/bootstrap.ts')).toContain(
-      "databasePath: join(kiteHomeRoot, 'kite.sqlite')",
+    expect(source('apps/kite-service/src/bootstrap.ts')).not.toContain(
+      'openKiteHomeRuntimeStorage',
     );
     expect(source('apps/kite-service/src/workspace-worker/runtime-composition.ts')).toContain(
       'options.ownerLock.acquire(workerIdentity)',
@@ -43,14 +43,13 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(owner).toContain('markGenerationUnknownInTransaction');
   });
 
-  test('keeps the legacy standalone Service outside the default TUI and CLI Runtime path', () => {
-    const composition = source('scripts/release/single-service-native-client.ts');
-    expect(composition).toContain("serviceTopology?: 'shared' | 'standalone'");
-    expect(composition).toContain('createStandaloneRuntimeHome()');
-    expect(composition).not.toContain('kite-session.sqlite');
-    expect(source('scripts/release/entrypoints/tui.ts')).not.toContain(
-      'createManagedLocalSingleServiceComposition',
-    );
+  test('removes the legacy single-Service control plane from public and internal entrypoints', () => {
+    const cli = source('scripts/release/entrypoints/cli.ts');
+    const service = source('apps/kite-service/src/executable.ts');
+    expect(cli).not.toContain('createManagedLocalSingleServiceComposition');
+    expect(cli).not.toContain("command.startsWith('service-')");
+    expect(service).not.toContain('run-single');
+    expect(source('apps/kite-cli/src/cli/index.ts')).not.toContain("'service-ensure'");
   });
 
   test('routes default TUI and CLI Runtime work through the paired App Server', () => {
@@ -77,7 +76,8 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('| KASD-02 | completed |');
     expect(plan).toContain('| KASD-03 | completed |');
     expect(plan).toContain('| KASD-04 | completed |');
-    expect(plan).toContain('| KASD-05 | in_progress |');
+    expect(plan).toContain('| KASD-05 | completed |');
+    expect(plan).toContain('| KASD-06 | in_progress |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

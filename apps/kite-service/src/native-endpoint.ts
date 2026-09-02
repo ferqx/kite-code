@@ -15,30 +15,12 @@ import {
 import { createServer, type Server, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import {
-  decodeKiteLocalNativeRequest,
-  decodeKiteLocalNativeResponse,
-  encodeKiteLocalNativeFrame,
   encodeKiteLocalRuntimeLifecycleReservation,
-  KITE_LOCAL_NATIVE_MAX_FRAME_BYTES,
-  KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-  type KiteLocalNativeRequest,
-  type KiteLocalNativeResponse,
   type KiteLocalRuntimeEndpoint,
   type KiteLocalRuntimeLifecycleReservation,
 } from '@kite-ai/kite-local-runtime/service';
 
-const DEFAULT_REQUEST_DEADLINE_MS = 2_000;
 const DEFAULT_MAX_CONNECTIONS = 64;
-
-export interface KiteNativeEndpointServerOptions {
-  readonly endpoint: KiteLocalRuntimeEndpoint;
-  readonly dispatch: (
-    request: KiteLocalNativeRequest,
-  ) => KiteLocalNativeResponse | Promise<KiteLocalNativeResponse>;
-  readonly requestDeadlineMs?: number;
-  readonly maxConnections?: number;
-  readonly lifecycleIdentity: KiteLocalRuntimeLifecycleReservation;
-}
 
 export interface KiteNativeEndpointServer extends AsyncDisposable {
   readonly endpoint: KiteLocalRuntimeEndpoint;
@@ -60,27 +42,6 @@ export type KiteOwnedLocalEndpointServer = KiteNativeEndpointServer;
 interface FileIdentity {
   readonly dev: number;
   readonly ino: number;
-}
-
-/**
- * Single-Service native discovery/control listener. It accepts exactly one bounded JSONL request
- * per connection and never writes descriptors, credentials, launch intents, or business state.
- */
-export function createKiteNativeEndpointServer(
-  options: KiteNativeEndpointServerOptions,
-): KiteNativeEndpointServer {
-  const requestDeadlineMs = positiveBound(
-    options.requestDeadlineMs,
-    DEFAULT_REQUEST_DEADLINE_MS,
-    30_000,
-    'requestDeadlineMs',
-  );
-  return createKiteOwnedLocalEndpointServer({
-    endpoint: options.endpoint,
-    lifecycleIdentity: options.lifecycleIdentity,
-    ...(options.maxConnections === undefined ? {} : { maxConnections: options.maxConnections }),
-    handleConnection: (socket) => handleConnection(socket, options.dispatch, requestDeadlineMs),
-  });
 }
 
 /** Owner-only Unix socket/named-pipe lifecycle shared by control and Runtime protocols. */
@@ -182,9 +143,7 @@ export function createKiteOwnedLocalEndpointServer(
   async function closeServer(): Promise<void> {
     if (state === 'closed') return;
     state = 'closed';
-    // Stop accepting first, then let bounded one-request connections flush their response. In
-    // particular, an authenticated service_stop response must reach the manager before endpoint
-    // cleanup removes the socket. Each connection already has requestDeadlineMs as its upper bound.
+    // Stop accepting first, then close or drain the connections according to the owner policy.
     const closing = closeNetServer(server);
     if (options.closeActiveConnections) {
       for (const socket of sockets) socket.destroy();
@@ -214,80 +173,6 @@ export function createKiteOwnedLocalEndpointServer(
     } catch (error) {
       if (!errorCodeIs(error, 'ENOENT') && !errorCodeIs(error, 'ENOTEMPTY')) throw error;
     }
-  }
-}
-
-async function handleConnection(
-  socket: Socket,
-  dispatch: KiteNativeEndpointServerOptions['dispatch'],
-  deadlineMs: number,
-): Promise<void> {
-  socket.setNoDelay(true);
-  let bytes = 0;
-  let settled = false;
-  let buffer = Buffer.alloc(0);
-  const timer = setTimeout(() => socket.destroy(), deadlineMs);
-  try {
-    const frame = await new Promise<Buffer>((resolveFrame, reject) => {
-      socket.on('data', (chunk: Buffer) => {
-        if (settled) return;
-        bytes += chunk.byteLength;
-        if (bytes > KITE_LOCAL_NATIVE_MAX_FRAME_BYTES) {
-          settled = true;
-          reject(new Error('Native request frame exceeds its fixed bound.'));
-          return;
-        }
-        buffer = Buffer.concat([buffer, chunk], bytes);
-        const newline = buffer.indexOf(0x0a);
-        if (newline < 0) return;
-        if (newline !== buffer.byteLength - 1 || buffer.subarray(0, newline).includes(0x0a)) {
-          settled = true;
-          reject(new Error('Native request must contain exactly one frame.'));
-          return;
-        }
-        settled = true;
-        resolveFrame(buffer.subarray(0, newline));
-      });
-      socket.once('error', reject);
-      socket.once('end', () => {
-        if (!settled) reject(new Error('Native request ended before a complete frame.'));
-      });
-    });
-    let request: KiteLocalNativeRequest;
-    try {
-      request = decodeKiteLocalNativeRequest(JSON.parse(frame.toString('utf8')) as unknown);
-    } catch {
-      socket.end(
-        encodeKiteLocalNativeFrame({
-          schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-          requestId: 'invalid-request',
-          operation: 'rejected',
-          outcome: 'rejected',
-          diagnostic: 'invalid_request',
-        }),
-      );
-      return;
-    }
-    let response: KiteLocalNativeResponse;
-    try {
-      response = decodeKiteLocalNativeResponse(await dispatch(request));
-      if (response.requestId !== request.requestId) {
-        throw new Error('Native response request identity mismatch.');
-      }
-    } catch {
-      response = {
-        schema: KITE_LOCAL_NATIVE_RESPONSE_SCHEMA_,
-        requestId: request.requestId,
-        operation: 'rejected',
-        outcome: 'rejected',
-        diagnostic: 'unavailable',
-      };
-    }
-    socket.end(encodeKiteLocalNativeFrame(response));
-  } catch {
-    socket.destroy();
-  } finally {
-    clearTimeout(timer);
   }
 }
 

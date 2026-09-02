@@ -1,17 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
-import {
-  WORKER_CONTROLLER_RESPONSE_SCHEMA_,
-  type WorkerControllerClient,
-  type WorkerControllerDurableOperation,
-  type WorkerControllerMutationResponse,
-} from '@kite-ai/kite-app-contract/worker-controller';
-import type {
-  KiteAppServerConnection,
-  LocalKiteConnection,
-  LocalRuntimeServiceDescriptor,
-} from '@kite-ai/kite-local-runtime/client';
-import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
+import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeClientConnection,
   RuntimeClientTransport,
@@ -30,7 +19,7 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
     history: history(),
   });
   let closeCalls = 0;
-  const connection: LocalKiteConnection = {
+  const connection: KiteAppServerConnection = {
     runtime,
     history: history(),
     app: {} as KiteAppControlClient,
@@ -39,7 +28,6 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
         throw new Error('not used');
       },
     },
-    service: descriptor(),
     get status() {
       return runtime.snapshotStore.getSnapshot().status === 'closed' ? 'closed' : 'active';
     },
@@ -111,7 +99,6 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   expect(continued?.threadId).toBe('service-created-fork-session');
   await facade.waitForSessionReady('service-created-fork-session');
   expect(remote.commands).toContain('fork_session');
-  expect(remote.commands).toContain('resume_session');
 
   const rewind = await facade.executeRewind({
     sourceThreadId: sessionId,
@@ -383,42 +370,9 @@ test('Native TUI facade converges when terminal projection arrives before the co
   await facade.dispose();
 });
 
-test('Native TUI opens an existing Session as Observer, then acquires its lease without reconnecting', async () => {
-  const remote = new FakeRuntimeConnection();
-  const controllerCalls: string[] = [];
-  const controller = createControllerClient('service-tui-test', controllerCalls);
-  let connectCalls = 0;
-  let reconnectCalls = 0;
-  const facade = facadeFor(remote, {
-    controller,
-    onConnect: () => {
-      connectCalls += 1;
-    },
-    onReconnect: () => {
-      reconnectCalls += 1;
-    },
-  });
-  const session = facade.registerSession('existing-session', '/tmp/tui-client-workspace');
-  await facade.waitForSessionReady('existing-session');
-
-  await session.runTask('mutate existing session', { dispatch: () => {} });
-
-  expect(connectCalls).toBe(1);
-  expect(reconnectCalls).toBe(0);
-  expect(remote.commands).not.toContain('resume_session');
-  expect(remote.commands).toContain('start_turn');
-  expect(controllerCalls).toEqual([
-    'read:existing-session',
-    'request:existing-session',
-    'read:existing-session',
-  ]);
-  await facade.dispose();
-  expect(remote.commands).not.toContain('cancel_turn');
-});
-
 test('App Server TUI keeps historical open observer-only and resumes on the first mutation', async () => {
   const remote = new FakeRuntimeConnection();
-  const facade = facadeFor(remote, { appServer: true, initialInteractionMode: 'full' });
+  const facade = facadeFor(remote, { initialInteractionMode: 'full' });
   const session = facade.registerSession('existing-session', '/tmp/tui-client-workspace');
   await facade.waitForSessionReady('existing-session');
 
@@ -432,51 +386,6 @@ test('App Server TUI keeps historical open observer-only and resumes on the firs
     remote.commands.indexOf('start_turn'),
   );
   await facade.dispose();
-});
-
-test('Native TUI releases every confirmed-idle Session lease on dispose without cancelling Turns', async () => {
-  const remote = new FakeRuntimeConnection();
-  const controllerCalls: string[] = [];
-  const controller = createControllerClient('service-tui-test', controllerCalls);
-  const facade = facadeFor(remote, { controller });
-  const first = facade.createSession('/tmp/tui-client-workspace');
-  await facade.waitForSessionReady(first);
-  const second = facade.createSession('/tmp/tui-client-workspace');
-  await facade.waitForSessionReady(second);
-
-  await facade.dispose();
-
-  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([
-    `release:${first}`,
-    `release:${second}`,
-  ]);
-  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([]);
-  expect(controllerCalls.filter((call) => call.startsWith('create:'))).toEqual([
-    `create:${first}`,
-    `create:${second}`,
-  ]);
-  expect(remote.commands).not.toContain('create_session');
-  expect(remote.commands).not.toContain('cancel_turn');
-  expect(remote.closeCalls).toBe(1);
-});
-
-test('Native TUI detaches an active Session lease on dispose without cancelling its Turn', async () => {
-  const remote = new FakeRuntimeConnection();
-  remote.restoreActiveTurnOnSubscribe();
-  const controllerCalls: string[] = [];
-  const controller = createControllerClient('service-tui-test', controllerCalls);
-  const facade = facadeFor(remote, { controller });
-  const sessionId = facade.createSession('/tmp/tui-client-workspace');
-  await facade.waitForSessionReady(sessionId);
-
-  await facade.dispose();
-
-  expect(controllerCalls.filter((call) => call.startsWith('detach:'))).toEqual([
-    `detach:${sessionId}`,
-  ]);
-  expect(controllerCalls.filter((call) => call.startsWith('release:'))).toEqual([]);
-  expect(remote.commands).not.toContain('cancel_turn');
-  expect(remote.closeCalls).toBe(1);
 });
 
 class FakeRuntimeConnection implements RuntimeClientConnection {
@@ -1134,23 +1043,6 @@ function history(): RuntimeHistoryClient {
   };
 }
 
-function descriptor(): LocalRuntimeServiceDescriptor {
-  return {
-    schema: 'kite.local-runtime-service.v1',
-    instanceId: 'service-tui-test',
-    pid: 1,
-    startedAt: '2026-08-27T00:00:00.000Z',
-    endpoint: {
-      origin: 'http://127.0.0.1:43123',
-      websocketUrl: 'ws://127.0.0.1:43123/rpc',
-    },
-    protocolVersion: 1,
-    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    serverVersion: 'test',
-    buildId: 'test',
-  };
-}
-
 function result(id: string | number | null, value: object): object {
   return { jsonrpc: '2.0', id, result: value };
 }
@@ -1227,8 +1119,6 @@ function idleProjection(sessionId: string, revision: number) {
 function facadeFor(
   remote: FakeRuntimeConnection,
   options: {
-    readonly appServer?: boolean;
-    readonly controller?: WorkerControllerClient;
     readonly initialInteractionMode?: 'accept_edits' | 'auto' | 'full';
     readonly onConnect?: () => void;
     readonly onReconnect?: () => void;
@@ -1249,7 +1139,6 @@ function facadeFor(
         throw new Error('not used');
       },
     },
-    ...(options.appServer ? {} : { service: descriptor() }),
     get status() {
       return runtime.snapshotStore.getSnapshot().status === 'closed' ? 'closed' : 'active';
     },
@@ -1268,10 +1157,7 @@ function facadeFor(
     },
     close: async () => runtime.close('tui-test-close'),
     [Symbol.asyncDispose]: async () => runtime.close('tui-test-dispose'),
-    ...(options.controller === undefined ? {} : { controller: options.controller }),
-  } as
-    | KiteAppServerConnection
-    | (LocalKiteConnection & { readonly controller?: WorkerControllerClient });
+  } as KiteAppServerConnection;
   return createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
@@ -1282,159 +1168,6 @@ function facadeFor(
       ? {}
       : { flushPresentation: options.flushPresentation }),
   });
-}
-
-interface TestControllerState {
-  status: 'idle' | 'active' | 'detached';
-  controllerGeneration: number;
-  connectionGeneration: number;
-  interactionGeneration: number;
-  clientId: string | null;
-  workerInstanceId: string | null;
-}
-
-function createControllerClient(workerInstanceId: string, calls: string[]): WorkerControllerClient {
-  const states = new Map<string, TestControllerState>();
-  const stateFor = (sessionId: string): TestControllerState => {
-    const current = states.get(sessionId);
-    if (current) return current;
-    const initial: TestControllerState = {
-      status: 'idle',
-      controllerGeneration: 0,
-      connectionGeneration: 0,
-      interactionGeneration: 0,
-      clientId: null,
-      workerInstanceId: null,
-    };
-    states.set(sessionId, initial);
-    return initial;
-  };
-  const operation = (
-    request: {
-      readonly sessionId: string;
-      readonly requestId: string;
-      readonly requestDigest: string;
-    },
-    operationName: WorkerControllerDurableOperation,
-    state: TestControllerState,
-  ): WorkerControllerMutationResponse => ({
-    schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
-    operation: operationName,
-    status: 'applied',
-    receipt: {
-      schema: 'kite.app.worker-controller.receipt.v1',
-      sessionId: request.sessionId,
-      requestId: request.requestId,
-      requestDigest: request.requestDigest,
-      operation: operationName,
-      status: 'applied',
-      code: operationName === 'request_control' ? 'acquired' : 'detached',
-      controllerGeneration: state.controllerGeneration,
-      connectionGeneration: state.connectionGeneration,
-      interactionGeneration: state.interactionGeneration,
-      clientId: state.clientId,
-      workerInstanceId: state.workerInstanceId,
-      completedAt: 1,
-    },
-    ...(operationName === 'request_control'
-      ? {
-          lease: {
-            sessionId: request.sessionId,
-            clientId: state.clientId!,
-            connectionGeneration: state.connectionGeneration,
-            controllerGeneration: state.controllerGeneration,
-            workerInstanceId,
-            status: 'active' as const,
-          },
-        }
-      : {}),
-  });
-  return {
-    async createSession(request) {
-      calls.push(`create:${request.sessionId}`);
-      const created: TestControllerState = {
-        status: 'active',
-        controllerGeneration: 1,
-        connectionGeneration: 1,
-        interactionGeneration: 0,
-        clientId: 'client-tui-test',
-        workerInstanceId,
-      };
-      states.set(request.sessionId, created);
-      const durable = operation(request, 'request_control', created);
-      return { ...durable, operation: 'create_session', sessionRevision: 1 };
-    },
-    async read(request) {
-      calls.push(`read:${request.sessionId}`);
-      const state = stateFor(request.sessionId);
-      return {
-        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
-        operation: 'read_controller',
-        state: {
-          sessionId: request.sessionId,
-          status: state.status,
-          controllerGeneration: state.controllerGeneration,
-          connectionGeneration: state.connectionGeneration,
-          clientId: state.clientId,
-          workerInstanceId: state.workerInstanceId,
-          interactionGeneration: state.interactionGeneration,
-          resumeCapabilityExpiresAtMs: null,
-        },
-      };
-    },
-    async requestControl(request) {
-      calls.push(`request:${request.sessionId}`);
-      const state = stateFor(request.sessionId);
-      if (state.status === 'active') throw new Error('Controller is busy.');
-      const active: TestControllerState = {
-        ...state,
-        status: 'active',
-        controllerGeneration: state.controllerGeneration + 1,
-        connectionGeneration: 1,
-        clientId: 'client-tui-test',
-        workerInstanceId,
-      };
-      states.set(request.sessionId, active);
-      return operation(request, 'request_control', active);
-    },
-    async releaseControl(request) {
-      calls.push(`release:${request.sessionId}`);
-      const state = stateFor(request.sessionId);
-      states.set(request.sessionId, {
-        ...state,
-        status: 'idle',
-        controllerGeneration: state.controllerGeneration + 1,
-        clientId: null,
-        workerInstanceId: null,
-      });
-      return operation(request, 'release_control', state);
-    },
-    async detach(request) {
-      calls.push(`detach:${request.sessionId}`);
-      const state = stateFor(request.sessionId);
-      states.set(request.sessionId, { ...state, status: 'detached' });
-      return operation(request, 'detach_controller', state);
-    },
-    async issueResumeCapability() {
-      throw new Error('unused');
-    },
-    async resume() {
-      throw new Error('unused');
-    },
-    async mintDetachedRecoveryCapability() {
-      throw new Error('unused');
-    },
-    async abandonDetachedController() {
-      throw new Error('unused');
-    },
-    async validateResumeCapability() {
-      return {
-        schema: WORKER_CONTROLLER_RESPONSE_SCHEMA_,
-        operation: 'validate_resume_capability',
-        status: 'missing',
-      };
-    },
-  };
 }
 
 function subscriptionUpdate(subscriptionId: string, generation: number, message: object): object {

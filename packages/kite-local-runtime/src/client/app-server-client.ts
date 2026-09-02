@@ -26,7 +26,7 @@ export interface KiteAppServerConnection extends AsyncDisposable {
   readonly history: NonNullable<RuntimeClient['history']>;
   readonly app: ReturnType<typeof createProtocolKiteAppControlClient>;
   readonly credential: NativeProviderCredentialClient;
-  /** App Server never exposes the legacy native Worker Controller. */
+  /** Session execution authority is carried by Runtime commands, never a side-channel controller. */
   readonly controller?: undefined;
   readonly snapshotStore: RuntimeClient['snapshotStore'];
   readonly status: 'disconnected' | 'connecting' | 'active' | 'reconnecting' | 'closed';

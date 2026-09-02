@@ -1,11 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
-import type {
-  LocalKiteConnection,
-  LocalRuntimeServiceDescriptor,
-} from '@kite-ai/kite-local-runtime/client';
-import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
+import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeClientConnection,
   RuntimeClientTransport,
@@ -75,7 +71,7 @@ test('TUI runtime facade consumes only an injected Native connection and exposes
 });
 
 function createConnectionFixture(): {
-  readonly connection: LocalKiteConnection;
+  readonly connection: KiteAppServerConnection;
   readonly closeReasons: string[];
 } {
   const transport: RuntimeClientTransport = {
@@ -95,21 +91,7 @@ function createConnectionFixture(): {
     },
   } as RuntimeHistoryClient;
   const closeReasons: string[] = [];
-  const descriptor: LocalRuntimeServiceDescriptor = {
-    schema: 'kite.local-runtime-service.v1',
-    instanceId: 'service-instance',
-    pid: 1234,
-    startedAt: '2026-08-27T00:00:00.000Z',
-    endpoint: {
-      origin: 'http://127.0.0.1:43123',
-      websocketUrl: 'ws://127.0.0.1:43123/rpc',
-    },
-    protocolVersion: 1,
-    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    serverVersion: 'test-service',
-    buildId: 'test-build',
-  };
-  const connection: LocalKiteConnection = {
+  const connection: KiteAppServerConnection = {
     runtime,
     history,
     app: {} as KiteAppControlClient,
@@ -118,7 +100,6 @@ function createConnectionFixture(): {
         throw new Error('credential is not used by this contract fixture');
       },
     },
-    service: descriptor,
     status: 'active',
     generation: 1,
     snapshotStore: runtime.snapshotStore,

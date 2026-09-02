@@ -5,28 +5,27 @@
 读取时机：修改`packages/kite-local-runtime/src/coordinator/`、`apps/kite-service/src/workspace-worker/`、
 `apps/kite-service/src/web-gateway/`、`apps/kite-service/src/agent-api/`、`packages/agent-api-client/`或`apps/kite-web/`时。
 
-验证：`bun test packages/kite-local-runtime/test/single-service-manager.test.ts apps/kite-service/test/agent-api
-apps/kite-service/test/web-gateway tests/release/single-service-real-child.test.ts`、`bun run --cwd apps/kite-web test`、
+验证：`bun test apps/kite-service/test/agent-api apps/kite-service/test/web-gateway tests/release/app-server-daemon.test.ts`、`bun run --cwd apps/kite-web test`、
 `bun run --cwd apps/kite-web typecheck`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`、
 `bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
 相关：ADR-0147、ADR-0148、ADR-0152、ADR-0154、ADR-0155、ADR-0156、
-[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
+[`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。
 
 ## 当前拓扑
 
 默认installed/source TUI与CLI `run/resume`各自拥有一个stdio App Server，并通过`kite-session.sqlite` durable profile共享facts；普通
-启动没有HTTP listener。显式`kite server start`另建一个App Server daemon与loopback Web listener；legacy `service *`只保留Native
-Runtime/control listener，等待KASD-06删除。
+启动没有HTTP listener。显式`kite server start`另建一个App Server daemon与loopback Web listener；旧`service *`与Native
+Runtime/control listener已经删除。
 Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
 process/control/state与Coordinator production glue已经删除，不能由普通startup、release connector或Browser恢复。
 
 Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
-`apps/kite-service/src/workspace-worker/`中仍被single-Service消费的identity、Trust、effect与execution组件是in-process领域模块。
+`apps/kite-service/src/workspace-worker/`中仍被App Server消费的identity、Trust、effect与execution组件是in-process领域模块。
 
 ADR-0166的`kite-session.sqlite`多连接owner不取得Workspace process lock，以Session generation裁决writer，并允许同Workspace不同App
-Server写不同Session。KASD-03默认client已切入该owner；这不恢复Coordinator/Worker拓扑，旧Workspace lock与one-connection Store只留在
-显式legacy Service。
+Server写不同Session。KASD-03默认client已切入该owner；这不恢复Coordinator/Worker拓扑，旧Workspace lock与one-connection Store没有
+production caller。
 
 App Server默认以parent-owned stdio组合该owner和现有Host；显式`kite server start`可用owner-only Unix socket/Windows named pipe
 承载同一composition的多个client，并固定一个canonical Workspace。daemon v2另有一个loopback HTTP listener；默认stdio仍没有。两者都不是

@@ -31,9 +31,9 @@ bun install
 bun run tui
 ```
 
-`bun run tui` builds the Web assets and ensures the one Local Service before opening the terminal
-UI. `/status` shows the Service PID, start time, actual/expected build identity, and stable Kite Web
-URL. Use `bun run tui:fresh` when the source Service itself must be restarted onto the current build.
+`bun run tui` starts a same-build, parent-owned App Server over stdio; it does not build Web assets or
+discover a shared process. `/status` shows the transport, profile, build, App Server version, and
+verified pairing. Sessions remain durable across TUI exits, and no `tui:fresh` workflow is needed.
 On first launch, follow the interface to configure a model provider.
 
 Headless CLI:
@@ -55,15 +55,15 @@ To start the Server without opening the TUI:
 bun run server
 ```
 
-This builds the Web assets, ensures the same Local Service used by the TUI, and prints its stable
-loopback root URL. The Service root address is the Web entrypoint; the same origin serves `/v1` and
-`/api-docs`. `bun run agent web` ensures the Service and prints the same root URL.
+This builds the Web assets, explicitly starts the local App Server daemon, and prints its stable
+loopback root URL. The same origin serves `/v1` and `/api-docs`. `bun run agent web` only discovers
+an already-running daemon and never starts or upgrades it.
 
-TUI/CLI and Browser reuse one Service, Runtime, listener and `kite.sqlite`. Visiting `/` establishes
-an HttpOnly read-only session, then the Browser reads Workspace, Session, History and Checkpoint data from
-the Service `/v1` REST API. Use `bun run agent service status|stop|restart` for the only lifecycle;
-there is no separate Web service to start or stop. `bun run --cwd apps/kite-web dev` remains only a
-Vite asset server.
+Default TUI/CLI each own a same-build stdio App Server and share durable `kite-session.sqlite` facts
+through per-Session writer fencing; they do not open Web ports. The explicit daemon owns one stable
+Web origin. Visiting `/` establishes an HttpOnly read-only session, then the Browser reads Workspace,
+Session, History and Checkpoint data from `/v1`. Use `bun run agent server start|status|stop` for the
+explicit daemon lifecycle. `bun run --cwd apps/kite-web dev` remains only a Vite asset server.
 
 ## Documentation
 

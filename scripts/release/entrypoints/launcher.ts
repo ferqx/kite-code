@@ -2,7 +2,6 @@
 
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { resolveReadinessForwarding, stripExecutableSuffix } from '../stable-launcher-contract';
 
 /** Stable launcher contract. Keep this source independent from the application bundle. */
 export const STABLE_LAUNCHER_CONTRACT_ = 'kite-stable-release-launcher-v1' as const;
@@ -66,26 +65,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  const readiness = resolveReadinessForwarding(name, args, process.env);
-  const childEnv = readiness === undefined ? env : { ...env, [readiness.environmentVariable]: '3' };
-  const child =
-    readiness !== undefined
-      ? process.platform === 'win32'
-        ? Bun.spawn([target, ...args], {
-            stdio: ['inherit', 'inherit', 'inherit', 3] as [
-              'inherit',
-              'inherit',
-              'inherit',
-              number,
-            ],
-            env: childEnv,
-          })
-        : Bun.spawn([target, ...args], {
-            stdio: ['inherit', 'inherit', 'inherit', Bun.file('/dev/fd/3')],
-            env: childEnv,
-          })
-      : Bun.spawn([target, ...args], { stdio: ['inherit', 'inherit', 'inherit'], env: childEnv });
+  const child = Bun.spawn([target, ...args], {
+    stdio: ['inherit', 'inherit', 'inherit'],
+    env,
+  });
   process.exitCode = await child.exited;
+}
+
+function stripExecutableSuffix(name: string): string {
+  return name.endsWith('.exe') ? name.slice(0, -'.exe'.length) : name;
 }
 
 async function runMcpWrapper(

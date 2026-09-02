@@ -8,13 +8,54 @@ import {
   rmdirSync,
   unlinkSync,
 } from 'node:fs';
-import {
-  decodeKiteLocalRuntimeLifecycleReservation,
-  type KiteLocalRuntimeLifecycleReservation,
-} from './native-protocol';
+import { z } from 'zod';
 import type { KiteLocalRuntimeEndpoint } from './paths';
 
 const MAX_RESERVATION_BYTES = 4_096;
+export const KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_ =
+  'kite.local-service-lifecycle-reservation.v1' as const;
+
+const identifier = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((value) => !/\p{Cc}/u.test(value));
+const kiteLocalRuntimeLifecycleReservationSchema = z
+  .object({
+    schema: z.literal(KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_),
+    pid: z.number().int().positive(),
+    processStartIdentity: identifier,
+    instanceId: identifier,
+    buildId: identifier,
+    startedAt: z.string().datetime({ offset: true }),
+    socketDevice: z.number().int().nonnegative().optional(),
+    socketInode: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .refine(
+    (value) => (value.socketDevice === undefined) === (value.socketInode === undefined),
+    'socket identity must be complete',
+  );
+
+export type KiteLocalRuntimeLifecycleReservation = z.infer<
+  typeof kiteLocalRuntimeLifecycleReservationSchema
+>;
+
+export function decodeKiteLocalRuntimeLifecycleReservation(
+  value: unknown,
+): KiteLocalRuntimeLifecycleReservation {
+  return kiteLocalRuntimeLifecycleReservationSchema.parse(value);
+}
+
+export function encodeKiteLocalRuntimeLifecycleReservation(
+  value: KiteLocalRuntimeLifecycleReservation,
+): string {
+  const frame = `${JSON.stringify(decodeKiteLocalRuntimeLifecycleReservation(value))}\n`;
+  if (Buffer.byteLength(frame, 'utf8') > MAX_RESERVATION_BYTES) {
+    throw new RangeError('Local endpoint lifecycle reservation is oversized.');
+  }
+  return frame;
+}
 
 export interface KiteLocalRuntimeProcessIdentityProbe {
   inspect(pid: number, processStartIdentity: string): Promise<'alive' | 'dead' | 'uncertain'>;
@@ -37,10 +78,10 @@ export function readKiteLocalRuntimeLifecycleReservation(
     );
     const stat = fstatSync(descriptor);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > MAX_RESERVATION_BYTES) {
-      throw new Error('Local Service lifecycle reservation is invalid.');
+      throw new Error('Local endpoint lifecycle reservation is invalid.');
     }
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
-      throw new Error('Local Service lifecycle reservation owner is invalid.');
+      throw new Error('Local endpoint lifecycle reservation owner is invalid.');
     }
     return decodeKiteLocalRuntimeLifecycleReservation(
       JSON.parse(readFileSync(descriptor, 'utf8')) as unknown,

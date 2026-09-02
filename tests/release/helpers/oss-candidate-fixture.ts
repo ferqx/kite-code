@@ -10,17 +10,16 @@ import {
 } from '../../../scripts/release/oss-candidate';
 
 let cachedWindowsLauncher: Promise<Uint8Array> | undefined;
-const cachedWindowsCli = new Map<'applied' | 'service_busy', Promise<Uint8Array>>();
+let cachedWindowsCli: Promise<Uint8Array> | undefined;
 
 export async function createOssCandidateFixture(
   version: string,
   target: OssReleaseTarget = currentOssReleaseTarget(),
-  stopOutcome: 'applied' | 'service_busy' = 'applied',
   argumentLogPath?: string,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-oss-candidate-test-'));
   const archivePath = join(root, 'candidate.tar.gz');
-  const cli = await fixtureCliBytes(root, target, stopOutcome, argumentLogPath);
+  const cli = await fixtureCliBytes(root, target, argumentLogPath);
   const suffix = target.executableSuffix;
   const launcher = await fixtureLauncherBytes(root, target);
   const web = bytes('<!doctype html><html><body><div id="root"></div></body></html>\n');
@@ -99,31 +98,26 @@ async function fixtureLauncherBytes(root: string, target: OssReleaseTarget): Pro
 async function fixtureCliBytes(
   root: string,
   target: OssReleaseTarget,
-  stopOutcome: 'applied' | 'service_busy',
   argumentLogPath?: string,
 ): Promise<Uint8Array> {
   if (target.os !== 'win32' || process.platform !== 'win32') {
     const recordArguments = argumentLogPath
       ? `printf '%s\\n' "$@" >> '${argumentLogPath.replaceAll("'", "'\\''")}'\n`
       : '';
-    const script =
-      stopOutcome === 'applied'
-        ? '#!/bin/sh\nif [ "$1" = "service" ] && [ "$2" = "status" ]; then echo \'{"outcome":"applied","state":"absent"}\'; elif [ "$1" = "service" ] && [ "$2" = "stop" ]; then echo stopped; else echo Kite; fi\n'
-        : '#!/bin/sh\nif [ "$1" = "service" ] && [ "$2" = "status" ]; then echo \'{"outcome":"service_busy","state":"ready"}\'; elif [ "$1" = "service" ] && [ "$2" = "stop" ]; then echo busy; exit 1; else echo Kite; fi\n';
-    return bytes(script.replace('#!/bin/sh\n', `#!/bin/sh\n${recordArguments}`));
+    return bytes(`#!/bin/sh\n${recordArguments}echo Kite\n`);
   }
 
   if (!argumentLogPath) {
-    const cached = cachedWindowsCli.get(stopOutcome) ?? compileWindowsFixtureCli(root, stopOutcome);
-    cachedWindowsCli.set(stopOutcome, cached);
+    const cached = cachedWindowsCli ?? compileWindowsFixtureCli(root);
+    cachedWindowsCli = cached;
     try {
       return new Uint8Array(await cached);
     } catch (error) {
-      if (cachedWindowsCli.get(stopOutcome) === cached) cachedWindowsCli.delete(stopOutcome);
+      if (cachedWindowsCli === cached) cachedWindowsCli = undefined;
       throw error;
     }
   }
-  return compileWindowsFixtureCli(root, stopOutcome, argumentLogPath);
+  return compileWindowsFixtureCli(root, argumentLogPath);
 }
 
 async function compileWindowsFixtureLauncher(root: string): Promise<Uint8Array> {
@@ -173,15 +167,9 @@ process.exitCode = await child.exited;
 
 async function compileWindowsFixtureCli(
   root: string,
-  stopOutcome: 'applied' | 'service_busy',
   argumentLogPath?: string,
 ): Promise<Uint8Array> {
   const executable = join(root, 'fixture-kite.exe');
-  const status = JSON.stringify(
-    stopOutcome === 'applied'
-      ? { outcome: 'applied', state: 'absent' }
-      : { outcome: 'service_busy', state: 'ready' },
-  );
   const rustLog = argumentLogPath
     ? `    let mut log = OpenOptions::new()
         .create(true)
@@ -205,21 +193,10 @@ appendFileSync(${JSON.stringify(argumentLogPath)}, process.argv.slice(1).join('\
 ${argumentLogPath ? 'use std::fs::OpenOptions;\nuse std::io::Write;\n' : ''}
 fn main() {
     let arguments: Vec<String> = env::args().skip(1).collect();
-${rustLog}    if arguments.iter().any(|argument| argument == "status") {
-        println!("{}", ${JSON.stringify(status)});
-    } else if arguments.iter().any(|argument| argument == "stop") {
-        println!("${stopOutcome === 'applied' ? 'stopped' : 'busy'}");
-        std::process::exit(${stopOutcome === 'applied' ? 0 : 1});
-    } else {
-        println!("Kite");
-    }
+${rustLog}    println!("Kite");
 }
 `,
-    `${bunLog}const args = process.argv.slice(1);
-if (args.includes('status')) console.log(${JSON.stringify(status)});
-else if (args.includes('stop')) { console.log('${stopOutcome === 'applied' ? 'stopped' : 'busy'}'); process.exit(${stopOutcome === 'applied' ? 0 : 1}); }
-else console.log('Kite');
-`,
+    `${bunLog}console.log('Kite');\n`,
     executable,
   );
 }

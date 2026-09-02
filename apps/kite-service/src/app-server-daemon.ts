@@ -18,7 +18,7 @@ import {
   type KiteAppServerMainDependencies,
   resolveKiteAppServerEnvironment,
 } from './app-server';
-import { createKiteSingleServiceAgentApiReadContext } from './bootstrap';
+import { createKiteAppServerAgentApiReadContext } from './bootstrap';
 import {
   createNodeRuntimeStdioOutput,
   createRuntimeStdioCarrier,
@@ -162,11 +162,11 @@ async function createDaemonWebOwners(
   webStaticRoot: string,
   buildId: string,
 ): Promise<{
-  readonly browserReadContext: ReturnType<typeof createKiteSingleServiceAgentApiReadContext>;
+  readonly browserReadContext: ReturnType<typeof createKiteAppServerAgentApiReadContext>;
   readonly agentApi: ReturnType<typeof createAgentApiRouteHandler>;
   readonly webGateway: ReturnType<typeof createWebGatewayCarrier>;
 }> {
-  const browserReadContext = createKiteSingleServiceAgentApiReadContext({
+  const browserReadContext = createKiteAppServerAgentApiReadContext({
     directory: owner.storageOwner.directory,
     runtime: owner.composition.runtime,
     history: owner.composition.history,

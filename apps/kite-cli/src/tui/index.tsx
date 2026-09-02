@@ -55,8 +55,6 @@ import type {
 import {
   type AppServerRuntimePresentation,
   formatAppServerRuntimeStatus,
-  formatServiceBuildDriftWarning,
-  formatServiceRuntimeStatus,
 } from './service-runtime-status';
 import { SessionNavigationAuthority } from './session-navigation';
 import {
@@ -103,10 +101,6 @@ export interface TuiBootstrapProps {
     forWorkspace(workspace: KiteWorkspaceIdentity): KiteAppControlClient;
   };
   credentialClient?: NativeProviderCredentialClient;
-  /** Client composition build identity used only for local status/drift presentation. */
-  expectedServiceBuildId?: string;
-  /** TUI candidate version used only for local status presentation. */
-  clientVersion?: string;
   /** Parent-owned App Server identity; initialize already proved exact build/capability pairing. */
   appServerRuntime?: AppServerRuntimePresentation;
 }
@@ -119,14 +113,6 @@ interface TuiAppProps {
   appControl: KiteAppControlClient;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
-  readServiceRuntime?: () => Readonly<{
-    pid: number;
-    startedAt: string;
-    buildId: string;
-    serviceVersion?: string;
-    clientVersion?: string;
-    expectedBuildId?: string;
-  }>;
   readAppServerRuntime?: () => AppServerRuntimePresentation;
 }
 
@@ -159,8 +145,6 @@ export function TuiBootstrap({
   createSessionManager,
   appControlGateway,
   credentialClient,
-  expectedServiceBuildId,
-  clientVersion,
   appServerRuntime,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
@@ -345,20 +329,6 @@ export function TuiBootstrap({
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
       readAppServerRuntime={appServerRuntime ? () => appServerRuntime : undefined}
-      readServiceRuntime={
-        runtimeMode?.service
-          ? () => ({
-              pid: runtimeMode.service!.pid,
-              startedAt: runtimeMode.service!.startedAt,
-              buildId: runtimeMode.service!.buildId,
-              serviceVersion: runtimeMode.service!.serverVersion,
-              ...(clientVersion === undefined ? {} : { clientVersion }),
-              ...(expectedServiceBuildId === undefined
-                ? {}
-                : { expectedBuildId: expectedServiceBuildId }),
-            })
-          : undefined
-      }
     />,
   );
 }
@@ -371,7 +341,6 @@ function TuiApp({
   appControl,
   languagePreference,
   onLanguageSelect,
-  readServiceRuntime,
   readAppServerRuntime,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
@@ -385,7 +354,6 @@ function TuiApp({
   );
   const stateRef = React.useRef(state);
   stateRef.current = state;
-  const serviceDriftWarningShownRef = React.useRef(false);
 
   const [themePreset, setThemePreset] = React.useState<ThemePreset>(() => {
     const saved = loadColorPreset(workspace);
@@ -1131,17 +1099,6 @@ function TuiApp({
     [],
   );
 
-  React.useEffect(() => {
-    if (serviceDriftWarningShownRef.current || !readServiceRuntime) return;
-    const warning = formatServiceBuildDriftWarning(
-      readServiceRuntime(),
-      translate('serviceStatus.driftStartup'),
-    );
-    if (!warning) return;
-    serviceDriftWarningShownRef.current = true;
-    void dispatchSessionLoad({ type: 'LOCAL_TEXT', text: warning, isError: true });
-  }, [dispatchSessionLoad, readServiceRuntime, translate]);
-
   const enterPlanMode = React.useCallback(() => {
     // With no submitted task, `/plan` is only input policy for the next
     // start_turn.  Creating a local Runtime planning placeholder here would
@@ -1302,7 +1259,6 @@ function TuiApp({
         });
     },
     () => {
-      const serviceRuntime = readServiceRuntime?.();
       const appServerRuntime = readAppServerRuntime?.();
       dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/status' });
       const identity = appServerRuntime
@@ -1315,24 +1271,11 @@ function TuiApp({
             paired: translate('appServerStatus.paired'),
             protocolCompatible: translate('appServerStatus.protocolCompatible'),
           })
-        : serviceRuntime
-          ? formatServiceRuntimeStatus(serviceRuntime, {
-              pid: translate('serviceStatus.pid'),
-              startedAt: translate('serviceStatus.startedAt'),
-              buildId: translate('serviceStatus.buildId'),
-              serviceVersion: translate('serviceStatus.serviceVersion'),
-              clientVersion: translate('serviceStatus.clientVersion'),
-              expectedBuildId: translate('serviceStatus.expectedBuildId'),
-              versionStatus: translate('serviceStatus.versionStatus'),
-              aligned: translate('serviceStatus.aligned'),
-              sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
-              buildMismatch: translate('serviceStatus.buildMismatch'),
-            })
-          : `  ⎿  ${translate('serviceStatus.unavailable')}`;
+        : `  ⎿  ${translate('appServerStatus.unavailable')}`;
       dispatchSessionLoad({
         type: 'LOCAL_TEXT',
         text: identity,
-        ...(serviceRuntime || appServerRuntime ? {} : { isError: true }),
+        ...(appServerRuntime ? {} : { isError: true }),
       });
     },
   );

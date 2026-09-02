@@ -38,11 +38,11 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
 Host/Builtin/History/App Control composition，多个进程只通过durable Store共享Session facts。普通启动没有HTTP/Web listener；显式
-`kite server start/status/stop`提供fixed exact protocol本机daemon且不参与默认发现，legacy Service/Web控制面将在KASD后续收敛。
+`kite server start/status/stop`提供fixed exact protocol本机daemon且不参与默认发现；旧Service/Web控制面已经删除。
 App Server internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、显式daemon、legacy single-Service、
+App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、显式daemon、
 retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
 Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 

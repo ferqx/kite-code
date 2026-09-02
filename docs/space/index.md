@@ -40,7 +40,8 @@
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
 | `../active/sqlite-runtime-log-query.md` | active | SQLite Runtime Store 的只读会话与事件查询、展示投影与数据边界 | 修改 Runtime Store event/session 数据、日志查询 Contract、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。 |
 | `../active/coordinator-workspace-worker-web.md` | active | 单Service内复用的Workspace/Controller模块、同listener只读Web与retired companion边界 | 修改Coordinator/Workspace/Web源码、browser auth或native Controller时。 |
-| `../active/single-service-local-runtime.md` | active | 每个canonical Kite Home唯一Service、Store 9、最小OS runtime、same-listener Web与legacy迁移边界 | 修改CLI/TUI本机连接、Service lifecycle/native IPC、Store 9、Web启动、Kite Home文件、旧Store迁移或release内容时。 |
+| `../active/app-server-local-runtime.md` | active | paired App Server、Durable Session fencing、显式daemon/Web与最小endpoint owner | 修改CLI/TUI本机连接、App Server lifecycle、Session Store、daemon/Web、profile或release内容时。 |
+| `../deprecated/single-service-local-runtime.md` | superseded | ADR-0152/0159/0164/0165历史边界 | 仅追溯历史决策时。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |

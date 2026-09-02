@@ -1,26 +1,11 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, join, resolve } from 'node:path';
-import type { LocalRuntimeServiceDescriptor } from './codecs';
-
-export const LOCAL_RUNTIME_SERVICE_STATE_DIRECTORY = Object.freeze([
-  'runtime-service',
-  'v1',
-] as const);
 
 export type KiteHomeIdentitySource = 'os_user_home' | 'explicit_argument';
 
 export interface KiteHomeIdentity {
   readonly root: string;
   readonly source: KiteHomeIdentitySource;
-}
-
-export interface LocalRuntimeServiceStatePaths {
-  readonly root: string;
-  readonly descriptor: string;
-  readonly accessToken: string;
-  readonly controlToken: string;
-  readonly instanceLock: string;
-  readonly lifecycleLock: string;
 }
 
 function assertAbsoluteCleanPath(value: string, label: string): string {
@@ -50,34 +35,6 @@ export function createKiteHomeIdentity(
   return Object.freeze({ root: assertAbsoluteCleanPath(root, 'Kite home'), source });
 }
 
-export function localRuntimeServiceStateRoot(identity: KiteHomeIdentity): string {
-  return join(identity.root, ...LOCAL_RUNTIME_SERVICE_STATE_DIRECTORY);
-}
-
-/**
- * Return the fixed V1 state layout. No file is read, created, followed, or removed by this
- * helper; service lifecycle code owns those operations and their no-follow/ACL checks.
- */
-export function resolveLocalRuntimeServiceStatePaths(
-  identity: KiteHomeIdentity,
-): LocalRuntimeServiceStatePaths {
-  const root = localRuntimeServiceStateRoot(identity);
-  return Object.freeze({
-    root,
-    descriptor: join(root, 'instance.json'),
-    accessToken: join(root, 'access.token'),
-    controlToken: join(root, 'control.token'),
-    instanceLock: join(root, 'instance.lock'),
-    lifecycleLock: join(root, 'lifecycle.lock'),
-  });
-}
-
-export interface LocalRuntimeServiceStatePort {
-  readonly paths: LocalRuntimeServiceStatePaths;
-  readDescriptor(): Promise<LocalRuntimeServiceDescriptor | undefined>;
-  readToken(kind: 'access' | 'control'): Promise<string | undefined>;
-}
-
 export const KITE_LOCAL_RUNTIME_ENDPOINT_VERSION = 'v1' as const;
 
 export type KiteLocalRuntimeEndpoint =
@@ -99,37 +56,7 @@ export function kiteHomeRuntimeDigest(identity: KiteHomeIdentity): string {
   return createHash('sha256').update(identity.root, 'utf8').digest('hex').slice(0, 32);
 }
 
-/**
- * Resolve the accepted single-Service runtime endpoint without reading or creating filesystem
- * state. POSIX callers inject an already owner-verified OS runtime parent; Windows uses a
- * SID-protected first named-pipe instance and therefore needs no persistent runtime path.
- */
-export function resolveKiteLocalRuntimeEndpoint(input: {
-  readonly home: KiteHomeIdentity;
-  readonly platform?: NodeJS.Platform;
-  readonly runtimeParent?: string;
-}): KiteLocalRuntimeEndpoint {
-  const platform = input.platform ?? process.platform;
-  const homeDigest = kiteHomeRuntimeDigest(input.home);
-  if (platform === 'win32') {
-    return Object.freeze({
-      kind: 'named_pipe',
-      homeDigest,
-      pipeName: `\\\\.\\pipe\\kite-service-${KITE_LOCAL_RUNTIME_ENDPOINT_VERSION}-${homeDigest}`,
-    });
-  }
-  const runtimeParent = assertAbsoluteCleanPath(input.runtimeParent ?? '', 'OS runtime parent');
-  const root = join(runtimeParent, 'kite-code', KITE_LOCAL_RUNTIME_ENDPOINT_VERSION, homeDigest);
-  return Object.freeze({
-    kind: 'unix',
-    homeDigest,
-    root,
-    socket: join(root, 'service.sock'),
-    lifecycleReservation: join(root, 'service.lock'),
-  });
-}
-
-/** Explicit App Server daemon endpoint; it never aliases the legacy Service endpoint. */
+/** Explicit App Server daemon endpoint derived without reading or creating state. */
 export function resolveKiteAppServerDaemonEndpoint(input: {
   readonly home: KiteHomeIdentity;
   readonly platform?: NodeJS.Platform;

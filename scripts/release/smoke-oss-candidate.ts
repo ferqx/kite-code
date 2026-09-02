@@ -1,19 +1,7 @@
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-} from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-} from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
@@ -44,17 +32,11 @@ const verified = await verifyOssCandidate(archivePath, currentOssReleaseTarget()
 const smokeRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-release-smoke-')));
 const prefix = join(smokeRoot, 'install');
 const variantPath = join(smokeRoot, 'variant.tar.gz');
-mkdirSync(join(smokeRoot, 'service-home'), { mode: 0o700 });
-const installerHome = ensureLocalRuntimeServiceHome(
-  createKiteHomeIdentity(join(smokeRoot, 'service-home', '.kite-code'), 'explicit_argument'),
-);
-
 let smokeFailure: unknown;
 try {
   await installOssCandidate({
     archivePath: verified.archivePath,
     prefix,
-    serviceHome: installerHome,
   });
   assertActiveRelease(prefix, verified.candidateId);
   await runInstalledSmokes(prefix, verified.manifest);
@@ -62,7 +44,6 @@ try {
   await installOssCandidate({
     archivePath: variant.archivePath,
     prefix,
-    serviceHome: installerHome,
   });
   const afterSecondInstall = readInstallStatus(prefix);
   if (
@@ -72,13 +53,13 @@ try {
     throw new Error('Second install did not preserve the previous candidate.');
   }
   assertActiveRelease(prefix, variant.candidateId);
-  const rolledBack = rollbackOssCandidate(prefix, { serviceHome: installerHome });
+  const rolledBack = rollbackOssCandidate(prefix);
   if (rolledBack.currentCandidateId !== verified.candidateId) {
     throw new Error('Rollback did not restore the original candidate.');
   }
   assertActiveRelease(prefix, verified.candidateId);
   await runInstalledSmokes(prefix, verified.manifest);
-  uninstallOssCandidate(prefix, { serviceHome: installerHome });
+  uninstallOssCandidate(prefix);
   if (existsSync(prefix)) throw new Error('Uninstall left the managed install root behind.');
   console.log(
     JSON.stringify({
@@ -91,7 +72,7 @@ try {
         'cli-help-version',
         'tui-version-pty-startup',
         'explicit-app-server-daemon',
-        'single-service-companion',
+        'paired-app-server-process',
         'retired-companion-slots-absent',
         'web-payload-assets',
         'mcp-stdio-authenticated-wrapper',

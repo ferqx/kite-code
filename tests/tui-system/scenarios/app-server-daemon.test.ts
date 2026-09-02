@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedLocalAppServerDaemon } from '../../../scripts/release/app-server-daemon';
-import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
+import { cleanupTuiSystemFixtures, stopTuiSystemServer } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
@@ -36,12 +36,10 @@ describe('TUI PTY System — explicit App Server daemon', () => {
   afterEach(async () => {
     await cleanupTuiSystemFixtures({
       tuis: tui ? [tui] : [],
+      servers: [daemon],
       mockServers: [server],
-      workspaces: [],
+      workspaces: [workspace],
     });
-    const status = await daemon.status();
-    if (status.state === 'ready' || status.state === 'draining') await daemon.stop();
-    workspace.cleanup();
   });
 
   test('connects only when selected and disconnect does not stop the daemon', async () => {
@@ -84,7 +82,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
       10_000,
     );
 
-    expect(await daemon.stop()).toMatchObject({ state: 'absent' });
+    expect(await stopTuiSystemServer(daemon)).toMatchObject({ state: 'absent' });
     expect(screenContains(tui.viewport(), 'SHOULD_NOT_COMPLETE')).toBe(false);
   }, 30_000);
 });

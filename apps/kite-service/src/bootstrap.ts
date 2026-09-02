@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import {
   type BuiltinToolCatalogProjection,
   createBuiltinContextCompilerPort,
@@ -9,7 +9,7 @@ import {
 } from '@kite-ai/builtin-runtime';
 import { canonicalModelJson, ModelArtifactStore } from '@kite-ai/builtin-runtime/model';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
-import { ensureLocalRuntimeServiceHome } from '@kite-ai/kite-local-runtime/service';
+import { ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
 import {
   RuntimeClient,
   type RuntimeClientTransport,
@@ -69,7 +69,6 @@ import {
   discoverSqliteRuntimeCompatibilitySource,
   type KiteHomeArtifactStore,
   type KiteHomeDirectoryQueryPort,
-  openKiteHomeRuntimeStorage,
   openKiteSessionRuntimeStorage,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
@@ -118,10 +117,6 @@ import type {
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
 import {
-  createKiteSingleServiceSessionCreationCoordinator,
-  type KiteSingleServiceSessionCreationCoordinator,
-} from './bootstrap/single-service-session-creation';
-import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
   createRuntimeExecutionBridgeRouter,
@@ -135,7 +130,7 @@ import { projectRuntimeClientInteractionQueue } from './runtime-client/interacti
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
-export function createKiteSingleServiceAgentApiReadContext(input: {
+export function createKiteAppServerAgentApiReadContext(input: {
   readonly directory: KiteHomeDirectoryQueryPort;
   readonly runtime: RuntimeAccess;
   readonly history: RuntimeHistoryClient;
@@ -149,7 +144,7 @@ export function createKiteSingleServiceAgentApiReadContext(input: {
   const modelArtifacts = new ModelArtifactStore({
     backend: createKiteHomeBuiltinArtifactBackends(input.artifactStore).model,
   });
-  const modelContexts = createSingleServiceModelContextReadPort(input.storage, modelArtifacts);
+  const modelContexts = createAppServerModelContextReadPort(input.storage, modelArtifacts);
   const checkpoints: AgentApiReadContext['checkpoints'] = Object.freeze({
     list(request: Parameters<AgentApiReadContext['checkpoints']['list']>[0]) {
       const entries = input.checkpoints
@@ -212,7 +207,7 @@ export function createKiteSingleServiceAgentApiReadContext(input: {
   });
 }
 
-function createSingleServiceModelContextReadPort(
+function createAppServerModelContextReadPort(
   storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
   artifacts: Pick<ModelArtifactStore, 'readSurface'>,
 ): AgentApiModelContextReadPort {
@@ -608,7 +603,7 @@ export function createWorkspaceWorkerStoreContext(input: {
   readonly layoutGeneration: string;
 }): WorkspaceWorkerStoreContext {
   assertWorkspaceWorkerStoreProfile(WORKSPACE_WORKER_STORE_PROFILE);
-  const home = ensureLocalRuntimeServiceHome(input.home);
+  const home = ensureKiteProfileHome(input.home);
   const canonicalWorkspace = canonicalWorkspaceIdentity(input.workspace);
   assertSafeWorkspaceWorkerIdentity(input.workerScopeId, 'Worker scope');
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/u.test(input.layoutGeneration)) {
@@ -833,10 +828,6 @@ export interface KiteRuntimeStorageOwner {
   readonly authorityForWorkspace?: (
     workspace: AdmittedWorkspace,
   ) => import('@kite-ai/runtime-storage-sqlite').SqliteWorkspaceAuthority;
-  /** Store 9 compound Runtime Session + initial Controller transaction coordinator. */
-  readonly sessionCreation?: KiteSingleServiceSessionCreationCoordinator;
-  /** Fence active Controller leases left by a previous single-Service instance. */
-  readonly reconcileControllerAuthority?: (serviceInstanceId: string) => void;
   /** Store 9 owner admits canonical Workspace identity before a new Session transaction. */
   readonly admitWorkspace?: (workspace: AdmittedWorkspace) => void;
   /** Current-format index path; unlike `storage.sessions`, it never imports a legacy session. */
@@ -849,118 +840,13 @@ export interface KiteRuntimeStorageOwner {
   getCurrentSessionModelRoute(
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
-  /** KASD App Server-only Session generation scope; absent for the old single-Service owner. */
+  /** KASD App Server Session generation scope. */
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly ownedSessionIds?: () => readonly string[];
   readonly releaseExecutions?: (cleanupConfirmed: boolean) => void;
   readonly disposeStorage?: () => void;
-}
-
-export interface KiteHomeRuntimeStorageCompositionOwner extends KiteRuntimeStorageOwner {
-  readonly directory: KiteHomeDirectoryQueryPort;
-  readonly artifactStore: KiteHomeArtifactStore;
-}
-
-/** Exact Store 9 owner used only by the Service composition root. */
-export function createKiteHomeRuntimeStorageComposition(
-  kiteHomeRoot: string,
-): KiteHomeRuntimeStorageCompositionOwner {
-  const target = openKiteHomeRuntimeStorage<RuntimeEvent, RuntimeState>({
-    databasePath: join(kiteHomeRoot, 'kite.sqlite'),
-    codec: STATE_STORAGE_BINDING_.codec,
-    stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
-  });
-  const workspaceIdFor = (workspace: AdmittedWorkspace): string => {
-    const digest = workspaceIdentityDigest({
-      canonicalPath: workspace.canonicalPath,
-      projectId: workspace.projectId,
-      workspaceDigest: workspace.workspaceDigest,
-    });
-    return `workspace_${digest.slice('sha256:'.length)}`;
-  };
-  const atomicSessionCreation = createKiteSingleServiceSessionCreationCoordinator({
-    storage: target.storage,
-    creationForWorkspace: (workspace) =>
-      target.sessionCreationForWorkspace(workspaceIdFor(workspace)),
-  });
-  return Object.freeze({
-    directory: target.directory,
-    artifactStore: target.artifactStore,
-    storage: atomicSessionCreation.storage,
-    sessionCreation: atomicSessionCreation.coordinator,
-    reconcileControllerAuthority(serviceInstanceId: string) {
-      if (
-        !serviceInstanceId ||
-        serviceInstanceId.length > 512 ||
-        /\p{Cc}/u.test(serviceInstanceId)
-      ) {
-        throw new Error('Service Controller recovery identity is invalid.');
-      }
-      const workspaces = target.database
-        .query<{ workspace_id: string }, []>(
-          'SELECT workspace_id FROM workspaces ORDER BY workspace_id',
-        )
-        .all();
-      for (const workspace of workspaces) {
-        const authority = target.authorityForWorkspace(workspace.workspace_id);
-        const sessions = target.database
-          .query<{ session_id: string }, [string]>(
-            'SELECT session_id FROM runtime_sessions WHERE workspace_id = ? ORDER BY session_id',
-          )
-          .all(workspace.workspace_id);
-        for (const session of sessions) {
-          const state = authority.controller.read(session.session_id);
-          if (state.status !== 'active' || state.workerInstanceId === serviceInstanceId) continue;
-          if (!state.clientId || !state.workerInstanceId) {
-            throw new Error('Persisted active Controller identity is incomplete.');
-          }
-          const requestId = `service-reconcile-${createHash('sha256')
-            .update(`${serviceInstanceId}\0${session.session_id}\0${state.controllerGeneration}`)
-            .digest('hex')}`;
-          const result = authority.controller.detachController({
-            sessionId: session.session_id,
-            requestId,
-            requestDigest: createHash('sha256').update(requestId).digest('hex'),
-            clientId: state.clientId,
-            connectionGeneration: state.connectionGeneration,
-            controllerGeneration: state.controllerGeneration,
-            workerInstanceId: state.workerInstanceId,
-            interactionGeneration: state.interactionGeneration,
-          });
-          if (result.status !== 'applied' && result.status !== 'replay') {
-            throw new Error('Persisted Controller could not enter restart recovery.');
-          }
-        }
-      }
-    },
-    authorityForWorkspace(workspace: AdmittedWorkspace) {
-      return target.authorityForWorkspace(workspaceIdFor(workspace));
-    },
-    admitWorkspace(workspace: AdmittedWorkspace) {
-      const digest = workspaceIdentityDigest({
-        canonicalPath: workspace.canonicalPath,
-        projectId: workspace.projectId,
-        workspaceDigest: workspace.workspaceDigest,
-      });
-      target.admissions.admit({
-        workspaceId: workspaceIdFor(workspace),
-        canonicalPath: workspace.canonicalPath,
-        workspaceIdentityDigest: digest,
-        projectId: workspace.projectId,
-        workspaceDigest: workspace.workspaceDigest,
-        displayName: basename(workspace.canonicalPath),
-      });
-    },
-    listCurrentSessions: (query = '', limit = 50) =>
-      target.storage.sessions.listSessions(query, limit),
-    loadCurrentSnapshot: (sessionId: string) =>
-      target.storage.sessions.loadSnapshot<RuntimeState>(sessionId),
-    getCurrentSessionModelRoute: (sessionId: string) =>
-      target.storage.sessions.getSessionModelRoute(sessionId),
-  });
 }
 
 /** KASD exact multi-connection Store owner; it never opens kite.sqlite or a Workspace lock. */

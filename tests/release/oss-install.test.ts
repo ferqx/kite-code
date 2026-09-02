@@ -6,16 +6,11 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, parse, resolve } from 'node:path';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-} from '@kite-ai/kite-local-runtime/service';
+import { join, parse, resolve } from 'node:path';
 import {
   installOssCandidate as installCandidate,
   readInstallStatus,
@@ -32,22 +27,16 @@ const roots: string[] = [];
 
 setDefaultTimeout(60_000);
 
-function serviceHome(prefix: string) {
-  const root = join(realpathSync(dirname(resolve(prefix))), 'service-home');
-  return ensureLocalRuntimeServiceHome(createKiteHomeIdentity(root, 'explicit_argument'));
-}
-
 function installOssCandidate(input: { archivePath: string; prefix: string }) {
-  if (resolve(input.prefix) === parse(resolve(input.prefix)).root) return installCandidate(input);
-  return installCandidate({ ...input, serviceHome: serviceHome(input.prefix) });
+  return installCandidate(input);
 }
 
 function rollbackOssCandidate(prefix: string) {
-  return rollbackCandidate(prefix, { serviceHome: serviceHome(prefix) });
+  return rollbackCandidate(prefix);
 }
 
 function uninstallOssCandidate(prefix: string) {
-  return uninstallCandidate(prefix, { serviceHome: serviceHome(prefix) });
+  return uninstallCandidate(prefix);
 }
 
 afterEach(() => {
@@ -65,9 +54,9 @@ describe('managed candidate install lifecycle', () => {
     roots.push(parent);
     const prefix = join(parent, 'managed');
     const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
-    expectSingleServiceExecutableAssets(prefix, firstMarker.currentCandidateId);
+    expectReleaseExecutableAssets(prefix, firstMarker.currentCandidateId);
     const secondMarker = await installOssCandidate({ archivePath: second.archivePath, prefix });
-    expectSingleServiceExecutableAssets(prefix, secondMarker.currentCandidateId);
+    expectReleaseExecutableAssets(prefix, secondMarker.currentCandidateId);
     expect(secondMarker.previousCandidateId).toBe(firstMarker.currentCandidateId);
     const rolledBack = rollbackOssCandidate(prefix);
     expect(rolledBack.currentCandidateId).toBe(firstMarker.currentCandidateId);
@@ -89,36 +78,6 @@ describe('managed candidate install lifecycle', () => {
     expect(
       readFileSync(join(prefix, 'releases', marker.currentCandidateId, '.candidate-id'), 'utf8'),
     ).toBe(`${marker.currentCandidateId}\n`);
-  });
-
-  test('uses the supplied custom Service home when uninstall stops the active Service', async () => {
-    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-custom-service-home-'));
-    roots.push(parent);
-    const prefix = join(parent, 'managed');
-    const identity = serviceHome(prefix);
-    const firstLog = join(parent, 'first-arguments.log');
-    const secondLog = join(parent, 'second-arguments.log');
-    const first = await createOssCandidateFixture(
-      '0.1.0',
-      currentOssReleaseTarget(),
-      'applied',
-      firstLog,
-    );
-    const second = await createOssCandidateFixture(
-      '0.1.1',
-      currentOssReleaseTarget(),
-      'applied',
-      secondLog,
-    );
-    roots.push(first.root, second.root);
-
-    await installCandidate({ archivePath: first.archivePath, prefix, serviceHome: identity });
-    await installCandidate({ archivePath: second.archivePath, prefix, serviceHome: identity });
-    rollbackCandidate(prefix, { serviceHome: identity });
-    uninstallCandidate(prefix, { serviceHome: identity });
-
-    expectAllKiteHomeArguments(firstLog, identity.root);
-    expect(existsSync(secondLog)).toBe(false);
   });
 
   test('refuses unmanaged, broad, or link-containing targets', async () => {
@@ -189,13 +148,13 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 
-  test('switches the active pointer while ordinary Service stop is busy', async () => {
+  test('switches the active pointer without contacting a running process', async () => {
     const target = currentOssReleaseTarget();
     const suffix = target.executableSuffix;
     const parent = mkdtempSync(join(tmpdir(), 'kite-oss-upgrade-busy-'));
     roots.push(parent);
-    const stopLog = join(parent, 'stop-arguments.log');
-    const first = await createOssCandidateFixture('0.1.0', target, 'service_busy', stopLog);
+    const invocationLog = join(parent, 'candidate-arguments.log');
+    const first = await createOssCandidateFixture('0.1.0', target, invocationLog);
     const second = await createOssCandidateFixture('0.1.1');
     roots.push(first.root, second.root);
     const prefix = join(parent, 'managed');
@@ -217,7 +176,7 @@ describe('managed candidate install lifecycle', () => {
     ).toEqual(firstPayload);
     expect(readFileSync(join(prefix, 'bin', `kite${suffix}`))).toEqual(stableLauncher);
     expect(readdirSync(join(prefix, 'releases'))).toHaveLength(2);
-    expect(existsSync(stopLog)).toBe(false);
+    expect(existsSync(invocationLog)).toBe(false);
   });
 
   test('refuses to replace a managed install with a different platform target', async () => {
@@ -253,7 +212,7 @@ describe('managed candidate install lifecycle', () => {
   });
 });
 
-function expectSingleServiceExecutableAssets(prefix: string, candidateId: string): void {
+function expectReleaseExecutableAssets(prefix: string, candidateId: string): void {
   const suffix = process.platform === 'win32' ? '.exe' : '';
   for (const name of ['kite', 'kite-tui', 'kite-service']) {
     const stable = join(prefix, 'bin', `${name}${suffix}`);
@@ -278,11 +237,4 @@ function nonNativeTarget(): OssReleaseTarget {
   return current.id === 'macos-arm64'
     ? { id: 'linux-x64', os: 'linux', arch: 'x64', executableSuffix: '' }
     : { id: 'macos-arm64', os: 'darwin', arch: 'arm64', executableSuffix: '' };
-}
-
-function expectAllKiteHomeArguments(path: string, expectedHome: string): void {
-  const args = readFileSync(path, 'utf8').trim().split('\n');
-  const positions = args.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
-  expect(positions.length).toBeGreaterThan(0);
-  for (const position of positions) expect(args[position + 1]).toBe(expectedHome);
 }

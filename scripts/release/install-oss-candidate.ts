@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -18,15 +18,6 @@ import {
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-  ensureLocalRuntimeServiceStateRoot,
-  type KiteHomeIdentity,
-  LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
-  type LocalRuntimeServiceDirectoryLock,
-  tryAcquireLocalRuntimeServiceLock,
-} from '@kite-ai/kite-local-runtime/service';
 import { z } from 'zod';
 import {
   currentOssReleaseTarget,
@@ -64,8 +55,6 @@ export function defaultInstallPrefix(): string {
 export async function installOssCandidate(input: {
   archivePath: string;
   prefix: string;
-  /** Explicit test/custom identity; production defaults to the canonical OS-user Kite home. */
-  serviceHome?: KiteHomeIdentity;
 }): Promise<InstallMarker> {
   const candidate = await verifyOssCandidate(input.archivePath, currentOssReleaseTarget().id);
   const root = prepareManagedRoot(input.prefix);
@@ -82,38 +71,30 @@ export async function installOssCandidate(input: {
       );
     }
   }
-  const fence = acquireInstallerServiceFence(input.serviceHome);
-  try {
-    const releaseRoot = join(root, 'releases', candidate.candidateId);
-    materializeRelease(candidate, releaseRoot);
-    const manifest = verifyMaterializedRelease(releaseRoot, candidate.candidateId);
-    assertInstallableRelease(manifest);
-    assertMarkerWriteReady(root);
-    activateRelease(root, releaseRoot, manifest);
-    const marker: InstallMarker = {
-      schema: 'KiteCodeManagedInstall',
-      version: INSTALL_MARKER_VERSION,
-      canonicalRoot: realpathSync.native(root),
-      currentCandidateId: candidate.candidateId,
-      previousCandidateId:
-        existing && existing.currentCandidateId !== candidate.candidateId
-          ? existing.currentCandidateId
-          : (existing?.previousCandidateId ?? null),
-      target: candidate.manifest.target.id,
-      activePointer: ACTIVE_RELEASE_POINTER_FILE,
-    };
-    writeActiveReleasePointer(root, candidate.candidateId);
-    writeMarker(root, marker);
-    return marker;
-  } finally {
-    fence.release();
-  }
+  const releaseRoot = join(root, 'releases', candidate.candidateId);
+  materializeRelease(candidate, releaseRoot);
+  const manifest = verifyMaterializedRelease(releaseRoot, candidate.candidateId);
+  assertInstallableRelease(manifest);
+  assertMarkerWriteReady(root);
+  activateRelease(root, releaseRoot, manifest);
+  const marker: InstallMarker = {
+    schema: 'KiteCodeManagedInstall',
+    version: INSTALL_MARKER_VERSION,
+    canonicalRoot: realpathSync.native(root),
+    currentCandidateId: candidate.candidateId,
+    previousCandidateId:
+      existing && existing.currentCandidateId !== candidate.candidateId
+        ? existing.currentCandidateId
+        : (existing?.previousCandidateId ?? null),
+    target: candidate.manifest.target.id,
+    activePointer: ACTIVE_RELEASE_POINTER_FILE,
+  };
+  writeActiveReleasePointer(root, candidate.candidateId);
+  writeMarker(root, marker);
+  return marker;
 }
 
-export function rollbackOssCandidate(
-  prefix: string,
-  options: { readonly serviceHome?: KiteHomeIdentity } = {},
-): InstallMarker {
+export function rollbackOssCandidate(prefix: string): InstallMarker {
   const root = requireManagedRoot(prefix);
   const marker = loadMarker(root);
   assertManagedTreeForUninstall(root, marker, 128);
@@ -121,39 +102,25 @@ export function rollbackOssCandidate(
   const releaseRoot = join(root, 'releases', marker.previousCandidateId);
   const manifest = verifyMaterializedRelease(releaseRoot, marker.previousCandidateId);
   assertInstallableRelease(manifest);
-  const fence = acquireInstallerServiceFence(options.serviceHome);
-  try {
-    assertMarkerWriteReady(root);
-    activateRelease(root, releaseRoot, manifest);
-    const next: InstallMarker = {
-      ...marker,
-      currentCandidateId: marker.previousCandidateId,
-      previousCandidateId: marker.currentCandidateId,
-      target: manifest.target.id,
-    };
-    writeActiveReleasePointer(root, marker.previousCandidateId);
-    writeMarker(root, next);
-    return next;
-  } finally {
-    fence.release();
-  }
+  assertMarkerWriteReady(root);
+  activateRelease(root, releaseRoot, manifest);
+  const next: InstallMarker = {
+    ...marker,
+    currentCandidateId: marker.previousCandidateId,
+    previousCandidateId: marker.currentCandidateId,
+    target: manifest.target.id,
+  };
+  writeActiveReleasePointer(root, marker.previousCandidateId);
+  writeMarker(root, next);
+  return next;
 }
 
-export function uninstallOssCandidate(
-  prefix: string,
-  options: { readonly serviceHome?: KiteHomeIdentity } = {},
-): void {
+export function uninstallOssCandidate(prefix: string): void {
   const root = requireManagedRoot(prefix);
   const marker = loadMarker(root);
   assertMarkerRoot(root, marker);
   assertManagedTreeForUninstall(root, marker, 128);
-  ordinaryStopManagedService(root, marker, options.serviceHome);
-  const fence = acquireInstallerServiceFence(options.serviceHome);
-  try {
-    rmSync(root, { recursive: true, force: false });
-  } finally {
-    fence.release();
-  }
+  rmSync(root, { recursive: true, force: false });
 }
 
 export function readInstallStatus(prefix: string): InstallMarker {
@@ -652,83 +619,6 @@ function verifyActiveLauncher(
   const active = readRegularFile(join(root, 'bin', name));
   const stored = readRegularFile(join(root, 'releases', candidateId, ...archivePath.split('/')));
   if (!active.equals(stored)) throw new Error(`Managed active launcher does not match: ${name}`);
-}
-
-function ordinaryStopManagedService(
-  root: string,
-  marker: InstallMarker,
-  serviceHome?: KiteHomeIdentity,
-): void {
-  const suffix = marker.target.startsWith('windows-') ? '.exe' : '';
-  const executable = join(root, 'bin', `kite${suffix}`);
-  const spawnOptions = {
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: {
-      PATH: process.env.PATH ?? '',
-      ...(process.platform === 'win32'
-        ? { USERPROFILE: userInfo().homedir }
-        : { HOME: userInfo().homedir }),
-    },
-  } as const;
-  const homeArguments = serviceHome ? ['--kite-home', serviceHome.root] : [];
-  const stopped = Bun.spawnSync([executable, 'service', 'stop', ...homeArguments], spawnOptions);
-  if (stopped.exitCode !== 0) {
-    throw new Error('Managed Service ordinary stop failed; active candidate is unchanged.');
-  }
-  const status = Bun.spawnSync(
-    [executable, 'service', 'status', '--json', ...homeArguments],
-    spawnOptions,
-  );
-  if (status.exitCode !== 0) {
-    throw new Error('Managed Service stop could not be confirmed; active candidate is unchanged.');
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(status.stdout.toString()) as unknown;
-  } catch {
-    throw new Error(
-      'Managed Service stop returned an invalid result; active candidate is unchanged.',
-    );
-  }
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    Array.isArray(value) ||
-    !('outcome' in value) ||
-    value.outcome !== 'applied' ||
-    !('state' in value) ||
-    value.state !== 'absent'
-  ) {
-    throw new Error('Managed Service is busy or unavailable; active candidate is unchanged.');
-  }
-}
-
-function acquireInstallerServiceFence(
-  suppliedIdentity?: KiteHomeIdentity,
-): LocalRuntimeServiceDirectoryLock {
-  let identity = suppliedIdentity;
-  if (!identity) {
-    const systemHome = realpathSync.native(userInfo().homedir);
-    const codeRoot = join(systemHome, '.kite-code');
-    identity = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(codeRoot, 'os_user_home'));
-  }
-  const paths = ensureLocalRuntimeServiceStateRoot(identity);
-  const lock = tryAcquireLocalRuntimeServiceLock(paths, 'lifecycle', {
-    schema: LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
-    nonce: randomBytes(24).toString('base64url'),
-    pid: process.pid,
-    operation: 'restart',
-    createdAt: new Date().toISOString(),
-  });
-  if (!lock) {
-    throw new Error('Managed Service lifecycle is busy; active candidate is unchanged.');
-  }
-  // This fence serializes installer lifecycle operations but deliberately does not
-  // inspect or stop the running companion. Pointer activation is independent from
-  // an already-running immutable candidate process.
-  return lock;
 }
 
 function addExpectedPath(expected: Set<string>, path: string): void {

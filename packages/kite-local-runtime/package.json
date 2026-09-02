@@ -8,11 +8,10 @@
     "./client": "./src/client/index.ts",
     "./config": "./src/config/index.ts",
     "./coordinator": "./src/coordinator/index.ts",
-    "./manager": "./src/manager/index.ts",
     "./service": "./src/service/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/client/index.ts ./src/config/index.ts ./src/coordinator/index.ts ./src/manager/index.ts ./src/service/index.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/client/index.ts ./src/config/index.ts ./src/coordinator/index.ts ./src/service/index.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

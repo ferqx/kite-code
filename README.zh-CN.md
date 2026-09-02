@@ -31,16 +31,9 @@ bun install
 bun run tui
 ```
 
-源码开发命令会先构建当前Kite Web assets再启动TUI，因此`/status`显示的URL始终对应当前checkout。首次启动时，按照界面引导配置模型 Provider。
-
-源码开发时，`/status`会显示常驻Local Service的PID、启动时间与build identity。如果TUI提示源码build drift，使用以下命令
-安全重启Service并启动TUI：
-
-```bash
-bun run tui:fresh
-```
-
-正式安装版会在内部安全换代上一版本遗留的Service；用户不需要查找、结束或手动重启旧进程。
+源码开发命令会通过stdio启动同build、由TUI parent持有的App Server，不构建Web资产，也不发现共享进程。`/status`只显示transport、
+profile、build、App Server版本与已验证的配对状态；TUI退出后Session仍持久保留，不再需要`tui:fresh`或手动处理旧Service。
+首次启动时，按照界面引导配置模型Provider。
 
 Headless CLI：
 
@@ -55,15 +48,15 @@ bun run agent run \
 
 ## 本地 Service 与 Web
 
-不打开TUI时，可使用以下命令构建Web assets、ensure同一个Local Service并打印稳定的loopback根地址：
+不打开TUI时，可使用以下命令构建Web assets、显式启动App Server daemon并打印稳定的loopback根地址：
 
 ```bash
 bun run server
 ```
 
-Service根地址就是Web入口；同一origin提供`/v1`与`/api-docs`。TUI、CLI和Browser复用一个Service、Runtime、listener与
-`kite.sqlite`。访问`/`会建立HttpOnly只读Browser session，页面通过Service `/v1` REST API读取Workspace、Session、History和
-Checkpoint。唯一生命周期入口是`bun run agent service status|stop|restart`；没有需要用户单独启动、停止或恢复的Web服务。
+daemon根地址就是Web入口；同一origin提供`/v1`与`/api-docs`。默认TUI/CLI各有配套stdio App Server并共享durable
+`kite-session.sqlite` facts；它们不打开Web端口。访问daemon的`/`会建立HttpOnly只读Browser session。显式daemon生命周期为
+`bun run agent server start|status|stop`；`bun run agent web`只发现已运行daemon。
 `bun run --cwd apps/kite-web dev`仍只是前端开发用的Vite asset server。
 
 ## 文档

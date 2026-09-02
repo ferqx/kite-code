@@ -3,11 +3,6 @@ import {
   WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import {
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  type LocalRuntimeLifecycleResult,
-} from '@kite-ai/kite-local-runtime/client';
-import type { KiteServiceManager } from '@kite-ai/kite-local-runtime/manager';
 import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_COMMAND_SCHEMA_,
@@ -18,16 +13,7 @@ import {
   type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
-import {
-  acquireKiteServiceModeController,
-  connectKiteRuntimeMode,
-  createKiteServiceModeSession,
-  detachKiteServiceModeController,
-  isKiteServiceModeConnection,
-  type KiteRuntimeModeConnector,
-  type KiteServiceModeControllerLease,
-  releaseKiteServiceModeController,
-} from '#kite-cli/service-mode';
+import { connectKiteRuntimeMode, type KiteRuntimeModeConnector } from '#kite-cli/service-mode';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#kite-cli/trace/replay';
 
 interface RuntimeCommandIdAllocator {
@@ -42,10 +28,6 @@ function createRuntimeCommandIdAllocator(): RuntimeCommandIdAllocator {
 export interface CliMainDependencies {
   /** Parent-owned local Runtime connector; failures are surfaced without a Service fallback. */
   readonly runtimeConnector?: KiteRuntimeModeConnector;
-  /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
-  readonly serviceManager?: KiteServiceManager;
-  /** Release-selected executable identity used by lifecycle replacement policy. */
-  readonly serviceExecutableMode?: 'source' | 'installed';
   readonly appServerDaemon?: {
     start(workspace: string): Promise<Readonly<Record<string, unknown>>>;
     status(): Promise<Readonly<Record<string, unknown>>>;
@@ -70,10 +52,6 @@ export interface ParsedArgs {
     | 'server-start'
     | 'server-status'
     | 'server-stop'
-    | 'service-ensure'
-    | 'service-status'
-    | 'service-stop'
-    | 'service-restart'
     | 'web-open';
   task?: string;
   threadId: string;
@@ -99,7 +77,6 @@ export interface ParsedArgs {
   executionStatus: boolean;
   releaseStatus: boolean;
   telemetryStatus: boolean;
-  serviceJson: boolean;
   webJson: boolean;
   serverJson: boolean;
 }
@@ -151,15 +128,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     }
     return;
   }
-  if (isServiceLifecycleCommand(args.command)) {
-    await runServiceLifecycleCommand(
-      dependencies.serviceManager,
-      args.command,
-      args.serviceJson,
-      dependencies.serviceExecutableMode,
-    );
-    return;
-  }
   if (args.command === 'web-open') {
     if (!dependencies.appServerWeb) {
       throw new Error('Kite Web App Server daemon client is unavailable.');
@@ -177,14 +145,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   const runtimeMode = await connectKiteRuntimeMode(dependencies.runtimeConnector, {
     workspace: args.workspace,
   });
-  const nativeControllerConnection =
-    isKiteServiceModeConnection(runtimeMode.connection) && runtimeMode.controller
-      ? runtimeMode.connection
-      : undefined;
   let iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
-  let controllerLease: KiteServiceModeControllerLease | undefined;
-  let turnMayHaveStarted = false;
-  let turnSettled = false;
   let primaryError: unknown;
   const commandIds = dependencies.commandIds ?? createRuntimeCommandIdAllocator();
   try {
@@ -256,19 +217,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
 
     const access = runtimeMode.runtime;
     const sessionId = args.threadId;
-    let createdSessionRevision: number | undefined;
-    if (nativeControllerConnection) {
-      if (args.command === 'resume') {
-        controllerLease = await acquireKiteServiceModeController(
-          nativeControllerConnection,
-          sessionId,
-        );
-      } else {
-        const created = await createKiteServiceModeSession(nativeControllerConnection, sessionId);
-        controllerLease = created.lease;
-        createdSessionRevision = created.sessionRevision;
-      }
-    }
     let expectedRevision = 0;
     if (args.command === 'resume') {
       const receipt = await access.command({
@@ -281,8 +229,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         throw new Error(`Runtime session resume rejected: ${receipt.code}`);
       }
       expectedRevision = receipt.status === 'applied' ? receipt.revision : receipt.originalRevision;
-    } else if (createdSessionRevision !== undefined) {
-      expectedRevision = createdSessionRevision;
     } else {
       const receipt = await access.command({
         schema: RUNTIME_COMMAND_SCHEMA_,
@@ -320,7 +266,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       },
     });
     iterator = subscription[Symbol.asyncIterator]();
-    turnMayHaveStarted = true;
     const startReceipt = await access.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: commandIds.next(),
@@ -338,7 +283,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
           }),
     });
     if (startReceipt.status !== 'applied' && startReceipt.status !== 'idempotent_replay') {
-      turnMayHaveStarted = false;
       throw new Error(`Runtime turn rejected: ${startReceipt.code}`);
     }
 
@@ -354,7 +298,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
             ? notification.projection.session.activeWork?.status
             : undefined;
         if (status && ['completed', 'cancelled', 'failed'].includes(status)) {
-          turnSettled = true;
           break;
         }
         continue;
@@ -377,18 +320,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   } finally {
     const cleanupFailures: unknown[] = [];
     await iterator?.return?.().catch((error: unknown) => cleanupFailures.push(error));
-    if (controllerLease) {
-      if (!nativeControllerConnection) {
-        cleanupFailures.push(new Error('CLI Controller lease lost its native connection.'));
-      }
-      const settle =
-        nativeControllerConnection && turnMayHaveStarted && !turnSettled
-          ? detachKiteServiceModeController(nativeControllerConnection, controllerLease)
-          : nativeControllerConnection
-            ? releaseKiteServiceModeController(nativeControllerConnection, controllerLease)
-            : undefined;
-      await settle?.catch((error: unknown) => cleanupFailures.push(error));
-    }
     await runtimeMode
       .close('cli_client_closed')
       .catch((error: unknown) => cleanupFailures.push(error));
@@ -638,79 +569,6 @@ function projectTerminalOutcome(outcome: ClientTerminalOutcome): ClientTerminalO
   };
 }
 
-type ServiceLifecycleCommand =
-  | 'service-ensure'
-  | 'service-status'
-  | 'service-stop'
-  | 'service-restart';
-
-function isServiceLifecycleCommand(
-  command: ParsedArgs['command'],
-): command is ServiceLifecycleCommand {
-  return (
-    command === 'service-ensure' ||
-    command === 'service-status' ||
-    command === 'service-stop' ||
-    command === 'service-restart'
-  );
-}
-
-function serviceOperation(command: ServiceLifecycleCommand): keyof KiteServiceManager {
-  switch (command) {
-    case 'service-ensure':
-      return 'ensure';
-    case 'service-status':
-      return 'status';
-    case 'service-stop':
-      return 'stop';
-    case 'service-restart':
-      return 'restart';
-  }
-}
-
-/**
- * Render the manager's already validated lifecycle DTO without exposing descriptor/token data in
- * the human-readable form. `--json` is reserved for `service status` and emits one compact JSON
- * object so scripts can consume the exact contract without scraping human text.
- */
-export function formatServiceLifecycleResult(
-  result: LocalRuntimeLifecycleResult,
-  json = false,
-): string {
-  if (json) return JSON.stringify(result);
-  const diagnostic = result.diagnostic === undefined ? '' : ` (${result.diagnostic})`;
-  return `Service ${result.operation}: ${result.outcome} [${result.state}]${diagnostic}`;
-}
-
-function serviceLifecycleSucceeded(result: LocalRuntimeLifecycleResult): boolean {
-  // `status` reports an absent service as an applied observation with `not_running`; every other
-  // non-applied result is an operational failure and must produce a non-zero CLI exit.
-  return result.outcome === 'applied';
-}
-
-async function runServiceLifecycleCommand(
-  manager: KiteServiceManager | undefined,
-  command: ServiceLifecycleCommand,
-  json: boolean,
-  executableMode?: 'source' | 'installed',
-): Promise<void> {
-  if (!manager) {
-    throw new Error('Managed Local Runtime Service lifecycle manager is unavailable.');
-  }
-  const operation = serviceOperation(command);
-  const result = await manager[operation]({
-    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    ...(executableMode === undefined ? {} : { executableMode }),
-  });
-  console.log(formatServiceLifecycleResult(result, command === 'service-status' && json));
-  if (result.diagnostic !== undefined) {
-    console.error(`Service ${result.operation}: ${result.diagnostic}.`);
-  }
-  if (!serviceLifecycleSucceeded(result)) {
-    throw new Error(`Service ${result.operation} failed: ${result.outcome}.`);
-  }
-}
-
 async function runAppServerWebCommand(
   discoverWeb: () => Promise<string>,
   json: boolean,
@@ -734,33 +592,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
     commandArgv[0] === 'web' &&
     (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
       ? 'web-open'
-      : commandArgv[0] === 'service' && commandArgv[1] === 'ensure'
-        ? 'service-ensure'
-        : commandArgv[0] === 'service' && commandArgv[1] === 'status'
-          ? 'service-status'
-          : commandArgv[0] === 'service' && commandArgv[1] === 'stop'
-            ? 'service-stop'
-            : commandArgv[0] === 'service' && commandArgv[1] === 'restart'
-              ? 'service-restart'
-              : commandArgv[0] === 'server' && commandArgv[1] === 'start'
-                ? 'server-start'
-                : commandArgv[0] === 'server' && commandArgv[1] === 'status'
-                  ? 'server-status'
-                  : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
-                    ? 'server-stop'
-                    : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
-                      ? 'sandbox-setup'
-                      : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
-                        ? 'sandbox-status'
-                        : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
-                          ? 'server-stdio'
-                          : commandArgv[0] === 'resume'
-                            ? 'resume'
-                            : commandArgv[0] === 'run'
-                              ? 'run'
-                              : commandArgv[0] === 'trace'
-                                ? 'trace'
-                                : 'help';
+      : commandArgv[0] === 'server' && commandArgv[1] === 'start'
+        ? 'server-start'
+        : commandArgv[0] === 'server' && commandArgv[1] === 'status'
+          ? 'server-status'
+          : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
+            ? 'server-stop'
+            : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
+              ? 'sandbox-setup'
+              : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
+                ? 'sandbox-status'
+                : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
+                  ? 'server-stdio'
+                  : commandArgv[0] === 'resume'
+                    ? 'resume'
+                    : commandArgv[0] === 'run'
+                      ? 'run'
+                      : commandArgv[0] === 'trace'
+                        ? 'trace'
+                        : 'help';
   rejectUnsupportedOptions(argv, command);
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
@@ -862,7 +712,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     executionStatus: argv.includes('--execution-status'),
     releaseStatus: argv.includes('--release-status'),
     telemetryStatus: argv.includes('--telemetry-status'),
-    serviceJson: command === 'service-status' && argv.includes('--json'),
     webJson: command === 'web-open' && argv.includes('--json'),
     serverJson: command === 'server-status' && argv.includes('--json'),
   };
@@ -929,12 +778,7 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
   ) {
     throw new Error('--server is supported only by Runtime, Web, and server lifecycle commands.');
   }
-  if (
-    argv.includes('--json') &&
-    command !== 'service-status' &&
-    command !== 'server-status' &&
-    command !== 'web-open'
-  ) {
+  if (argv.includes('--json') && command !== 'server-status' && command !== 'web-open') {
     throw new Error('The --json option is unsupported for this command.');
   }
 }
@@ -980,10 +824,6 @@ function printHelp(): void {
   bun run agent server start [--server <endpoint>]
   bun run agent server status [--server <endpoint>] [--json]
   bun run agent server stop [--server <endpoint>]
-  bun run agent service ensure
-  bun run agent service status [--json]
-  bun run agent service stop
-  bun run agent service restart
   bun run agent web [--server <endpoint>] [--json]
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
@@ -994,13 +834,13 @@ Options:
   trace <events.jsonl>   Replay a runtime trace
   --thread <id>          LangGraph thread id
   --workspace <path>     Tool workspace
-  --kite-home <path>     Advanced: explicit managed Service home (validated by release composition)
+  --kite-home <path>     Advanced: explicit Kite profile home (validated by release composition)
   --server <endpoint>    Explicit App Server Unix socket or Windows named pipe; never auto-discovered
   --skill <name>         Activate a skill (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit
   --telemetry-status     Print redacted telemetry consent/export status and exit
-  --json                 Emit a closed JSON result for server/service status or Web ensure/status
+  --json                 Emit a closed JSON result for server status or Web discovery
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --trust-workspace      Record trust for --workspace and continue (source=config)

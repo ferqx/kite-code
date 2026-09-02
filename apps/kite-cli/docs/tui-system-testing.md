@@ -33,7 +33,7 @@
 ## 隔离与清理
 
 - 每个 scenario 拥有独立 Workspace、HOME、KITE_CODE_HOME、配置与持久目录。KITE_CODE_HOME在写入任何config前
-  必须由production `ensureLocalRuntimeServiceHome`创建；尤其Windows不得用普通`mkdir`继承runner ACL后再要求
+  必须由production `ensureKiteProfileHome`创建；尤其Windows不得用普通`mkdir`继承runner ACL后再要求
   cleanup manager接管不同owner的目录。
 - Runner 为每个文件设置 deadline，拥有 child process group/tree，并在成功、失败或 timeout 后回收。
 - 场景不得读取开发机 credential、真实配置或 live Provider；live MCP/Model 使用独立显式命令。

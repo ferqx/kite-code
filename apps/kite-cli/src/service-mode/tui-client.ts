@@ -32,29 +32,13 @@ import type {
 } from '../adapters/tui/session-adapter';
 import { createTuiHistoryFacade } from '../runtime-client/tui-history-facade';
 import type { RuntimePresentationEvent } from '../tui/runtime-presentation';
-import {
-  acquireKiteServiceModeController,
-  createKiteServiceModeSession,
-  detachKiteServiceModeController,
-  isKiteServiceModeConnection,
-  type KiteRuntimeModeConnection,
-  type KiteServiceModeConnection,
-  type KiteServiceModeControllerLease,
-  releaseKiteServiceModeController,
-} from './adapter';
+import type { KiteRuntimeModeConnection } from './adapter';
 
 const CANCEL_RETRY_LIMIT = 8;
 const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
-const CONTROLLER_DISPOSITION_DEADLINE_MS = 1_000;
 const PRESENTATION_FLUSH_DEADLINE_MS = 1_000;
 const RUN_IDLE_QUERY_INITIAL_DELAY_MS = 2_000;
 const RUN_IDLE_QUERY_MAX_DELAY_MS = 2_000;
-
-function activeNativeController(
-  connection: KiteRuntimeModeConnection,
-): KiteServiceModeConnection | undefined {
-  return isKiteServiceModeConnection(connection) && connection.controller ? connection : undefined;
-}
 
 interface NativeSessionRecord {
   readonly threadId: string;
@@ -102,7 +86,6 @@ interface NativeSessionRecord {
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
   mutationAdmitted: boolean;
-  controllerLease: KiteServiceModeControllerLease | undefined;
   resolveRun: (() => void) | undefined;
   rejectRun: ((error: unknown) => void) | undefined;
 }
@@ -314,7 +297,6 @@ class NativeTuiRuntimeClient {
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
       mutationAdmitted: false,
-      controllerLease: undefined,
       resolveRun: undefined,
       rejectRun: undefined,
     };
@@ -323,42 +305,17 @@ class NativeTuiRuntimeClient {
   }
 
   async #createRemoteSession(record: NativeSessionRecord): Promise<void> {
-    const nativeConnection = activeNativeController(this.#connection);
-    if (nativeConnection) {
-      const created = await createKiteServiceModeSession(nativeConnection, record.threadId);
-      record.controllerLease = created.lease;
-      record.revision = created.sessionRevision;
-      record.dormant = false;
-      return;
-    }
-    const lease = isKiteServiceModeConnection(this.#connection)
-      ? await this.#ensureControllerForMutation(record)
-      : undefined;
-    try {
-      const receipt = await this.#runtime.command({
-        schema: RUNTIME_COMMAND_SCHEMA_,
-        commandId: this.#nextCommandId(record.threadId, 'create'),
-        type: 'create_session',
-        workspace: record.workspace,
-        bootstrapSessionId: record.threadId,
-      });
-      this.#assertApplied(receipt);
-      this.#recordRevision(record, receipt);
-      record.mutationAdmitted = true;
-      record.dormant = false;
-    } catch (error) {
-      // A newly reserved Session must not retain a Controller lease when its
-      // atomic create boundary failed. This is a release only; it never
-      // cancels a Runtime turn.
-      if (lease) {
-        const nativeConnection = activeNativeController(this.#connection);
-        if (nativeConnection) {
-          await releaseKiteServiceModeController(nativeConnection, lease).catch(() => undefined);
-        }
-        record.controllerLease = undefined;
-      }
-      throw error;
-    }
+    const receipt = await this.#runtime.command({
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: this.#nextCommandId(record.threadId, 'create'),
+      type: 'create_session',
+      workspace: record.workspace,
+      bootstrapSessionId: record.threadId,
+    });
+    this.#assertApplied(receipt);
+    this.#recordRevision(record, receipt);
+    record.mutationAdmitted = true;
+    record.dormant = false;
   }
 
   async #admitAndSubscribe(
@@ -369,7 +326,7 @@ class NativeTuiRuntimeClient {
       if (operation === 'create') await this.#createRemoteSession(record);
       else {
         await this.#resumeRemoteSession(record);
-        if (operation === 'resume-mutation') await this.#ensureControllerForMutation(record);
+        if (operation === 'resume-mutation') await this.#ensureMutationAdmission(record);
       }
       // A connection can close while the admission command is in flight. Do not
       // establish a new long-lived subscription from a late command response.
@@ -389,22 +346,7 @@ class NativeTuiRuntimeClient {
     // Opening an existing Session in the release TUI is Observer-only. The
     // History/Runtime subscription is sufficient to render it; Controller
     // acquisition is deferred until the user invokes a mutation.
-    if (
-      !isKiteServiceModeConnection(this.#connection) ||
-      activeNativeController(this.#connection)
-    ) {
-      await this.#connection.connect();
-      record.dormant = false;
-      return;
-    }
-    const receipt = await this.#runtime.command({
-      schema: RUNTIME_COMMAND_SCHEMA_,
-      commandId: this.#nextCommandId(record.threadId, 'resume'),
-      type: 'resume_session',
-      sessionId: record.threadId,
-    });
-    this.#assertApplied(receipt);
-    this.#recordRevision(record, receipt);
+    await this.#connection.connect();
     record.dormant = false;
   }
 
@@ -446,29 +388,18 @@ class NativeTuiRuntimeClient {
     }
   }
 
-  async #ensureControllerForMutation(
-    record: NativeSessionRecord,
-  ): Promise<KiteServiceModeControllerLease | undefined> {
-    const nativeConnection = activeNativeController(this.#connection);
-    if (!nativeConnection) {
-      if (!isKiteServiceModeConnection(this.#connection) && !record.mutationAdmitted) {
-        const receipt = await this.#runtime.command({
-          schema: RUNTIME_COMMAND_SCHEMA_,
-          commandId: this.#nextCommandId(record.threadId, 'mutation-resume'),
-          type: 'resume_session',
-          sessionId: record.threadId,
-          afterRevision: this.#revision(record),
-        });
-        this.#assertApplied(receipt);
-        this.#recordRevision(record, receipt);
-        record.mutationAdmitted = true;
-      }
-      return undefined;
-    }
-    if (record.controllerLease) return record.controllerLease;
-    const lease = await acquireKiteServiceModeController(nativeConnection, record.threadId);
-    record.controllerLease = lease;
-    return lease;
+  async #ensureMutationAdmission(record: NativeSessionRecord): Promise<void> {
+    if (record.mutationAdmitted) return;
+    const receipt = await this.#runtime.command({
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: this.#nextCommandId(record.threadId, 'mutation-resume'),
+      type: 'resume_session',
+      sessionId: record.threadId,
+      afterRevision: this.#revision(record),
+    });
+    this.#assertApplied(receipt);
+    this.#recordRevision(record, receipt);
+    record.mutationAdmitted = true;
   }
 
   async #applyNotification(
@@ -743,7 +674,7 @@ class NativeTuiRuntimeClient {
     void completion.catch(() => undefined);
     record.runPromise = completion;
     try {
-      await this.#ensureControllerForMutation(record);
+      await this.#ensureMutationAdmission(record);
       const commandId = this.#nextCommandId(record.threadId, 'turn');
       let expectedRevision = this.#revision(record);
       let receipt: RuntimeCommandReceipt | undefined;
@@ -923,7 +854,7 @@ class NativeTuiRuntimeClient {
     mode: 'accept_edits' | 'auto' | 'full',
   ): Promise<void> {
     await this.#waitForSessionReady(record.threadId);
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'mode'),
@@ -955,7 +886,7 @@ class NativeTuiRuntimeClient {
     }
     const commandId = this.#nextCommandId(record.threadId, 'interaction');
     await this.#waitForSessionReady(record.threadId);
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     let interaction = pendingInteraction;
     let expectedRevision = interaction.sessionRevision;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1030,7 +961,7 @@ class NativeTuiRuntimeClient {
     const work = record.projection?.activeWork;
     if (!isActiveWork(work)) return;
     const activeWork = work;
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const turnId = activeWork.activeTurn?.turnId ?? record.threadId;
     let expectedRevision = this.#revision(record);
     for (let attempt = 0; attempt < CANCEL_RETRY_LIMIT; attempt += 1) {
@@ -1070,7 +1001,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(sessionId);
     if (!record) throw new Error(`Runtime session is unavailable: ${sessionId}`);
     await this.#cancelRuntimeOperations(sessionId);
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'delete'),
@@ -1181,7 +1112,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(input.sourceThreadId);
     if (!record) throw new Error(`Runtime session is unavailable: ${input.sourceThreadId}`);
     await this.#waitForSessionReady(input.sourceThreadId);
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const commandId = this.#nextCommandId(input.sourceThreadId, 'rewind');
     let resolveTerminal!: (event: Extract<RuntimeClientEvent, { type: 'rewind.terminal' }>) => void;
     let rejectTerminal!: (error: unknown) => void;
@@ -1237,7 +1168,7 @@ class NativeTuiRuntimeClient {
     const record = this.#sessions.get(sessionId);
     if (!record) return undefined;
     await this.#waitForSessionReady(sessionId);
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'fork'),
@@ -1266,7 +1197,7 @@ class NativeTuiRuntimeClient {
     onCommand?: TuiContextCompactionCommand,
   ): Promise<TuiContextCompactionResult> {
     await this.#waitForSessionReady(sessionId);
-    await this.#ensureControllerForMutation(this.#sessions.get(sessionId)!);
+    await this.#ensureMutationAdmission(this.#sessions.get(sessionId)!);
     onProgress?.('preparing');
     const commandId = this.#nextCommandId(sessionId, 'compact');
     onCommand?.({ type: 'user.command_invoked', commandId, command: '/compact' });
@@ -1287,7 +1218,7 @@ class NativeTuiRuntimeClient {
   async #handleContextReset(sessionId: string): Promise<TuiContextCompactionResult> {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'reset'),
@@ -1326,7 +1257,7 @@ class NativeTuiRuntimeClient {
   async #clearSessionCommandGrants(sessionId: string): Promise<RuntimeCommandReceipt> {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
-    await this.#ensureControllerForMutation(record);
+    await this.#ensureMutationAdmission(record);
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'clear-grants'),
@@ -1340,13 +1271,6 @@ class NativeTuiRuntimeClient {
 
   async #dispose(): Promise<void> {
     if (this.#closed) return;
-    const detachBySession = new Map<string, boolean>();
-    await Promise.all(
-      [...this.#sessions.values()].map(async (record) => {
-        if (!record.controllerLease) return;
-        detachBySession.set(record.threadId, await this.#controllerRequiresDetach(record));
-      }),
-    );
     this.#closed = true;
     this.#unsubscribeSnapshot();
     // RuntimeClient.close() closes all local subscription queues as part of
@@ -1359,61 +1283,11 @@ class NativeTuiRuntimeClient {
       for (const waiter of record.rewindWaiters.values()) waiter.reject(closedError);
       record.rewindWaiters.clear();
     }
-    // Release an authoritatively idle Controller; detach only when active work,
-    // pending interaction, or an uncertain projection requires recovery. Closing
-    // the transport never cancels a Turn or releases another client's lease.
-    for (const record of this.#sessions.values()) {
-      const lease = record.controllerLease;
-      if (!lease) continue;
-      const nativeConnection = activeNativeController(this.#connection);
-      if (!nativeConnection) throw new Error('TUI Controller lease lost its native connection.');
-      const operation = detachBySession.get(record.threadId)
-        ? detachKiteServiceModeController(nativeConnection, lease)
-        : releaseKiteServiceModeController(nativeConnection, lease);
-      await operation.catch(() => undefined);
-      record.controllerLease = undefined;
-    }
     this.#sessions.clear();
     this.#views.clear();
     // This is intentionally the Runtime Client connection close only. It
     // cannot call a Service Host/Store dispose or an implicit cancel-all.
     await this.#connection.close('tui_client_closed');
-  }
-
-  async #controllerRequiresDetach(record: NativeSessionRecord): Promise<boolean> {
-    if (
-      record.agentLoopActive ||
-      isActiveWork(record.projection?.activeWork) ||
-      record.interactions.size > 0
-    ) {
-      return true;
-    }
-    try {
-      const result = await withDeadline(
-        this.#runtime.query({
-          schema: RUNTIME_QUERY_SCHEMA_,
-          type: 'get_session_projection',
-          sessionId: record.threadId,
-        }),
-        CONTROLLER_DISPOSITION_DEADLINE_MS,
-        'Runtime Controller disposition query',
-      );
-      if (
-        result.status !== 'ok' ||
-        result.queryType !== 'get_session_projection' ||
-        !result.session
-      ) {
-        return true;
-      }
-      record.projection = result.session;
-      record.revision = Math.max(record.revision, result.session.revision);
-      return (
-        isActiveWork(result.session.activeWork) ||
-        result.session.interactionQueue.interactions.length > 0
-      );
-    } catch {
-      return true;
-    }
   }
 
   #assertWorkspace(workspace: string): void {

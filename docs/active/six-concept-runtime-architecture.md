@@ -12,7 +12,7 @@
 `kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。显式`kite server start`可创建
 同一composition的多client Unix socket/Windows named-pipe daemon，但默认client不发现它。Workspace仍是逻辑admission/execution scope，
 不对应独立Worker进程或DB。显式legacy Service/Web控制面等待KASD后续删除。详见
-[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
+[`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。
 
 ## 总览
 
@@ -110,18 +110,10 @@ first-run完成、首个Runtime context请求到达时由lazy Workspace template
 authenticated App Control完成Workspace Trust query/decision，再建立one-shot ticket Runtime connection；之后只消费
 Runtime/History/App Control/credential client。client close只关闭本connection/subscription/snapshot state，不取消
 Session或dispose Service Host。CLI不依赖Server、Host、Builtin、SQLite或Runtime SPI，也不导入Service source；Service
-同样不导入CLI source。发布组合只把typed manager/connector传给terminal App，没有app-to-app production import、
-embedded fallback或第二默认Store。`kite service ensure/status/stop/restart`只是同一typed manager的显式lifecycle
-surface，不把control token或process/state authority交给普通Runtime connection。
-
-Native manager把`GET /readyz`只作为liveness precheck，随后用restart-scoped access token执行exact
-`POST /_kite/instance`与`{}` body。它严格验证content type、大小、closed keys以及
-`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`，并比较descriptor/PID/
-Protocol/client contract/server version与Service自身build identity。malformed、server identity drift或无关listener返回
-`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端发现跨expected build的ready owner；source
-`dev:` drift和非active installed candidate可复用该owner，但只有active installed candidate能在验证旧owner identity后通过旧build
-client执行stop并收敛到当前candidate。source与installed owner互不复用、互不替换；显式跨build `service stop/restart`仍返回
-`incompatible/build_mismatch`。所有不兼容或不确定结果都保留state、`spawn=0`，且绝不从调用者descriptor/build回显或重建健康身份。
+同样不导入CLI source。发布组合只把typed App Server connector与显式daemon control传给terminal App，没有app-to-app production import、
+embedded fallback或第二默认Store。默认parent-child在initialize验证exact build/capability；daemon按fixed protocol/capability兼容，build只作
+诊断。任何mismatch都fail closed，不discover、stop或replace其他进程。PID/start/socket reservation只服务dead endpoint cleanup，不能提升
+Session或Store authority。旧single-Service manager、Native describe/control与`service *`surface已经删除。
 
 ## Runtime Kernel
 

@@ -48,11 +48,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 与其相同，`KITE_CODE_HOME`固定为该home下的exact `.kite-code` root；结束后连同root一起清理。
 
 默认测试排除真实 PTY、fault/soak、native sandbox、spike 和 live Provider；这些使用已有显式命令。
-`tests/release/single-service-real-child.test.ts`使用真实child Service与本地模型fixture覆盖Runtime socket先于Controller、首条`start_turn`、
-模型dispatch/terminal、同连接多Session、外来client拒绝及旧installed build→当前build自动换代；
-`packages/kite-local-runtime/test/single-service-manager.test.ts`固定验证transient/permanent busy、source隔离与精确旧build stop，旧descriptor manager
-suite继续验证显式legacy restart在busy、outcome-unknown与成功replacement下不重放control mutation；默认source TUI使用parent-owned App
-Server与worktree持久profile，因此不再保留`tui:fresh`跨build mutation路径。
+默认source TUI使用parent-owned App Server与worktree持久profile；旧single-Service real-child/manager/build replacement矩阵已随production
+控制面删除，不再保留只为测试存在的兼容路径。
 `apps/kite-service/test/isolated/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、同连接
 Runtime/History/App Control/credential client、EOF active model cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint。
 同文件还让真实approved host-shell child记录PID，SIGKILL App Server后验证Runtime Host watchdog清理command group、successor显式reconcile且
@@ -100,18 +97,13 @@ Worker HTTP listener，验证两种role、capability incompatibility/replay、co
 16-request overload/drain、Worker replacement及non-disclosure。它不是production SDK；当前Web由显式daemon-owned static/auth carrier承载，
 不再保留独立Gateway process restart矩阵。
 `packages/kite-app-contract/test/` 验证browser-safe、no-secret、
-exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
-filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
-`POST /_kite/instance`，包括strict schema/keys/values/content-type/size、malformed与instance/server/build identity
-mismatch fail closed与Protocol/client-contract incompatibility。single-Service focused suite另验证兼容客户端跨expected build执行
-`describe/ensure/status`时复用ready owner且spawn=0，以及跨build `service stop/restart`返回`incompatible + build_mismatch`。
+exact App Control codec；`packages/kite-local-runtime/test/`验证App Server transport、credential codec、profile/config filesystem与
+owner-only daemon endpoint lifecycle。dead cleanup focused suite验证PID/start/reservation/socket identity全部exact，drift/uncertain保持fail closed。
 
 KLSV1-06 clean cutover后，`apps/kite-service/test/`拥有真实Runtime Application/Host/Store/Builtin、History/App Control与
 carrier composition tests；`apps/kite-cli/test/`只验证default managed client/presentation、两阶段Workspace Trust、
-disconnect/exit不shutdown owner及无embedded fallback。`apps/kite-service/test/isolated/process-harness/`仍是KLSV1-05
-fake-application detached-child fixture，不能代替当前default Store持久恢复或release evidence。
+disconnect/exit不shutdown owner及无embedded fallback。旧fake process harness已删除，不能以test-only lifecycle保留退役production抽象。
 
-`tests/release/single-service-real-child.test.ts`只保留legacy build replacement/Native Runtime证据，并明确其根与Browser `/v1`为404。
 `tests/release/app-server-daemon.test.ts`负责Web当前证据：absent discovery不spawn、stable origin/static shell、HttpOnly Browser `/v1`读取
 Native client写入同一`kite-session.sqlite`的Session、v1/v2 mismatch、双client History与stop清理。
 
@@ -135,7 +127,7 @@ no-receipt copy、reopen/Workspace isolation、pre-resume unknown投影、显式
 mechanism evidence，不替代02B migration、03A production composition或release三平台qualification。
 
 KRSRUN-02B的Store7→Store8 migration是未发布历史机制；ADR-0154 clean cutover后不再由`tests/release`或正式CLI验证/组合。current release
-只验证single-Service、Store 9与retired companion absence。
+只验证App Server、Store 9与retired companion absence。
 
 KRSRUN-03A的历史证据由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
 `process-foreground.test.ts`及Store Catalog layout tests固定Store8-only Worker readiness/reopen、

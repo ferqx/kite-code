@@ -10,8 +10,10 @@ import {
   KITE_APP_SERVER_DAEMON_STATUS_REQUEST_SCHEMA_,
   KITE_APP_SERVER_DAEMON_VERSION_,
 } from '@kite-ai/kite-local-runtime/client';
-import { createKiteSingleServiceNativeProcessIdentityProbe } from '@kite-ai/kite-local-runtime/manager';
-import { readKiteLocalRuntimeLifecycleReservation } from '@kite-ai/kite-local-runtime/service';
+import {
+  createKiteLocalRuntimeProcessIdentityProbe,
+  readKiteLocalRuntimeLifecycleReservation,
+} from '@kite-ai/kite-local-runtime/service';
 import { RuntimeClient } from '@kite-ai/runtime-client';
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMethod } from '@kite-ai/runtime-protocol';
@@ -200,7 +202,7 @@ describe('explicit App Server daemon lifecycle', () => {
         throw new Error('Daemon test did not obtain a child process identity.');
       }
       process.kill(reservation.pid, 'SIGKILL');
-      const processProbe = createKiteSingleServiceNativeProcessIdentityProbe();
+      const processProbe = createKiteLocalRuntimeProcessIdentityProbe();
       await until(
         async () =>
           (await daemon.status()).state === 'unavailable' &&

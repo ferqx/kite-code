@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe('ordinary open-source candidate archive', () => {
-  test('keeps the source Service entrypoint directly executable by the manager', () => {
+  test('keeps the source App Server entrypoint directly executable by its parent', () => {
     const entrypoint = 'scripts/release/entrypoints/service.ts';
     expect(readFileSync(entrypoint, 'utf8')).toStartWith('#!/usr/bin/env bun\n');
     if (process.platform !== 'win32') expect(lstatSync(entrypoint).mode & 0o111).not.toBe(0);

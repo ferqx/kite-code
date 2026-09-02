@@ -4,14 +4,13 @@
 与source TUI/CLI都连接parent-owned stdio App Server：installed固定launcher-pinned immutable candidate，source固定当前checkout；多个连接共享
 durable profile但不共享进程。CLI不导入Service App，也不持有Store authority。
 
-adapter把 `KiteAppServerConnection`或legacy `LocalKiteConnection`投影为typed Runtime、History、App Control、credential与
-`RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。Controller只存在于legacy native connection；
-App Server mutation直接受Session execution generation/revision fence约束。adapter不读取descriptor/access/control
+adapter把 `KiteAppServerConnection`投影为typed Runtime、History、App Control、credential与
+`RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。App Server mutation直接受Session execution
+generation/revision fence约束。adapter不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
-普通跨build lifecycle mutation保持owner-build fence。source已删除previous-build replacement authority；standalone TUI退出只停止自己的
-exact-build owner，显式shared source发生drift时不替换owner。source↔installed或identity不确定时仍fail closed。
-CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
+默认parent-child必须exact build；显式daemon只按exact protocol/capability判断兼容。任何mismatch都fail closed，不执行previous-build
+stop、replacement或fallback。
 
 默认`/status`展示stdio transport、profile mode、build、App Server version与same-build pairing。显式`--server`只连接指定的
 Unix socket/Windows named pipe，展示exact-protocol compatible pairing；daemon的build ID只用于诊断，不参与兼容判断。client/server mismatch在initialize时关闭连接，
@@ -30,9 +29,6 @@ embedded/InProcess或legacy Service。
 reconnect为同一resolver显式spawn新的parent-owned child并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral
 stream，再由replacement subscription/index reset重建；mutation不会自动重放。close关闭本client connection/subscription/snapshot
 observer和child，不发送Session删除或隐式cancel-all。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
-以下Controller与跨build规则仅描述KASD-06前仍显式可达的legacy native Service seam，不是默认TUI/CLI行为。升级前仍运行的inactive installed
-TUI在Protocol/client-contract兼容时可通过该路径连接current installed Service；其manager不执行
-replacement，Native exact-build control fence也不允许它停止或降级current owner。不兼容client诊断保持fail closed且`spawn=0/stop=0`。
 TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
 Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。
 

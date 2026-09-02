@@ -6,18 +6,17 @@ import {
   WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
+import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
-import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
+import { main, parseArgs } from '../src/cli/index';
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
 describe('cli argument parsing', () => {
-  test('recognizes the public managed Service lifecycle surface', () => {
-    expect(parseArgs(['service', 'ensure']).command).toBe('service-ensure');
-    expect(parseArgs(['service', 'status']).command).toBe('service-status');
-    expect(parseArgs(['service', 'status', '--json']).serviceJson).toBe(true);
-    expect(parseArgs(['service', 'stop']).command).toBe('service-stop');
-    expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
+  test('does not register the retired Service lifecycle surface', () => {
+    expect(parseArgs(['service', 'ensure']).command).toBe('help');
+    expect(parseArgs(['service', 'status']).command).toBe('help');
+    expect(parseArgs(['service', 'stop']).command).toBe('help');
+    expect(parseArgs(['service', 'restart']).command).toBe('help');
   });
 
   test('recognizes only explicit App Server daemon lifecycle and endpoint selection', async () => {
@@ -112,61 +111,8 @@ describe('cli argument parsing', () => {
     }
   });
 
-  test('passes the release-selected executable mode to Service lifecycle commands', async () => {
-    const originalArgv = process.argv;
-    const output = spyOn(console, 'log').mockImplementation(() => undefined);
-    const requests: unknown[] = [];
-    const result = {
-      schema: 'kite.local-runtime-lifecycle-result.v1' as const,
-      requestId: 'restart-installed',
-      operation: 'restart' as const,
-      outcome: 'applied' as const,
-      state: 'ready' as const,
-    };
-    const unavailable = async () => {
-      throw new Error('unexpected lifecycle operation');
-    };
-    try {
-      process.argv = ['bun', 'kite', 'service', 'restart'];
-      await main({
-        serviceExecutableMode: 'installed',
-        serviceManager: {
-          ensure: unavailable,
-          status: unavailable,
-          stop: unavailable,
-          restart: async (request) => {
-            requests.push(request);
-            return result;
-          },
-        },
-      });
-      expect(requests).toEqual([
-        {
-          clientContractRevision: 'kite-local-runtime-contract-v2',
-          executableMode: 'installed',
-        },
-      ]);
-      expect(output.mock.calls.at(-1)).toEqual(['Service restart: applied [ready]']);
-    } finally {
-      process.argv = originalArgv;
-      output.mockRestore();
-    }
-  });
-
-  test('keeps service run private and renders lifecycle results without secrets', () => {
+  test('keeps every Service lifecycle invocation retired', () => {
     expect(parseArgs(['service', 'run']).command).toBe('help');
-    const result = {
-      schema: 'kite.local-runtime-lifecycle-result.v1' as const,
-      requestId: 'status-1',
-      operation: 'stop' as const,
-      outcome: 'incompatible' as const,
-      state: 'ready' as const,
-      diagnostic: 'build_mismatch' as const,
-    };
-    expect(formatServiceLifecycleResult(result)).toBe(
-      'Service stop: incompatible [ready] (build_mismatch)',
-    );
-    expect(JSON.parse(formatServiceLifecycleResult(result, true))).toEqual(result);
   });
 
   test('recognizes explicit Windows sandbox control-plane commands', () => {
@@ -447,7 +393,7 @@ function createCliConnection(input: {
   commandWorkspaces?: string[];
   queryStatus: 'trusted' | 'unknown';
   externalReadRoots?: readonly string[];
-}): LocalKiteConnection {
+}): KiteAppServerConnection {
   const workspace: KiteWorkspaceIdentity = {
     canonicalPath: '/tmp/trusted',
     projectId: 'cli-test-project',
@@ -515,10 +461,9 @@ function createCliConnection(input: {
         throw new Error('credential is not used by CLI test');
       },
     },
-    service: {} as LocalKiteConnection['service'],
     status: 'disconnected',
     generation: 0,
-    snapshotStore: {} as LocalKiteConnection['snapshotStore'],
+    snapshotStore: {} as KiteAppServerConnection['snapshotStore'],
     subscribe: () => () => undefined,
     prepareAppControl: async () => {
       input.calls.push('prepare-app-control');

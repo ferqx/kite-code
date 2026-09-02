@@ -13,10 +13,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-} from '@kite-ai/kite-local-runtime/service';
+import { createKiteHomeIdentity, ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { sourceKiteSessionStorePath } from '../../../scripts/release/local-service-client';
 
@@ -400,7 +397,7 @@ export function createTestWorkspace(opts?: {
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
   const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
-  const kiteCodeDir = ensureLocalRuntimeServiceHome(
+  const kiteCodeDir = ensureKiteProfileHome(
     createKiteHomeIdentity(join(tempHome, '.kite-code'), 'explicit_argument'),
   ).root;
 

@@ -3,7 +3,7 @@ import type { PtyProcess } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
 
 interface StoppableFixture {
-  stop(): unknown;
+  stop(): unknown | Promise<unknown>;
 }
 
 export interface TuiSystemFixtures {
@@ -54,7 +54,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
   ]);
   for (const server of servers) {
     try {
-      server.stop();
+      await server.stop();
     } catch (error) {
       errors.push(error);
     }
@@ -71,4 +71,9 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
   if (errors.length > 0) {
     throw new AggregateError(errors, 'TUI system fixture cleanup failed');
   }
+}
+
+/** Execute an explicit server stop without exposing raw fixture lifecycle calls in scenarios. */
+export async function stopTuiSystemServer(server: StoppableFixture): Promise<unknown> {
+  return server.stop();
 }

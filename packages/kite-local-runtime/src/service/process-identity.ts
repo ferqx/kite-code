@@ -2,6 +2,7 @@ import { dlopen, type Pointer, ptr } from 'bun:ffi';
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
+import type { KiteLocalRuntimeProcessIdentityProbe } from './lifecycle-reservation';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,7 +20,7 @@ type WindowsProcessIdentityApi = {
 
 let windowsProcessIdentityApi: WindowsProcessIdentityApi | undefined;
 
-/** Exact OS process-start token shared by Service lifecycle and legacy transition owners. */
+/** Exact OS process-start token used by owner-only local endpoint lifecycle. */
 export async function readLocalProcessStartIdentity(
   pid: number = process.pid,
   platform: NodeJS.Platform = process.platform,
@@ -29,6 +30,34 @@ export async function readLocalProcessStartIdentity(
   if (platform === 'darwin') return readDarwinProcessStartIdentity(pid);
   if (platform === 'win32') return readWindowsProcessStartIdentity(pid);
   return undefined;
+}
+
+/** Exact PID plus OS start-token probe used by owner-only local endpoint cleanup. */
+export function createKiteLocalRuntimeProcessIdentityProbe(
+  platform: NodeJS.Platform = process.platform,
+): KiteLocalRuntimeProcessIdentityProbe {
+  return Object.freeze({
+    async inspect(pid: number, expectedStartIdentity: string) {
+      if (!Number.isSafeInteger(pid) || pid <= 0 || !expectedStartIdentity) return 'uncertain';
+      const actual = await readLocalProcessStartIdentity(pid, platform);
+      if (actual !== undefined) return actual === expectedStartIdentity ? 'alive' : 'dead';
+      try {
+        process.kill(pid, 0);
+        return 'uncertain';
+      } catch (error) {
+        return errorCodeIs(error, 'ESRCH') ? 'dead' : 'uncertain';
+      }
+    },
+  });
+}
+
+function errorCodeIs(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { readonly code?: unknown }).code === code
+  );
 }
 
 function readLinuxProcessStartIdentity(pid: number): string | undefined {

@@ -120,38 +120,17 @@ InProcess logical-message必须得到同一Client state；共享对象引用不�
 原Turn continuation与Tool一次dispatch；进程内broker/waiter不能作为恢复证据。batch中每个notification必须携带自身revision的
 exact post-event queue，无法读取时unavailable而不是空queue。
 
-以下Local Service contract只约束显式legacy Service/Web控制面：descriptor/lock/token/lifecycle/credential exact，connection不携带control
-token，mutation不自动重放。默认TUI/CLI已使用parent-owned App Server且没有embedded或Service fallback。legacy focused tests覆盖
-多connection/Workspace、persisted restart、Trust、History、App Control、operation gate、disconnect后Runtime继续、20-way
-ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与frame/queue limits。
+App Server qualification只覆盖当前production路径。默认TUI/CLI通过parent-owned stdio连接same-build child；显式daemon通过owner-only
+socket/pipe提供多个client与一个stable Web origin。旧descriptor/token/manager/build replacement测试已经随production删除，不得为了历史矩阵
+保留实现。
 
-manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access`、exact`{}`body调用
-`POST /_kite/instance`。response的content type、4 KiB上限、closed keys及
-`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
-identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
-expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
-`incompatible/build_mismatch`。legacy source standalone已删除previous-build stop authority；qualification验证其显式invocation endpoint、临时Runtime Home
-隔离与退出cleanup，普通source restart与source↔installed仍保持`spawn=0`。installed qualification还用门控Provider证明真实TUI Turn active期间换代返回`service_busy`并保持old build/instance，
-terminal后第二次ensure才替换且兼容旧TUI可reconnect。这些结果不能从caller build或descriptor合成健康身份。restart后
-descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
-source↔installed双向矩阵均已覆盖：任一方向只要actual/expected mode不同就返回`incompatible/build_mismatch`，且stop=0、spawn=0；
-不能只验证source client面对installed owner而遗漏installed client面对source owner。
-同一journey还覆盖两个旧TUI并发连接：一个Turn active时另一个仍可query，manager收到busy后第二个TUI可创建Session证明admission已resume；
-同一active Turn上的连续外部ensure都稳定返回busy且不遗留quiesce lease；换代后两者都显式reconnect。后续candidate面对approval waiting
-interaction仍返回busy，取消并terminal后才允许再次换代。
-同一V2→V3真实endpoint journey在V2接受`service_stop`并返回`applied`后由测试transport丢弃响应；manager只观察exact
-reservation/PID/start/instance absence，previous-build stop请求在丢失后保持0次重发，随后启动V3且两个旧TUI以新generation重连。
-对称模拟响应丢失但old PID/start/reservation仍alive时，manager返回`outcome_unknown/identity_uncertain`并保持old owner，单次ensure内
-previous-build stop仍只发送一次且`spawn=0`；只有confirmed absence才能把同一不确定响应收敛为成功。
-两个独立active-candidate manager并发V1→V2时各自最多发送一次authenticated previous-build stop；Service shell将并发请求合并为一个
-quiesce/commit/cleanup flight。两边随后都可尝试spawn，但native reservation只允许一个instance ready，loser观察同一winner并返回applied。
-并发busy control requests同样共享一个quiesce结果；control flight进行中到达的ordinary stop或signal加入同一barrier。busy settlement释放flight，
-active work结束后的下一次stop创建新flight并完成唯一cleanup，不存在残留busy Promise吞掉retry或重复owner disposal。
-deterministic Application race另证明：Session work刚terminal但interaction settlement mutation仍在gate临界区时，quiesce继续报告busy；
-resume后settlement完成，下一次quiesce才允许drain。因此Host active事实与mutation gate任一方都不能单独冒充全局idle。
-模拟current candidate首次`waitForReady`失败时，manager返回typed unavailable而不伪造ready；旧installed stop保持一次且不重放，ensure flight释放，
-下一次ensure只重试current spawn并收敛唯一ready owner。若失败child已写入current lifecycle reservation，后续ensure只在PID/start identity确认dead
-后清理该exact reservation，再spawn一次；不会清理不匹配证据或重放旧stop。该证据不承诺自动回滚已停止的旧Service。
+daemon focused tests覆盖explicit start/status/stop、absent无副作用、两个client、fixed protocol/capability、不同Workspace拒绝、stable Web、
+Browser读取Native刚写入的Session、普通disconnect保活以及PID/start/socket exact dead cleanup。alive、identity uncertain或reservation drift
+必须保持endpoint且不spawn。default stdio tests覆盖EOF/signal cleanup、active model/Shell child tree、durable resume与无HTTP listener。
+
+Store qualification覆盖两个真实进程首次open、同Workspace不同Session并发、同Session writer竞争、stale generation、revision CAS、
+lease renewal/takeover、effect response loss、SIGKILL recovery_required与explicit reconciliation。release upgrade/rollback只切换pointer，
+不运行任何process discovery/stop；测试以candidate invocation log保持absent证明。
 
 Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
@@ -346,10 +325,8 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production缺省仍使用加密随机identity与系统时钟；默认Workspace Worker writer精确为
-State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`，显式legacy Service maintenance仍为State 27 / Store 6 /
-`kite-runtime-server-v1-2026-08-26`，Store 7只作offline migration source。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`
-与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都只属于explicit readonly historical source profile，不能进入当前Worker执行路径。
+strict mismatch 与 no-fallback contract。production缺省仍使用加密随机identity与系统时钟；当前writer只打开exact
+`kite-session.sqlite` epoch并受Session generation约束。旧Store只属于不可见历史数据，不能进入当前执行、maintenance或fallback路径。
 
 RM-04 production Store 由 Service 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与

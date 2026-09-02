@@ -1,11 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { McpCredentialStore } from '@kite-ai/builtin-runtime/mcp';
-import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
-import {
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
-} from '@kite-ai/kite-local-runtime/service';
+import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-client';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
@@ -21,7 +17,7 @@ export function createInProcessTuiServiceConnector(
   shellExecutor: AppShellExecutor,
   options: { readonly mcpCredentialStore?: McpCredentialStore } = {},
 ): Readonly<{
-  connect(input: { readonly workspace: string }): Promise<LocalKiteConnection>;
+  connect(input: { readonly workspace: string }): Promise<KiteAppServerConnection>;
 }> {
   return Object.freeze({
     connect: async ({ workspace }) => {
@@ -103,20 +99,6 @@ export function createInProcessTuiServiceConnector(
         history,
         app: appControl.gateway.forWorkspace(identity),
         credential: appControl.credentialClient,
-        service: Object.freeze({
-          schema: LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
-          instanceId: `fixture_${randomUUID()}`,
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-          endpoint: {
-            origin: 'http://127.0.0.1:1',
-            websocketUrl: 'ws://127.0.0.1:1/rpc',
-          },
-          protocolVersion: 1,
-          clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-          serverVersion: 'tui-system-fixture',
-          buildId: 'dev:tui-system-fixture',
-        }),
         get status() {
           return closed
             ? ('closed' as const)
@@ -134,7 +116,7 @@ export function createInProcessTuiServiceConnector(
         reconnect: async () => runtime.reconnect(),
         close,
         [Symbol.asyncDispose]: close,
-      }) satisfies LocalKiteConnection;
+      }) satisfies KiteAppServerConnection;
     },
   });
 }

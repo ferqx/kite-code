@@ -1,7 +1,7 @@
 # Runtime carrier client boundary
 
-本页定义`apps/kite-cli`对Runtime carrier的owner-local边界。parent-owned stdio是默认terminal transport；legacy Native listener与
-development reference仍由`apps/kite-service`拥有，CLI只拥有client/presentation adapter。
+本页定义`apps/kite-cli`对Runtime carrier的owner-local边界。parent-owned stdio是默认terminal transport；显式daemon socket/pipe与
+development reference由`apps/kite-service`拥有，CLI只拥有client/presentation adapter。
 
 ## Production App Server path
 
@@ -13,11 +13,10 @@ development reference仍由`apps/kite-service`拥有，CLI只拥有client/presen
   client-safe projection。
 - terminal exit关闭自身logical connection与child，但不会删除durable facts；新TUI可从同一profile恢复History。
 
-## Service lifecycle commands
+## Daemon lifecycle commands
 
-`kite service ensure/status/stop/restart` 是已注册的 terminal surface，但实现只调用 release composition注入的
-`KiteServiceManager`窄port。CLI 不拥有 PID probe、instance handshake、control token、spawn、stale cleanup或state lock。
-`--kite-home` 只由 release composition验证并选择显式 managed Service home，不能由 Workspace/cwd猜测。
+`kite server start/status/stop`只调用release composition注入的daemon control。CLI不拥有PID probe、spawn或dead cleanup。
+`--kite-home`只由release composition验证并选择profile；`--server`只选择显式endpoint。旧`kite service *`不再注册。
 
 ## Stdio 与 development reference
 

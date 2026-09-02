@@ -28,7 +28,7 @@ reconciliation把上一generation全部prepared事实改为unknown，并与clean
 
 `openKiteSessionRuntimeStorage`以每App Server一条WAL connection组合所有Session write port；read/list不取得execution lease，启动深验使用一个
 SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
-scope；无Session归属的Artifact GC仍关闭。该owner不取得旧Workspace process lock；旧lock只留在显式legacy single-Service owner。
+scope；无Session归属的Artifact GC仍关闭。App Server owner不取得Workspace process lock；旧lock不再有production caller。
 
 KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App进程按Session command显式acquire/renew execution handle，并让整条异步
 Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
@@ -67,7 +67,7 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 `ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。Service App是
 唯一 composition root，Host/Store operation 仍各有一个 production owner。
 
-当前默认Service/Store/native discovery边界见[`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。本文后续
+当前默认App Server/Store/daemon discovery边界见[`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。本文后续
 出现的Coordinator/Worker/Store 8 generation只约束legacy offline migration source，不是普通run/resume/Web的第二authority。
 
 ## Runtime Server / Client authority boundary
@@ -131,7 +131,7 @@ principal。ServerInfo按principal发布`checkpoints/history/sessions/workspaces
 Checkpoint list/preview经同一个Store 9 Directory/Runtime/History authority可达，其他resource/mutation仍404。History的`after_sequence`只做
 bounded增量读取且与cursor互斥。两类principal都不开放SQLite/State concrete或新connection/DDL；context/session close不取消Runtime work，
 controller role不绕过Store 9 Controller lease或binding authority。
-single-Service Native Runtime socket只认证Workspace、Client与connection generation；每条command用目标Session重新读取Store 9当前Controller，
+App Server connection只认证Workspace、Client与connection generation；每条command用目标Session重新读取当前execution authority，
 并将Workspace/connection/request/Session/Controller generation摘要为in-process binding reference。该reference不持久化、不成为credential或
 第二registry；旧connection generation和非当前Controller仍在Host之前拒绝。
 每context的16-request admission与drain只约束Public HTTP资源；它不成为domain mailbox。已认证read在异步Trust重验后还必须复核context current，
@@ -178,32 +178,11 @@ registry/history和已等待subscriber；该动作不写Store。这样订阅先�
 Store 7/8 migration与旧Coordinator/Worker/Gateway control plane属于未发布历史机制。ADR-0154 clean cutover后，正式CLI/release不再组合
 这些entrypoint、barrier或descriptor recovery；current Runtime authority只从单Service与Store 9建立，普通startup也不扫描或删除旧source。
 
-Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
-raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
-instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
-Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
-restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX
-no-follow/owner-only primitive，以及Windows current-user SID、protected owner-only DACL、non-reparse verifier；两者都在
-敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有App Server composition和显式legacy loopback carrier；
-`kite-local-runtime/manager`只拥有legacy Service/Web使用的dead-only stale manager。manager先用
-`GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
-`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
-Protocol/client-contract/serverVersion及Service自身build identity一致。server identity drift、malformed或无关listener返回
-`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨expected build取得Service真实identity；manager必须保留
-actual build作部署决策，只有显式shared source `dev:`→`dev:` ensure把build drift视为可复用，installed active candidate对另一installed build执行
-verified replacement；inactive installed TUI只可兼容复用与显式reconnect，不能取得replacement authority；source↔installed不复用也不替换。
-Protocol/client-contract不兼容仍fail closed，跨build lifecycle mutation返回
-`incompatible/build_mismatch`。这些结果都保留state、
-`spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
-该instance proof也不创建persisted Project authority或跨Host Store fence。
-当前single-Service Native IPC v2只在protocol/client-contract exact且Service/caller build identity同为`dev:`时把build drift视为可复用；
-installed/candidate、source↔installed与Web semantic revision仍要求exact request compatibility。production manager只对
-installed→installed drift换代：POSIX使用strict reservation中的旧build identity重新验证旧owner，Windows只允许exact contract且双方installed
-identity的跨build`service_stop`；confirmed absent后才spawn当前companion。
-manager还要动态验证caller build与managed active pointer一致，退役candidate不能反向停止current Service。它不放宽普通Service gate，
-也不把source或uncertain identity提升为replacement authority。legacy source standalone/shared只取得连接authority，
-不取得previous-build stop authority。它不适用于普通restart、source↔installed或Protocol/client-contract drift。build ID是部署/诊断身份，
-不替代wire revision。
+App Server infrastructure不改变上述可信域。`kite-app-contract`只允许no-secret exact projection/action；Provider API key与MCP OAuth
+只经过fixed credential方法。default stdio连接由parent pipe和exact initialize绑定，source/installed都要求client-child same build。
+显式daemon使用owner-only Unix socket/current-user named pipe与fixed protocol/capabilities；build只作诊断。mismatch不授权stop、spawn或
+replacement。`kite-local-runtime/service`仅保留profile/private-directory校验、PID/start probe与dead-only endpoint cleanup；reservation
+不保存credential、Store或Session generation。alive、identity uncertain或inode drift全部保留证据并fail closed。
 
 ## Authority sequence
 
@@ -263,9 +242,8 @@ executable argv不能因`slice(2)`为空而落入普通Service命令解析或静
 
 ## SQLite Store 与 Artifact
 
-新production Session只使用State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`的active Workspace generation target，exact schema为
-**11 tables / 3 named non-primary-key indexes**。显式legacy Service maintenance仍使用State 27 / Store 6 /
-`kite-runtime-server-v1-2026-08-26`的8 tables / 2 indexes；Store 7只作whole-generation offline migration source。不存在persisted
+新production Session只使用exact `kite-session.sqlite` epoch与active Workspace generation target。旧`kite.sqlite`原样保留但不可见，
+不作为maintenance owner、migration source或fallback。不存在persisted
 authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event是strict canonical JSON，Snapshot以SHA-256
 checksum检测损坏。写入/恢复Store时会校验目标会话的当前Event/Snapshot；SessionStore的会话发现只按序解码到第一条命名候选后停止，不以全日志
 解码阻塞TUI启动，具体会话恢复仍走session-scoped完整校验。历史source只要存在WAL/SHM sidecar就必须在隔离副本中读取；

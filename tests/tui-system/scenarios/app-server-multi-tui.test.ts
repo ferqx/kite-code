@@ -67,15 +67,14 @@ describe('TUI PTY System — parent-owned App Servers', () => {
       );
 
       await submitCommand(first, '/status');
-      await waitForText(() => first.transcript(), 'App Server 传输: stdio', 10_000);
-      const firstStatus = first.transcript();
-      expect(screenContains(firstStatus, '客户端与 App Server 已精确配对')).toBe(true);
-      expect(screenContains(firstStatus, 'Service PID')).toBe(false);
-      expect(screenContains(firstStatus, 'Kite Web')).toBe(false);
+      await waitForText(() => first.outputSinceLastAction(), 'App Server 传输: stdio', 10_000);
+      expect(screenContains(first.viewport(), '客户端与 App Server 已精确配对')).toBe(true);
+      expect(screenContains(first.viewport(), 'Service PID')).toBe(false);
+      expect(screenContains(first.viewport(), 'Kite Web')).toBe(false);
 
       await submitCommand(second, '/status');
-      await waitForText(() => second.transcript(), 'App Server 传输: stdio', 10_000);
-      expect(screenContains(second.transcript(), '客户端与 App Server 已精确配对')).toBe(true);
+      await waitForText(() => second.outputSinceLastAction(), 'App Server 传输: stdio', 10_000);
+      expect(screenContains(second.viewport(), '客户端与 App Server 已精确配对')).toBe(true);
     },
     TIMEOUT,
   );

@@ -11,8 +11,8 @@
 ## 当前存储模型
 
 `packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。每个实例必须在App注入的durable
-backend与filesystem root之间二选一；不能同时写两者或运行时fallback。当前default App Server production注入Store 9专用表且不fallback；
-显式legacy single-Service沿用同一Store backend，下面的root只保留给显式旧owner和Builtin owner-local测试：
+backend与filesystem root之间二选一；不能同时写两者或运行时fallback。当前default与daemon App Server production注入Session Store专用表且不fallback；
+下面的root只保留给Builtin owner-local测试：
 
 ```text
 model-artifacts/{surfaces,responses,provider-options}/

@@ -1,12 +1,8 @@
 export * from './agent-api';
 export * from './carrier';
 export * from './composition';
+export { runKiteServiceMain } from './executable';
 export * from './native-endpoint';
-export * from './native-infrastructure';
-export * from './ports';
-export * from './readiness';
-export * from './shell';
-export * from './single-service-infrastructure';
 
 export const KITE_SERVICE_BOUNDARY = Object.freeze({
   privatePackage: true,

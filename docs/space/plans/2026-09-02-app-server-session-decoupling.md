@@ -244,6 +244,21 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 
 ### KASD-06：旧single-Service控制面删除与qualification
 
+当前子阶段（2026-09-02）：
+
+- 已删除public `kite service ensure/status/stop/restart`、internal `service run-single`、single-Service release composition、manager/client、
+  Native lifecycle request codec、canonical `service.sock`与旧descriptor/token/lock filesystem state；默认和显式路径均不能回退旧owner；
+- 已删除只为旧控制面存在的Native infrastructure、process harness、stable-launcher readiness fd forwarding、installer lifecycle fence与
+  previous-build replacement tests；release upgrade/rollback现在只验证candidate并切换pointer，不发现、停止或替换运行中的App Server；
+- 最终过度设计复核删除了无任何production/test caller的旧`createKiteHomeRuntimeStorageComposition`及其第二套Session创建协调器；当前
+  production executable只组合`createKiteSessionAppServerStorageComposition`，旧`kite.sqlite`仍只作为未导入的历史文件保留；
+- daemon只复用最小owner-only endpoint reservation、PID/start probe与dead-only exact cleanup；reservation不保存Session/Store authority；
+- release三平台workflow已改为验证App Server endpoint、`kite-session.sqlite` execution fencing/mutation与daemon真实process，不再运行旧
+  single-Service矩阵；macOS arm64 dirty candidate `b2989c6787b407d936f4dfa7`已通过build/verify、installed TUI、paired App Server、
+  daemon/Web、upgrade/rollback/uninstall smoke，完整default tests、42-file TUI PTY、16-workspace typecheck与architecture/docs Gate通过；
+  Ubuntu/Windows必须等待包含本提交的hosted run，不能静态推断；
+- current authority已改写为App Server/Session拓扑。KASD-06保持`in_progress`，直到本机完整Gate与三平台真实qualification均完成。
+
 - 删除默认路径的active-candidateService replacement、previous-build client、source/installed build drift分支和全局Service reservation；KASD-01已
   前置删除Workspace/Store单进程owner限制，本阶段只清理不可达旧控制面；
 - 仅保留daemon endpoint所需的最小process owner状态，不让PID/build拥有Session或Store authority；
@@ -397,13 +412,6 @@ revision
 
 ## 10. KASD-00 architecture baseline test
 
-`tests/release/app-server-decoupling-baseline.test.ts`冻结以下尚未改变的production事实：
-
-- current Store basename/epoch仍为`kite.sqlite`/single-Service epoch；
-- Workspace process owner lock与one-connection composition仍存在；
-- source过渡入口仍创建临时Runtime Home；
-- production尚未出现`kite-session.sqlite`、`sessionMutation`或default app-server entrypoint；
-- ADR-0166/KASD文档已经存在且旧single-Service计划已superseded。
-
-该测试不是永久兼容层。KASD-01～06每关闭一项current约束就同步改写对应断言；cutover完成后删除“旧路径仍存在”断言，只保留最终
-architecture invariants。
+`tests/release/app-server-decoupling-baseline.test.ts`现在固定最终architecture invariants：exact Session Store epoch、multi-process
+execution fencing、default paired App Server、显式daemon，以及旧single-Service public/internal入口均不可达。旧`kite.sqlite`断言只证明
+未发布clean cutover保留历史文件实现，不赋予旧owner任何production caller。

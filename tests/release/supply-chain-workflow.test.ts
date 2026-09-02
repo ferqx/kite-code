@@ -81,11 +81,11 @@ describe('ordinary open-source release candidate workflow', () => {
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
-      'Verify Windows Service ACL, native IPC, and Store 9 boundary',
-      'packages/kite-local-runtime/test/isolated/service-state.test.ts',
-      'packages/kite-local-runtime/test/isolated/native-ipc.test.ts',
-      'packages/runtime-storage-sqlite/test/kite-home-store.test.ts',
-      'apps/kite-service/test/single-service-infrastructure.test.ts',
+      'Verify Windows App Server endpoint and Session Store fencing',
+      'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
+      'packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts',
+      'tests/release/app-server-daemon.test.ts',
       'bun run release:build',
     ];
     let previousIndex = -1;

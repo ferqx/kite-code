@@ -9,7 +9,7 @@ import {
   encodeKiteLocalRuntimeLifecycleReservation,
   KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_,
   readKiteLocalRuntimeLifecycleReservation,
-  resolveKiteLocalRuntimeEndpoint,
+  resolveKiteAppServerDaemonEndpoint,
 } from '../../src/service';
 
 const roots: string[] = [];
@@ -28,11 +28,11 @@ afterEach(async () => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe.skipIf(process.platform === 'win32')('single-Service lifecycle reservation', () => {
+describe.skipIf(process.platform === 'win32')('owner-only endpoint lifecycle reservation', () => {
   test('preserves alive evidence and clears only the same dead PID/start/socket identity', async () => {
     const parent = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-lifecycle-parent-')));
     roots.push(parent);
-    const endpoint = resolveKiteLocalRuntimeEndpoint({
+    const endpoint = resolveKiteAppServerDaemonEndpoint({
       home: createKiteHomeIdentity(join(parent, 'home')),
       runtimeParent: parent,
       platform: process.platform,
@@ -50,7 +50,7 @@ describe.skipIf(process.platform === 'win32')('single-Service lifecycle reservat
       schema: KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_,
       pid: 42_001,
       processStartIdentity: 'process-start-1',
-      instanceId: 'service-1',
+      instanceId: 'app-server-1',
       buildId: 'build-1',
       startedAt: '2026-08-30T00:00:00.000Z',
       socketDevice: socket.dev,
@@ -85,7 +85,7 @@ describe.skipIf(process.platform === 'win32')('single-Service lifecycle reservat
   test('keeps identity-drifted evidence even with dead proof for the old owner', async () => {
     const parent = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-lifecycle-drift-')));
     roots.push(parent);
-    const endpoint = resolveKiteLocalRuntimeEndpoint({
+    const endpoint = resolveKiteAppServerDaemonEndpoint({
       home: createKiteHomeIdentity(join(parent, 'home')),
       runtimeParent: parent,
       platform: process.platform,
@@ -96,7 +96,7 @@ describe.skipIf(process.platform === 'win32')('single-Service lifecycle reservat
       schema: KITE_LOCAL_RUNTIME_LIFECYCLE_SCHEMA_,
       pid: 42_002,
       processStartIdentity: 'process-start-new',
-      instanceId: 'service-new',
+      instanceId: 'app-server-new',
       buildId: 'build-1',
       startedAt: '2026-08-30T00:00:01.000Z',
     } as const;
@@ -108,7 +108,7 @@ describe.skipIf(process.platform === 'win32')('single-Service lifecycle reservat
     await expect(
       clearDeadKiteLocalRuntimeEndpoint({
         endpoint,
-        expected: { ...current, instanceId: 'service-old' },
+        expected: { ...current, instanceId: 'app-server-old' },
         process: { inspect: async () => 'dead' },
       }),
     ).resolves.toEqual({ outcome: 'blocked', diagnostic: 'drift' });

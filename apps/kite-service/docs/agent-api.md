@@ -1,7 +1,7 @@
 # Service Agent API
 
-本页是`apps/kite-service/src/agent-api/`的owner-local current authority。当前Service在唯一single-Service loopback listener上提供Agent bearer与
-Browser cookie两种只读principal；Run/Interaction mutation、SSE与外部SDK尚未实现。
+本页是`apps/kite-service/src/agent-api/`的owner-local current authority。显式App Server daemon的唯一loopback listener提供Agent bearer与
+Browser cookie两种只读principal；default stdio App Server不开放HTTP。Run/Interaction mutation、SSE与外部SDK尚未实现。
 
 ## 当前路由
 
@@ -30,11 +30,11 @@ capability route仍可由Worker listener独立注入。
 
 Agent exchange在消费capability前重新验证Workspace Trust，创建hash-only、60分钟、最多1024个context，并绑定WorkerScope/instance、Workspace
 digest、Client/generation、role与一条query-only private Runtime logical connection。logout、TTL、generation drift、Trust撤销、connection close、
-drain/restart关闭context。
+drain/daemon restart关闭context。
 
 `GET /`创建或复用受TTL/容量限制的内存Browser session。cookie不暴露给JavaScript，不写Kite Home。logout、Service close/restart、expiry
-撤销session；Browser关闭不停止Service。Browser principal是
-service-scoped read-only，但每个Session direct read必须在Store 9 Directory中可见。
+撤销session；Browser关闭不停止App Server daemon。Browser principal是
+App-Server-scoped read-only，但每个Session direct read必须在Store 9 Directory中可见。
 
 真实浏览器的同源GET不保证发送`Origin`：Browser只读GET允许Origin缺失但存在时必须exact；logout要求exact Origin。Browser API请求都
 必须带`Sec-Fetch-Site: same-origin`与`cors|same-origin`mode，cross-site保持403。
@@ -44,7 +44,7 @@ media type、并发与response byte上限约束；所有response使用contract c
 
 ## Read composition
 
-production executable只打开一个`kite.sqlite`与一个Runtime/History composition。Browser read context直接引用同一Directory、Runtime query、
+production executable只打开一个`kite-session.sqlite`与一个Runtime/History composition。Browser read context直接引用同一Directory、Runtime query、
 History client与Checkpoint store；它的close是Service composition的生命周期边界，不建立reader pool、Browser cache或第二DB。
 
 Workspace cursor按Directory稳定identity续页。Workspace Session page只对当前Workspace记录做Runtime projection；展示标题优先使用持久化名称，
@@ -69,6 +69,6 @@ bun test apps/kite-service/test/agent-api/context.test.ts
 bun test apps/kite-service/test/agent-api/read-adapter.test.ts
 bun test apps/kite-service/test/agent-api/conformance.test.ts
 bun test apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts
-bun test apps/kite-service/test/single-service-infrastructure.test.ts
+bun test tests/release/app-server-daemon.test.ts
 bun run check:agent-api-packages
 ```

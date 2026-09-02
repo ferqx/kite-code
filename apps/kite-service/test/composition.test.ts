@@ -6,7 +6,6 @@ import {
   WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
 import { createKiteServiceRuntimeComposition } from '../src/composition';
 
 let root: string | undefined;
@@ -30,18 +29,11 @@ test('starts neutral and admits a trusted workspace lazily', async () => {
     // Creating and starting the process-wide application does not resolve config, MCP, Skill, or
     // a Workspace template.
     await expect(composition.application.start()).resolves.toBeUndefined();
-    await expect(
-      composition.carrierApplication.workspaceAdmission.admitForConnect(workspacePath),
-    ).resolves.toMatchObject({ outcome: 'untrusted' });
-
     const queried = await composition.appControl.gateway.discovery.queryWorkspaceTrust({
       schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
       workspace: workspacePath,
     });
     expect(queried.status).toBe('unknown');
-    await expect(
-      composition.carrierApplication.workspaceAdmission.resolveIdentity(queried.workspace),
-    ).resolves.toBeUndefined();
     const decided = await composition.appControl.gateway.discovery.decideWorkspaceTrust({
       schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
       workspace: queried.workspace,
@@ -51,47 +43,7 @@ test('starts neutral and admits a trusted workspace lazily', async () => {
       externalReadScopeDigest: queried.externalReadScope.digest,
     });
     expect(decided.outcome).toBe('recorded');
-    await expect(
-      composition.carrierApplication.workspaceAdmission.admitForConnect(workspacePath),
-    ).resolves.toMatchObject({ outcome: 'admitted', workspace: queried.workspace });
-    await expect(
-      composition.carrierApplication.workspaceAdmission.resolveIdentity(queried.workspace),
-    ).resolves.toEqual(queried.workspace);
-    await expect(
-      composition.carrierApplication.runtimeAdmission
-        .create(queried.workspace, 'browser-connection', 'web_observer')
-        .authorize({
-          connectionId: 'browser-connection',
-          operation: 'runtime/command',
-          requestId: 'browser-command',
-          command: {
-            type: 'user_message',
-            commandId: 'browser-command',
-            sessionId: 'session-1',
-          },
-        }),
-    ).resolves.toEqual({ allowed: false, reason: 'unauthorized' });
-  } finally {
-    await composition[Symbol.asyncDispose]();
-  }
-});
-
-test('requires an explicit home identity when creating Native infrastructure', async () => {
-  root = mkdtempSync(join(realpathSync(homedir()), 'kite-service-composition-'));
-  const composition = createKiteServiceRuntimeComposition({
-    instanceId: 'composition-test',
-    checkpointPath: join(root, 'checkpoints.sqlite'),
-  });
-  try {
-    const infrastructure = composition.createInfrastructure({
-      home: createKiteHomeIdentity(root, 'explicit_argument'),
-      instanceId: 'composition-test',
-      serverVersion: 'composition-test',
-      buildId: 'composition-test',
-      startupTimeoutMs: 1_000,
-      shutdownTimeoutMs: 1_000,
-    });
-    await infrastructure[Symbol.asyncDispose]();
+    expect(composition.appControl.admitWorkspace(workspacePath)).toEqual(queried.workspace);
   } finally {
     await composition[Symbol.asyncDispose]();
   }

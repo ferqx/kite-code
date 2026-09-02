@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { openCoordinatorCatalog } from '@kite-ai/kite-local-runtime/coordinator';
 import {
   createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
+  ensureKiteProfileHome,
   secureWindowsStatePath,
 } from '@kite-ai/kite-local-runtime/service';
 import {
@@ -17,7 +17,7 @@ import { createSqliteRuntimeMigrationCatalogBuilder } from '../../src/coordinato
 
 function fixture(): { readonly root: string; readonly generation: string; readonly path: string } {
   const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-catalog-builder-')));
-  const root = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(temporaryRoot)).root;
+  const root = ensureKiteProfileHome(createKiteHomeIdentity(temporaryRoot)).root;
   const generation = 'generation-1';
   const initializeCreatedDirectory = (path: string): void =>
     secureWindowsStatePath(path, 'directory', { allowOwnerInitialization: true });

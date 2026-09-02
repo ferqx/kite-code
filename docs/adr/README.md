@@ -160,11 +160,11 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157/0166 | root/static配对只保留给显式daemon；default local不再拥有Web listener |
 | [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158/0166 | daemon `GET /`与cookie语义保留；default local Web root取消 |
 | [0158](0158-local-web-root-session-without-launch-token.md) | partially superseded by ADR-0166 | read-only root cookie保留给显式daemon；不再由每个local App Server提供 |
-| [0159](0159-compatible-clients-share-single-service.md) | partially superseded by ADR-0164/0165/0166 | 历史build discovery规则仅用于迁移；default local改为同build App Server |
+| [0159](0159-compatible-clients-share-single-service.md) | superseded by ADR-0166 | 历史build discovery与共享Service规则已无production caller；default local改为同build App Server |
 | [0160](0160-uncertain-shell-requires-exact-approval.md) | accepted | 未知Shell effects请求exact用户审批；模型脚本统一走Shell；执行前拒绝不再折叠为失败 |
 | [0161](0161-versioned-shell-semantics-and-read-only-trial.md) | partially superseded by ADR-0162 | 保留revision-bound Shell语义注册表；严格只读试跑grant由ADR-0162删除 |
 | [0162](0162-remove-read-only-trial-grant.md) | accepted | 删除严格只读试跑grant；unknown Shell恢复正常exact审批，registry继续演进 |
 | [0163](0163-service-owned-exploration-presentation.md) | accepted | Service唯一投影探索展示分类；TUI删除Shell前缀解析与历史重聚合路径 |
-| [0164](0164-active-candidate-service-build-convergence.md) | partially superseded by ADR-0165/0166 | 现有换代保护保留至cutover；default local完成后删除build convergence控制面 |
+| [0164](0164-active-candidate-service-build-convergence.md) | superseded by ADR-0166 | active-candidate/previous-build换代控制面已删除；release切换只影响后续App Server启动 |
 | [0165](0165-source-tui-standalone-service-topology.md) | superseded by ADR-0166 | 临时进程隔离保留为参考；临时Store/History与source/installed拓扑差异被取消 |
 | [0166](0166-decouple-app-server-process-from-durable-session-authority.md) | accepted | Client启动同build App Server；Session独立持久并按Session writer fencing；daemon/Web显式化 |
