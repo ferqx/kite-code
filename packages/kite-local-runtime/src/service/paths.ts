@@ -52,8 +52,12 @@ export type KiteLocalRuntimeEndpoint =
     };
 
 /** Stable, path-free identity used only for ephemeral per-home runtime discovery. */
-export function kiteHomeRuntimeDigest(identity: KiteHomeIdentity): string {
-  return createHash('sha256').update(identity.root, 'utf8').digest('hex').slice(0, 32);
+export function kiteHomeRuntimeDigest(
+  identity: KiteHomeIdentity,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const root = platform === 'win32' ? identity.root.toLowerCase() : identity.root;
+  return createHash('sha256').update(root, 'utf8').digest('hex').slice(0, 32);
 }
 
 /** Explicit App Server daemon endpoint derived without reading or creating state. */
@@ -63,7 +67,7 @@ export function resolveKiteAppServerDaemonEndpoint(input: {
   readonly runtimeParent?: string;
 }): KiteLocalRuntimeEndpoint {
   const platform = input.platform ?? process.platform;
-  const homeDigest = kiteHomeRuntimeDigest(input.home);
+  const homeDigest = kiteHomeRuntimeDigest(input.home, platform);
   if (platform === 'win32') {
     return Object.freeze({
       kind: 'named_pipe',

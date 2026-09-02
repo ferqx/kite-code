@@ -147,12 +147,26 @@ export function createManagedLocalAppServerDaemon(
           ? { ...existing, state: 'incompatible' }
           : existing;
       }
-      validateWebStaticRoot(target.webStaticRoot);
-      prepareManagedLocalAppServerTarget(target);
+      const preparedTarget = prepareManagedLocalAppServerTarget(target);
+      if (!options.endpoint) {
+        const preparedEndpoint = resolveKiteAppServerDaemonEndpoint({
+          home: createKiteHomeIdentity(preparedTarget.runtimeRoot, 'explicit_argument'),
+          ...(process.platform === 'win32' ? {} : { runtimeParent }),
+        });
+        if (endpointLabel(preparedEndpoint) !== endpointLabel(endpoint)) {
+          throw new Error('App Server daemon endpoint identity changed during validation.');
+        }
+      }
+      validateWebStaticRoot(preparedTarget.webStaticRoot);
       await clearDeadEndpoint(endpoint);
-      const env = daemonEnvironment(target, endpoint, canonicalWorkspace);
+      const env = daemonEnvironment(preparedTarget, endpoint, canonicalWorkspace);
       const child = Bun.spawn({
-        cmd: [target.executable, ...target.argumentsPrefix, 'app-server', 'run-daemon'],
+        cmd: [
+          preparedTarget.executable,
+          ...preparedTarget.argumentsPrefix,
+          'app-server',
+          'run-daemon',
+        ],
         cwd: runtimeParent,
         env,
         stdin: 'ignore',

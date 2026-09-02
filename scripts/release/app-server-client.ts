@@ -61,14 +61,14 @@ export interface ManagedLocalAppServerTarget {
   readonly webStaticRoot: string;
   readonly argumentsPrefix: readonly string[];
   readonly environment: Readonly<Record<string, string>>;
+  readonly sourceRepositoryRoot?: string;
 }
 
 /** Resolve only the client distribution's matching child; never inspect a running Service. */
 export function createManagedLocalAppServerComposition(
   options: ManagedLocalAppServerOptions = {},
 ): ManagedLocalAppServerComposition {
-  const target = resolveManagedLocalAppServerTarget(options);
-  prepareManagedLocalAppServerTarget(target);
+  const target = prepareManagedLocalAppServerTarget(resolveManagedLocalAppServerTarget(options));
   const { mode, buildId, runtimeRoot, configRoot, systemHome, executable, environment } = target;
   const argumentsPrefix = target.argumentsPrefix;
   const connect = (input: {
@@ -180,24 +180,26 @@ export function resolveManagedLocalAppServerTarget(
     webStaticRoot,
     argumentsPrefix: Object.freeze(sourceEntrypoint ? [sourceEntrypoint] : []),
     environment: Object.freeze(environment),
+    ...(repositoryRoot ? { sourceRepositoryRoot: repositoryRoot } : {}),
   });
 }
 
-export function prepareManagedLocalAppServerTarget(target: ManagedLocalAppServerTarget): void {
+export function prepareManagedLocalAppServerTarget(
+  target: ManagedLocalAppServerTarget,
+): ManagedLocalAppServerTarget {
   const home = ensureKiteProfileHome(createKiteHomeIdentity(target.configRoot));
-  if (!sameCanonicalPath(home.root, target.configRoot)) {
-    throw new Error('App Server Kite Home identity changed during validation.');
+  if (target.mode !== 'source') {
+    return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: home.root });
   }
-  if (target.mode !== 'source') return;
-  const digest = basename(target.runtimeRoot);
+  if (!target.sourceRepositoryRoot) {
+    throw new Error('Source App Server repository identity is missing.');
+  }
+  const canonicalRuntimeRoot = dirname(
+    sourceKiteSessionStorePathFromCanonicalRoots(home.root, target.sourceRepositoryRoot),
+  );
+  const digest = basename(canonicalRuntimeRoot);
   const ensured = ensurePrivateKiteHomeDirectory(home, ['source-profiles', digest]);
-  if (!sameCanonicalPath(ensured, target.runtimeRoot)) {
-    throw new Error('Source App Server profile identity changed.');
-  }
-}
-
-function sameCanonicalPath(left: string, right: string): boolean {
-  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+  return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: ensured });
 }
 
 function canonicalRepositoryRoot(path: string): string {

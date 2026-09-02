@@ -28,6 +28,24 @@ afterEach(async () => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
+test('Windows daemon endpoint identity ignores canonical display casing', () => {
+  const upper = resolveKiteAppServerDaemonEndpoint({
+    home: {
+      root: 'C:\\Users\\RunnerAdmin\\.kite-code',
+      source: 'explicit_argument',
+    },
+    platform: 'win32',
+  });
+  const lower = resolveKiteAppServerDaemonEndpoint({
+    home: {
+      root: 'c:\\users\\runneradmin\\.kite-code',
+      source: 'explicit_argument',
+    },
+    platform: 'win32',
+  });
+  expect(upper).toEqual(lower);
+});
+
 describe.skipIf(process.platform === 'win32')('owner-only endpoint lifecycle reservation', () => {
   test('preserves alive evidence and clears only the same dead PID/start/socket identity', async () => {
     const parent = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-lifecycle-parent-')));
