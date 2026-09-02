@@ -111,6 +111,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-09-03-app-server-session-decoupling.md` | completed | 记录KASD-00～06、App Server/Session authority解耦、旧single-Service控制面删除、本机验证与implementation head `af7c7596`的macOS/Ubuntu/Windows release qualification。 |
 | `execution/completed/2026-08-26-kite-runtime-server-v1.md` | completed | 记录 KRSV1-00～10、唯一 Runtime Host authority、Protocol/Server/Client、Store 6 原子 receipt、TUI/CLI 单路径、stdio/development WebSocket、展示保真与 PR #65 三平台 Gate。 |
 | `execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md` | completed | 记录 ADR-0127 简化切换、过度设计删除、State26/Store5、用户 model 修复保留、本地 Gate 与 final-SHA GitHub qualification。 |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |

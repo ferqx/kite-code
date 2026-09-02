@@ -69,4 +69,7 @@ Release installer contract test在Windows使用pinned Rust冷编译native CLI/la
 `release:smoke`覆盖verify、install、CLI help/version、installed TUI PTY、paired App Server、显式daemon start/status/Web/stop、
 retired slot absence、Web payload、MCP wrapper、upgrade、active pointer、immutable roots、rollback与uninstall。单平台smoke不等于G1。
 
-当前代码提交只有macOS本机证据时，macOS/Ubuntu/Windows hosted状态必须保持pending；包含该提交的workflow run通过后才能更新为完成。
+只有macOS本机证据时，macOS/Ubuntu/Windows hosted状态必须保持pending；包含implementation head
+`af7c7596c2e1b7b4aa6eccb12375aca017b45222`的
+[OSS RC run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)已在三平台完成build/verify/install/process/PTY/smoke，
+因此本次KASD release qualification为completed。

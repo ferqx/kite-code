@@ -64,12 +64,12 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(source('scripts/release/app-server-client.ts')).toContain('sourceKiteSessionStorePath');
   });
 
-  test('binds the accepted decision and active plan without changing current authority', () => {
+  test('binds the accepted decision and archived completion evidence', () => {
     expect(
       source('docs/adr/0166-decouple-app-server-process-from-durable-session-authority.md'),
     ).toContain('状态：accepted');
     const plan = source('docs/space/plans/2026-09-02-app-server-session-decoupling.md');
-    expect(plan).toContain('状态：active');
+    expect(plan).toContain('状态：archived');
     expect(plan).toContain('kite-session-app-server-2026-09-02');
     expect(plan).toContain('kite-source-runtime-profile\\0');
     expect(plan).toContain('| KASD-01 | completed |');
@@ -77,7 +77,10 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('| KASD-03 | completed |');
     expect(plan).toContain('| KASD-04 | completed |');
     expect(plan).toContain('| KASD-05 | completed |');
-    expect(plan).toContain('| KASD-06 | in_progress |');
+    expect(plan).toContain('| KASD-06 | completed |');
+    expect(
+      source('docs/space/execution/completed/2026-09-03-app-server-session-decoupling.md'),
+    ).toContain('33659494358');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

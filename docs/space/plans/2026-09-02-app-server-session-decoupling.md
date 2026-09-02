@@ -1,6 +1,6 @@
 # App Server进程与Durable Session解耦实施方案
 
-状态：active
+状态：archived（KASD-00～KASD-06 completed；[完成记录](../execution/completed/2026-09-03-app-server-session-decoupling.md)）
 
 日期：2026-09-02
 
@@ -53,7 +53,7 @@ Web -------loopback HTTP------------>       │
 | KASD-03 | completed | TUI/CLI default local cutover、observer/mutation边界、双TUI与installed smoke |
 | KASD-04 | completed | 显式本机daemon、exact protocol、dead-only lifecycle与真实client/PTY/candidate证据 |
 | KASD-05 | completed | daemon v2 Web/static/API、显式discovery、legacy Service Web拆除与Browser/Native共享Store证据 |
-| KASD-06 | in_progress | 旧single-Service控制面删除与qualification |
+| KASD-06 | completed | 旧single-Service控制面删除与macOS/Ubuntu/Windows真实qualification |
 
 ### KASD-00：冻结契约与迁移基线
 
@@ -119,7 +119,7 @@ global mutation inventory无未裁决写路径；并发首次建库稳定；GC�
 
 ### KASD-02：App Server正式进程边界
 
-当前子阶段（2026-09-02）：
+完成证据（2026-09-03）：
 
 - 已增加内部exact `app-server run-stdio`入口；它只接受显式Runtime/config/Home/Workspace/build输入，复用现有Host、Runtime Server与JSONL
   carrier，不创建Service reservation、global endpoint、HTTP listener或Web资产；当前TUI/CLI尚未调用；
@@ -256,8 +256,9 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 - release三平台workflow已改为验证App Server endpoint、`kite-session.sqlite` execution fencing/mutation与daemon真实process，不再运行旧
   single-Service矩阵；macOS arm64 dirty candidate `9e5ebc21d6cf30a6f7f80c7d`已通过build/verify、installed TUI、paired App Server、
   daemon/Web、upgrade/rollback/uninstall smoke，完整default tests、42-file TUI PTY、16-workspace typecheck与architecture/docs Gate通过；
-  Ubuntu/Windows必须等待包含本提交的hosted run，不能静态推断；
-- current authority已改写为App Server/Session拓扑。KASD-06保持`in_progress`，直到本机完整Gate与三平台真实qualification均完成。
+  implementation head `af7c7596c2e1b7b4aa6eccb12375aca017b45222`的GitHub-hosted
+  [run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)已在macOS 15、Ubuntu 24.04、Windows 2025全部通过；
+- current authority已改写为App Server/Session拓扑；KASD-00～06与本机、三平台qualification全部完成。
 
 - 删除默认路径的active-candidateService replacement、previous-build client、source/installed build drift分支和全局Service reservation；KASD-01已
   前置删除Workspace/Store单进程owner限制，本阶段只清理不可达旧控制面；

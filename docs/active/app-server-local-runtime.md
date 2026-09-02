@@ -93,6 +93,8 @@ release install/upgrade/rollback 只物化 immutable candidate 并切换 active 
 candidate install/upgrade/rollback/uninstall。release workflow 在 macOS、Ubuntu 与 Windows 分别运行 candidate build/verify/smoke，
 并在 Windows 单独验证 endpoint lifecycle 与 Session Store fencing。
 
-当前macOS arm64 dirty candidate `9e5ebc21d6cf30a6f7f80c7d`已通过build/verify、installed TUI、paired App Server、显式daemon/Web、
-upgrade/rollback/uninstall smoke；完整default tests与42-file TUI PTY也已通过。Ubuntu/Windows结果必须来自包含本变更的hosted workflow run，
-不能由静态workflow或本机结果推断。
+当前macOS arm64 dirty candidate `9e5ebc21d6cf30a6f7f80c7d`已通过本机build/verify与完整smoke；完整default tests与42-file TUI PTY
+也已通过。implementation head `af7c7596c2e1b7b4aa6eccb12375aca017b45222`的GitHub-hosted
+[run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)在macOS 15、Ubuntu 24.04、Windows 2025均通过candidate
+build/verify/install、paired App Server、显式daemon/Web、upgrade/rollback/uninstall和TUI PTY；Windows另通过endpoint lifecycle与
+Session Store fencing/mutation真实进程测试。
