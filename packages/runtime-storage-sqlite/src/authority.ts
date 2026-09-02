@@ -151,7 +151,10 @@ export interface SqliteWorkspaceRequestControlInput
  * compound port computes controllerGeneration=1 and never accepts a caller
  * supplied generation.
  */
-export interface SqliteWorkspaceInitialControllerInput extends SqliteWorkspaceRequestControlInput {}
+export interface SqliteWorkspaceInitialControllerInput extends SqliteWorkspaceRequestControlInput {
+  /** New Session Store-only execution lease; legacy Workspace authority ignores it. */
+  readonly executionLeaseUntilMs?: number;
+}
 
 export interface SqliteWorkspaceLeaseOwner {
   readonly sessionId: string;

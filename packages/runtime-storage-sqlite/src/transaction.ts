@@ -59,7 +59,7 @@ export interface SqliteWorkspaceSessionCreationPort<Event, State> {
   ): SqliteWorkspaceSessionCreationResult;
 }
 
-interface InitialControllerTransactionPort {
+export interface InitialControllerTransactionPort {
   readonly create: (
     input: SqliteWorkspaceInitialControllerInput,
     mode: 'create' | 'replay',
@@ -114,8 +114,14 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   /** Same-connection Store 8 port. Omit for Store 6/7. */
   readonly runStore?: RuntimeRunStorePort;
   readonly beforeWrite?: () => void;
+  readonly afterPersistInTransaction?: (
+    channel: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+    transaction: RuntimeTransactionInput<Event, State>,
+  ) => void;
   /** Store 9 injects its first-write-aware transaction owner instead of opening a second BEGIN. */
   readonly runWriteTransaction?: <Result>(write: () => Result) => Result;
+  /** New Session creation may use the unfenced writer before generation 1 exists. */
+  readonly runCreateTransaction?: <Result>(write: () => Result) => Result;
 }): RuntimeStorage<Event, State>['transactions'] & {
   readonly createSessionWithInitialController?: SqliteWorkspaceSessionCreationPort<
     Event,
@@ -251,8 +257,15 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       throw error;
     }
   };
+  const createInTransaction = <T>(work: () => T): T => {
+    if (input.runCreateTransaction) return input.runCreateTransaction(work);
+    return inTransaction(work);
+  };
 
-  const commit = (transaction: RuntimeTransactionInput<Event, State>): void => {
+  const commit = (
+    channel: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+    transaction: RuntimeTransactionInput<Event, State>,
+  ): void => {
     if (input.isClosed()) return;
     try {
       input.beforeWrite?.();
@@ -261,6 +274,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       // event/session metadata and snapshot writes as one unit.
       inTransaction(() => {
         persist(transaction);
+        input.afterPersistInTransaction?.(channel, transaction);
       });
     } catch (error) {
       throwRuntimeTransactionError(error, transaction);
@@ -311,7 +325,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
           };
           try {
             input.beforeWrite?.();
-            return inTransaction(() => {
+            return createInTransaction(() => {
               const existing = input.readCommandReceipt!(commandReceipt);
               if (existing) {
                 assertSameCommandReceipt(existing, commandReceipt);
@@ -353,10 +367,14 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       : undefined;
 
   return Object.freeze({
-    commitDecision: commit,
-    commitAttemptStart: commit,
-    commitReceiptEvidence: commit,
-    commitTerminalRecovery: commit,
+    commitDecision: (transaction: RuntimeTransactionInput<Event, State>) =>
+      commit('decision', transaction),
+    commitAttemptStart: (transaction: RuntimeTransactionInput<Event, State>) =>
+      commit('attempt_start', transaction),
+    commitReceiptEvidence: (transaction: RuntimeTransactionInput<Event, State>) =>
+      commit('receipt_evidence', transaction),
+    commitTerminalRecovery: (transaction: RuntimeTransactionInput<Event, State>) =>
+      commit('terminal_recovery', transaction),
     ...(createSessionWithInitialController ? { createSessionWithInitialController } : {}),
   });
 }

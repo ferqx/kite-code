@@ -171,6 +171,14 @@ export {
   openKiteSessionStoreDatabase,
 } from './kite-session-runtime-file';
 export {
+  type KiteSessionExecutionControl,
+  type KiteSessionExecutionHandle,
+  type KiteSessionRecoveryPort,
+  KiteSessionRuntimeStorageError,
+  type KiteSessionRuntimeStorageOwner,
+  openKiteSessionRuntimeStorage,
+} from './kite-session-runtime-storage';
+export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,
   assertSqliteRuntimeRunStoreActive,

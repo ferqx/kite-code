@@ -39,6 +39,8 @@ export function createKiteHomeCheckpointStore<Event, State>(input: {
   readonly recovery: KiteHomeRecoveryIdentityLedger;
   readonly runs: NonNullable<import('@kite-ai/runtime-host/storage').RuntimeStorage['runs']>;
   readonly receiptWriter: SqliteRuntimeCommandReceiptWriter;
+  /** Target Session generation 1, created after its row exists in the same fork transaction. */
+  readonly createForkTargetAuthorityInTransaction?: (targetSessionId: string) => void;
   readonly now?: () => number;
 }): CheckpointPort<State> {
   const now = input.now ?? Date.now;
@@ -326,6 +328,7 @@ export function createKiteHomeCheckpointStore<Event, State>(input: {
         throw new Error('Fork target appeared during the transaction.');
       }
       input.sessions.ensureInTransaction(targetSessionId, rebound);
+      input.createForkTargetAuthorityInTransaction?.(targetSessionId);
       if (sourceRecovery !== undefined) {
         if (persistedRecovery === undefined) {
           input.recovery.putInTransaction(sourceSessionId, sourceRecovery);

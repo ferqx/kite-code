@@ -48,7 +48,7 @@ Web -------loopback HTTP------------>       │
 | Tranche | 状态 | 当前产出 |
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
-| KASD-01 | in_progress | 新Store/generation/mutation/effect与global config CAS前置已完成；旧write port接入和process lock移除待完成 |
+| KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
 | KASD-02 | pending | App Server正式进程边界 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
@@ -83,9 +83,14 @@ Web -------loopback HTTP------------>       │
   prepare/dispatch/renew/terminal/unknown绑定Session generation与正交lease revision，unknown与`recovery_required`原子提交；
 - 已完成global config CAS：CLI preference、provider/model、MCP config、Project approval和Workspace Trust使用共享per-file lock、持锁后重读与
   atomic replacement；真实TUI/TUI及TUI/模拟App Server进程并发写同一用户配置不丢字段，没有global writer lock；
-- 尚未把event/snapshot/name/model、delete、checkpoint/fork/rewind、Run/recovery与Artifact引用等旧write port逐项组合到该入口，也尚未删除
-  Workspace process lock与one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production
-  caller。
+- 已完成目标多连接Runtime owner：event/snapshot/name/model、delete、checkpoint/rewind/fork、Run/recovery与Artifact mutation逐项进入
+  source Session的`sessionMutation`；fork target generation 1与target facts/Run/receipt同事务，后续copy fault共同回滚；Artifact GC保持禁用；
+- 新owner不取得Workspace process lock，不复用one-connection composition；同Workspace两个真实进程可写不同Session，同Session只有一个
+  generation writer。constructor深验固定在单一SQLite read snapshot，避免并发commit被误判为corruption；
+- effect receipt与State transaction原子settle；clean release存在prepared effect时拒绝。真实SIGKILL后，successor只能先进入
+  `recovery_required`，显式reconciliation把上一generation遗留prepared effect持久化为unknown并同事务确认cleanup，随后才允许更高generation；
+- KASD-01前置已完成，但新Store仍无TUI/CLI production caller；当前Workspace process lock只属于尚待KASD-06删除的旧single-Service
+  composition，KASD-02 App Server不得调用该旧owner。
 
 - 建立新exact Store epoch，把现有`controllerGeneration`字段提升为App Server Host持有的Session execution generation；Controller client binding
   从属于Host/generation，保留`connectionGeneration`与effect lease revision的正交职责；不新增第二个writer generation；

@@ -49,12 +49,11 @@ describe('Kite Session effect generation fence', () => {
       const terminal = context.effects.commitTerminal({
         ...request,
         expectedLeaseRevision: 2,
-        outcome: 'succeeded',
         terminalDigest: 'a'.repeat(64),
       });
       expect(terminal).toMatchObject({
         state: 'terminal',
-        outcome: 'succeeded',
+        outcome: 'settled',
         terminalDigest: 'a'.repeat(64),
       });
       expect(() =>
@@ -101,7 +100,6 @@ describe('Kite Session effect generation fence', () => {
         context.effects.commitTerminal({
           ...request,
           expectedLeaseRevision: 1,
-          outcome: 'failed',
           terminalDigest: 'b'.repeat(64),
         }),
       ).toThrow();
@@ -122,7 +120,6 @@ describe('Kite Session effect generation fence', () => {
         context.effects.commitTerminal({
           ...request,
           expectedLeaseRevision: 1,
-          outcome: 'failed',
           terminalDigest: 'c'.repeat(64),
         }),
       ).toThrow();
@@ -172,6 +169,7 @@ function createContext(fixture: ReturnType<typeof createFixture>, nowMs: () => n
       database: fixture.database,
       mutations,
       authority,
+      writer,
       nowMs,
     }),
   };

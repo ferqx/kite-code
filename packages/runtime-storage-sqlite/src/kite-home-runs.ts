@@ -43,12 +43,13 @@ interface RunSessionRow {
 export function createKiteHomeRuntimeRunStore(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly workspace: KiteHomeWorkspaceAdmission;
   readonly stateSchemaVersion: number;
   readonly formatEpoch: string;
   readonly isClosed: () => boolean;
 }): RuntimeRunStorePort {
-  assertKiteHomeStoreSchema(input.database);
+  (input.assertStoreSchema ?? assertKiteHomeStoreSchema)(input.database);
   const selectSession = input.database.query<RunSessionRow, [string]>(
     `SELECT workspace_id, project_id, workspace_digest, state_schema, format_epoch,
             revision, run_index_from_revision

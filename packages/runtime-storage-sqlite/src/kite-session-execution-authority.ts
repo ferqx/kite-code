@@ -74,6 +74,8 @@ export interface KiteSessionExecutionAuthority {
   acquireInitialInTransaction(
     input: KiteSessionInitialExecutionInput,
   ): KiteSessionExecutionAuthorityRecord;
+  /** Delete the exact active authority while the fenced Session deletion transaction is held. */
+  removeInTransaction(binding: KiteSessionExecutionBinding): void;
   acquire(input: {
     readonly sessionId: string;
     readonly expectedRevision: number;
@@ -102,7 +104,20 @@ export interface KiteSessionExecutionAuthority {
     readonly hostInstanceId: string;
     readonly cleanupConfirmed: boolean;
   }): KiteSessionExecutionAuthorityRecord;
+  /** Caller already owns the writer transaction. */
+  releaseInTransaction(input: {
+    readonly sessionId: string;
+    readonly expectedRevision: number;
+    readonly controllerGeneration: number;
+    readonly hostInstanceId: string;
+    readonly cleanupConfirmed: boolean;
+  }): KiteSessionExecutionAuthorityRecord;
   confirmRecoveryCleanup(input: {
+    readonly sessionId: string;
+    readonly expectedRevision: number;
+  }): KiteSessionExecutionAuthorityRecord;
+  /** Caller already owns the recovery reconciliation transaction. */
+  confirmRecoveryCleanupInTransaction(input: {
     readonly sessionId: string;
     readonly expectedRevision: number;
   }): KiteSessionExecutionAuthorityRecord;
@@ -262,6 +277,17 @@ export function createKiteSessionExecutionAuthority(input: {
     return publicRecord(acquired);
   };
 
+  const removeInTransaction = (binding: KiteSessionExecutionBinding): void => {
+    if (!input.writer.inTransaction) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Session execution authority removal requires the deletion transaction.',
+      );
+    }
+    assertActive(binding);
+    input.database.query('DELETE FROM kite_meta WHERE key = ?').run(key(binding.sessionId));
+  };
+
   const acquire = (
     request: Parameters<KiteSessionExecutionAuthority['acquire']>[0],
   ): KiteSessionAcquireResult => {
@@ -355,66 +381,86 @@ export function createKiteSessionExecutionAuthority(input: {
     });
   };
 
-  const release = (
+  const releaseInTransaction = (
     request: Parameters<KiteSessionExecutionAuthority['release']>[0],
   ): KiteSessionExecutionAuthorityRecord => {
     validateOwnerRequest(request);
     if (typeof request.cleanupConfirmed !== 'boolean') invalid('Cleanup confirmation is invalid.');
-    return mutate(() => {
-      const current = readTx(request.sessionId);
-      assertExpectedRevision(current, request.expectedRevision);
-      assertCurrentOwner(current, request);
-      const released = nextRecord(current, now(), {
-        status: request.cleanupConfirmed ? 'idle' : 'recovery_required',
-        controllerGeneration: increment(current.controllerGeneration),
-        hostInstanceId: null,
-        clientId: null,
-        connectionGeneration: 0,
-        leaseUntilMs: null,
-        cleanupConfirmed: request.cleanupConfirmed,
-      });
-      writeTx(released);
-      return publicRecord(released);
+    if (!input.writer.inTransaction) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Session execution release requires the writer transaction.',
+      );
+    }
+    const current = readTx(request.sessionId);
+    assertExpectedRevision(current, request.expectedRevision);
+    assertCurrentOwner(current, request);
+    const released = nextRecord(current, now(), {
+      status: request.cleanupConfirmed ? 'idle' : 'recovery_required',
+      controllerGeneration: increment(current.controllerGeneration),
+      hostInstanceId: null,
+      clientId: null,
+      connectionGeneration: 0,
+      leaseUntilMs: null,
+      cleanupConfirmed: request.cleanupConfirmed,
     });
+    writeTx(released);
+    return publicRecord(released);
+  };
+
+  const release = (
+    request: Parameters<KiteSessionExecutionAuthority['release']>[0],
+  ): KiteSessionExecutionAuthorityRecord => mutate(() => releaseInTransaction(request));
+
+  const confirmRecoveryCleanupInTransaction = (
+    request: Parameters<KiteSessionExecutionAuthority['confirmRecoveryCleanup']>[0],
+  ): KiteSessionExecutionAuthorityRecord => {
+    assertRevision(request.expectedRevision);
+    if (!input.writer.inTransaction) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Recovery cleanup confirmation requires the writer transaction.',
+      );
+    }
+    const current = readTx(request.sessionId);
+    assertExpectedRevision(current, request.expectedRevision);
+    if (current.status !== 'recovery_required') {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Session is not waiting for recovery cleanup.',
+      );
+    }
+    const reconciled = nextRecord(current, now(), {
+      status: 'idle',
+      controllerGeneration: increment(current.controllerGeneration),
+      hostInstanceId: null,
+      clientId: null,
+      connectionGeneration: 0,
+      leaseUntilMs: null,
+      cleanupConfirmed: true,
+    });
+    writeTx(reconciled);
+    return publicRecord(reconciled);
   };
 
   const confirmRecoveryCleanup = (
     request: Parameters<KiteSessionExecutionAuthority['confirmRecoveryCleanup']>[0],
-  ): KiteSessionExecutionAuthorityRecord => {
-    assertRevision(request.expectedRevision);
-    return mutate(() => {
-      const current = readTx(request.sessionId);
-      assertExpectedRevision(current, request.expectedRevision);
-      if (current.status !== 'recovery_required') {
-        throw new KiteSessionExecutionAuthorityError(
-          'invalid_transition',
-          'Session is not waiting for recovery cleanup.',
-        );
-      }
-      const reconciled = nextRecord(current, now(), {
-        status: 'idle',
-        controllerGeneration: increment(current.controllerGeneration),
-        hostInstanceId: null,
-        clientId: null,
-        connectionGeneration: 0,
-        leaseUntilMs: null,
-        cleanupConfirmed: true,
-      });
-      writeTx(reconciled);
-      return publicRecord(reconciled);
-    });
-  };
+  ): KiteSessionExecutionAuthorityRecord =>
+    mutate(() => confirmRecoveryCleanupInTransaction(request));
 
   return Object.freeze({
     read,
     assertActive,
     markRecoveryRequiredInTransaction,
     acquireInitialInTransaction,
+    removeInTransaction,
     acquire,
     renew,
     detach,
     release,
+    releaseInTransaction,
     confirmRecoveryCleanup,
+    confirmRecoveryCleanupInTransaction,
   });
 }
 

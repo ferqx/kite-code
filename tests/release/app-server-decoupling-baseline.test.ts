@@ -21,7 +21,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     );
   });
 
-  test('admits only the KASD-01 exact Store and Session generation substrate', () => {
+  test('admits the completed KASD-01 exact Store and multi-connection owner', () => {
     expect(KITE_SESSION_STORE_FORMAT_EPOCH).toBe('kite-session-app-server-2026-09-02');
     expect(source('packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts')).toContain(
       "'store_upgrade_required'",
@@ -37,6 +37,10 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(source('packages/runtime-storage-sqlite/src/kite-session-effects.ts')).toContain(
       'assertDispatchable',
     );
+    const owner = source('packages/runtime-storage-sqlite/src/kite-session-runtime-storage.ts');
+    expect(owner).toContain('new AsyncLocalStorage<KiteSessionExecutionHandle>()');
+    expect(owner).toContain('createForkTargetAuthorityInTransaction');
+    expect(owner).toContain('markGenerationUnknownInTransaction');
   });
 
   test('keeps the source standalone Store as an explicit unshipped transition', () => {
@@ -65,7 +69,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('状态：active');
     expect(plan).toContain('kite-session-app-server-2026-09-02');
     expect(plan).toContain('kite-source-runtime-profile\\0');
-    expect(plan).toContain('| KASD-01 | in_progress |');
+    expect(plan).toContain('| KASD-01 | completed |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

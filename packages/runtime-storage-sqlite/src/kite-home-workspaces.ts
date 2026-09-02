@@ -114,9 +114,10 @@ const MAX_TEXT_LENGTH = 512;
 export function createKiteHomeWorkspaceAdmissionPort(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly now?: () => number;
 }): KiteHomeWorkspaceAdmissionPort {
-  assertKiteHomeStoreSchema(input.database);
+  (input.assertStoreSchema ?? assertKiteHomeStoreSchema)(input.database);
   const now = input.now ?? Date.now;
   const selectById = input.database.query<WorkspaceRow, [string]>(
     'SELECT * FROM workspaces WHERE workspace_id = ? LIMIT 1',
@@ -206,6 +207,7 @@ export function createKiteHomeWorkspaceAdmissionPort(input: {
 export function createKiteHomeWorkspaceSessionStore<State>(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly workspace: KiteHomeWorkspaceAdmission;
   readonly codec: SqliteRuntimeSnapshotCodec<unknown, State>;
   readonly stateSchemaVersion: number;
@@ -213,7 +215,7 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
   readonly formatEpoch: string;
   readonly now?: () => number;
 }): KiteHomeWorkspaceSessionStore<State> {
-  assertKiteHomeStoreSchema(input.database);
+  (input.assertStoreSchema ?? assertKiteHomeStoreSchema)(input.database);
   assertWorkspace(input.workspace);
   if (!Number.isSafeInteger(input.stateSchemaVersion) || input.stateSchemaVersion < 1) {
     throw new TypeError('Kite Home State schema version is invalid.');

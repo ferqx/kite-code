@@ -61,13 +61,18 @@
   corrupt Store统一返回`store_upgrade_required`；它不探测、导入或改写`kite.sqlite`。`createKiteSessionExecutionAuthority`在同一
   `kite_meta` owner中持久化Host-owned `controllerGeneration`、authority revision、lease deadline与cleanup状态；acquire/renew/detach/release
   均使用SQLite CAS；fresh Session的generation 1只能在已持有的Session creation transaction内建立，任一后续失败同时回滚Session与authority。
-  过期且cleanup未确认的owner只会进入`recovery_required`，显式确认cleanup后才可再次acquire。该substrate尚未成为TUI/CLI
-  production composition，不能据此删除当前Store 9或Workspace process lock。
+  过期且cleanup未确认的owner只会进入`recovery_required`。`openKiteSessionRuntimeStorage`在每条WAL connection上提供统一Session execution
+  scope：event/snapshot/name/model、delete、checkpoint/rewind/fork、Run/recovery与typed Artifact mutation全部进入同一个generation/revision
+  fence；read/list不取lease，constructor深验固定在一个SQLite read snapshot。fork target facts、Run/receipt与generation 1同事务，后续copy
+  fault共同回滚。新owner不取得旧Workspace process lock，也不要求one-connection Store composition。该substrate尚未成为TUI/CLI production
+  composition，不能据此删除当前Store 9或旧single-Service owner。
 - 新epoch的`runtime_effect_leases`使用独立exact列集合，除attempt-local `lease_revision`外还绑定Session `controller_generation`与
   Host/client/connection identity。`createKiteSessionMutationPort`在同一个`BEGIN IMMEDIATE`内重读这组execution binding、authority revision、
   lease deadline与Session revision后才执行callback；`createKiteSessionEffectPort`只允许该transaction内prepare/renew/terminal/unknown，并在每次
-  external dispatch前重读同一binding。unknown effect不可再次prepare/dispatch/terminal，并与Session `recovery_required`在同一transaction提交。
-  旧event/checkpoint/Run/Artifact write ports尚未组合到该target mutation入口，所以KASD-01仍未完成。
+  external dispatch前重读同一binding。receipt-bearing State commit在同一transaction把effect设为settled；unknown effect不可再次
+  prepare/dispatch/terminal，并与Session `recovery_required`在同一transaction提交。clean release在prepared effect存在时拒绝；SIGKILL后的
+  successor reconciliation把上一generation遗留prepared effect全部改为unknown，并与cleanup confirmation同事务。Artifact GC因没有安全的
+  Session归属/maintenance barrier继续显式禁用。
 - `createKiteHomeArtifactStore`只暴露Model/Plan/Capability/filesystem preimage/Sandbox/Subagent领域方法，保留existing ref/byte bound、
   exact retry冲突和complete reachability GC。
 - KHSS-02的`createKiteHomeDirectoryQuery`直接从同一Store 9 connection按`workspace_id`读取bounded、path-free Workspace/Session

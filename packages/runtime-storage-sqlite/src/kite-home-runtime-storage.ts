@@ -31,9 +31,15 @@ import {
   createKiteHomeWorkspaceAdmissionPort,
   type KiteHomeWorkspaceAdmissionPort,
 } from './kite-home-workspaces';
-import { createKiteHomeWriteTransactionPort } from './kite-home-write';
+import {
+  createKiteHomeWriteTransactionPort,
+  type KiteHomeWriteTransactionPort,
+} from './kite-home-write';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
-import type { SqliteWorkspaceSessionCreationPort } from './transaction';
+import type {
+  InitialControllerTransactionPort,
+  SqliteWorkspaceSessionCreationPort,
+} from './transaction';
 
 type Journal<Event, State> = ReturnType<typeof createKiteHomeWorkspaceRuntimeJournal<Event, State>>;
 
@@ -58,6 +64,23 @@ export interface KiteHomeRuntimeStorageOwner<Event, State> extends AsyncDisposab
  */
 export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   readonly database: Database;
+  readonly assertStoreSchema?: (database: Database) => void;
+  readonly storeSchemaVersion?: number;
+  readonly writer?: KiteHomeWriteTransactionPort;
+  readonly sessionWriter?: KiteHomeWriteTransactionPort;
+  readonly removeSessionAuthorityInTransaction?: (sessionId: string) => void;
+  readonly createForkTargetAuthorityInTransaction?: (targetSessionId: string) => void;
+  readonly hasEffectLease?: (
+    sessionId: string,
+    effectId: string,
+    ownerId: string,
+    observedAtMs: number,
+  ) => boolean;
+  readonly afterPersistInTransaction?: Parameters<
+    typeof createKiteHomeWorkspaceRuntimeJournal<Event, State>
+  >[0]['afterPersistInTransaction'];
+  readonly initialController?: InitialControllerTransactionPort;
+  readonly runCreateTransaction?: <Result>(write: () => Result) => Result;
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
   readonly stateSchemaVersion: number;
   readonly formatEpoch: string;
@@ -65,20 +88,24 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   readonly ownsDatabase?: boolean;
   readonly now?: () => number;
 }): KiteHomeRuntimeStorageOwner<Event, State> {
-  assertKiteHomeStoreSchema(input.database);
+  const assertStoreSchema = input.assertStoreSchema ?? assertKiteHomeStoreSchema;
+  assertStoreSchema(input.database);
   if (!Number.isSafeInteger(input.stateSchemaVersion) || input.stateSchemaVersion < 1) {
     throw new TypeError('Kite Home Runtime State schema is invalid.');
   }
   if (!input.formatEpoch || input.formatEpoch.length > 512 || /\p{Cc}/u.test(input.formatEpoch)) {
     throw new TypeError('Kite Home Runtime State format is invalid.');
   }
-  const writer = createKiteHomeWriteTransactionPort(input.database);
+  const writer =
+    input.writer ?? createKiteHomeWriteTransactionPort(input.database, assertStoreSchema);
+  const sessionWriter = input.sessionWriter ?? writer;
   const rawAdmissions = createKiteHomeWorkspaceAdmissionPort({
     database: input.database,
     writer,
+    assertStoreSchema,
     ...(input.now ? { now: input.now } : {}),
   });
-  const rawDirectory = createKiteHomeDirectoryQuery(input.database);
+  const rawDirectory = createKiteHomeDirectoryQuery(input.database, { assertStoreSchema });
   const rawArtifacts = createKiteHomeArtifactStore(input.database);
   const artifacts = input.artifacts ?? createArtifactPort();
   const journals = new Map<string, Journal<Event, State>>();
@@ -124,7 +151,7 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       return rawDirectory.list();
     },
   });
-  const artifactStore = transactionalArtifactStore(rawArtifacts, writer, assertOpen);
+  const artifactStore = transactionalArtifactStore(rawArtifacts, sessionWriter, assertOpen);
   const authorityForWorkspace = (workspaceId: string): SqliteWorkspaceAuthority => {
     assertOpen();
     const current = authorities.get(workspaceId);
@@ -148,7 +175,20 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
     if (!workspace) throw new Error('Runtime Workspace is not admitted.');
     const journal = createKiteHomeWorkspaceRuntimeJournal({
       database: input.database,
-      writer,
+      writer: sessionWriter,
+      assertStoreSchema,
+      ...(input.removeSessionAuthorityInTransaction
+        ? { removeSessionAuthorityInTransaction: input.removeSessionAuthorityInTransaction }
+        : {}),
+      ...(input.createForkTargetAuthorityInTransaction
+        ? { createForkTargetAuthorityInTransaction: input.createForkTargetAuthorityInTransaction }
+        : {}),
+      ...(input.hasEffectLease ? { hasEffectLease: input.hasEffectLease } : {}),
+      ...(input.afterPersistInTransaction
+        ? { afterPersistInTransaction: input.afterPersistInTransaction }
+        : {}),
+      ...(input.initialController ? { initialController: input.initialController } : {}),
+      ...(input.runCreateTransaction ? { runCreateTransaction: input.runCreateTransaction } : {}),
       workspace,
       codec: input.codec,
       stateSchemaVersion: input.stateSchemaVersion,
@@ -359,7 +399,7 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       const journal = journalForSession(transition.sessionId);
       if (!journal) return 'missing';
       const apply = () => journal.runs.transition(transition);
-      return writer.inTransaction ? apply() : writer.run(apply);
+      return sessionWriter.inTransaction ? apply() : sessionWriter.run(apply);
     },
     rewindSession(sessionId, revision) {
       const journal = journalForSession(sessionId);
@@ -376,12 +416,12 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   };
   Object.freeze(runs);
 
-  validateExistingFacts();
+  validateExistingFactsInReadSnapshot();
 
   const storage: KiteHomeRuntimeStorageOwner<Event, State>['storage'] = Object.freeze({
     adapterId: 'kite-home-sqlite',
     stateSchemaVersion: input.stateSchemaVersion,
-    storeSchemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
+    storeSchemaVersion: input.storeSchemaVersion ?? KITE_HOME_STORE_SCHEMA_VERSION,
     formatEpoch: input.formatEpoch,
     sessions,
     transactions,
@@ -557,6 +597,21 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       }
     }
     validateArtifactPayloadLengths(input.database);
+  }
+
+  function validateExistingFactsInReadSnapshot(): void {
+    input.database.run('BEGIN');
+    try {
+      validateExistingFacts();
+      input.database.run('COMMIT');
+    } catch (error) {
+      try {
+        input.database.run('ROLLBACK');
+      } catch {
+        /* SQLite may already have rolled back after an I/O or corruption fault. */
+      }
+      throw error;
+    }
   }
 }
 

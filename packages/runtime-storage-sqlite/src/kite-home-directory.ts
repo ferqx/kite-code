@@ -22,6 +22,7 @@ export interface KiteHomeDirectoryQueryPort {
 export interface KiteHomeDirectoryQueryOptions {
   readonly maxWorkspaces?: number;
   readonly maxSessionsPerWorkspace?: number;
+  readonly assertStoreSchema?: (database: Database) => void;
 }
 
 const DEFAULT_MAX_WORKSPACES = 256;
@@ -36,7 +37,7 @@ export function createKiteHomeDirectoryQuery(
   database: Database,
   options: KiteHomeDirectoryQueryOptions = {},
 ): KiteHomeDirectoryQueryPort {
-  assertKiteHomeStoreSchema(database);
+  (options.assertStoreSchema ?? assertKiteHomeStoreSchema)(database);
   const maxWorkspaces = positiveBound(
     options.maxWorkspaces,
     DEFAULT_MAX_WORKSPACES,

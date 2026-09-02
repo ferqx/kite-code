@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import { KiteHomeWriteError } from './kite-home-write';
+import { KiteHomeWriteError, type KiteHomeWriteTransactionPort } from './kite-home-write';
 import type {
   KiteSessionExecutionAuthority,
   KiteSessionExecutionAuthorityRecord,
@@ -21,7 +21,7 @@ export interface KiteSessionEffectRecord {
   readonly clientId: string | null;
   readonly connectionGeneration: number;
   readonly state: KiteSessionEffectState;
-  readonly outcome: 'succeeded' | 'failed' | 'unknown' | null;
+  readonly outcome: 'settled' | 'unknown' | null;
   readonly terminalDigest: string | null;
   readonly updatedAt: number;
 }
@@ -66,7 +66,15 @@ export interface KiteSessionEffectPort {
       readonly effectId: string;
       readonly ownerId: string;
       readonly expectedLeaseRevision: number;
-      readonly outcome: 'succeeded' | 'failed';
+      readonly terminalDigest: string;
+    },
+  ): KiteSessionEffectRecord;
+  /** Caller already owns the fenced Session mutation transaction. */
+  commitTerminalInTransaction(
+    input: KiteSessionExecutionBinding & {
+      readonly effectId: string;
+      readonly ownerId: string;
+      readonly expectedLeaseRevision: number;
       readonly terminalDigest: string;
     },
   ): KiteSessionEffectRecord;
@@ -80,6 +88,12 @@ export interface KiteSessionEffectPort {
     readonly effect: KiteSessionEffectRecord;
     readonly authority: KiteSessionExecutionAuthorityRecord;
   };
+  listPrepared(sessionId: string): readonly KiteSessionEffectRecord[];
+  /** Caller owns recovery/release transaction and has validated the Session authority. */
+  markGenerationUnknownInTransaction(input: {
+    readonly sessionId: string;
+    readonly controllerGeneration: number;
+  }): readonly KiteSessionEffectRecord[];
   inspect(sessionId: string, effectId: string): KiteSessionEffectRecord | null;
 }
 
@@ -95,7 +109,7 @@ interface EffectRow {
   readonly client_id: string | null;
   readonly connection_generation: number;
   readonly state: KiteSessionEffectState;
-  readonly outcome: 'succeeded' | 'failed' | 'unknown' | null;
+  readonly outcome: 'settled' | 'unknown' | null;
   readonly terminal_digest: string | null;
   readonly updated_at: number;
 }
@@ -104,6 +118,7 @@ export function createKiteSessionEffectPort(input: {
   readonly database: Database;
   readonly mutations: KiteSessionMutationPort;
   readonly authority: KiteSessionExecutionAuthority;
+  readonly writer: KiteHomeWriteTransactionPort;
   readonly nowMs?: () => number;
 }): KiteSessionEffectPort {
   const now = input.nowMs ?? Date.now;
@@ -124,7 +139,7 @@ export function createKiteSessionEffectPort(input: {
   );
   const terminalRow = input.database.query(
     `UPDATE runtime_effect_leases
-      SET state = 'terminal', outcome = ?, terminal_digest = ?, updated_at = ?
+      SET state = 'terminal', outcome = 'settled', terminal_digest = ?, updated_at = ?
       WHERE session_id = ? AND effect_id = ?`,
   );
   const unknownRow = input.database.query(
@@ -132,6 +147,17 @@ export function createKiteSessionEffectPort(input: {
       SET state = 'unknown', outcome = 'unknown', certainty = 'uncertain',
         terminal_digest = NULL, updated_at = ?
       WHERE session_id = ? AND effect_id = ?`,
+  );
+  const selectPrepared = input.database.query<EffectRow, [string]>(
+    `SELECT * FROM runtime_effect_leases
+      WHERE session_id = ? AND state = 'prepared'
+      ORDER BY effect_id`,
+  );
+  const unknownGeneration = input.database.query(
+    `UPDATE runtime_effect_leases
+      SET state = 'unknown', outcome = 'unknown', certainty = 'uncertain',
+        terminal_digest = NULL, updated_at = ?
+      WHERE session_id = ? AND controller_generation = ? AND state = 'prepared'`,
   );
 
   const inspect = (sessionId: string, effectId: string): KiteSessionEffectRecord | null => {
@@ -210,30 +236,31 @@ export function createKiteSessionEffectPort(input: {
 
   const commitTerminal: KiteSessionEffectPort['commitTerminal'] = (request) => {
     assertLeaseRequest(request);
-    if (request.outcome !== 'succeeded' && request.outcome !== 'failed') {
-      invalid('Effect terminal outcome is invalid.');
-    }
     assertDigest(request.terminalDigest);
-    return runEffectMutation(input.mutations, request, () => {
-      const current = requiredEffect(select, request);
-      assertEffectIdentity(current, request);
-      if (
-        current.state !== 'prepared' ||
-        current.certainty !== 'certain' ||
-        current.lease_revision !== request.expectedLeaseRevision ||
-        current.expires_at_ms <= now()
-      ) {
-        stale('Effect terminal evidence is stale.');
-      }
-      terminalRow.run(
-        request.outcome,
-        request.terminalDigest,
-        now(),
-        request.sessionId,
-        request.effectId,
-      );
-      return record(requiredEffect(select, request));
-    });
+    return runEffectMutation(input.mutations, request, () => commitTerminalInTransaction(request));
+  };
+
+  const commitTerminalInTransaction: KiteSessionEffectPort['commitTerminalInTransaction'] = (
+    request,
+  ) => {
+    assertLeaseRequest(request);
+    assertDigest(request.terminalDigest);
+    if (!input.writer.inTransaction) {
+      stale('Effect terminal evidence requires the Session mutation transaction.');
+    }
+    input.authority.assertActive(request);
+    const current = requiredEffect(select, request);
+    assertEffectIdentity(current, request);
+    if (
+      current.state !== 'prepared' ||
+      current.certainty !== 'certain' ||
+      current.lease_revision !== request.expectedLeaseRevision ||
+      current.expires_at_ms <= now()
+    ) {
+      stale('Effect terminal evidence is stale.');
+    }
+    terminalRow.run(request.terminalDigest, now(), request.sessionId, request.effectId);
+    return record(requiredEffect(select, request));
   };
 
   const markOutcomeUnknown: KiteSessionEffectPort['markOutcomeUnknown'] = (request) => {
@@ -255,12 +282,54 @@ export function createKiteSessionEffectPort(input: {
     });
   };
 
+  const listPrepared: KiteSessionEffectPort['listPrepared'] = (sessionId) => {
+    assertIdentity(sessionId, 'Session');
+    return Object.freeze(selectPrepared.all(sessionId).map(record));
+  };
+
+  const markGenerationUnknownInTransaction: KiteSessionEffectPort['markGenerationUnknownInTransaction'] =
+    (request) => {
+      assertIdentity(request.sessionId, 'Session');
+      if (!Number.isSafeInteger(request.controllerGeneration) || request.controllerGeneration < 1) {
+        invalid('Controller generation is invalid.');
+      }
+      if (!input.writer.inTransaction) {
+        stale('Effect recovery requires the authority transaction.');
+      }
+      const prepared = selectPrepared.all(request.sessionId);
+      if (
+        prepared.some((effect) => effect.controller_generation !== request.controllerGeneration)
+      ) {
+        throw new KiteSessionEffectError(
+          'identity_conflict',
+          'Prepared effect belongs to another Session execution generation.',
+        );
+      }
+      const updatedAt = now();
+      unknownGeneration.run(updatedAt, request.sessionId, request.controllerGeneration);
+      return Object.freeze(
+        prepared.map((effect) =>
+          record({
+            ...effect,
+            state: 'unknown',
+            outcome: 'unknown',
+            certainty: 'uncertain',
+            terminal_digest: null,
+            updated_at: updatedAt,
+          }),
+        ),
+      );
+    };
+
   return Object.freeze({
     prepare,
     renew,
     assertDispatchable,
     commitTerminal,
+    commitTerminalInTransaction,
     markOutcomeUnknown,
+    listPrepared,
+    markGenerationUnknownInTransaction,
     inspect,
   });
 }

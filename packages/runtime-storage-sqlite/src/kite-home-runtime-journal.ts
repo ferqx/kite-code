@@ -32,7 +32,10 @@ import {
   type SqliteRuntimeSnapshotCodec,
 } from './preflight';
 import { createSqliteSnapshotStore } from './snapshot-store';
-import type { SqliteWorkspaceSessionCreationPort } from './transaction';
+import type {
+  InitialControllerTransactionPort,
+  SqliteWorkspaceSessionCreationPort,
+} from './transaction';
 import { createSqliteRuntimeTransactionPort } from './transaction';
 
 export interface KiteHomeWorkspaceRuntimeJournal<Event, State> {
@@ -55,6 +58,20 @@ export interface KiteHomeWorkspaceRuntimeJournal<Event, State> {
 export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  readonly assertStoreSchema?: (database: Database) => void;
+  readonly removeSessionAuthorityInTransaction?: (sessionId: string) => void;
+  readonly createForkTargetAuthorityInTransaction?: (targetSessionId: string) => void;
+  readonly hasEffectLease?: (
+    sessionId: string,
+    effectId: string,
+    ownerId: string,
+    observedAtMs: number,
+  ) => boolean;
+  readonly afterPersistInTransaction?: Parameters<
+    typeof createSqliteRuntimeTransactionPort<Event, State>
+  >[0]['afterPersistInTransaction'];
+  readonly initialController?: InitialControllerTransactionPort;
+  readonly runCreateTransaction?: <Result>(write: () => Result) => Result;
   readonly workspace: KiteHomeWorkspaceAdmission;
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
   readonly stateSchemaVersion: number;
@@ -62,11 +79,13 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   readonly isClosed?: () => boolean;
   readonly now?: () => number;
 }): KiteHomeWorkspaceRuntimeJournal<Event, State> {
-  assertKiteHomeStoreSchema(input.database);
+  const assertStoreSchema = input.assertStoreSchema ?? assertKiteHomeStoreSchema;
+  assertStoreSchema(input.database);
   const isClosed = input.isClosed ?? (() => false);
   const sessionMetadata = createKiteHomeWorkspaceSessionStore({
     database: input.database,
     writer: input.writer,
+    assertStoreSchema,
     workspace: input.workspace,
     codec: input.codec,
     stateSchemaVersion: input.stateSchemaVersion,
@@ -92,11 +111,13 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   const receipts = createKiteHomeCommandReceiptStore({
     database: input.database,
     workspace: input.workspace,
+    assertStoreSchema,
     isClosed,
   });
   const recoveryIdentities = createKiteHomeRecoveryIdentityLedger({
     database: input.database,
     writer: input.writer,
+    assertStoreSchema,
     workspaceId: input.workspace.workspaceId,
     sessions: sessionMetadata,
     isClosed,
@@ -110,6 +131,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   const runs = createKiteHomeRuntimeRunStore({
     database: input.database,
     writer: input.writer,
+    assertStoreSchema,
     workspace: input.workspace,
     stateSchemaVersion: input.stateSchemaVersion,
     formatEpoch: input.formatEpoch,
@@ -128,6 +150,9 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     recovery: recoveryIdentities,
     runs,
     receiptWriter: receipts.writer,
+    ...(input.createForkTargetAuthorityInTransaction
+      ? { createForkTargetAuthorityInTransaction: input.createForkTargetAuthorityInTransaction }
+      : {}),
     ...(input.now ? { now: input.now } : {}),
   });
   const selectEffectLease = input.database.query<
@@ -227,6 +252,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
             workspaceId: input.workspace.workspaceId,
             sessionId,
           });
+          input.removeSessionAuthorityInTransaction?.(sessionId);
           sessionMetadata.deleteInTransaction(sessionId);
         });
         return;
@@ -249,6 +275,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
           workspaceId: input.workspace.workspaceId,
           sessionId,
         });
+        input.removeSessionAuthorityInTransaction?.(sessionId);
         sessionMetadata.deleteInTransaction(sessionId, deletion.expectedRevision);
         receipts.writer.insert(
           deletion.commandReceipt,
@@ -263,8 +290,10 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   const transactions = createSqliteRuntimeTransactionPort({
     db: input.database,
     isClosed,
-    hasEffectLease: (sessionId, effectId, ownerId, observedAtMs) =>
-      selectEffectLease.get(sessionId, effectId, ownerId, observedAtMs) !== null,
+    hasEffectLease:
+      input.hasEffectLease ??
+      ((sessionId, effectId, ownerId, observedAtMs) =>
+        selectEffectLease.get(sessionId, effectId, ownerId, observedAtMs) !== null),
     readSnapshotBoundary: snapshotStore.getRollingRow,
     readSnapshotRevision: snapshotStore.getRevision,
     lastEventPosition: eventStore.lastEventPosition,
@@ -284,51 +313,57 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
         throw new SqliteRuntimeRevisionConflictError(sessionId, 0, null);
       }
     },
-    initialController: {
-      create: (request, mode) =>
-        createSqliteWorkspaceInitialControllerTransaction({
-          db: input.database,
-          binding: {
-            layoutGeneration: KITE_HOME_STORE_FORMAT_EPOCH,
-            workerScopeId: input.workspace.workspaceId,
-            workspaceIdentityDigest: input.workspace.workspaceIdentityDigest,
-          },
-          request,
-          mode,
-          assertConnection: () => assertKiteHomeStoreSchema(input.database),
-          ensureSession(sessionId) {
-            const row = input.database
-              .query<{ workspace_id: string }, [string]>(
-                'SELECT workspace_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
-              )
-              .get(sessionId);
-            if (row?.workspace_id !== input.workspace.workspaceId) {
-              throw new Error('Kite Home Controller Session belongs to another Workspace.');
-            }
-          },
-          metadataKey: (key) => `workspace_authority/${input.workspace.workspaceId}/${key}`,
-          readMetadata(key) {
-            const row = input.database
-              .query<{ value: string }, [string]>(
-                'SELECT value FROM kite_meta WHERE key = ? LIMIT 1',
-              )
-              .get(key);
-            if (!row) return undefined;
-            return JSON.parse(row.value) as unknown;
-          },
-          writeMetadata(key, value) {
-            input.database
-              .query('INSERT OR REPLACE INTO kite_meta (key, value) VALUES (?, ?)')
-              .run(key, JSON.stringify(value));
-          },
-          ...(input.now ? { nowMs: input.now } : {}),
-        }),
-    },
+    initialController:
+      input.initialController ??
+      ({
+        create: (request, mode) =>
+          createSqliteWorkspaceInitialControllerTransaction({
+            db: input.database,
+            binding: {
+              layoutGeneration: KITE_HOME_STORE_FORMAT_EPOCH,
+              workerScopeId: input.workspace.workspaceId,
+              workspaceIdentityDigest: input.workspace.workspaceIdentityDigest,
+            },
+            request,
+            mode,
+            assertConnection: () => assertStoreSchema(input.database),
+            ensureSession(sessionId) {
+              const row = input.database
+                .query<{ workspace_id: string }, [string]>(
+                  'SELECT workspace_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+                )
+                .get(sessionId);
+              if (row?.workspace_id !== input.workspace.workspaceId) {
+                throw new Error('Kite Home Controller Session belongs to another Workspace.');
+              }
+            },
+            metadataKey: (key) => `workspace_authority/${input.workspace.workspaceId}/${key}`,
+            readMetadata(key) {
+              const row = input.database
+                .query<{ value: string }, [string]>(
+                  'SELECT value FROM kite_meta WHERE key = ? LIMIT 1',
+                )
+                .get(key);
+              if (!row) return undefined;
+              return JSON.parse(row.value) as unknown;
+            },
+            writeMetadata(key, value) {
+              input.database
+                .query('INSERT OR REPLACE INTO kite_meta (key, value) VALUES (?, ?)')
+                .run(key, JSON.stringify(value));
+            },
+            ...(input.now ? { nowMs: input.now } : {}),
+          }),
+      } satisfies InitialControllerTransactionPort),
     initialRecoveryIdentity: {
       put: (sessionId, value) => recoveryIdentities.putInTransaction(sessionId, value),
     },
     runStore: runs,
     runWriteTransaction: (write) => input.writer.run(write),
+    ...(input.runCreateTransaction ? { runCreateTransaction: input.runCreateTransaction } : {}),
+    ...(input.afterPersistInTransaction
+      ? { afterPersistInTransaction: input.afterPersistInTransaction }
+      : {}),
   });
   if (!transactions.createSessionWithInitialController) {
     throw new Error('Kite Home atomic Session creation is unavailable.');

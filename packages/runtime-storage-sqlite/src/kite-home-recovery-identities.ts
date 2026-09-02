@@ -22,11 +22,12 @@ export interface KiteHomeRecoveryIdentityLedger {
 export function createKiteHomeRecoveryIdentityLedger<State>(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly workspaceId: string;
   readonly sessions: KiteHomeWorkspaceSessionStore<State>;
   readonly isClosed: () => boolean;
 }): KiteHomeRecoveryIdentityLedger {
-  assertKiteHomeStoreSchema(input.database);
+  (input.assertStoreSchema ?? assertKiteHomeStoreSchema)(input.database);
   const select = input.database.query<{ value: string }, [string]>(
     'SELECT value FROM kite_meta WHERE key = ?',
   );

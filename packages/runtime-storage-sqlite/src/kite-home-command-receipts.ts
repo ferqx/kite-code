@@ -45,9 +45,10 @@ export interface KiteHomeCommandReceiptStore {
 export function createKiteHomeCommandReceiptStore(input: {
   readonly database: Database;
   readonly workspace: KiteHomeWorkspaceAdmission;
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly isClosed: () => boolean;
 }): KiteHomeCommandReceiptStore {
-  assertKiteHomeStoreSchema(input.database);
+  (input.assertStoreSchema ?? assertKiteHomeStoreSchema)(input.database);
   const selectReceipt = input.database.query<ReceiptRow, [string, string]>(
     `SELECT scope_session_id, command_id, workspace_id, project_id, workspace_digest,
             request_digest, target_session_id, original_receipt_json, committed_revision,

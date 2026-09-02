@@ -16,17 +16,23 @@ client binding，不能单独renew或提交。read不落盘也不取得lease；a
 cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
 `controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
 fresh Session的generation 1不经过第二个transaction：Session事实插入后只能调用already-held writer中的initial acquire seam，后续callback/fault会
-同时回滚Session与authority。
+同时回滚Session与authority。checkpoint fork同样先以source generation进入唯一mutation transaction，再让target facts、recovery identity、
+Run/receipt与target generation 1共同提交；copy fault不会留下target Session或authority。
 
 目标Store的`sessionMutation`在SQLite writer transaction取得后重读execution binding、authority revision、lease deadline与Session revision，
 检查和写入之间不存在另一个SQLite writer commit窗口。目标effect record同时保存Session generation、Host/client/connection tuple和正交的effect
 lease revision；prepare、renew、terminal与unknown只能通过`sessionMutation`。dispatch前必须再次重读authority与effect tuple；late terminal
 exact拒绝。response loss或cleanup无法确认时，effect `unknown/uncertain`与Session `recovery_required`同事务提交，后续prepare、dispatch与terminal
-均不可用，直到显式cleanup reconciliation产生更大的Session generation。
+均不可用，直到显式cleanup reconciliation产生更大的Session generation。SIGKILL遗留的prepared effect由successor在lease失效后只读列出；
+reconciliation把上一generation全部prepared事实改为unknown，并与cleanup confirmation同事务提交。prepared仍存在时clean release fail closed。
 
-这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。当前Session
-mutation/effect dispatch尚未全部接入该fence，Workspace process lock仍在，所以KASD-01整体仍为in progress，不能把目标多App Server语义宣称为
-production能力。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts`。
+`openKiteSessionRuntimeStorage`以每App Server一条WAL connection组合所有Session write port；read/list不取得execution lease，启动深验使用一个
+SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
+scope；无Session归属的Artifact GC仍关闭。该owner不取得旧Workspace process lock；旧lock只留在尚未切换的single-Service production owner。
+
+这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
+完成，但KASD-02尚未把App Server接入该owner，因此不能把目标多App Server语义宣称为production能力。验证：
+`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
 
 ## 当前可信域
 

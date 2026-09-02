@@ -22,6 +22,10 @@ process/control/state与Coordinator production glue已经删除，不能由普�
 Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
 `apps/kite-service/src/workspace-worker/`中仍被single-Service消费的identity、Trust、effect与execution组件是in-process领域模块。
 
+ADR-0166的KASD-01前置已另建未接production的`kite-session.sqlite`多连接owner：它不取得Workspace process lock，以Session generation裁决
+writer，并允许同Workspace不同App Server写不同Session。该完成不恢复Coordinator/Worker拓扑，也不改变上述current production；KASD-02开始的
+App Server只能组合该新owner，旧Workspace lock与one-connection Store不能进入新进程路径。
+
 ## Web REST边界
 
 Web是同一Service `/v1`的薄只读客户端：访问`GET /`或`GET /api-docs`SPA shell时Service创建或复用短期HttpOnly cookie；Workspace、Session、

@@ -12,13 +12,14 @@
 
 ADR-0166已经接受App Server进程与Durable Session解耦目标，实施计划见
 [`2026-09-02-app-server-session-decoupling.md`](../space/plans/2026-09-02-app-server-session-decoupling.md)。当前production行为仍是下文记录的
-single-Service/临时source standalone实现。KASD-01当前只完成了新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile
-路径函数与独立Session execution authority substrate；真实双进程测试已证明同一Session只有一个generation writer、不同Session均可acquire，
-且cleanup未确认会持久化为`recovery_required`。目标Store进一步具备原子`sessionMutation`与generation-bound effect
-prepare/dispatch/terminal/unknown substrate；unknown effect与`recovery_required`同事务提交。TUI/CLI/Service尚未消费该substrate，event、Run、
-checkpoint等旧write port也尚未全部接入，Workspace process lock、one-connection composition与
-临时source Runtime Home仍未删除，因此下文single-Service行为继续是production current authority。当前没有daemon、Web切换、旧库导入、dual
-write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定尚未关闭的transition gap。
+single-Service/临时source standalone实现。KASD-01已完成新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile、独立Session
+execution authority与多连接Runtime owner。全部Session write port经generation/revision transaction；fork target首代authority原子创建；真实双进程
+证明不同Session可并行写、同Session只有一个writer；真实SIGKILL后prepared effect先进入`recovery_required`并在显式reconciliation中持久化为
+unknown，不能自动重放。新owner不取得旧Workspace process lock，Artifact GC保持关闭。
+
+TUI/CLI/Service尚未消费该owner，旧Workspace lock、one-connection composition与临时source Runtime Home仍存在于当前single-Service路径，
+因此下文仍是production current authority。KASD-02 App Server只能使用新owner，不能回接旧lock。当前没有daemon、Web切换、旧库导入、dual
+write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定production尚未切换的transition gap。
 
 KASD-01的global config前置已收敛：CLI preference、Service provider/model、MCP project/user config、Project approval与Workspace Trust共享
 `kite-local-runtime/config`的per-file owner lock与atomic replacement。多文件revision CAS按canonical path排序取锁；只有PID/start identity明确dead的

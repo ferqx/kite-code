@@ -10,12 +10,15 @@
 
 ## KASD-01局部资格
 
-新Session Store substrate当前只取得局部资格：两个真实Bun进程可在同一空`kite-session.sqlite`上并发首次open并收敛到唯一exact epoch；两个
-真实进程争用同一Session时只有一个取得generation，而不同Session均可取得。旧epoch、partial与corrupt target均fail closed为
-`store_upgrade_required`，现有`kite.sqlite`保持不变。detached/expired owner在cleanup未确认时进入durable `recovery_required`，显式确认前不能
-接管。该证据不覆盖全部Session mutation、effect dispatch、SIGKILL/response-loss恢复、global config CAS或TUI/App Server lifecycle，因此不构成
-KASD-01或release qualification完成。局部effect fault matrix另外证明prepare/dispatch/renew/terminal的generation binding、late terminal
-拒绝，以及unknown effect与Session `recovery_required`原子提交后不能重放。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts`。
+KASD-01 Store前置已取得局部资格：两个真实Bun进程可在同一空`kite-session.sqlite`上并发首次open并收敛到唯一exact epoch；同Workspace两个
+真实进程可分别写不同Session，争用同一Session只有一个generation writer。旧epoch、partial与corrupt target均fail closed为
+`store_upgrade_required`，现有`kite.sqlite`保持不变。全部Session write port进入统一mutation scope；并发open的深验固定单一read snapshot；
+fork source fence、target generation 1与全部target事实同事务并覆盖后段fault rollback。
+
+effect matrix证明prepare/dispatch/renew、State receipt settle、late terminal与unknown generation binding。真实SIGKILL fixture在prepared effect后杀死
+owner；successor等待lease失效只能得到durable `recovery_required`，显式reconciliation把遗留effect改为unknown并与cleanup confirmation同事务，
+随后才可取得更高generation，不能自动重放。该证据仍不覆盖KASD-02 App Server的Provider/child cancellation、stdio EOF/signal、完整response-loss
+Host恢复或TUI lifecycle，因此不是release qualification。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
 
 global config局部资格以真实process证明同一文件互斥、不同文件无global lock、两个TUI并发保留不同preference字段，以及TUI与模拟App Server并发
 保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整

@@ -464,12 +464,12 @@ const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
   client_id TEXT,
   connection_generation INTEGER NOT NULL CHECK (connection_generation >= 0),
   state TEXT NOT NULL CHECK (state IN ('prepared', 'terminal', 'unknown')),
-  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('succeeded', 'failed', 'unknown')),
+  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('settled', 'unknown')),
   terminal_digest TEXT CHECK (terminal_digest IS NULL OR (${digestCheck('terminal_digest')})),
   updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
   PRIMARY KEY (session_id, effect_id),
   CHECK ((state = 'prepared' AND outcome IS NULL AND terminal_digest IS NULL AND certainty = 'certain') OR
-    (state = 'terminal' AND outcome IN ('succeeded', 'failed') AND terminal_digest IS NOT NULL) OR
+    (state = 'terminal' AND outcome = 'settled' AND terminal_digest IS NOT NULL) OR
     (state = 'unknown' AND outcome = 'unknown' AND terminal_digest IS NULL AND certainty = 'uncertain'))
 ) STRICT`;
 

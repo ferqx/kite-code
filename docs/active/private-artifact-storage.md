@@ -48,6 +48,11 @@ Runtime 不创建或加载 `model-artifacts.key`、installation integrity key �
 Store 9 backend不解析root/path或创建Artifact目录；它按领域调用同一writer connection上的typed table port，并在返回ref前用同一Builtin
 reader重新readback canonical bytes。Plan的既有path字段在DB backend中只是`kite.sqlite#...`逻辑位置，不能交给filesystem API。
 
+未接production的KASD Session Store复用相同typed table/ref contract，但每次Artifact mutation必须位于一个active Session execution scope并
+通过该Session的generation/revision transaction。Artifact正文仍是内容寻址的独立CAS事实，不建立第二份Session ownership registry。由于当前
+Artifact表没有可证明完整的跨Session reachability snapshot，多App Server owner显式禁用全部Artifact GC；首次真实GC需求必须另行设计
+maintenance barrier，不能由任一App Server自行扫描后删除。
+
 单个 Model/Capability Artifact 默认上限为 16 MiB。具体领域可以更严格，但不能扩大到无界 payload。
 
 ## Runtime 生命周期
