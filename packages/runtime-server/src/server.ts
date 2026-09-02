@@ -111,7 +111,7 @@ export interface RuntimeServerOptions {
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
   readonly historyMethods?: boolean;
-  readonly appControlMethods?: boolean;
+  readonly appMethods?: boolean;
 }
 
 export interface RuntimeServerConnection {
@@ -158,7 +158,7 @@ export class RuntimeServer {
       connection,
       this.#options.serverInfo,
       this.#options.historyMethods === true,
-      this.#options.appControlMethods === true,
+      this.#options.appMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
       () => this.#reserveSubscription(),
@@ -213,7 +213,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly #historyMethods: boolean;
-  readonly #appControlMethods: boolean;
+  readonly #appMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
   readonly #reserveSubscription: () => boolean;
@@ -240,7 +240,7 @@ class ServerConnection implements RuntimeServerConnection {
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     historyMethods: boolean,
-    appControlMethods: boolean,
+    appMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
     reserveSubscription: () => boolean,
@@ -254,7 +254,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#connection = connection;
     this.#serverInfo = serverInfo;
     this.#historyMethods = historyMethods;
-    this.#appControlMethods = appControlMethods;
+    this.#appMethods = appMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
     this.#reserveSubscription = reserveSubscription;
@@ -441,7 +441,7 @@ class ServerConnection implements RuntimeServerConnection {
           ...(this.#historyMethods
             ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
             : []),
-          ...(this.#appControlMethods
+          ...(this.#appMethods
             ? ([
                 'app/workspace_trust/query',
                 'app/workspace_trust/decide',
@@ -452,6 +452,7 @@ class ServerConnection implements RuntimeServerConnection {
                 'app/skills/catalog',
                 'app/execution/status',
                 'app/release/status',
+                'app/provider_credential/write',
               ] as const)
             : []),
           'server/ping',

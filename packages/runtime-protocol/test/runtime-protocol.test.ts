@@ -821,7 +821,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '0ee4d46f:554413e5';
+    const expectedDigest = '4d6cf5fe:7013c1fc';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -830,6 +830,7 @@ describe('Runtime Protocol', () => {
     expect(generated.typeScript).toContain("method: 'runtime/command'");
     expect(generated.typeScript).toContain("method: 'history/list_sessions'");
     expect(generated.typeScript).toContain("method: 'app/workspace_trust/query'");
+    expect(generated.typeScript).toContain("method: 'app/provider_credential/write'");
     expect(generated.typeScript).toContain("method: 'server/ping'");
     expect(generated.typeScript).toContain('RuntimeProtocolToolPresentation');
     expect(generated.typeScript).toContain('RuntimeProtocolToolQueuedEvent');

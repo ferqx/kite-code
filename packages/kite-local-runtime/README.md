@@ -15,8 +15,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   Worker identity并把同一App Control request重发一次；第二次401、identity drift或Runtime已连接时不自动重试。
 - `./client`还组合parent-owned stdio App Server client：caller必须显式提供executable/可选source entry arguments、build ID、
   Runtime/config/Home/Workspace root与cwd；它只启动`app-server run-stdio`，并在同一Runtime Client connection上提供Runtime、
-  protocol History和逐方法exact App Control。initialize必须返回由同一build ID导出的exact server version及全部12个App方法，
-  否则关闭child并拒绝连接；这里不发现PATH、daemon或active candidate，也不提供fallback。
+  protocol History、逐方法exact App Control和Native provider credential write。initialize必须返回由同一build ID导出的exact server
+  version及全部13个App方法，否则关闭child并拒绝连接；credential在dispatch前可取消，dispatch后不以本地Abort伪造未执行；这里不发现
+  PATH、daemon或active candidate，也不提供fallback。
 - `./config`：CLI与Service共享的per-file mutation primitive。每个目标使用独立`.kite-lock`、PID/start identity、随机nonce与inode
   复核；只有exact owner可release，只有明确dead的owner可reclaim，alive/uncertain/malformed全部fail closed。多文件CAS按canonical path排序取锁，
   普通用户配置以same-directory temp、fsync、atomic rename替换。它不读取配置语义、不建立global lock/daemon，也不接触Runtime Store。

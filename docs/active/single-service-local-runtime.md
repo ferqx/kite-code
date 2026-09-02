@@ -24,8 +24,8 @@ write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续�
 KASD-02已增加未接client的内部`app-server run-stdio`：它使用新Store与同一Host/config/Trust实现，EOF/signal关闭本进程且无Native/HTTP/Web
 endpoint；同一条已initialize JSONL connection提供三个App-owned durable History read，且每次读取固定SQLite snapshot。真实process已覆盖
 History transcript、clean cancel/handoff和SIGKILL后no-replay恢复。它的存在不改变下文manager/Service默认行为，TUI/CLI仍不会自动或
-fallback调用该入口。九个no-secret App Control方法与typed parent client已就绪并执行exact build/capability检查；provider credential、
-source/candidate默认resolver和TUI切换仍未完成。
+fallback调用该入口。九个no-secret App Control方法与typed parent client已就绪并执行exact build/capability检查；Native provider
+credential方法也已接入且不回显secret；source/candidate默认resolver和TUI切换仍未完成。
 
 KASD-01的global config前置已收敛：CLI preference、Service provider/model、MCP project/user config、Project approval与Workspace Trust共享
 `kite-local-runtime/config`的per-file owner lock与atomic replacement。多文件revision CAS按canonical path排序取锁；只有PID/start identity明确dead的

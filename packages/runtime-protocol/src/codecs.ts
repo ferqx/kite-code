@@ -401,6 +401,7 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'app/skills/catalog',
   'app/execution/status',
   'app/release/status',
+  'app/provider_credential/write',
   'server/ping',
 ]);
 export type RuntimeProtocolMethod = z.infer<typeof RUNTIME_PROTOCOL_METHOD_SCHEMA_>;
@@ -419,6 +420,11 @@ export const RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_ = z.enum([
 export type RuntimeProtocolAppControlMethod = z.infer<
   typeof RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_
 >;
+export const RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_ = z.enum([
+  ...RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.options,
+  'app/provider_credential/write',
+]);
+export type RuntimeProtocolAppMethod = z.infer<typeof RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_>;
 const requestBase = { jsonrpc: z.literal('2.0'), id: rpcId };
 export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
   z
@@ -493,6 +499,13 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
       })
       .strict(),
   ),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('app/provider_credential/write'),
+      params: z.object({ request: jsonRecord }).strict(),
+    })
+    .strict(),
   z
     .object({
       ...requestBase,
@@ -913,7 +926,7 @@ export const INITIALIZE_RESULT_SCHEMA_ = z
     serverInfo: z.object({ version: z.string().min(1).max(128), instanceId: identifier }).strict(),
     capabilities: z
       .object({
-        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(18),
+        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(19),
         subscriptions: z.array(z.enum(['session', 'sessions'])).max(2),
       })
       .strict(),
@@ -1023,7 +1036,7 @@ const historyTranscript = z
   .strict();
 const appControlResult = z
   .object({
-    method: RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_,
+    method: RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_,
     response: jsonRecord,
   })
   .strict();

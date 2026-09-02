@@ -66,6 +66,10 @@ request/response codec验证Workspace Trust、Provider/model、MCP、Skill、exe
 OperationGate一次，response loss不触发自动重放。App Server composition显式开启`appServerProtocol`并注入单Workspace App Control client；
 普通Service/Worker不会因Store支持snapshot而发布这些capability。unknown/malformed `app/*`在调用owner前拒绝。
 
+第十个App方法`app/provider_credential/write`不进入browser-safe App Control：carrier使用`kite-local-runtime`的现有Native credential
+codec，只接纳`write_provider_api_key`，再调用Service-owned credential owner。secret只存在于parent pipe/request与配置owner，不写stdout、
+diagnostic或response；response loss继续由mutation ID与`outcome_unknown`规则处理，client不得自动重放。
+
 ## Development reference
 
 development loopback/reference仅用于同一Protocol transport qualification，不进入production support。不存在

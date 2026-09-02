@@ -13,9 +13,9 @@ KASD-02新增尚未接默认client的内部`app-server run-stdio`入口。它从
 JSONL承载现有Runtime Protocol，复用同一Host/Builtin/config/Trust composition，但不创建single-Service reservation、Native socket、HTTP或
 Web。每个进程只cancel/dispose自己持有generation的Session；list/get/checkpoint是单SQLite read snapshot，不取得writer。统一Kite App
 History读取与九个no-secret App Control方法已通过同一条initialize后的JSONL connection提供；App Control复用既有exact codec与
-OperationGate，Runtime Server只条件发布capability而不取得History/Store/App Control authority。typed parent client会核对由build ID
-导出的server version与完整方法集。provider credential、TUI默认launcher和source/candidate resolution尚未切换，因此当前production定位
-仍是上文single-Service。
+OperationGate；Native provider credential write继续使用既有credential codec/owner且不回显secret。Runtime Server只条件发布capability而不取得
+History/Store/App Control/credential authority。typed parent client会核对由build ID导出的server version与完整方法集。TUI默认launcher和
+source/candidate resolution尚未切换，因此当前production定位仍是上文single-Service。
 
 ## 拥有职责
 

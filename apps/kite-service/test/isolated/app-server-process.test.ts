@@ -49,6 +49,22 @@ describe('KASD parent-owned App Server process', () => {
       await expect(
         client.app.getReleaseStatus({ schema: 'kite.app.release-status.request.v1' }),
       ).resolves.toMatchObject({ schema: 'kite.app.release-status.response.v1' });
+      await expect(
+        client.credential.writeProviderCredential({
+          schema: 'kite.local-runtime-credential-request.v1',
+          mutationId: 'credential-client-1',
+          operation: 'write_provider_api_key',
+          providerId: 'openai-compatible',
+          apiKey: '',
+          baseURL: 'http://127.0.0.1:8080/v1',
+          modelName: 'local-test-model',
+        }),
+      ).resolves.toMatchObject({
+        schema: 'kite.local-runtime-credential-result.v1',
+        mutationId: 'credential-client-1',
+        outcome: 'applied',
+        credentialPresent: true,
+      });
     } finally {
       await client[Symbol.asyncDispose]();
       rmSync(root, { recursive: true, force: true });

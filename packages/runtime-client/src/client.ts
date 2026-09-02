@@ -14,7 +14,7 @@ import {
   type InitializeResult,
   mapRuntimeCommandToProtocol,
   mapRuntimeQueryToProtocol,
-  type RuntimeProtocolAppControlMethod,
+  type RuntimeProtocolAppMethod,
   type RuntimeProtocolError,
   type RuntimeProtocolMessage,
   type RuntimeProtocolMethod,
@@ -229,8 +229,8 @@ export class RuntimeClient implements AsyncDisposable {
   }
 
   /** Native App connector seam; semantic request/response codecs remain owned above this package. */
-  async requestAppControl(
-    method: RuntimeProtocolAppControlMethod,
+  async requestApp(
+    method: RuntimeProtocolAppMethod,
     request: Readonly<Record<string, unknown>>,
   ): Promise<Readonly<Record<string, unknown>>> {
     const result = await this.#request(method, { request });
@@ -502,7 +502,7 @@ export class RuntimeClient implements AsyncDisposable {
       | 'history/list_sessions'
       | 'history/list_events'
       | 'history/load_session'
-      | RuntimeProtocolAppControlMethod,
+      | RuntimeProtocolAppMethod,
     params: unknown,
     subscriptionState?: SubscriptionState,
   ): Promise<RuntimeProtocolResult> {

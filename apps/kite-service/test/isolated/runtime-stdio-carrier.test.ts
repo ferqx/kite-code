@@ -4,6 +4,11 @@ import {
   RELEASE_STATUS_REQUEST_SCHEMA_,
   RELEASE_STATUS_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
+import {
+  LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+  LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+  type NativeProviderCredentialClient,
+} from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeAccess,
   RuntimeAccessNotification,
@@ -181,6 +186,58 @@ describe('Runtime stdio carrier', () => {
     await carrier.done;
   });
 
+  test('routes only provider credential writes and never echoes secret material', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const credential: NativeProviderCredentialClient = Object.freeze({
+      writeProviderCredential: async (
+        request: Parameters<NativeProviderCredentialClient['writeProviderCredential']>[0],
+      ) =>
+        ({
+          schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+          mutationId: request.mutationId,
+          operation: 'write_provider_api_key',
+          outcome: 'applied',
+          credentialPresent: true,
+          revision: 'credential-1',
+        }) as const,
+    });
+    const carrier = createCarrier({ input, output, credential });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'credential',
+        method: 'app/provider_credential/write',
+        params: {
+          request: {
+            schema: LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+            mutationId: 'credential-1',
+            operation: 'write_provider_api_key',
+            providerId: 'openai',
+            apiKey: 'must-not-echo',
+          },
+        },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'credential',
+      result: {
+        method: 'app/provider_credential/write',
+        response: {
+          schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+          outcome: 'applied',
+          credentialPresent: true,
+        },
+      },
+    });
+    expect(output.text()).not.toContain('must-not-echo');
+    input.close();
+    await carrier.done;
+  });
+
   test('fails closed for invalid UTF-8 and overlong raw lines without echoing input', async () => {
     const invalidInput = new BytesInput();
     const invalidOutput = new FakeOutput();
@@ -353,12 +410,13 @@ function createCarrier(options: {
   readonly drainDeadlineMs?: number;
   readonly shutdownComposition?: () => void | Promise<void>;
   readonly appControl?: KiteAppControlClient;
+  readonly credential?: NativeProviderCredentialClient;
 }) {
   const server = new RuntimeServer(
     { runtime: new FakeRuntime(), admission: allowAdmission },
     {
       serverInfo: { version: 'test', instanceId: 'server-1' },
-      ...(options.appControl ? { appControlMethods: true } : {}),
+      ...(options.appControl || options.credential ? { appMethods: true } : {}),
     },
   );
   const carrier = createRuntimeStdioCarrier({
@@ -371,6 +429,7 @@ function createCarrier(options: {
     drainDeadlineMs: options.drainDeadlineMs,
     shutdownComposition: options.shutdownComposition,
     appControl: options.appControl,
+    credential: options.credential,
   });
   return { ...carrier, server };
 }

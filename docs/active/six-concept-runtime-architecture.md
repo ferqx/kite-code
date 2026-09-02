@@ -69,8 +69,9 @@ apps/kite-web ──────────────────────
 KASD parent-owned App Server在同一条已initialize Protocol connection上增加三个exact durable History read与九个no-secret App Control方法。
 Service stdio carrier在消息进入Runtime Server前处理这些App-owned方法，以单一SQLite read snapshot调用History projector，并用现有
 `kite-app-contract`逐方法codec调用App Control；Runtime Server只条件发布capability，不路由它们。Runtime Client复用现有correlation/
-connection并验证exact server version/capability，`kite-local-runtime/client`组合semantic App adapter与parent-owned child。该内部入口尚未
-成为TUI/CLI默认路径，provider credential与source/candidate launcher pairing也仍未完成。
+connection并验证exact server version/capability，`kite-local-runtime/client`组合semantic App adapter、Native credential codec与
+parent-owned child。credential secret不进入App Control、response或diagnostic。该内部入口尚未成为TUI/CLI默认路径，source/candidate
+launcher pairing也仍未完成。
 
 `@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有

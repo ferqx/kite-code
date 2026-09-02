@@ -6,6 +6,13 @@ import {
   type BunStdioChildSpawnFactory,
   createBunStdioChildRuntimeClientTransport,
 } from './bun-stdio-child-transport';
+import {
+  decodeLocalRuntimeCredentialResult,
+  encodeLocalRuntimeCredentialRequest,
+  type NativeProviderCredentialRequest,
+  type NativeProviderCredentialResult,
+} from './codecs';
+import type { NativeProviderCredentialClient } from './connection';
 import { createProtocolKiteAppControlClient } from './protocol-app-control';
 
 export const KITE_APP_SERVER_PROTOCOL_METHODS_ = Object.freeze([
@@ -21,6 +28,7 @@ export const KITE_APP_SERVER_PROTOCOL_METHODS_ = Object.freeze([
   'app/skills/catalog',
   'app/execution/status',
   'app/release/status',
+  'app/provider_credential/write',
 ] as const satisfies readonly RuntimeProtocolMethod[]);
 
 export interface KiteAppServerClientOptions {
@@ -84,10 +92,28 @@ export function createKiteAppServerClient(options: KiteAppServerClientOptions) {
       requiredMethods: KITE_APP_SERVER_PROTOCOL_METHODS_,
     },
   });
+  const credential: NativeProviderCredentialClient = Object.freeze({
+    writeProviderCredential: async (
+      request: NativeProviderCredentialRequest,
+      requestOptions?: { readonly signal?: AbortSignal },
+    ): Promise<NativeProviderCredentialResult> => {
+      if (requestOptions?.signal?.aborted) throw new Error('Provider credential write cancelled.');
+      const response = await runtime.requestApp(
+        'app/provider_credential/write',
+        encodeLocalRuntimeCredentialRequest(request),
+      );
+      const decoded = decodeLocalRuntimeCredentialResult(response);
+      if (decoded.operation !== 'write_provider_api_key') {
+        throw new TypeError('App Server returned the wrong credential operation.');
+      }
+      return decoded as NativeProviderCredentialResult;
+    },
+  });
   return Object.freeze({
     runtime,
     history: runtime.history!,
     app: createProtocolKiteAppControlClient(runtime),
+    credential,
     connect: () => runtime.connect(),
     close: (reason?: string) => runtime.close(reason),
     [Symbol.asyncDispose]: () => runtime[Symbol.asyncDispose](),

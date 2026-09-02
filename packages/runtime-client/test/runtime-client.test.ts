@@ -95,7 +95,7 @@ describe('RuntimeClient protocol state machine', () => {
       clientInfo: clientInfo(),
     });
     await expect(
-      client.requestAppControl('app/release/status', {
+      client.requestApp('app/release/status', {
         schema: 'kite.app.release-status.request.v1',
       }),
     ).resolves.toEqual({

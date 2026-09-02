@@ -21,15 +21,22 @@ import {
   workspaceTrustQueryRequestCodec,
   workspaceTrustQueryResponseCodec,
 } from '@kite-ai/kite-app-contract';
+import {
+  decodeLocalRuntimeCredentialRequest,
+  encodeLocalRuntimeCredentialResult,
+  type NativeProviderCredentialClient,
+  type NativeProviderCredentialRequest,
+} from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import {
-  RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_,
+  RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_,
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
   RUNTIME_PROTOCOL_ERROR_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_REQUEST_SCHEMA_,
   RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   type RuntimeProtocolAppControlMethod,
+  type RuntimeProtocolAppMethod,
   type RuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
 import type {
@@ -74,6 +81,8 @@ export interface RuntimeStdioCarrierOptions {
   readonly history?: RuntimeHistoryClient;
   /** KASD App Server-only exact no-secret control surface on this connection. */
   readonly appControl?: KiteAppControlClient;
+  /** Native-only first-run credential owner; secret material is never returned. */
+  readonly credential?: NativeProviderCredentialClient;
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
 }
@@ -379,7 +388,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     const decoded = RUNTIME_PROTOCOL_REQUEST_SCHEMA_.safeParse(value);
     if (
       !decoded.success ||
-      !RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.safeParse(decoded.data.method).success
+      !RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_.safeParse(decoded.data.method).success
     ) {
       await this.#writeError(
         typeof candidate.id === 'string' ? candidate.id : null,
@@ -389,19 +398,28 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     }
     const request = decoded.data as Extract<
       typeof decoded.data,
-      { readonly method: RuntimeProtocolAppControlMethod }
+      { readonly method: RuntimeProtocolAppMethod }
     >;
     if (this.#connection?.state !== 'active') {
       await this.#writeError(request.id, 'not_initialized');
       return true;
     }
-    const appControl = this.#options.appControl;
-    if (!appControl) {
+    if (
+      (request.method === 'app/provider_credential/write' && !this.#options.credential) ||
+      (request.method !== 'app/provider_credential/write' && !this.#options.appControl)
+    ) {
       await this.#writeError(request.id, 'method_not_found');
       return true;
     }
     try {
-      const response = await dispatchAppControl(appControl, request.method, request.params.request);
+      const response =
+        request.method === 'app/provider_credential/write'
+          ? await dispatchProviderCredential(this.#options.credential!, request.params.request)
+          : await dispatchAppControl(
+              this.#options.appControl!,
+              request.method,
+              request.params.request,
+            );
       await this.#writeProtocol({
         jsonrpc: '2.0',
         id: request.id,
@@ -482,6 +500,23 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       // stderr is diagnostic-only; a failed diagnostic must never enter stdout.
     }
   }
+}
+
+async function dispatchProviderCredential(
+  client: NativeProviderCredentialClient,
+  input: unknown,
+): Promise<Readonly<Record<string, unknown>>> {
+  let request: NativeProviderCredentialRequest;
+  try {
+    const decoded = decodeLocalRuntimeCredentialRequest(input);
+    if (decoded.operation !== 'write_provider_api_key') {
+      throw new TypeError('App Server accepts only provider credential writes.');
+    }
+    request = decoded;
+  } catch {
+    throw new AppControlProtocolRequestError();
+  }
+  return encodeLocalRuntimeCredentialResult(await client.writeProviderCredential(request));
 }
 
 async function dispatchAppControl(

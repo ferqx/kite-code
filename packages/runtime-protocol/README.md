@@ -11,9 +11,10 @@
 - Admits three bounded durable History reads: `history/list_sessions`, `history/list_events`, and
   `history/load_session`. They reuse the initialized JSON-RPC connection and closed client-safe DTOs; the App
   carrier owns their handlers and SQLite read snapshot, while Runtime Server core owns neither History nor Store.
-- Admits nine fixed `app/*` method names plus the exact outer `{request}` and `{method,response}` envelope.
-  Their semantic payload authority remains the per-method `kite-app-contract` codec in the App carrier/client;
-  this package neither imports that contract nor accepts a dynamic method name.
+- Admits ten fixed `app/*` method names plus the exact outer `{request}` and `{method,response}` envelope.
+  No-secret control payload authority remains the per-method `kite-app-contract` codec; the one Native provider
+  credential payload remains owned by `kite-local-runtime`. This package imports neither owner and accepts no
+  dynamic method name.
 - Supplies browser-safe schema-generation artifacts. Carriers frame complete logical messages; this package does not prescribe JSONL, WebSocket, streams, or sockets.
 
 ## Non-responsibilities

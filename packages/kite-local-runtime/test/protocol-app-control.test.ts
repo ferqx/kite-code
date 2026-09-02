@@ -9,7 +9,7 @@ describe('Protocol Kite App Control client', () => {
   test('uses the closed method and exact request/response codecs', async () => {
     const calls: unknown[] = [];
     const client = createProtocolKiteAppControlClient({
-      requestAppControl: async (method, request) => {
+      requestApp: async (method, request) => {
         calls.push({ method, request });
         return {
           schema: RELEASE_STATUS_RESPONSE_SCHEMA_,

@@ -41,7 +41,7 @@ import {
 import type { RuntimeClient } from '@kite-ai/runtime-client';
 import type { RuntimeProtocolAppControlMethod } from '@kite-ai/runtime-protocol';
 
-type AppControlRequester = Pick<RuntimeClient, 'requestAppControl'>;
+type AppControlRequester = Pick<RuntimeClient, 'requestApp'>;
 
 /** Exact App Control adapter for a RuntimeClient sharing the App Server logical connection. */
 export class ProtocolKiteAppControlClient implements KiteAppControlClient {
@@ -135,7 +135,7 @@ export class ProtocolKiteAppControlClient implements KiteAppControlClient {
     responseCodec: ExactJsonCodec<Response>,
     request: Request,
   ): Promise<Response> {
-    const response = await this.#runtime.requestAppControl(method, requestCodec.encode(request));
+    const response = await this.#runtime.requestApp(method, requestCodec.encode(request));
     return responseCodec.decode(response);
   }
 }
