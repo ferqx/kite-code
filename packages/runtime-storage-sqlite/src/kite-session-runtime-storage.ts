@@ -95,6 +95,7 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
     authority: KiteSessionExecutionAuthorityRecord,
   ): void;
   runWithExecution<Result>(handle: KiteSessionExecutionHandle, operation: () => Result): Result;
+  readSnapshot<Result>(operation: () => Result): Result;
   close(): void;
 }
 
@@ -490,6 +491,23 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     return nested ? operation() : scope.run(external, operation);
   };
 
+  const readSnapshot = <Result>(operation: () => Result): Result => {
+    if (rawWriter.inTransaction) return operation();
+    database.run('BEGIN');
+    try {
+      const result = operation();
+      database.run('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        database.run('ROLLBACK');
+      } catch {
+        /* SQLite may already have rolled back after an I/O or corruption fault. */
+      }
+      throw error;
+    }
+  };
+
   const owner: KiteSessionRuntimeStorageOwner<Event, State> = {
     storage,
     admissions: base.admissions,
@@ -501,6 +519,7 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     bindExecution,
     refreshExecution,
     runWithExecution,
+    readSnapshot,
     close: () => base.close(),
     [Symbol.asyncDispose]: async () => base.close(),
   };

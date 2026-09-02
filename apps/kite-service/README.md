@@ -9,6 +9,11 @@ loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox�
 `apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker进程拓扑及Store 6/7/8代码不得回到普通
 terminal/Web data plane；独立Web Gateway process/control/state实现已经删除。
 
+KASD-02新增尚未接默认client的内部`app-server run-stdio`入口。它从显式profile打开`kite-session.sqlite`多连接owner，以parent-owned
+JSONL承载现有Runtime Protocol，复用同一Host/Builtin/config/Trust composition，但不创建single-Service reservation、Native socket、HTTP或
+Web。每个进程只cancel/dispose自己持有generation的Session；list/get/checkpoint是单SQLite read snapshot，不取得writer。统一Kite App
+History/App Control方法面与TUI/candidate launcher尚未完成，因此当前production定位仍是上文single-Service。
+
 ## 拥有职责
 
 - `src/composition.ts`组合唯一Runtime Application、Host/Store、Builtin execution、Runtime Server、History、Workspace router、
@@ -62,6 +67,9 @@ Contract、browser-safe Agent API Contract、Browser HTTP client与Native-only l
 
 package根入口只服务repo内部composition/test。compiled `kite-service`只接受manager调用的exact internal `service run-single`；普通用户通过
 `kite service ensure/status/stop/restart`控制窄lifecycle surface。
+
+同一internal executable也接受exact `app-server run-stdio`，但当前没有公开CLI route或默认launcher；直接调用必须提供显式profile、Workspace与
+build identity，不能发现/替换shared Service，也不能产生Web endpoint。
 
 OSS candidate只输出`bin/kite`、`bin/kite-tui`、`bin/kite-service`（Windows为`.exe`）及`payload/web`。manifest中的
 Coordinator/Worker/Gateway slot必须为null，archive不得包含相应executable或launcher。`payload/web/api-docs/openapi.json`是必需的Agent API

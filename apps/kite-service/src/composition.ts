@@ -60,6 +60,7 @@ export interface KiteServiceWorkspaceSpec {
 export interface KiteServiceRuntimeCompositionOptions {
   /** One process identity shared by descriptor, carrier handshake, and Runtime initialize. */
   readonly instanceId?: string;
+  readonly runtimeServerVersion?: string;
   /** The one explicit current Store path used by the Service owner. */
   readonly checkpointPath: string;
   /** Already-open Store 9 owner; when present no legacy Store or History connection is opened. */
@@ -235,6 +236,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
   const owner = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath: input.checkpointPath,
     serverInstanceId: instanceId,
+    ...(input.runtimeServerVersion ? { serverVersion: input.runtimeServerVersion } : {}),
     operationGate,
     ...(input.storageOwner ? { storageOwner: input.storageOwner } : {}),
     ...(templates.length === 0 ? {} : { workspaces: templates }),

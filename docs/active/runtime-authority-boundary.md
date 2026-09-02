@@ -30,6 +30,11 @@ reconciliation把上一generation全部prepared事实改为unknown，并与clean
 SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
 scope；无Session归属的Artifact GC仍关闭。该owner不取得旧Workspace process lock；旧lock只留在尚未切换的single-Service production owner。
 
+KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App进程按Session command显式acquire/renew execution handle，并让整条异步
+Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
+execution projection并在cancel/dispose处理；Store list/get/checkpoint在一个read snapshot完成，不会因另一个App Server读取或退出而取得/释放
+writer。该入口尚未接TUI，也尚未扩展History/App Control统一方法面。
+
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
 完成，但KASD-02尚未把App Server接入该owner，因此不能把目标多App Server语义宣称为production能力。验证：
 `bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。

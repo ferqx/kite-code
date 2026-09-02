@@ -52,6 +52,9 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 模型dispatch/terminal、同连接多Session、外来client拒绝及旧installed build→当前build自动换代；
 `packages/kite-local-runtime/test/single-service-manager.test.ts`固定验证transient/permanent busy、source隔离与精确旧build stop，旧descriptor manager
 suite继续验证restart在busy、outcome-unknown与成功replacement下不重放control mutation；source TUI默认standalone，因此不再保留`tui:fresh`跨build mutation路径。
+`apps/kite-service/test/isolated/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、EOF active model
+cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint；`runtime-server-multi-workspace.test.ts`固定第二Server read-only不会取得或
+取消第一Server的Session generation。这仍不是TUI/candidate cutover证据。
 
 ## 稳定命令
 

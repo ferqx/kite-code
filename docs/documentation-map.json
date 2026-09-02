@@ -176,6 +176,7 @@
       "id": "kite-service-application",
       "sources": [
         "apps/kite-service/package.json",
+        "apps/kite-service/src/app-server.ts",
         "apps/kite-service/src/index.ts",
         "apps/kite-service/src/executable.ts",
         "apps/kite-service/src/composition.ts",

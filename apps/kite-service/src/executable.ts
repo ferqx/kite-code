@@ -13,6 +13,7 @@ import {
   runPosixSupervisorChild,
 } from '@kite-ai/runtime-host';
 import { createAgentApiRouteHandler } from './agent-api';
+import { runKiteAppServerMain } from './app-server';
 import {
   createKiteHomeRuntimeStorageComposition,
   createKiteRuntimeObserverHistoryFromStorage,
@@ -127,6 +128,10 @@ export async function runKiteServiceMain(
 ): Promise<void> {
   if (isKiteServiceMcpStdioInvocation(args)) {
     await runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
+    return;
+  }
+  if (args[0] === 'app-server') {
+    await runKiteAppServerMain(args, { environment: dependencies.environment });
     return;
   }
   const posixSupervisorMarker = '--kite-internal-posix-supervisor-v1';

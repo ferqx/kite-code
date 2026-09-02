@@ -14,7 +14,160 @@ import type {
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
-import { createKiteMultiWorkspaceRuntimeServer } from '../../src/bootstrap';
+import {
+  createKiteMultiWorkspaceRuntimeServer,
+  createKiteSessionAppServerStorageComposition,
+} from '../../src/bootstrap';
+
+test('runs a real Host on the KASD Session Store and cleanly hands off its generation', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-app-server-storage-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const model = createMockModelServer();
+  model.setResponses([{ message: { content: 'app-server-terminal' } }]);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'app-server-host-1',
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'app-server-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'app-server-client');
+  const sessionId = 'app-server-session';
+  try {
+    await createSession(runtime, sessionId, '/untrusted-wire-workspace');
+    const stream = runtime.subscribe({ spec: { scope: 'session', sessionId } });
+    const iterator = stream[Symbol.asyncIterator]();
+    await next(iterator);
+    await runtime.command(start('app-server-turn', sessionId, 'run app server'));
+    await waitForTerminal(iterator, sessionId);
+    expect(model.getRequestCount()).toBe(1);
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+  }
+
+  const successor = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'app-server-host-2',
+  });
+  try {
+    successor.runWithSessionExecution(sessionId, () => {
+      successor.storage.sessions.setSessionName(sessionId, 'Handed off');
+    });
+    expect(successor.storage.sessions.listSessions()).toEqual([
+      expect.objectContaining({ threadId: sessionId, name: 'Handed off' }),
+    ]);
+    successor.releaseExecutions(true);
+  } finally {
+    successor.disposeStorage();
+    model.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(resolve(root), { recursive: true, force: true });
+  }
+}, 30_000);
+
+test('a second App Server reads another Host Session without acquiring or cancelling it', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-app-server-read-only-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const model = createMockModelServer();
+  model.setResponses([{ message: { content: 'writer-still-active' } }]);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const writerStorage = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'read-only-writer-host',
+  });
+  const writer = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner: writerStorage,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'read-only-model')],
+  });
+  const writerClient = client(writer, admission(workspace), 'read-only-writer-client');
+  const sessionId = 'read-only-shared-session';
+  try {
+    await createSession(writerClient, sessionId, '/writer-wire');
+    expect(writerStorage.recovery.inspect(sessionId).authority).toMatchObject({
+      status: 'active',
+      hostInstanceId: 'read-only-writer-host',
+    });
+
+    const readerStorage = createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'read-only-reader-host',
+    });
+    const reader = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: databasePath,
+      storageOwner: readerStorage,
+      workspaces: [runtimeInput(workspace, model.baseURL, 'read-only-model')],
+    });
+    const readerClient = client(reader, admission(workspace), 'read-only-reader-client');
+    try {
+      await expect(
+        readerClient.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
+      ).resolves.toMatchObject({
+        status: 'ok',
+        sessions: [expect.objectContaining({ sessionId })],
+      });
+      await expect(
+        readerClient.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId,
+        }),
+      ).resolves.toMatchObject({ status: 'ok', session: { sessionId } });
+      await expect(
+        readerClient.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'list_checkpoints',
+          sessionId,
+        }),
+      ).resolves.toMatchObject({ status: 'ok', revision: 0, checkpoints: [] });
+      await expect(
+        readerClient.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'read-only-reader-resume',
+          type: 'resume_session',
+          sessionId,
+        }),
+      ).resolves.toEqual({
+        status: 'rejected',
+        commandId: 'read-only-reader-resume',
+        code: 'runtime_busy',
+      });
+      expect(readerStorage.ownedSessionIds()).toEqual([]);
+    } finally {
+      await readerClient.close();
+      await reader[Symbol.asyncDispose]();
+    }
+
+    expect(writerStorage.recovery.inspect(sessionId).authority).toMatchObject({
+      status: 'active',
+      hostInstanceId: 'read-only-writer-host',
+    });
+    const stream = writerClient.subscribe({ spec: { scope: 'session', sessionId } });
+    const iterator = stream[Symbol.asyncIterator]();
+    await next(iterator);
+    await writerClient.command(start('writer-after-reader-exit', sessionId, 'continue'));
+    await waitForTerminal(iterator, sessionId);
+    expect(model.getRequestCount()).toBe(1);
+  } finally {
+    await writerClient.close();
+    await writer[Symbol.asyncDispose]();
+    model.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(resolve(root), { recursive: true, force: true });
+  }
+}, 30_000);
 
 test('two canonical Workspaces execute through one real Host and SQLite Store without cross-wiring', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-multi-workspace-'));

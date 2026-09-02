@@ -50,15 +50,16 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(composition).not.toContain('kite-session.sqlite');
   });
 
-  test('does not prematurely wire the new Store into production or add an App Server entrypoint', () => {
-    const production = [
-      source('packages/runtime-storage-sqlite/src/kite-home-runtime-storage.ts'),
-      source('apps/kite-service/src/executable.ts'),
+  test('admits the internal App Server while keeping every default client on the old path', () => {
+    expect(source('apps/kite-service/src/executable.ts')).toContain('runKiteAppServerMain');
+    expect(source('apps/kite-service/src/app-server.ts')).toContain("'kite-session.sqlite'");
+    const defaultClients = [
       source('scripts/release/entrypoints/tui.ts'),
+      source('scripts/release/entrypoints/cli.ts'),
+      source('scripts/release/single-service-native-client.ts'),
     ].join('\n');
-    expect(production).not.toContain('kite-session.sqlite');
-    expect(production).not.toContain('sessionMutation');
-    expect(production).not.toContain('app-server');
+    expect(defaultClients).not.toContain('app-server');
+    expect(defaultClients).not.toContain('kite-session.sqlite');
   });
 
   test('binds the accepted decision and active plan without changing current authority', () => {
@@ -70,6 +71,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('kite-session-app-server-2026-09-02');
     expect(plan).toContain('kite-source-runtime-profile\\0');
     expect(plan).toContain('| KASD-01 | completed |');
+    expect(plan).toContain('| KASD-02 | in_progress |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

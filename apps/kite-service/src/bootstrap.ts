@@ -70,6 +70,7 @@ import {
   type KiteHomeArtifactStore,
   type KiteHomeDirectoryQueryPort,
   openKiteHomeRuntimeStorage,
+  openKiteSessionRuntimeStorage,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
@@ -95,6 +96,11 @@ import type {
 } from './agent-api';
 import type { KiteInProcessAppControlComposition } from './app-control';
 import { createKiteHomeBuiltinArtifactBackends } from './bootstrap/kite-home-artifact-backends';
+import {
+  createKiteSessionAppServerStorage,
+  KiteAppServerSessionError,
+  type KiteSessionAppServerStorageOwner,
+} from './bootstrap/kite-session-app-server-storage';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import { createInstalledKiteRuntimeCompositionFactory } from './bootstrap/model-runtime-composition';
 import {
@@ -311,6 +317,7 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   readonly checkpointPath: string;
   /** Service process identity shared with descriptor/carrier handshake. */
   readonly serverInstanceId?: string;
+  readonly serverVersion?: string;
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
   /**
@@ -838,6 +845,13 @@ export interface KiteRuntimeStorageOwner {
   getCurrentSessionModelRoute(
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
+  /** KASD App Server-only Session generation scope; absent for the old single-Service owner. */
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly readSnapshot?: <Result>(operation: () => Result) => Result;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly ownedSessionIds?: () => readonly string[];
+  readonly releaseExecutions?: (cleanupConfirmed: boolean) => void;
+  readonly disposeStorage?: () => void;
 }
 
 export interface KiteHomeRuntimeStorageCompositionOwner extends KiteRuntimeStorageOwner {
@@ -943,6 +957,34 @@ export function createKiteHomeRuntimeStorageComposition(
     getCurrentSessionModelRoute: (sessionId: string) =>
       target.storage.sessions.getSessionModelRoute(sessionId),
   });
+}
+
+/** KASD exact multi-connection Store owner; it never opens kite.sqlite or a Workspace lock. */
+export function createKiteSessionAppServerStorageComposition(input: {
+  readonly databasePath: string;
+  readonly hostInstanceId: string;
+  readonly clientId?: string;
+  readonly connectionGeneration?: number;
+  readonly executionLeaseMs?: number;
+  readonly renewIntervalMs?: number;
+  readonly now?: () => number;
+}): KiteSessionAppServerStorageOwner {
+  const target = openKiteSessionRuntimeStorage<RuntimeEvent, RuntimeState>({
+    databasePath: input.databasePath,
+    codec: STATE_STORAGE_BINDING_.codec,
+    stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    ...(input.now ? { now: input.now } : {}),
+  });
+  try {
+    return createKiteSessionAppServerStorage({
+      ...input,
+      target,
+    });
+  } catch (error) {
+    target.close();
+    throw error;
+  }
 }
 
 /**
@@ -1234,6 +1276,7 @@ function createKiteRuntimeHost(
     context: RuntimeHostExecutionAdapterContext<RuntimeEvent, RuntimeState>,
     builtinToolCatalog: BuiltinToolCatalogProjection,
   ) => RuntimeHostExecutionBridge,
+  ownsSessionExecution?: (sessionId: string) => boolean,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
   return createRuntimeHost({
     storage,
@@ -1241,6 +1284,7 @@ function createKiteRuntimeHost(
       createBridge(context, createBuiltinToolCatalogProjection(context.capabilityRegistrySnapshot)),
     ),
     contextCompiler: createBuiltinContextCompilerPort(),
+    ...(ownsSessionExecution ? { ownsSessionExecution } : {}),
   });
 }
 
@@ -1290,37 +1334,41 @@ function createKiteCliRuntimeHost(
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
   const projectIdentity = resolveProjectIdentity(input.workspace);
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
-  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
-    const { services, capabilities, capabilityRegistrySnapshot } = context;
-    const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
-    const modelOperationExecution = createKiteModelOperationExecutionPort(
-      capabilities,
-      builtinToolCatalog,
-    );
-    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
-    const modelInvocationRuntimeFactory = (workspace: string) => ({
-      ...modelRuntime(workspace),
-      builtinToolCatalog,
-      toolPipelineComposition,
-    });
-    const runtimeStorageView = createRuntimeStorageAccess(services);
-    runtimeCoordinatorBinding.bind({
-      services,
-      capabilities,
-      capabilityRegistrySnapshot,
-      builtinToolCatalog,
-      toolPipelineComposition,
-      modelRuntimeFactory: modelRuntime,
-      store: runtimeStorageView,
-    });
-    return createCliRuntimeBridge(
-      { ...input, projectIdentity },
-      capabilities,
-      modelInvocationRuntimeFactory,
-      (sessionId) => resolveKiteRecoveryIdentity(services, sessionId),
-      runtimeCoordinatorBinding.access(),
-    );
-  });
+  const host = createKiteRuntimeHost(
+    owner.storage,
+    (context, builtinToolCatalog) => {
+      const { services, capabilities, capabilityRegistrySnapshot } = context;
+      const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
+      const modelOperationExecution = createKiteModelOperationExecutionPort(
+        capabilities,
+        builtinToolCatalog,
+      );
+      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
+      const modelInvocationRuntimeFactory = (workspace: string) => ({
+        ...modelRuntime(workspace),
+        builtinToolCatalog,
+        toolPipelineComposition,
+      });
+      const runtimeStorageView = createRuntimeStorageAccess(services);
+      runtimeCoordinatorBinding.bind({
+        services,
+        capabilities,
+        capabilityRegistrySnapshot,
+        builtinToolCatalog,
+        toolPipelineComposition,
+        modelRuntimeFactory: modelRuntime,
+        store: runtimeStorageView,
+      });
+      return createCliRuntimeBridge(
+        { ...input, projectIdentity },
+        capabilities,
+        modelInvocationRuntimeFactory,
+        (sessionId) => resolveKiteRecoveryIdentity(services, sessionId),
+        runtimeCoordinatorBinding.access(),
+      );
+    },
+    owner.ownsSessionExecution,
+  );
   return host;
 }
 
@@ -1424,6 +1472,47 @@ export function createKiteMultiWorkspaceRuntimeServer(
     }
     bySession.delete(sessionId);
     return undefined;
+  };
+  const projectStoredSession = (threadId: string): RuntimeSessionProjection | undefined => {
+    const snapshot = owner.loadCurrentSnapshot(threadId);
+    if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
+    const model = owner.getCurrentSessionModelRoute(threadId);
+    const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
+      sessionRevision: snapshot.revision,
+    });
+    const activeInteraction =
+      interactionQueue.activeInteractionId === undefined
+        ? undefined
+        : interactionQueue.interactions.find(
+            (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
+          );
+    const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
+    return Object.freeze({
+      schema: RUNTIME_PROJECTION_SCHEMA_,
+      sessionId: threadId,
+      revision: snapshot.revision,
+      workspace: snapshot.session.workspace,
+      lifecycle: 'open' as const,
+      interactionQueue,
+      ...(activeInteraction === undefined
+        ? {}
+        : {
+            activeWork: {
+              workId: activeTask?.taskId ?? snapshot.turn.turnId,
+              phase:
+                activeTask?.planning.kind === 'executing'
+                  ? ('building' as const)
+                  : ('planning' as const),
+              status: 'waiting' as const,
+              activeTurn: {
+                turnId: snapshot.turn.turnId,
+                status: 'waiting' as const,
+                interaction: activeInteraction,
+              },
+            },
+          }),
+      ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
+    });
   };
   const bridges = new Map<string, RuntimeHostExecutionBridge>();
   const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
@@ -1602,50 +1691,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
         // start MCP, or scan Skills for a Workspace the caller did not admit).
         const projections = owner
           .listCurrentSessions('', 1_000)
-          .map(({ threadId }): RuntimeSessionProjection | undefined => {
-            const snapshot = owner.loadCurrentSnapshot(threadId);
-            if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
-            const model = owner.getCurrentSessionModelRoute(threadId);
-            const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
-              sessionRevision: snapshot.revision,
-            });
-            const activeInteraction =
-              interactionQueue.activeInteractionId === undefined
-                ? undefined
-                : interactionQueue.interactions.find(
-                    (interaction) =>
-                      interaction.interactionId === interactionQueue.activeInteractionId,
-                  );
-            const activeTask = snapshot.activeTaskId
-              ? snapshot.tasks[snapshot.activeTaskId]
-              : undefined;
-            return Object.freeze({
-              schema: RUNTIME_PROJECTION_SCHEMA_,
-              sessionId: threadId,
-              revision: snapshot.revision,
-              workspace: snapshot.session.workspace,
-              lifecycle: 'open' as const,
-              interactionQueue,
-              ...(activeInteraction === undefined
-                ? {}
-                : {
-                    activeWork: {
-                      workId: activeTask?.taskId ?? snapshot.turn.turnId,
-                      phase:
-                        activeTask?.planning.kind === 'executing'
-                          ? ('building' as const)
-                          : ('planning' as const),
-                      status: 'waiting' as const,
-                      activeTurn: {
-                        turnId: snapshot.turn.turnId,
-                        status: 'waiting' as const,
-                        interaction: activeInteraction,
-                      },
-                    },
-                  }),
-              ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
-            });
-          });
+          .map(({ threadId }) => projectStoredSession(threadId));
         return {
           status: 'ok',
           queryType: 'list_sessions',
@@ -1674,19 +1720,117 @@ export function createKiteMultiWorkspaceRuntimeServer(
       reason: 'unauthorized' as const,
     }),
   });
+  const runHostCommand = (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) => {
+    try {
+      const sessionId = appServerExecutionSessionId(command);
+      const result =
+        sessionId && owner.runWithSessionExecution
+          ? owner.runWithSessionExecution(sessionId, () => host.command(command, context))
+          : host.command(command, context);
+      return Promise.resolve(result).catch((error) => appServerCommandFailure(command, error));
+    } catch (error) {
+      return Promise.resolve(appServerCommandFailure(command, error));
+    }
+  };
+  const runHostQuery = (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+    if (!owner.readSnapshot) return host.query(query);
+    const direct = owner.readSnapshot(() => {
+      if (query.type === 'list_sessions') {
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          sessions: owner
+            .listCurrentSessions('', 1_000)
+            .map(({ threadId }) => projectStoredSession(threadId))
+            .filter((projection) => projection !== undefined),
+        };
+      }
+      if (query.type === 'get_session_projection') {
+        const projection = projectStoredSession(query.sessionId);
+        return projection
+          ? {
+              status: 'ok' as const,
+              queryType: query.type,
+              revision: projection.revision,
+              session: projection,
+            }
+          : {
+              status: 'not_found' as const,
+              queryType: query.type,
+              code: 'session_not_found' as const,
+            };
+      }
+      if (query.type === 'list_checkpoints') {
+        const snapshot = owner.loadCurrentSnapshot(query.sessionId);
+        if (!snapshot) {
+          return {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'session_not_found' as const,
+          };
+        }
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          revision: snapshot.revision,
+          checkpoints: owner.storage.checkpoints
+            .listNamedSnapshots(query.sessionId)
+            .map((entry) => {
+              const state = owner.storage.checkpoints.loadNamedSnapshot<RuntimeState>(
+                query.sessionId,
+                entry.snapshotId,
+              );
+              return {
+                checkpointId: entry.snapshotId,
+                sessionId: query.sessionId,
+                revision: state?.revision ?? 0,
+                eventPosition: entry.eventPosition,
+                createdAt: entry.createdAt,
+                ...(entry.targetMessage === undefined
+                  ? {}
+                  : { targetMessage: entry.targetMessage.slice(0, 8_192) }),
+                ...(entry.targetMessageCreatedAt === undefined
+                  ? {}
+                  : { targetMessageCreatedAt: entry.targetMessageCreatedAt }),
+                affectedFileCount: entry.affectedFileCount ?? 0,
+              };
+            }),
+        };
+      }
+      return undefined;
+    });
+    return direct === undefined ? host.query(query) : Promise.resolve(direct);
+  };
+  const cancelAllSessions = async (reason: string): Promise<void> => {
+    if (!owner.runWithSessionExecution || !owner.ownedSessionIds) {
+      await host.cancelAllSessions(reason);
+      return;
+    }
+    await Promise.all(
+      owner
+        .ownedSessionIds()
+        .map((sessionId) =>
+          owner.runWithSessionExecution!(sessionId, () => host.cancelSession(sessionId, reason)),
+        ),
+    );
+  };
   const runtime: RuntimeAccess = input.operationGate
     ? Object.freeze({
         command: (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) =>
-          input.operationGate!.runMutation(() => host.command(command, context)),
-        query: (query: RuntimeQuery) => host.query(query),
+          input.operationGate!.runMutation(() => runHostCommand(command, context)),
+        query: runHostQuery,
         subscribe: (subscription: RuntimeSubscription) => host.subscribe(subscription),
       })
-    : host;
+    : Object.freeze({
+        command: runHostCommand,
+        query: runHostQuery,
+        subscribe: (subscription: RuntimeSubscription) => host.subscribe(subscription),
+      });
   const hub = createRuntimeServerInProcessHub(
     { runtime, admission: denyByDefault },
     {
       serverInfo: {
-        version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+        version: input.serverVersion ?? `protocol-${RUNTIME_PROTOCOL_VERSION}`,
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
     },
@@ -1697,7 +1841,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     host,
     runtime,
     storage: owner.storage,
-    cancelAllSessions: (reason: string) => host.cancelAllSessions(reason),
+    cancelAllSessions,
     bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => {
       connectionWorkspaces.set(connectionId, workspace);
     },
@@ -1762,15 +1906,59 @@ export function createKiteMultiWorkspaceRuntimeServer(
     },
     [Symbol.asyncDispose]: () => {
       disposePromise ??= (async () => {
+        const failures: unknown[] = [];
+        let cleanupConfirmed = true;
         try {
           await hub.server.beginDraining();
-        } finally {
+        } catch (error) {
+          failures.push(error);
+        }
+        try {
+          await cancelAllSessions('Runtime App Server disposed.');
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
           await host[Symbol.asyncDispose]();
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
+          owner.releaseExecutions?.(cleanupConfirmed);
+        } catch (error) {
+          failures.push(error);
+        } finally {
+          try {
+            owner.disposeStorage?.();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'Runtime Server owner disposal failed.');
         }
       })();
       return disposePromise;
     },
   });
+}
+
+function appServerExecutionSessionId(command: RuntimeCommand): string | undefined {
+  if (command.type === 'create_session') return undefined;
+  if (command.type === 'fork_session') return command.sourceSessionId;
+  return command.sessionId;
+}
+
+function appServerCommandFailure(command: RuntimeCommand, error: unknown) {
+  if (!(error instanceof KiteAppServerSessionError)) throw error;
+  return {
+    status: 'rejected' as const,
+    commandId: command.commandId,
+    code:
+      error.code === 'session_busy' ? ('runtime_busy' as const) : ('session_unavailable' as const),
+  };
 }
 
 export function createKiteCliRuntimeServer(

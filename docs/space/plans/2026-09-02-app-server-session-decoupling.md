@@ -49,7 +49,7 @@ Web -------loopback HTTP------------>       │
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
-| KASD-02 | pending | App Server正式进程边界 |
+| KASD-02 | in_progress | stdio进程/Host/Session generation lifecycle已接通；统一App方法面与candidate配对待完成 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
 | KASD-05 | pending | Web client解耦 |
@@ -118,6 +118,19 @@ Web -------loopback HTTP------------>       │
 global mutation inventory无未裁决写路径；并发首次建库稳定；GC保持关闭。
 
 ### KASD-02：App Server正式进程边界
+
+当前子阶段（2026-09-02）：
+
+- 已增加内部exact `app-server run-stdio`入口；它只接受显式Runtime/config/Home/Workspace/build输入，复用现有Host、Runtime Server与JSONL
+  carrier，不创建Service reservation、global endpoint、HTTP listener或Web资产；当前TUI/CLI尚未调用；
+- 已把Host command及其异步Turn绑定到App Server持有的Session execution handle，并以进程内timer续租；首次create与fork继续使用KASD-01
+  原子首代transaction。缺失scope的底层write保持fail closed，不做per-port自动acquire；
+- Host新增App-owned execution ownership predicate：hydrate/query可读投影不进入execution registry，cancel/dispose只处理本Server已持有generation的
+  Session。App Server list/get/checkpoint从同一SQLite read snapshot返回，第二Server只读不会acquire、cancel或release第一Server的Session；
+- 真实process已覆盖protocol-only stdout、EOF active model cancel与clean handoff，以及短lease active model SIGKILL后
+  `recovery_required`→显式reconciliation→resume，Provider请求保持一次；
+- 尚未完成统一Kite App protocol的History/App Control方法面、source/candidate launcher配对与Shell/MCP child crash矩阵，所以KASD-02保持
+  `in_progress`。
 
 - 从现有Runtime Server/Client与Service composition提取`kite app-server`内部入口；
 - default transport为parent-owned stdio或等价private channel，使用initialize + typed request/notification；

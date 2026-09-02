@@ -63,7 +63,7 @@
   均使用SQLite CAS；fresh Session的generation 1只能在已持有的Session creation transaction内建立，任一后续失败同时回滚Session与authority。
   过期且cleanup未确认的owner只会进入`recovery_required`。`openKiteSessionRuntimeStorage`在每条WAL connection上提供统一Session execution
   scope：event/snapshot/name/model、delete、checkpoint/rewind/fork、Run/recovery与typed Artifact mutation全部进入同一个generation/revision
-  fence；read/list不取lease，constructor深验固定在一个SQLite read snapshot。fork target facts、Run/receipt与generation 1同事务，后续copy
+  fence；read/list不取lease，constructor深验及App Server复合read可固定在一个SQLite read snapshot。fork target facts、Run/receipt与generation 1同事务，后续copy
   fault共同回滚。新owner不取得旧Workspace process lock，也不要求one-connection Store composition。该substrate尚未成为TUI/CLI production
   composition，不能据此删除当前Store 9或旧single-Service owner。
 - 新epoch的`runtime_effect_leases`使用独立exact列集合，除attempt-local `lease_revision`外还绑定Session `controller_generation`与

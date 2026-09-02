@@ -22,6 +22,9 @@
 - Store-authoritative query返回Session projection时通过同一NotificationProjector发布event-free durable snapshot；这只hydrate
   process-local registry/history与已等待的subscriber，不写Store。订阅先于query建立且Session仅存在于Store时，pending subscriber也会
   收到该snapshot并完成ready，不能只更新registry后永久等待。
+- KASD App Server可注入App-owned `ownsSessionExecution(sessionId)` predicate；Host hydrate/query仍可返回Store read DTO，但只有predicate为真的
+  projection进入本进程notification registry，`cancelAll`与dispose也只调用这些Session的shutdown。默认predicate恒真，旧single-Service语义不变。
+  predicate只读取App已取得的generation map，不自行acquire、renew或持久化authority。
 
 ## 不拥有职责
 

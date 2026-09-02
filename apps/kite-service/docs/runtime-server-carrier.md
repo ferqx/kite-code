@@ -48,13 +48,13 @@ lifecycle，也不授权调用方在响应丢失时重放stop。
 
 ## Parent-owned stdio
 
-stdio carrier是Service-owned code，但只用于parent-owned test/internal显式composition。parent必须提供isolated Workspace
-admission、明确owner lifecycle与显式nondefault `--checkpoints` path；它不能指向managed default canonical Store，也
-不是CLI fallback或daemon。
+stdio carrier是Service-owned code。KASD-02的内部`app-server run-stdio`是首个真实process owner：parent显式提供profile root、config root、
+Workspace和build identity，Server只打开该profile的`kite-session.sqlite`，不发现managed Service且不是daemon。旧test/internal composition
+仍必须提供isolated admission与nondefault Store。
 
-stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diagnostic。EOF只释放该logical connection，
-parent-owned signal/explicit shutdown才drain Server、flush stdout并释放composition。非法UTF-8、overlong/invalid JSON与
-stdout failure fail closed。
+stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diagnostic。carrier primitive中的EOF仍只释放logical connection；
+`app-server run-stdio` process owner观察该EOF后立即执行Server drain、active Turn cancel/cleanup、Session generation release和composition
+dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/invalid JSON与stdout failure fail closed。
 
 ## Development reference
 

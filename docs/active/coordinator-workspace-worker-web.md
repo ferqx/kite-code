@@ -26,6 +26,9 @@ ADR-0166的KASD-01前置已另建未接production的`kite-session.sqlite`多连�
 writer，并允许同Workspace不同App Server写不同Session。该完成不恢复Coordinator/Worker拓扑，也不改变上述current production；KASD-02开始的
 App Server只能组合该新owner，旧Workspace lock与one-connection Store不能进入新进程路径。
 
+KASD-02内部App Server现以parent-owned stdio组合该owner和现有Host；它不是Coordinator/Worker复活，也没有Web Gateway、HTTP listener或
+process-wide notification bus。另一个App Server可从Store snapshot读取Session，但不因read或退出取得/取消其generation。
+
 ## Web REST边界
 
 Web是同一Service `/v1`的薄只读客户端：访问`GET /`或`GET /api-docs`SPA shell时Service创建或复用短期HttpOnly cookie；Workspace、Session、

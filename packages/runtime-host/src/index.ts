@@ -232,6 +232,7 @@ export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unkn
   readonly storage: RuntimeStorage<Event, State>;
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
 }
@@ -241,6 +242,7 @@ export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unkno
   readonly moduleRegistry: RuntimeModuleRegistry;
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly modules?: never;
 }
 
@@ -286,6 +288,7 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       moduleRegistry,
       capabilityRegistrySnapshot: moduleRegistry.snapshot(),
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
+      ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
     });
   }
 
@@ -301,6 +304,7 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       moduleRegistry: input.moduleRegistry,
       capabilityRegistrySnapshot: input.capabilityRegistrySnapshot,
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
+      ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
     });
   }
 

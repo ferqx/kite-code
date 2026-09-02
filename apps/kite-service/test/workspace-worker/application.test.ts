@@ -45,8 +45,9 @@ afterEach(async () => {
 test('keeps the authenticated command context across the mutation operation gate', () => {
   const source = readFileSync(join(import.meta.dir, '../../src/bootstrap.ts'), 'utf8');
   expect(source).toMatch(
-    /command: \(command: RuntimeCommand, context\?: Readonly<RuntimeCommandContext>\) =>\s*input\.operationGate!\.runMutation\(\(\) => host\.command\(command, context\)\)/u,
+    /command: \(command: RuntimeCommand, context\?: Readonly<RuntimeCommandContext>\) =>\s*input\.operationGate!\.runMutation\(\(\) => runHostCommand\(command, context\)\)/u,
   );
+  expect(source).toContain('host.command(command, context)');
 });
 
 test('composes a real Worker Application over one injected Store and query-only History', async () => {

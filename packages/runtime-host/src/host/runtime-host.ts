@@ -102,6 +102,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   /** Durable deletion tombstones prevent bridge queries from rehydrating State. */
   readonly #deletedSessions = new Set<string>();
   readonly #activeAccesses = new Set<Promise<unknown>>();
+  readonly #ownsSessionExecution: (sessionId: string) => boolean;
   #startPromise: Promise<void> | undefined;
   #disposePromise: Promise<void> | undefined;
   #closing = false;
@@ -112,8 +113,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     readonly moduleRegistry: RuntimeModuleRegistry;
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
     readonly contextCompiler?: ContextCompilerPort;
+    readonly ownsSessionExecution?: (sessionId: string) => boolean;
   }) {
     this.storage = input.storage;
+    this.#ownsSessionExecution = input.ownsSessionExecution ?? (() => true);
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
     assertRuntimeHostRegistrySnapshot(input.moduleRegistry, input.capabilityRegistrySnapshot);
@@ -489,7 +492,11 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
-    await Promise.all([...sessionIds].map((sessionId) => this.#cancelSession(sessionId, reason)));
+    await Promise.all(
+      [...sessionIds]
+        .filter((sessionId) => this.#ownsSessionExecution(sessionId))
+        .map((sessionId) => this.#cancelSession(sessionId, reason)),
+    );
   }
 
   waitForSessionIdle(sessionId: string): Promise<void> {
@@ -518,6 +525,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
+    for (const sessionId of [...sessionIds]) {
+      if (!this.#ownsSessionExecution(sessionId)) sessionIds.delete(sessionId);
+    }
     const failures: unknown[] = [];
     for (const sessionId of sessionIds) {
       try {
@@ -577,7 +587,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     });
     if (result.status !== 'ok') return;
     for (const projection of result.sessions ?? []) {
-      this.#registry.commitProjection(projection);
+      if (this.#ownsSessionExecution(projection.sessionId)) {
+        this.#registry.commitProjection(projection);
+      }
     }
   }
 
@@ -631,7 +643,8 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   #commitQueryProjection(result: RuntimeQueryResult): void {
     if (result.status !== 'ok') return;
-    const publish = (projection: RuntimeSessionProjection): void =>
+    const publish = (projection: RuntimeSessionProjection): void => {
+      if (!this.#ownsSessionExecution(projection.sessionId)) return;
       this.#notifications.publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
@@ -639,6 +652,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         revision: projection.revision,
         projection: { kind: 'snapshot', session: projection },
       });
+    };
     if (result.session) publish(result.session);
     for (const projection of result.sessions ?? []) publish(projection);
   }
