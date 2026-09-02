@@ -62,6 +62,13 @@ build；installed candidate恢复active-pointer guard与previous-build client，
 confirmed absent后启动当前build。退役candidate、source↔installed或identity不确定均不能替换owner。
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。
 
+KASD过渡已增加尚未接默认TUI/CLI的parent-owned App Server release resolver。source只使用当前Bun加checked-in Service entrypoint，build
+identity覆盖该resolver并把Runtime Store放在canonical Kite Home下按repository/worktree digest隔离的owner-only `source-profiles/`；installed
+只接受launcher传入且经marker、active pointer、`.candidate-id`与manifest重新验证的immutable candidate root，并固定解析同candidate的
+`bin/kite-service`。两者都把同一个build ID交给client与child，initialize再核对derived server version和完整capability；不查PATH、不发现
+running Service、不回退另一模式。installed child显式保留standalone marker，使其后续internal process watchdog仍解析到同candidate Service
+binary而不是不存在的source文件。默认release入口尚未切换，所以上文single-Service仍是当前production行为。
+
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装器写入 v2 managed-install marker 与唯一 `active` regular-file
 pointer；stable launcher 将同一个 immutable candidate root 显式 pin 给 child process。Windows runner resolver

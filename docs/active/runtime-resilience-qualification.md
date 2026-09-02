@@ -29,7 +29,10 @@ initialize前拒绝，未组合owner时fail closed，组合owner后可从同一S
 cleanup confirmed时释放generation；active model dispatch后SIGKILL会在短lease失效后阻断successor，显式reconciliation后resume只消费durable
 attempt事实，mock Provider请求保持一次；第二App Server的list/get/checkpoint与退出不取得或取消第一Server的active Session。同build typed
 client还验证exact server version/capability并在mismatch时关闭连接；真实child的provider credential write使用manual model避免网络并证明
-response不回显secret。该证据尚不替代Shell/MCP child crash、source/candidate resolver配对或三平台qualification。验证：
+response不回显secret。source resolver真实启动checked-in App Server，installed fixture验证immutable candidate path/build pairing；真实
+App Server SIGKILL会经POSIX watchdog杀死已批准且已dispatch的host-shell child，lease到期后successor必须显式reconcile，resume不会再次启动
+该command。local stdio MCP当前没有release-approved process port，因此本阶段不注入测试旁路；首次真实启用必须在对应execution qualification
+中补parent-crash child证据。该证据尚不替代三平台qualification。验证：
 `bun test apps/kite-service/test/isolated/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
 
 ## 两级运行契约

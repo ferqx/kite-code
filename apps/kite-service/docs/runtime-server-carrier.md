@@ -56,6 +56,10 @@ stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diag
 `app-server run-stdio` process owner观察该EOF后立即执行Server drain、active Turn cancel/cleanup、Session generation release和composition
 dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/invalid JSON与stdout failure fail closed。
 
+App Server执行未sandboxed host Shell时，Runtime Host generic process port使用Service内嵌的
+`--kite-internal-process-tree-v1`（source使用同源码child）作为POSIX watchdog；App Server意外死亡会关闭watchdog stdin，watchdog终止
+同process group的实际command。正常EOF/signal仍优先走Host cancel/cleanup。该internal mode不接受普通CLI路由或command args。
+
 同一stdio connection完成initialize后还承载三个exact durable History read。carrier在把logical message交给Runtime Server前识别并验证
 `history/list_sessions`、`history/list_events`和`history/load_session`，调用App composition注入的`RuntimeHistoryClient`；每次调用的
 同步Store读取由同一个SQLite read snapshot包围。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知

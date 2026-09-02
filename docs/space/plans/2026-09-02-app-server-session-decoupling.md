@@ -49,7 +49,7 @@ Web -------loopback HTTP------------>       │
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
-| KASD-02 | in_progress | stdio/Host/Session generation及同连接History/App Control/credential已接通；candidate配对待完成 |
+| KASD-02 | completed | stdio/Host/Session generation、完整client面、source/candidate配对与active model/Shell crash已通过 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
 | KASD-05 | pending | Web client解耦 |
@@ -74,8 +74,8 @@ Web -------loopback HTTP------------>       │
 当前子阶段（2026-09-02）：
 
 - 已完成`kite-session.sqlite` absent/empty transaction初始化、exact reopen、旧epoch/partial/corrupt typed拒绝以及不探测旧`kite.sqlite`；
-- 已完成installed/source deterministic物理profile path，其中source digest严格采用本计划冻结的domain-separated SHA-256；目录owner/non-link创建将在
-  composition接入时完成，当前纯路径函数不产生目录副作用；
+- 已完成installed/source deterministic物理profile path，其中source digest严格采用本计划冻结的domain-separated SHA-256；KASD-02 release
+  resolver已用既有no-follow/owner-only Kite Home primitive创建`source-profiles/<digest>`，纯路径函数本身仍不产生目录副作用；
 - 已完成Host-owned Session execution authority substrate：`controllerGeneration`、authority revision、lease deadline、cleanup状态与
   `recovery_required` CAS闭环；fresh Session generation 1与Session事实同一writer transaction、失败共同回滚；真实双进程同Session争用只有一个
   writer，不同Session均成功；
@@ -135,8 +135,13 @@ global mutation inventory无未裁决写路径；并发首次建库稳定；GC�
   Control，并要求由caller build ID导出的exact server version与完整capability，mismatch关闭child；
 - 已把Native provider credential write作为第十个固定App方法接入既有credential codec/owner；只接受provider API key操作，response和
   diagnostic不回显secret，mutation不自动重放；
-- 尚未完成source/candidate launcher resolution配对与Shell/MCP child crash矩阵，所以KASD-02保持
-  `in_progress`。
+- 已增加release resolver：source固定当前Bun + checked-in Service entrypoint、worktree digest持久profile与source build identity；installed
+  固定launcher提供并经managed marker/pointer/candidate manifest验证的immutable candidate与canonical profile；二者都不查PATH、不发现
+  running Service，并以同一build ID在initialize复核server version/capability；
+- 已补POSIX host-shell parent-death watchdog：实际command位于独立process group，App Server SIGKILL后的stdin EOF杀整个组；真实process证明
+  successor仍需显式reconcile，resume不重新启动command；
+- 当前release不批准local stdio MCP process port，配置保持typed disconnected；本tranche不注入test-only port制造虚假consumer。首次真实
+  `localStdioMcp` release admission必须在对应execution qualification中补App Server parent-crash child evidence，不作为当前KASD-02 blocker。
 
 - 从现有Runtime Server/Client与Service composition提取`kite app-server`内部入口；
 - default transport为parent-owned stdio或等价private channel，使用initialize + typed request/notification；
@@ -152,8 +157,9 @@ global mutation inventory无未裁决写路径；并发首次建库稳定；GC�
   read snapshot并返回Store revision；approval和command提交前重读generation/revision。本计划不新增跨进程notification bus；
 - source与installed使用同一入口与schema/protocol，只替换executable resolution和物理profile root。
 
-验收：source和candidate均证明client/server build一致；杀死App Server及active model/Shell/MCP child后，新进程可读取并按interrupted/
-outcome-unknown规则resume既有Session；late Host completion无法提交；无Web listener或global endpoint。
+验收：source和candidate均证明client/server build一致；杀死App Server及当前可达的active model/Shell child后，新进程可读取并按interrupted/
+outcome-unknown规则resume既有Session；late Host completion无法提交；无Web listener或global endpoint。MCP child只在其既有release admission
+真正开放后进入同一门禁，不由KASD绕过。
 
 ### KASD-03：TUI/CLI default local cutover
 
@@ -298,7 +304,7 @@ source standalone: <temporary Runtime Home>/kite.sqlite
 format epoch: kite-home-single-service-v1-2026-08-30
 ```
 
-KASD目标但尚未实现：
+KASD-01/02已实现的目标路径：
 
 ```text
 installed: <canonical Kite Home>/kite-session.sqlite

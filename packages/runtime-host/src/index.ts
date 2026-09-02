@@ -199,6 +199,7 @@ export {
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
 } from './process/process-tree';
+export { runProcessTreeChild } from './process/process-tree-child-runtime';
 export { spawnRuntimeHostProcess } from './process/spawn';
 export {
   BoundedOutputBuffer,

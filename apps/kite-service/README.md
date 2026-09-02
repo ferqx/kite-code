@@ -27,6 +27,8 @@ source/candidate resolution尚未切换，因此当前production定位仍是上�
   重读和atomic replacement。Provider/model跨user/project两文件按canonical顺序取锁并在写前重新CAS；不存在global config daemon或宽锁。
 - `src/executable.ts`接受manager专用的exact `service run-single`入口，从显式canonical home、build identity、neutral cwd、allowlisted env和
   readiness fd启动；stdout不承载readiness。
+- 同一executable的internal POSIX process-tree watchdog只由Runtime Host以固定marker和stdin request启动；它使host-shell child在App Server
+  SIGKILL后随parent pipe EOF终止，不是用户命令、daemon或第二Service入口。
 - `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；
   access/control capability与process identity只在进程内和IPC握手中存在，不写入Kite Home。
 - `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/

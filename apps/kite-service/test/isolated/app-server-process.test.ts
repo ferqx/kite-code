@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -452,6 +453,227 @@ describe('KASD parent-owned App Server process', () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 20_000);
+
+  test.skipIf(process.platform === 'win32')(
+    'SIGKILL terminates an active Shell child before Session reconciliation',
+    async () => {
+      const root = realpathSync.native(
+        mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-server-child-crash-')),
+      );
+      const runtimeRoot = join(root, 'runtime');
+      const configRoot = join(root, 'config');
+      const osHome = join(root, 'home');
+      const workspace = join(root, 'workspace');
+      for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+      const shellPidPath = join(root, 'shell.pid');
+      const longChild = join(import.meta.dir, '../fixtures/long-running-child.ts');
+      const model = createMockModelServer();
+      model.setResponses([
+        {
+          message: {
+            tool_calls: [
+              {
+                id: 'long-shell',
+                name: 'shell_execute',
+                args: {
+                  command: `${shellQuote(process.execPath)} ${shellQuote(longChild)} ${shellQuote(shellPidPath)}`,
+                },
+              },
+            ],
+          },
+        },
+        { message: { content: 'must-not-resume-after-crash' } },
+      ]);
+      writeAppServerConfig(configRoot, model.baseURL, 'full');
+      expect(
+        trustWorkspace({
+          workspace,
+          source: 'test',
+          storePath: join(configRoot, 'workspace-trust.jsonc'),
+        }).status,
+      ).toBe('recorded');
+
+      const childPath = join(import.meta.dir, '../fixtures/app-server-short-lease-child.ts');
+      const child = Bun.spawn([process.execPath, childPath], {
+        cwd: '/',
+        env: {
+          ...process.env,
+          KITE_CODE_HOME: runtimeRoot,
+          KITE_CODE_CONFIG_HOME: configRoot,
+          KITE_APP_SERVER_WORKSPACE: workspace,
+          KITE_APP_SERVER_BUILD_ID: 'child-crash-build',
+          HOME: osHome,
+          USERPROFILE: osHome,
+        },
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const output = new JsonlReader(child.stdout);
+      const sessionId = 'child-crash-session';
+      let shellPid: number | undefined;
+      try {
+        child.stdin.write(
+          line('init', 'initialize', {
+            protocolVersion: 1,
+            clientInfo: { name: 'child-crash', version: '1', instanceId: 'child-crash-1' },
+          }),
+        );
+        await output.next();
+        child.stdin.write(
+          line('create', 'runtime/command', {
+            command: {
+              schema: 'kite.runtime-command.v1',
+              commandId: 'create-child-crash',
+              type: 'create_session',
+              bootstrapSessionId: sessionId,
+            },
+          }),
+        );
+        expect(await output.next()).toMatchObject({ id: 'create', result: { status: 'applied' } });
+        child.stdin.write(
+          line('turn', 'runtime/command', {
+            command: {
+              schema: 'kite.runtime-command.v1',
+              commandId: 'turn-child-crash',
+              type: 'start_turn',
+              sessionId,
+              expectedRevision: 0,
+              input: 'start the long shell',
+            },
+          }),
+        );
+        expect(await output.next()).toMatchObject({ id: 'turn', result: { status: 'applied' } });
+        let approval: Record<string, unknown> | undefined;
+        for (let attempt = 0; attempt < 300 && !approval; attempt += 1) {
+          child.stdin.write(
+            line(`approval-query-${attempt}`, 'runtime/query', {
+              query: {
+                schema: 'kite.runtime-query.v1',
+                type: 'get_session_projection',
+                sessionId,
+              },
+            }),
+          );
+          const queried = await output.next();
+          const session = (queried.result as { session?: Record<string, unknown> }).session;
+          const queue = session?.interactionQueue as
+            | {
+                activeInteractionId?: string;
+                interactions?: readonly Record<string, unknown>[];
+              }
+            | undefined;
+          approval = queue?.interactions?.find(
+            (interaction) =>
+              interaction.kind === 'approval' &&
+              interaction.interactionId === queue.activeInteractionId,
+          );
+          if (!approval) await Bun.sleep(10);
+        }
+        if (!approval) throw new Error('Shell approval was not projected.');
+        child.stdin.write(
+          line('approve-shell', 'runtime/command', {
+            command: {
+              schema: 'kite.runtime-command.v1',
+              commandId: 'approve-child-crash-shell',
+              type: 'respond_interaction',
+              sessionId,
+              expectedRevision: approval.sessionRevision,
+              interaction: approval,
+              response: { kind: 'approval', decision: 'approve_once' },
+            },
+          }),
+        );
+        expect(await output.next()).toMatchObject({
+          id: 'approve-shell',
+          result: { status: 'applied' },
+        });
+        await eventually(() => existsSync(shellPidPath), 1_000);
+        shellPid = Number(readFileSync(shellPidPath, 'utf8').trim());
+        expect(isLivePid(shellPid)).toBe(true);
+
+        child.kill('SIGKILL');
+        await child.exited;
+        await eventually(() => !isLivePid(shellPid!), 1_000);
+        await Bun.sleep(650);
+
+        const successor = createKiteSessionAppServerStorageComposition({
+          databasePath: join(runtimeRoot, 'kite-session.sqlite'),
+          hostInstanceId: 'successor-after-child-crash',
+          executionLeaseMs: 600,
+          renewIntervalMs: 200,
+        });
+        try {
+          expect(() => successor.runWithSessionExecution(sessionId, () => undefined)).toThrow(
+            'explicit effect reconciliation',
+          );
+          const recovery = successor.recovery.inspect(sessionId);
+          expect(recovery.authority.status).toBe('recovery_required');
+          const reconciled = successor.recovery.reconcile({
+            sessionId,
+            expectedAuthorityRevision: recovery.authority.revision,
+          });
+          expect(reconciled.authority.status).toBe('idle');
+        } finally {
+          successor.disposeStorage();
+        }
+
+        const resumed = Bun.spawn([process.execPath, childPath], {
+          cwd: '/',
+          env: {
+            ...process.env,
+            KITE_CODE_HOME: runtimeRoot,
+            KITE_CODE_CONFIG_HOME: configRoot,
+            KITE_APP_SERVER_WORKSPACE: workspace,
+            KITE_APP_SERVER_BUILD_ID: 'child-crash-build',
+            HOME: osHome,
+            USERPROFILE: osHome,
+          },
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const resumedOutput = new JsonlReader(resumed.stdout);
+        try {
+          resumed.stdin.write(
+            line('resume-init', 'initialize', {
+              protocolVersion: 1,
+              clientInfo: { name: 'child-resume', version: '1', instanceId: 'child-resume-1' },
+            }),
+          );
+          await resumedOutput.next();
+          resumed.stdin.write(
+            line('resume', 'runtime/command', {
+              command: {
+                schema: 'kite.runtime-command.v1',
+                commandId: 'resume-after-child-crash',
+                type: 'resume_session',
+                sessionId,
+              },
+            }),
+          );
+          expect(await resumedOutput.next()).toMatchObject({
+            id: 'resume',
+            result: { status: 'applied' },
+          });
+          await Bun.sleep(300);
+          expect(readFileSync(shellPidPath, 'utf8').trim().split('\n')).toHaveLength(1);
+          resumed.stdin.end();
+          expect(await resumed.exited).toBe(0);
+        } finally {
+          if (resumed.exitCode === null) resumed.kill('SIGKILL');
+          await resumed.exited;
+        }
+      } finally {
+        if (child.exitCode === null) child.kill('SIGKILL');
+        await child.exited;
+        if (shellPid !== undefined && isLivePid(shellPid)) process.kill(shellPid, 'SIGKILL');
+        model.stop();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });
 
 function line(id: string, method: string, params: object): string {
@@ -482,15 +704,19 @@ class JsonlReader {
   }
 }
 
-async function eventually(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+async function eventually(check: () => boolean, attempts = 200): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (check()) return;
     await Bun.sleep(10);
   }
   throw new Error('Timed out waiting for App Server process evidence.');
 }
 
-function writeAppServerConfig(configRoot: string, baseURL: string): void {
+function writeAppServerConfig(
+  configRoot: string,
+  baseURL: string,
+  interactionMode: 'auto' | 'full' = 'auto',
+): void {
   writeFileSync(
     join(configRoot, 'kite-code.jsonc'),
     JSON.stringify({
@@ -504,10 +730,24 @@ function writeAppServerConfig(configRoot: string, baseURL: string): void {
         },
       },
       model: { default: { provider: 'test', name: 'mock-model' } },
-      interactionMode: 'auto',
+      interactionMode,
       sandbox: { enabled: false },
       features: {},
       mcpServers: {},
     }),
   );
+}
+
+function isLivePid(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

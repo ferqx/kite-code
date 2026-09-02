@@ -304,6 +304,11 @@ production execution。composition 的 startup discovery 只解析静态候选�
 执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite-ai/runtime-host` 的唯一 process supervisor；
 Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
+不经过native sandbox的POSIX host-shell仍是当前development/用户显式fallback，因此KASD App Server不能在parent SIGKILL后留下该process tree。
+Runtime Host generic process port现以同组watchdog代替direct spawn：一次性bounded stdin传递argv/cwd/env且保持parent pipe，正常cancel走现有
+process-tree guard，parent EOF杀整个group。它不提供confinement、detached descendant containment或production sandbox资格，也不改变本页
+native backend空支持集；它只补足现有host-shell的parent-death cleanup。
+
 App composition 的 preparation abort 不依赖平台 probe 主动观察 `AbortSignal`：一旦 controller 轮换，当前
 `prepare()` waiter 必须立即以 typed abort 收敛，下一次 `prepare()` 重新执行 discovery。旧 probe 的迟到结果或异常
 仍由组合层消费以避免未处理 rejection，但不得写入 cache、选择 backend 或触发 host/native dispatch。该边界保证

@@ -52,8 +52,13 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 模型dispatch/terminal、同连接多Session、外来client拒绝及旧installed build→当前build自动换代；
 `packages/kite-local-runtime/test/single-service-manager.test.ts`固定验证transient/permanent busy、source隔离与精确旧build stop，旧descriptor manager
 suite继续验证restart在busy、outcome-unknown与成功replacement下不重放control mutation；source TUI默认standalone，因此不再保留`tui:fresh`跨build mutation路径。
-`apps/kite-service/test/isolated/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、EOF active model
-cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint；`runtime-server-multi-workspace.test.ts`固定第二Server read-only不会取得或
+`apps/kite-service/test/isolated/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、同连接
+Runtime/History/App Control/credential client、EOF active model cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint。
+同文件还让真实approved host-shell child记录PID，SIGKILL App Server后验证Runtime Host watchdog清理command group、successor显式reconcile且
+resume不重新启动command；当前release未启用local stdio MCP，因此不以测试专用port伪造该能力。
+`tests/release/app-server-client.test.ts`分别固定source checked-in entrypoint + worktree持久profile与installed launcher-pinned immutable
+candidate解析；两条路径都要求client/child build identity与initialize capability精确配对，不查PATH或running Service。
+`runtime-server-multi-workspace.test.ts`固定第二Server read-only不会取得或
 取消第一Server的Session generation。这仍不是TUI/candidate cutover证据。
 
 ## 稳定命令

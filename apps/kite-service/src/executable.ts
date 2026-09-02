@@ -11,6 +11,7 @@ import {
   MCP_STDIO_WRAPPER_ENTRYPOINT_,
   runMcpStdioChildRuntime,
   runPosixSupervisorChild,
+  runProcessTreeChild,
 } from '@kite-ai/runtime-host';
 import { createAgentApiRouteHandler } from './agent-api';
 import { runKiteAppServerMain } from './app-server';
@@ -132,6 +133,10 @@ export async function runKiteServiceMain(
   }
   if (args[0] === 'app-server') {
     await runKiteAppServerMain(args, { environment: dependencies.environment });
+    return;
+  }
+  if (args.length === 1 && args[0] === '--kite-internal-process-tree-v1') {
+    runProcessTreeChild([]);
     return;
   }
   const posixSupervisorMarker = '--kite-internal-posix-supervisor-v1';

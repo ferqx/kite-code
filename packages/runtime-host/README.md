@@ -14,6 +14,9 @@
   State/event/snapshot放入同一transaction；activation必须通过现有`attempt_start` transaction把queued推进running，不能直接调用Run port绕过
   Store writer；interaction/terminal/cancel/recovery event batch同步推进同一Run。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
+- POSIX generic process port不再直接把用户命令作为Host子进程：它先启动同进程组watchdog，通过有界stdin一次性传入exact
+  argv/cwd/env并保持pipe；Host正常cancel按process group终止，Host被SIGKILL时watchdog从EOF终止自身与命令组。Windows继续使用
+  Job/process-tree guard。watchdog不新增daemon、持久registry或业务协议。
 - 根入口导出纯函数`isRuntimeHostStateSettledForMigration`，保守验证terminal Turn、idle Interaction、已知external effect、
   terminal Tool/Capability/Model/approval、无cleanup/subagent/recovery authority；SQLite owner仍独立验证effect lease与durable authority row。
 - 接收 Runtime Server 的进程内 `RuntimeCommandContext`，在 Host inspect/commit 到 prepared execution bridge 时保持同一冻结
@@ -65,7 +68,7 @@
 
 ## 测试
 
-`bun test packages/runtime-host/test`（当前203 pass、1 skip；含Run restart projection/recovery refinement、lifecycle/resource replay/private query与Store7 fail-closed）
+`bun test packages/runtime-host/test`（含process watchdog、Run restart projection/recovery refinement、lifecycle/resource replay/private query与Store7 fail-closed）
 
 ## 文档影响
 

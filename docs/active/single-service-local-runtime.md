@@ -25,7 +25,9 @@ KASD-02已增加未接client的内部`app-server run-stdio`：它使用新Store�
 endpoint；同一条已initialize JSONL connection提供三个App-owned durable History read，且每次读取固定SQLite snapshot。真实process已覆盖
 History transcript、clean cancel/handoff和SIGKILL后no-replay恢复。它的存在不改变下文manager/Service默认行为，TUI/CLI仍不会自动或
 fallback调用该入口。九个no-secret App Control方法与typed parent client已就绪并执行exact build/capability检查；Native provider
-credential方法也已接入且不回显secret；source/candidate默认resolver和TUI切换仍未完成。
+credential方法也已接入且不回显secret。release resolver现已分别固定source checked-in entrypoint + worktree持久profile，以及installed
+launcher-pinned immutable candidate + canonical Store；二者都以同一build ID做initialize复核。POSIX host-shell经parent-pipe watchdog保证
+App Server SIGKILL不留下命令组。默认TUI/CLI接线仍未完成。
 
 KASD-01的global config前置已收敛：CLI preference、Service provider/model、MCP project/user config、Project approval与Workspace Trust共享
 `kite-local-runtime/config`的per-file owner lock与atomic replacement。多文件revision CAS按canonical path排序取锁；只有PID/start identity明确dead的

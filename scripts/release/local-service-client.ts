@@ -20,6 +20,7 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
   'scripts/release/entrypoints/launcher.ts',
   'scripts/release/entrypoints/service.ts',
   'scripts/release/entrypoints/tui.ts',
+  'scripts/release/app-server-client.ts',
   'scripts/release/local-service-client.ts',
   'scripts/release/single-service-native-client.ts',
   'package.json',
@@ -163,8 +164,11 @@ export function sourceServiceBuildIdentity(repositoryRoot: string): string {
   return `dev:${sourceTreeId}:dirty:${digest.digest('hex')}`;
 }
 
-export function installedBuildIdentity(executable: string): string {
-  const hintedCandidateRoot = process.env.KITE_CODE_RELEASE_ROOT;
+export function installedBuildIdentity(
+  executable: string,
+  input: { readonly candidateRoot?: string } = {},
+): string {
+  const hintedCandidateRoot = input.candidateRoot ?? process.env.KITE_CODE_RELEASE_ROOT;
   if (hintedCandidateRoot !== undefined && !isAbsolute(hintedCandidateRoot)) {
     throw new Error(`Managed candidate root is not absolute for ${basename(executable)}.`);
   }

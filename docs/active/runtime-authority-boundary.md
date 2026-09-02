@@ -39,6 +39,11 @@ outer envelope，Runtime Server只条件声明这些capability，不路由Histor
 build ID导出的exact server version与完整App capability，mismatch会关闭child。第十个App方法只用Native credential codec调用既有
 Service credential owner，secret不进入response/diagnostic；默认TUI launcher仍待接入。
 
+KASD-02的POSIX host-shell crash边界由Runtime Host generic process port拥有：实际命令位于parent-owned watchdog的独立process group，
+argv/cwd/env只经bounded stdin传入且pipe保持到terminal；App Server正常关闭调用既有process-tree cleanup，SIGKILL则由stdin EOF触发watchdog
+kill整个组。successor仍必须等Session lease并显式reconcile，不能因为child已退出就推断其副作用未发生或自动重放。Windows沿用Job guard；
+当前未获release admission的local stdio MCP不为本阶段创建测试专用启用旁路。
+
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
 完成，KASD-02 internal App Server也已接入该owner，但默认TUI/CLI尚未切换，因此不能把目标多App Server语义宣称为production能力。验证：
 `bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
