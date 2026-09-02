@@ -99,7 +99,9 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 - `workspacePath` 仅供审计，不参与判定；目录移动或改名后 key 变化，信任自然失效。
 - `externalReadScopeDigest`绑定批准时展示的exact roots；缺少该字段的legacy record只对空external scope有效，scope
   新增或漂移必须重新确认。roots本身由每次query重新canonicalize，不从store反向恢复authority。
-- 写入使用 fsync + 原子 rename，文件权限 0o600，与 MCP 项目批准存储同一模式。`trustWorkspace()` 在读取-合并-写入前获取 `.lock` 文件（排他创建 + 指数退避重试，5s 过期清理残留锁），并在持锁后重新读取存储，避免多进程并发信任不同目录时发生记录覆盖。
+- 写入使用fsync + 原子rename，文件权限0o600，与MCP项目批准存储同一模式。`trustWorkspace()`在读取-合并-写入前获取
+  owner-specific `.kite-lock`并在持锁后重新读取expected revision。锁绑定PID、process-start identity、随机nonce与inode；不再按固定wall-clock
+  年龄删除，只有能证明exact owner已死亡才回收，alive/uncertain/malformed全部fail closed。多进程并发信任不同目录不会覆盖已有记录。
 - `source` 当前取值：`user`（TUI 确认）、`config`（CLI `--trust-workspace` 显式背书）、`test`（测试 harness 预写）。
 
 ## 测试边界

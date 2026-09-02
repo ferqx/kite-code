@@ -8,7 +8,8 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
 ## 拥有职责
 
 - 拥有 CLI parser/output、Ink TUI、terminal interaction/rendering、client-safe reducer/projection，以及 language、theme、
-  color preset、key binding 等 presentation-local preference。
+  color preset、key binding 等 presentation-local preference。偏好写入使用`@kite-ai/kite-local-runtime/config`的per-file lock与atomic
+  replacement；两个TUI或TUI/App Server并发修改不同字段不得lost update。
 - 通过release composition注入的single-Service connector取得Runtime、History、App Control、Native credential与connection
   snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
 - `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed

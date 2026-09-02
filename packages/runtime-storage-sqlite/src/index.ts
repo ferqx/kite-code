@@ -156,6 +156,7 @@ export {
   type KiteSessionExecutionAuthorityRecord,
   type KiteSessionExecutionBinding,
   type KiteSessionExecutionStatus,
+  type KiteSessionInitialExecutionInput,
 } from './kite-session-execution-authority';
 export {
   createKiteSessionMutationPort,

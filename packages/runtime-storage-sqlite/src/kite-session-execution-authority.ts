@@ -30,6 +30,14 @@ export interface KiteSessionExecutionBinding {
   readonly expectedAuthorityRevision: number;
 }
 
+export interface KiteSessionInitialExecutionInput {
+  readonly sessionId: string;
+  readonly hostInstanceId: string;
+  readonly clientId: string | null;
+  readonly connectionGeneration: number;
+  readonly leaseUntilMs: number;
+}
+
 export type KiteSessionExecutionAuthorityErrorCode =
   | 'invalid_input'
   | 'session_not_found'
@@ -61,6 +69,10 @@ export interface KiteSessionExecutionAuthority {
   /** Caller already owns the Session mutation transaction. */
   markRecoveryRequiredInTransaction(
     binding: KiteSessionExecutionBinding,
+  ): KiteSessionExecutionAuthorityRecord;
+  /** Session facts were inserted earlier in this same writer transaction. */
+  acquireInitialInTransaction(
+    input: KiteSessionInitialExecutionInput,
   ): KiteSessionExecutionAuthorityRecord;
   acquire(input: {
     readonly sessionId: string;
@@ -123,12 +135,12 @@ export function createKiteSessionExecutionAuthority(input: {
     }
   };
 
-  const readTx = (sessionId: string): PersistedRecord => {
+  const readStoredTx = (sessionId: string): PersistedRecord | undefined => {
     ensureSession(sessionId);
     const row = input.database
       .query<{ value: string }, [string]>('SELECT value FROM kite_meta WHERE key = ? LIMIT 1')
       .get(key(sessionId));
-    if (!row) return initialRecord(sessionId);
+    if (!row) return undefined;
     try {
       return parseRecord(JSON.parse(row.value) as unknown, sessionId);
     } catch (error) {
@@ -139,6 +151,8 @@ export function createKiteSessionExecutionAuthority(input: {
       );
     }
   };
+  const readTx = (sessionId: string): PersistedRecord =>
+    readStoredTx(sessionId) ?? initialRecord(sessionId);
 
   const writeTx = (record: PersistedRecord): void => {
     input.database
@@ -213,6 +227,39 @@ export function createKiteSessionExecutionAuthority(input: {
     });
     writeTx(recovery);
     return publicRecord(recovery);
+  };
+
+  const acquireInitialInTransaction = (
+    request: KiteSessionInitialExecutionInput,
+  ): KiteSessionExecutionAuthorityRecord => {
+    if (!input.writer.inTransaction) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Initial Session execution authority requires the creation transaction.',
+      );
+    }
+    assertSessionId(request.sessionId);
+    assertIdentity(request.hostInstanceId, 'Host instance');
+    assertNullableIdentity(request.clientId, 'Client');
+    assertGeneration(request.connectionGeneration, 'Connection generation');
+    assertFutureLease(request.leaseUntilMs, now());
+    if (readStoredTx(request.sessionId)) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Initial Session execution authority already exists.',
+      );
+    }
+    const acquired = nextRecord(initialRecord(request.sessionId), now(), {
+      status: 'active',
+      controllerGeneration: 1,
+      hostInstanceId: request.hostInstanceId,
+      clientId: request.clientId,
+      connectionGeneration: request.connectionGeneration,
+      leaseUntilMs: request.leaseUntilMs,
+      cleanupConfirmed: false,
+    });
+    writeTx(acquired);
+    return publicRecord(acquired);
   };
 
   const acquire = (
@@ -362,6 +409,7 @@ export function createKiteSessionExecutionAuthority(input: {
     read,
     assertActive,
     markRecoveryRequiredInTransaction,
+    acquireInitialInTransaction,
     acquire,
     renew,
     detach,

@@ -101,6 +101,7 @@
       "id": "kite-local-runtime-client",
       "sources": ["packages/kite-local-runtime/src/**", "packages/kite-local-runtime/package.json"],
       "excludeSources": [
+        "packages/kite-local-runtime/src/config/**",
         "packages/kite-local-runtime/src/service/**",
         "packages/kite-local-runtime/src/client/native-connector.ts",
         "packages/kite-local-runtime/src/manager/**"
@@ -110,6 +111,16 @@
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/coordinator-workspace-worker-web.md",
+        "docs/active/single-service-local-runtime.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-config",
+      "sources": ["packages/kite-local-runtime/src/config/**"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "apps/kite-cli/README.md",
+        "apps/kite-service/README.md",
         "docs/active/single-service-local-runtime.md"
       ]
     },

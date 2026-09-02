@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -200,6 +201,56 @@ describe('Kite Session execution authority', () => {
       rmSync(fixture.root, { recursive: true, force: true });
     }
   });
+
+  test('creates the first generation atomically with new Session facts', () => {
+    const fixture = createStore([]);
+    try {
+      const writer = createKiteHomeWriteTransactionPort(
+        fixture.database,
+        assertKiteSessionStoreSchema,
+      );
+      const authority = createKiteSessionExecutionAuthority({
+        database: fixture.database,
+        writer,
+        nowMs: () => 100,
+      });
+      const initial = writer.run(() => {
+        insertSession(fixture.database, 'session-1');
+        return authority.acquireInitialInTransaction({
+          sessionId: 'session-1',
+          hostInstanceId: 'host-1',
+          clientId: 'client-1',
+          connectionGeneration: 1,
+          leaseUntilMs: 200,
+        });
+      });
+      expect(initial).toMatchObject({
+        status: 'active',
+        controllerGeneration: 1,
+        revision: 1,
+      });
+
+      expect(() =>
+        writer.run(() => {
+          insertSession(fixture.database, 'session-2');
+          authority.acquireInitialInTransaction({
+            sessionId: 'session-2',
+            hostInstanceId: 'host-1',
+            clientId: null,
+            connectionGeneration: 1,
+            leaseUntilMs: 50,
+          });
+        }),
+      ).toThrow();
+      expect(
+        fixture.database
+          .query("SELECT 1 FROM runtime_sessions WHERE session_id = 'session-2'")
+          .get(),
+      ).toBeNull();
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 function createStore(sessionIds: readonly string[]) {
@@ -216,14 +267,7 @@ function createStore(sessionIds: readonly string[]) {
       ) VALUES ('workspace-1', '/workspace', ?, 'project-1', 'digest-1', '', 1, 1)`,
     )
     .run(`sha256:${'1'.repeat(64)}`);
-  const insert = database.query(
-    `INSERT INTO runtime_sessions(
-      session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch,
-      revision, name, updated_at, run_index_from_revision
-    ) VALUES (?, 'workspace-1', 'project-1', 'digest-1', 27,
-      'kite-agent-server-api-v1-2026-08-29', 0, '', 1, 0)`,
-  );
-  for (const sessionId of sessionIds) insert.run(sessionId);
+  for (const sessionId of sessionIds) insertSession(database, sessionId);
   return {
     root,
     path,
@@ -233,6 +277,18 @@ function createStore(sessionIds: readonly string[]) {
       rmSync(root, { recursive: true, force: true });
     },
   };
+}
+
+function insertSession(database: Database, sessionId: string): void {
+  database
+    .query(
+      `INSERT INTO runtime_sessions(
+      session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch,
+      revision, name, updated_at, run_index_from_revision
+    ) VALUES (?, 'workspace-1', 'project-1', 'digest-1', 27,
+      'kite-agent-server-api-v1-2026-08-29', 0, '', 1, 0)`,
+    )
+    .run(sessionId);
 }
 
 async function runChildren(

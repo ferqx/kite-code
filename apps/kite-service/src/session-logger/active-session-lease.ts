@@ -1,5 +1,3 @@
-import { dlopen, type Pointer, ptr } from 'bun:ffi';
-import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -13,7 +11,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
 import {
   assertSecureOwnedRegularFile,
   assertSecureSessionLogDirectoryChainIdentity,
@@ -22,6 +19,7 @@ import {
   type SecureSessionStorageOptions,
   writeSessionLogJsonAtomically,
 } from '@kite-ai/builtin-runtime/model';
+import { readLocalProcessStartIdentity } from '@kite-ai/kite-local-runtime/config';
 
 export const SESSION_LOG_LEASE_FILE = '.active-session-lease.json';
 export const SESSION_LOG_TERMINAL_FILE = 'terminal.json';
@@ -29,20 +27,6 @@ const OPERATION_LOCK_FILE = '.session-operation.lock';
 export const SESSION_LOG_ADMISSION_LOCK_FILE = '.session-admission.lock';
 export const SESSION_LOG_LEASE_RESERVE_BYTES = 512;
 export const SESSION_LOG_OPERATION_RESERVE_BYTES = 256;
-
-type WindowsProcessIdentityApi = {
-  OpenProcess(access: number, inheritHandle: boolean, processId: number): number | bigint;
-  GetProcessTimes(
-    process: number | bigint,
-    creationTime: Pointer,
-    exitTime: Pointer,
-    kernelTime: Pointer,
-    userTime: Pointer,
-  ): boolean;
-  CloseHandle(handle: number | bigint): boolean;
-};
-
-let windowsProcessIdentityApi: WindowsProcessIdentityApi | undefined;
 
 export interface SessionLogLeaseRecord {
   version: 1;
@@ -374,81 +358,7 @@ export function tryAcquireSessionLogAdmission(
 }
 
 export function readProcessStartIdentity(pid: number): string | undefined {
-  if (!Number.isInteger(pid) || pid <= 0) return undefined;
-  if (process.platform === 'linux') {
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const closeParen = stat.lastIndexOf(')');
-      const fields = stat.slice(closeParen + 2).split(' ');
-      const startTicks = fields[19];
-      const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
-      return startTicks && bootId ? `linux:${bootId}:${startTicks}` : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  if (process.platform === 'darwin') {
-    // Establishing the current writer must not depend on spawning `ps`: a
-    // hardened sandbox may deny process listing even though secure local file
-    // writes are allowed. This fallback is deliberately tagged as
-    // incomparable with a later `ps` observation; inspection fails closed for
-    // a live PID instead of treating clock rounding as evidence of PID reuse.
-    if (pid === process.pid && Number.isFinite(performance.timeOrigin)) {
-      return `darwin:fallback:${pid}:${Math.floor(performance.timeOrigin)}`;
-    }
-    const result = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8',
-    });
-    const started = result.status === 0 ? result.stdout.trim() : '';
-    const startedAt = Date.parse(started);
-    return Number.isFinite(startedAt) ? `darwin:ps:${Math.floor(startedAt / 1000)}` : undefined;
-  }
-  if (process.platform === 'win32') {
-    return readWindowsProcessStartIdentity(pid);
-  }
-  return undefined;
-}
-
-function readWindowsProcessStartIdentity(pid: number): string | undefined {
-  try {
-    const api = getWindowsProcessIdentityApi();
-    // PROCESS_QUERY_LIMITED_INFORMATION is available on supported Windows versions
-    // and avoids a PowerShell process launch during session initialization.
-    const processHandle = api.OpenProcess(0x1000, false, pid);
-    if (!processHandle) return undefined;
-    try {
-      const creationTime = new Uint8Array(8);
-      const ignored = new Uint8Array(8);
-      if (
-        !api.GetProcessTimes(
-          processHandle,
-          ptr(creationTime),
-          ptr(ignored),
-          ptr(ignored),
-          ptr(ignored),
-        )
-      ) {
-        return undefined;
-      }
-      const value = new DataView(creationTime.buffer).getBigUint64(0, true);
-      return `win32:${value}`;
-    } finally {
-      api.CloseHandle(processHandle);
-    }
-  } catch {
-    return undefined;
-  }
-}
-
-function getWindowsProcessIdentityApi(): WindowsProcessIdentityApi {
-  if (!windowsProcessIdentityApi) {
-    windowsProcessIdentityApi = dlopen('kernel32.dll', {
-      OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
-      GetProcessTimes: { args: ['u64', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'bool' },
-      CloseHandle: { args: ['u64'], returns: 'bool' },
-    }).symbols;
-  }
-  return windowsProcessIdentityApi;
+  return readLocalProcessStartIdentity(pid);
 }
 
 function readLeaseRecord(path: string): SessionLogLeaseRecord | undefined {

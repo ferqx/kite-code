@@ -58,6 +58,8 @@ current authority；generator不成为runtime export。KASAPI-02C后，Web build
 Local Runtime Service 的客户端边界已经分成browser-safe Agent API client、terminal App Control contract与Bun/Node-only
 `kite-local-runtime`；App Control使用独立source owner，Native client与Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+CLI与Service共享的per-file config mutation primitive使用独立`kite-local-runtime-config`规则；它从通用local-runtime client rule排除，避免把
+用户配置lock/atomic replacement误写成Runtime connection行为。
 当前默认单Service、单SQLite、最小OS runtime与legacy migration边界见
 [`active/single-service-local-runtime.md`](active/single-service-local-runtime.md)。
 

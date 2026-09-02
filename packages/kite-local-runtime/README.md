@@ -3,7 +3,7 @@
 ## 定位
 
 `@kite-ai/kite-local-runtime` 是 Kite managed Local Service 的 Bun/Node-only、repo-private Native substrate。它以互斥
-`./client`、`./coordinator`、`./manager`、`./service` exports冻结descriptor/token/lock/lifecycle、instance handshake、Native
+`./client`、`./config`、`./coordinator`、`./manager`、`./service` exports冻结descriptor/token/lock/lifecycle、instance handshake、Native
 credential及Runtime/History/App Control connection contract；它不创建Runtime Host/Store/Server composition。
 
 ## 拥有职责
@@ -13,6 +13,9 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   authenticated control plane；caller确认Workspace trusted后才显式`connect()`。用户可在Trust页面停留超过Worker
   capability TTL：Runtime尚未连接时，HTTP 401只在carrier dispatch前产生，connector会重新ensure/discover exact
   Worker identity并把同一App Control request重发一次；第二次401、identity drift或Runtime已连接时不自动重试。
+- `./config`：CLI与Service共享的per-file mutation primitive。每个目标使用独立`.kite-lock`、PID/start identity、随机nonce与inode
+  复核；只有exact owner可release，只有明确dead的owner可reclaim，alive/uncertain/malformed全部fail closed。多文件CAS按canonical path排序取锁，
+  普通用户配置以same-directory temp、fsync、atomic rename替换。它不读取配置语义、不建立global lock/daemon，也不接触Runtime Store。
 - `./manager`：单一ensure/status/stop/restart state machine、native process/spawn/PID probe、cross-process lifecycle lock、
   neutral environment与explicit executable resolver composition。manager拥有control token；普通connection不取得它。
 - source mode在POSIX直接执行repo-owned shebang entry（Service、Coordinator、Worker、Gateway各自的 exact entry）；Windows没有
@@ -76,7 +79,7 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 
 ## 公开入口
 
-只导出 `@kite-ai/kite-local-runtime/client`、`@kite-ai/kite-local-runtime/coordinator`、
+只导出 `@kite-ai/kite-local-runtime/client`、`@kite-ai/kite-local-runtime/config`、`@kite-ai/kite-local-runtime/coordinator`、
 `@kite-ai/kite-local-runtime/manager` 与 `@kite-ai/kite-local-runtime/service`。不提供root export，不暴露跨layerimplementation。
 
 ## 关键不变量

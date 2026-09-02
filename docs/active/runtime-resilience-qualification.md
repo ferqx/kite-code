@@ -17,6 +17,10 @@
 KASD-01或release qualification完成。局部effect fault matrix另外证明prepare/dispatch/renew/terminal的generation binding、late terminal
 拒绝，以及unknown effect与Session `recovery_required`原子提交后不能重放。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts`。
 
+global config局部资格以真实process证明同一文件互斥、不同文件无global lock、两个TUI并发保留不同preference字段，以及TUI与模拟App Server并发
+保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整
+App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/config-file-mutation-lock.test.ts apps/kite-cli/test/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
+
 ## 两级运行契约
 
 ## Runtime Server V1 恢复与 transport 资格

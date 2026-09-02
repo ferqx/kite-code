@@ -9,6 +9,10 @@
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
 
+Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-runtime/config`共享primitive，原有Linux boot-id/start-ticks、macOS
+current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变
+日志lease、heartbeat或retention语义。
+
 GitHub Session log ACL smoke 使用正式 CI 基线 Bun `1.4.0`；版本变化必须与 Required CI 和 smoke
 验证共同收敛。
 

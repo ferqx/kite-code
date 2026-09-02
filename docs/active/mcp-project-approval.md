@@ -29,7 +29,9 @@ local 与 user 来源保持自动连接行为。调用方显式传入的 `config
 - 排序对象键但保留数组顺序的完整 raw config；
 - 未识别字段和未展开的环境变量引用。
 
-批准动作在写入前重新读取 source 并比较 expected digest。配置变化返回 `config_changed`，旧批准或拒绝记录不匹配新摘要，条目回到 `pending_approval`。Approval Store 损坏或不可读时项目来源 fail closed，且不得覆盖损坏文件。
+批准动作按canonical path顺序同时取得source配置与Approval Store的owner-specific lock，再重新读取source并比较expected digest、重读Approval
+Store后执行atomic replacement。配置变化返回`config_changed`，锁/Store不可用返回`store_unavailable`；旧批准或拒绝记录不匹配新摘要，条目回到
+`pending_approval`。Approval Store损坏时fail closed且不得覆盖。外部编辑器虽不参与Kite lock，后续connect仍重新按当前config digest匹配批准记录。
 
 ## 与 Runtime Policy 的边界
 

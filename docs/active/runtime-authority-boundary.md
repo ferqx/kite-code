@@ -15,6 +15,8 @@
 client binding，不能单独renew或提交。read不落盘也不取得lease；acquire/renew/detach/release才写authority record。active/detached lease失效且
 cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
 `controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
+fresh Session的generation 1不经过第二个transaction：Session事实插入后只能调用already-held writer中的initial acquire seam，后续callback/fault会
+同时回滚Session与authority。
 
 目标Store的`sessionMutation`在SQLite writer transaction取得后重读execution binding、authority revision、lease deadline与Session revision，
 检查和写入之间不存在另一个SQLite writer commit窗口。目标effect record同时保存Session generation、Host/client/connection tuple和正交的effect

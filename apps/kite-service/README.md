@@ -15,6 +15,8 @@ terminal/Web data plane；独立Web Gateway process/control/state实现已经删
   interaction broker、App Control与共享mutation gate。
 - Service拥有config/credential、Workspace Trust、Provider/model、MCP Supervisor/auth、Skill、Sandbox/Shell、Git、observability、
   session logging、checkpoint及release/execution status，并只向client投影closed safe contract。
+- 用户配置、MCP配置、Project approval与Workspace Trust写入复用`kite-local-runtime/config`的owner-specific跨进程lock、持锁后revision
+  重读和atomic replacement。Provider/model跨user/project两文件按canonical顺序取锁并在写前重新CAS；不存在global config daemon或宽锁。
 - `src/executable.ts`接受manager专用的exact `service run-single`入口，从显式canonical home、build identity、neutral cwd、allowlisted env和
   readiness fd启动；stdout不承载readiness。
 - `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；

@@ -60,7 +60,8 @@
   `kite-session-app-server-2026-09-02` exact epoch，空文件在`BEGIN IMMEDIATE`内初始化，existing exact Store正常reopen，旧epoch、partial或
   corrupt Store统一返回`store_upgrade_required`；它不探测、导入或改写`kite.sqlite`。`createKiteSessionExecutionAuthority`在同一
   `kite_meta` owner中持久化Host-owned `controllerGeneration`、authority revision、lease deadline与cleanup状态；acquire/renew/detach/release
-  均使用SQLite CAS，过期且cleanup未确认的owner只会进入`recovery_required`，显式确认cleanup后才可再次acquire。该substrate尚未成为TUI/CLI
+  均使用SQLite CAS；fresh Session的generation 1只能在已持有的Session creation transaction内建立，任一后续失败同时回滚Session与authority。
+  过期且cleanup未确认的owner只会进入`recovery_required`，显式确认cleanup后才可再次acquire。该substrate尚未成为TUI/CLI
   production composition，不能据此删除当前Store 9或Workspace process lock。
 - 新epoch的`runtime_effect_leases`使用独立exact列集合，除attempt-local `lease_revision`外还绑定Session `controller_generation`与
   Host/client/connection identity。`createKiteSessionMutationPort`在同一个`BEGIN IMMEDIATE`内重读这组execution binding、authority revision、

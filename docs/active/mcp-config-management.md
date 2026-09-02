@@ -28,6 +28,8 @@ MCP 配置 schema 不识别数据分类、正文授权或 egress permit 字段�
 
 - mutation 重新读取文件并验证 source/entry expected revision；
 - 外部变化返回 `config_conflict`，不得覆盖；
+- 每次project/user mutation只取得目标文件自己的`.kite-lock`，持锁后重新加载catalog并执行expected revision CAS，再以fsync + atomic rename替换；
+  不同配置文件可并行，锁busy/identity不确定返回typed write failure，不建立全局配置锁或daemon；
 - JSONC edit 只修改 `mcpServers` 下的目标键，保留无关字段、注释和环境变量占位；
 - 写入使用目标同目录临时文件、文件 flush、权限设置和原子 rename；已有文件保留原 mode，新建 user 文件为 `0600`，新建 project 文件为 `0644`；
 - project add 只产生 pending approval，保存动作不得同时批准。

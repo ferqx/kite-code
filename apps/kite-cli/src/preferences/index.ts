@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import {
+  acquireConfigFileMutationLock,
+  replaceConfigFileAtomically,
+} from '@kite-ai/kite-local-runtime/config';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 
 /**
@@ -54,16 +58,19 @@ function readPreferences(path = clientConfigPath()): ClientPreferences | undefin
 }
 
 function writePreference(key: keyof ClientPreferences, value: string): boolean {
+  let lock: ReturnType<typeof acquireConfigFileMutationLock> | undefined;
   try {
     const path = clientConfigPath();
-    mkdirSync(dirname(path), { recursive: true });
+    lock = acquireConfigFileMutationLock(path);
     const source = existsSync(path) ? readFileSync(path, 'utf8') : '{}';
     const formattingOptions = { insertSpaces: true, tabSize: 2, eol: '\n' as const };
     const next = applyEdits(source, modify(source, [key], value, { formattingOptions }));
-    writeFileSync(path, next, { encoding: 'utf8', mode: 0o600 });
+    replaceConfigFileAtomically(path, next, 0o600);
     return true;
   } catch {
     return false;
+  } finally {
+    lock?.release();
   }
 }
 

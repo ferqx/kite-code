@@ -48,7 +48,7 @@ Web -------loopback HTTP------------>       │
 | Tranche | 状态 | 当前产出 |
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
-| KASD-01 | in_progress | 新Store exact open/profile path与Session generation CAS已完成；全mutation/effect/config与lock移除待完成 |
+| KASD-01 | in_progress | 新Store/generation/mutation/effect与global config CAS前置已完成；旧write port接入和process lock移除待完成 |
 | KASD-02 | pending | App Server正式进程边界 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
@@ -77,11 +77,14 @@ Web -------loopback HTTP------------>       │
 - 已完成installed/source deterministic物理profile path，其中source digest严格采用本计划冻结的domain-separated SHA-256；目录owner/non-link创建将在
   composition接入时完成，当前纯路径函数不产生目录副作用；
 - 已完成Host-owned Session execution authority substrate：`controllerGeneration`、authority revision、lease deadline、cleanup状态与
-  `recovery_required` CAS闭环；真实双进程同Session争用只有一个writer，不同Session均成功；
+  `recovery_required` CAS闭环；fresh Session generation 1与Session事实同一writer transaction、失败共同回滚；真实双进程同Session争用只有一个
+  writer，不同Session均成功；
 - 已完成目标`sessionMutation` transaction与generation-bound effect substrate：检查/写入共享一个SQLite writer transaction，effect
   prepare/dispatch/renew/terminal/unknown绑定Session generation与正交lease revision，unknown与`recovery_required`原子提交；
-- 尚未把event/snapshot/name/model、delete、checkpoint/fork/rewind、Run/recovery与Artifact引用等旧write port逐项组合到该入口，尚未完成global
-  config CAS，也尚未删除Workspace process lock与one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production
+- 已完成global config CAS：CLI preference、provider/model、MCP config、Project approval和Workspace Trust使用共享per-file lock、持锁后重读与
+  atomic replacement；真实TUI/TUI及TUI/模拟App Server进程并发写同一用户配置不丢字段，没有global writer lock；
+- 尚未把event/snapshot/name/model、delete、checkpoint/fork/rewind、Run/recovery与Artifact引用等旧write port逐项组合到该入口，也尚未删除
+  Workspace process lock与one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production
   caller。
 
 - 建立新exact Store epoch，把现有`controllerGeneration`字段提升为App Server Host持有的Session execution generation；Controller client binding
@@ -243,10 +246,10 @@ Runtime Store。
 
 | Mutation族 | 当前source | 当前并发事实 | KASD-01裁决 |
 | --- | --- | --- | --- |
-| Provider/model、language、interaction mode、color preset等用户配置 | `apps/kite-service/src/config/index.ts` | 多处`readFileSync`后直接`writeFileSync`，可能lost update | 每个文件定义digest/revision、owner lock、lock后重读与typed conflict；未完成setter在多App Server路径禁用 |
-| MCP config | `mcp-config-repository.ts` | 有revision检查与atomic rename，但缺少跨进程lock后的重新CAS | 增加owner-specific lock + reread CAS；不建立全局config daemon |
-| Project MCP approval | `mcp-project-approvals.ts` | 读取旧文件后覆盖，无可靠跨进程CAS | 增加独立revision/lock/conflict；未完成前mutation禁用 |
-| Workspace Trust | `workspace-trust.ts` | 有文件lock/revision，但旧PID/固定时间stale判断不足以证明长操作owner | 使用可验证owner identity并在lock内重读expected revision；失败返回typed conflict，不静默抢锁 |
+| Provider/model、language、interaction mode、color preset等用户配置 | CLI preference、Service provider/model owner | 共享per-file lock + atomic read/modify/replace；provider/model跨user/project锁内重读revision | 已完成；presentation preference以锁内field merge避免lost update，provider/model返回typed conflict |
+| MCP config | `mcp-config-repository.ts` | owner-specific file lock内reload catalog、expected revision CAS、atomic replace | 已完成；不建立global config daemon |
+| Project MCP approval | `mcp-project-approvals.ts` | source与approval按canonical顺序取锁、重读digest/store、atomic replace | 已完成；外部editor由connect-time digest继续fail closed |
+| Workspace Trust | `workspace-trust.ts` | PID/start identity/nonce/inode owner lock内重读expected revision；dead-only reclaim | 已完成；不再按固定时间抢锁 |
 | Store首次初始化 | `kite-home-runtime-file.ts`、`kite-home-store.ts` | 空库判断在初始化transaction之外，两个进程可能同时认为需要初始化 | 空库判断、DDL、metadata insert与exact validation进入同一transaction；`SQLITE_BUSY`有界重试 |
 | Directory/list/history/checkpoint read | `kite-home-directory.ts`及各read port | 无writer lease；多个query可能跨revision拼接 | list允许eventually consistent；resume/history/checkpoint固定单一SQLite snapshot并返回Store revision |
 

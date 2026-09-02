@@ -20,6 +20,11 @@ checkpoint等旧write port也尚未全部接入，Workspace process lock、one-c
 临时source Runtime Home仍未删除，因此下文single-Service行为继续是production current authority。当前没有daemon、Web切换、旧库导入、dual
 write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定尚未关闭的transition gap。
 
+KASD-01的global config前置已收敛：CLI preference、Service provider/model、MCP project/user config、Project approval与Workspace Trust共享
+`kite-local-runtime/config`的per-file owner lock与atomic replacement。多文件revision CAS按canonical path排序取锁；只有PID/start identity明确dead的
+exact owner可被回收，不使用固定时长stale删除。真实双进程测试覆盖两个TUI以及TUI/模拟App Server同时写同一用户配置且不丢字段。该锁不延伸到
+Runtime Store，也不是global writer lease。
+
 ## 当前边界
 
 installed/release entrypoint中的TUI、CLI `run/resume`、`service *`和`web`共用每个canonical Kite Home唯一的Local Service。source TUI默认
