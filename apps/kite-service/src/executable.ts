@@ -15,6 +15,7 @@ import {
 } from '@kite-ai/runtime-host';
 import { createAgentApiRouteHandler } from './agent-api';
 import { runKiteAppServerMain } from './app-server';
+import { runKiteAppServerDaemonMain } from './app-server-daemon';
 import {
   createKiteHomeRuntimeStorageComposition,
   createKiteRuntimeObserverHistoryFromStorage,
@@ -132,7 +133,11 @@ export async function runKiteServiceMain(
     return;
   }
   if (args[0] === 'app-server') {
-    await runKiteAppServerMain(args, { environment: dependencies.environment });
+    if (args[1] === 'run-daemon') {
+      await runKiteAppServerDaemonMain(args, { environment: dependencies.environment });
+    } else {
+      await runKiteAppServerMain(args, { environment: dependencies.environment });
+    }
     return;
   }
   if (args.length === 1 && args[0] === '--kite-internal-process-tree-v1') {

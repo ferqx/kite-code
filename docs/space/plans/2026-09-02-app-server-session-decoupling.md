@@ -51,8 +51,8 @@ Web -------loopback HTTP------------>       │
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
 | KASD-02 | completed | stdio/Host/Session generation、完整client面、source/candidate配对与active model/Shell crash已通过 |
 | KASD-03 | completed | TUI/CLI default local cutover、observer/mutation边界、双TUI与installed smoke |
-| KASD-04 | in_progress | 显式本机daemon与exact protocol |
-| KASD-05 | pending | Web client解耦 |
+| KASD-04 | completed | 显式本机daemon、exact protocol、dead-only lifecycle与真实client/PTY/candidate证据 |
+| KASD-05 | in_progress | Web client解耦 |
 | KASD-06 | pending | 旧single-Service控制面删除与qualification |
 
 ### KASD-00：冻结契约与迁移基线
@@ -71,7 +71,7 @@ Web -------loopback HTTP------------>       │
 
 ### KASD-01：Durable Session execution fencing与多进程Store前置
 
-当前子阶段（2026-09-02）：
+完成证据（2026-09-02）：
 
 - 已完成`kite-session.sqlite` absent/empty transaction初始化、exact reopen、旧epoch/partial/corrupt typed拒绝以及不探测旧`kite.sqlite`；
 - 已完成installed/source deterministic物理profile path，其中source digest严格采用本计划冻结的domain-separated SHA-256；KASD-02 release
@@ -189,6 +189,22 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 
 ### KASD-04：显式daemon与版本协商
 
+当前子阶段（2026-09-02）：
+
+- 已增加显式`kite server start/status/stop`与TUI/CLI `--server <endpoint>`；默认run/TUI仍只spawn parent-owned stdio，不discover或
+  auto-start daemon；
+- daemon复用App Server composition和`kite-session.sqlite`，以独立per-profile owner-only Unix socket/Windows named pipe服务多个client，
+  当前start固定一个canonical Workspace，连接另一Workspace fail closed；
+- daemon使用固定`kite-app-server-daemon-v1`和exact method capability判断兼容，build ID只作status诊断。模拟旧build但同protocol可连接，
+  要求未知capability的future client拒绝；不提供version range、client-triggered upgrade或fallback；
+- 普通disconnect只释放对应carrier；显式stop先cancel active Turn、drain连接，再清理endpoint。status只读，不创建daemon state；不兼容或
+  identity不确定的endpoint不被stop/replace；
+- 本机真实release与PTY测试已覆盖幂等start/status/stop、双client History、TUI disconnect保活和active Turn stop；完整42-file TUI PTY、
+  Service 1516 + 38 isolated、CLI 717 + 3 isolated、release 199、16-workspace typecheck、architecture/docs Gate与candidate
+  `112948303d37d3a548521541` build/verify/smoke通过；
+- 过度设计门禁保留上述真实consumer与安全边界，删除status/stop隐式创建Kite Home/profile的副作用，并延期version range、自动升级、
+  Storage daemon、remote transport、多Workspace daemon与Web listener，未留下对应脚手架。
+
 - 增加`kite server start/status/stop`和显式`--server <endpoint>`；不自动发现daemon；
 - daemon使用owner-only Unix socket/Windows named pipe，WebSocket/remote保持未支持；
 - 只定义一套exact Kite App protocol：复用ADR-0142 transport envelope/request identity/strict schema/receipt边界，`initialize`是首个请求而非
@@ -201,6 +217,8 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 验收：default local与daemon使用同一协议conformance；旧/新模拟客户端覆盖read-only、write拒绝和unknown capability fail-closed。
 
 ### KASD-05：Web client解耦
+
+当前子阶段（2026-09-02）：开始实施；KASD-04 daemon不包含HTTP/Web listener，以下变化尚未声明完成。
 
 - Web assets从App Server Runtime readiness中移除；default local不启动HTTP；
 - `kite web`只连接已经显式启动的daemon；daemon absent返回typed unavailable，不隐式启动；

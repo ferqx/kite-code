@@ -27,7 +27,8 @@ ADR-0166的`kite-session.sqlite`多连接owner不取得Workspace process lock，
 Server写不同Session。KASD-03默认client已切入该owner；这不恢复Coordinator/Worker拓扑，旧Workspace lock与one-connection Store只留在
 显式legacy Service。
 
-App Server以parent-owned stdio组合该owner和现有Host；它不是Coordinator/Worker复活，也没有Web Gateway、HTTP listener或
+App Server默认以parent-owned stdio组合该owner和现有Host；显式`kite server start`可用owner-only Unix socket/Windows named pipe
+承载同一composition的多个client，并固定一个canonical Workspace。两者都不是Coordinator/Worker复活，也没有Web Gateway、HTTP listener或
 process-wide notification bus。另一个App Server可从Store snapshot读取Session，但不因read或退出取得/取消其generation。
 
 ## Web REST边界

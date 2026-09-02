@@ -1321,6 +1321,7 @@ function TuiApp({
               serverVersion: translate('appServerStatus.serverVersion'),
               clientVersion: translate('appServerStatus.clientVersion'),
               paired: translate('appServerStatus.paired'),
+              protocolCompatible: translate('appServerStatus.protocolCompatible'),
             })
           : serviceRuntime
             ? formatServiceRuntimeStatus(serviceRuntime, {

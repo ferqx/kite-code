@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   createKiteHomeIdentity,
   kiteHomeRuntimeDigest,
+  resolveKiteAppServerDaemonEndpoint,
   resolveKiteLocalRuntimeEndpoint,
 } from '../../src/service';
 
@@ -42,6 +43,35 @@ describe('single Service runtime endpoint contract', () => {
       pipeName: `\\\\.\\pipe\\kite-service-v1-${kiteHomeRuntimeDigest(home)}`,
     });
     expect(JSON.stringify(endpoint)).not.toContain('validated');
+  });
+
+  test('keeps the explicit App Server daemon endpoint distinct from legacy Service', () => {
+    const home = createKiteHomeIdentity('/Users/test/.kite-code');
+    const runtimeParent = '/run/user/501';
+    const daemon = resolveKiteAppServerDaemonEndpoint({
+      home,
+      platform: 'darwin',
+      runtimeParent,
+    });
+    const service = resolveKiteLocalRuntimeEndpoint({
+      home,
+      platform: 'darwin',
+      runtimeParent,
+    });
+    expect(daemon).toEqual({
+      kind: 'unix',
+      homeDigest: kiteHomeRuntimeDigest(home),
+      root: service.kind === 'unix' ? service.root : '',
+      socket:
+        service.kind === 'unix' ? join(service.root, 'app-server.sock') : 'unexpected-service-kind',
+      lifecycleReservation:
+        service.kind === 'unix' ? join(service.root, 'app-server.lock') : 'unexpected-service-kind',
+    });
+    expect(resolveKiteAppServerDaemonEndpoint({ home, platform: 'win32' })).toEqual({
+      kind: 'named_pipe',
+      homeDigest: kiteHomeRuntimeDigest(home),
+      pipeName: `\\\\.\\pipe\\kite-app-server-v1-${kiteHomeRuntimeDigest(home)}`,
+    });
   });
 
   test('requires an explicit verified POSIX runtime parent', () => {

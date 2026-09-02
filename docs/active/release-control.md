@@ -60,6 +60,11 @@ build；installed candidate恢复active-pointer guard与previous-build client，
 confirmed absent后启动当前build。退役candidate、source↔installed或identity不确定均不能替换owner。
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。
 
+KASD-04候选还提供显式`kite server start/status/stop`与`--server <endpoint>`。daemon从同一source checkout或launcher-pinned candidate解析
+`kite-service app-server run-daemon`，但使用固定`kite-app-server-daemon-v1`和exact required capabilities判断兼容；build ID仅用于status。
+普通TUI/CLI不发现或启动daemon。status/stop不会替换不兼容或identity不确定的owner，自定义POSIX endpoint要求现存canonical owner-only parent；
+release smoke必须覆盖start、status、stop并确认清理。Web仍在KASD-05前走legacy Service。
+
 KASD-03已将默认TUI/CLI接到parent-owned App Server release resolver。source只使用当前Bun加checked-in Service entrypoint，build
 identity覆盖该resolver并把Runtime Store放在canonical Kite Home下按repository/worktree digest隔离的owner-only `source-profiles/`；installed
 只接受launcher传入且经marker、active pointer、`.candidate-id`与manifest重新验证的immutable candidate root，并固定解析同candidate的
@@ -167,8 +172,8 @@ hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native
 Windows候选在native build前还串行运行Service state ACL/reparse与fresh Store 9 owner tests；它们证明native canonical KiteHome、
 `kite.sqlite`与runtime endpoint的protected owner-only边界，仍不能替代随后installed single-Service/TUI process smoke。
 
-`bun run release:smoke`在新临时目录中完成verify、install、CLI help/version、parent-owned App Server TUI启动、显式legacy
-single-Service companion、retired slot/file absence、
+`bun run release:smoke`在新临时目录中完成verify、install、CLI help/version、parent-owned App Server TUI启动、显式App Server daemon
+start/status/stop、legacy single-Service companion、retired slot/file absence、
 Web payload、installed `kite-service` MCP stdio
 wrapper、第二候选安装、rollback和uninstall。
 candidate root与Kite home都使用native canonical identity；Windows长路径、8.3与大小写形式不通过字符串猜测互换，后续

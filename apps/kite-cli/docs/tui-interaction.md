@@ -49,11 +49,12 @@
 ## App Server 状态
 
 默认TUI启动一个配套的parent-owned stdio App Server，不启动HTTP listener或Web assets。`/status`显示transport、source/installed
-profile、build、App Server version、client version和initialize已证明的exact pairing；不显示Service PID、启动时间、Web URL或build drift。
+profile、build、App Server version、client version和initialize已证明的same-build pairing；不显示Service PID、启动时间、Web URL或build drift。
 source与installed mismatch都在TUI mount前fail closed，不形成可继续使用的“版本不一致”状态。
 
-该动作只读取composition注入的已验证identity，不创建Runtime Session、不发送Runtime command，也不取得writer authority。显式daemon/Web
-命令将在后续tranche接入；默认TUI没有`/web`或隐式Service发现。
+显式`--server <endpoint>`改用调用者选择的owner-only Unix socket/Windows named pipe；状态显示exact-protocol compatible，而daemon
+build只作诊断。daemon固定一个canonical Workspace，连接不同Workspace会在进入TUI前失败。该动作只读取composition注入的已验证identity，
+不创建Runtime Session、不发送Runtime command，也不取得writer authority；默认TUI没有`/web`或隐式daemon/Service发现。
 
 ## 单一交互表面
 

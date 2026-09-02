@@ -38,6 +38,7 @@ import {
   type RuntimeProtocolAppControlMethod,
   type RuntimeProtocolAppMethod,
   type RuntimeProtocolMessage,
+  type RuntimeProtocolServerControlMethod,
 } from '@kite-ai/runtime-protocol';
 import type {
   RuntimeServer,
@@ -83,6 +84,12 @@ export interface RuntimeStdioCarrierOptions {
   readonly appControl?: KiteAppControlClient;
   /** Native-only first-run credential owner; secret material is never returned. */
   readonly credential?: NativeProviderCredentialClient;
+  readonly serverControl?: Readonly<{
+    dispatch(
+      method: RuntimeProtocolServerControlMethod,
+      request: Readonly<Record<string, unknown>>,
+    ): Readonly<Record<string, unknown>> | Promise<Readonly<Record<string, unknown>>>;
+  }>;
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
 }
@@ -282,6 +289,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
             if (parsed === undefined) continue;
             if (await this.#handleHistory(parsed)) continue;
             if (await this.#handleAppControl(parsed)) continue;
+            if (await this.#handleServerControl(parsed)) continue;
             yield parsed;
             continue;
           }
@@ -302,7 +310,8 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         if (
           parsed !== undefined &&
           !(await this.#handleHistory(parsed)) &&
-          !(await this.#handleAppControl(parsed))
+          !(await this.#handleAppControl(parsed)) &&
+          !(await this.#handleServerControl(parsed))
         )
           yield parsed;
       }
@@ -430,6 +439,47 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         request.id,
         error instanceof AppControlProtocolRequestError ? 'invalid_params' : 'internal_error',
       );
+    }
+    return true;
+  }
+
+  async #handleServerControl(value: unknown): Promise<boolean> {
+    const candidate = value as { readonly method?: unknown; readonly id?: unknown };
+    if (candidate.method !== 'server/status' && candidate.method !== 'server/shutdown') {
+      return false;
+    }
+    const decoded = RUNTIME_PROTOCOL_REQUEST_SCHEMA_.safeParse(value);
+    if (!decoded.success) {
+      await this.#writeError(
+        typeof candidate.id === 'string' ? candidate.id : null,
+        'invalid_params',
+      );
+      return true;
+    }
+    const request = decoded.data as Extract<
+      typeof decoded.data,
+      { readonly method: RuntimeProtocolServerControlMethod }
+    >;
+    if (this.#connection?.state !== 'active') {
+      await this.#writeError(request.id, 'not_initialized');
+      return true;
+    }
+    if (!this.#options.serverControl) {
+      await this.#writeError(request.id, 'method_not_found');
+      return true;
+    }
+    try {
+      const response = await this.#options.serverControl.dispatch(
+        request.method,
+        request.params.request,
+      );
+      await this.#writeProtocol({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({ method: request.method, response }),
+      });
+    } catch {
+      await this.#writeError(request.id, 'invalid_params');
     }
     return true;
   }

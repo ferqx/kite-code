@@ -121,7 +121,7 @@ describe('RuntimeClient protocol state machine', () => {
         clientInfo: clientInfo(),
         expectedServer,
       });
-      await expect(client.connect()).rejects.toMatchObject({ code: 'protocol_error' });
+      await expect(client.connect()).rejects.toMatchObject({ code: 'server_mismatch' });
       expect(client.snapshotStore.getSnapshot().status).toBe('disconnected');
       await client.close();
     }

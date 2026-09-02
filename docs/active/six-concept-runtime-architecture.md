@@ -9,8 +9,9 @@
 相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143、ADR-0152、ADR-0153；模块局部边界见各 workspace README。
 
 物理本机默认拓扑是每个TUI/CLI invocation一个parent-owned stdio App Server；source/installed按各自profile共享多连接
-`kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。Workspace仍是逻辑
-admission/execution scope，不对应独立Worker进程或DB。显式legacy Service/Web控制面等待KASD后续删除。详见
+`kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。显式`kite server start`可创建
+同一composition的多client Unix socket/Windows named-pipe daemon，但默认client不发现它。Workspace仍是逻辑admission/execution scope，
+不对应独立Worker进程或DB。显式legacy Service/Web控制面等待KASD后续删除。详见
 [`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
 
 ## 总览
@@ -71,8 +72,8 @@ KASD parent-owned App Server在同一条已initialize Protocol connection上增�
 Service stdio carrier在消息进入Runtime Server前处理这些App-owned方法，以单一SQLite read snapshot调用History projector，并用现有
 `kite-app-contract`逐方法codec调用App Control；Runtime Server只条件发布capability，不路由它们。Runtime Client复用现有correlation/
 connection并验证exact server version/capability，`kite-local-runtime/client`组合semantic App adapter、Native credential codec与
-parent-owned child。credential secret不进入App Control、response或diagnostic。该内部入口尚未成为TUI/CLI默认路径，source/candidate
-launcher pairing也仍未完成。
+parent-owned child。credential secret不进入App Control、response或diagnostic。默认TUI/CLI使用same-build stdio pairing；显式daemon
+在同一logical protocol上额外声明`server/status|shutdown`，以固定exact daemon version/capability兼容，而不把build ID提升为协议或Store authority。
 
 `@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有

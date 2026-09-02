@@ -56,6 +56,12 @@ stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diag
 `app-server run-stdio` process owner观察该EOF后立即执行Server drain、active Turn cancel/cleanup、Session generation release和composition
 dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/invalid JSON与stdout failure fail closed。
 
+显式`app-server run-daemon`复用同一JSONL logical-message carrier，但listener是独立owner-only Unix socket或Windows named pipe；
+每条socket connection拥有一个carrier/Runtime Server connection并共享daemon composition。Client EOF只释放该connection，不触发
+`cancelAll`或dispose。daemon只额外声明exact`server/status|server/shutdown`，parent-owned stdio不声明；shutdown response仍走同一JSON-RPC
+correlation，随后owner取消active Turn、drain全部connection、关闭endpoint并dispose Store。未知字段、未initialize、缺少capability或协议版本
+不匹配都fail closed，不存在外层lifecycle frame或build negotiation。
+
 App Server执行未sandboxed host Shell时，Runtime Host generic process port使用Service内嵌的
 `--kite-internal-process-tree-v1`（source使用同源码child）作为POSIX watchdog；App Server意外死亡会关闭watchdog stdin，watchdog终止
 同process group的实际command。正常EOF/signal仍优先走Host cancel/cleanup。该internal mode不接受普通CLI路由或command args。

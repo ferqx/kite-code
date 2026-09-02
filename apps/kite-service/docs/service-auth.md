@@ -10,6 +10,7 @@
 | Runtime WebSocket | one-shot `Kite-Local-Ticket` | 无cookie/subprotocol；Origin absent或exact；instance+Workspace bound |
 | History/App | `Kite-Local-Access` | 无cookie；Origin absent或exact；exact route codec |
 | control stop | `Kite-Local-Control` | Origin/cookie缺失；body exact `{}` |
+| App Server daemon Runtime/control | 无secret token | owner-only Unix socket/current-user named pipe；首请求initialize；fixed exact daemon version/capabilities |
 | Agent API exchange | one-shot `Kite-Connection` | Native-only purpose；Workspace Trust重验；无Origin/Cookie/Sec-Fetch；strict body |
 | Agent API shell | hash-only `Bearer` context | 60分钟absolute TTL；Worker/Workspace/Client generation/role bound；Browser拒绝 |
 

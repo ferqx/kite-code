@@ -42,6 +42,10 @@ rewind产生独立durable目标且不依赖旧single-Service Controller。
 校验还暴露并修复了TUI首屏History请求携带`cursor: undefined`的非JSON对象，现仅在cursor真实存在时编码。macOS arm64 candidate已通过
 build/verify/install和installed TUI PTY startup；Ubuntu/Windows与完整TUI矩阵仍须在后续qualification收敛。
 
+KASD-04本机资格增加真实Unix socket daemon：start幂等、status只读、普通disconnect保留owner、双client共享History、active Turn stop时先
+cancel再drain并清理endpoint；模拟旧build但相同exact protocol可连接，要求未知capability的client fail closed且不能触发replace/stop。
+当前证据不声称Windows named-pipe或三平台通过，daemon也不提供自动upgrade、background watcher、remote transport或Web listener。
+
 ## 两级运行契约
 
 ## Runtime Server V1 恢复与 transport 资格

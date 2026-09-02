@@ -16,11 +16,14 @@
 - `src/service-mode/` 将parent-owned `KiteAppServerConnection`与legacy authenticated `LocalKiteConnection`投影为同一个中性
   Runtime mode facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
-- CLI parser/main只保留`kite web [--json]`：它ensure唯一Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
+- CLI parser/main提供显式`kite server start/status/stop`与`run/resume --server <endpoint>`；它们只连接调用者指定或当前profile的
+  owner-only Unix socket/Windows named pipe，不参与默认run/TUI发现。daemon启动时固定一个canonical Workspace；另一Workspace连接会
+  fail closed。CLI仍保留`kite web [--json]`过渡入口：它ensure legacy Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
   ready前验证和挂载，不存在独立`web status/stop`、asset root客户端注入或Web lifecycle diagnostic。
 - release entrypoint把已选择的`source|installed` executable mode显式注入`service ensure/status/stop/restart`请求；CLI不从cwd、argv形状或
   Service返回值猜部署形态，因此installed active-candidate换代不会因mode丢失退化为`build_mismatch`。
-- 默认TUI `/status`只展示`stdio` transport、source/installed profile、build、App Server version与initialize已证明的exact pairing；
+- 默认TUI `/status`展示`stdio` transport、source/installed profile、build、App Server version与initialize已证明的same-build pairing；
+  显式`--server`显示Unix/named-pipe transport与exact-protocol compatible pairing，daemon build只作诊断；
   不展示Service PID、Web URL或build drift。legacy Service/Web callback只服务仍显式存在的过渡命令。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
@@ -45,7 +48,8 @@
   repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
 - 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend fallback。
   配套App Server不可用时直接失败，不回退legacy Service。
-- 不拥有Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart`暂由显式legacy manager处理；默认
+- 不拥有Service/Coordinator/Worker process state。daemon lifecycle由release composition中的显式manager持有；普通client断开不停止daemon，
+  `server stop`取消active Turn并完成bounded drain。`kite service ensure/status/stop/restart`暂由显式legacy manager处理；默认
   run/resume/TUI不discover或ensure该owner。
 - `scripts/release/entrypoints/cli.ts`为run/resume注入App Server connector，仅为显式legacy命令组合single-Service manager/Web discovery；
   不组合legacy Coordinator或Store migration。

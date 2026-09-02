@@ -18,6 +18,11 @@ OperationGate；Native provider credential write继续使用既有credential cod
 History/Store/App Control/credential authority。typed parent client会核对由build ID导出的server version与完整方法集。source固定当前
 源码entrypoint与worktree profile；installed固定launcher提供的immutable candidate与canonical profile，均不发现running Service。
 
+KASD-04另增加显式`app-server run-daemon`前台子入口。它在独立owner-only Unix socket/Windows named pipe上为多个client打开同一个
+Runtime Server/Store composition；每个connection仍使用同一exact logical-message protocol。daemon固定协议身份
+`kite-app-server-daemon-v1`，build只在status中观察，不参与兼容协商；普通disconnect不停止进程，只有exact`server/shutdown`或OS signal
+进入cancel/drain/cleanup。该endpoint不参与default TUI/CLI发现。
+
 ## 拥有职责
 
 - `src/composition.ts`组合唯一Runtime Application、Host/Store、Builtin execution、Runtime Server、History、Workspace router、
@@ -60,7 +65,8 @@ History/Store/App Control/credential authority。typed parent client会核对由
 
 - 不拥有terminal CLI/TUI、Ink/React、presentation reducer或client preference，也不导入`apps/kite-cli`。
 - 不提供第二默认Service、第二Store、embedded fallback、dual write、try-new-catch-old、通用多Store或OS Service。
-- 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener。
+- 不把development WebSocket reference、parent-owned stdio fixture或fake process harness描述为额外production listener；显式daemon是唯一
+  新增的production Native listener，且当前不提供HTTP/Web。
 - 不提供remote/LAN、多租户或Browser mutation data plane。Web是private loopback REST observer；Agent API的角色与能力受独立contract约束。
 - manager lifecycle/process primitive由`@kite-ai/kite-local-runtime/manager`提供；Service process不自行扮演client manager。
 
@@ -74,7 +80,7 @@ Contract、browser-safe Agent API Contract、Browser HTTP client与Native-only l
 package根入口只服务repo内部composition/test。compiled `kite-service`只接受manager调用的exact internal `service run-single`；普通用户通过
 `kite service ensure/status/stop/restart`控制窄lifecycle surface。
 
-同一internal executable也接受exact `app-server run-stdio`；default TUI/CLI只通过配套typed launcher调用并提供显式profile、Workspace与
+同一internal executable也接受exact `app-server run-stdio|run-daemon`；default TUI/CLI只通过配套typed launcher调用stdio并提供显式profile、Workspace与
 build identity，不能发现/替换shared Service，也不能产生Web endpoint。
 
 OSS candidate只输出`bin/kite`、`bin/kite-tui`、`bin/kite-service`（Windows为`.exe`）及`payload/web`。manifest中的

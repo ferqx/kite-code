@@ -320,6 +320,8 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   readonly serverVersion?: string;
   /** Only the parent-owned App Server carrier may advertise App-owned protocol methods. */
   readonly appServerProtocol?: boolean;
+  /** Explicit daemon lifecycle methods; absent from parent-owned stdio children. */
+  readonly appServerDaemonProtocol?: boolean;
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
   /**
@@ -1836,6 +1838,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
       ...(input.appServerProtocol ? { historyMethods: true, appMethods: true } : {}),
+      ...(input.appServerDaemonProtocol ? { serverControlMethods: true } : {}),
     },
   );
   let disposePromise: Promise<void> | undefined;

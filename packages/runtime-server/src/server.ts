@@ -112,6 +112,7 @@ export interface RuntimeServerOptions {
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
   readonly historyMethods?: boolean;
   readonly appMethods?: boolean;
+  readonly serverControlMethods?: boolean;
 }
 
 export interface RuntimeServerConnection {
@@ -159,6 +160,7 @@ export class RuntimeServer {
       this.#options.serverInfo,
       this.#options.historyMethods === true,
       this.#options.appMethods === true,
+      this.#options.serverControlMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
       () => this.#reserveSubscription(),
@@ -214,6 +216,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly #historyMethods: boolean;
   readonly #appMethods: boolean;
+  readonly #serverControlMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
   readonly #reserveSubscription: () => boolean;
@@ -241,6 +244,7 @@ class ServerConnection implements RuntimeServerConnection {
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     historyMethods: boolean,
     appMethods: boolean,
+    serverControlMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
     reserveSubscription: () => boolean,
@@ -255,6 +259,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#serverInfo = serverInfo;
     this.#historyMethods = historyMethods;
     this.#appMethods = appMethods;
+    this.#serverControlMethods = serverControlMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
     this.#reserveSubscription = reserveSubscription;
@@ -455,6 +460,7 @@ class ServerConnection implements RuntimeServerConnection {
                 'app/provider_credential/write',
               ] as const)
             : []),
+          ...(this.#serverControlMethods ? (['server/status', 'server/shutdown'] as const) : []),
           'server/ping',
         ],
         subscriptions: ['session', 'sessions'],

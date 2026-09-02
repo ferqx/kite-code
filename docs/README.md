@@ -58,8 +58,9 @@ current authority；generator不成为runtime export。KASAPI-02C后，Web build
 Local Runtime Service 的客户端边界已经分成browser-safe Agent API client、terminal App Control contract与Bun/Node-only
 `kite-local-runtime`；App Control使用独立source owner，Native client与Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
-KASD的`apps/kite-service/src/app-server.ts`由Service application规则拥有；它复用Runtime carrier/Host，默认由TUI/CLI父进程通过
-`kite-local-runtime` typed stdio client启动，但不进入legacy local-runtime manager规则。
+KASD的`apps/kite-service/src/app-server.ts`与`app-server-daemon.ts`由Service application规则拥有；前者复用Runtime carrier/Host，
+默认由TUI/CLI父进程通过`kite-local-runtime` typed stdio client启动；后者只由显式`kite server start`创建owner-only本机daemon，
+二者都不进入legacy local-runtime manager规则。
 CLI与Service共享的per-file config mutation primitive使用独立`kite-local-runtime-config`规则；它从通用local-runtime client rule排除，避免把
 用户配置lock/atomic replacement误写成Runtime connection行为。
 当前default parent-owned App Server、Durable Session Store与显式legacy single-Service边界见
@@ -84,8 +85,9 @@ CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager
 
 本地TUI开发中，`bun run tui`直接启动当前源码同build的parent-owned App Server，不预构建Web、不发现shared Service，也不需要
 `tui:fresh`。source按canonical repository/worktree使用持久`source-profiles/<digest>/kite-session.sqlite`，installed使用canonical
-`kite-session.sqlite`；二者共享用户配置root但不共享Runtime Store。TUI退出只回收自身child，不删除durable Session。显式legacy
-`service-*`/`web-*`命令暂时保留，后续由KASD-04～06迁移或删除；它们不是默认Runtime fallback。
+`kite-session.sqlite`；二者共享用户配置root但不共享Runtime Store。TUI退出只回收自身child，不删除durable Session。显式
+`server start/status/stop`与`--server`已提供本机daemon；legacy `service-*`/`web-*`命令暂时保留，后续由KASD-05～06迁移或删除；
+它们都不是默认Runtime fallback。
 
 ## 目录职责
 

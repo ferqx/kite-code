@@ -128,3 +128,29 @@ export function resolveKiteLocalRuntimeEndpoint(input: {
     lifecycleReservation: join(root, 'service.lock'),
   });
 }
+
+/** Explicit App Server daemon endpoint; it never aliases the legacy Service endpoint. */
+export function resolveKiteAppServerDaemonEndpoint(input: {
+  readonly home: KiteHomeIdentity;
+  readonly platform?: NodeJS.Platform;
+  readonly runtimeParent?: string;
+}): KiteLocalRuntimeEndpoint {
+  const platform = input.platform ?? process.platform;
+  const homeDigest = kiteHomeRuntimeDigest(input.home);
+  if (platform === 'win32') {
+    return Object.freeze({
+      kind: 'named_pipe',
+      homeDigest,
+      pipeName: `\\\\.\\pipe\\kite-app-server-${KITE_LOCAL_RUNTIME_ENDPOINT_VERSION}-${homeDigest}`,
+    });
+  }
+  const runtimeParent = assertAbsoluteCleanPath(input.runtimeParent ?? '', 'OS runtime parent');
+  const root = join(runtimeParent, 'kite-code', KITE_LOCAL_RUNTIME_ENDPOINT_VERSION, homeDigest);
+  return Object.freeze({
+    kind: 'unix',
+    homeDigest,
+    root,
+    socket: join(root, 'app-server.sock'),
+    lifecycleReservation: join(root, 'app-server.lock'),
+  });
+}

@@ -60,7 +60,8 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     const cli = source('scripts/release/entrypoints/cli.ts');
     expect(tui).toContain('createManagedLocalAppServerComposition');
     expect(tui).not.toContain('discoverWeb');
-    expect(cli).toContain('runtimeConnector: appServer.connector');
+    expect(cli).toContain('runtimeConnector: connector');
+    expect(cli).toContain('createManagedLocalAppServerDaemon');
     expect(source('scripts/release/app-server-client.ts')).toContain('sourceKiteSessionStorePath');
   });
 
@@ -74,7 +75,8 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('kite-source-runtime-profile\\0');
     expect(plan).toContain('| KASD-01 | completed |');
     expect(plan).toContain('| KASD-02 | completed |');
-    expect(plan).toContain('| KASD-03 | in_progress |');
+    expect(plan).toContain('| KASD-03 | completed |');
+    expect(plan).toContain('| KASD-04 | in_progress |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

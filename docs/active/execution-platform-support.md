@@ -42,8 +42,8 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 G
 Docker、WSL2 和架构模拟只作开发预检。
 
 Local Runtime Service不扩大该production effectful支持集合。shipped terminal consumer仍只有本地TUI与用户在场的
-foreground CLI，但二者当前都通过managed Native client连接`apps/kite-service`的唯一Host/Store/Builtin composition；
-internal stdio与development/reference carrier不构成Web/Desktop支持。普通candidate已包含同identity的`kite-service`
+foreground CLI；二者默认通过parent-owned stdio App Server进入`apps/kite-service`的Host/Store/Builtin composition，显式`--server`可改连
+owner-only Unix socket/Windows named-pipe daemon。development/reference carrier不构成Web/Desktop支持。普通candidate已包含同identity的`kite-service`
 companion，installer也定义ordinary stop/lifecycle fence的fail-closed cutover；当前只登记owner-local focused evidence，
 完整40个PTY scenarios、本地fault与CI-profile soak、本机macOS arm64 release smoke已通过；CI-profile soak不提供formal
 资源资格，单平台结果也不能推断三平台passed。这些事实仍不能改变下方effectful execution空支持集。

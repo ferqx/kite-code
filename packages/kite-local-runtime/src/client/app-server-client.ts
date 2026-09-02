@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
-import { RuntimeClient, type RuntimeClientInfo } from '@kite-ai/runtime-client';
+import {
+  RuntimeClient,
+  type RuntimeClientInfo,
+  type RuntimeClientTransport,
+} from '@kite-ai/runtime-client';
 import type { RuntimeProtocolMethod } from '@kite-ai/runtime-protocol';
+import type { KiteLocalRuntimeEndpoint } from '../service';
 import {
   type BunStdioChildSpawnFactory,
   createBunStdioChildRuntimeClientTransport,
@@ -13,6 +18,7 @@ import {
   type NativeProviderCredentialResult,
 } from './codecs';
 import type { NativeProviderCredentialClient } from './connection';
+import { createNodeSocketRuntimeClientTransport } from './node-socket-transport';
 import { createProtocolKiteAppControlClient } from './protocol-app-control';
 
 export interface KiteAppServerConnection extends AsyncDisposable {
@@ -49,6 +55,13 @@ export const KITE_APP_SERVER_PROTOCOL_METHODS_ = Object.freeze([
   'app/provider_credential/write',
 ] as const satisfies readonly RuntimeProtocolMethod[]);
 
+export const KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_ = Object.freeze([
+  ...KITE_APP_SERVER_PROTOCOL_METHODS_,
+  'server/status',
+  'server/shutdown',
+] as const satisfies readonly RuntimeProtocolMethod[]);
+export const KITE_APP_SERVER_DAEMON_VERSION_ = 'kite-app-server-daemon-v1' as const;
+
 export interface KiteAppServerClientOptions {
   readonly executable: string;
   /** Source mode may place an exact checked-in entrypoint before the internal App Server args. */
@@ -62,6 +75,11 @@ export interface KiteAppServerClientOptions {
   readonly environment?: Readonly<Record<string, string>>;
   readonly clientInfo: RuntimeClientInfo;
   readonly spawn?: BunStdioChildSpawnFactory;
+}
+
+export interface KiteAppServerDaemonClientOptions {
+  readonly endpoint: KiteLocalRuntimeEndpoint;
+  readonly clientInfo: RuntimeClientInfo;
 }
 
 export function kiteAppServerVersion(buildId: string): string {
@@ -103,13 +121,39 @@ export function createKiteAppServerClient(
     },
     ...(options.spawn ? { spawn: options.spawn } : {}),
   });
+  return createAppServerProtocolConnection(
+    transport,
+    kiteAppServerVersion(options.buildId),
+    options.clientInfo,
+    KITE_APP_SERVER_PROTOCOL_METHODS_,
+  );
+}
+
+/** Connect only to the caller-selected daemon endpoint; no discovery or spawn occurs. */
+export function createKiteAppServerDaemonClient(
+  options: KiteAppServerDaemonClientOptions,
+): KiteAppServerConnection {
+  return createAppServerProtocolConnection(
+    createNodeSocketRuntimeClientTransport({ endpoint: options.endpoint }),
+    KITE_APP_SERVER_DAEMON_VERSION_,
+    options.clientInfo,
+    KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_,
+  );
+}
+
+function createAppServerProtocolConnection(
+  transport: RuntimeClientTransport,
+  expectedServerVersion: string,
+  clientInfo: RuntimeClientInfo,
+  requiredMethods: readonly RuntimeProtocolMethod[],
+): KiteAppServerConnection {
   const runtime = new RuntimeClient({
     transport,
-    clientInfo: options.clientInfo,
+    clientInfo,
     history: 'protocol',
     expectedServer: {
-      version: kiteAppServerVersion(options.buildId),
-      requiredMethods: KITE_APP_SERVER_PROTOCOL_METHODS_,
+      version: expectedServerVersion,
+      requiredMethods,
     },
   });
   const credential: NativeProviderCredentialClient = Object.freeze({

@@ -49,6 +49,11 @@ kill整个组。successor仍必须等Session lease并显式reconcile，不能因
 一个成功；client close只收掉parent-owned child，不删除durable facts。验证：
 `bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
 
+KASD-04的显式daemon只新增process/endpoint lifecycle与logical-message carrier，不新增Session或Store authority。owner-only Unix socket/
+Windows named pipe可承载多个connection；每个connection仍经同一Runtime Server admission，disconnect只释放自身资源。`server/status`与
+`server/shutdown`是固定`kite-app-server-daemon-v1`的exact capability：status只读且不创建endpoint/credential/Session，shutdown由daemon owner
+取消active Turn并bounded drain。daemon build ID不参与compatibility，Store generation/revision仍是唯一writer裁决。
+
 ## 当前可信域
 
 Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。

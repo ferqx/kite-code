@@ -368,7 +368,7 @@ export function createManagedLocalSingleServiceComposition(
     executableMode === 'source'
       ? join(repositoryRoot, 'apps', 'kite-web', 'dist')
       : join(candidateRoot, 'payload', 'web');
-  const runtimeParent = singleServiceRuntimeParent(sourceEnvironment);
+  const runtimeParent = resolveLocalRuntimeParent(sourceEnvironment);
   const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
   const standalone = serviceTopology === 'standalone' ? createStandaloneRuntimeHome() : undefined;
   const standaloneRuntimeRoot = standalone?.root;
@@ -766,7 +766,7 @@ function defaultSingleServiceWebSocketFactory(
   return new webSocketConstructor(url, { headers: { ...options.headers } });
 }
 
-function singleServiceRuntimeParent(
+export function resolveLocalRuntimeParent(
   environment: Readonly<Record<string, string | undefined>>,
 ): string {
   const candidate =

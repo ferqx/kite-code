@@ -18,6 +18,8 @@ credential及Runtime/History/App Control connection contract；它不创建Runti
   protocol History、逐方法exact App Control和Native provider credential write。initialize必须返回由同一build ID导出的exact server
   version及全部13个App方法，否则关闭child并拒绝连接；credential在dispatch前可取消，dispatch后不以本地Abort伪造未执行；这里不发现
   PATH、daemon或active candidate，也不提供fallback。
+- `./client`另提供显式daemon的Unix socket/Windows named-pipe logical-message transport与typed lifecycle codec。它只连接caller给出的
+  endpoint，不发现、不启动、不升级daemon；daemon使用固定`kite-app-server-daemon-v1`和exact capability集合，build ID只作状态信息。
 - `./config`：CLI与Service共享的per-file mutation primitive。每个目标使用独立`.kite-lock`、PID/start identity、随机nonce与inode
   复核；只有exact owner可release，只有明确dead的owner可reclaim，alive/uncertain/malformed全部fail closed。多文件CAS按canonical path排序取锁，
   普通用户配置以same-directory temp、fsync、atomic rename替换。它不读取配置语义、不建立global lock/daemon，也不接触Runtime Store。
@@ -118,7 +120,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   current SID由fixed system `whoami.exe`有界解析
   一次并缓存，ACL apply/verify不启动child process；resolver timeout不授权访问。只有当前操作刚exclusive创建并记录
   inode的entry可初始化owner SID，既有路径owner不匹配时拒绝。
-- 当前single-Service production endpoint contract让canonical Kite home只投影32字符SHA-256 digest；POSIX调用方必须
+- 当前endpoint contract让profile root只投影32字符SHA-256 digest；显式App Server daemon使用独立`app-server.sock/.lock`或
+  `kite-app-server-v1-<digest>` named pipe，绝不与legacy`service.sock/.lock`别名。POSIX调用方必须
   注入已验证的OS runtime parent并为每home只得到`service.sock`与`service.lock`，Windows只得到按digest隔离的named pipe identity。
   不同custom home是独立profile；local-runtime不为它们增加共享lease、locator或coordination state。
   helper不读取、创建或删除路径，也不从ambient environment猜测runtime parent。KHSS-02在该identity上新增exact、32 KiB、每连接
@@ -135,6 +138,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   reservation不授权使用current-build client猜测停止旧owner。
   single-Service manager现只由显式legacy Service/Web命令组合；正式TUI与CLI run/resume不会discover/ensure它，也不会回退该路径。
   clean cutover不会从legacy source恢复，也不会在普通App Server启动中扫描或删除它们。
+- daemon lifecycle只由显式`server start/status/stop`composition使用；status/stop通过同一Runtime protocol，未知version/capability fail closed，
+  普通client disconnect不停止daemon。Unix stale endpoint只有PID/start identity dead且socket/lock identity复核后才能清理。
 
 ## 测试与 evidence
 

@@ -165,6 +165,7 @@ describe('KASD parent-owned App Server process', () => {
           }),
         ]),
       );
+      expect(JSON.stringify(frames)).not.toContain('server/shutdown');
       expect(existsSync(join(runtimeRoot, 'kite-session.sqlite'))).toBe(true);
       expect(existsSync(join(runtimeRoot, 'service.sock'))).toBe(false);
       expect(existsSync(join(runtimeRoot, 'service.lock'))).toBe(false);

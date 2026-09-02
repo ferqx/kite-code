@@ -8,6 +8,10 @@ Service不读取请求cwd、Workspace `.env`或ambient `KITE_CODE_HOME`来推导
 `<kite-home>/runtime-service/v1/{instance.json,access.token,control.token,instance.lock/,lifecycle.lock/}`；default Store
 另固定为同一validated home下的`checkpoints.sqlite`，不能由stdio fixture或client option alias替换。
 
+上述布局只约束legacy single-Service。显式App Server daemon在per-profile OS runtime root使用独立`app-server.sock`与
+`app-server.lock`（Windows为独立named pipe）；reservation只保存PID/start/socket exact cleanup identity，不保存Session authority、
+credential或Store generation。daemon status/stop在absent时不创建Kite Home、profile或endpoint state。
+
 POSIX目录必须owner UID且`0700`，文件必须owner UID、single-link regular file且`0600`。读取采用
 `lstat → O_NOFOLLOW open → fstat/inode recheck → bounded read`；发布采用同目录exclusive temp、fsync、atomic rename、
 directory fsync与strict readback。symlink、hardlink、type、owner、permission或parent identity drift均fail closed。

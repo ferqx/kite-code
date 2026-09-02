@@ -47,6 +47,16 @@ export interface KiteNativeEndpointServer extends AsyncDisposable {
   close(): Promise<void>;
 }
 
+export interface KiteOwnedLocalEndpointServerOptions {
+  readonly endpoint: KiteLocalRuntimeEndpoint;
+  readonly lifecycleIdentity: KiteLocalRuntimeLifecycleReservation;
+  readonly handleConnection: (socket: Socket) => void | Promise<void>;
+  readonly maxConnections?: number;
+  readonly closeActiveConnections?: boolean;
+}
+
+export type KiteOwnedLocalEndpointServer = KiteNativeEndpointServer;
+
 interface FileIdentity {
   readonly dev: number;
   readonly ino: number;
@@ -65,6 +75,18 @@ export function createKiteNativeEndpointServer(
     30_000,
     'requestDeadlineMs',
   );
+  return createKiteOwnedLocalEndpointServer({
+    endpoint: options.endpoint,
+    lifecycleIdentity: options.lifecycleIdentity,
+    ...(options.maxConnections === undefined ? {} : { maxConnections: options.maxConnections }),
+    handleConnection: (socket) => handleConnection(socket, options.dispatch, requestDeadlineMs),
+  });
+}
+
+/** Owner-only Unix socket/named-pipe lifecycle shared by control and Runtime protocols. */
+export function createKiteOwnedLocalEndpointServer(
+  options: KiteOwnedLocalEndpointServerOptions,
+): KiteOwnedLocalEndpointServer {
   const maxConnections = positiveBound(
     options.maxConnections,
     DEFAULT_MAX_CONNECTIONS,
@@ -78,9 +100,11 @@ export function createKiteNativeEndpointServer(
       return;
     }
     sockets.add(socket);
-    handleConnection(socket, options.dispatch, requestDeadlineMs).finally(() => {
-      sockets.delete(socket);
-    });
+    Promise.resolve()
+      .then(() => options.handleConnection(socket))
+      .finally(() => {
+        sockets.delete(socket);
+      });
   });
   let state: KiteNativeEndpointServer['state'] = 'absent';
   let startPromise: Promise<void> | undefined;
@@ -161,7 +185,11 @@ export function createKiteNativeEndpointServer(
     // Stop accepting first, then let bounded one-request connections flush their response. In
     // particular, an authenticated service_stop response must reach the manager before endpoint
     // cleanup removes the socket. Each connection already has requestDeadlineMs as its upper bound.
-    await closeNetServer(server);
+    const closing = closeNetServer(server);
+    if (options.closeActiveConnections) {
+      for (const socket of sockets) socket.destroy();
+    }
+    await closing;
     for (const socket of sockets) socket.destroy();
     sockets.clear();
     await cleanupTransport();

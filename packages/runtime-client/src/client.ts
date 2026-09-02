@@ -60,6 +60,7 @@ export class RuntimeClientError extends Error {
     | 'connection_closed'
     | 'connection_failed'
     | 'protocol_error'
+    | 'server_mismatch'
     | 'unsupported_command'
     | 'unsupported_query';
   readonly protocol?: RuntimeProtocolError;
@@ -244,6 +245,23 @@ export class RuntimeClient implements AsyncDisposable {
         'protocol_error',
         'Protocol returned an invalid App Control result.',
       );
+    }
+    return result.response;
+  }
+
+  /** Explicit daemon lifecycle control over the initialized Runtime protocol connection. */
+  async requestServerControl(
+    method: import('@kite-ai/runtime-protocol').RuntimeProtocolServerControlMethod,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const result = await this.#request(method, { request });
+    if (
+      !('method' in result) ||
+      result.method !== method ||
+      !('response' in result) ||
+      !isPlainRecord(result.response)
+    ) {
+      throw new RuntimeClientError('protocol_error', 'Protocol returned an invalid Server result.');
     }
     return result.response;
   }
@@ -448,12 +466,12 @@ export class RuntimeClient implements AsyncDisposable {
     const expected = this.#expectedServer;
     if (!expected) return;
     if (initialize.serverInfo.version !== expected.version) {
-      throw new RuntimeClientError('protocol_error', 'Runtime Server version does not match.');
+      throw new RuntimeClientError('server_mismatch', 'Runtime Server version does not match.');
     }
     const advertised = new Set(initialize.capabilities.methods);
     if (expected.requiredMethods?.some((method) => !advertised.has(method))) {
       throw new RuntimeClientError(
-        'protocol_error',
+        'server_mismatch',
         'Runtime Server capability set is incomplete.',
       );
     }
@@ -502,7 +520,8 @@ export class RuntimeClient implements AsyncDisposable {
       | 'history/list_sessions'
       | 'history/list_events'
       | 'history/load_session'
-      | RuntimeProtocolAppMethod,
+      | RuntimeProtocolAppMethod
+      | import('@kite-ai/runtime-protocol').RuntimeProtocolServerControlMethod,
     params: unknown,
     subscriptionState?: SubscriptionState,
   ): Promise<RuntimeProtocolResult> {

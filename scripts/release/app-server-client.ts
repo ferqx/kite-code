@@ -17,7 +17,7 @@ import {
   installedBuildIdentity,
   resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
-  sourceKiteSessionStorePath,
+  sourceKiteSessionStorePathFromCanonicalRoots,
   sourceServiceBuildIdentity,
 } from './local-service-client';
 
@@ -49,50 +49,25 @@ export interface ManagedLocalAppServerComposition {
   };
 }
 
+export interface ManagedLocalAppServerTarget {
+  readonly mode: 'source' | 'installed';
+  readonly buildId: string;
+  readonly runtimeRoot: string;
+  readonly configRoot: string;
+  readonly systemHome: string;
+  readonly executable: string;
+  readonly argumentsPrefix: readonly string[];
+  readonly environment: Readonly<Record<string, string>>;
+}
+
 /** Resolve only the client distribution's matching child; never inspect a running Service. */
 export function createManagedLocalAppServerComposition(
   options: ManagedLocalAppServerOptions = {},
 ): ManagedLocalAppServerComposition {
-  const sourceEnvironment = options.environment ?? process.env;
-  const systemHome = realpathSync.native(options.systemHome ?? userInfo().homedir);
-  const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
-  const home = ensureLocalRuntimeServiceHome(
-    createKiteHomeIdentity(
-      explicitHome ?? join(systemHome, '.kite-code'),
-      explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
-    ),
-  );
-  const mode = options.executableMode ?? 'source';
-  const repositoryRoot =
-    mode === 'source'
-      ? canonicalRepositoryRoot(options.repositoryRoot ?? resolve(import.meta.dir, '../..'))
-      : undefined;
-  const processExecutable = realpathSync.native(options.processExecutable ?? process.execPath);
-  const candidateRoot = sourceEnvironment.KITE_CODE_RELEASE_ROOT;
-  const buildId =
-    mode === 'source'
-      ? sourceServiceBuildIdentity(repositoryRoot!)
-      : installedBuildIdentity(processExecutable, { candidateRoot });
-  const runtimeRoot = mode === 'source' ? ensureSourceProfile(home, repositoryRoot!) : home.root;
-  const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
-  const environment: Record<string, string> = { NODE_ENV: 'production' };
-  for (const [key, value] of Object.entries(selected)) {
-    if (value !== undefined) environment[key] = value;
-  }
-  if (mode === 'installed') environment.KITE_STANDALONE_EXECUTABLE = '1';
-  const sourceEntrypoint =
-    mode === 'source'
-      ? join(repositoryRoot!, 'scripts', 'release', 'entrypoints', 'service.ts')
-      : undefined;
-  if (sourceEntrypoint) assertSourceEntrypoint(repositoryRoot!, sourceEntrypoint);
-  const executable =
-    mode === 'source'
-      ? processExecutable
-      : resolveInstalledReleaseExecutable('kite-service', {
-          executable: processExecutable,
-          candidateRoot,
-        });
-  const argumentsPrefix = sourceEntrypoint ? [sourceEntrypoint] : undefined;
+  const target = resolveManagedLocalAppServerTarget(options);
+  prepareManagedLocalAppServerTarget(target);
+  const { mode, buildId, runtimeRoot, configRoot, systemHome, executable, environment } = target;
+  const argumentsPrefix = target.argumentsPrefix;
   const connect = (input: {
     readonly workspace: string;
     readonly clientInfo: RuntimeClientInfo;
@@ -107,7 +82,7 @@ export function createManagedLocalAppServerComposition(
       ...(argumentsPrefix ? { argumentsPrefix } : {}),
       buildId,
       runtimeRoot,
-      configRoot: home.root,
+      configRoot,
       osHome: systemHome,
       workspace,
       cwd: systemRoot(systemHome),
@@ -120,7 +95,7 @@ export function createManagedLocalAppServerComposition(
     mode,
     buildId,
     runtimeRoot,
-    configRoot: home.root,
+    configRoot,
     connect,
     connector: Object.freeze({
       async connect(input: {
@@ -142,15 +117,72 @@ export function createManagedLocalAppServerComposition(
   });
 }
 
-function ensureSourceProfile(
-  home: ReturnType<typeof ensureLocalRuntimeServiceHome>,
-  repositoryRoot: string,
-): string {
-  const profile = dirname(sourceKiteSessionStorePath(home.root, repositoryRoot));
-  const digest = basename(profile);
+export function resolveManagedLocalAppServerTarget(
+  options: ManagedLocalAppServerOptions = {},
+): ManagedLocalAppServerTarget {
+  const sourceEnvironment = options.environment ?? process.env;
+  const systemHome = realpathSync.native(options.systemHome ?? userInfo().homedir);
+  const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
+  const home = createKiteHomeIdentity(
+    explicitHome ?? join(systemHome, '.kite-code'),
+    explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
+  );
+  const mode = options.executableMode ?? 'source';
+  const repositoryRoot =
+    mode === 'source'
+      ? canonicalRepositoryRoot(options.repositoryRoot ?? resolve(import.meta.dir, '../..'))
+      : undefined;
+  const processExecutable = realpathSync.native(options.processExecutable ?? process.execPath);
+  const candidateRoot = sourceEnvironment.KITE_CODE_RELEASE_ROOT;
+  const buildId =
+    mode === 'source'
+      ? sourceServiceBuildIdentity(repositoryRoot!)
+      : installedBuildIdentity(processExecutable, { candidateRoot });
+  const runtimeRoot =
+    mode === 'source'
+      ? dirname(sourceKiteSessionStorePathFromCanonicalRoots(home.root, repositoryRoot!))
+      : home.root;
+  const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
+  const environment: Record<string, string> = { NODE_ENV: 'production' };
+  for (const [key, value] of Object.entries(selected)) {
+    if (value !== undefined) environment[key] = value;
+  }
+  if (mode === 'installed') environment.KITE_STANDALONE_EXECUTABLE = '1';
+  const sourceEntrypoint =
+    mode === 'source'
+      ? join(repositoryRoot!, 'scripts', 'release', 'entrypoints', 'service.ts')
+      : undefined;
+  if (sourceEntrypoint) assertSourceEntrypoint(repositoryRoot!, sourceEntrypoint);
+  const executable =
+    mode === 'source'
+      ? processExecutable
+      : resolveInstalledReleaseExecutable('kite-service', {
+          executable: processExecutable,
+          candidateRoot,
+        });
+  return Object.freeze({
+    mode,
+    buildId,
+    runtimeRoot,
+    configRoot: home.root,
+    systemHome,
+    executable,
+    argumentsPrefix: Object.freeze(sourceEntrypoint ? [sourceEntrypoint] : []),
+    environment: Object.freeze(environment),
+  });
+}
+
+export function prepareManagedLocalAppServerTarget(target: ManagedLocalAppServerTarget): void {
+  const home = ensureLocalRuntimeServiceHome(createKiteHomeIdentity(target.configRoot));
+  if (home.root !== target.configRoot) {
+    throw new Error('App Server Kite Home identity changed during validation.');
+  }
+  if (target.mode !== 'source') return;
+  const digest = basename(target.runtimeRoot);
   const ensured = ensurePrivateKiteHomeDirectory(home, ['source-profiles', digest]);
-  if (ensured !== profile) throw new Error('Source App Server profile identity changed.');
-  return ensured;
+  if (ensured !== target.runtimeRoot) {
+    throw new Error('Source App Server profile identity changed.');
+  }
 }
 
 function canonicalRepositoryRoot(path: string): string {

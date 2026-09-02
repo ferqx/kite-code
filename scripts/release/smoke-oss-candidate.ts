@@ -90,6 +90,7 @@ try {
         'install',
         'cli-help-version',
         'tui-version-pty-startup',
+        'explicit-app-server-daemon',
         'single-service-companion',
         'retired-companion-slots-absent',
         'web-payload-assets',
@@ -152,6 +153,42 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
   }
   await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
+  runInstalledAppServerDaemonSmoke(cli);
+}
+
+function runInstalledAppServerDaemonSmoke(cli: string): void {
+  const homeParent = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-home-')));
+  const workspace = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
+  const kiteHome = join(homeParent, '.kite-code');
+  const common = ['--kite-home', kiteHome];
+  let primaryError: unknown;
+  try {
+    const start = Bun.spawnSync([cli, 'server', 'start', '--workspace', workspace, ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (start.exitCode !== 0 || !start.stdout.toString().includes('App Server: ready')) {
+      throw installedSmokeError('App Server daemon start', start);
+    }
+    const status = Bun.spawnSync([cli, 'server', 'status', '--json', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (status.exitCode !== 0) throw installedSmokeError('App Server daemon status', status);
+    const decoded = JSON.parse(status.stdout.toString()) as { readonly state?: unknown };
+    if (decoded.state !== 'ready') throw new Error('Installed App Server daemon was not ready.');
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    const stop = Bun.spawnSync([cli, 'server', 'stop', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (stop.exitCode !== 0 || !stop.stdout.toString().includes('App Server: absent')) {
+      primaryError ??= installedSmokeError('App Server daemon stop', stop);
+    }
+  }
+  if (primaryError !== undefined) throw primaryError;
 }
 
 function assertInstalledReleaseAssets(prefix: string, manifest: OssCandidateManifest): void {

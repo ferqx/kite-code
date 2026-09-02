@@ -19,7 +19,8 @@ execution authority与多连接Runtime owner。全部Session write port经genera
 unknown，不能自动重放。新owner不取得旧Workspace process lock，Artifact GC保持关闭。
 
 默认TUI/CLI现已消费该owner；旧Workspace lock、one-connection composition与临时source Runtime Home只存在于尚待KASD-06删除的legacy
-single-Service implementation，不属于普通启动路径。当前没有daemon、Web client切换、旧库导入、dual write或fallback。
+single-Service implementation，不属于普通启动路径。KASD-04另增加显式本机App Server daemon；当前仍没有Web client切换、旧库导入、
+dual write或fallback。
 
 KASD-02增加的`app-server run-stdio`现由默认client使用：它使用新Store与同一Host/config/Trust实现，EOF/signal关闭本进程且无Native/HTTP/Web
 endpoint；同一条已initialize JSONL connection提供三个App-owned durable History read，且每次读取固定SQLite snapshot。真实process已覆盖
@@ -42,7 +43,13 @@ repository/worktree digest隔离的`source-profiles/<digest>/kite-session.sqlite
 `kite-session.sqlite`；client退出不删除这些facts。默认路径不读Native descriptor/token/socket，不ensure canonical Service，不构建Web assets，
 不监听HTTP，也没有source临时Runtime Home。
 
-`service *`与`web`当前仍显式进入legacy single-Service控制面，等待KASD-04/05替换及KASD-06删除。下文关于Native endpoint、Web listener、
+显式`kite server start/status/stop`拥有独立的per-profile `app-server.sock`/reservation（Windows为per-profile named pipe），并固定start时的
+一个canonical Workspace。普通run/TUI不discover或ensure该daemon；只有显式`--server <endpoint>`连接。daemon使用固定exact
+`kite-app-server-daemon-v1`与capability集合判断兼容，build ID只作诊断；相同protocol的不同build可连接，未知required capability拒绝。
+普通client disconnect不停止daemon，显式stop才取消active Turn、drain carrier并清理endpoint。自定义POSIX endpoint只接受已存在的
+canonical owner-only parent，status不创建owner state，不兼容或identity不确定的owner不会被替换或停止。
+
+`service *`与`web`当前仍显式进入legacy single-Service控制面，等待KASD-05替换及KASD-06删除。下文关于legacy Native endpoint、Web listener、
 build replacement与Store 9的描述只约束该显式legacy路径，不能作为默认TUI/CLI fallback。
 
 Service拥有一个Runtime Host、一个Store 9 writer connection和一个loopback HTTP listener。Workspace仍是Trust、配置、Skill、MCP、

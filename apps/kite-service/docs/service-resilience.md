@@ -2,6 +2,8 @@
 
 本页描述single-Service shell与`@kite-ai/kite-local-runtime/manager`拥有的lifecycle。每个canonical Kite Home最多一个Service；Runtime、
 History、App Control、Controller、Web/Agent API与Store 9均在该进程内组合。Coordinator/Worker/Gateway lifecycle只属于legacy迁移边界。
+显式App Server daemon是独立KASD lifecycle：它不复用本页的Service build replacement、Native control token或Web readiness，见
+[`runtime-server-carrier.md`](runtime-server-carrier.md)与仓库[`single-service-local-runtime.md`](../../../docs/active/single-service-local-runtime.md)。
 
 ## 启动
 
@@ -15,6 +17,9 @@ listener → reconcile旧Service instance的Controller lease → 发布ready。
 Kite Home不保存descriptor、token、lock、launch intent或socket。POSIX每home runtime只允许`service.sock`与`service.lock`；
 Windows endpoint使用named pipe。不同custom home相互独立，不另建跨home lease或coordination目录。
 access/control capability在Service进程内生成并通过native握手返回，不形成durable credential file。
+
+App Server daemon使用独立owner-only endpoint与fixed exact protocol。普通client断开不改变owner；显式stop才取消active Turn、drain carrier并
+清理exact reservation。status/stop在absent时不创建Kite Home或endpoint，start只回收PID/start/socket identity明确dead的旧owner。
 
 项目采用未发布clean cutover。普通启动不扫描、迁移或删除旧Store/layout/Artifact/process state及`.kite-code-coordination`，旧数据也不作为
 current Store 9 fallback。

@@ -63,6 +63,7 @@ export interface KiteServiceRuntimeCompositionOptions {
   readonly runtimeServerVersion?: string;
   /** Enables only the parent-owned stdio App Server's History/App Control capability set. */
   readonly appServerProtocol?: boolean;
+  readonly appServerDaemonProtocol?: boolean;
   /** The one explicit current Store path used by the Service owner. */
   readonly checkpointPath: string;
   /** Already-open Store 9 owner; when present no legacy Store or History connection is opened. */
@@ -240,6 +241,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
     serverInstanceId: instanceId,
     ...(input.runtimeServerVersion ? { serverVersion: input.runtimeServerVersion } : {}),
     ...(input.appServerProtocol ? { appServerProtocol: true } : {}),
+    ...(input.appServerDaemonProtocol ? { appServerDaemonProtocol: true } : {}),
     operationGate,
     ...(input.storageOwner ? { storageOwner: input.storageOwner } : {}),
     ...(templates.length === 0 ? {} : { workspaces: templates }),

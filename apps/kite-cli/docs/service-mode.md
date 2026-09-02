@@ -13,10 +13,13 @@ token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也
 exact-build owner，显式shared source发生drift时不替换owner。source↔installed或identity不确定时仍fail closed。
 CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
 
-默认`/status`展示stdio transport、profile mode、build、App Server version与exact pairing。client/server mismatch在initialize时关闭child，
+默认`/status`展示stdio transport、profile mode、build、App Server version与same-build pairing。显式`--server`只连接指定的
+Unix socket/Windows named pipe，展示exact-protocol compatible pairing；daemon的build ID只用于诊断，不参与兼容判断。client/server mismatch在initialize时关闭连接，
 不会进入TUI形成build drift状态。Service PID/Web根地址只属于仍显式可调用的legacy控制面，不出现在默认TUI状态。
 
-Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
+`kite server start/status/stop`是唯一daemon lifecycle入口；默认TUI/CLI不发现或启动daemon。daemon固定服务start时选择的canonical
+Workspace，另一Workspace连接拒绝；普通connection close不停止daemon，显式stop才取消active Turn并等待carrier drain。Web route目前仍是legacy
+Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
 `kite web [--json]`和TUI `/status`返回稳定根地址；TUI同时展示Service identity，不保留单独的`/web`。它不接收asset root，也没有独立status/stop。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
 parser/adapter contract与tests不代表hosted Web qualification。
 

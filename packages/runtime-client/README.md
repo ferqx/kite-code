@@ -19,6 +19,8 @@
 - 提供仅供Native App connector组合的closed `requestApp(method, request)` seam：方法名来自Protocol enum，
   响应必须回显同一method；语义payload仍由上层`kite-app-contract`逐方法codec拥有。`expectedServer`可要求
   exact server version与capability集合，initialize不匹配时关闭刚打开的连接并fail closed。
+- 提供独立的`requestServerControl()`给显式daemon status/shutdown；它仍走同一request correlation与response method校验，
+  不建立第二层控制协议，也不赋予Client进程信号或Store authority。
 
 ## 不拥有职责
 

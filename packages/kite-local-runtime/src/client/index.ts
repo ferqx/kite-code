@@ -7,8 +7,10 @@ export * from './bun-stdio-child-transport';
 export * from './bun-websocket-transport';
 export * from './codecs';
 export * from './connection';
+export * from './daemon-control';
 export * from './native-connector';
 export * from './native-ipc';
+export * from './node-socket-transport';
 export * from './protocol-app-control';
 export * from './single-service-client';
 

@@ -37,6 +37,13 @@ export function installedKiteSessionStorePath(kiteHomeRoot: string): string {
 export function sourceKiteSessionStorePath(kiteHomeRoot: string, repositoryRoot: string): string {
   const canonicalKiteHome = realpathSync.native(kiteHomeRoot);
   const canonicalRepositoryRoot = realpathSync.native(repositoryRoot);
+  return sourceKiteSessionStorePathFromCanonicalRoots(canonicalKiteHome, canonicalRepositoryRoot);
+}
+
+export function sourceKiteSessionStorePathFromCanonicalRoots(
+  canonicalKiteHome: string,
+  canonicalRepositoryRoot: string,
+): string {
   const profileDigest = createHash('sha256')
     .update('kite-source-runtime-profile\0')
     .update(canonicalKiteHome)

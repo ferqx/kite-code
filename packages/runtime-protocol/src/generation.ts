@@ -237,6 +237,8 @@ export function generateRuntimeProtocolTypeScript(): string {
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/execution/status'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/release/status'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/provider_credential/write'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
+    "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'server/status'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
+    "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'server/shutdown'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'server/ping'; readonly params: Readonly<Record<string, never>> };",
     "export type RuntimeProtocolSchema = 'kite.runtime-protocol.v1';",
     '',

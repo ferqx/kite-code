@@ -9,9 +9,10 @@
 - 所有 Kite Code 自有标题、状态、快捷键、空态、错误和交互说明从统一 catalog 读取。
 - Slash command 的名称与帮助来自共享 command metadata；catalog 只为实际注册的 TUI command 提供说明。
   发布与遥测状态由既有配置/CLI 入口负责，TUI 不注册 `/release` 或 `/telemetry`，也不保留其孤立译文。
-- `/status`的命令说明、App Server transport/profile/build/version、client version与exact pairing提示使用
+- `/status`的命令说明、App Server transport/profile/build/version、client version与`same_build|exact_protocol` pairing提示使用
   同一中英文catalog；PID、ISO时间与version/build identity原样显示。稳定的
-  `aligned|source_build_drift|build_mismatch`语义先于本地化产生，不能从译文反推状态；source drift只说明显式shared连接的事实。
+  稳定语义先于本地化产生，不能从译文反推状态；显式daemon的build只作诊断，`protocolCompatible`必须来自initialize的exact
+  version/capability验证。
 - Runtime event、command、failure code、status 枚举和 provider 返回值保持稳定英文机器值，不进入翻译 key。
 - 状态推导先生成稳定语义值，渲染边界再映射当前 locale；禁止从译文反推状态。
 

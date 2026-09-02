@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_ } from '@kite-ai/kite-app-contract';
-import { kiteAppServerVersion } from '@kite-ai/kite-local-runtime/client';
+import {
+  KITE_APP_SERVER_DAEMON_VERSION_,
+  kiteAppServerVersion,
+} from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
@@ -41,6 +44,15 @@ export interface KiteAppServerMainDependencies {
   readonly signals?: Parameters<typeof createProcessRuntimeStdioSignals>[0];
 }
 
+export interface KiteAppServerRuntimeOwner {
+  readonly instanceId: string;
+  readonly composition: KiteServiceRuntimeComposition;
+  readonly admission: RuntimeServerAdmissionPort;
+  readonly appControl: ReturnType<
+    KiteServiceRuntimeComposition['appControl']['gateway']['forWorkspace']
+  >;
+}
+
 export function resolveKiteAppServerEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): KiteAppServerEnvironment {
@@ -65,6 +77,44 @@ export async function runKiteAppServerMain(
     throw new Error('Kite App Server requires exact `app-server run-stdio` arguments.');
   }
   const environment = resolveKiteAppServerEnvironment(dependencies.environment);
+  const owner = createKiteAppServerRuntimeOwner(environment, dependencies);
+  const { composition, admission, appControl } = owner;
+  const stdin = dependencies.stdin ?? process.stdin;
+  const stdout = dependencies.stdout ?? process.stdout;
+  const stderr = dependencies.stderr ?? process.stderr;
+  const signals = dependencies.signals ?? process;
+  const carrier = createRuntimeStdioCarrier({
+    server: composition.server,
+    admission,
+    stdin,
+    stdout: createNodeRuntimeStdioOutput(stdout),
+    stderr,
+    signals: createProcessRuntimeStdioSignals(signals),
+    history: composition.history,
+    appControl,
+    credential: composition.appControl.credentialClient,
+    shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
+  });
+  let primaryError: unknown;
+  try {
+    await carrier.done;
+    await carrier.shutdown();
+  } catch (error) {
+    primaryError = error;
+  }
+  try {
+    await composition[Symbol.asyncDispose]();
+  } catch (error) {
+    primaryError ??= error;
+  }
+  if (primaryError !== undefined) throw primaryError;
+}
+
+export function createKiteAppServerRuntimeOwner(
+  environment: KiteAppServerEnvironment,
+  dependencies: Pick<KiteAppServerMainDependencies, 'createStorage' | 'createComposition'> = {},
+  options: { readonly daemonProtocol?: boolean } = {},
+): KiteAppServerRuntimeOwner {
   const instanceId = `app-server_${randomUUID()}`;
   const databasePath = join(environment.runtimeRoot, 'kite-session.sqlite');
   const createStorage =
@@ -75,8 +125,11 @@ export async function runKiteAppServerMain(
   try {
     composition = createComposition({
       instanceId,
-      runtimeServerVersion: kiteAppServerVersion(environment.buildId),
+      runtimeServerVersion: options.daemonProtocol
+        ? KITE_APP_SERVER_DAEMON_VERSION_
+        : kiteAppServerVersion(environment.buildId),
       appServerProtocol: true,
+      ...(options.daemonProtocol ? { appServerDaemonProtocol: true } : {}),
       checkpointPath: databasePath,
       storageOwner,
       workspaces: [{ workspace: environment.workspace }],
@@ -108,35 +161,7 @@ export async function runKiteAppServerMain(
         : { allowed: false as const, reason: 'unauthorized' as const };
     },
   });
-  const stdin = dependencies.stdin ?? process.stdin;
-  const stdout = dependencies.stdout ?? process.stdout;
-  const stderr = dependencies.stderr ?? process.stderr;
-  const signals = dependencies.signals ?? process;
-  const carrier = createRuntimeStdioCarrier({
-    server: composition.server,
-    admission,
-    stdin,
-    stdout: createNodeRuntimeStdioOutput(stdout),
-    stderr,
-    signals: createProcessRuntimeStdioSignals(signals),
-    history: composition.history,
-    appControl,
-    credential: composition.appControl.credentialClient,
-    shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
-  });
-  let primaryError: unknown;
-  try {
-    await carrier.done;
-    await carrier.shutdown();
-  } catch (error) {
-    primaryError = error;
-  }
-  try {
-    await composition[Symbol.asyncDispose]();
-  } catch (error) {
-    primaryError ??= error;
-  }
-  if (primaryError !== undefined) throw primaryError;
+  return Object.freeze({ instanceId, composition, admission, appControl });
 }
 
 function required(source: Readonly<Record<string, string | undefined>>, name: string): string {

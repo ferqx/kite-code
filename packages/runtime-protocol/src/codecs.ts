@@ -402,6 +402,8 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'app/execution/status',
   'app/release/status',
   'app/provider_credential/write',
+  'server/status',
+  'server/shutdown',
   'server/ping',
 ]);
 export type RuntimeProtocolMethod = z.infer<typeof RUNTIME_PROTOCOL_METHOD_SCHEMA_>;
@@ -425,6 +427,13 @@ export const RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_ = z.enum([
   'app/provider_credential/write',
 ]);
 export type RuntimeProtocolAppMethod = z.infer<typeof RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_>;
+export const RUNTIME_PROTOCOL_SERVER_CONTROL_METHOD_SCHEMA_ = z.enum([
+  'server/status',
+  'server/shutdown',
+]);
+export type RuntimeProtocolServerControlMethod = z.infer<
+  typeof RUNTIME_PROTOCOL_SERVER_CONTROL_METHOD_SCHEMA_
+>;
 const requestBase = { jsonrpc: z.literal('2.0'), id: rpcId };
 export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
   z
@@ -530,6 +539,15 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
   z
     .object({ ...requestBase, method: z.literal('server/ping'), params: z.object({}).strict() })
     .strict(),
+  ...RUNTIME_PROTOCOL_SERVER_CONTROL_METHOD_SCHEMA_.options.map((method) =>
+    z
+      .object({
+        ...requestBase,
+        method: z.literal(method),
+        params: z.object({ request: jsonRecord }).strict(),
+      })
+      .strict(),
+  ),
 ]);
 export type RuntimeProtocolRequest = z.infer<typeof RUNTIME_PROTOCOL_REQUEST_SCHEMA_>;
 
@@ -926,7 +944,10 @@ export const INITIALIZE_RESULT_SCHEMA_ = z
     serverInfo: z.object({ version: z.string().min(1).max(128), instanceId: identifier }).strict(),
     capabilities: z
       .object({
-        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(19),
+        methods: z
+          .array(RUNTIME_PROTOCOL_METHOD_SCHEMA_)
+          .min(1)
+          .max(RUNTIME_PROTOCOL_METHOD_SCHEMA_.options.length),
         subscriptions: z.array(z.enum(['session', 'sessions'])).max(2),
       })
       .strict(),
@@ -1040,6 +1061,12 @@ const appControlResult = z
     response: jsonRecord,
   })
   .strict();
+const serverControlResult = z
+  .object({
+    method: RUNTIME_PROTOCOL_SERVER_CONTROL_METHOD_SCHEMA_,
+    response: jsonRecord,
+  })
+  .strict();
 export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   INITIALIZE_RESULT_SCHEMA_,
   RUNTIME_COMMAND_RECEIPT_SCHEMA_,
@@ -1051,6 +1078,7 @@ export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   historyEventPage,
   historyTranscript,
   appControlResult,
+  serverControlResult,
 ]);
 export type RuntimeProtocolResult = z.infer<typeof RUNTIME_PROTOCOL_RESULT_SCHEMA_>;
 

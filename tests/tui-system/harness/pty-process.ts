@@ -46,6 +46,8 @@ export interface PtyProcessOptions {
   executablePath?: string;
   /** Launch a test-owned TypeScript composition root through Bun. */
   entryPath?: string;
+  /** Explicit release-entrypoint arguments such as a selected daemon endpoint. */
+  args?: readonly string[];
 }
 
 export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
@@ -473,13 +475,19 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
   const proc = Bun.spawn({
     cmd: opts.executablePath
-      ? [entryPath, '--kite-home', join(opts.workspace?.home ?? userInfo().homedir, '.kite-code')]
+      ? [
+          entryPath,
+          '--kite-home',
+          join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
+          ...(opts.args ?? []),
+        ]
       : [
           process.execPath,
           'run',
           entryPath,
           '--kite-home',
           join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
+          ...(opts.args ?? []),
         ],
     cwd,
     env: childEnv,

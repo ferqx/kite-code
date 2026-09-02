@@ -38,11 +38,11 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
 Host/Builtin/History/App Control composition，多个进程只通过durable Store共享Session facts。普通启动没有HTTP/Web listener；显式
-legacy Service/Web控制面将在KASD后续收敛。
+`kite server start/status/stop`提供fixed exact protocol本机daemon且不参与默认发现，legacy Service/Web控制面将在KASD后续收敛。
 Service-owned internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、legacy single-Service、
+App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、显式daemon、legacy single-Service、
 retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
 Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 
@@ -63,7 +63,7 @@ Standalone build resolver机械覆盖十六个workspace package的全部public e
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
-临时prefix中完成安装、CLI help/version、已安装standalone TUI通过managed Service的真实PTY startup、
+临时prefix中完成安装、CLI help/version、已安装standalone TUI通过parent-owned App Server的真实PTY startup、显式daemon start/status/stop、
 installed Service MCP stdio wrapper、retired companion absence、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
 改名到 immutable 最终目录。v2 managed-install marker 与唯一 `active` pointer 原子绑定当前/previous candidate；
 stable launcher 将启动时的 candidate root pin 给 child process，running process 不重新读取 pointer。首次安装才以

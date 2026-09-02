@@ -8,7 +8,9 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('migrate-run-store');
     expect(source).not.toContain('migrate-single-store');
     expect(source).not.toContain('web-recover');
-    expect(source).toContain('runtimeConnector: appServer.connector');
+    expect(source).toContain('createManagedLocalAppServerComposition');
+    expect(source).toContain('runtimeConnector: connector');
+    expect(source).toContain('createManagedLocalAppServerDaemon');
   });
 
   test('stable launcher enters its main without relying on standalone import.meta.main', () => {

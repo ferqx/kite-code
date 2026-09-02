@@ -46,6 +46,11 @@ export interface CliMainDependencies {
   readonly serviceManager?: KiteServiceManager;
   /** Release-selected executable identity used by lifecycle replacement policy. */
   readonly serviceExecutableMode?: 'source' | 'installed';
+  readonly appServerDaemon?: {
+    start(workspace: string): Promise<Readonly<Record<string, unknown>>>;
+    status(): Promise<Readonly<Record<string, unknown>>>;
+    stop(): Promise<Readonly<Record<string, unknown>>>;
+  };
   /** Ensures the one Service and returns its stable Web root URL. */
   readonly singleServiceWeb?: {
     readonly discover: () => Promise<string>;
@@ -62,6 +67,9 @@ export interface ParsedArgs {
     | 'sandbox-setup'
     | 'sandbox-status'
     | 'server-stdio'
+    | 'server-start'
+    | 'server-status'
+    | 'server-stop'
     | 'service-ensure'
     | 'service-status'
     | 'service-stop'
@@ -73,6 +81,7 @@ export interface ParsedArgs {
   workspace: string;
   /** Explicit managed Service home forwarded to release composition; the CLI never reads it. */
   kiteHome?: string;
+  serverEndpoint?: string;
   checkpointPath: string;
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
@@ -92,6 +101,7 @@ export interface ParsedArgs {
   telemetryStatus: boolean;
   serviceJson: boolean;
   webJson: boolean;
+  serverJson: boolean;
 }
 
 export async function main(dependencies: CliMainDependencies): Promise<void> {
@@ -118,6 +128,28 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   }
   if (args.command === 'server-stdio') {
     throw new Error('Runtime stdio is a Service-owned internal entrypoint.');
+  }
+  if (
+    args.command === 'server-start' ||
+    args.command === 'server-status' ||
+    args.command === 'server-stop'
+  ) {
+    const daemon = dependencies.appServerDaemon;
+    if (!daemon) throw new Error('Explicit App Server daemon control is unavailable.');
+    const result =
+      args.command === 'server-start'
+        ? await daemon.start(args.workspace)
+        : args.command === 'server-status'
+          ? await daemon.status()
+          : await daemon.stop();
+    console.log(args.serverJson ? JSON.stringify(result) : formatAppServerDaemonResult(result));
+    if (result.state === 'incompatible' || result.state === 'unavailable') {
+      throw new Error(`App Server daemon is ${String(result.state)}.`);
+    }
+    if (args.command === 'server-start' && result.state !== 'ready') {
+      throw new Error(`App Server daemon did not start: ${String(result.state)}.`);
+    }
+    return;
   }
   if (isServiceLifecycleCommand(args.command)) {
     await runServiceLifecycleCommand(
@@ -693,6 +725,13 @@ async function runSingleServiceWebCommand(
   console.log(json ? JSON.stringify({ state: 'ready', url }) : url);
 }
 
+function formatAppServerDaemonResult(result: Readonly<Record<string, unknown>>): string {
+  const state = typeof result.state === 'string' ? result.state : 'unavailable';
+  const endpoint = typeof result.endpoint === 'string' ? ` ${result.endpoint}` : '';
+  const build = typeof result.buildId === 'string' ? ` build=${result.buildId}` : '';
+  return `App Server: ${state}${endpoint}${build}`;
+}
+
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -701,27 +740,33 @@ export function parseArgs(argv: string[]): ParsedArgs {
     commandArgv[0] === 'web' &&
     (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
       ? 'web-open'
-      : argv[0] === 'service' && argv[1] === 'ensure'
+      : commandArgv[0] === 'service' && commandArgv[1] === 'ensure'
         ? 'service-ensure'
-        : argv[0] === 'service' && argv[1] === 'status'
+        : commandArgv[0] === 'service' && commandArgv[1] === 'status'
           ? 'service-status'
-          : argv[0] === 'service' && argv[1] === 'stop'
+          : commandArgv[0] === 'service' && commandArgv[1] === 'stop'
             ? 'service-stop'
-            : argv[0] === 'service' && argv[1] === 'restart'
+            : commandArgv[0] === 'service' && commandArgv[1] === 'restart'
               ? 'service-restart'
-              : argv[0] === 'sandbox' && argv[1] === 'setup'
-                ? 'sandbox-setup'
-                : argv[0] === 'sandbox' && argv[1] === 'status'
-                  ? 'sandbox-status'
-                  : argv[0] === 'server' && argv[1] === '--stdio'
-                    ? 'server-stdio'
-                    : argv[0] === 'resume'
-                      ? 'resume'
-                      : argv[0] === 'run'
-                        ? 'run'
-                        : argv[0] === 'trace'
-                          ? 'trace'
-                          : 'help';
+              : commandArgv[0] === 'server' && commandArgv[1] === 'start'
+                ? 'server-start'
+                : commandArgv[0] === 'server' && commandArgv[1] === 'status'
+                  ? 'server-status'
+                  : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
+                    ? 'server-stop'
+                    : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
+                      ? 'sandbox-setup'
+                      : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
+                        ? 'sandbox-status'
+                        : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
+                          ? 'server-stdio'
+                          : commandArgv[0] === 'resume'
+                            ? 'resume'
+                            : commandArgv[0] === 'run'
+                              ? 'run'
+                              : commandArgv[0] === 'trace'
+                                ? 'trace'
+                                : 'help';
   rejectUnsupportedOptions(argv, command);
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
@@ -805,6 +850,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
     kiteHome: optionalValue('--kite-home'),
+    serverEndpoint: optionalValue('--server'),
     checkpointPath: resolve(value('--checkpoints', defaultClientCheckpointPath())),
     approve: approvalGrant !== undefined,
     approvalGrant,
@@ -824,6 +870,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     telemetryStatus: argv.includes('--telemetry-status'),
     serviceJson: command === 'service-status' && argv.includes('--json'),
     webJson: command === 'web-open' && argv.includes('--json'),
+    serverJson: command === 'server-status' && argv.includes('--json'),
   };
 }
 
@@ -873,7 +920,26 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
       throw new Error('Interaction mode flags are supported only by run and resume.');
     }
   }
-  if (argv.includes('--json') && command !== 'service-status' && command !== 'web-open') {
+  const serverFlags = argv.flatMap((value, index) => (value === '--server' ? [index] : []));
+  if (serverFlags.length > 1 || (serverFlags.length === 1 && !argv[serverFlags[0]! + 1])) {
+    throw new Error('--server requires exactly one explicit endpoint.');
+  }
+  if (
+    serverFlags.length === 1 &&
+    command !== 'run' &&
+    command !== 'resume' &&
+    command !== 'server-start' &&
+    command !== 'server-status' &&
+    command !== 'server-stop'
+  ) {
+    throw new Error('--server is supported only by Runtime and server lifecycle commands.');
+  }
+  if (
+    argv.includes('--json') &&
+    command !== 'service-status' &&
+    command !== 'server-status' &&
+    command !== 'web-open'
+  ) {
     throw new Error('The --json option is unsupported for this command.');
   }
 }
@@ -892,6 +958,7 @@ function positionalTask(argv: string[]): string {
     '--replace-command',
     '--skill',
     '--feature',
+    '--server',
   ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -915,6 +982,9 @@ function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt"
   bun run agent resume --thread default-thread --task "Continue the task"
+  bun run agent server start [--server <endpoint>]
+  bun run agent server status [--server <endpoint>] [--json]
+  bun run agent server stop [--server <endpoint>]
   bun run agent service ensure
   bun run agent service status [--json]
   bun run agent service stop
@@ -930,11 +1000,12 @@ Options:
   --thread <id>          LangGraph thread id
   --workspace <path>     Tool workspace
   --kite-home <path>     Advanced: explicit managed Service home (validated by release composition)
+  --server <endpoint>    Explicit App Server Unix socket or Windows named pipe; never auto-discovered
   --skill <name>         Activate a skill (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit
   --telemetry-status     Print redacted telemetry consent/export status and exit
-  --json                 Emit a closed JSON result for service status or Web ensure/status
+  --json                 Emit a closed JSON result for server/service status or Web ensure/status
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --trust-workspace      Record trust for --workspace and continue (source=config)

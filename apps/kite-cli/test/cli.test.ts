@@ -20,6 +20,42 @@ describe('cli argument parsing', () => {
     expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
   });
 
+  test('recognizes only explicit App Server daemon lifecycle and endpoint selection', async () => {
+    expect(parseArgs(['server', 'start'])).toMatchObject({
+      command: 'server-start',
+      serverJson: false,
+    });
+    expect(parseArgs(['server', 'status', '--server', '/tmp/kite.sock', '--json'])).toMatchObject({
+      command: 'server-status',
+      serverEndpoint: '/tmp/kite.sock',
+      serverJson: true,
+    });
+    expect(parseArgs(['server', 'stop']).command).toBe('server-stop');
+    expect(parseArgs(['run', '--server', '/tmp/kite.sock', 'hello']).serverEndpoint).toBe(
+      '/tmp/kite.sock',
+    );
+    expect(() => parseArgs(['run', '--server'])).toThrow('--server requires');
+
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      process.argv = ['bun', 'kite', 'server', 'status', '--json'];
+      await main({
+        appServerDaemon: {
+          start: async () => ({ state: 'ready' }),
+          status: async () => ({ state: 'ready', endpoint: '/tmp/kite.sock' }),
+          stop: async () => ({ state: 'absent' }),
+        },
+      });
+      expect(output.mock.calls.at(-1)).toEqual([
+        JSON.stringify({ state: 'ready', endpoint: '/tmp/kite.sock' }),
+      ]);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
   test('recognizes only the single-Service Web root command', () => {
     expect(parseArgs(['web']).command).toBe('web-open');
     expect(parseArgs(['web', '--json'])).toMatchObject({

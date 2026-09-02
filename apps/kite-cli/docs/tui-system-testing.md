@@ -10,6 +10,7 @@
 - 默认 `bun run test` 不执行真实 PTY scenario、native smoke、spike 或 live Provider。
 - source PTY child从repo-owned `scripts/release/entrypoints/tui.ts`进入parent-owned App Server composition，不再直入
   `apps/kite-cli/src/tui/executable.tsx`绕过release resolver；installed smoke使用standalone executable并解析同candidate Service child。
+- PTY harness可用显式`args`启动`--server <endpoint>`场景；参数由scenario固定，不从ambient进程状态发现daemon。
 
 ## Runtime client boundary
 
@@ -72,6 +73,10 @@
 KASD-03新增真实双TUI journey：两个parent-owned App Server同时打开同一source profile，第二个读取第一个的Session，两边普通
 `/status`都没有Service PID/Web URL/build drift。startup与exit/reopen journey使用持久`kite-session.sqlite`；installed macOS candidate
 也通过真实PTY startup。完整三平台release/platform qualification仍在KASD-06，当前POSIX结果不能替代Windows/Linux证据。
+
+KASD-04新增显式daemon journey：真实`server start`后两个TUI通过同一Unix socket读取durable History，单个TUI退出不停止daemon；
+`server stop`取消active Turn、drain连接并清理endpoint。模拟旧build但同exact protocol的client可连接，要求未知capability的future client
+必须fail closed；Windows named-pipe与完整三平台证据仍由KASD-06拥有。
 
 ## 验证
 
