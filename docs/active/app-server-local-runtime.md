@@ -25,8 +25,9 @@ Web -------- loopback HTTP ------->        |
 
 source 与 installed 的语义相同：默认 client 启动 exact same-build child，不发现常驻进程。source 以 canonical checkout digest 隔离
 Store profile，installed 使用 canonical profile。App Server 退出不删除 Session/History。
-profile preparation先逐段执行no-follow/owner校验，再把client与child统一到`realpath`返回的canonical target。Windows daemon endpoint digest
-忽略display casing；准备后的canonical target会再次推导默认endpoint，short-name或reparse alias造成的endpoint漂移仍会被拒绝。
+profile resolver以最近存在父目录的`realpath`加未创建尾部计算无写入的稳定identity，同时保留请求路径；preparation再沿请求路径逐段执行
+no-follow/owner校验，并把client与child统一到最终canonical target。Windows daemon endpoint digest忽略display casing；准备后的target会再次
+推导默认endpoint，任何真实identity漂移仍会被拒绝。
 
 ## Authority
 
@@ -92,6 +93,6 @@ release install/upgrade/rollback 只物化 immutable candidate 并切换 active 
 candidate install/upgrade/rollback/uninstall。release workflow 在 macOS、Ubuntu 与 Windows 分别运行 candidate build/verify/smoke，
 并在 Windows 单独验证 endpoint lifecycle 与 Session Store fencing。
 
-当前macOS arm64 dirty candidate `29d2fc768bff7557a3ec8738`已通过build/verify、installed TUI、paired App Server、显式daemon/Web、
+当前macOS arm64 dirty candidate `9e5ebc21d6cf30a6f7f80c7d`已通过build/verify、installed TUI、paired App Server、显式daemon/Web、
 upgrade/rollback/uninstall smoke；完整default tests与42-file TUI PTY也已通过。Ubuntu/Windows结果必须来自包含本变更的hosted workflow run，
 不能由静态workflow或本机结果推断。

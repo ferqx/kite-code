@@ -254,7 +254,7 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
   production executable只组合`createKiteSessionAppServerStorageComposition`，旧`kite.sqlite`仍只作为未导入的历史文件保留；
 - daemon只复用最小owner-only endpoint reservation、PID/start probe与dead-only exact cleanup；reservation不保存Session/Store authority；
 - release三平台workflow已改为验证App Server endpoint、`kite-session.sqlite` execution fencing/mutation与daemon真实process，不再运行旧
-  single-Service矩阵；macOS arm64 dirty candidate `29d2fc768bff7557a3ec8738`已通过build/verify、installed TUI、paired App Server、
+  single-Service矩阵；macOS arm64 dirty candidate `9e5ebc21d6cf30a6f7f80c7d`已通过build/verify、installed TUI、paired App Server、
   daemon/Web、upgrade/rollback/uninstall smoke，完整default tests、42-file TUI PTY、16-workspace typecheck与architecture/docs Gate通过；
   Ubuntu/Windows必须等待包含本提交的hosted run，不能静态推断；
 - current authority已改写为App Server/Session拓扑。KASD-06保持`in_progress`，直到本机完整Gate与三平台真实qualification均完成。

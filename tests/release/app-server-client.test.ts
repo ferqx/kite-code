@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,13 +11,35 @@ import {
 } from '@kite-ai/kite-local-runtime/client';
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import { trustWorkspace } from '../../apps/kite-service/src/config/workspace-trust';
-import { createManagedLocalAppServerComposition } from '../../scripts/release/app-server-client';
+import {
+  createManagedLocalAppServerComposition,
+  resolveManagedLocalAppServerTarget,
+} from '../../scripts/release/app-server-client';
 import {
   sourceKiteSessionStorePath,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
 
 describe('release App Server client pairing', () => {
+  test('resolves a canonical pending profile without creating it', () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-app-pending-home-')));
+    try {
+      const requested = join(root, 'missing', '.kite-code');
+      const target = resolveManagedLocalAppServerTarget({
+        argv: ['kite-tui', '--kite-home', requested],
+        environment: { PATH: process.env.PATH },
+        systemHome: root,
+        repositoryRoot: realpathSync.native(join(import.meta.dir, '../..')),
+        executableMode: 'source',
+      });
+      expect(target.configRoot).toBe(requested);
+      expect(target.requestedConfigRoot).toBe(requested);
+      expect(existsSync(requested)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('source uses the checked-in entrypoint and persistent worktree profile', async () => {
     const root = realpathSync.native(
       mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-source-')),

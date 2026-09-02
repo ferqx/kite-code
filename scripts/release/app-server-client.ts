@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstatSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
@@ -62,6 +62,7 @@ export interface ManagedLocalAppServerTarget {
   readonly argumentsPrefix: readonly string[];
   readonly environment: Readonly<Record<string, string>>;
   readonly sourceRepositoryRoot?: string;
+  readonly requestedConfigRoot?: string;
 }
 
 /** Resolve only the client distribution's matching child; never inspect a running Service. */
@@ -126,9 +127,13 @@ export function resolveManagedLocalAppServerTarget(
   const sourceEnvironment = options.environment ?? process.env;
   const systemHome = realpathSync.native(options.systemHome ?? userInfo().homedir);
   const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
-  const home = createKiteHomeIdentity(
+  const requestedHome = createKiteHomeIdentity(
     explicitHome ?? join(systemHome, '.kite-code'),
     explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
+  );
+  const home = createKiteHomeIdentity(
+    canonicalPendingPath(requestedHome.root),
+    requestedHome.source,
   );
   const mode = options.executableMode ?? 'source';
   const repositoryRoot =
@@ -181,13 +186,16 @@ export function resolveManagedLocalAppServerTarget(
     argumentsPrefix: Object.freeze(sourceEntrypoint ? [sourceEntrypoint] : []),
     environment: Object.freeze(environment),
     ...(repositoryRoot ? { sourceRepositoryRoot: repositoryRoot } : {}),
+    requestedConfigRoot: requestedHome.root,
   });
 }
 
 export function prepareManagedLocalAppServerTarget(
   target: ManagedLocalAppServerTarget,
 ): ManagedLocalAppServerTarget {
-  const home = ensureKiteProfileHome(createKiteHomeIdentity(target.configRoot));
+  const home = ensureKiteProfileHome(
+    createKiteHomeIdentity(target.requestedConfigRoot ?? target.configRoot),
+  );
   if (target.mode !== 'source') {
     return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: home.root });
   }
@@ -200,6 +208,17 @@ export function prepareManagedLocalAppServerTarget(
   const digest = basename(canonicalRuntimeRoot);
   const ensured = ensurePrivateKiteHomeDirectory(home, ['source-profiles', digest]);
   return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: ensured });
+}
+
+/** Resolve a stable identity without creating the final profile path. */
+function canonicalPendingPath(path: string): string {
+  let existing = path;
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error('App Server profile has no existing parent.');
+    existing = parent;
+  }
+  return resolve(realpathSync.native(existing), relative(existing, path));
 }
 
 function canonicalRepositoryRoot(path: string): string {
