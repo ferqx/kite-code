@@ -1,7 +1,10 @@
+import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import {
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
   RUNTIME_PROTOCOL_ERROR_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
+  RUNTIME_PROTOCOL_REQUEST_SCHEMA_,
+  RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   type RuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
 import type {
@@ -42,6 +45,8 @@ export interface RuntimeStdioCarrierOptions {
   readonly onClose?: RuntimeServerOpenOptions['onClose'];
   /** Only an App composition owner may release the Host/composition. */
   readonly shutdownComposition?: () => void | Promise<void>;
+  /** KASD App Server-only durable reads on this same JSON-RPC connection. */
+  readonly history?: RuntimeHistoryClient;
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
 }
@@ -126,6 +131,7 @@ export function createRuntimeStdioCarrier(
     ...(options.admission === undefined ? {} : { admission: options.admission }),
     ...(options.onClose === undefined ? {} : { onClose: options.onClose }),
   });
+  session.bindConnection(connection);
   return Object.freeze({
     connection,
     done: session.done,
@@ -142,6 +148,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   #source: AsyncIterator<Uint8Array> | undefined;
   #outputTail: Promise<void> = Promise.resolve();
   #shutdown: Promise<void> | undefined;
+  #connection: RuntimeServerConnection | undefined;
   #closed = false;
   #readingComplete = false;
   #resolveDone!: () => void;
@@ -169,6 +176,11 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         }),
       );
     }
+  }
+
+  bindConnection(connection: RuntimeServerConnection): void {
+    if (this.#connection) throw new Error('Runtime stdio connection is already bound.');
+    this.#connection = connection;
   }
 
   async send(message: RuntimeProtocolMessage): Promise<void> {
@@ -232,6 +244,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
             const parsed = await this.#parseLine(line.subarray(0, payloadLength));
             length = 0;
             if (parsed === undefined) continue;
+            if (await this.#handleHistory(parsed)) continue;
             yield parsed;
             continue;
           }
@@ -249,7 +262,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       if (!this.#closed && length > 0) {
         const payloadLength = line[length - 1] === 0x0d ? length - 1 : length;
         const parsed = await this.#parseLine(line.subarray(0, payloadLength));
-        if (parsed !== undefined) yield parsed;
+        if (parsed !== undefined && !(await this.#handleHistory(parsed))) yield parsed;
       }
     } catch {
       if (!this.#closed) await this.#failClosed('input_failure');
@@ -276,6 +289,79 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       }
       return undefined;
     }
+  }
+
+  async #handleHistory(value: unknown): Promise<boolean> {
+    const candidate = value as { readonly method?: unknown; readonly id?: unknown };
+    if (typeof candidate.method !== 'string' || !candidate.method.startsWith('history/')) {
+      return false;
+    }
+    const decoded = RUNTIME_PROTOCOL_REQUEST_SCHEMA_.safeParse(value);
+    if (!decoded.success || !decoded.data.method.startsWith('history/')) {
+      await this.#writeError(
+        typeof candidate.id === 'string' ? candidate.id : null,
+        'invalid_params',
+      );
+      return true;
+    }
+    const request = decoded.data;
+    if (this.#connection?.state !== 'active') {
+      await this.#writeError(request.id, 'not_initialized');
+      return true;
+    }
+    const history = this.#options.history;
+    if (!history) {
+      await this.#writeError(request.id, 'method_not_found');
+      return true;
+    }
+    try {
+      const result =
+        request.method === 'history/list_sessions'
+          ? await history.listSessions(request.params.request)
+          : request.method === 'history/list_events'
+            ? await history.listEvents(request.params.request)
+            : request.method === 'history/load_session'
+              ? await history.loadSession(request.params.sessionId)
+              : undefined;
+      if (result === undefined) {
+        await this.#writeError(request.id, 'method_not_found');
+        return true;
+      }
+      await this.#writeProtocol({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(result),
+      });
+    } catch {
+      await this.#writeError(request.id, 'internal_error');
+    }
+    return true;
+  }
+
+  #writeError(id: string | null, code: keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS): Promise<void> {
+    const messages: Record<keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS, string> = {
+      parse_error: 'Parse error',
+      invalid_request: 'Invalid request',
+      method_not_found: 'Method not found',
+      invalid_params: 'Invalid params',
+      internal_error: 'Internal error',
+      overloaded: 'Overloaded',
+      not_initialized: 'Not initialized',
+      already_initialized: 'Already initialized',
+      protocol_version_mismatch: 'Protocol version mismatch',
+      unauthorized: 'Unauthorized',
+      subscription_unavailable: 'Subscription unavailable',
+      resync_required: 'Resync required',
+    };
+    return this.#writeProtocol({
+      jsonrpc: '2.0',
+      id,
+      error: RUNTIME_PROTOCOL_ERROR_SCHEMA_.parse({
+        code: RUNTIME_PROTOCOL_ERROR_NUMBERS[code],
+        message: messages[code],
+        data: { code },
+      }),
+    });
   }
 
   async #failClosed(diagnostic: string): Promise<void> {

@@ -38,7 +38,7 @@ export interface RuntimeClientOptions {
   readonly clientInfo: RuntimeClientInfo;
   readonly snapshotStore?: RuntimeSnapshotStore;
   /** App-injected exact, client-safe durable history reader. */
-  readonly history?: RuntimeHistoryClient;
+  readonly history?: RuntimeHistoryClient | 'protocol';
 }
 
 export interface RuntimeClientSubscription {
@@ -112,7 +112,41 @@ export class RuntimeClient implements AsyncDisposable {
     this.#transport = options.transport;
     this.#clientInfo = options.clientInfo;
     this.#store = options.snapshotStore ?? new RuntimeSnapshotStore();
-    this.#history = options.history;
+    this.#history =
+      options.history === 'protocol'
+        ? Object.freeze({
+            listSessions: async (request) => {
+              const result = await this.#request('history/list_sessions', { request });
+              if (!('entries' in result) || 'observedLastSequence' in result) {
+                throw new RuntimeClientError(
+                  'protocol_error',
+                  'Protocol returned invalid History.',
+                );
+              }
+              return result;
+            },
+            listEvents: async (request) => {
+              const result = await this.#request('history/list_events', { request });
+              if (!('entries' in result) || !('observedLastSequence' in result)) {
+                throw new RuntimeClientError(
+                  'protocol_error',
+                  'Protocol returned invalid History.',
+                );
+              }
+              return result;
+            },
+            loadSession: async (sessionId) => {
+              const result = await this.#request('history/load_session', { sessionId });
+              if (!('records' in result) || !('events' in result)) {
+                throw new RuntimeClientError(
+                  'protocol_error',
+                  'Protocol returned invalid History.',
+                );
+              }
+              return result;
+            },
+          } satisfies RuntimeHistoryClient)
+        : options.history;
   }
 
   get snapshotStore(): RuntimeSnapshotStore {
@@ -414,7 +448,10 @@ export class RuntimeClient implements AsyncDisposable {
       | 'runtime/command'
       | 'runtime/query'
       | 'runtime/subscribe'
-      | 'runtime/unsubscribe',
+      | 'runtime/unsubscribe'
+      | 'history/list_sessions'
+      | 'history/list_events'
+      | 'history/load_session',
     params: unknown,
     subscriptionState?: SubscriptionState,
   ): Promise<RuntimeProtocolResult> {

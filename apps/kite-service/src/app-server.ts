@@ -116,6 +116,7 @@ export async function runKiteAppServerMain(
     stdout: createNodeRuntimeStdioOutput(stdout),
     stderr,
     signals: createProcessRuntimeStdioSignals(signals),
+    history: composition.history,
     shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
   });
   let primaryError: unknown;

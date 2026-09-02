@@ -9,6 +9,8 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
 
 - 管理 connection 的 `uninitialized → active → draining → closed` 状态机。
 - 路由 initialize、command、query、subscribe、unsubscribe 与 ping。
+- 可按App composition的精确布尔开关在initialize capability中声明三个History方法；Runtime Server不路由这些
+  App-owned请求，声明与实际carrier handler必须由同一composition配对。
 - 管理 subscription pump、ack-before-notification、iterator cleanup、同 subscription FIFO 与 connection/global bounded outbound queue。
 - 将 App admission 返回的 opaque `bindingReference` 与 connection/request/client identity 组合成 strict、frozen 的进程内
   `RuntimeCommandContext`，仅传给 `RuntimeAccess.command()`；该 context 不进入 Protocol frame、request body、History 或 Browser。
@@ -20,6 +22,8 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
   storage 或 App composition。
 - 不折叠 domain projection，不保存 Runtime receipt，不成为第二 Session/Store authority。
 - 不拥有 Web static UI、process signal、stdio JSONL、WebSocket、HTTP 或 transport framing。
+- 不拥有、读取或路由durable History；App carrier必须在logical message进入Server前处理History，并复用App-owned
+  read snapshot与closed result codec。
 
 ## 允许依赖
 

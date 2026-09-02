@@ -14,7 +14,8 @@
 - 结构性实现 `RuntimeAccess`：`command/execute`、`query` 与同步返回 `AsyncIterable` 的
   `subscribe({ spec, signal? })`。每个订阅拥有独立有界队列，Abort 或 iterator `return()` 会释放远端订阅。
 - 定义 framing-neutral transport 和只读、exact DTO 的 `RuntimeHistoryClient` 接口；`loadSession` 返回完整
-  closed transcript，完整 durable history 由 App 注入的 history adapter 提供。
+  closed transcript。App可以继续注入独立history adapter；parent-owned App Server client也可显式选择
+  `history: 'protocol'`，在同一条已initialize的logical connection上发送三个exact History request。
 
 ## 不拥有职责
 
@@ -24,8 +25,8 @@
 - reconnect 只恢复登记的 subscription，绝不自动重放 mutation。
 - Session index 仅在同一连接 generation 内的 reset begin/upsert/end 边界原子替换；乱序、旧连接和同 revision
   不同投影均被拒绝或标记 resync。Server 的短期 notification replay 只帮助断线恢复，不是完整 history。
-- History adapter 与 control transport 正交注入；Client facade 可以同时暴露两者，但 history 不通过 Server
-  retention，也不让 Client 取得 raw Runtime event 或 Store authority。
+- History adapter/protocol adapter与control transport正交；Client facade可以同时暴露两者。History不通过Server
+  notification retention，也不让Client取得raw Runtime event或Store authority。
 - Native descriptor/discovery/process、WebSocket/History/App Control connector contract 位于
   `@kite-ai/kite-local-runtime/client`；本 package 不反向依赖该 Native owner，也不在 browser build 中加入环境分支。
 

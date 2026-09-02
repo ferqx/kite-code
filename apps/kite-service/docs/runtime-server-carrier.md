@@ -56,6 +56,11 @@ stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diag
 `app-server run-stdio` process owner观察该EOF后立即执行Server drain、active Turn cancel/cleanup、Session generation release和composition
 dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/invalid JSON与stdout failure fail closed。
 
+同一stdio connection完成initialize后还承载三个exact durable History read。carrier在把logical message交给Runtime Server前识别并验证
+`history/list_sessions`、`history/list_events`和`history/load_session`，调用App composition注入的`RuntimeHistoryClient`；每次调用的
+同步Store读取由同一个SQLite read snapshot包围。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知
+`history/*`方法和malformed params不进入Store。Runtime Server只在该composition中声明History capability，不路由或持有History。
+
 ## Development reference
 
 development loopback/reference仅用于同一Protocol transport qualification，不进入production support。不存在

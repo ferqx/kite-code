@@ -24,10 +24,11 @@ global config局部资格以真实process证明同一文件互斥、不同文件
 保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整
 App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/config-file-mutation-lock.test.ts apps/kite-cli/test/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
 
-KASD-02A真实process局部资格覆盖：stdio initialize/list只写protocol stdout且不创建global endpoint；active model收到parent EOF后cancel并在
+KASD-02真实process局部资格覆盖：stdio initialize/list/History只写protocol stdout且不创建global endpoint；History在initialize前拒绝，
+未组合owner时fail closed，组合owner后可从同一SQLite read snapshot加载已创建Session的完整closed transcript；active model收到parent EOF后cancel并在
 cleanup confirmed时释放generation；active model dispatch后SIGKILL会在短lease失效后阻断successor，显式reconciliation后resume只消费durable
 attempt事实，mock Provider请求保持一次；第二App Server的list/get/checkpoint与退出不取得或取消第一Server的active Session。该证据尚不替代
-Shell/MCP child crash、统一App History/Control protocol、candidate配对或三平台qualification。验证：
+Shell/MCP child crash、App Control protocol、candidate配对或三平台qualification。验证：
 `bun test apps/kite-service/test/isolated/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
 
 ## 两级运行契约

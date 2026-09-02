@@ -1833,6 +1833,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
         version: input.serverVersion ?? `protocol-${RUNTIME_PROTOCOL_VERSION}`,
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
+      ...(owner.readSnapshot ? { historyMethods: true } : {}),
     },
   );
   let disposePromise: Promise<void> | undefined;

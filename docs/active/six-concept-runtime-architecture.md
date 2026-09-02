@@ -66,6 +66,11 @@ apps/kite-web ──────────────────────
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
 
+KASD parent-owned App Server在同一条已initialize Protocol connection上增加三个exact durable History read。Service stdio carrier在消息进入
+Runtime Server前处理这些App-owned方法，并以单一SQLite read snapshot调用History projector；Runtime Server只条件发布capability，不路由
+History，Runtime Client的`history: 'protocol'` adapter只复用现有correlation/connection。该内部入口尚未成为TUI/CLI默认路径，App Control与
+candidate pairing也仍未完成。
+
 `@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
 I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native

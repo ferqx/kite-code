@@ -389,6 +389,9 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'runtime/query',
   'runtime/subscribe',
   'runtime/unsubscribe',
+  'history/list_sessions',
+  'history/list_events',
+  'history/load_session',
   'server/ping',
 ]);
 export type RuntimeProtocolMethod = z.infer<typeof RUNTIME_PROTOCOL_METHOD_SCHEMA_>;
@@ -402,6 +405,59 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
       ...requestBase,
       method: z.literal('runtime/command'),
       params: z.object({ command: RUNTIME_PROTOCOL_COMMAND_SCHEMA_ }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('history/list_sessions'),
+      params: z
+        .object({
+          request: z
+            .object({
+              cursor: z
+                .object({ updatedAt: safeRevision, sessionId: identifier })
+                .strict()
+                .optional(),
+              limit: safeRevision.min(1).max(100),
+              query: shortText.max(256).optional(),
+            })
+            .strict(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('history/list_events'),
+      params: z
+        .object({
+          request: z
+            .object({
+              sessionId: identifier,
+              afterSequence: safeRevision.optional(),
+              beforeSequence: safeRevision.optional(),
+              direction: z.enum(['forward', 'backward']),
+              limit: safeRevision.min(1).max(200),
+              eventTypes: z.array(shortText.min(1).max(160)).max(256).optional(),
+            })
+            .strict()
+            .refine(
+              (value) =>
+                value.afterSequence === undefined ||
+                value.beforeSequence === undefined ||
+                value.afterSequence < value.beforeSequence,
+            ),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('history/load_session'),
+      params: z.object({ sessionId: identifier }).strict(),
     })
     .strict(),
   z
@@ -824,7 +880,7 @@ export const INITIALIZE_RESULT_SCHEMA_ = z
     serverInfo: z.object({ version: z.string().min(1).max(128), instanceId: identifier }).strict(),
     capabilities: z
       .object({
-        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(6),
+        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(9),
         subscriptions: z.array(z.enum(['session', 'sessions'])).max(2),
       })
       .strict(),
@@ -843,6 +899,95 @@ export type InitializeResult = z.infer<typeof INITIALIZE_RESULT_SCHEMA_>;
 const subscribeResult = z.object({ subscriptionId: identifier, generation: safeRevision }).strict();
 const unsubscribeResult = z.object({ unsubscribed: z.boolean() }).strict();
 const pingResult = z.object({ status: z.literal('ok') }).strict();
+const historySessionEntry = z
+  .object({
+    sessionId: identifier,
+    displayName: shortText,
+    needsSmartName: z.boolean(),
+    updatedAt: safeRevision,
+    lastSequence: safeRevision,
+    model: z.object({ provider: identifier, name: shortText }).strict().optional(),
+  })
+  .strict();
+const historySessionPage = z
+  .object({
+    entries: z.array(historySessionEntry).max(100),
+    nextCursor: z.object({ updatedAt: safeRevision, sessionId: identifier }).strict().optional(),
+    hasMore: z.boolean(),
+  })
+  .strict();
+const historyEventDetail = z
+  .object({
+    kind: z.enum([
+      'message',
+      'model',
+      'tool',
+      'interaction',
+      'subagent',
+      'verification',
+      'artifact',
+      'unavailable',
+    ]),
+    fields: z
+      .record(z.string(), z.union([z.string(), z.number().finite(), z.boolean(), z.null()]))
+      .optional(),
+    artifact: z
+      .object({ kind: shortText, availability: z.enum(['available', 'unavailable']) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+const historyEventEntry = z
+  .object({
+    sessionId: identifier,
+    sequence: safeRevision,
+    eventId: identifier,
+    causationId: identifier.optional(),
+    occurredAt: shortText.optional(),
+    createdAt: safeRevision,
+    type: shortText.max(160),
+    category: z.enum([
+      'session',
+      'turn',
+      'model',
+      'tool',
+      'interaction',
+      'subagent',
+      'verification',
+      'recovery',
+      'other',
+    ]),
+    status: z.enum(['ok', 'running', 'waiting', 'cancelled', 'failed', 'unknown']),
+    summary: outputText.optional(),
+    detail: historyEventDetail.optional(),
+  })
+  .strict();
+const historyEventPage = z
+  .object({
+    entries: z.array(historyEventEntry).max(200),
+    nextCursor: safeRevision.optional(),
+    hasMore: z.boolean(),
+    observedLastSequence: safeRevision,
+  })
+  .strict();
+const historyTranscript = z
+  .object({
+    session: historySessionEntry,
+    records: z
+      .array(
+        z
+          .object({
+            sequence: safeRevision,
+            events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
+          })
+          .strict(),
+      )
+      .max(RUNTIME_PROTOCOL_LIMITS.maxArrayLength),
+    events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
+    interactionMode: z.enum(['accept_edits', 'auto', 'full']),
+    recovery: z.enum(['normal', 'pending_interaction']),
+  })
+  .strict();
 export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   INITIALIZE_RESULT_SCHEMA_,
   RUNTIME_COMMAND_RECEIPT_SCHEMA_,
@@ -850,6 +995,9 @@ export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   subscribeResult,
   unsubscribeResult,
   pingResult,
+  historySessionPage,
+  historyEventPage,
+  historyTranscript,
 ]);
 export type RuntimeProtocolResult = z.infer<typeof RUNTIME_PROTOCOL_RESULT_SCHEMA_>;
 

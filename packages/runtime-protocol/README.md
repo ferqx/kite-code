@@ -8,6 +8,9 @@
 - Freezes explicit command, query, client-event and session-index vocabularies, and maps only admitted Contract projections to wire values.
 - Admits the private closed `get_run`/bounded `list_runs` queries, Run projection results, and optional original Run resource on applied/replayed
   command receipts. This remains repo-private Protocol and does not expose an HTTP `/rpc` or Public Agent API route.
+- Admits three bounded durable History reads: `history/list_sessions`, `history/list_events`, and
+  `history/load_session`. They reuse the initialized JSON-RPC connection and closed client-safe DTOs; the App
+  carrier owns their handlers and SQLite read snapshot, while Runtime Server core owns neither History nor Store.
 - Supplies browser-safe schema-generation artifacts. Carriers frame complete logical messages; this package does not prescribe JSONL, WebSocket, streams, or sockets.
 
 ## Non-responsibilities
@@ -27,7 +30,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 
 - `jsonrpc` is exactly `"2.0"`; request IDs are bounded strings; batch, client notification, binary frame, numeric/null IDs, unknown fields and dynamic methods fail closed.
 - Inputs are bounded by UTF-8 bytes, object keys, array length, JSON depth and safe-number checks; prototype-shaped keys and accessors are rejected before schema parsing.
-- The only request methods are initialize, Runtime command/query/subscribe/unsubscribe and ping. Server notifications are subscription and draining facts; the Server never makes Client requests.
+- The only request methods are initialize, Runtime command/query/subscribe/unsubscribe, the three exact History
+  reads and ping. Server notifications are subscription and draining facts; the Server never makes Client requests.
 - New Contract discriminants do not become wire capabilities until an explicit exhaustive mapper and codec change admits them. Raw Runtime events, credentials, headers, provider bodies, authority identities and Store locators do not cross this boundary. User-local presentation may carry bounded reasoning, ordinary tool paths/commands/arguments and terminal output through their exact closed DTOs; obvious credential-shaped values remain redacted.
 - `model.text_delta` and `reasoning.activity` carry a required `requestId`; codecs and mappers preserve it exactly and reject missing or additional fields.
 - `tool.queued.presentationGroupId`, when present, is a bounded opaque identifier copied from the App projection. It pairs the tool with `model.responded.messageId` for presentation only; it grants no Runtime authority and unknown/additional grouping fields fail closed.

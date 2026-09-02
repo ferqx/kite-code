@@ -21,6 +21,62 @@ describe('Runtime Client boundary', () => {
 });
 
 describe('RuntimeClient protocol state machine', () => {
+  test('uses the same initialized connection for durable History reads', async () => {
+    const sessionEntry = {
+      sessionId: 'session-history',
+      displayName: 'History',
+      needsSmartName: false,
+      updatedAt: 10,
+      lastSequence: 0,
+    };
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('server-history')));
+      } else if (message.method === 'history/list_sessions') {
+        target.push(result(message.id, { entries: [sessionEntry], hasMore: false }));
+      } else if (message.method === 'history/list_events') {
+        target.push(
+          result(message.id, {
+            entries: [],
+            hasMore: false,
+            observedLastSequence: 0,
+          }),
+        );
+      } else if (message.method === 'history/load_session') {
+        target.push(
+          result(message.id, {
+            session: sessionEntry,
+            records: [],
+            events: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    await expect(client.history?.listSessions({ limit: 10 })).resolves.toMatchObject({
+      entries: [{ sessionId: 'session-history' }],
+    });
+    await expect(
+      client.history?.listEvents({
+        sessionId: 'session-history',
+        direction: 'forward',
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({ observedLastSequence: 0 });
+    await expect(client.history?.loadSession('session-history')).resolves.toMatchObject({
+      session: { sessionId: 'session-history' },
+      recovery: 'normal',
+    });
+    expect(connection.requests('initialize')).toHaveLength(1);
+    await client.close();
+  });
+
   test('round-trips private Run queries and original command resources', async () => {
     const run = {
       schema: 'kite.runtime-run.v1' as const,

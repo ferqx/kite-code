@@ -110,6 +110,7 @@ export interface RuntimeServerOptions {
   readonly serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
+  readonly historyMethods?: boolean;
 }
 
 export interface RuntimeServerConnection {
@@ -155,6 +156,7 @@ export class RuntimeServer {
       options?.admission ?? this.#backend.admission,
       connection,
       this.#options.serverInfo,
+      this.#options.historyMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
       () => this.#reserveSubscription(),
@@ -208,6 +210,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #backend: RuntimeServerBackend;
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
+  readonly #historyMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
   readonly #reserveSubscription: () => boolean;
@@ -233,6 +236,7 @@ class ServerConnection implements RuntimeServerConnection {
     admission: RuntimeServerAdmissionPort,
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
+    historyMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
     reserveSubscription: () => boolean,
@@ -245,6 +249,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#admission = admission;
     this.#connection = connection;
     this.#serverInfo = serverInfo;
+    this.#historyMethods = historyMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
     this.#reserveSubscription = reserveSubscription;
@@ -428,6 +433,9 @@ class ServerConnection implements RuntimeServerConnection {
           'runtime/query',
           'runtime/subscribe',
           'runtime/unsubscribe',
+          ...(this.#historyMethods
+            ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
+            : []),
           'server/ping',
         ],
         subscriptions: ['session', 'sessions'],

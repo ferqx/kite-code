@@ -81,6 +81,40 @@ describe('Runtime stdio carrier', () => {
     await carrier.done;
   });
 
+  test('keeps History on the initialized App connection and fails closed without its owner', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const carrier = createCarrier({ input, output });
+    const history = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'history-1',
+      method: 'history/list_sessions',
+      params: { request: { limit: 10 } },
+    });
+    input.pushText(`${history}\n${initializeLine()}`);
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'history-1',
+          error: expect.objectContaining({ data: { code: 'not_initialized' } }),
+        }),
+        expect.objectContaining({
+          id: 'init',
+          result: expect.objectContaining({ protocolVersion: 1 }),
+        }),
+      ]),
+    );
+    input.pushText(`${history.replace('history-1', 'history-2')}\n`);
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'history-2',
+      error: { data: { code: 'method_not_found' } },
+    });
+    input.close();
+    await carrier.done;
+  });
+
   test('fails closed for invalid UTF-8 and overlong raw lines without echoing input', async () => {
     const invalidInput = new BytesInput();
     const invalidOutput = new FakeOutput();

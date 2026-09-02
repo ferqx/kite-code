@@ -49,7 +49,7 @@ Web -------loopback HTTP------------>       │
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
-| KASD-02 | in_progress | stdio进程/Host/Session generation lifecycle已接通；统一App方法面与candidate配对待完成 |
+| KASD-02 | in_progress | stdio进程/Host/Session generation与同连接History已接通；App Control/candidate配对待完成 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
 | KASD-05 | pending | Web client解耦 |
@@ -129,7 +129,9 @@ global mutation inventory无未裁决写路径；并发首次建库稳定；GC�
   Session。App Server list/get/checkpoint从同一SQLite read snapshot返回，第二Server只读不会acquire、cancel或release第一Server的Session；
 - 真实process已覆盖protocol-only stdout、EOF active model cancel与clean handoff，以及短lease active model SIGKILL后
   `recovery_required`→显式reconciliation→resume，Provider请求保持一次；
-- 尚未完成统一Kite App protocol的History/App Control方法面、source/candidate launcher配对与Shell/MCP child crash矩阵，所以KASD-02保持
+- 已把三个exact durable History read接到同一条initialize后的JSONL connection：carrier拥有路由与单SQLite read snapshot，Runtime Server只
+  条件声明capability且不取得History/Store authority，Runtime Client可显式使用protocol History adapter；
+- 尚未完成App Control方法面、source/candidate launcher配对与Shell/MCP child crash矩阵，所以KASD-02保持
   `in_progress`。
 
 - 从现有Runtime Server/Client与Service composition提取`kite app-server`内部入口；

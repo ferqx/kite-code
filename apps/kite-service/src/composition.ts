@@ -272,9 +272,19 @@ function createKiteServiceRuntimeCompositionUnchecked(
         }
       : {}),
   });
-  const history = input.storageOwner
+  const rawHistory = input.storageOwner
     ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
     : createKiteRuntimeHistory(input.checkpointPath);
+  const history: RuntimeHistoryClient = input.storageOwner?.readSnapshot
+    ? Object.freeze({
+        listSessions: (request: Parameters<RuntimeHistoryClient['listSessions']>[0]) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.listSessions(request)),
+        listEvents: (request: Parameters<RuntimeHistoryClient['listEvents']>[0]) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.listEvents(request)),
+        loadSession: (sessionId: string) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.loadSession(sessionId)),
+      })
+    : rawHistory;
   const persistedWorkspace = (sessionId: string): KiteWorkspaceIdentity | undefined => {
     const snapshot = owner.storage.sessions.loadSnapshot<{
       readonly session: {

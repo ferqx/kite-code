@@ -62,6 +62,14 @@ describe('KASD parent-owned App Server process', () => {
           params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
         })}\n`,
       );
+      child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'history-1',
+          method: 'history/list_sessions',
+          params: { request: { limit: 10 } },
+        })}\n`,
+      );
       child.stdin.end();
       const [exitCode, stdout, stderr] = await Promise.all([
         child.exited,
@@ -83,6 +91,9 @@ describe('KASD parent-owned App Server process', () => {
               serverInfo: expect.objectContaining({
                 version: `kite-app-server-v1-${createHash('sha256').update(buildId).digest('hex')}`,
               }),
+              capabilities: expect.objectContaining({
+                methods: expect.arrayContaining(['history/list_sessions']),
+              }),
             }),
           }),
           expect.objectContaining({
@@ -91,6 +102,10 @@ describe('KASD parent-owned App Server process', () => {
               queryType: 'list_sessions',
               sessions: [],
             }),
+          }),
+          expect.objectContaining({
+            id: 'history-1',
+            result: { entries: [], hasMore: false },
           }),
         ]),
       );
@@ -164,6 +179,15 @@ describe('KASD parent-owned App Server process', () => {
         }),
       );
       expect(await output.next()).toMatchObject({ id: 'create', result: { status: 'applied' } });
+      child.stdin.write(line('history-created', 'history/load_session', { sessionId }));
+      expect(await output.next()).toMatchObject({
+        id: 'history-created',
+        result: {
+          session: { sessionId },
+          records: expect.any(Array),
+          events: expect.any(Array),
+        },
+      });
       child.stdin.write(
         line('turn', 'runtime/command', {
           command: {
