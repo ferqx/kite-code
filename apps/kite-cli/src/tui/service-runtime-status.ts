@@ -7,6 +7,40 @@ export interface ServiceRuntimePresentation {
   readonly expectedBuildId?: string;
 }
 
+export interface AppServerRuntimePresentation {
+  readonly transport: 'stdio';
+  readonly mode: 'source' | 'installed';
+  readonly buildId: string;
+  readonly serverVersion: string;
+  readonly clientVersion?: string;
+}
+
+export interface AppServerRuntimeStatusLabels {
+  readonly transport: string;
+  readonly mode: string;
+  readonly buildId: string;
+  readonly serverVersion: string;
+  readonly clientVersion: string;
+  readonly paired: string;
+}
+
+export function formatAppServerRuntimeStatus(
+  server: AppServerRuntimePresentation,
+  labels: AppServerRuntimeStatusLabels,
+): string {
+  const lines = [
+    `  ⎿  ${labels.transport}: ${server.transport}`,
+    `     ${labels.mode}: ${server.mode}`,
+    `     ${labels.buildId}: ${server.buildId}`,
+    `     ${labels.serverVersion}: ${server.serverVersion}`,
+  ];
+  if (server.clientVersion !== undefined) {
+    lines.push(`     ${labels.clientVersion}: ${server.clientVersion}`);
+  }
+  lines.push(`     ${labels.paired}`);
+  return lines.join('\n');
+}
+
 export interface ServiceRuntimeStatusLabels {
   readonly pid: string;
   readonly startedAt: string;

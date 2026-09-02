@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  formatAppServerRuntimeStatus,
   formatServiceBuildDriftWarning,
   formatServiceRuntimeStatus,
   hasServiceBuildDrift,
@@ -28,6 +29,31 @@ const labels = {
 };
 
 describe('TUI Local Service status presentation', () => {
+  test('shows parent-owned App Server pairing without a PID or Web endpoint', () => {
+    const status = formatAppServerRuntimeStatus(
+      {
+        transport: 'stdio',
+        mode: 'source',
+        buildId: 'dev:paired',
+        serverVersion: 'kite-app-server-v1-paired',
+        clientVersion: '0.1.0',
+      },
+      {
+        transport: 'App Server transport',
+        mode: 'Runtime profile',
+        buildId: 'Build',
+        serverVersion: 'App Server version',
+        clientVersion: 'Client version',
+        paired: 'Client and App Server are exactly paired',
+      },
+    );
+    expect(status).toContain('App Server transport: stdio');
+    expect(status).toContain('Runtime profile: source');
+    expect(status).toContain('Client and App Server are exactly paired');
+    expect(status).not.toContain('PID');
+    expect(status).not.toContain('Web');
+  });
+
   test('shows the exact process and build identity without a false drift warning', () => {
     expect(hasServiceBuildDrift(current)).toBe(false);
     expect(formatServiceBuildDriftWarning(current, 'warning')).toBeNull();

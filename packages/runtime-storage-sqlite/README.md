@@ -56,7 +56,7 @@
 - KHSS当前production Store 9 / `kite-home-single-service-v1-2026-08-30` exact inventory在一个DB内固定
   `workspaces`、现有Runtime/Run/receipt/tombstone事实与八张领域专用Artifact表。该target明确拒绝`runtime_artifacts`通用blob、Directory
   outbox、未知table/column/index和metadata drift，也不保存legacy Coordinator operation receipt或migration state。
-- KASD-01已建立未接入默认入口的`kite-session.sqlite` substrate：`openKiteSessionStoreDatabase`只接受新文件名与
+- KASD-01～03已把`kite-session.sqlite`接入default TUI/CLI App Server：`openKiteSessionStoreDatabase`只接受新文件名与
   `kite-session-app-server-2026-09-02` exact epoch，空文件在`BEGIN IMMEDIATE`内初始化，existing exact Store正常reopen，旧epoch、partial或
   corrupt Store统一返回`store_upgrade_required`；它不探测、导入或改写`kite.sqlite`。`createKiteSessionExecutionAuthority`在同一
   `kite_meta` owner中持久化Host-owned `controllerGeneration`、authority revision、lease deadline与cleanup状态；acquire/renew/detach/release
@@ -64,8 +64,8 @@
   过期且cleanup未确认的owner只会进入`recovery_required`。`openKiteSessionRuntimeStorage`在每条WAL connection上提供统一Session execution
   scope：event/snapshot/name/model、delete、checkpoint/rewind/fork、Run/recovery与typed Artifact mutation全部进入同一个generation/revision
   fence；read/list不取lease，constructor深验及App Server复合read可固定在一个SQLite read snapshot。fork target facts、Run/receipt与generation 1同事务，后续copy
-  fault共同回滚。新owner不取得旧Workspace process lock，也不要求one-connection Store composition。该substrate尚未成为TUI/CLI production
-  composition，不能据此删除当前Store 9或旧single-Service owner。
+  fault共同回滚。新owner不取得旧Workspace process lock，也不要求one-connection Store composition。旧Store 9只服务显式legacy
+  single-Service/Web控制面，不能成为default App Server fallback。
 - 新epoch的`runtime_effect_leases`使用独立exact列集合，除attempt-local `lease_revision`外还绑定Session `controller_generation`与
   Host/client/connection identity。`createKiteSessionMutationPort`在同一个`BEGIN IMMEDIATE`内重读这组execution binding、authority revision、
   lease deadline与Session revision后才执行callback；`createKiteSessionEffectPort`只允许该transaction内prepare/renew/terminal/unknown，并在每次
@@ -74,7 +74,8 @@
   successor reconciliation把上一generation遗留prepared effect全部改为unknown，并与cleanup confirmation同事务。Artifact GC因没有安全的
   Session归属/maintenance barrier继续显式禁用。
 - `createKiteHomeArtifactStore`只暴露Model/Plan/Capability/filesystem preimage/Sandbox/Subagent领域方法，保留existing ref/byte bound、
-  exact retry冲突和complete reachability GC。
+  exact retry冲突和complete reachability GC。Capability结果以`(invocation_id,evidence_digest)`唯一，允许resumable invocation分别保存partial与
+  terminal结果；相同tuple换ref或正文仍冲突。
 - KHSS-02的`createKiteHomeDirectoryQuery`直接从同一Store 9 connection按`workspace_id`读取bounded、path-free Workspace/Session
   目录；它不读取`canonical_path`，不创建Catalog mirror、outbox cursor、compatibility reader或第二SQLite连接。Session固定按
   `updated_at DESC + session_id ASC`排列，并只统计本Workspace下同Session的event sequence；空的持久`name`只读回退到该Session第一条

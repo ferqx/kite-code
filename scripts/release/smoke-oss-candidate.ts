@@ -151,7 +151,7 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
     throw installedSmokeError('TUI version', tuiVersion);
   }
   await runInstalledMcpStdioWrapperSmoke(service);
-  await runInstalledTuiStartupSmoke(cli, tui);
+  await runInstalledTuiStartupSmoke(tui);
 }
 
 function assertInstalledReleaseAssets(prefix: string, manifest: OssCandidateManifest): void {
@@ -286,10 +286,7 @@ async function drainRemainingMcpOutput(
   }
 }
 
-async function runInstalledTuiStartupSmoke(
-  cliExecutablePath: string,
-  tuiExecutablePath: string,
-): Promise<void> {
+async function runInstalledTuiStartupSmoke(tuiExecutablePath: string): Promise<void> {
   const server = createMockModelServer();
   // This is a standalone startup smoke, not Windows managed-network
   // onboarding coverage. Keep its fixture independent from any local account
@@ -321,13 +318,6 @@ async function runInstalledTuiStartupSmoke(
         : error;
     }
     try {
-      await stopInstalledTuiService(cliExecutablePath, workspace);
-    } catch (error) {
-      failure = failure
-        ? new AggregateError([failure, error], 'Installed TUI smoke and Service cleanup failed')
-        : error;
-    }
-    try {
       await cleanupTuiSystemFixtures({
         tuis: [],
         mockServers: [server],
@@ -340,73 +330,6 @@ async function runInstalledTuiStartupSmoke(
     }
   }
   if (failure) throw failure;
-}
-
-async function stopInstalledTuiService(
-  cliExecutablePath: string,
-  workspace: Pick<ReturnType<typeof createTestWorkspace>, 'env' | 'workspace'>,
-): Promise<void> {
-  const environment = { ...workspace.env };
-  for (const key of [
-    'PATH',
-    'SystemRoot',
-    'WINDIR',
-    'ComSpec',
-    'PATHEXT',
-    'TMPDIR',
-    'TMP',
-    'TEMP',
-  ]) {
-    const value = process.env[key];
-    if (value !== undefined) environment[key] = value;
-  }
-  const stopped = Bun.spawnSync(
-    [cliExecutablePath, 'service', 'stop', '--kite-home', workspace.env.KITE_CODE_HOME],
-    {
-      cwd: workspace.workspace,
-      env: environment,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-  if (stopped.exitCode !== 0) throw installedSmokeError('TUI Service stop', stopped);
-
-  let observed = Bun.spawnSync(
-    [cliExecutablePath, 'service', 'status', '--json', '--kite-home', workspace.env.KITE_CODE_HOME],
-    {
-      cwd: workspace.workspace,
-      env: environment,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (
-      observed.exitCode === 0 &&
-      /"outcome":"applied"/u.test(observed.stdout.toString()) &&
-      /"state":"absent"/u.test(observed.stdout.toString())
-    ) {
-      return;
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-    observed = Bun.spawnSync(
-      [
-        cliExecutablePath,
-        'service',
-        'status',
-        '--json',
-        '--kite-home',
-        workspace.env.KITE_CODE_HOME,
-      ],
-      {
-        cwd: workspace.workspace,
-        env: environment,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    );
-  }
-  throw installedSmokeError('TUI Service shutdown observation', observed);
 }
 
 function installedSmokeError(

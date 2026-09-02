@@ -67,7 +67,8 @@
   `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
   乱序仍按 call ID 更新同一个 summary。存在queued metadata时，未started的`tool.rejected`保留为error终态诊断，
   明确表示执行前拒绝；因为策略拒绝可能没有独立interaction notice，不能把它静默删除。subscription gap连queued
-  metadata也缺失时仍不得凭terminal创建匿名`Tool`执行卡。
+  metadata也缺失时仍不得凭terminal创建匿名`Tool`执行卡。例外仅是用户已通过approval interaction明确拒绝：该路径已有独立settlement
+  notice，queued payload必须删除，不能再把从未启动的工具物化成空名称/空参数执行卡。
 - 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
   统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued event 已由 Runtime 分类为
   `effectClass=read_only` 且 `sideEffect=false` 时才归 exploration；TUI 不读取命令文本重新分类。

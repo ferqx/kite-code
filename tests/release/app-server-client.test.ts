@@ -9,6 +9,8 @@ import {
   KITE_APP_SERVER_PROTOCOL_METHODS_,
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
+import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
+import { trustWorkspace } from '../../apps/kite-service/src/config/workspace-trust';
 import { createManagedLocalAppServerComposition } from '../../scripts/release/app-server-client';
 import {
   sourceKiteSessionStorePath,
@@ -23,7 +25,24 @@ describe('release App Server client pairing', () => {
     const systemHome = join(root, 'home');
     const kiteHome = join(root, 'kite-home');
     const workspace = join(root, 'workspace');
-    for (const path of [systemHome, workspace]) mkdirSync(path);
+    for (const path of [systemHome, kiteHome, workspace]) mkdirSync(path);
+    writeFileSync(
+      join(kiteHome, 'kite-code.jsonc'),
+      JSON.stringify({
+        provider: {
+          test: {
+            type: 'openai-compatible',
+            apiKey: 'test-key',
+            baseURL: 'http://127.0.0.1:1/v1',
+            model: 'test-model',
+            models: ['test-model'],
+          },
+        },
+        model: { default: { provider: 'test', name: 'test-model' } },
+        sandbox: { enabled: false },
+        mcpServers: {},
+      }),
+    );
     const repositoryRoot = realpathSync.native(join(import.meta.dir, '../..'));
     const composition = createManagedLocalAppServerComposition({
       argv: ['kite-tui', '--kite-home', kiteHome],
@@ -33,6 +52,13 @@ describe('release App Server client pairing', () => {
       executableMode: 'source',
     });
     const expectedBuild = sourceServiceBuildIdentity(repositoryRoot);
+    expect(
+      trustWorkspace({
+        workspace,
+        source: 'test',
+        storePath: join(kiteHome, 'workspace-trust.jsonc'),
+      }).status,
+    ).toBe('recorded');
     expect(composition).toMatchObject({
       mode: 'source',
       buildId: expectedBuild,
@@ -41,6 +67,7 @@ describe('release App Server client pairing', () => {
     expect(join(composition.runtimeRoot, 'kite-session.sqlite')).toBe(
       sourceKiteSessionStorePath(kiteHome, repositoryRoot),
     );
+    let createdRevision = -1;
     const client = composition.connect({
       workspace,
       clientInfo: { name: 'source-pairing', version: '1', instanceId: 'source-pairing-1' },
@@ -48,8 +75,64 @@ describe('release App Server client pairing', () => {
     try {
       await client.connect();
       expect(client.runtime.snapshotStore.getSnapshot().status).toBe('active');
+      const created = await client.runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'source-pairing-create',
+        type: 'create_session',
+        workspace,
+        bootstrapSessionId: 'source-pairing-session',
+      });
+      expect(created).toMatchObject({ status: 'applied' });
+      if (created.status !== 'applied') throw new Error('Source Session creation was not applied.');
+      createdRevision = created.revision;
     } finally {
       await client[Symbol.asyncDispose]();
+    }
+    const successor = composition.connect({
+      workspace,
+      clientInfo: { name: 'source-successor', version: '1', instanceId: 'source-successor-1' },
+    });
+    const contender = composition.connect({
+      workspace,
+      clientInfo: { name: 'source-contender', version: '1', instanceId: 'source-contender-1' },
+    });
+    try {
+      await Promise.all([successor.connect(), contender.connect()]);
+      expect((await successor.history.listSessions({ limit: 100 })).entries).toEqual(
+        expect.arrayContaining([expect.objectContaining({ sessionId: 'source-pairing-session' })]),
+      );
+      const writes = await Promise.allSettled([
+        successor.runtime.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'source-pairing-write-1',
+          type: 'set_interaction_mode',
+          sessionId: 'source-pairing-session',
+          expectedRevision: createdRevision,
+          mode: 'full',
+        }),
+        contender.runtime.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'source-pairing-write-2',
+          type: 'set_interaction_mode',
+          sessionId: 'source-pairing-session',
+          expectedRevision: createdRevision,
+          mode: 'accept_edits',
+        }),
+      ]);
+      expect(
+        writes.filter(
+          (result) => result.status === 'fulfilled' && result.value.status === 'applied',
+        ),
+      ).toHaveLength(1);
+      expect(
+        writes.filter(
+          (result) =>
+            result.status === 'rejected' ||
+            (result.status === 'fulfilled' && result.value.status === 'rejected'),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await Promise.all([successor[Symbol.asyncDispose](), contender[Symbol.asyncDispose]()]);
       rmSync(root, { recursive: true, force: true });
     }
   }, 20_000);

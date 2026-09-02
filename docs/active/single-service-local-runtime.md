@@ -11,36 +11,39 @@
 ## KASD过渡状态
 
 ADR-0166已经接受App Server进程与Durable Session解耦目标，实施计划见
-[`2026-09-02-app-server-session-decoupling.md`](../space/plans/2026-09-02-app-server-session-decoupling.md)。当前production行为仍是下文记录的
-single-Service/临时source standalone实现。KASD-01已完成新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile、独立Session
+[`2026-09-02-app-server-session-decoupling.md`](../space/plans/2026-09-02-app-server-session-decoupling.md)。KASD-03已把默认TUI与CLI
+`run/resume`切到parent-owned stdio App Server；single-Service只在显式legacy `service *`/`web`命令中可达，且不是fallback。KASD-01已完成
+新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile、独立Session
 execution authority与多连接Runtime owner。全部Session write port经generation/revision transaction；fork target首代authority原子创建；真实双进程
 证明不同Session可并行写、同Session只有一个writer；真实SIGKILL后prepared effect先进入`recovery_required`并在显式reconciliation中持久化为
 unknown，不能自动重放。新owner不取得旧Workspace process lock，Artifact GC保持关闭。
 
-TUI/CLI/Service尚未消费该owner，旧Workspace lock、one-connection composition与临时source Runtime Home仍存在于当前single-Service路径，
-因此下文仍是production current authority。KASD-02 App Server只能使用新owner，不能回接旧lock。当前没有daemon、Web切换、旧库导入、dual
-write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定production尚未切换的transition gap。
+默认TUI/CLI现已消费该owner；旧Workspace lock、one-connection composition与临时source Runtime Home只存在于尚待KASD-06删除的legacy
+single-Service implementation，不属于普通启动路径。当前没有daemon、Web client切换、旧库导入、dual write或fallback。
 
-KASD-02已增加未接client的内部`app-server run-stdio`：它使用新Store与同一Host/config/Trust实现，EOF/signal关闭本进程且无Native/HTTP/Web
+KASD-02增加的`app-server run-stdio`现由默认client使用：它使用新Store与同一Host/config/Trust实现，EOF/signal关闭本进程且无Native/HTTP/Web
 endpoint；同一条已initialize JSONL connection提供三个App-owned durable History read，且每次读取固定SQLite snapshot。真实process已覆盖
-History transcript、clean cancel/handoff和SIGKILL后no-replay恢复。它的存在不改变下文manager/Service默认行为，TUI/CLI仍不会自动或
-fallback调用该入口。九个no-secret App Control方法与typed parent client已就绪并执行exact build/capability检查；Native provider
+History transcript、clean cancel/handoff和SIGKILL后no-replay恢复。九个no-secret App Control方法与typed parent client执行exact
+build/capability检查；provider
 credential方法也已接入且不回显secret。release resolver现已分别固定source checked-in entrypoint + worktree持久profile，以及installed
 launcher-pinned immutable candidate + canonical Store；二者都以同一build ID做initialize复核。POSIX host-shell经parent-pipe watchdog保证
-App Server SIGKILL不留下命令组。默认TUI/CLI接线仍未完成。
+App Server SIGKILL不留下命令组。KASD-03真实双TUI证明两个child同时读同一History，模拟client证明同Session双写被fence；普通`/status`
+无Service PID、build drift或Web URL。
 
 KASD-01的global config前置已收敛：CLI preference、Service provider/model、MCP project/user config、Project approval与Workspace Trust共享
 `kite-local-runtime/config`的per-file owner lock与atomic replacement。多文件revision CAS按canonical path排序取锁；只有PID/start identity明确dead的
 exact owner可被回收，不使用固定时长stale删除。真实双进程测试覆盖两个TUI以及TUI/模拟App Server同时写同一用户配置且不丢字段。该锁不延伸到
 Runtime Store，也不是global writer lease。
 
-## 当前边界
+## 当前默认边界
 
-installed/release entrypoint中的TUI、CLI `run/resume`、`service *`和`web`共用每个canonical Kite Home唯一的Local Service。source TUI默认
-使用invocation-scoped standalone Service与临时Runtime Home，显式`--server shared`才加入canonical owner。客户端只通过
-按home digest隔离的Unix socket或Windows named pipe发现Service；descriptor、access/control token、HTTP origin与Browser session均不写
-Kite Home。POSIX每home runtime只允许`service.sock`和`service.lock`，Windows endpoint不创建对应文件。除此之外不建立OS app
-data/state、跨home lease或另一套coordination目录。
+installed/release entrypoint中的TUI与CLI `run/resume`各自spawn同build App Server并通过stdio连接。source使用canonical Kite Home下按
+repository/worktree digest隔离的`source-profiles/<digest>/kite-session.sqlite`，installed使用canonical
+`kite-session.sqlite`；client退出不删除这些facts。默认路径不读Native descriptor/token/socket，不ensure canonical Service，不构建Web assets，
+不监听HTTP，也没有source临时Runtime Home。
+
+`service *`与`web`当前仍显式进入legacy single-Service控制面，等待KASD-04/05替换及KASD-06删除。下文关于Native endpoint、Web listener、
+build replacement与Store 9的描述只约束该显式legacy路径，不能作为默认TUI/CLI fallback。
 
 Service拥有一个Runtime Host、一个Store 9 writer connection和一个loopback HTTP listener。Workspace仍是Trust、配置、Skill、MCP、
 Sandbox、Controller和query scope，但不拥有独立进程、DB或idle lifecycle。Browser只消费同listener中的static asset与只读`/v1` REST；
@@ -50,7 +53,7 @@ canonical Kite Home白名单是用户配置、`skills/`、Session Logger的`sess
 source standalone的SQLite/Artifact只存在于owner-only临时Runtime Home，成功停止后删除。运行期不得在canonical Home新建
 `runtime-service/`、`coordinator/`、`workspace-worker/`、`web-gateway/`、`layouts/`或filesystem Artifact root。
 
-## 启动与Web
+## Legacy Service启动与Web
 
 - source入口先构建Web；Service child从release composition取得exact static root，在发布ready前验证`index.html`、OpenAPI和hashed
   JS/CSS并挂载到唯一listener。资源缺失时Service启动失败，不存在Web absent/API ready的部分状态。
@@ -77,10 +80,10 @@ source standalone的SQLite/Artifact只存在于owner-only临时Runtime Home，�
 - busy response必须resume mutation admission；其他已连接TUI继续允许query与正常Session mutation。running model request和waiting interaction
   都属于busy，换代后全部Protocol/client-contract兼容的旧TUI通过各自generation显式reconnect。
 
-Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。source `bun run server`和`bun run tui`先build Web assets，
-再ensure唯一Service；installed candidate只从immutable release root解析Service executable与payload。
+Browser打开URL不拥有本机启动权限；Vite dev server只提供前端资源。source `bun run server`仍build Web assets并进入legacy Service；
+`bun run tui`不再build Web。installed default TUI只从immutable release root解析同candidate App Server executable。
 
-## Store 9
+## Legacy Store 9
 
 `kite.sqlite`是唯一durable authority。一个connection承载Workspace admission、Session/event/snapshot/named snapshot、checkpoint
 preimage、effect lease、command receipt、Run/tombstone、Controller/recovery namespace和Directory query。
@@ -101,5 +104,6 @@ operation receipt。所有mutation直接复用一个`BEGIN IMMEDIATE` transactio
 
 ## Qualification
 
-macOS arm64本机candidate已证明release只打包CLI、TUI、Service与Web assets，并通过build/verify/install/single-Service smoke、
-upgrade/rollback/uninstall。Ubuntu与Windows hosted native endpoint/ACL/SQLite evidence尚未共同收敛，不能由本机或workflow定义推断完成。
+macOS arm64本机candidate已证明release只打包CLI、TUI、Service与Web assets，并通过build/verify/install、installed TUI→同candidate
+App Server PTY startup、legacy single-Service companion smoke、upgrade/rollback/uninstall。Ubuntu与Windows hosted App Server/SQLite evidence
+尚未共同收敛，不能由本机或workflow定义推断完成。

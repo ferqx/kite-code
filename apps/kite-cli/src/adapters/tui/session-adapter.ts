@@ -258,6 +258,7 @@ export interface TuiRuntimeClientFacade {
 
 export interface TuiRuntimeClientDependencies {
   readonly workspace: string;
+  readonly initialInteractionMode?: 'accept_edits' | 'auto' | 'full';
   readonly flushPresentation?: () => Promise<void>;
 }
 

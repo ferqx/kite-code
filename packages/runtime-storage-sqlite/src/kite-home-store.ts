@@ -390,12 +390,13 @@ export const KITE_HOME_STORE_DDL = Object.freeze([
   `CREATE TABLE capability_artifacts (
     artifact_id TEXT PRIMARY KEY NOT NULL CHECK (${artifactIdCheck('artifact_id')}),
     integrity_identifier TEXT NOT NULL UNIQUE CHECK (${integrityCheck('integrity_identifier')}),
-    invocation_id TEXT NOT NULL UNIQUE,
+    invocation_id TEXT NOT NULL,
     evidence_digest TEXT NOT NULL CHECK (length(evidence_digest) BETWEEN 1 AND 128),
     artifact_format_version INTEGER NOT NULL CHECK (artifact_format_version >= 1),
     canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
     byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 1 AND 16777216),
-    created_at INTEGER NOT NULL CHECK (created_at >= 0)
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (invocation_id, evidence_digest)
   ) STRICT`,
   `CREATE TABLE filesystem_preimage_artifacts (
     artifact_id TEXT PRIMARY KEY NOT NULL CHECK (${artifactIdCheck('artifact_id')}),

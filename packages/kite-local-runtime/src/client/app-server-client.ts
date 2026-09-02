@@ -15,6 +15,24 @@ import {
 import type { NativeProviderCredentialClient } from './connection';
 import { createProtocolKiteAppControlClient } from './protocol-app-control';
 
+export interface KiteAppServerConnection extends AsyncDisposable {
+  readonly runtime: RuntimeClient;
+  readonly history: NonNullable<RuntimeClient['history']>;
+  readonly app: ReturnType<typeof createProtocolKiteAppControlClient>;
+  readonly credential: NativeProviderCredentialClient;
+  /** App Server never exposes the legacy native Worker Controller. */
+  readonly controller?: undefined;
+  readonly snapshotStore: RuntimeClient['snapshotStore'];
+  readonly status: 'disconnected' | 'connecting' | 'active' | 'reconnecting' | 'closed';
+  readonly generation: number;
+  subscribe(listener: () => void): () => void;
+  /** Opens the one exact protocol connection so Trust/App methods can run before Runtime mutation. */
+  prepareAppControl(): Promise<void>;
+  connect(): Promise<void>;
+  reconnect(): Promise<void>;
+  close(reason?: string): Promise<void>;
+}
+
 export const KITE_APP_SERVER_PROTOCOL_METHODS_ = Object.freeze([
   'history/list_sessions',
   'history/list_events',
@@ -54,7 +72,9 @@ export function kiteAppServerVersion(buildId: string): string {
 }
 
 /** One parent-owned child and one initialized connection carrying Runtime, History and App Control. */
-export function createKiteAppServerClient(options: KiteAppServerClientOptions) {
+export function createKiteAppServerClient(
+  options: KiteAppServerClientOptions,
+): KiteAppServerConnection {
   const executable = absolute(options.executable, 'executable');
   const runtimeRoot = absolute(options.runtimeRoot, 'runtimeRoot');
   const configRoot = absolute(options.configRoot, 'configRoot');
@@ -114,7 +134,23 @@ export function createKiteAppServerClient(options: KiteAppServerClientOptions) {
     history: runtime.history!,
     app: createProtocolKiteAppControlClient(runtime),
     credential,
+    controller: undefined,
+    snapshotStore: runtime.snapshotStore,
+    get status() {
+      const status = runtime.snapshotStore.getSnapshot().status;
+      if (status === 'connecting') return 'connecting' as const;
+      if (status === 'reconnecting') return 'reconnecting' as const;
+      if (status === 'active') return 'active' as const;
+      if (status === 'closed' || status === 'draining') return 'closed' as const;
+      return 'disconnected' as const;
+    },
+    get generation() {
+      return runtime.connectionGeneration;
+    },
+    subscribe: (listener: () => void) => runtime.snapshotStore.subscribe(listener),
+    prepareAppControl: () => runtime.connect(),
     connect: () => runtime.connect(),
+    reconnect: () => runtime.reconnect(),
     close: (reason?: string) => runtime.close(reason),
     [Symbol.asyncDispose]: () => runtime[Symbol.asyncDispose](),
   });

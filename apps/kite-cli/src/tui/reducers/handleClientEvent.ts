@@ -1568,6 +1568,11 @@ function finishSafeClientTool(
     if (status === 'cancelled') {
       return removePendingTool(state, toolId);
     }
+    if (status === 'rejected' && summary === 'Tool approval rejected by user.') {
+      // The interaction settlement already renders the explicit user decision. The queued
+      // payload never reached tool.started, so do not materialize it as an executed Tool card.
+      return settleCurrentThought(removePendingTool(state, toolId));
+    }
     return updateSafeTool(
       settleCurrentThought(removePendingTool(state, toolId)),
       toolId,

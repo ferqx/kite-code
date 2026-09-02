@@ -1,33 +1,34 @@
-# Managed Local Service mode
+# Managed local Runtime mode
 
-本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。该目录承载 terminal 使用的 Native client adapter；
-当前installed connector直接ensure每个canonical Kite Home唯一的shared Local Service；source TUI默认使用invocation-scoped standalone
-endpoint，只有显式`--server shared`才连接canonical owner。两者仍使用同一Kite Home配置。CLI不导入Service App，也不持有Store authority。
+本页是 `apps/kite-cli/src/service-mode/` 的owner-local current authority。该目录承载terminal使用的typed client adapter。默认installed
+与source TUI/CLI都连接parent-owned stdio App Server：installed固定launcher-pinned immutable candidate，source固定当前checkout；多个连接共享
+durable profile但不共享进程。CLI不导入Service App，也不持有Store authority。
 
-adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、owner status与
-`RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
+adapter把 `KiteAppServerConnection`或legacy `LocalKiteConnection`投影为typed Runtime、History、App Control、credential与
+`RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。Controller只存在于legacy native connection；
+App Server mutation直接受Session execution generation/revision fence约束。adapter不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
 普通跨build lifecycle mutation保持owner-build fence。source已删除previous-build replacement authority；standalone TUI退出只停止自己的
 exact-build owner，显式shared source发生drift时不替换owner。source↔installed或identity不确定时仍fail closed。
 CLI `service *`的每个manager request都携带release composition选择的`source|installed` mode；App层不自行推断该字段。
 
-`/status`从当前Native connection展示client/service version、Service actual build、client expected build和派生version status。只有双方build
-均为`dev:`时把差异显示为显式shared source drift事实；installed或source↔installed mismatch显示重启/不兼容诊断，不新增第二套
-lifecycle状态或持久化pending-upgrade事实。
+默认`/status`展示stdio transport、profile mode、build、App Server version与exact pairing。client/server mismatch在initialize时关闭child，
+不会进入TUI形成build drift状态。Service PID/Web根地址只属于仍显式可调用的legacy控制面，不出现在默认TUI状态。
 
 Web route是Service readiness的一部分。release注入的`discoverWeb`先ensure唯一Service，再从Native `describe`得到`httpOrigin`，为CLI
 `kite web [--json]`和TUI `/status`返回稳定根地址；TUI同时展示Service identity，不保留单独的`/web`。它不接收asset root，也没有独立status/stop。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
 parser/adapter contract与tests不代表hosted Web qualification。
 
-连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
-TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败
-都原样reject，不silent fallback到embedded/InProcess。
+连接采用两阶段Trust语义。App Server的`prepareAppControl()`打开唯一exact protocol connection，以便执行Trust/App方法，但不发Runtime
+mutation；TUI/CLI查询或显式更新Workspace Trust后才调用Runtime command。任何阶段失败都原样reject，不silent fallback到
+embedded/InProcess或legacy Service。
 
-reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
-再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
-snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
-升级前仍运行的inactive installed TUI在Protocol/client-contract兼容时可通过该路径连接current installed Service；其manager不执行
+reconnect为同一resolver显式spawn新的parent-owned child并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral
+stream，再由replacement subscription/index reset重建；mutation不会自动重放。close关闭本client connection/subscription/snapshot
+observer和child，不发送Session删除或隐式cancel-all。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
+以下Controller与跨build规则仅描述KASD-06前仍显式可达的legacy native Service seam，不是默认TUI/CLI行为。升级前仍运行的inactive installed
+TUI在Protocol/client-contract兼容时可通过该路径连接current installed Service；其manager不执行
 replacement，Native exact-build control fence也不允许它停止或降级current owner。不兼容client诊断保持fail closed且`spawn=0/stop=0`。
 TUI dispose在connection仍可查询时读取exact Session projection：只有durable idle且interaction queue为空才release本client持有的
 Controller；queued/running/waiting、pending interaction或query失败一律detach。它不做force takeover，也不替其他client释放lease。

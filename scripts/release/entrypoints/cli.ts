@@ -1,5 +1,6 @@
 import { parseArgs, main as runCliMain } from '../../../apps/kite-cli/src/cli/index';
 import packageJson from '../../../package.json' with { type: 'json' };
+import { createManagedLocalAppServerComposition } from '../app-server-client';
 import { createManagedLocalSingleServiceComposition } from '../single-service-native-client';
 
 if (process.argv.includes('--version')) {
@@ -33,12 +34,12 @@ if (process.argv.includes('--version')) {
               return runCliMain({ singleServiceWeb: { discover: localService.discoverWeb } });
             })()
           : (() => {
-              const localService = createManagedLocalSingleServiceComposition({
+              const appServer = createManagedLocalAppServerComposition({
                 argv: process.argv,
                 executableMode,
               });
               return runCliMain({
-                serviceConnector: localService.connector,
+                runtimeConnector: appServer.connector,
               });
             })();
   run.catch((error) => {

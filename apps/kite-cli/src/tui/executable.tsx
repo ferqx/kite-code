@@ -1,17 +1,17 @@
 import packageJson from '../../package.json' with { type: 'json' };
-import type { KiteServiceModeConnector } from '../service-mode';
-import { createKiteServiceModeAdapter } from '../service-mode';
+import type { KiteRuntimeModeConnector } from '../service-mode';
+import { createKiteRuntimeModeAdapter } from '../service-mode';
 import { runTui as runTuiClient, type TuiBootstrapProps } from './index';
 
 export type KiteTuiProps = Omit<TuiBootstrapProps, 'createSessionManager'> & {
-  /** Explicit managed Service connector supplied by the release composition. */
-  readonly connectService?: KiteServiceModeConnector;
+  /** Explicit parent-owned Runtime connector supplied by the release composition. */
+  readonly connectRuntime?: KiteRuntimeModeConnector;
 };
 
 export function runTui(props: KiteTuiProps = {}): void {
-  if (props.serviceMode) {
-    const serviceMode = props.serviceMode;
-    void serviceMode.connection
+  if (props.runtimeMode) {
+    const runtimeMode = props.runtimeMode;
+    void runtimeMode.connection
       .prepareAppControl()
       .then(() => runTuiClient(props))
       .catch((error: unknown) => {
@@ -20,10 +20,10 @@ export function runTui(props: KiteTuiProps = {}): void {
       });
     return;
   }
-  if (!props.connectService) {
-    throw new Error('Managed Local Runtime Service connector is unavailable.');
+  if (!props.connectRuntime) {
+    throw new Error('Managed local App Server connector is unavailable.');
   }
-  const connector = props.connectService;
+  const connector = props.connectRuntime;
   const workspace = process.cwd();
   void Promise.resolve()
     .then(() => connector.connect({ workspace }))
@@ -34,11 +34,10 @@ export function runTui(props: KiteTuiProps = {}): void {
     .then((connection) => {
       runTuiClient({
         ...props,
-        serviceMode: createKiteServiceModeAdapter(connection),
+        runtimeMode: createKiteRuntimeModeAdapter(connection),
       });
     })
     .catch(async (error: unknown) => {
-      await props.disposeRuntime?.().catch(() => undefined);
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
     });

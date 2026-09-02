@@ -20,10 +20,11 @@ import {
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
 import {
   acquireKiteServiceModeController,
-  connectKiteServiceMode,
+  connectKiteRuntimeMode,
   createKiteServiceModeSession,
   detachKiteServiceModeController,
-  type KiteServiceModeConnector,
+  isKiteServiceModeConnection,
+  type KiteRuntimeModeConnector,
   type KiteServiceModeControllerLease,
   releaseKiteServiceModeController,
 } from '#kite-cli/service-mode';
@@ -39,8 +40,8 @@ function createRuntimeCommandIdAllocator(): RuntimeCommandIdAllocator {
 }
 
 export interface CliMainDependencies {
-  /** Managed companion connector; failures are surfaced and never fall back InProcess. */
-  readonly serviceConnector?: KiteServiceModeConnector;
+  /** Parent-owned local Runtime connector; failures are surfaced without a Service fallback. */
+  readonly runtimeConnector?: KiteRuntimeModeConnector;
   /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
   readonly serviceManager?: KiteServiceManager;
   /** Release-selected executable identity used by lifecycle replacement policy. */
@@ -138,13 +139,17 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   if (args.command === 'resume' && !args.task?.trim()) {
     throw new Error('resume requires --task (or positional task text) to continue the session.');
   }
-  if (!dependencies.serviceConnector) {
-    throw new Error('Managed Local Runtime Service connector is unavailable.');
+  if (!dependencies.runtimeConnector) {
+    throw new Error('Managed local App Server connector is unavailable.');
   }
 
-  const service = await connectKiteServiceMode(dependencies.serviceConnector, {
+  const runtimeMode = await connectKiteRuntimeMode(dependencies.runtimeConnector, {
     workspace: args.workspace,
   });
+  const nativeControllerConnection =
+    isKiteServiceModeConnection(runtimeMode.connection) && runtimeMode.controller
+      ? runtimeMode.connection
+      : undefined;
   let iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
   let controllerLease: KiteServiceModeControllerLease | undefined;
   let turnMayHaveStarted = false;
@@ -155,8 +160,8 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     // Native connectors may intentionally return a prepared connection before
     // the trust gate. Preparation authenticates only the safe App Control
     // routes; Runtime initialize must wait until the Workspace is trusted.
-    await service.connection.prepareAppControl();
-    const trust = await service.appControl.queryWorkspaceTrust({
+    await runtimeMode.connection.prepareAppControl();
+    const trust = await runtimeMode.appControl.queryWorkspaceTrust({
       schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
       workspace: args.workspace,
     });
@@ -169,7 +174,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
             formatExternalReadScope(trust.externalReadScope.roots),
         );
       }
-      const decision = await service.appControl.decideWorkspaceTrust({
+      const decision = await runtimeMode.appControl.decideWorkspaceTrust({
         schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
         workspace,
         observedStatus: trust.status,
@@ -178,17 +183,17 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         externalReadScopeDigest: trust.externalReadScope.digest,
       });
       if (decision.status !== 'trusted') {
-        throw new Error('Workspace trust could not be recorded by the Local Runtime Service.');
+        throw new Error('Workspace trust could not be recorded by the local App Server.');
       }
       workspace = decision.workspace;
     }
-    // Never issue Runtime commands for an untrusted Workspace. The Service
-    // connection is opened only after the authoritative trust query/decision.
-    await service.connection.connect();
+    // Never issue Runtime commands for an untrusted Workspace. App Server protocol
+    // initialization permits App Control only; Runtime mutation waits for this decision.
+    await runtimeMode.connection.connect();
     if (args.executionStatus) {
       console.log(
         JSON.stringify(
-          await service.appControl.getExecutionStatus({
+          await runtimeMode.appControl.getExecutionStatus({
             schema: 'kite.app.execution-status.request.v1',
             workspace,
           }),
@@ -201,7 +206,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     if (args.releaseStatus) {
       console.log(
         JSON.stringify(
-          await service.appControl.getReleaseStatus({
+          await runtimeMode.appControl.getReleaseStatus({
             schema: 'kite.app.release-status.request.v1',
           }),
           null,
@@ -211,21 +216,24 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       return;
     }
     if (args.telemetryStatus) {
-      const release = await service.appControl.getReleaseStatus({
+      const release = await runtimeMode.appControl.getReleaseStatus({
         schema: 'kite.app.release-status.request.v1',
       });
       console.log(JSON.stringify({ telemetry: release.telemetry ?? { allowed: false } }, null, 2));
       return;
     }
 
-    const access = service.runtime;
+    const access = runtimeMode.runtime;
     const sessionId = args.threadId;
     let createdSessionRevision: number | undefined;
-    if (service.controller) {
+    if (nativeControllerConnection) {
       if (args.command === 'resume') {
-        controllerLease = await acquireKiteServiceModeController(service.connection, sessionId);
+        controllerLease = await acquireKiteServiceModeController(
+          nativeControllerConnection,
+          sessionId,
+        );
       } else {
-        const created = await createKiteServiceModeSession(service.connection, sessionId);
+        const created = await createKiteServiceModeSession(nativeControllerConnection, sessionId);
         controllerLease = created.lease;
         createdSessionRevision = created.sessionRevision;
       }
@@ -339,13 +347,20 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     const cleanupFailures: unknown[] = [];
     await iterator?.return?.().catch((error: unknown) => cleanupFailures.push(error));
     if (controllerLease) {
+      if (!nativeControllerConnection) {
+        cleanupFailures.push(new Error('CLI Controller lease lost its native connection.'));
+      }
       const settle =
-        turnMayHaveStarted && !turnSettled
-          ? detachKiteServiceModeController(service.connection, controllerLease)
-          : releaseKiteServiceModeController(service.connection, controllerLease);
-      await settle.catch((error: unknown) => cleanupFailures.push(error));
+        nativeControllerConnection && turnMayHaveStarted && !turnSettled
+          ? detachKiteServiceModeController(nativeControllerConnection, controllerLease)
+          : nativeControllerConnection
+            ? releaseKiteServiceModeController(nativeControllerConnection, controllerLease)
+            : undefined;
+      await settle?.catch((error: unknown) => cleanupFailures.push(error));
     }
-    await service.close('cli_client_closed').catch((error: unknown) => cleanupFailures.push(error));
+    await runtimeMode
+      .close('cli_client_closed')
+      .catch((error: unknown) => cleanupFailures.push(error));
     await settleCliCleanup(primaryError, cleanupFailures);
   }
 }

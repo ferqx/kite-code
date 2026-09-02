@@ -13,7 +13,7 @@ const shellExecutor = (async (input) => ({
 shellExecutor.prepare = async () => ({ mode: 'host_shell', backend: 'none' });
 
 runTui({
-  connectService: createInProcessTuiServiceConnector(shellExecutor, {
+  connectRuntime: createInProcessTuiServiceConnector(shellExecutor, {
     mcpCredentialStore: new MemoryMcpCredentialStore(),
   }),
 });

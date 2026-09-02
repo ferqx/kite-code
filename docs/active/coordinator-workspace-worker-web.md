@@ -15,18 +15,19 @@ apps/kite-service/test/web-gateway tests/release/single-service-real-child.test.
 
 ## 当前拓扑
 
-正式installed/release与显式shared source每个canonical Kite Home只有一个Local Service、一个Store 9、一个`kite.sqlite`和一个loopback
-HTTP listener。source TUI默认使用独立临时Runtime Home、Store与invocation endpoint。Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
+默认installed/source TUI与CLI `run/resume`各自拥有一个stdio App Server，并通过`kite-session.sqlite` durable profile共享facts；普通
+启动没有HTTP listener。显式legacy `service *`/`web`仍可进入一个Local Service、Store 9与loopback listener，等待KASD后续删除。
+Coordinator与per-Workspace Worker不是当前可执行拓扑；独立Web Gateway的
 process/control/state与Coordinator production glue已经删除，不能由普通startup、release connector或Browser恢复。
 
 Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
 `apps/kite-service/src/workspace-worker/`中仍被single-Service消费的identity、Trust、effect与execution组件是in-process领域模块。
 
-ADR-0166的KASD-01前置已另建未接production的`kite-session.sqlite`多连接owner：它不取得Workspace process lock，以Session generation裁决
-writer，并允许同Workspace不同App Server写不同Session。该完成不恢复Coordinator/Worker拓扑，也不改变上述current production；KASD-02开始的
-App Server只能组合该新owner，旧Workspace lock与one-connection Store不能进入新进程路径。
+ADR-0166的`kite-session.sqlite`多连接owner不取得Workspace process lock，以Session generation裁决writer，并允许同Workspace不同App
+Server写不同Session。KASD-03默认client已切入该owner；这不恢复Coordinator/Worker拓扑，旧Workspace lock与one-connection Store只留在
+显式legacy Service。
 
-KASD-02内部App Server现以parent-owned stdio组合该owner和现有Host；它不是Coordinator/Worker复活，也没有Web Gateway、HTTP listener或
+App Server以parent-owned stdio组合该owner和现有Host；它不是Coordinator/Worker复活，也没有Web Gateway、HTTP listener或
 process-wide notification bus。另一个App Server可从Store snapshot读取Session，但不因read或退出取得/取消其generation。
 
 ## Web REST边界

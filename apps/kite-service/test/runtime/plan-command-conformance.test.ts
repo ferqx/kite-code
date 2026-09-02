@@ -60,7 +60,7 @@ function stateWithoutTask(): RuntimeState {
 }
 
 function planDocument(): PlanDocument {
-  return createBuiltinPlanDocument({
+  const document = createBuiltinPlanDocument({
     taskId: 'task-parity',
     turnId: 'turn-1',
     title: saveCommand.title,
@@ -70,6 +70,20 @@ function planDocument(): PlanDocument {
       { id: 'implement', title: 'Implement the package seam' },
     ],
   });
+  return {
+    ...document,
+    artifact: {
+      artifactId: `${document.planId}:v${document.version}`,
+      taskId: 'task-parity',
+      planId: document.planId,
+      version: document.version,
+      fileName: `v${document.version}.md`,
+      relativePath: `plans/task-parity/${document.planId}/v${document.version}.md`,
+      displayPath: `/tmp/plans/task-parity/${document.planId}/v${document.version}.md`,
+      structuralDigest: document.structuralDigest,
+      byteLength: Buffer.byteLength(document.bodyMarkdown, 'utf8'),
+    },
+  };
 }
 
 function compareLegacyDecision(
@@ -113,7 +127,7 @@ function artifactStore(): PlanArtifactStore & { saved?: PlanDocument } {
         relativePath: `plans/${taskId}/${plan.planId}/v${plan.version}.md`,
         displayPath: `/tmp/plans/${taskId}/${plan.planId}/v${plan.version}.md`,
         structuralDigest: plan.structuralDigest,
-        byteLength: 0,
+        byteLength: Buffer.byteLength(plan.bodyMarkdown, 'utf8'),
       };
     },
     read(ref: Parameters<PlanArtifactStore['read']>[0]): PlanArtifactContent {

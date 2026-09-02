@@ -46,17 +46,14 @@
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
-## Service 与 Kite Web 状态
+## App Server 状态
 
-TUI启动时唯一Service已经验证并挂载同源Web assets。`/status`在同一输出中显示Service PID、启动时间、client/service version、
-actual/expected build、派生version status与Kite Web稳定根地址。version status只由封闭build identity shape派生：exact为aligned，
-双方`dev:`差异为显式shared source drift，其余为build mismatch；drift只展示事实，不提供previous-build replacement建议，不能从译文或任意版本字符串推断。
-Web地址由可选的`discoverWeb` callback通过Native `describe`取得。callback缺失或发现失败时显示固定
-unavailable文案。该动作不attach route、不创建Runtime Session、不发送Runtime command，也不取得Controller capability；不再提供
-单独的TUI `/web`命令。
+默认TUI启动一个配套的parent-owned stdio App Server，不启动HTTP listener或Web assets。`/status`显示transport、source/installed
+profile、build、App Server version、client version和initialize已证明的exact pairing；不显示Service PID、启动时间、Web URL或build drift。
+source与installed mismatch都在TUI mount前fail closed，不形成可继续使用的“版本不一致”状态。
 
-当前没有`web_ensure/web_status/web_stop`。candidate没有legacy companion entrypoint/slot；本地asset/entrypoint smoke不替代
-Windows/Linux hosted process与Web qualification。TUI提示统一使用“Kite Web”。
+该动作只读取composition注入的已验证identity，不创建Runtime Session、不发送Runtime command，也不取得writer authority。显式daemon/Web
+命令将在后续tranche接入；默认TUI没有`/web`或隐式Service发现。
 
 ## 单一交互表面
 

@@ -1,14 +1,14 @@
 # Service Runtime Application 与 App Control
 
 本页是 `apps/kite-service/src/composition.ts`、`src/bootstrap/**`、`src/runtime-application/**` 与
-`src/app-control/**` 的 owner-local current authority。KLSV1-06 clean cutover 后，它们组成默认Store唯一production
-Runtime root；CLI只通过Native client seam消费结果。
+`src/app-control/**` 的 owner-local current authority。它们同时组合default parent-owned App Server与显式legacy single-Service；CLI/TUI
+只通过typed Runtime/App client seam消费结果。
 
 ## 唯一 Host/Store composition
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
-Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable
-对default canonical home使用 `<kite-home>/kite.sqlite`；CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
+Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable的default App Server
+按installed/source profile使用`kite-session.sqlite`；显式legacy single-Service使用`<kite-home>/kite.sqlite`。CLI/TUI不再有Host/Server/SQLite/Builtin依赖或旧
 InProcess composition调用点。
 composition在打开前以realpath parent + filename建立process-local Store claim；相同路径或canonical alias的第二owner
 fail closed，dispose完成后才释放claim。internal/test stdio绕过此default composition时必须使用显式isolated nondefault path。
@@ -16,8 +16,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
-当前source/release只组合Store 9 single-Service路径。Coordinator、per-Workspace Worker与独立Web Gateway都不是普通启动拓扑；Web static
-surface在Service发布ready前挂到同一个loopback listener，并与Runtime/API一起随Service关闭。
+当前source/release默认组合App Server多连接Session Store。Coordinator、per-Workspace Worker与独立Web Gateway都不是普通启动拓扑；只有
+显式legacy Service仍在发布ready前把Web static surface挂到loopback listener，并与Runtime/API一起随Service关闭。
 
 ## Workspace、Trust 与 routing
 
@@ -63,7 +63,8 @@ resource receipt和State decision共同提交。bridge activation先调用Coordi
 Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
 current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
 
-History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；未持久化名称的Session在
+History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；Plan submit必须从
+active PlanDocument携带的exact Artifact ref读取正文，不得伪造空path或零byteLength ref。未持久化名称的Session在
 History与Agent API中复用同一safe-text规则，从首条用户消息派生最多80字符的只读展示标题，不写入第二份状态。carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。

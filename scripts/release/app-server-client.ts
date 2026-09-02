@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
@@ -40,6 +41,12 @@ export interface ManagedLocalAppServerComposition {
     readonly workspace: string;
     readonly clientInfo: RuntimeClientInfo;
   }): ReturnType<typeof createKiteAppServerClient>;
+  readonly connector: {
+    connect(input: {
+      readonly workspace: string;
+      readonly clientInfo?: RuntimeClientInfo;
+    }): Promise<ReturnType<typeof createKiteAppServerClient>>;
+  };
 }
 
 /** Resolve only the client distribution's matching child; never inspect a running Service. */
@@ -86,31 +93,52 @@ export function createManagedLocalAppServerComposition(
           candidateRoot,
         });
   const argumentsPrefix = sourceEntrypoint ? [sourceEntrypoint] : undefined;
+  const connect = (input: {
+    readonly workspace: string;
+    readonly clientInfo: RuntimeClientInfo;
+  }) => {
+    const workspace = realpathSync.native(input.workspace);
+    const stat = lstatSync(workspace);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error('App Server Workspace must be a canonical directory.');
+    }
+    return createKiteAppServerClient({
+      executable,
+      ...(argumentsPrefix ? { argumentsPrefix } : {}),
+      buildId,
+      runtimeRoot,
+      configRoot: home.root,
+      osHome: systemHome,
+      workspace,
+      cwd: systemRoot(systemHome),
+      environment,
+      clientInfo: input.clientInfo,
+      ...(options.spawn ? { spawn: options.spawn } : {}),
+    });
+  };
   return Object.freeze({
     mode,
     buildId,
     runtimeRoot,
     configRoot: home.root,
-    connect(input: { readonly workspace: string; readonly clientInfo: RuntimeClientInfo }) {
-      const workspace = realpathSync.native(input.workspace);
-      const stat = lstatSync(workspace);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw new Error('App Server Workspace must be a canonical directory.');
-      }
-      return createKiteAppServerClient({
-        executable,
-        ...(argumentsPrefix ? { argumentsPrefix } : {}),
-        buildId,
-        runtimeRoot,
-        configRoot: home.root,
-        osHome: systemHome,
-        workspace,
-        cwd: systemRoot(systemHome),
-        environment,
-        clientInfo: input.clientInfo,
-        ...(options.spawn ? { spawn: options.spawn } : {}),
-      });
-    },
+    connect,
+    connector: Object.freeze({
+      async connect(input: {
+        readonly workspace: string;
+        readonly clientInfo?: RuntimeClientInfo;
+      }) {
+        return connect({
+          workspace: input.workspace,
+          clientInfo:
+            input.clientInfo ??
+            Object.freeze({
+              name: 'kite-terminal',
+              version: '0.1.0',
+              instanceId: `terminal_${randomUUID()}`,
+            }),
+        });
+      },
+    }),
   });
 }
 

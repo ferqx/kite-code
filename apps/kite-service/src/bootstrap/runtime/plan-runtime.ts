@@ -253,17 +253,15 @@ export function writePlanAction(
   };
   if (submitExistingAllowed) {
     try {
-      const artifact = context.artifacts.read({
-        artifactId: `${command.plan_id}:v${command.version}`,
-        taskId,
-        planId: command.plan_id!,
-        version: command.version!,
-        fileName: `v${command.version}.md`,
-        relativePath: '',
-        displayPath: '',
-        structuralDigest: command.structural_digest!,
-        byteLength: 0,
+      const active = activeArtifactRef(context, {
+        plan_id: command.plan_id!,
+        version: command.version,
+        structural_digest: command.structural_digest,
       });
+      if (!active?.ref.relativePath || !active.ref.displayPath || active.ref.byteLength < 1) {
+        return rejectRuntimeAction('Saved Plan Artifact identity is unavailable.');
+      }
+      const artifact = context.artifacts.read(active.ref);
       const document = artifact.plan;
       events.push({
         type: 'plan.review_requested',

@@ -59,8 +59,8 @@ export function createTuiHistoryFacade(history: RuntimeHistoryClient): {
         let cursor: { readonly updatedAt: number; readonly sessionId: string } | undefined;
         for (;;) {
           const page = await history.listSessions({
-            cursor,
             limit: 100,
+            ...(cursor ? { cursor } : {}),
             ...(query ? { query } : {}),
           });
           entries.push(

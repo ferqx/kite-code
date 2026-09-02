@@ -8,8 +8,9 @@
 
 相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143、ADR-0152、ADR-0153；模块局部边界见各 workspace README。
 
-物理本机installed/shared拓扑当前是每个canonical Kite Home一个Service、一个Store 9 connection与一个HTTP listener；source TUI默认使用
-invocation-scoped Service与临时Runtime Home。Workspace仍是逻辑admission/execution scope，不对应独立Worker进程或DB。详见
+物理本机默认拓扑是每个TUI/CLI invocation一个parent-owned stdio App Server；source/installed按各自profile共享多连接
+`kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。Workspace仍是逻辑
+admission/execution scope，不对应独立Worker进程或DB。显式legacy Service/Web控制面等待KASD后续删除。详见
 [`单 Service 本机 Runtime 与 Kite Home 边界`](single-service-local-runtime.md)。
 
 ## 总览

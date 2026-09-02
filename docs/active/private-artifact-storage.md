@@ -11,8 +11,8 @@
 ## 当前存储模型
 
 `packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。每个实例必须在App注入的durable
-backend与filesystem root之间二选一；不能同时写两者或运行时fallback。当前single-Service production注入Store 9专用表且不fallback，
-下面的root只保留给显式旧owner和Builtin owner-local测试：
+backend与filesystem root之间二选一；不能同时写两者或运行时fallback。当前default App Server production注入Store 9专用表且不fallback；
+显式legacy single-Service沿用同一Store backend，下面的root只保留给显式旧owner和Builtin owner-local测试：
 
 ```text
 model-artifacts/{surfaces,responses,provider-options}/
@@ -28,6 +28,10 @@ Store 9对应`model_artifacts`、`plan_artifacts`、`capability_artifacts`、`fi
 `sandbox_preparation_artifacts`、`subagent_task_artifacts`、`subagent_lifecycle_artifacts`与`subagent_continuation_artifacts`。
 `filesystem_preimage_artifacts`是mutation ready-before-commit evidence；它与Session checkpoint用的`runtime_file_preimages`不是同一领域，
 不得合表或相互fallback，见ADR-0153。
+
+`capability_artifacts`以`(invocation_id, evidence_digest)`作为同一invocation内的不可变结果身份；resumable subagent可以先提交partial结果、
+再以不同evidence digest提交terminal结果。相同tuple的exact retry幂等，换ref或正文则冲突；不得恢复为`invocation_id`单列唯一，否则会把
+合法continuation误判为Artifact冲突。
 
 Host `ArtifactPort` 只提供 type-erased namespace registry；它不统一 ref/schema，不读取正文，也不把 Notification 或 Mailbox fact 当成 Artifact receipt。Builtin 是每种正文 schema 与交叉绑定的唯一 owner，App 只注入 access object。
 
@@ -48,7 +52,7 @@ Runtime 不创建或加载 `model-artifacts.key`、installation integrity key �
 Store 9 backend不解析root/path或创建Artifact目录；它按领域调用同一writer connection上的typed table port，并在返回ref前用同一Builtin
 reader重新readback canonical bytes。Plan的既有path字段在DB backend中只是`kite.sqlite#...`逻辑位置，不能交给filesystem API。
 
-未接production的KASD Session Store复用相同typed table/ref contract，但每次Artifact mutation必须位于一个active Session execution scope并
+KASD Session Store复用相同typed table/ref contract，每次Artifact mutation必须位于一个active Session execution scope并
 通过该Session的generation/revision transaction。Artifact正文仍是内容寻址的独立CAS事实，不建立第二份Session ownership registry。由于当前
 Artifact表没有可证明完整的跨Session reachability snapshot，多App Server owner显式禁用全部Artifact GC；首次真实GC需求必须另行设计
 maintenance barrier，不能由任一App Server自行扫描后删除。

@@ -2,30 +2,32 @@
 
 ## 定位
 
-`@kite-ai/kite-cli` 是 terminal presentation 与 Native client App。它不再是 Runtime composition root；当前 release/source
-entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Home连接唯一Local Service；CLI不拥有Runtime或Store。
+`@kite-ai/kite-cli` 是 terminal presentation 与 client App。它不再是 Runtime composition root；当前release/source默认TUI与CLI
+`run/resume`各自连接配套的parent-owned stdio App Server，多个客户端共享durable Session Store但不共享进程。旧`service *`与`web`
+命令在KASD过渡期仍显式使用legacy Local Service；CLI不拥有Runtime或Store。
 
 ## 拥有职责
 
 - 拥有 CLI parser/output、Ink TUI、terminal interaction/rendering、client-safe reducer/projection，以及 language、theme、
   color preset、key binding 等 presentation-local preference。偏好写入使用`@kite-ai/kite-local-runtime/config`的per-file lock与atomic
   replacement；两个TUI或TUI/App Server并发修改不同字段不得lost update。
-- 通过release composition注入的single-Service connector取得Runtime、History、App Control、Native credential与connection
-  snapshot；CLI/TUI自身不读取descriptor/token/lock，也不直接spawn后端进程。
-- `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
+- 通过release composition注入的Runtime connector取得Runtime、History、App Control、credential与connection snapshot；release owner
+  spawn配套child，CLI/TUI App本身不解析executable、descriptor、token或Store。
+- `src/service-mode/` 将parent-owned `KiteAppServerConnection`与legacy authenticated `LocalKiteConnection`投影为同一个中性
+  Runtime mode facade；每个 surface 都是 typed
   method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
 - CLI parser/main只保留`kite web [--json]`：它ensure唯一Service并通过Native `describe`打印稳定的Service根地址。Web assets已在Service
   ready前验证和挂载，不存在独立`web status/stop`、asset root客户端注入或Web lifecycle diagnostic。
 - release entrypoint把已选择的`source|installed` executable mode显式注入`service ensure/status/stop/restart`请求；CLI不从cwd、argv形状或
   Service返回值猜部署形态，因此installed active-candidate换代不会因mode丢失退化为`build_mismatch`。
-- single-Service Web callback由release/source默认入口选择；`/status`在同一状态输出中展示Service identity与稳定Web根地址。TUI启动只ensure Service，
-  不额外attach route、启动进程或取得Browser/Controller authority。
+- 默认TUI `/status`只展示`stdio` transport、source/installed profile、build、App Server version与initialize已证明的exact pairing；
+  不展示Service PID、Web URL或build drift。legacy Service/Web callback只服务仍显式存在的过渡命令。
 - 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
   得到 Service-owned canonical identity；只有 trusted 后才 `connect()` 并取得 Workspace-bound one-shot Runtime ticket。
   untrusted/conflict/connection failure 均 fail closed，不打开 Runtime，也不回退 embedded。
-- TUI exit 只关闭本 client connection、subscription 与 presentation resource；不 `abortAll()`、不 dispose Service Host。
+- TUI exit只关闭本client connection、subscription、presentation resource及其parent-owned App Server；不删除durable facts，也不`abortAll()`。
   退出前按 exact Session projection确认Controller disposition：idle且无pending interaction时release，active/pending或query不确定时
   detach；Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
 - 连续普通prompt使用client-local FIFO；terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
@@ -41,11 +43,12 @@ entrypoint的默认TUI、`run/resume`、`service *`与`web`按canonical Kite Hom
 
 - 不创建或依赖 Runtime Host、Runtime Server、SQLite Store、Builtin Runtime、Kernel、raw History projector、App Control
   repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
-- 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend
-  fallback。managed Service 不可用时直接失败。
-- 不拥有Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart`与默认run/resume/TUI使用同一
-  single-Service manager/connector；CLI不自行discover、spawn、kill或清理owner state。
-- `scripts/release/entrypoints/cli.ts`只注入single-Service manager/connector/Web root discovery，不组合legacy Coordinator或Store migration。
+- 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend fallback。
+  配套App Server不可用时直接失败，不回退legacy Service。
+- 不拥有Service/Coordinator/Worker process state。`kite service ensure/status/stop/restart`暂由显式legacy manager处理；默认
+  run/resume/TUI不discover或ensure该owner。
+- `scripts/release/entrypoints/cli.ts`为run/resume注入App Server connector，仅为显式legacy命令组合single-Service manager/Web discovery；
+  不组合legacy Coordinator或Store migration。
   任一owner不可用时fail closed。parser/main contract与本地tests不等于三平台qualification。
 - 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
   parent-owned test/internal、显式非默认 Store 场景。
@@ -66,24 +69,23 @@ executable、release entrypoint与slot均已删除。
 
 - terminal process 永远只有 client/presentation authority；新增 journey 必须显式扩展 client contract、adapter 与
   fake/native conformance test，不能重新取得 backend object。
-- Runtime initialize 前必须完成 Service-owned Workspace Trust query/decision；wire path、cwd 或 client metadata不能
-  提升 Workspace authority。
-- connection close与Service owner shutdown分离。exit/reconnect只处理本client generation；Session、Turn、interaction、Controller与
-  Store lifecycle仍由Service决定。
+- App Server协议initialize只建立transport/App Control能力；Runtime mutation前必须完成Workspace Trust query/decision。wire path、cwd或
+  client metadata不能提升Workspace authority。
+- connection close会收掉本client-owned App Server但不删除Session facts；Session、Turn、interaction与Store authority仍由durable Store fencing决定。
 - first-run连接同一个Service，但Provider未配置时只使用neutral App Control/credential surface；CLI不创建bootstrap Host、第二Runtime或
   本地config authority。配置完成后的首个Runtime请求才创建Workspace execution context。
-- installed connector只ensure canonical shared Service；source TUI默认使用invocation-scoped standalone endpoint，并在退出时关闭connection后停止
-  composition-owned Service。source只有显式`--server shared`才使用canonical endpoint。exact dead owner才清理reservation/socket并spawn，alive/uncertain/corrupt identity不替换。
+- installed默认从launcher-pinned immutable candidate解析同candidate `kite-service`；source默认使用当前Bun与checked-in Service entrypoint。
+  两者都spawn parent-owned stdio App Server，以同一build ID和完整capability在initialize精确复核；source使用worktree profile，installed使用
+  canonical `kite-session.sqlite`，不查PATH、running Service或fallback。
   Native `describe`返回兼容Service的actual build；显式shared source只读复用另一`dev:` build及其Web root，installed active candidate对另一installed
   build执行verified replacement，source↔installed返回typed `build_mismatch`且不替换。Protocol/client-contract/identity不兼容保持fail closed。
   普通跨build `service stop/restart`由owner build控制并返回typed `build_mismatch`；source不再拥有previous-build replacement authority。
   manager mutation不自动重放，也不会回退legacy Coordinator/Worker或embedded backend。
-- TUI `/status`显示client/service version、actual/expected build与派生version status；显式shared source的`dev:`→`dev:` drift只显示事实，
-  installed或source↔installed mismatch不得伪装成开发态drift。该状态只由当前connection identity派生，不新增持久化升级状态。
+- TUI `/status`显示当前App Server transport/profile/build/version与exact pairing事实；mismatch在initialize时fail closed，因此普通启动不产生
+  build drift告警，也不把Web URL当Runtime identity。
 - client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
   都由 Service owner处理。
-- TUI启动只ensure唯一Service；Web assets已经是Service readiness的一部分。`/status`调用可选的`discoverWeb` callback，通过Native
-  `describe`取得稳定的`origin/`；它不attach route、不启动第二进程、不取得Controller。
+- TUI启动不构建Web assets、不ensure canonical Service、不监听HTTP；两个默认TUI各有一个child且共享同一durable profile。
 
 ## 本地文档
 

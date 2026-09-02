@@ -4,8 +4,10 @@ import { createTuiHistoryFacade } from '../src/runtime-client/tui-history-facade
 
 test('formats Runtime History epoch-millisecond timestamps without multiplying them', async () => {
   const updatedAt = Date.UTC(2026, 6, 1, 12, 0, 0);
+  let firstRequest: Parameters<RuntimeHistoryClient['listSessions']>[0] | undefined;
   const history: RuntimeHistoryClient = {
-    async listSessions() {
+    async listSessions(request) {
+      firstRequest = request;
       return {
         entries: [
           {
@@ -33,4 +35,6 @@ test('formats Runtime History epoch-millisecond timestamps without multiplying t
       updatedAt: expect.stringMatching(/^2026-/u),
     }),
   ]);
+  expect(firstRequest).toEqual({ limit: 100 });
+  expect(Object.hasOwn(firstRequest!, 'cursor')).toBe(false);
 });

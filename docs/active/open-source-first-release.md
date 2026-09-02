@@ -32,17 +32,17 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
-项目采用未发布clean cutover。fresh home由normal ensure直接创建`kite.sqlite` Store 9；正式CLI/candidate不提供Store 7/8 migration、
-legacy companion entrypoint或启动期source cleanup。Store 9 reopen与single-Service本机candidate smoke已通过，但三平台filesystem/process
-evidence完成前仍不计入G1；旧内部source不作为runtime fallback，也不会被正常Service自动删除。
+项目采用未发布clean cutover。默认terminal fresh profile直接创建exact `kite-session.sqlite`；正式CLI/candidate不导入旧
+`kite.sqlite`，不提供Store 7/8 migration或启动期source cleanup。旧Store原样保留但不是fallback。App Server reopen与本机candidate smoke
+已通过，但三平台filesystem/process evidence完成前仍不计入G1。
 
-首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，默认唯一
-Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。private loopback Web static与cookie-authenticated只读`/v1`由同一
-Service listener组合；
+首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
+Host/Builtin/History/App Control composition，多个进程只通过durable Store共享Session facts。普通启动没有HTTP/Web listener；显式
+legacy Service/Web控制面将在KASD后续收敛。
 Service-owned internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-single-Service/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI、single-Service、
+App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、legacy single-Service、
 retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
 Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 

@@ -89,6 +89,12 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 
 ## 关键不变量
 
+- 默认terminal路径使用`KiteAppServerConnection`：一个typed stdio connection同时承载Runtime、History、App Control与credential，
+  `prepareAppControl()`只打开exact protocol供Trust/App调用，Runtime mutation仍等待Trust。source/installed resolver由release owner持有，
+  connect/close分别spawn/reap配套child，durable Store不随connection删除。
+- 下述descriptor、Native IPC、single-Service manager与跨build replacement规则仅服务KASD-06前显式`service *`/`web`控制面；它们不再是
+  默认TUI或CLI run/resume路径，也不是App Server fallback。
+
 - descriptor schema为`kite.local-runtime-service.v1`，只含instance/PID/start time、loopback endpoint、Protocol、client
   contract revision、server version与build ID；token、Workspace、Store/executable path、credential与Session字段fail closed。
 - authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
@@ -127,8 +133,8 @@ source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
   在同一PID/start-token/reservation边界内继续等待；identity drift/uncertain仍立即blocked，不重发stop。installed active candidate在POSIX
   从reservation、在Windows从跨build `describe`取得actual old build，并用该build client再次校验后发送exact stop；named pipe没有filesystem
   reservation不授权使用current-build client猜测停止旧owner。
-  single-Service manager现是CLI/TUI/Web默认production path；正式release不再组合旧descriptor/token、Coordinator manager、Store migration或
-  `web recover`。clean cutover不会从legacy source恢复，也不会在普通ensure中扫描或删除它们。
+  single-Service manager现只由显式legacy Service/Web命令组合；正式TUI与CLI run/resume不会discover/ensure它，也不会回退该路径。
+  clean cutover不会从legacy source恢复，也不会在普通App Server启动中扫描或删除它们。
 
 ## 测试与 evidence
 

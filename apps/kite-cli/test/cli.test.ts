@@ -258,7 +258,7 @@ describe('cli argument parsing', () => {
     try {
       await expect(
         main({
-          serviceConnector: {
+          runtimeConnector: {
             connect: async () =>
               createCliConnection({
                 calls,
@@ -289,7 +289,7 @@ describe('cli argument parsing', () => {
     ];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
             createCliConnection({
               calls,
@@ -326,7 +326,7 @@ describe('cli argument parsing', () => {
     ];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
             createCliConnection({
               calls,
@@ -353,7 +353,7 @@ describe('cli argument parsing', () => {
     process.argv = ['bun', 'kite', 'run', '--workspace', '/tmp/workspace-alias', '--task', 'hello'];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
             createCliConnection({
               calls,

@@ -35,6 +35,13 @@ App Server SIGKILL会经POSIX watchdog杀死已批准且已dispatch的host-shell
 中补parent-crash child证据。该证据尚不替代三平台qualification。验证：
 `bun test apps/kite-service/test/isolated/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
 
+KASD-03本机client资格覆盖default source TUI startup、退出后重启/History恢复、两个并存TUI通过各自App Server读取同一profile，以及普通
+历史打开的observer-only边界；首次mutation惰性resume，rewind continuation在交给UI前完成写准入与subscription readiness，连续两次
+rewind产生独立durable目标且不依赖旧single-Service Controller。
+`/status`无Service PID、Web URL或build drift；模拟client以两个真实child争用同Session mutation并证明只允许一个writer。严格stdio发送前
+校验还暴露并修复了TUI首屏History请求携带`cursor: undefined`的非JSON对象，现仅在cursor真实存在时编码。macOS arm64 candidate已通过
+build/verify/install和installed TUI PTY startup；Ubuntu/Windows与完整TUI矩阵仍须在后续qualification收敛。
+
 ## 两级运行契约
 
 ## Runtime Server V1 恢复与 transport 资格
@@ -108,9 +115,8 @@ InProcess logical-message必须得到同一Client state；共享对象引用不�
 原Turn continuation与Tool一次dispatch；进程内broker/waiter不能作为恢复证据。batch中每个notification必须携带自身revision的
 exact post-event queue，无法读取时unavailable而不是空queue。
 
-Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
-重放。当前唯一production composition位于`apps/kite-service`：它在同一process拥有真实Host、State 27 / Store 6、Builtin、
-History与App Control；CLI/TUI只消费Native client且没有embedded fallback或第二default Store。focused local tests覆盖
+以下Local Service contract只约束显式legacy Service/Web控制面：descriptor/lock/token/lifecycle/credential exact，connection不携带control
+token，mutation不自动重放。默认TUI/CLI已使用parent-owned App Server且没有embedded或Service fallback。legacy focused tests覆盖
 多connection/Workspace、persisted restart、Trust、History、App Control、operation gate、disconnect后Runtime继续、20-way
 ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与frame/queue limits。
 
@@ -119,7 +125,7 @@ manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
 identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`。single-Service只读Native `describe`允许兼容客户端跨
 expected build复用Service真实descriptor/access；Protocol/client-contract不兼容仍fail closed，跨build `service stop/restart`返回
-`incompatible/build_mismatch`。source TUI默认standalone并删除previous-build stop路径；qualification验证invocation endpoint、临时Runtime Home
+`incompatible/build_mismatch`。legacy source standalone已删除previous-build stop authority；qualification验证其显式invocation endpoint、临时Runtime Home
 隔离与退出cleanup，普通source restart与source↔installed仍保持`spawn=0`。installed qualification还用门控Provider证明真实TUI Turn active期间换代返回`service_busy`并保持old build/instance，
 terminal后第二次ensure才替换且兼容旧TUI可reconnect。这些结果不能从caller build或descriptor合成健康身份。restart后
 descriptor/access与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。

@@ -10,7 +10,7 @@
 
 ## KASD-01 authority substrate
 
-新的`kite-session.sqlite`已具有独立exact epoch与Host-owned Session execution authority，但尚未接入production composition。
+新的`kite-session.sqlite`具有独立exact epoch与Host-owned Session execution authority，并已由默认TUI/CLI App Server消费。
 该authority复用`controllerGeneration`作为唯一Session writer fence，并以独立authority revision执行SQLite CAS；`connectionGeneration`仍只是
 client binding，不能单独renew或提交。read不落盘也不取得lease；acquire/renew/detach/release才写authority record。active/detached lease失效且
 cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
@@ -28,16 +28,16 @@ reconciliation把上一generation全部prepared事实改为unknown，并与clean
 
 `openKiteSessionRuntimeStorage`以每App Server一条WAL connection组合所有Session write port；read/list不取得execution lease，启动深验使用一个
 SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
-scope；无Session归属的Artifact GC仍关闭。该owner不取得旧Workspace process lock；旧lock只留在尚未切换的single-Service production owner。
+scope；无Session归属的Artifact GC仍关闭。该owner不取得旧Workspace process lock；旧lock只留在显式legacy single-Service owner。
 
 KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App进程按Session command显式acquire/renew execution handle，并让整条异步
 Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
 execution projection并在cancel/dispose处理；Store list/get/checkpoint在一个read snapshot完成，不会因另一个App Server读取或退出而取得/释放
-writer。该入口尚未接TUI；三个durable History read已由stdio carrier在同一条已initialize connection上处理，并逐次使用App-owned
+writer。默认TUI/CLI现使用该入口；三个durable History read由stdio carrier在同一条已initialize connection上处理，并逐次使用App-owned
 SQLite read snapshot。九个no-secret App Control方法也由同一carrier调用既有逐方法codec与共享OperationGate；Protocol只拥有closed method/
 outer envelope，Runtime Server只条件声明这些capability，不路由History/App Control或取得对应authority。typed parent client要求由同一
 build ID导出的exact server version与完整App capability，mismatch会关闭child。第十个App方法只用Native credential codec调用既有
-Service credential owner，secret不进入response/diagnostic；默认TUI launcher仍待接入。
+Service credential owner，secret不进入response/diagnostic。
 
 KASD-02的POSIX host-shell crash边界由Runtime Host generic process port拥有：实际命令位于parent-owned watchdog的独立process group，
 argv/cwd/env只经bounded stdin传入且pipe保持到terminal；App Server正常关闭调用既有process-tree cleanup，SIGKILL则由stdin EOF触发watchdog
@@ -45,7 +45,8 @@ kill整个组。successor仍必须等Session lease并显式reconcile，不能因
 当前未获release admission的local stdio MCP不为本阶段创建测试专用启用旁路。
 
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
-完成，KASD-02 internal App Server也已接入该owner，但默认TUI/CLI尚未切换，因此不能把目标多App Server语义宣称为production能力。验证：
+完成，KASD-02 App Server与KASD-03默认client均已接入该owner。真实双TUI同时读同一History，两个模拟client争用同Session mutation时只有
+一个成功；client close只收掉parent-owned child，不删除durable facts。验证：
 `bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
 
 ## 当前可信域
@@ -177,8 +178,8 @@ instance/PID/start time、exact loopback endpoint、Protocol/client-contract rev
 Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
 restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX
 no-follow/owner-only primitive，以及Windows current-user SID、protected owner-only DACL、non-reparse verifier；两者都在
-敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有production loopback carrier、required-port shell与唯一default
-Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用的dead-only stale manager。manager先用
+敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有App Server composition和显式legacy loopback carrier；
+`kite-local-runtime/manager`只拥有legacy Service/Web使用的dead-only stale manager。manager先用
 `GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
 `{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
 Protocol/client-contract/serverVersion及Service自身build identity一致。server identity drift、malformed或无关listener返回
@@ -194,7 +195,7 @@ installed/candidate、source↔installed与Web semantic revision仍要求exact r
 installed→installed drift换代：POSIX使用strict reservation中的旧build identity重新验证旧owner，Windows只允许exact contract且双方installed
 identity的跨build`service_stop`；confirmed absent后才spawn当前companion。
 manager还要动态验证caller build与managed active pointer一致，退役candidate不能反向停止current Service。它不放宽普通Service gate，
-也不把source或uncertain identity提升为replacement authority。source TUI默认standalone；显式`--server shared`只取得连接authority，
+也不把source或uncertain identity提升为replacement authority。legacy source standalone/shared只取得连接authority，
 不取得previous-build stop authority。它不适用于普通restart、source↔installed或Protocol/client-contract drift。build ID是部署/诊断身份，
 不替代wire revision。
 

@@ -8,7 +8,7 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('migrate-run-store');
     expect(source).not.toContain('migrate-single-store');
     expect(source).not.toContain('web-recover');
-    expect(source).toContain('serviceExecutableMode: executableMode');
+    expect(source).toContain('runtimeConnector: appServer.connector');
   });
 
   test('stable launcher enters its main without relying on standalone import.meta.main', () => {
@@ -17,7 +17,7 @@ describe('current release entrypoints', () => {
     expect(source).not.toContain('import.meta.main');
   });
 
-  test('developer Server and TUI build Web assets before the Service-owned preflight', () => {
+  test('developer Server builds Web assets while default TUI stays stdio-only', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
       readonly scripts?: Readonly<Record<string, string>>;
     };
@@ -26,13 +26,13 @@ describe('current release entrypoints', () => {
     expect(manifest.scripts?.['web:dev']).toBe('bun run scripts/development/ensure-web.ts');
     expect(source.indexOf("'build'")).toBeLessThan(source.indexOf("'agent', 'web'"));
     expect(source).not.toContain('preflightWebGatewayStaticAssets');
-    expect(manifest.scripts?.tui).toContain('apps/kite-web build');
-    expect(manifest.scripts?.tui).toContain('entrypoints/tui.ts');
+    expect(manifest.scripts?.tui).toBe('bun run scripts/release/entrypoints/tui.ts');
     expect(manifest.scripts?.['tui:fresh']).toBeUndefined();
     const tui = readFileSync('scripts/release/entrypoints/tui.ts', 'utf8');
-    expect(tui).toContain("? 'standalone'");
-    expect(tui).toContain('--server');
-    expect(tui).toContain('disposeRuntime: localService.dispose');
+    expect(tui).toContain('createManagedLocalAppServerComposition');
+    expect(tui).toContain('connectRuntime: appServer.connector');
+    expect(tui).not.toContain('createManagedLocalSingleServiceComposition');
+    expect(tui).not.toContain('discoverWeb');
     expect(tui).not.toContain('manager.restart(');
   });
 

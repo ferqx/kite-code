@@ -50,8 +50,8 @@ Web -------loopback HTTP------------>       │
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
 | KASD-02 | completed | stdio/Host/Session generation、完整client面、source/candidate配对与active model/Shell crash已通过 |
-| KASD-03 | pending | TUI/CLI default local cutover |
-| KASD-04 | pending | 显式本机daemon与exact protocol |
+| KASD-03 | completed | TUI/CLI default local cutover、observer/mutation边界、双TUI与installed smoke |
+| KASD-04 | in_progress | 显式本机daemon与exact protocol |
 | KASD-05 | pending | Web client解耦 |
 | KASD-06 | pending | 旧single-Service控制面删除与qualification |
 
@@ -162,6 +162,22 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 真正开放后进入同一门禁，不由KASD绕过。
 
 ### KASD-03：TUI/CLI default local cutover
+
+当前子阶段（2026-09-02）：
+
+- source与installed的TUI、CLI `run/resume`都默认解析并spawn同build parent-owned App Server；默认入口不再ensure/discover canonical
+  Service，不启动Web，也不保留Runtime fallback；显式legacy `service-*`/`web-*`命令仍待KASD-04～06迁移或删除；
+- CLI/TUI共用只暴露Runtime/History/App Control/credential的中性connection adapter；App Server不伪造Worker Controller。新会话继承当前
+  interaction mode用于首屏与命令语义，历史会话打开保持observer-only，首次真实mutation才发送`resume_session`；
+- rewind产生的continuation在返回UI前完成写准入和subscription readiness，连续rewind可创建独立durable目标；Plan submit读取State中保存的
+  exact Artifact ref，resumable capability允许同一invocation按不同evidence digest保存partial与terminal Artifact；
+- `/status`在默认路径只显示stdio transport、source/installed distribution、actual/expected build、App/client version与exact pairing，移除
+  Service PID、Web URL与build drift建议；root `tui`不再预构建Web；
+- source profile持久保留，TUI退出只回收自身App Server process tree，不删除Session facts。双TUI真实PTY证明各自stdio child共享History且
+  不共享Web端口；同Session writer争用仍由KASD-01 generation fencing拒绝；
+- source完整TUI system 41个scenario文件、CLI/local-runtime/Store/Service owner suites与release tests全部通过；macOS arm64 dirty candidate
+  `eafb473bccaa3300c0279829`通过build/verify/install/upgrade/rollback/uninstall及installed TUI PTY startup。三平台最终qualification仍属于
+  KASD-06。
 
 - TUI、CLI `run/resume`默认spawn配套App Server，不调用canonical Service ensure；
 - Session picker、resume、fork、history和approval全部通过App protocol；

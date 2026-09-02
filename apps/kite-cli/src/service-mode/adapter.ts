@@ -7,6 +7,7 @@ import {
   type WorkerControllerReadResponse,
 } from '@kite-ai/kite-app-contract/worker-controller';
 import type {
+  KiteAppServerConnection,
   LocalKiteConnection,
   LocalKiteConnectionStatus,
   LocalRuntimeClientStatePort,
@@ -24,14 +25,9 @@ import type {
   RuntimeSnapshotStore,
 } from '@kite-ai/runtime-client';
 
-/**
- * The only CLI-owned object in the opt-in Service path.  It is a typed view
- * over one Native connection; discovery, auth, reconnect transport and every
- * remote owner remain in `@kite-ai/kite-local-runtime/client`.
- */
-export interface KiteServiceModeAdapter extends AsyncDisposable {
-  /** The opaque Native connection; tokens and process handles are not exposed. */
-  readonly connection: KiteServiceModeConnection;
+/** Client-only view shared by the parent-owned App Server and the legacy native Service. */
+export interface KiteRuntimeModeAdapter extends AsyncDisposable {
+  readonly connection: KiteRuntimeModeConnection;
   /** Native-only Controller surface; absent on test-only/non-Worker connections. */
   readonly controller?: WorkerControllerClient;
   /** Existing Runtime Client facade; no Runtime Host/Store is created here. */
@@ -42,7 +38,8 @@ export interface KiteServiceModeAdapter extends AsyncDisposable {
   readonly appControl: KiteAppControlClient;
   /** Optional Native-only credential capability for first-run composition. */
   readonly credentialClient: LocalKiteConnection['credential'];
-  readonly service: LocalRuntimeServiceDescriptor;
+  /** Present only for the legacy native Service transport. */
+  readonly service?: LocalRuntimeServiceDescriptor;
   readonly snapshotStore: RuntimeSnapshotStore;
   readonly status: LocalKiteConnectionStatus;
   readonly generation: number;
@@ -50,6 +47,12 @@ export interface KiteServiceModeAdapter extends AsyncDisposable {
   subscribeSnapshot(listener: () => void): () => void;
   reconnect(): Promise<void>;
   close(reason?: string): Promise<void>;
+}
+
+/** Legacy native specialization retained for explicit Service lifecycle paths. */
+export interface KiteServiceModeAdapter extends KiteRuntimeModeAdapter {
+  readonly connection: KiteServiceModeConnection;
+  readonly service: LocalRuntimeServiceDescriptor;
 }
 
 export interface KiteServiceModeAdapterOptions {
@@ -60,6 +63,14 @@ export interface KiteServiceModeAdapterOptions {
 export type KiteServiceModeConnection = LocalKiteConnection & {
   readonly controller?: WorkerControllerClient;
 };
+
+export type KiteRuntimeModeConnection = KiteServiceModeConnection | KiteAppServerConnection;
+
+export function isKiteServiceModeConnection(
+  connection: KiteRuntimeModeConnection,
+): connection is KiteServiceModeConnection {
+  return 'service' in connection;
+}
 
 export interface KiteServiceModeControllerLease {
   readonly sessionId: string;
@@ -419,13 +430,26 @@ export function createKiteServiceModeAdapter(
   options: KiteServiceModeAdapterOptions | LocalKiteConnection,
 ): KiteServiceModeAdapter {
   const connection = isOptions(options) ? options.connection : options;
-  return new KiteServiceModeAdapterImpl(connection);
+  return new KiteRuntimeModeAdapterImpl(connection) as KiteServiceModeAdapter;
 }
 
 /** Descriptive alias used by foreground CLI integration code. */
 export const createKiteServiceModeClient = createKiteServiceModeAdapter;
 
-export interface KiteServiceModeConnector {
+export function createKiteRuntimeModeAdapter(
+  connection: KiteRuntimeModeConnection,
+): KiteRuntimeModeAdapter {
+  return new KiteRuntimeModeAdapterImpl(connection);
+}
+
+export interface KiteRuntimeModeConnector {
+  connect(input: {
+    readonly workspace: string;
+    readonly clientInfo?: RuntimeClientInfo;
+  }): Promise<KiteRuntimeModeConnection>;
+}
+
+export interface KiteServiceModeConnector extends KiteRuntimeModeConnector {
   /** Discovery/ensure is intentionally outside this CLI adapter. */
   connect(input: {
     readonly workspace: string;
@@ -475,12 +499,20 @@ export async function connectKiteServiceMode(
   return createKiteServiceModeAdapter(connection);
 }
 
-class KiteServiceModeAdapterImpl implements KiteServiceModeAdapter {
-  readonly connection: KiteServiceModeConnection;
+export async function connectKiteRuntimeMode(
+  connector: KiteRuntimeModeConnector,
+  input: { readonly workspace: string },
+): Promise<KiteRuntimeModeAdapter> {
+  const connection = await connector.connect({ workspace: input.workspace });
+  return createKiteRuntimeModeAdapter(connection);
+}
+
+class KiteRuntimeModeAdapterImpl implements KiteRuntimeModeAdapter {
+  readonly connection: KiteRuntimeModeConnection;
   #closed = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(connection: KiteServiceModeConnection) {
+  constructor(connection: KiteRuntimeModeConnection) {
     this.connection = connection;
   }
 
@@ -504,8 +536,8 @@ class KiteServiceModeAdapterImpl implements KiteServiceModeAdapter {
     return this.connection.credential;
   }
 
-  get service(): LocalRuntimeServiceDescriptor {
-    return this.connection.service;
+  get service(): LocalRuntimeServiceDescriptor | undefined {
+    return isKiteServiceModeConnection(this.connection) ? this.connection.service : undefined;
   }
 
   get snapshotStore(): RuntimeSnapshotStore {
@@ -525,16 +557,15 @@ class KiteServiceModeAdapterImpl implements KiteServiceModeAdapter {
   }
 
   reconnect(): Promise<void> {
-    if (this.#closed) return Promise.reject(new Error('Kite Service mode adapter is closed.'));
+    if (this.#closed) return Promise.reject(new Error('Kite Runtime mode adapter is closed.'));
     return this.connection.reconnect();
   }
 
   close(reason = 'service_mode_client_closed'): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
-    // Closing the Native connection only tears down this Client's connection,
-    // subscriptions and local snapshot store.  It never sends Runtime cancel
-    // or close-session commands and cannot dispose the Service Host.
+    // Closing tears down only this client connection and its parent-owned child, if any.
+    // It never deletes durable Session facts or sends a Runtime cancel command.
     this.#closePromise = this.connection.close(reason);
     return this.#closePromise;
   }

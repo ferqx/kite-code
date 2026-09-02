@@ -43,23 +43,25 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(owner).toContain('markGenerationUnknownInTransaction');
   });
 
-  test('keeps the source standalone Store as an explicit unshipped transition', () => {
+  test('keeps the legacy standalone Service outside the default TUI and CLI Runtime path', () => {
     const composition = source('scripts/release/single-service-native-client.ts');
     expect(composition).toContain("serviceTopology?: 'shared' | 'standalone'");
     expect(composition).toContain('createStandaloneRuntimeHome()');
     expect(composition).not.toContain('kite-session.sqlite');
+    expect(source('scripts/release/entrypoints/tui.ts')).not.toContain(
+      'createManagedLocalSingleServiceComposition',
+    );
   });
 
-  test('admits the internal App Server while keeping every default client on the old path', () => {
+  test('routes default TUI and CLI Runtime work through the paired App Server', () => {
     expect(source('apps/kite-service/src/executable.ts')).toContain('runKiteAppServerMain');
     expect(source('apps/kite-service/src/app-server.ts')).toContain("'kite-session.sqlite'");
-    const defaultClients = [
-      source('scripts/release/entrypoints/tui.ts'),
-      source('scripts/release/entrypoints/cli.ts'),
-      source('scripts/release/single-service-native-client.ts'),
-    ].join('\n');
-    expect(defaultClients).not.toContain('app-server');
-    expect(defaultClients).not.toContain('kite-session.sqlite');
+    const tui = source('scripts/release/entrypoints/tui.ts');
+    const cli = source('scripts/release/entrypoints/cli.ts');
+    expect(tui).toContain('createManagedLocalAppServerComposition');
+    expect(tui).not.toContain('discoverWeb');
+    expect(cli).toContain('runtimeConnector: appServer.connector');
+    expect(source('scripts/release/app-server-client.ts')).toContain('sourceKiteSessionStorePath');
   });
 
   test('binds the accepted decision and active plan without changing current authority', () => {
@@ -72,6 +74,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(plan).toContain('kite-source-runtime-profile\\0');
     expect(plan).toContain('| KASD-01 | completed |');
     expect(plan).toContain('| KASD-02 | completed |');
+    expect(plan).toContain('| KASD-03 | in_progress |');
     expect(
       source('docs/space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md'),
     ).toContain('状态：superseded');

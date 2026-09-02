@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { CapabilityArtifactStore } from '@kite-ai/builtin-runtime';
 import { FilesystemPreimageArtifactStore } from '@kite-ai/builtin-runtime/filesystem';
 import { PrivateImmutableArtifactStorage } from '@kite-ai/builtin-runtime/model';
 import { createBuiltinPlanDocument, PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
@@ -46,6 +47,19 @@ describe('Store 9 Builtin Artifact adapters', () => {
       const planRef = plans.write('task-db-artifact', plan);
       expect(planRef.displayPath).toStartWith('kite.sqlite#plans/');
       expect(plans.read(planRef).plan).toEqual(plan);
+
+      const capabilities = new CapabilityArtifactStore({ backend: backends.capability });
+      const suspended = capabilities.write('resumable-invocation', {
+        status: 'partial',
+        content: [{ type: 'text', text: 'suspended' }],
+      });
+      const completed = capabilities.write('resumable-invocation', {
+        status: 'success',
+        content: [{ type: 'text', text: 'completed' }],
+      });
+      expect(suspended.artifactId).not.toBe(completed.artifactId);
+      expect(capabilities.read(suspended).status).toBe('partial');
+      expect(capabilities.read(completed).status).toBe('success');
 
       const content = 'private preimage';
       const bytes = Buffer.from(content, 'utf8');

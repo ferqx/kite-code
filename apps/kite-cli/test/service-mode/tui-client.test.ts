@@ -7,6 +7,7 @@ import {
   type WorkerControllerMutationResponse,
 } from '@kite-ai/kite-app-contract/worker-controller';
 import type {
+  KiteAppServerConnection,
   LocalKiteConnection,
   LocalRuntimeServiceDescriptor,
 } from '@kite-ai/kite-local-runtime/client';
@@ -413,6 +414,24 @@ test('Native TUI opens an existing Session as Observer, then acquires its lease 
   ]);
   await facade.dispose();
   expect(remote.commands).not.toContain('cancel_turn');
+});
+
+test('App Server TUI keeps historical open observer-only and resumes on the first mutation', async () => {
+  const remote = new FakeRuntimeConnection();
+  const facade = facadeFor(remote, { appServer: true, initialInteractionMode: 'full' });
+  const session = facade.registerSession('existing-session', '/tmp/tui-client-workspace');
+  await facade.waitForSessionReady('existing-session');
+
+  expect(session.interactionMode).toBe('full');
+  expect(remote.commands).not.toContain('resume_session');
+
+  await session.runTask('mutate existing app-server session', { dispatch: () => {} });
+
+  expect(remote.commands).toContain('resume_session');
+  expect(remote.commands.indexOf('resume_session')).toBeLessThan(
+    remote.commands.indexOf('start_turn'),
+  );
+  await facade.dispose();
 });
 
 test('Native TUI releases every confirmed-idle Session lease on dispose without cancelling Turns', async () => {
@@ -1208,7 +1227,9 @@ function idleProjection(sessionId: string, revision: number) {
 function facadeFor(
   remote: FakeRuntimeConnection,
   options: {
+    readonly appServer?: boolean;
     readonly controller?: WorkerControllerClient;
+    readonly initialInteractionMode?: 'accept_edits' | 'auto' | 'full';
     readonly onConnect?: () => void;
     readonly onReconnect?: () => void;
     readonly flushPresentation?: () => Promise<void>;
@@ -1219,7 +1240,7 @@ function facadeFor(
     clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
     history: history(),
   });
-  const connection: LocalKiteConnection & { readonly controller?: WorkerControllerClient } = {
+  const connection = {
     runtime,
     history: history(),
     app: {} as KiteAppControlClient,
@@ -1228,7 +1249,7 @@ function facadeFor(
         throw new Error('not used');
       },
     },
-    service: descriptor(),
+    ...(options.appServer ? {} : { service: descriptor() }),
     get status() {
       return runtime.snapshotStore.getSnapshot().status === 'closed' ? 'closed' : 'active';
     },
@@ -1248,10 +1269,15 @@ function facadeFor(
     close: async () => runtime.close('tui-test-close'),
     [Symbol.asyncDispose]: async () => runtime.close('tui-test-dispose'),
     ...(options.controller === undefined ? {} : { controller: options.controller }),
-  };
+  } as
+    | KiteAppServerConnection
+    | (LocalKiteConnection & { readonly controller?: WorkerControllerClient });
   return createNativeTuiRuntimeClient({
     connection,
     workspace: '/tmp/tui-client-workspace',
+    ...(options.initialInteractionMode === undefined
+      ? {}
+      : { initialInteractionMode: options.initialInteractionMode }),
     ...(options.flushPresentation === undefined
       ? {}
       : { flushPresentation: options.flushPresentation }),

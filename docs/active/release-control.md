@@ -43,31 +43,30 @@ Ubuntu/Windows hosted evidence仍未完成。
 - archive SHA-256 sidecar；
 - release notes、known limitations 与普通维护者检查清单。
 
-候选中的`kite`与`kite-tui`由release entrypoint注入managed single-Service connector；前台`run/resume`、TUI、`service *`和
-`web`默认ensure/复用同一Service。CLI不构造legacy Coordinator或Store migration owner。
-Service在ready前验证并挂载candidate Web assets；CLI `web`与TUI `/status`只ensure同一Service并从native `describe`返回稳定根地址；
-`/status`同时展示Service PID、启动时间和actual/expected build，不保留单独的TUI `/web`。connector/manager失败直接暴露，不
-导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
-installed与显式shared source client只ensure每个canonical Kite Home唯一的Service；默认source TUI使用临时Runtime Home与invocation-scoped
-Service。每个logical connection使用独立client identity与generation，
+候选中的`kite`与`kite-tui`由release entrypoint为默认`run/resume`与TUI注入parent-owned App Server connector；每次调用从同一个
+immutable candidate固定解析`kite-service app-server run-stdio`。`service *`与`web`仍是KASD过渡期显式legacy控制面，不是default fallback。
+默认TUI `/status`只展示stdio/profile/build/App Server version与exact pairing，不ensure Service、不返回Web根地址。resolver或initialize
+失败直接暴露，不创建embedded Store，也不`catch`后回退旧CLI backend。
+每个logical App Server connection使用独立client identity与generation，
 Service restart时通过rotating capability恢复Controller，不启动Workspace Worker。Manager的spawn/readiness outcome-unknown由native
 reservation阻止第二次spawn；alive/uncertain identity保持fail closed，confirmed dead才清理exact socket/reservation并启动replacement。
 managed release/source composition构造neutral child environment时只复制固定OS/runtime keys和内建Provider的exact
 `DEEPSEEK_*`、`OPENAI_*`、`OLLAMA_BASE_URL` keys；未知`*_API_KEY`、Workspace dotenv与ambient Kite home不进入
-Service。source mode的build identity绑定同一single-Service bundle所需的CLI/TUI/Service/Web、package/root build
+App Server。source mode的build identity绑定同一client/App Server bundle所需的CLI/TUI/Service、package/root build
 inputs committed tree、tracked binary diff及有界untracked regular-file内容摘要；任一实际build input改变都产生新bundle identity。
-摘要不可用或越界时fail closed。默认source TUI不连接canonical owner；只有显式`--server shared`才可在Protocol/client-contract兼容时连接
-既有ready Service并使用其Web assets。source不能以新build执行`service stop/restart`，也不会隐式替换owner。Native `describe`成功只证明wire-compatible discovery，manager必须继续比较actual/expected
+摘要不可用或越界时fail closed。默认source TUI不连接canonical Service，而是使用worktree持久profile；source不能以新build执行legacy
+`service stop/restart`，也不会隐式替换owner。Native `describe`成功只证明legacy wire-compatible discovery，manager必须继续比较actual/expected
 build；installed candidate恢复active-pointer guard与previous-build client，只有当前active candidate能停止verified上一installed build并在
 confirmed absent后启动当前build。退役candidate、source↔installed或identity不确定均不能替换owner。
 release CLI还必须把选择后的`source|installed` mode注入每个`service *` lifecycle request；mode缺失不能触发installed replacement。
 
-KASD过渡已增加尚未接默认TUI/CLI的parent-owned App Server release resolver。source只使用当前Bun加checked-in Service entrypoint，build
+KASD-03已将默认TUI/CLI接到parent-owned App Server release resolver。source只使用当前Bun加checked-in Service entrypoint，build
 identity覆盖该resolver并把Runtime Store放在canonical Kite Home下按repository/worktree digest隔离的owner-only `source-profiles/`；installed
 只接受launcher传入且经marker、active pointer、`.candidate-id`与manifest重新验证的immutable candidate root，并固定解析同candidate的
 `bin/kite-service`。两者都把同一个build ID交给client与child，initialize再核对derived server version和完整capability；不查PATH、不发现
 running Service、不回退另一模式。installed child显式保留standalone marker，使其后续internal process watchdog仍解析到同candidate Service
-binary而不是不存在的source文件。默认release入口尚未切换，所以上文single-Service仍是当前production行为。
+binary而不是不存在的source文件。两个默认TUI不会共享进程或Web listener，但会读取同一durable profile；同Session mutation由Store
+generation/revision fence裁决。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装器写入 v2 managed-install marker 与唯一 `active` regular-file
@@ -168,7 +167,8 @@ hosted workflow优先用已锁定的Windows GNU Rust toolchain生成微型native
 Windows候选在native build前还串行运行Service state ACL/reparse与fresh Store 9 owner tests；它们证明native canonical KiteHome、
 `kite.sqlite`与runtime endpoint的protected owner-only边界，仍不能替代随后installed single-Service/TUI process smoke。
 
-`bun run release:smoke`在新临时目录中完成verify、install、CLI help/version、TUI启动、single-Service reuse、retired slot/file absence、
+`bun run release:smoke`在新临时目录中完成verify、install、CLI help/version、parent-owned App Server TUI启动、显式legacy
+single-Service companion、retired slot/file absence、
 Web payload、installed `kite-service` MCP stdio
 wrapper、第二候选安装、rollback和uninstall。
 candidate root与Kite home都使用native canonical identity；Windows长路径、8.3与大小写形式不通过字符串猜测互换，后续
@@ -179,9 +179,8 @@ CLI、TUI与Service candidate都从`scripts/release/entrypoints/`的显式顶层
 entrypoint同时是带Bun shebang与POSIX executable mode的source manager目标；launcher传入的`KITE_CODE_RELEASE_ROOT`是installed Service
 resolver的优先candidate root，仍由marker、active pointer、`.candidate-id`与manifest重新校验，不能从cwd/PATH推导替代路径。
 
-source `server`/`tui`先build fixed assets；source/installed Service child在发布ready前执行preflight并把Browser surface挂到同一个
-HTTP listener。缺失时Service启动失败，不存在独立Browser route status/stop或Web专用Native operation；这些路径不让Browser或Vite dev
-server取得Native lifecycle authority。
+source `server`仍build fixed assets并进入legacy Web/Service路径；source `tui`不build Web assets。默认source/installed App Server没有HTTP
+listener或static preflight；Web payload继续随candidate发布供后续显式daemon/Web cutover及当前legacy `web`命令使用。
 TUI/release fixture的显式Kite home必须在写config前由production `ensureLocalRuntimeServiceHome`创建；Windows测试不得
 先用普通`mkdir`继承Administrators/runner ACL，再要求manager把不同owner目录“修复”为current-user identity。
 fixture普通stop若lost response返回`outcome_unknown`，只能有界query status并要求`applied + absent`，不得自动重放stop；

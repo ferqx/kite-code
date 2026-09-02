@@ -23,7 +23,7 @@ import type {
   TuiRuntimeClientFacade as SessionManager,
   TuiRuntimeClientFacadeFactory,
 } from '../adapters/tui/session-adapter';
-import type { KiteServiceModeAdapter } from '../service-mode';
+import type { KiteRuntimeModeAdapter } from '../service-mode';
 import { createNativeTuiRuntimeClientFactory } from '../service-mode';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import type { SandboxBackend } from './client-types';
@@ -53,6 +53,8 @@ import type {
   RuntimePresentationEvent,
 } from './runtime-presentation';
 import {
+  type AppServerRuntimePresentation,
+  formatAppServerRuntimeStatus,
   formatServiceBuildDriftWarning,
   formatServiceRuntimeStatus,
 } from './service-runtime-status';
@@ -65,8 +67,7 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
-let _serviceModeForExit: KiteServiceModeAdapter | null = null;
-let _disposeRuntimeForExit: (() => Promise<void>) | null = null;
+let _runtimeModeForExit: KiteRuntimeModeAdapter | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -92,8 +93,8 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
 }
 
 export interface TuiBootstrapProps {
-  /** Explicit managed Local Runtime Service client; no embedded fallback is constructed. */
-  serviceMode?: KiteServiceModeAdapter;
+  /** Explicit parent-owned Runtime/App client; no Service discovery fallback is constructed. */
+  runtimeMode?: KiteRuntimeModeAdapter;
   /** Single client-facade injection used by conformance tests. */
   createSessionManager?: TuiRuntimeClientFacadeFactory;
   /** Explicit client-safe App Control test seam. */
@@ -108,8 +109,8 @@ export interface TuiBootstrapProps {
   expectedServiceBuildId?: string;
   /** TUI candidate version used only for local status presentation. */
   clientVersion?: string;
-  /** Release composition cleanup for an invocation-scoped source Service. */
-  disposeRuntime?: () => Promise<void>;
+  /** Parent-owned App Server identity; initialize already proved exact build/capability pairing. */
+  appServerRuntime?: AppServerRuntimePresentation;
 }
 
 interface TuiAppProps {
@@ -129,6 +130,7 @@ interface TuiAppProps {
     clientVersion?: string;
     expectedBuildId?: string;
   }>;
+  readAppServerRuntime?: () => AppServerRuntimePresentation;
 }
 
 interface TuiInitialConfig {
@@ -156,35 +158,34 @@ function initialConfigFromSnapshot(snapshot: ProviderModelSnapshot): TuiInitialC
 }
 
 export function TuiBootstrap({
-  serviceMode,
+  runtimeMode,
   createSessionManager,
   appControlGateway,
   credentialClient,
   discoverWeb,
   expectedServiceBuildId,
   clientVersion,
-  disposeRuntime,
+  appServerRuntime,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
-  _serviceModeForExit = serviceMode ?? null;
-  _disposeRuntimeForExit = disposeRuntime ?? null;
+  _runtimeModeForExit = runtimeMode ?? null;
   const effectiveAppControlGateway = React.useMemo(() => {
-    if (serviceMode) {
+    if (runtimeMode) {
       return {
-        discovery: serviceMode.appControl,
-        forWorkspace: (_workspace: KiteWorkspaceIdentity) => serviceMode.appControl,
+        discovery: runtimeMode.appControl,
+        forWorkspace: (_workspace: KiteWorkspaceIdentity) => runtimeMode.appControl,
       };
     }
     return appControlGateway;
-  }, [appControlGateway, serviceMode]);
+  }, [appControlGateway, runtimeMode]);
   const effectiveCreateSessionManager = React.useMemo(() => {
     if (createSessionManager) return createSessionManager;
-    if (!serviceMode) return undefined;
+    if (!runtimeMode) return undefined;
     return createNativeTuiRuntimeClientFactory({
-      connection: serviceMode.connection,
+      connection: runtimeMode.connection,
     });
-  }, [createSessionManager, serviceMode]);
-  const effectiveCredentialClient = credentialClient ?? serviceMode?.credentialClient;
+  }, [createSessionManager, runtimeMode]);
+  const effectiveCredentialClient = credentialClient ?? runtimeMode?.credentialClient;
   const [languagePreference, setLanguagePreference] = React.useState<LanguagePreference>(() =>
     loadUserLanguage(),
   );
@@ -201,7 +202,7 @@ export function TuiBootstrap({
   >({ status: 'idle' });
   const [runtimeConnectionStatus, setRuntimeConnectionStatus] = React.useState<
     'not_required' | 'connecting' | 'connected' | 'error'
-  >(() => (serviceMode ? 'connecting' : 'not_required'));
+  >(() => (runtimeMode ? 'connecting' : 'not_required'));
 
   const refreshProviderSnapshot = React.useCallback(
     async (identity: KiteWorkspaceIdentity) => {
@@ -227,14 +228,14 @@ export function TuiBootstrap({
 
   const connectRuntimeAfterTrust = React.useCallback(
     async (identity: KiteWorkspaceIdentity): Promise<void> => {
-      if (!serviceMode) {
+      if (!runtimeMode) {
         setRuntimeConnectionStatus('not_required');
         await refreshProviderSnapshot(identity);
         return;
       }
       setRuntimeConnectionStatus('connecting');
       try {
-        await serviceMode.connection.connect();
+        await runtimeMode.connection.connect();
         setRuntimeConnectionStatus('connected');
         await refreshProviderSnapshot(identity);
       } catch {
@@ -242,7 +243,7 @@ export function TuiBootstrap({
         setProviderSnapshot({ status: 'error' });
       }
     },
-    [refreshProviderSnapshot, serviceMode],
+    [refreshProviderSnapshot, runtimeMode],
   );
 
   const handleTrusted = React.useCallback(
@@ -292,7 +293,7 @@ export function TuiBootstrap({
   }
 
   if (
-    serviceMode &&
+    runtimeMode &&
     runtimeConnectionStatus !== 'connected' &&
     providerSnapshot.status !== 'error'
   ) {
@@ -348,13 +349,14 @@ export function TuiBootstrap({
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
       discoverWeb={discoverWeb}
+      readAppServerRuntime={appServerRuntime ? () => appServerRuntime : undefined}
       readServiceRuntime={
-        serviceMode
+        runtimeMode?.service
           ? () => ({
-              pid: serviceMode.service.pid,
-              startedAt: serviceMode.service.startedAt,
-              buildId: serviceMode.service.buildId,
-              serviceVersion: serviceMode.service.serverVersion,
+              pid: runtimeMode.service!.pid,
+              startedAt: runtimeMode.service!.startedAt,
+              buildId: runtimeMode.service!.buildId,
+              serviceVersion: runtimeMode.service!.serverVersion,
               ...(clientVersion === undefined ? {} : { clientVersion }),
               ...(expectedServiceBuildId === undefined
                 ? {}
@@ -376,6 +378,7 @@ function TuiApp({
   onLanguageSelect,
   discoverWeb,
   readServiceRuntime,
+  readAppServerRuntime,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
@@ -560,9 +563,10 @@ function TuiApp({
   const sessionManager = React.useMemo(() => {
     return createSessionManager({
       workspace,
+      initialInteractionMode: config.interactionMode,
       flushPresentation: waitUntilRenderFlush,
     });
-  }, [waitUntilRenderFlush, createSessionManager, workspace]);
+  }, [config.interactionMode, waitUntilRenderFlush, createSessionManager, workspace]);
   React.useEffect(() => {
     const releaseActionSink = provider.setActionSink((action) =>
       sessionManager.submitUserAction(action),
@@ -1305,42 +1309,49 @@ function TuiApp({
     },
     () => {
       const targetThreadId = threadIdRef.current;
-      const targetTurnCount = Math.max(1, stateRef.current.turns.length);
       const serviceRuntime = readServiceRuntime?.();
+      const appServerRuntime = readAppServerRuntime?.();
       dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: '/status' });
       void (async () => {
-        let web = translate('serviceStatus.webUnavailable');
-        if (discoverWeb) {
+        const identity = appServerRuntime
+          ? formatAppServerRuntimeStatus(appServerRuntime, {
+              transport: translate('appServerStatus.transport'),
+              mode: translate('appServerStatus.mode'),
+              buildId: translate('appServerStatus.buildId'),
+              serverVersion: translate('appServerStatus.serverVersion'),
+              clientVersion: translate('appServerStatus.clientVersion'),
+              paired: translate('appServerStatus.paired'),
+            })
+          : serviceRuntime
+            ? formatServiceRuntimeStatus(serviceRuntime, {
+                pid: translate('serviceStatus.pid'),
+                startedAt: translate('serviceStatus.startedAt'),
+                buildId: translate('serviceStatus.buildId'),
+                serviceVersion: translate('serviceStatus.serviceVersion'),
+                clientVersion: translate('serviceStatus.clientVersion'),
+                expectedBuildId: translate('serviceStatus.expectedBuildId'),
+                versionStatus: translate('serviceStatus.versionStatus'),
+                aligned: translate('serviceStatus.aligned'),
+                sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
+                buildMismatch: translate('serviceStatus.buildMismatch'),
+              })
+            : `  ⎿  ${translate('serviceStatus.unavailable')}`;
+        let web: string | undefined;
+        if (!appServerRuntime && discoverWeb) {
           try {
             web = await discoverWeb();
           } catch {
             web = translate('serviceStatus.webDiscoveryUnavailable');
           }
         }
-        const identity = serviceRuntime
-          ? formatServiceRuntimeStatus(serviceRuntime, {
-              pid: translate('serviceStatus.pid'),
-              startedAt: translate('serviceStatus.startedAt'),
-              buildId: translate('serviceStatus.buildId'),
-              serviceVersion: translate('serviceStatus.serviceVersion'),
-              clientVersion: translate('serviceStatus.clientVersion'),
-              expectedBuildId: translate('serviceStatus.expectedBuildId'),
-              versionStatus: translate('serviceStatus.versionStatus'),
-              aligned: translate('serviceStatus.aligned'),
-              sourceBuildDrift: translate('serviceStatus.sourceBuildDrift'),
-              buildMismatch: translate('serviceStatus.buildMismatch'),
-            })
-          : `  ⎿  ${translate('serviceStatus.unavailable')}`;
-        if (
-          threadIdRef.current !== targetThreadId ||
-          stateRef.current.turns.length !== targetTurnCount
-        ) {
-          return;
-        }
+        if (threadIdRef.current !== targetThreadId) return;
         dispatchSessionLoad({
           type: 'LOCAL_TEXT',
-          text: `${identity}\n     ${translate('serviceStatus.web')}: ${web}`,
-          ...(serviceRuntime ? {} : { isError: true }),
+          text:
+            web === undefined
+              ? identity
+              : `${identity}\n     ${translate('serviceStatus.web')}: ${web}`,
+          ...(serviceRuntime || appServerRuntime ? {} : { isError: true }),
         });
       })();
     },
@@ -1717,16 +1728,14 @@ export function runTui(props: TuiBootstrapProps): void {
   const exitCoordinator = createTuiExitCoordinator({
     getSessionLifecycle: () => {
       const session = _sessionManagerForExit;
-      const serviceMode = _serviceModeForExit;
-      const disposeRuntime = _disposeRuntimeForExit;
-      if (!session && !serviceMode && !disposeRuntime) return null;
+      const runtimeMode = _runtimeModeForExit;
+      if (!session && !runtimeMode) return null;
       return {
         shutdownObservability: (timeoutMs: number) =>
           session?.shutdownObservability(timeoutMs) ?? Promise.resolve(),
         dispose: async () => {
           if (session) await session.dispose();
-          else await serviceMode?.close('tui_exit');
-          await disposeRuntime?.();
+          else await runtimeMode?.close('tui_exit');
         },
       };
     },

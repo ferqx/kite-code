@@ -2,20 +2,21 @@
 
 ## 定位
 
-`@kite-ai/kite-service`拥有production backend composition。当前source/release的TUI、`run/resume`、`service *`与`web`按
-canonical Kite Home复用唯一Local Service；该进程拥有唯一Store 9 writer、Runtime Host、Controller authority、Native endpoint与
-loopback HTTP listener。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope，但不拥有独立进程或数据库。
+`@kite-ai/kite-service`拥有production backend composition。当前source/release的TUI与CLI `run/resume`各自启动同build、parent-owned
+`app-server run-stdio`，多个App Server通过Durable Session Store共享facts，并由per-Session generation fencing限制execution writer。
+显式legacy `service *`与`web`暂时继续使用canonical single-Service、Store 9与loopback HTTP，等待KASD-04～06迁移或删除；它们不是
+default Runtime fallback。Workspace仍是Trust、配置、MCP、Skill、Sandbox、Git与query scope。
 
 `apps/kite-cli`只保留terminal presentation和Native client。Coordinator、Workspace Worker进程拓扑及Store 6/7/8代码不得回到普通
 terminal/Web data plane；独立Web Gateway process/control/state实现已经删除。
 
-KASD-02新增尚未接默认client的内部`app-server run-stdio`入口。它从显式profile打开`kite-session.sqlite`多连接owner，以parent-owned
+KASD-02/03的`app-server run-stdio`入口从显式profile打开`kite-session.sqlite`多连接owner，以parent-owned
 JSONL承载现有Runtime Protocol，复用同一Host/Builtin/config/Trust composition，但不创建single-Service reservation、Native socket、HTTP或
 Web。每个进程只cancel/dispose自己持有generation的Session；list/get/checkpoint是单SQLite read snapshot，不取得writer。统一Kite App
 History读取与九个no-secret App Control方法已通过同一条initialize后的JSONL connection提供；App Control复用既有exact codec与
 OperationGate；Native provider credential write继续使用既有credential codec/owner且不回显secret。Runtime Server只条件发布capability而不取得
-History/Store/App Control/credential authority。typed parent client会核对由build ID导出的server version与完整方法集。TUI默认launcher和
-source/candidate resolution尚未切换，因此当前production定位仍是上文single-Service。
+History/Store/App Control/credential authority。typed parent client会核对由build ID导出的server version与完整方法集。source固定当前
+源码entrypoint与worktree profile；installed固定launcher提供的immutable candidate与canonical profile，均不发现running Service。
 
 ## 拥有职责
 
@@ -31,8 +32,8 @@ source/candidate resolution尚未切换，因此当前production定位仍是上�
   SIGKILL后随parent pipe EOF终止，不是用户命令、daemon或第二Service入口。
 - `src/single-service-infrastructure.ts`在每个canonical home的唯一native reservation内发布Unix socket或Windows named pipe；
   access/control capability与process identity只在进程内和IPC握手中存在，不写入Kite Home。
-- `bootstrap.ts`打开唯一`kite.sqlite` connection，组合Store 9 Directory、RuntimeStorage、Controller/recovery authority、Run/checkpoint/
-  receipt及八类typed private Artifact backend。Workspace execution context按需建立，但复用同一Host/writer。
+- `bootstrap.ts`为default App Server打开可多连接的`kite-session.sqlite`，组合per-Session execution authority、RuntimeStorage、Run/checkpoint/
+  receipt及typed private Artifact backend；显式legacy single-Service仍打开`kite.sqlite`。两条物理Store不互相探测、导入或fallback。
 - native Runtime command在每次admission时用已认证socket的client/connection generation读取Store 9当前Session Controller；Controller
   generation进入opaque command binding reference，不固化为socket建连快照，因此同一TUI可在多个Session间切换且旧connection generation仍
   fail closed。执行复用现有Runtime/Host的per-Session mailbox、transaction、receipt与recovery，不增加第二套command registry。
@@ -73,7 +74,7 @@ Contract、browser-safe Agent API Contract、Browser HTTP client与Native-only l
 package根入口只服务repo内部composition/test。compiled `kite-service`只接受manager调用的exact internal `service run-single`；普通用户通过
 `kite service ensure/status/stop/restart`控制窄lifecycle surface。
 
-同一internal executable也接受exact `app-server run-stdio`，但当前没有公开CLI route或默认launcher；直接调用必须提供显式profile、Workspace与
+同一internal executable也接受exact `app-server run-stdio`；default TUI/CLI只通过配套typed launcher调用并提供显式profile、Workspace与
 build identity，不能发现/替换shared Service，也不能产生Web endpoint。
 
 OSS candidate只输出`bin/kite`、`bin/kite-tui`、`bin/kite-service`（Windows为`.exe`）及`payload/web`。manifest中的
@@ -82,12 +83,12 @@ contract asset；installed mode只从launcher固定的immutable candidate root�
 
 ## 关键不变量
 
-- installed/shared topology中每个canonical Kite Home最多一个Service、一个Runtime Host、一个Store 9 writer与一个`kite.sqlite`；source
-  standalone为每次TUI调用分配独立临时Runtime Home，不共享该Store owner。
+- default topology中每个TUI/CLI拥有一个App Server/Runtime Host；同一profile允许多SQLite connection，不同Session可并行，同一Session最多
+  一个generation writer。installed使用canonical`kite-session.sqlite`，source按canonical repository/worktree隔离持久profile。
 - Kite Home只保存用户配置、`skills/`、`sessions/`和`kite.sqlite`及SQLite companion；不得写process descriptor、token、socket、lock、
   launch intent、layout sidecar或filesystem Artifact root。
-- source standalone通过`KITE_CODE_CONFIG_HOME`从canonical Home读取配置、Trust、MCP与Skills，`KITE_CODE_HOME`只指向临时Runtime Home；
-  Service成功停止后release composition删除临时Home，停止不确定时保留现场且不删除活跃Store。
+- source App Server通过`KITE_CODE_CONFIG_HOME`从canonical Home读取配置、Trust、MCP与Skills，`KITE_CODE_HOME`指向持久source profile；
+  parent退出后只停止自身child，绝不删除profile或Session facts。
 - POSIX每home runtime只允许`service.sock`与`service.lock`；Windows endpoint使用named pipe。custom home按canonical home digest
   隔离endpoint并作为相互独立的profile，不增加跨home coordination。
 - Web assets是Service的exact启动输入；`index.html`、OpenAPI或hashed JS/CSS缺失时Service不发布ready。客户端不能在Service ready后

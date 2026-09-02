@@ -283,7 +283,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 每个模型请求拥有独立的思考/工具组件边界
+  // Test 2 — 相邻探索请求保持同一个 Thought 边界
   //
   // 消息结构：
   //   Response 1: reasoning + read_file(CLAUDE.md)
@@ -291,13 +291,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 3: content 文本输出（阶段结束）
   //
   // 预期 TUI 现象：
-  //   - 每个 model.requested(requestId) 结算前一个组件
-  //   - 两轮分别显示 "Thinking Xs · read 1 file"
-  //   - 不依赖相邻事件顺序把不同 request 的工具聚合到同一块
+  //   - model.requested(requestId) 本身不是可见边界
+  //   - 没有正文、独立工具或交互打断时，两轮探索合并为一个 Thought
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'successive model requests keep separate reasoning and tool components',
+    'successive exploration requests stay in one thought component',
     async () => {
       server.setResponses([
         // Phase 1
@@ -334,9 +333,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
-
-      expect(screenContains(output, 'read 2 files')).toBe(false);
-      expect(clean.match(/Thinking \d+s · read 1 file/gu)?.length ?? 0).toBe(2);
+      expect(screenContains(output, 'read 2 files')).toBe(true);
+      expect(clean.match(/Thinking \d+s · read 2 files/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'Phase 1:')).toBe(false);
       expect(screenContains(output, 'Phase 2:')).toBe(false);
 
@@ -354,21 +352,20 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 3 — shell_execute 无 inspect intent 时使用独立工具块
+  // Test 3 — 只读 shell_execute 使用服务端安全展示分类
   //
   // 消息结构：
   //   Response 1: reasoning + read_file + shell_execute(without inspect intent)
   //   Response 2: content 文本输出 → 关闭 Thought
   //
   // 预期 TUI 现象：
-  //   - shell_execute 无 intent=inspect 时不纳入 Thought
-  //   - read_file 保持探索摘要
-  //   - shell_execute 使用独立 tool_card
+  //   - App Server 根据已解析的只读 effect 将 shell 纳入探索摘要
+  //   - 客户端不根据原始 command 自行重做分类
   //   - 最终文本正常出现
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'shell_execute keeps its governed tool lifecycle with a verified result',
+    'read-only shell_execute uses the server-owned exploration presentation',
     async () => {
       server.setResponses([
         {
@@ -405,13 +402,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       const shellHistory = tui.screenFramesSince(shellFrames).join('\n');
-
-      // ── shell_execute without inspect intent stays as independent tool_card ──
-      // The read starts after the shell boundary as a separate safe summary;
-      // it never renders a transient standalone Read card.
+      // ── 服务端将已验证的只读 shell 与 read 一起投影为探索摘要 ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'ran 1 command')).toBe(false);
-      expect(screenContains(output, 'Bash')).toBe(true);
+      expect(screenContains(output, 'ran 1 shell command')).toBe(true);
+      expect(screenContains(output, 'Bash')).toBe(false);
       expect(screenContains(shellHistory, 'exit: error')).toBe(false);
 
       // ── 独立工具卡完成后可折叠；最终回答仍可见 ──
@@ -429,7 +424,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'post-Bash searches and later reasoning keep request-scoped components',
+    'post-Bash searches and later reasoning form one exploration thought',
     async () => {
       server.setResponses([
         {
@@ -479,22 +474,22 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await submitUserMessage(tui, server, 'Inspect after a standalone command', {
         timeout: 15_000,
       });
+      await waitForText(() => tui.viewport(), '工具授权', 15_000);
+      tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'POST_BASH_DONE', 25_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
       expect(screenContains(output, 'Bash')).toBe(true);
-      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(false);
+      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
       const bash = clean.indexOf('● Bash Ran:');
-      const searchSummary = clean.indexOf('searched 2 file patterns');
-      const laterThinking = clean.lastIndexOf('Thinking ');
+      const explorationThought = clean.lastIndexOf('Thinking ');
       const finalText = clean.indexOf('POST_BASH_DONE:');
-      expect(searchSummary).toBeGreaterThan(bash);
-      expect(laterThinking).toBeGreaterThan(searchSummary);
-      expect(finalText).toBeGreaterThan(laterThinking);
+      expect(explorationThought).toBeGreaterThan(bash);
+      expect(finalText).toBeGreaterThan(explorationThought);
       expect(tui.scrollback()).not.toContain('● Find');
 
       await waitForCondition(
@@ -550,11 +545,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .split('\n')
         .filter((line) => line.includes('searched 2 file patterns'));
       expect(searchLines).toHaveLength(1);
-      expect(searchLines[0]?.trim()).toBe('searched 2 file patterns');
+      expect(searchLines[0]?.trim()).toMatch(/^Thinking \d+s · searched 2 file patterns$/u);
       expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
-      expect(replay.indexOf('Thinking ')).toBeGreaterThan(
-        replay.indexOf('searched 2 file patterns'),
-      );
+      expect(replay.indexOf('Thinking ')).toBeGreaterThan(replay.indexOf('● Bash Ran:'));
     },
     TIMEOUT,
   );
@@ -676,24 +669,18 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // permanent caption collection inside the first Thought.
       const lastNarration = narrationLines.at(-1)!;
 
-      const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
-      expect(bash).toBeGreaterThan(lastNarration);
-      const postBashSearch = lines.findIndex(
-        (line, index) => index > bash && line === 'searched 2 file patterns',
+      const finalThought = lines.findIndex(
+        (line, index) =>
+          index > lastNarration &&
+          line.startsWith('Thinking ') &&
+          line.includes('searched 2 file patterns') &&
+          line.includes('ran 1 shell command'),
       );
-      expect(postBashSearch).toBeGreaterThan(bash);
-      const secondThinking = lines.findIndex(
-        (line, index) => index > postBashSearch && line.startsWith('Thinking '),
-      );
-      expect(secondThinking).toBeGreaterThan(bash);
-      expect(
-        lines.some(
-          (line) => line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
-        ),
-      ).toBe(false);
+      expect(finalThought).toBeGreaterThan(lastNarration);
+      expect(lines.some((line) => line.startsWith('● Bash Ran:'))).toBe(false);
       expect(
         lines.indexOf('PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。'),
-      ).toBeGreaterThan(secondThinking);
+      ).toBeGreaterThan(finalThought);
       expect(tui.scrollback()).not.toContain('● Find');
 
       console.log('  [project-overview] clean output:', stripAnsi(output));

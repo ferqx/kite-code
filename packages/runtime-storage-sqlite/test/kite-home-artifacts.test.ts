@@ -199,11 +199,24 @@ describe('Kite Home typed Artifact Store', () => {
         canonicalJson: capabilityJson,
         createdAt: 1,
       });
+      store.writeCapability({
+        ref: reference('capability_result', 'c', capabilityJson),
+        invocationId: 'same-invocation',
+        evidenceDigest: 'evidence-two',
+        artifactFormatVersion: 2,
+        canonicalJson: capabilityJson,
+        createdAt: 1,
+      });
+      expect(
+        database
+          .query<{ count: number }, []>('SELECT count(*) AS count FROM capability_artifacts')
+          .get()?.count,
+      ).toBe(2);
       expect(() =>
         store.writeCapability({
-          ref: reference('capability_result', 'c', capabilityJson),
+          ref: reference('capability_result', 'd', capabilityJson),
           invocationId: 'same-invocation',
-          evidenceDigest: 'evidence-two',
+          evidenceDigest: 'evidence-one',
           artifactFormatVersion: 2,
           canonicalJson: capabilityJson,
           createdAt: 1,
@@ -211,9 +224,9 @@ describe('Kite Home typed Artifact Store', () => {
       ).toThrow(KiteHomeArtifactError);
       try {
         store.writeCapability({
-          ref: reference('capability_result', 'c', capabilityJson),
+          ref: reference('capability_result', 'd', capabilityJson),
           invocationId: 'same-invocation',
-          evidenceDigest: 'evidence-two',
+          evidenceDigest: 'evidence-one',
           artifactFormatVersion: 2,
           canonicalJson: capabilityJson,
           createdAt: 1,
