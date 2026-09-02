@@ -31,6 +31,12 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     );
     expect(authority).toContain('controllerGeneration');
     expect(authority).toContain("status: 'recovery_required'");
+    expect(source('packages/runtime-storage-sqlite/src/kite-session-mutation.ts')).toContain(
+      'createKiteSessionMutationPort',
+    );
+    expect(source('packages/runtime-storage-sqlite/src/kite-session-effects.ts')).toContain(
+      'assertDispatchable',
+    );
   });
 
   test('keeps the source standalone Store as an explicit unshipped transition', () => {

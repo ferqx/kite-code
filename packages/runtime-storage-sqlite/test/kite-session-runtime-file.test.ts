@@ -7,6 +7,7 @@ import {
   initializeKiteHomeStoreSchema,
   KITE_SESSION_STORE_FORMAT_EPOCH,
   KITE_SESSION_STORE_SCHEMA_VERSION,
+  KITE_SESSION_STORE_TABLE_COLUMNS,
   KiteSessionStoreOpenError,
   openKiteSessionStoreDatabase,
 } from '../src';
@@ -21,6 +22,12 @@ describe('Kite Session Store physical file', () => {
         const first = openKiteSessionStoreDatabase(path);
         expect(metadata(first, 'schema_version')).toBe(String(KITE_SESSION_STORE_SCHEMA_VERSION));
         expect(metadata(first, 'format_epoch')).toBe(KITE_SESSION_STORE_FORMAT_EPOCH);
+        expect(
+          first
+            .query<{ name: string }, []>('PRAGMA table_info(runtime_effect_leases)')
+            .all()
+            .map((row) => row.name),
+        ).toEqual([...KITE_SESSION_STORE_TABLE_COLUMNS.runtime_effect_leases]);
         first.close(false);
 
         const reopened = openKiteSessionStoreDatabase(path);

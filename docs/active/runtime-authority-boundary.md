@@ -16,9 +16,15 @@ client binding，不能单独renew或提交。read不落盘也不取得lease；a
 cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
 `controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
 
+目标Store的`sessionMutation`在SQLite writer transaction取得后重读execution binding、authority revision、lease deadline与Session revision，
+检查和写入之间不存在另一个SQLite writer commit窗口。目标effect record同时保存Session generation、Host/client/connection tuple和正交的effect
+lease revision；prepare、renew、terminal与unknown只能通过`sessionMutation`。dispatch前必须再次重读authority与effect tuple；late terminal
+exact拒绝。response loss或cleanup无法确认时，effect `unknown/uncertain`与Session `recovery_required`同事务提交，后续prepare、dispatch与terminal
+均不可用，直到显式cleanup reconciliation产生更大的Session generation。
+
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。当前Session
 mutation/effect dispatch尚未全部接入该fence，Workspace process lock仍在，所以KASD-01整体仍为in progress，不能把目标多App Server语义宣称为
-production能力。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts`。
+production能力。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts`。
 
 ## 当前可信域
 

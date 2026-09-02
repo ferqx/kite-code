@@ -21,6 +21,15 @@ export interface KiteSessionExecutionAuthorityRecord {
   readonly revision: number;
 }
 
+export interface KiteSessionExecutionBinding {
+  readonly sessionId: string;
+  readonly controllerGeneration: number;
+  readonly hostInstanceId: string;
+  readonly clientId: string | null;
+  readonly connectionGeneration: number;
+  readonly expectedAuthorityRevision: number;
+}
+
 export type KiteSessionExecutionAuthorityErrorCode =
   | 'invalid_input'
   | 'session_not_found'
@@ -48,6 +57,11 @@ export type KiteSessionAcquireResult =
 
 export interface KiteSessionExecutionAuthority {
   read(sessionId: string): KiteSessionExecutionAuthorityRecord;
+  assertActive(binding: KiteSessionExecutionBinding): KiteSessionExecutionAuthorityRecord;
+  /** Caller already owns the Session mutation transaction. */
+  markRecoveryRequiredInTransaction(
+    binding: KiteSessionExecutionBinding,
+  ): KiteSessionExecutionAuthorityRecord;
   acquire(input: {
     readonly sessionId: string;
     readonly expectedRevision: number;
@@ -151,6 +165,54 @@ export function createKiteSessionExecutionAuthority(input: {
   const read = (sessionId: string): KiteSessionExecutionAuthorityRecord => {
     assertKiteSessionStoreSchema(input.database);
     return publicRecord(readTx(sessionId));
+  };
+
+  const assertActive = (
+    binding: KiteSessionExecutionBinding,
+  ): KiteSessionExecutionAuthorityRecord => {
+    validateBinding(binding);
+    assertKiteSessionStoreSchema(input.database);
+    const current = readTx(binding.sessionId);
+    assertExpectedRevision(current, binding.expectedAuthorityRevision);
+    if (
+      current.status !== 'active' ||
+      current.controllerGeneration !== binding.controllerGeneration ||
+      current.hostInstanceId !== binding.hostInstanceId ||
+      current.clientId !== binding.clientId ||
+      current.connectionGeneration !== binding.connectionGeneration ||
+      current.leaseUntilMs === null ||
+      current.leaseUntilMs <= now()
+    ) {
+      throw new KiteSessionExecutionAuthorityError(
+        'stale_generation',
+        'Session execution binding is no longer active.',
+      );
+    }
+    return publicRecord(current);
+  };
+
+  const markRecoveryRequiredInTransaction = (
+    binding: KiteSessionExecutionBinding,
+  ): KiteSessionExecutionAuthorityRecord => {
+    if (!input.writer.inTransaction) {
+      throw new KiteSessionExecutionAuthorityError(
+        'invalid_transition',
+        'Recovery fencing requires the Session mutation transaction.',
+      );
+    }
+    assertActive(binding);
+    const current = readTx(binding.sessionId);
+    const recovery = nextRecord(current, now(), {
+      status: 'recovery_required',
+      controllerGeneration: increment(current.controllerGeneration),
+      hostInstanceId: null,
+      clientId: null,
+      connectionGeneration: 0,
+      leaseUntilMs: null,
+      cleanupConfirmed: false,
+    });
+    writeTx(recovery);
+    return publicRecord(recovery);
   };
 
   const acquire = (
@@ -296,7 +358,16 @@ export function createKiteSessionExecutionAuthority(input: {
     });
   };
 
-  return Object.freeze({ read, acquire, renew, detach, release, confirmRecoveryCleanup });
+  return Object.freeze({
+    read,
+    assertActive,
+    markRecoveryRequiredInTransaction,
+    acquire,
+    renew,
+    detach,
+    release,
+    confirmRecoveryCleanup,
+  });
 }
 
 function initialRecord(sessionId: string): PersistedRecord {
@@ -388,6 +459,15 @@ function validateOwnerRequest(request: {
   assertRevision(request.expectedRevision);
   assertGeneration(request.controllerGeneration, 'Controller generation');
   assertIdentity(request.hostInstanceId, 'Host instance');
+}
+
+function validateBinding(binding: KiteSessionExecutionBinding): void {
+  assertSessionId(binding.sessionId);
+  assertGeneration(binding.controllerGeneration, 'Controller generation');
+  assertIdentity(binding.hostInstanceId, 'Host instance');
+  assertNullableIdentity(binding.clientId, 'Client');
+  assertGeneration(binding.connectionGeneration, 'Connection generation');
+  assertRevision(binding.expectedAuthorityRevision);
 }
 
 function assertExpectedRevision(current: PersistedRecord, expected: number): void {

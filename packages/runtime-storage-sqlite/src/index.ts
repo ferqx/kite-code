@@ -119,6 +119,7 @@ export {
   KITE_HOME_STORE_TABLE_COLUMNS,
   KITE_SESSION_STORE_FORMAT_EPOCH,
   KITE_SESSION_STORE_SCHEMA_VERSION,
+  KITE_SESSION_STORE_TABLE_COLUMNS,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
 export {
@@ -138,6 +139,14 @@ export {
   type KiteHomeWriteTransactionPort,
 } from './kite-home-write';
 export {
+  createKiteSessionEffectPort,
+  KiteSessionEffectError,
+  type KiteSessionEffectErrorCode,
+  type KiteSessionEffectPort,
+  type KiteSessionEffectRecord,
+  type KiteSessionEffectState,
+} from './kite-session-effects';
+export {
   createKiteSessionExecutionAuthority,
   KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
   type KiteSessionAcquireResult,
@@ -145,8 +154,16 @@ export {
   KiteSessionExecutionAuthorityError,
   type KiteSessionExecutionAuthorityErrorCode,
   type KiteSessionExecutionAuthorityRecord,
+  type KiteSessionExecutionBinding,
   type KiteSessionExecutionStatus,
 } from './kite-session-execution-authority';
+export {
+  createKiteSessionMutationPort,
+  KiteSessionMutationError,
+  type KiteSessionMutationErrorCode,
+  type KiteSessionMutationInput,
+  type KiteSessionMutationPort,
+} from './kite-session-mutation';
 export {
   KiteSessionStoreOpenError,
   type KiteSessionStoreOpenErrorCode,

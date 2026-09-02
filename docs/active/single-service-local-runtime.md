@@ -14,7 +14,9 @@ ADR-0166已经接受App Server进程与Durable Session解耦目标，实施计�
 [`2026-09-02-app-server-session-decoupling.md`](../space/plans/2026-09-02-app-server-session-decoupling.md)。当前production行为仍是下文记录的
 single-Service/临时source standalone实现。KASD-01当前只完成了新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile
 路径函数与独立Session execution authority substrate；真实双进程测试已证明同一Session只有一个generation writer、不同Session均可acquire，
-且cleanup未确认会持久化为`recovery_required`。TUI/CLI/Service尚未消费该substrate，Workspace process lock、one-connection composition与
+且cleanup未确认会持久化为`recovery_required`。目标Store进一步具备原子`sessionMutation`与generation-bound effect
+prepare/dispatch/terminal/unknown substrate；unknown effect与`recovery_required`同事务提交。TUI/CLI/Service尚未消费该substrate，event、Run、
+checkpoint等旧write port也尚未全部接入，Workspace process lock、one-connection composition与
 临时source Runtime Home仍未删除，因此下文single-Service行为继续是production current authority。当前没有daemon、Web切换、旧库导入、dual
 write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定尚未关闭的transition gap。
 

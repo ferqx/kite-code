@@ -205,6 +205,26 @@ export const KITE_HOME_STORE_INDEXES = Object.freeze([
   'runtime_session_tombstones_workspace_deleted',
 ] as const);
 
+export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
+  ...KITE_HOME_STORE_TABLE_COLUMNS,
+  runtime_effect_leases: [
+    'session_id',
+    'effect_id',
+    'owner_id',
+    'lease_revision',
+    'certainty',
+    'expires_at_ms',
+    'controller_generation',
+    'host_instance_id',
+    'client_id',
+    'connection_generation',
+    'state',
+    'outcome',
+    'terminal_digest',
+    'updated_at',
+  ],
+} as const);
+
 const DIGEST_CHECK = "length(%s) = 64 AND %s NOT GLOB '*[^a-f0-9]*'";
 const digestCheck = (column: string): string => DIGEST_CHECK.replaceAll('%s', column);
 const artifactIdCheck = (column: string): string =>
@@ -432,6 +452,59 @@ export const KITE_HOME_STORE_DDL = Object.freeze([
   'CREATE INDEX runtime_session_tombstones_workspace_deleted ON runtime_session_tombstones(workspace_id, deleted_at DESC, session_id)',
 ] as const);
 
+const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
+  session_id TEXT NOT NULL REFERENCES runtime_sessions(session_id) ON DELETE CASCADE,
+  effect_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  lease_revision INTEGER NOT NULL CHECK (lease_revision >= 1),
+  certainty TEXT NOT NULL CHECK (certainty IN ('certain', 'uncertain')),
+  expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms >= 0),
+  controller_generation INTEGER NOT NULL CHECK (controller_generation >= 1),
+  host_instance_id TEXT NOT NULL,
+  client_id TEXT,
+  connection_generation INTEGER NOT NULL CHECK (connection_generation >= 0),
+  state TEXT NOT NULL CHECK (state IN ('prepared', 'terminal', 'unknown')),
+  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('succeeded', 'failed', 'unknown')),
+  terminal_digest TEXT CHECK (terminal_digest IS NULL OR (${digestCheck('terminal_digest')})),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+  PRIMARY KEY (session_id, effect_id),
+  CHECK ((state = 'prepared' AND outcome IS NULL AND terminal_digest IS NULL AND certainty = 'certain') OR
+    (state = 'terminal' AND outcome IN ('succeeded', 'failed') AND terminal_digest IS NOT NULL) OR
+    (state = 'unknown' AND outcome = 'unknown' AND terminal_digest IS NULL AND certainty = 'uncertain'))
+) STRICT`;
+
+const KITE_SESSION_STORE_DDL = Object.freeze(
+  KITE_HOME_STORE_DDL.map((statement) =>
+    statement.startsWith('CREATE TABLE runtime_effect_leases')
+      ? KITE_SESSION_EFFECT_LEASE_DDL
+      : statement,
+  ),
+);
+
+interface ExactKiteStoreProfile {
+  readonly schemaVersion: number;
+  readonly formatEpoch: string;
+  readonly ddl: readonly string[];
+  readonly tableColumns: Readonly<Record<string, readonly string[]>>;
+  readonly indexes: readonly string[];
+}
+
+const kiteHomeStoreProfile = (): ExactKiteStoreProfile => ({
+  schemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
+  formatEpoch: KITE_HOME_STORE_FORMAT_EPOCH,
+  ddl: KITE_HOME_STORE_DDL,
+  tableColumns: KITE_HOME_STORE_TABLE_COLUMNS,
+  indexes: KITE_HOME_STORE_INDEXES,
+});
+
+const kiteSessionStoreProfile = (): ExactKiteStoreProfile => ({
+  schemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
+  formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
+  ddl: KITE_SESSION_STORE_DDL,
+  tableColumns: KITE_SESSION_STORE_TABLE_COLUMNS,
+  indexes: KITE_HOME_STORE_INDEXES,
+});
+
 export class KiteHomeStoreSchemaError extends Error {
   constructor(message: string) {
     super(message);
@@ -440,10 +513,7 @@ export class KiteHomeStoreSchemaError extends Error {
 }
 
 export function initializeKiteHomeStoreSchema(database: Database): void {
-  initializeExactKiteStoreSchema(database, {
-    schemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
-    formatEpoch: KITE_HOME_STORE_FORMAT_EPOCH,
-  });
+  initializeExactKiteStoreSchema(database, kiteHomeStoreProfile());
 }
 
 export function initializeKiteSessionStoreIfNeeded(database: Database): void {
@@ -452,10 +522,7 @@ export function initializeKiteSessionStoreIfNeeded(database: Database): void {
   try {
     const tableCount = currentTableCount(database);
     if (tableCount === 0) {
-      initializeExactKiteStoreSchemaInTransaction(database, {
-        schemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
-        formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
-      });
+      initializeExactKiteStoreSchemaInTransaction(database, kiteSessionStoreProfile());
     }
     database.run('COMMIT');
   } catch (error) {
@@ -469,10 +536,7 @@ export function initializeKiteSessionStoreIfNeeded(database: Database): void {
   assertKiteSessionStoreSchema(database);
 }
 
-function initializeExactKiteStoreSchema(
-  database: Database,
-  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
-): void {
+function initializeExactKiteStoreSchema(database: Database, profile: ExactKiteStoreProfile): void {
   database.run('PRAGMA foreign_keys = ON');
   database.run('BEGIN IMMEDIATE');
   try {
@@ -491,9 +555,9 @@ function initializeExactKiteStoreSchema(
 
 function initializeExactKiteStoreSchemaInTransaction(
   database: Database,
-  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
+  profile: ExactKiteStoreProfile,
 ): void {
-  for (const statement of KITE_HOME_STORE_DDL) database.run(statement);
+  for (const statement of profile.ddl) database.run(statement);
   database
     .query('INSERT INTO kite_meta(key, value) VALUES (?, ?)')
     .run('schema_version', String(profile.schemaVersion));
@@ -504,23 +568,14 @@ function initializeExactKiteStoreSchemaInTransaction(
 }
 
 export function assertKiteHomeStoreSchema(database: Database): void {
-  assertExactKiteStoreSchema(database, {
-    schemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
-    formatEpoch: KITE_HOME_STORE_FORMAT_EPOCH,
-  });
+  assertExactKiteStoreSchema(database, kiteHomeStoreProfile());
 }
 
 export function assertKiteSessionStoreSchema(database: Database): void {
-  assertExactKiteStoreSchema(database, {
-    schemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
-    formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
-  });
+  assertExactKiteStoreSchema(database, kiteSessionStoreProfile());
 }
 
-function assertExactKiteStoreSchema(
-  database: Database,
-  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
-): void {
+function assertExactKiteStoreSchema(database: Database, profile: ExactKiteStoreProfile): void {
   database.run('PRAGMA foreign_keys = ON');
   const quickCheck = database.query<{ quick_check: string }, []>('PRAGMA quick_check').get();
   if (quickCheck?.quick_check !== 'ok') fail('SQLite quick_check failed.');
@@ -535,12 +590,12 @@ function assertExactKiteStoreSchema(
     )
     .all()
     .map((row) => row.name);
-  const expectedTables = Object.keys(KITE_HOME_STORE_TABLE_COLUMNS).sort();
+  const expectedTables = Object.keys(profile.tableColumns).sort();
   if (JSON.stringify(tables) !== JSON.stringify(expectedTables)) {
     fail('Kite Home Store table inventory is incompatible.');
   }
 
-  for (const [table, expectedColumns] of Object.entries(KITE_HOME_STORE_TABLE_COLUMNS)) {
+  for (const [table, expectedColumns] of Object.entries(profile.tableColumns)) {
     const actual = database
       .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
       .all()
@@ -556,7 +611,7 @@ function assertExactKiteStoreSchema(
     )
     .all()
     .map((row) => row.name);
-  const expectedIndexes = [...KITE_HOME_STORE_INDEXES].sort();
+  const expectedIndexes = [...profile.indexes].sort();
   if (JSON.stringify(indexes) !== JSON.stringify(expectedIndexes)) {
     fail('Kite Home Store index inventory is incompatible.');
   }

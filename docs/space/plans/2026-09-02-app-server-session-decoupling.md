@@ -78,8 +78,11 @@ Web -------loopback HTTP------------>       │
   composition接入时完成，当前纯路径函数不产生目录副作用；
 - 已完成Host-owned Session execution authority substrate：`controllerGeneration`、authority revision、lease deadline、cleanup状态与
   `recovery_required` CAS闭环；真实双进程同Session争用只有一个writer，不同Session均成功；
-- 尚未把全部Session mutation和effect dispatch收口到generation transaction，尚未完成global config CAS，也尚未删除Workspace process lock与
-  one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production caller。
+- 已完成目标`sessionMutation` transaction与generation-bound effect substrate：检查/写入共享一个SQLite writer transaction，effect
+  prepare/dispatch/renew/terminal/unknown绑定Session generation与正交lease revision，unknown与`recovery_required`原子提交；
+- 尚未把event/snapshot/name/model、delete、checkpoint/fork/rewind、Run/recovery与Artifact引用等旧write port逐项组合到该入口，尚未完成global
+  config CAS，也尚未删除Workspace process lock与one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production
+  caller。
 
 - 建立新exact Store epoch，把现有`controllerGeneration`字段提升为App Server Host持有的Session execution generation；Controller client binding
   从属于Host/generation，保留`connectionGeneration`与effect lease revision的正交职责；不新增第二个writer generation；

@@ -14,7 +14,8 @@
 真实进程争用同一Session时只有一个取得generation，而不同Session均可取得。旧epoch、partial与corrupt target均fail closed为
 `store_upgrade_required`，现有`kite.sqlite`保持不变。detached/expired owner在cleanup未确认时进入durable `recovery_required`，显式确认前不能
 接管。该证据不覆盖全部Session mutation、effect dispatch、SIGKILL/response-loss恢复、global config CAS或TUI/App Server lifecycle，因此不构成
-KASD-01或release qualification完成。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts`。
+KASD-01或release qualification完成。局部effect fault matrix另外证明prepare/dispatch/renew/terminal的generation binding、late terminal
+拒绝，以及unknown effect与Session `recovery_required`原子提交后不能重放。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts`。
 
 ## 两级运行契约
 
