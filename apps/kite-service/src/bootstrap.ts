@@ -318,6 +318,8 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   /** Service process identity shared with descriptor/carrier handshake. */
   readonly serverInstanceId?: string;
   readonly serverVersion?: string;
+  /** Only the parent-owned App Server carrier may advertise App-owned protocol methods. */
+  readonly appServerProtocol?: boolean;
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
   /**
@@ -1833,7 +1835,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
         version: input.serverVersion ?? `protocol-${RUNTIME_PROTOCOL_VERSION}`,
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
-      ...(owner.readSnapshot ? { historyMethods: true } : {}),
+      ...(input.appServerProtocol ? { historyMethods: true, appControlMethods: true } : {}),
     },
   );
   let disposePromise: Promise<void> | undefined;

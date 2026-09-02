@@ -14,8 +14,10 @@ import {
   type InitializeResult,
   mapRuntimeCommandToProtocol,
   mapRuntimeQueryToProtocol,
+  type RuntimeProtocolAppControlMethod,
   type RuntimeProtocolError,
   type RuntimeProtocolMessage,
+  type RuntimeProtocolMethod,
   type RuntimeProtocolResult,
   type RuntimeSubscriptionMessage,
   safeDecodeRuntimeProtocolMessage,
@@ -39,6 +41,11 @@ export interface RuntimeClientOptions {
   readonly snapshotStore?: RuntimeSnapshotStore;
   /** App-injected exact, client-safe durable history reader. */
   readonly history?: RuntimeHistoryClient | 'protocol';
+  /** Exact peer identity/capability check used by same-build App Server clients. */
+  readonly expectedServer?: Readonly<{
+    version: string;
+    requiredMethods?: readonly RuntimeProtocolMethod[];
+  }>;
 }
 
 export interface RuntimeClientSubscription {
@@ -99,6 +106,7 @@ export class RuntimeClient implements AsyncDisposable {
   readonly #clientInfo: RuntimeClientInfo;
   readonly #store: RuntimeSnapshotStore;
   readonly #history: RuntimeHistoryClient | undefined;
+  readonly #expectedServer: RuntimeClientOptions['expectedServer'];
   readonly #pending = new Map<string, PendingRequest>();
   readonly #subscriptions = new Map<string, SubscriptionState>();
   #connection: RuntimeClientConnection | undefined;
@@ -112,6 +120,7 @@ export class RuntimeClient implements AsyncDisposable {
     this.#transport = options.transport;
     this.#clientInfo = options.clientInfo;
     this.#store = options.snapshotStore ?? new RuntimeSnapshotStore();
+    this.#expectedServer = options.expectedServer;
     this.#history =
       options.history === 'protocol'
         ? Object.freeze({
@@ -217,6 +226,26 @@ export class RuntimeClient implements AsyncDisposable {
       throw new RuntimeClientError('protocol_error', 'Protocol returned a non-query result.');
     }
     return result;
+  }
+
+  /** Native App connector seam; semantic request/response codecs remain owned above this package. */
+  async requestAppControl(
+    method: RuntimeProtocolAppControlMethod,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const result = await this.#request(method, { request });
+    if (
+      !('method' in result) ||
+      result.method !== method ||
+      !('response' in result) ||
+      !isPlainRecord(result.response)
+    ) {
+      throw new RuntimeClientError(
+        'protocol_error',
+        'Protocol returned an invalid App Control result.',
+      );
+    }
+    return result.response;
   }
 
   /** RuntimeAccess-compatible stream. Remote acquisition happens asynchronously. */
@@ -369,9 +398,11 @@ export class RuntimeClient implements AsyncDisposable {
       previousGeneration,
       new RuntimeClientError('connection_closed', 'Runtime connection was replaced.'),
     );
+    let openedConnection: RuntimeClientConnection | undefined;
     try {
       await previous?.close('runtime_client_reconnect');
       const connection = await this.#transport.connect();
+      openedConnection = connection;
       if (this.#closed || generation !== this.#connectionGeneration) {
         await connection.close('stale_runtime_client_connection');
         throw closedError();
@@ -388,6 +419,7 @@ export class RuntimeClient implements AsyncDisposable {
           'Protocol returned an invalid initialize result.',
         );
       }
+      this.#assertExpectedServer(initialize);
       this.#store.setConnection({
         generation,
         status: 'active',
@@ -397,6 +429,9 @@ export class RuntimeClient implements AsyncDisposable {
         for (const state of this.#subscriptions.values()) await this.#activateSubscription(state);
       }
     } catch (error) {
+      if (openedConnection && openedConnection !== previous) {
+        await openedConnection.close('runtime_client_initialize_failed').catch(() => undefined);
+      }
       if (generation === this.#connectionGeneration) {
         this.#connection = undefined;
         this.#store.setConnection({ generation, status: 'disconnected' });
@@ -405,6 +440,21 @@ export class RuntimeClient implements AsyncDisposable {
       throw new RuntimeClientError(
         'connection_failed',
         'Runtime connection could not be established.',
+      );
+    }
+  }
+
+  #assertExpectedServer(initialize: InitializeResult): void {
+    const expected = this.#expectedServer;
+    if (!expected) return;
+    if (initialize.serverInfo.version !== expected.version) {
+      throw new RuntimeClientError('protocol_error', 'Runtime Server version does not match.');
+    }
+    const advertised = new Set(initialize.capabilities.methods);
+    if (expected.requiredMethods?.some((method) => !advertised.has(method))) {
+      throw new RuntimeClientError(
+        'protocol_error',
+        'Runtime Server capability set is incomplete.',
       );
     }
   }
@@ -451,7 +501,8 @@ export class RuntimeClient implements AsyncDisposable {
       | 'runtime/unsubscribe'
       | 'history/list_sessions'
       | 'history/list_events'
-      | 'history/load_session',
+      | 'history/load_session'
+      | RuntimeProtocolAppControlMethod,
     params: unknown,
     subscriptionState?: SubscriptionState,
   ): Promise<RuntimeProtocolResult> {
@@ -680,6 +731,12 @@ export class RuntimeClient implements AsyncDisposable {
     // a fresh, bounded stream.
     void this.#closeSubscription(state, true).catch(() => undefined);
   }
+}
+
+function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 class RuntimeNotificationQueue {

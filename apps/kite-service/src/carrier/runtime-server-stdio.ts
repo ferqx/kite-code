@@ -1,10 +1,35 @@
+import {
+  type ExactJsonCodec,
+  executionStatusRequestCodec,
+  executionStatusResponseCodec,
+  KiteAppContractValidationError,
+  type KiteAppControlClient,
+  mcpActionRequestCodec,
+  mcpActionResponseCodec,
+  mcpSnapshotRequestCodec,
+  mcpSnapshotResponseCodec,
+  providerModelSelectRequestCodec,
+  providerModelSelectResponseCodec,
+  providerModelSnapshotRequestCodec,
+  providerModelSnapshotResponseCodec,
+  releaseStatusRequestCodec,
+  releaseStatusResponseCodec,
+  skillCatalogRequestCodec,
+  skillCatalogResponseCodec,
+  workspaceTrustDecisionRequestCodec,
+  workspaceTrustDecisionResponseCodec,
+  workspaceTrustQueryRequestCodec,
+  workspaceTrustQueryResponseCodec,
+} from '@kite-ai/kite-app-contract';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import {
+  RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_,
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
   RUNTIME_PROTOCOL_ERROR_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_REQUEST_SCHEMA_,
   RUNTIME_PROTOCOL_RESULT_SCHEMA_,
+  type RuntimeProtocolAppControlMethod,
   type RuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
 import type {
@@ -47,6 +72,8 @@ export interface RuntimeStdioCarrierOptions {
   readonly shutdownComposition?: () => void | Promise<void>;
   /** KASD App Server-only durable reads on this same JSON-RPC connection. */
   readonly history?: RuntimeHistoryClient;
+  /** KASD App Server-only exact no-secret control surface on this connection. */
+  readonly appControl?: KiteAppControlClient;
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
 }
@@ -245,6 +272,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
             length = 0;
             if (parsed === undefined) continue;
             if (await this.#handleHistory(parsed)) continue;
+            if (await this.#handleAppControl(parsed)) continue;
             yield parsed;
             continue;
           }
@@ -262,7 +290,12 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       if (!this.#closed && length > 0) {
         const payloadLength = line[length - 1] === 0x0d ? length - 1 : length;
         const parsed = await this.#parseLine(line.subarray(0, payloadLength));
-        if (parsed !== undefined && !(await this.#handleHistory(parsed))) yield parsed;
+        if (
+          parsed !== undefined &&
+          !(await this.#handleHistory(parsed)) &&
+          !(await this.#handleAppControl(parsed))
+        )
+          yield parsed;
       }
     } catch {
       if (!this.#closed) await this.#failClosed('input_failure');
@@ -338,6 +371,51 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     return true;
   }
 
+  async #handleAppControl(value: unknown): Promise<boolean> {
+    const candidate = value as { readonly method?: unknown; readonly id?: unknown };
+    if (typeof candidate.method !== 'string' || !candidate.method.startsWith('app/')) {
+      return false;
+    }
+    const decoded = RUNTIME_PROTOCOL_REQUEST_SCHEMA_.safeParse(value);
+    if (
+      !decoded.success ||
+      !RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.safeParse(decoded.data.method).success
+    ) {
+      await this.#writeError(
+        typeof candidate.id === 'string' ? candidate.id : null,
+        'invalid_params',
+      );
+      return true;
+    }
+    const request = decoded.data as Extract<
+      typeof decoded.data,
+      { readonly method: RuntimeProtocolAppControlMethod }
+    >;
+    if (this.#connection?.state !== 'active') {
+      await this.#writeError(request.id, 'not_initialized');
+      return true;
+    }
+    const appControl = this.#options.appControl;
+    if (!appControl) {
+      await this.#writeError(request.id, 'method_not_found');
+      return true;
+    }
+    try {
+      const response = await dispatchAppControl(appControl, request.method, request.params.request);
+      await this.#writeProtocol({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({ method: request.method, response }),
+      });
+    } catch (error) {
+      await this.#writeError(
+        request.id,
+        error instanceof AppControlProtocolRequestError ? 'invalid_params' : 'internal_error',
+      );
+    }
+    return true;
+  }
+
   #writeError(id: string | null, code: keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS): Promise<void> {
     const messages: Record<keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS, string> = {
       parse_error: 'Parse error',
@@ -403,6 +481,103 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     } catch {
       // stderr is diagnostic-only; a failed diagnostic must never enter stdout.
     }
+  }
+}
+
+async function dispatchAppControl(
+  client: KiteAppControlClient,
+  method: RuntimeProtocolAppControlMethod,
+  input: unknown,
+): Promise<Readonly<Record<string, unknown>>> {
+  switch (method) {
+    case 'app/workspace_trust/query':
+      return invokeAppControlCodec(
+        input,
+        workspaceTrustQueryRequestCodec,
+        workspaceTrustQueryResponseCodec,
+        (request) => client.queryWorkspaceTrust(request),
+      );
+    case 'app/workspace_trust/decide':
+      return invokeAppControlCodec(
+        input,
+        workspaceTrustDecisionRequestCodec,
+        workspaceTrustDecisionResponseCodec,
+        (request) => client.decideWorkspaceTrust(request),
+      );
+    case 'app/provider_model/snapshot':
+      return invokeAppControlCodec(
+        input,
+        providerModelSnapshotRequestCodec,
+        providerModelSnapshotResponseCodec,
+        (request) => client.getProviderModelSnapshot(request),
+      );
+    case 'app/provider_model/select':
+      return invokeAppControlCodec(
+        input,
+        providerModelSelectRequestCodec,
+        providerModelSelectResponseCodec,
+        (request) => client.selectProviderModel(request),
+      );
+    case 'app/mcp/snapshot':
+      return invokeAppControlCodec(
+        input,
+        mcpSnapshotRequestCodec,
+        mcpSnapshotResponseCodec,
+        (request) => client.getMcpSnapshot(request),
+      );
+    case 'app/mcp/action':
+      return invokeAppControlCodec(
+        input,
+        mcpActionRequestCodec,
+        mcpActionResponseCodec,
+        (request) => client.applyMcpAction(request),
+      );
+    case 'app/skills/catalog':
+      return invokeAppControlCodec(
+        input,
+        skillCatalogRequestCodec,
+        skillCatalogResponseCodec,
+        (request) => client.getSkillCatalog(request),
+      );
+    case 'app/execution/status':
+      return invokeAppControlCodec(
+        input,
+        executionStatusRequestCodec,
+        executionStatusResponseCodec,
+        (request) => client.getExecutionStatus(request),
+      );
+    case 'app/release/status':
+      return invokeAppControlCodec(
+        input,
+        releaseStatusRequestCodec,
+        releaseStatusResponseCodec,
+        (request) => client.getReleaseStatus(request),
+      );
+  }
+}
+
+async function invokeAppControlCodec<Request, ResponseValue>(
+  input: unknown,
+  requestCodec: ExactJsonCodec<Request>,
+  responseCodec: ExactJsonCodec<ResponseValue>,
+  operation: (request: Request) => Promise<ResponseValue>,
+): Promise<Readonly<Record<string, unknown>>> {
+  let request: Request;
+  try {
+    request = requestCodec.decode(input);
+  } catch (error) {
+    if (error instanceof KiteAppContractValidationError) {
+      throw new AppControlProtocolRequestError();
+    }
+    throw error;
+  }
+  return responseCodec.encode(await operation(request));
+}
+
+class AppControlProtocolRequestError extends Error {
+  constructor() {
+    super('App Control request is invalid.');
+    this.name = 'AppControlProtocolRequestError';
   }
 }
 

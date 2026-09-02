@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_ } from '@kite-ai/kite-app-contract';
+import { kiteAppServerVersion } from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
@@ -74,7 +75,8 @@ export async function runKiteAppServerMain(
   try {
     composition = createComposition({
       instanceId,
-      runtimeServerVersion: appServerVersion(environment.buildId),
+      runtimeServerVersion: kiteAppServerVersion(environment.buildId),
+      appServerProtocol: true,
       checkpointPath: databasePath,
       storageOwner,
       workspaces: [{ workspace: environment.workspace }],
@@ -91,6 +93,7 @@ export async function runKiteAppServerMain(
     throw error;
   }
   const workspace = composition.appControl.admitWorkspace(environment.workspace);
+  const appControl = composition.appControl.gateway.forWorkspace(workspace);
   const admission: RuntimeServerAdmissionPort = Object.freeze({
     authorize: async (request: RuntimeServerAdmissionInput) => {
       if (request.operation === 'initialize' || request.operation === 'runtime/query') {
@@ -117,6 +120,7 @@ export async function runKiteAppServerMain(
     stderr,
     signals: createProcessRuntimeStdioSignals(signals),
     history: composition.history,
+    appControl,
     shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
   });
   let primaryError: unknown;
@@ -132,10 +136,6 @@ export async function runKiteAppServerMain(
     primaryError ??= error;
   }
   if (primaryError !== undefined) throw primaryError;
-}
-
-function appServerVersion(buildId: string): string {
-  return `kite-app-server-v1-${createHash('sha256').update(buildId).digest('hex')}`;
 }
 
 function required(source: Readonly<Record<string, string | undefined>>, name: string): string {

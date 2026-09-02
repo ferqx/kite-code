@@ -111,6 +111,7 @@ export interface RuntimeServerOptions {
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
   readonly historyMethods?: boolean;
+  readonly appControlMethods?: boolean;
 }
 
 export interface RuntimeServerConnection {
@@ -157,6 +158,7 @@ export class RuntimeServer {
       connection,
       this.#options.serverInfo,
       this.#options.historyMethods === true,
+      this.#options.appControlMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
       () => this.#reserveSubscription(),
@@ -211,6 +213,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly #historyMethods: boolean;
+  readonly #appControlMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
   readonly #reserveSubscription: () => boolean;
@@ -237,6 +240,7 @@ class ServerConnection implements RuntimeServerConnection {
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     historyMethods: boolean,
+    appControlMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
     reserveSubscription: () => boolean,
@@ -250,6 +254,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#connection = connection;
     this.#serverInfo = serverInfo;
     this.#historyMethods = historyMethods;
+    this.#appControlMethods = appControlMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
     this.#reserveSubscription = reserveSubscription;
@@ -435,6 +440,19 @@ class ServerConnection implements RuntimeServerConnection {
           'runtime/unsubscribe',
           ...(this.#historyMethods
             ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
+            : []),
+          ...(this.#appControlMethods
+            ? ([
+                'app/workspace_trust/query',
+                'app/workspace_trust/decide',
+                'app/provider_model/snapshot',
+                'app/provider_model/select',
+                'app/mcp/snapshot',
+                'app/mcp/action',
+                'app/skills/catalog',
+                'app/execution/status',
+                'app/release/status',
+              ] as const)
             : []),
           'server/ping',
         ],

@@ -11,11 +11,50 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createKiteAppServerClient } from '@kite-ai/kite-local-runtime/client';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteSessionAppServerStorageComposition } from '../../src/bootstrap';
 import { trustWorkspace } from '../../src/config/workspace-trust';
 
 describe('KASD parent-owned App Server process', () => {
+  test('the same-build client composes Runtime, History and App Control over one child', async () => {
+    const root = realpathSync.native(
+      mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-server-client-')),
+    );
+    const runtimeRoot = join(root, 'runtime');
+    const configRoot = join(root, 'config');
+    const osHome = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+    const client = createKiteAppServerClient({
+      executable: process.execPath,
+      argumentsPrefix: [
+        join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+      ],
+      buildId: 'source-client-build',
+      runtimeRoot,
+      configRoot,
+      osHome,
+      workspace,
+      cwd: '/',
+      environment: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      clientInfo: { name: 'app-client-test', version: '1', instanceId: 'app-client-test-1' },
+    });
+    try {
+      await client.connect();
+      await expect(client.history.listSessions({ limit: 10 })).resolves.toEqual({
+        entries: [],
+        hasMore: false,
+      });
+      await expect(
+        client.app.getReleaseStatus({ schema: 'kite.app.release-status.request.v1' }),
+      ).resolves.toMatchObject({ schema: 'kite.app.release-status.response.v1' });
+    } finally {
+      await client[Symbol.asyncDispose]();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   test('serves exact Runtime JSONL and exits cleanly on parent EOF without a global endpoint', async () => {
     const root = realpathSync.native(
       mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-server-')),
@@ -92,7 +131,7 @@ describe('KASD parent-owned App Server process', () => {
                 version: `kite-app-server-v1-${createHash('sha256').update(buildId).digest('hex')}`,
               }),
               capabilities: expect.objectContaining({
-                methods: expect.arrayContaining(['history/list_sessions']),
+                methods: expect.arrayContaining(['history/list_sessions', 'app/release/status']),
               }),
             }),
           }),
@@ -168,6 +207,18 @@ describe('KASD parent-owned App Server process', () => {
         }),
       );
       expect(await output.next()).toMatchObject({ id: 'init', result: { protocolVersion: 1 } });
+      child.stdin.write(
+        line('app-release', 'app/release/status', {
+          request: { schema: 'kite.app.release-status.request.v1' },
+        }),
+      );
+      expect(await output.next()).toMatchObject({
+        id: 'app-release',
+        result: {
+          method: 'app/release/status',
+          response: { schema: 'kite.app.release-status.response.v1' },
+        },
+      });
       child.stdin.write(
         line('create', 'runtime/command', {
           command: {

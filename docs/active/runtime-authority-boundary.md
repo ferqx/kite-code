@@ -34,7 +34,9 @@ KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App
 Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
 execution projection并在cancel/dispose处理；Store list/get/checkpoint在一个read snapshot完成，不会因另一个App Server读取或退出而取得/释放
 writer。该入口尚未接TUI；三个durable History read已由stdio carrier在同一条已initialize connection上处理，并逐次使用App-owned
-SQLite read snapshot。Runtime Server只条件声明这些capability，不路由History或取得Store authority；App Control仍待接入。
+SQLite read snapshot。九个no-secret App Control方法也由同一carrier调用既有逐方法codec与共享OperationGate；Protocol只拥有closed method/
+outer envelope，Runtime Server只条件声明这些capability，不路由History/App Control或取得对应authority。typed parent client要求由同一
+build ID导出的exact server version与完整App capability，mismatch会关闭child。provider credential与默认TUI launcher仍待接入。
 
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
 完成，KASD-02 internal App Server也已接入该owner，但默认TUI/CLI尚未切换，因此不能把目标多App Server语义宣称为production能力。验证：

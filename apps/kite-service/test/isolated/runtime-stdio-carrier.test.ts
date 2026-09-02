@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  type KiteAppControlClient,
+  RELEASE_STATUS_REQUEST_SCHEMA_,
+  RELEASE_STATUS_RESPONSE_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
 import type {
   RuntimeAccess,
   RuntimeAccessNotification,
@@ -110,6 +115,67 @@ describe('Runtime stdio carrier', () => {
     expect(protocolFrames(output)[2]).toMatchObject({
       id: 'history-2',
       error: { data: { code: 'method_not_found' } },
+    });
+    input.close();
+    await carrier.done;
+  });
+
+  test('routes exact App Control after initialize and rejects malformed payloads', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const unavailable = async (): Promise<never> => {
+      throw new Error('unexpected App Control method');
+    };
+    const appControl: KiteAppControlClient = {
+      queryWorkspaceTrust: unavailable,
+      decideWorkspaceTrust: unavailable,
+      getProviderModelSnapshot: unavailable,
+      selectProviderModel: unavailable,
+      getMcpSnapshot: unavailable,
+      applyMcpAction: unavailable,
+      getSkillCatalog: unavailable,
+      getExecutionStatus: unavailable,
+      getReleaseStatus: async () => ({
+        schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+        revision: 'release-1',
+        active: true,
+        production: false,
+        capabilities: [],
+        execution: { admitted: false },
+      }),
+    };
+    const carrier = createCarrier({ input, output, appControl });
+    input.pushText(initializeLine());
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'release',
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+      })}\n`,
+    );
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'malformed',
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_, extra: true } },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[0]).toMatchObject({
+      result: { capabilities: { methods: expect.arrayContaining(['app/release/status']) } },
+    });
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'release',
+      result: {
+        method: 'app/release/status',
+        response: { schema: RELEASE_STATUS_RESPONSE_SCHEMA_, revision: 'release-1' },
+      },
+    });
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'malformed',
+      error: { data: { code: 'invalid_params' } },
     });
     input.close();
     await carrier.done;
@@ -286,10 +352,14 @@ function createCarrier(options: {
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
   readonly shutdownComposition?: () => void | Promise<void>;
+  readonly appControl?: KiteAppControlClient;
 }) {
   const server = new RuntimeServer(
     { runtime: new FakeRuntime(), admission: allowAdmission },
-    { serverInfo: { version: 'test', instanceId: 'server-1' } },
+    {
+      serverInfo: { version: 'test', instanceId: 'server-1' },
+      ...(options.appControl ? { appControlMethods: true } : {}),
+    },
   );
   const carrier = createRuntimeStdioCarrier({
     server,
@@ -300,6 +370,7 @@ function createCarrier(options: {
     maxLineBytes: options.maxLineBytes,
     drainDeadlineMs: options.drainDeadlineMs,
     shutdownComposition: options.shutdownComposition,
+    appControl: options.appControl,
   });
   return { ...carrier, server };
 }

@@ -16,6 +16,9 @@
 - 定义 framing-neutral transport 和只读、exact DTO 的 `RuntimeHistoryClient` 接口；`loadSession` 返回完整
   closed transcript。App可以继续注入独立history adapter；parent-owned App Server client也可显式选择
   `history: 'protocol'`，在同一条已initialize的logical connection上发送三个exact History request。
+- 提供仅供Native App connector组合的closed `requestAppControl(method, request)` seam：方法名来自Protocol enum，
+  响应必须回显同一method；语义payload仍由上层`kite-app-contract`逐方法codec拥有。`expectedServer`可要求
+  exact server version与capability集合，initialize不匹配时关闭刚打开的连接并fail closed。
 
 ## 不拥有职责
 

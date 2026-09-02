@@ -392,9 +392,33 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'history/list_sessions',
   'history/list_events',
   'history/load_session',
+  'app/workspace_trust/query',
+  'app/workspace_trust/decide',
+  'app/provider_model/snapshot',
+  'app/provider_model/select',
+  'app/mcp/snapshot',
+  'app/mcp/action',
+  'app/skills/catalog',
+  'app/execution/status',
+  'app/release/status',
   'server/ping',
 ]);
 export type RuntimeProtocolMethod = z.infer<typeof RUNTIME_PROTOCOL_METHOD_SCHEMA_>;
+
+export const RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_ = z.enum([
+  'app/workspace_trust/query',
+  'app/workspace_trust/decide',
+  'app/provider_model/snapshot',
+  'app/provider_model/select',
+  'app/mcp/snapshot',
+  'app/mcp/action',
+  'app/skills/catalog',
+  'app/execution/status',
+  'app/release/status',
+]);
+export type RuntimeProtocolAppControlMethod = z.infer<
+  typeof RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_
+>;
 const requestBase = { jsonrpc: z.literal('2.0'), id: rpcId };
 export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
   z
@@ -460,6 +484,15 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
       params: z.object({ sessionId: identifier }).strict(),
     })
     .strict(),
+  ...RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.options.map((method) =>
+    z
+      .object({
+        ...requestBase,
+        method: z.literal(method),
+        params: z.object({ request: jsonRecord }).strict(),
+      })
+      .strict(),
+  ),
   z
     .object({
       ...requestBase,
@@ -880,7 +913,7 @@ export const INITIALIZE_RESULT_SCHEMA_ = z
     serverInfo: z.object({ version: z.string().min(1).max(128), instanceId: identifier }).strict(),
     capabilities: z
       .object({
-        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(9),
+        methods: z.array(RUNTIME_PROTOCOL_METHOD_SCHEMA_).min(1).max(18),
         subscriptions: z.array(z.enum(['session', 'sessions'])).max(2),
       })
       .strict(),
@@ -988,6 +1021,12 @@ const historyTranscript = z
     recovery: z.enum(['normal', 'pending_interaction']),
   })
   .strict();
+const appControlResult = z
+  .object({
+    method: RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_,
+    response: jsonRecord,
+  })
+  .strict();
 export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   INITIALIZE_RESULT_SCHEMA_,
   RUNTIME_COMMAND_RECEIPT_SCHEMA_,
@@ -998,6 +1037,7 @@ export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   historySessionPage,
   historyEventPage,
   historyTranscript,
+  appControlResult,
 ]);
 export type RuntimeProtocolResult = z.infer<typeof RUNTIME_PROTOCOL_RESULT_SCHEMA_>;
 

@@ -11,6 +11,9 @@
 - Admits three bounded durable History reads: `history/list_sessions`, `history/list_events`, and
   `history/load_session`. They reuse the initialized JSON-RPC connection and closed client-safe DTOs; the App
   carrier owns their handlers and SQLite read snapshot, while Runtime Server core owns neither History nor Store.
+- Admits nine fixed `app/*` method names plus the exact outer `{request}` and `{method,response}` envelope.
+  Their semantic payload authority remains the per-method `kite-app-contract` codec in the App carrier/client;
+  this package neither imports that contract nor accepts a dynamic method name.
 - Supplies browser-safe schema-generation artifacts. Carriers frame complete logical messages; this package does not prescribe JSONL, WebSocket, streams, or sockets.
 
 ## Non-responsibilities
@@ -49,6 +52,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 - Workspace identity is App-injected at the command mapper and never accepted on the wire.
 - Run pages are capped at 200 entries and use the exact `(createdRevision, runId)` cursor; unknown fields, invalid lifecycle values and
   resource/result shape drift fail closed in the same codec used by in-process and transport clients.
+- App Control responses repeat the requested closed method. Runtime Client rejects a mismatched method before the
+  upper adapter applies its exact semantic response codec.
 
 ## Tests
 

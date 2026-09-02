@@ -61,6 +61,11 @@ dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/in
 同步Store读取由同一个SQLite read snapshot包围。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知
 `history/*`方法和malformed params不进入Store。Runtime Server只在该composition中声明History capability，不路由或持有History。
 
+同一connection还承载九个fixed App Control方法。Protocol只关闭方法名和外层envelope，carrier再用`kite-app-contract`既有的逐方法
+request/response codec验证Workspace Trust、Provider/model、MCP、Skill、execution与release payload；mutation仍只进入既有共享
+OperationGate一次，response loss不触发自动重放。App Server composition显式开启`appServerProtocol`并注入单Workspace App Control client；
+普通Service/Worker不会因Store支持snapshot而发布这些capability。unknown/malformed `app/*`在调用owner前拒绝。
+
 ## Development reference
 
 development loopback/reference仅用于同一Protocol transport qualification，不进入production support。不存在

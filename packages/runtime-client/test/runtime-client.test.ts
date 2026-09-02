@@ -77,6 +77,56 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('correlates exact App Control envelopes on the initialized connection', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('server-app-control')));
+      } else if (message.method === 'app/release/status') {
+        target.push(
+          result(message.id, {
+            method: 'app/release/status',
+            response: { schema: 'kite.app.release-status.response.v1', serverVersion: 'test' },
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await expect(
+      client.requestAppControl('app/release/status', {
+        schema: 'kite.app.release-status.request.v1',
+      }),
+    ).resolves.toEqual({
+      schema: 'kite.app.release-status.response.v1',
+      serverVersion: 'test',
+    });
+    expect(connection.requests('initialize')).toHaveLength(1);
+    await client.close();
+  });
+
+  test('fails closed when an App Server identity or required capability does not match', async () => {
+    for (const expectedServer of [
+      { version: 'expected-version', requiredMethods: [] as const },
+      { version: '1', requiredMethods: ['history/list_sessions'] as const },
+    ]) {
+      const connection = new FakeConnection((message, target) => {
+        if (message.method === 'initialize') {
+          target.push(result(message.id, initializeResult('wrong-server')));
+        }
+      });
+      const client = new RuntimeClient({
+        transport: transport(connection),
+        clientInfo: clientInfo(),
+        expectedServer,
+      });
+      await expect(client.connect()).rejects.toMatchObject({ code: 'protocol_error' });
+      expect(client.snapshotStore.getSnapshot().status).toBe('disconnected');
+      await client.close();
+    }
+  });
+
   test('round-trips private Run queries and original command resources', async () => {
     const run = {
       schema: 'kite.runtime-run.v1' as const,
