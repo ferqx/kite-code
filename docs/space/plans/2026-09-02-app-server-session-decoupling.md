@@ -48,7 +48,7 @@ Web -------loopback HTTP------------>       │
 | Tranche | 状态 | 当前产出 |
 | --- | --- | --- |
 | KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
-| KASD-01 | pending | Durable Session execution fencing与多进程Store前置 |
+| KASD-01 | in_progress | 新Store exact open/profile path与Session generation CAS已完成；全mutation/effect/config与lock移除待完成 |
 | KASD-02 | pending | App Server正式进程边界 |
 | KASD-03 | pending | TUI/CLI default local cutover |
 | KASD-04 | pending | 显式本机daemon与exact protocol |
@@ -70,6 +70,16 @@ Web -------loopback HTTP------------>       │
 双写、fallback、第二套generation或未裁决global mutation。
 
 ### KASD-01：Durable Session execution fencing与多进程Store前置
+
+当前子阶段（2026-09-02）：
+
+- 已完成`kite-session.sqlite` absent/empty transaction初始化、exact reopen、旧epoch/partial/corrupt typed拒绝以及不探测旧`kite.sqlite`；
+- 已完成installed/source deterministic物理profile path，其中source digest严格采用本计划冻结的domain-separated SHA-256；目录owner/non-link创建将在
+  composition接入时完成，当前纯路径函数不产生目录副作用；
+- 已完成Host-owned Session execution authority substrate：`controllerGeneration`、authority revision、lease deadline、cleanup状态与
+  `recovery_required` CAS闭环；真实双进程同Session争用只有一个writer，不同Session均成功；
+- 尚未把全部Session mutation和effect dispatch收口到generation transaction，尚未完成global config CAS，也尚未删除Workspace process lock与
+  one-connection composition。因此KASD-01保持`in_progress`，新Store尚无TUI/CLI production caller。
 
 - 建立新exact Store epoch，把现有`controllerGeneration`字段提升为App Server Host持有的Session execution generation；Controller client binding
   从属于Host/generation，保留`connectionGeneration`与effect lease revision的正交职责；不新增第二个writer generation；

@@ -29,6 +29,23 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
 const MAX_SOURCE_BUILD_UNTRACKED_FILES = 1_024;
 const MAX_SOURCE_BUILD_UNTRACKED_BYTES = 64 * 1024 * 1024;
 
+export function installedKiteSessionStorePath(kiteHomeRoot: string): string {
+  return join(realpathSync.native(kiteHomeRoot), 'kite-session.sqlite');
+}
+
+export function sourceKiteSessionStorePath(kiteHomeRoot: string, repositoryRoot: string): string {
+  const canonicalKiteHome = realpathSync.native(kiteHomeRoot);
+  const canonicalRepositoryRoot = realpathSync.native(repositoryRoot);
+  const profileDigest = createHash('sha256')
+    .update('kite-source-runtime-profile\0')
+    .update(canonicalKiteHome)
+    .update('\0')
+    .update(canonicalRepositoryRoot)
+    .digest('hex')
+    .slice(0, 32);
+  return join(canonicalKiteHome, 'source-profiles', profileDigest, 'kite-session.sqlite');
+}
+
 export function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
   const positions = argv.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
   if (positions.length === 0) return undefined;

@@ -6,7 +6,15 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、ADR-0165、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、ADR-0165、ADR-0166、Task 1C.7。
+
+## KASD-01局部资格
+
+新Session Store substrate当前只取得局部资格：两个真实Bun进程可在同一空`kite-session.sqlite`上并发首次open并收敛到唯一exact epoch；两个
+真实进程争用同一Session时只有一个取得generation，而不同Session均可取得。旧epoch、partial与corrupt target均fail closed为
+`store_upgrade_required`，现有`kite.sqlite`保持不变。detached/expired owner在cleanup未确认时进入durable `recovery_required`，显式确认前不能
+接管。该证据不覆盖全部Session mutation、effect dispatch、SIGKILL/response-loss恢复、global config CAS或TUI/App Server lifecycle，因此不构成
+KASD-01或release qualification完成。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts`。
 
 ## 两级运行契约
 

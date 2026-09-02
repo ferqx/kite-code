@@ -56,6 +56,12 @@
 - KHSS当前production Store 9 / `kite-home-single-service-v1-2026-08-30` exact inventory在一个DB内固定
   `workspaces`、现有Runtime/Run/receipt/tombstone事实与八张领域专用Artifact表。该target明确拒绝`runtime_artifacts`通用blob、Directory
   outbox、未知table/column/index和metadata drift，也不保存legacy Coordinator operation receipt或migration state。
+- KASD-01已建立未接入默认入口的`kite-session.sqlite` substrate：`openKiteSessionStoreDatabase`只接受新文件名与
+  `kite-session-app-server-2026-09-02` exact epoch，空文件在`BEGIN IMMEDIATE`内初始化，existing exact Store正常reopen，旧epoch、partial或
+  corrupt Store统一返回`store_upgrade_required`；它不探测、导入或改写`kite.sqlite`。`createKiteSessionExecutionAuthority`在同一
+  `kite_meta` owner中持久化Host-owned `controllerGeneration`、authority revision、lease deadline与cleanup状态；acquire/renew/detach/release
+  均使用SQLite CAS，过期且cleanup未确认的owner只会进入`recovery_required`，显式确认cleanup后才可再次acquire。该substrate尚未成为TUI/CLI
+  production composition，不能据此删除当前Store 9或Workspace process lock。
 - `createKiteHomeArtifactStore`只暴露Model/Plan/Capability/filesystem preimage/Sandbox/Subagent领域方法，保留existing ref/byte bound、
   exact retry冲突和complete reachability GC。
 - KHSS-02的`createKiteHomeDirectoryQuery`直接从同一Store 9 connection按`workspace_id`读取bounded、path-free Workspace/Session
@@ -134,6 +140,8 @@
   `sha256:<64 hex>`，不是裸hex。
 - `createKiteHomeWriteTransactionPort`直接以`BEGIN IMMEDIATE`拥有Store 9 mutation；constraint或callback fault整笔rollback。它不读取或写入
   migration phase、first-write marker，也没有额外global writer queue。
+- 新Session Store复用同一transaction primitive，但显式注入`assertKiteSessionStoreSchema`，不会把旧Store 9 epoch误认为目标Store；底层
+  write failure仍保留cause，Session authority只重新抛出自身typed CAS/transition错误。
 - Store 9 Directory query只消费已经exact preflight的同一connection；返回类型没有canonical path或Store path，Workspace和每Workspace
   Session数量分别有256 hard bound。跨Workspace归属只由`runtime_sessions.workspace_id`外键与query predicate决定，不能由Browser输入重绑。
 - `runtime_command_receipts` 的主键精确为 `(scope_session_id, command_id)`；applied receipt 与 event/snapshot 同一 `BEGIN IMMEDIATE` 原子提交。
@@ -149,7 +157,8 @@
 ## 测试
 
 `bun run --cwd packages/runtime-storage-sqlite test`（含Store7→Store8 generation/WAL/fault/active/corrupt/partial migration、Store8
-production reopen/activation/recovery、Store7 negatives与Store9 Workspace/Session/journal transaction scope）。
+production reopen/activation/recovery、Store7 negatives、Store9 Workspace/Session/journal transaction scope，以及新Session Store的真实
+双进程首次初始化与generation争用）。
 
 ## 文档影响
 

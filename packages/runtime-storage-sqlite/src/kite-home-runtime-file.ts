@@ -54,9 +54,12 @@ export function openKiteHomeRuntimeStorage<Event, State>(input: {
   }
 }
 
-function assertCanonicalKiteDatabasePath(path: string): string {
-  if (!isAbsolute(path) || basename(path) !== 'kite.sqlite' || /\p{Cc}/u.test(path)) {
-    throw new TypeError('Kite Home Store path must be an absolute kite.sqlite path.');
+export function assertCanonicalKiteDatabasePath(
+  path: string,
+  expectedBasename = 'kite.sqlite',
+): string {
+  if (!isAbsolute(path) || basename(path) !== expectedBasename || /\p{Cc}/u.test(path)) {
+    throw new TypeError(`Kite Home Store path must be an absolute ${expectedBasename} path.`);
   }
   const resolved = resolve(path);
   const parent = dirname(resolved);
@@ -74,7 +77,7 @@ function assertCanonicalKiteDatabasePath(path: string): string {
   return resolved;
 }
 
-function ensurePrivateDatabaseFile(path: string): void {
+export function ensurePrivateDatabaseFile(path: string): void {
   try {
     const descriptor = openSync(path, 'wx', 0o600);
     closeSync(descriptor);

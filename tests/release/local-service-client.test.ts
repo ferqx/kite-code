@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -12,8 +13,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  installedKiteSessionStorePath,
   resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
+  sourceKiteSessionStorePath,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
 import { createManagedLocalSingleServiceComposition } from '../../scripts/release/single-service-native-client';
@@ -110,6 +113,34 @@ test('managed client derives default KiteHome only from the canonical OS identit
     expect(existsSync(join(systemHome, '.kite-code'))).toBe(true);
     expect(existsSync(ambientHome)).toBe(false);
     expect(existsSync(join(root, 'ambient-kite-home'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Session Store profiles separate installed data from each canonical source checkout', () => {
+  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'kite-session-profiles-')));
+  const kiteHome = join(root, 'kite-home');
+  const firstRepository = join(root, 'first-repository');
+  const secondRepository = join(root, 'second-repository');
+  mkdirSync(kiteHome);
+  mkdirSync(firstRepository);
+  mkdirSync(secondRepository);
+  try {
+    expect(installedKiteSessionStorePath(kiteHome)).toBe(join(kiteHome, 'kite-session.sqlite'));
+    const firstDigest = createHash('sha256')
+      .update('kite-source-runtime-profile\0')
+      .update(kiteHome)
+      .update('\0')
+      .update(firstRepository)
+      .digest('hex')
+      .slice(0, 32);
+    expect(sourceKiteSessionStorePath(kiteHome, firstRepository)).toBe(
+      join(kiteHome, 'source-profiles', firstDigest, 'kite-session.sqlite'),
+    );
+    expect(sourceKiteSessionStorePath(kiteHome, secondRepository)).not.toBe(
+      sourceKiteSessionStorePath(kiteHome, firstRepository),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

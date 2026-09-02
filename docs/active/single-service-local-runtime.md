@@ -8,13 +8,15 @@
 
 相关：ADR-0152、ADR-0153、ADR-0154、ADR-0156、ADR-0159、ADR-0164、ADR-0165、ADR-0166、[`Kite Home 与本机 Runtime 单一化实施方案`](../space/plans/2026-08-30-kite-home-and-local-runtime-simplification.md)。
 
-## KASD-00过渡状态
+## KASD过渡状态
 
 ADR-0166已经接受App Server进程与Durable Session解耦目标，实施计划见
 [`2026-09-02-app-server-session-decoupling.md`](../space/plans/2026-09-02-app-server-session-decoupling.md)。当前production行为仍是下文记录的
-single-Service/临时source standalone实现；KASD-00只冻结mutation、owner、Store path/epoch与待删除路径，没有启用多App Server、
-`kite-session.sqlite`、Session execution fencing或daemon。`tests/release/app-server-decoupling-baseline.test.ts`防止这些前置条件在没有对应
-tranche门禁时被静默改变。KASD-01通过前，下文single-Service保护继续是current authority。
+single-Service/临时source standalone实现。KASD-01当前只完成了新`kite-session.sqlite` exact open/并发初始化、source/installed物理profile
+路径函数与独立Session execution authority substrate；真实双进程测试已证明同一Session只有一个generation writer、不同Session均可acquire，
+且cleanup未确认会持久化为`recovery_required`。TUI/CLI/Service尚未消费该substrate，Workspace process lock、one-connection composition与
+临时source Runtime Home仍未删除，因此下文single-Service行为继续是production current authority。当前没有daemon、Web切换、旧库导入、dual
+write或fallback；`tests/release/app-server-decoupling-baseline.test.ts`继续固定尚未关闭的transition gap。
 
 ## 当前边界
 

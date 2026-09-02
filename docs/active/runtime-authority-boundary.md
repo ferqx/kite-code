@@ -6,7 +6,19 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164、ADR-0165。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164、ADR-0165、ADR-0166。
+
+## KASD-01 authority substrate
+
+新的`kite-session.sqlite`已具有独立exact epoch与Host-owned Session execution authority，但尚未接入production composition。
+该authority复用`controllerGeneration`作为唯一Session writer fence，并以独立authority revision执行SQLite CAS；`connectionGeneration`仍只是
+client binding，不能单独renew或提交。read不落盘也不取得lease；acquire/renew/detach/release才写authority record。active/detached lease失效且
+cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
+`controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
+
+这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。当前Session
+mutation/effect dispatch尚未全部接入该fence，Workspace process lock仍在，所以KASD-01整体仍为in progress，不能把目标多App Server语义宣称为
+production能力。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts`。
 
 ## 当前可信域
 

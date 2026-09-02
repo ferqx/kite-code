@@ -2,6 +2,8 @@ import type { Database } from 'bun:sqlite';
 
 export const KITE_HOME_STORE_SCHEMA_VERSION = 9;
 export const KITE_HOME_STORE_FORMAT_EPOCH = 'kite-home-single-service-v1-2026-08-30';
+export const KITE_SESSION_STORE_SCHEMA_VERSION = 10;
+export const KITE_SESSION_STORE_FORMAT_EPOCH = 'kite-session-app-server-2026-09-02';
 
 export const KITE_HOME_STORE_TABLE_COLUMNS = Object.freeze({
   kite_meta: ['key', 'value'],
@@ -438,17 +440,23 @@ export class KiteHomeStoreSchemaError extends Error {
 }
 
 export function initializeKiteHomeStoreSchema(database: Database): void {
+  initializeExactKiteStoreSchema(database, {
+    schemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
+    formatEpoch: KITE_HOME_STORE_FORMAT_EPOCH,
+  });
+}
+
+export function initializeKiteSessionStoreIfNeeded(database: Database): void {
   database.run('PRAGMA foreign_keys = ON');
   database.run('BEGIN IMMEDIATE');
   try {
-    for (const statement of KITE_HOME_STORE_DDL) database.run(statement);
-    database
-      .query('INSERT INTO kite_meta(key, value) VALUES (?, ?)')
-      .run('schema_version', String(KITE_HOME_STORE_SCHEMA_VERSION));
-    database
-      .query('INSERT INTO kite_meta(key, value) VALUES (?, ?)')
-      .run('format_epoch', KITE_HOME_STORE_FORMAT_EPOCH);
-    database.run(`PRAGMA user_version = ${KITE_HOME_STORE_SCHEMA_VERSION}`);
+    const tableCount = currentTableCount(database);
+    if (tableCount === 0) {
+      initializeExactKiteStoreSchemaInTransaction(database, {
+        schemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
+        formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
+      });
+    }
     database.run('COMMIT');
   } catch (error) {
     try {
@@ -458,10 +466,61 @@ export function initializeKiteHomeStoreSchema(database: Database): void {
     }
     throw error;
   }
-  assertKiteHomeStoreSchema(database);
+  assertKiteSessionStoreSchema(database);
+}
+
+function initializeExactKiteStoreSchema(
+  database: Database,
+  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
+): void {
+  database.run('PRAGMA foreign_keys = ON');
+  database.run('BEGIN IMMEDIATE');
+  try {
+    initializeExactKiteStoreSchemaInTransaction(database, profile);
+    database.run('COMMIT');
+  } catch (error) {
+    try {
+      database.run('ROLLBACK');
+    } catch {
+      // BEGIN may have failed.
+    }
+    throw error;
+  }
+  assertExactKiteStoreSchema(database, profile);
+}
+
+function initializeExactKiteStoreSchemaInTransaction(
+  database: Database,
+  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
+): void {
+  for (const statement of KITE_HOME_STORE_DDL) database.run(statement);
+  database
+    .query('INSERT INTO kite_meta(key, value) VALUES (?, ?)')
+    .run('schema_version', String(profile.schemaVersion));
+  database
+    .query('INSERT INTO kite_meta(key, value) VALUES (?, ?)')
+    .run('format_epoch', profile.formatEpoch);
+  database.run(`PRAGMA user_version = ${profile.schemaVersion}`);
 }
 
 export function assertKiteHomeStoreSchema(database: Database): void {
+  assertExactKiteStoreSchema(database, {
+    schemaVersion: KITE_HOME_STORE_SCHEMA_VERSION,
+    formatEpoch: KITE_HOME_STORE_FORMAT_EPOCH,
+  });
+}
+
+export function assertKiteSessionStoreSchema(database: Database): void {
+  assertExactKiteStoreSchema(database, {
+    schemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
+    formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
+  });
+}
+
+function assertExactKiteStoreSchema(
+  database: Database,
+  profile: { readonly schemaVersion: number; readonly formatEpoch: string },
+): void {
   database.run('PRAGMA foreign_keys = ON');
   const quickCheck = database.query<{ quick_check: string }, []>('PRAGMA quick_check').get();
   if (quickCheck?.quick_check !== 'ok') fail('SQLite quick_check failed.');
@@ -512,15 +571,25 @@ export function assertKiteHomeStoreSchema(database: Database): void {
   );
   if (
     metadata.size !== 2 ||
-    metadata.get('schema_version') !== String(KITE_HOME_STORE_SCHEMA_VERSION) ||
-    metadata.get('format_epoch') !== KITE_HOME_STORE_FORMAT_EPOCH
+    metadata.get('schema_version') !== String(profile.schemaVersion) ||
+    metadata.get('format_epoch') !== profile.formatEpoch
   ) {
     fail('Kite Home Store metadata is incompatible.');
   }
   const userVersion = database.query<{ user_version: number }, []>('PRAGMA user_version').get();
-  if (userVersion?.user_version !== KITE_HOME_STORE_SCHEMA_VERSION) {
+  if (userVersion?.user_version !== profile.schemaVersion) {
     fail('Kite Home Store user_version is incompatible.');
   }
+}
+
+function currentTableCount(database: Database): number {
+  return (
+    database
+      .query<{ count: number }, []>(
+        "SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      )
+      .get()?.count ?? 0
+  );
 }
 
 function fail(message: string): never {

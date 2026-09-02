@@ -109,12 +109,16 @@ export {
 } from './kite-home-runtime-storage';
 export {
   assertKiteHomeStoreSchema,
+  assertKiteSessionStoreSchema,
   initializeKiteHomeStoreSchema,
+  initializeKiteSessionStoreIfNeeded,
   KITE_HOME_STORE_DDL,
   KITE_HOME_STORE_FORMAT_EPOCH,
   KITE_HOME_STORE_INDEXES,
   KITE_HOME_STORE_SCHEMA_VERSION,
   KITE_HOME_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
 export {
@@ -133,6 +137,21 @@ export {
   KiteHomeWriteError,
   type KiteHomeWriteTransactionPort,
 } from './kite-home-write';
+export {
+  createKiteSessionExecutionAuthority,
+  KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
+  type KiteSessionAcquireResult,
+  type KiteSessionExecutionAuthority,
+  KiteSessionExecutionAuthorityError,
+  type KiteSessionExecutionAuthorityErrorCode,
+  type KiteSessionExecutionAuthorityRecord,
+  type KiteSessionExecutionStatus,
+} from './kite-session-execution-authority';
+export {
+  KiteSessionStoreOpenError,
+  type KiteSessionStoreOpenErrorCode,
+  openKiteSessionStoreDatabase,
+} from './kite-session-runtime-file';
 export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,
