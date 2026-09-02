@@ -1,12 +1,15 @@
 # Kite Home 与本机 Runtime 单一化实施方案
 
-状态：active
+状态：superseded
 
 日期：2026-08-30
 
 优先级：P0
 
 相关：ADR-0152、ADR-0153、ADR-0154。
+
+替代：2026-09-02由[`App Server进程与Durable Session解耦实施方案`](2026-09-02-app-server-session-decoupling.md)接管未完成与后续演进；
+已完成的Store 9、typed Artifact、Trust、receipt与clean cutover成果继续有效，“全局单Service拥有Runtime/Store/Web”不再是目标拓扑。
 
 ## 1. 目标
 

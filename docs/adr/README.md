@@ -153,17 +153,18 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0149](0149-stable-local-agent-api-facade.md) | partially superseded by ADR-0155 | Stable local REST/SSE façade与no remote/mutation保留；Browser可通过独立cookie principal消费只读`/v1` |
 | [0150](0150-store-8-canonical-runtime-run-index.md) | accepted | Store 8以canonical Run index、receipt resource result与coverage boundary支撑first-class Run；Store 7历史不推断回填 |
 | [0151](0151-web-gateway-preflight-and-exact-launch-recovery.md) | accepted | Web Gateway在state/spawn前验证asset，并以PID/start-token绑定launch intent与显式recover |
-| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154/0159 | 每个Kite Home收敛为单Service、单SQLite、DB-backed typed Artifact与最小OS runtime endpoint；client expected build连接门禁由ADR-0159调整 |
+| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154/0159/0166 | 单SQLite/typed Artifact成果保留；全局单Service/Host ownership由ADR-0166替代为per-Session execution fencing |
 | [0153](0153-filesystem-preimage-remains-a-private-artifact-domain.md) | accepted | Filesystem mutation preimage保持独立typed Artifact表，不与Runtime checkpoint preimage或Capability result混用 |
 | [0154](0154-pre-release-store9-clean-cutover.md) | accepted | 未发布Store 9采用clean cutover；正式路径不迁移或清理旧布局，Web status保持只读 |
-| [0155](0155-single-service-web-rest-client-convergence.md) | partially superseded by ADR-0156/0159 | 保留per-home single Service与TUI Native client；Web通过cookie-authenticated只读`/v1`消费Workspace/Session/History并删除重复BFF；独立Web lifecycle由ADR-0156删除，跨build兼容复用由ADR-0159调整 |
-| [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157 | Service启动即挂载同源Web根页面；删除独立Web ensure/status/stop lifecycle；根路径302机制由ADR-0157替代 |
-| [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158 | 保留`GET /`直接返回Web并建立只读HttpOnly Browser session；launch token与exchange由ADR-0158删除 |
-| [0158](0158-local-web-root-session-without-launch-token.md) | accepted | 本地只读Web固定使用Service根地址与root-created HttpOnly session；删除launch token、exchange与Native `web_launch` |
-| [0159](0159-compatible-clients-share-single-service.md) | partially superseded by ADR-0164/0165 | installed共享与跨build只读发现保留；source默认共享由ADR-0165取消 |
+| [0155](0155-single-service-web-rest-client-convergence.md) | partially superseded by ADR-0156/0159/0166 | Browser只读`/v1`与principal保留；default Service Web ownership由ADR-0166取消 |
+| [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157/0166 | root/static配对只保留给显式daemon；default local不再拥有Web listener |
+| [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158/0166 | daemon `GET /`与cookie语义保留；default local Web root取消 |
+| [0158](0158-local-web-root-session-without-launch-token.md) | partially superseded by ADR-0166 | read-only root cookie保留给显式daemon；不再由每个local App Server提供 |
+| [0159](0159-compatible-clients-share-single-service.md) | partially superseded by ADR-0164/0165/0166 | 历史build discovery规则仅用于迁移；default local改为同build App Server |
 | [0160](0160-uncertain-shell-requires-exact-approval.md) | accepted | 未知Shell effects请求exact用户审批；模型脚本统一走Shell；执行前拒绝不再折叠为失败 |
 | [0161](0161-versioned-shell-semantics-and-read-only-trial.md) | partially superseded by ADR-0162 | 保留revision-bound Shell语义注册表；严格只读试跑grant由ADR-0162删除 |
 | [0162](0162-remove-read-only-trial-grant.md) | accepted | 删除严格只读试跑grant；unknown Shell恢复正常exact审批，registry继续演进 |
 | [0163](0163-service-owned-exploration-presentation.md) | accepted | Service唯一投影探索展示分类；TUI删除Shell前缀解析与历史重聚合路径 |
-| [0164](0164-active-candidate-service-build-convergence.md) | partially superseded by ADR-0165 | installed active candidate继续安全换代；source默认共享与`tui:fresh`已取消 |
-| [0165](0165-source-tui-standalone-service-topology.md) | accepted | source TUI默认invocation-scoped standalone；installed默认共享，source显式`--server shared`才共享 |
+| [0164](0164-active-candidate-service-build-convergence.md) | partially superseded by ADR-0165/0166 | 现有换代保护保留至cutover；default local完成后删除build convergence控制面 |
+| [0165](0165-source-tui-standalone-service-topology.md) | superseded by ADR-0166 | 临时进程隔离保留为参考；临时Store/History与source/installed拓扑差异被取消 |
+| [0166](0166-decouple-app-server-process-from-durable-session-authority.md) | accepted | Client启动同build App Server；Session独立持久并按Session writer fencing；daemon/Web显式化 |
