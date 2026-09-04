@@ -176,56 +176,65 @@ const sessionCommandBase = {
   sessionId: identifier,
   expectedRevision: safeRevision,
 };
-const respondInteractionCommands = z.union([
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[1],
-      response: textResponse,
-    })
-    .strict(),
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[1],
-      response: inputCancelResponse,
-    })
-    .strict(),
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[0],
-      response: approvalResponse,
-    })
-    .strict(),
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[2],
-      response: planReviewResponse,
-    })
-    .strict(),
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[3],
-      response: providerActionResponse,
-    })
-    .strict(),
-  z
-    .object({
-      ...sessionCommandBase,
-      type: z.literal('respond_interaction'),
-      interaction: interaction.options[4],
-      response: verificationResponse,
-    })
-    .strict(),
-]);
+const respondInteractionCommands = z
+  .union([
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[1],
+        response: textResponse,
+      })
+      .strict(),
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[1],
+        response: inputCancelResponse,
+      })
+      .strict(),
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[0],
+        response: approvalResponse,
+      })
+      .strict(),
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[2],
+        response: planReviewResponse,
+      })
+      .strict(),
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[3],
+        response: providerActionResponse,
+      })
+      .strict(),
+    z
+      .object({
+        ...sessionCommandBase,
+        type: z.literal('respond_interaction'),
+        interaction: interaction.options[4],
+        response: verificationResponse,
+      })
+      .strict(),
+  ])
+  .superRefine((value, context) => {
+    if (value.interaction.sessionRevision !== value.expectedRevision) {
+      context.addIssue({
+        code: 'custom',
+        message: 'interaction revision must match the command revision',
+      });
+    }
+  });
 
 /** The intentionally frozen remote command vocabulary. */
 export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
@@ -1293,6 +1302,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       subagentId: identifier,
       role: z.enum(['explore', 'plan', 'code', 'review']),
       name: shortText,
+      concurrencyGroupId: identifier.optional(),
     })
     .strict(),
   z
@@ -1310,10 +1320,44 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     })
     .strict(),
   z
-    .object({ type: z.literal('subagent.completed'), subagentId: identifier, summary: shortText })
+    .object({
+      type: z.literal('subagent.completed'),
+      subagentId: identifier,
+      summary: shortText,
+      toolCallCount: safeRevision,
+      durationMs: safeRevision,
+    })
     .strict(),
   z
-    .object({ type: z.literal('subagent.failed'), subagentId: identifier, summary: shortText })
+    .object({
+      type: z.literal('subagent.failed'),
+      subagentId: identifier,
+      summary: shortText,
+      toolCallCount: safeRevision.optional(),
+      durationMs: safeRevision.optional(),
+      diagnostic: z
+        .object({
+          code: z.enum([
+            'aborted',
+            'timed_out',
+            'invalid_input',
+            'consumer_protocol',
+            'model_step_failed',
+            'internal_error',
+          ]),
+          stage: z.enum([
+            'initialization',
+            'next_round_preparation',
+            'model_step',
+            'model_response_validation',
+            'tool_consumption',
+            'transcript_validation',
+            'terminal_projection',
+          ]),
+        })
+        .strict()
+        .optional(),
+    })
     .strict(),
   z
     .object({

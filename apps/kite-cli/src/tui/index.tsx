@@ -46,7 +46,6 @@ import {
 } from './prompt-submission-queue';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
-import { shouldAbortStoppedRun, shouldSetIdleAfterRun } from './run-lifecycle';
 import type {
   ContextCompactionProgressPhase,
   ContextCompactionResult,
@@ -391,11 +390,14 @@ function TuiApp({
   const creatingSessionRef = React.useRef(false);
   // A cancelled run may still be unwinding while the next prompt has already
   // been accepted. Older run finalizers must not clear the newer run's state.
-  const runGenerationRef = React.useRef(0);
   const inputValueRef = React.useRef('');
   const handleInputValueChange = React.useCallback((v: string) => {
     inputValueRef.current = v;
   }, []);
+  const canToggleLastOutputBlock = React.useCallback(
+    () => inputValueRef.current.trim().length === 0,
+    [],
+  );
 
   // Terminal resize: only remount App when width shrinks.
   // Height changes (e.g. tmux split, terminal window height drag) don't
@@ -455,6 +457,7 @@ function TuiApp({
     ) => Promise<void>
   >(async () => {});
   const promptSubmissionQueueRef = React.useRef<TuiPromptSubmissionQueue | null>(null);
+  const queuedPromptIdRef = React.useRef(0);
   if (!promptSubmissionQueueRef.current) {
     promptSubmissionQueueRef.current = new TuiPromptSubmissionQueue();
   }
@@ -1004,7 +1007,6 @@ function TuiApp({
             });
           }
           incomingRt.eventBuffer = [];
-          incomingRt.pendingInterrupt = false;
         }
         return;
       }
@@ -1280,34 +1282,6 @@ function TuiApp({
     },
   );
 
-  // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
-  React.useEffect(() => {
-    if (state.ctrlCPressed && !state.interrupt) {
-      const rt = sessionManager.getRuntime(threadIdRef.current);
-      rt?.abort();
-    }
-  }, [state.ctrlCPressed, state.interrupt, sessionManager]);
-
-  // When Esc stops a running agent, abort the controller so the generator
-  // doesn't keep running in background. Ctrl+C is handled above and already
-  // sets ctrlCPressed, so we skip here to avoid double-abort.
-  const prevRunningRef = React.useRef(state.running);
-  React.useEffect(() => {
-    const wasRunning = prevRunningRef.current;
-    prevRunningRef.current = state.running;
-    if (
-      shouldAbortStoppedRun({
-        wasRunning,
-        running: state.running,
-        ctrlCPressed: state.ctrlCPressed,
-        exited: state.exited,
-      })
-    ) {
-      const rt = sessionManager.getRuntime(threadIdRef.current);
-      rt?.abort();
-    }
-  }, [state.running, state.ctrlCPressed, state.exited, sessionManager]);
-
   // Keyboard cancellation must reach SessionRuntime in the same input turn as
   // ESC/Ctrl+C. Waiting for the reducer-driven running=false effect leaves a
   // race where the next prompt is submitted while the old runtime still looks
@@ -1316,8 +1290,17 @@ function TuiApp({
     // Ctrl+C is always whole-turn cancellation.  SessionRuntime owns the
     // durable no-op check when there is no active turn, so an input/plan/tool
     // overlay must never narrow this into a local interaction cancellation.
-    sessionManager.getRuntime(threadIdRef.current)?.abort();
-  }, [sessionManager]);
+    const runtime = sessionManager.getRuntime(threadIdRef.current);
+    if (!runtime) return;
+    void runtime.abort().catch((error) => {
+      dispatch({ type: 'CANCEL_REQUEST_FAILED' });
+      dispatch({
+        type: 'LOCAL_TEXT',
+        text: `  ⎿  Cancellation was not accepted: ${toErrorMessage(error)}`,
+        isError: true,
+      });
+    });
+  }, [dispatch, sessionManager]);
 
   const syncInteractionMode = React.useCallback(
     (mode: 'accept_edits' | 'auto' | 'full') => {
@@ -1364,6 +1347,7 @@ function TuiApp({
         skillId: string;
         input: Record<string, unknown>;
       }>,
+      queuedPromptId?: number,
     ) => {
       // A prompt queued behind an active turn belongs to the Session that was
       // foreground when the user pressed Enter. Do not retarget it if the user
@@ -1411,7 +1395,6 @@ function TuiApp({
       if (!rt.tryReservePrompt()) {
         throw new Error('The Runtime session did not admit the queued prompt.');
       }
-      const runGeneration = ++runGenerationRef.current;
       const startsForeground = threadIdRef.current === threadId;
 
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
@@ -1420,18 +1403,12 @@ function TuiApp({
         rt.conversationHistory = [...conversationHistoryRef.current];
       }
 
-      // Establish the new active turn before inserting the prompt. This keeps
-      // the durable prompt out of the idle/static transition window between a
-      // cancelled predecessor and its successor; otherwise Ink can commit the
-      // combined old+new turn to <Static> before the successor tool starts.
-      if (startsForeground) dispatch({ type: 'SET_RUNNING' });
-      // Do not optimistically append a prompt here. The bridge allocates the
-      // durable command and message identities, and the RuntimeClient's
-      // `user.message` projection is the only canonical rendering input.
-      // Rendering a local text-only copy first would make its later durable
-      // echo indistinguishable from a second user prompt.
-
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
+      if (startsForeground && queuedPromptId === undefined) {
+        // An idle prompt has no predecessor to disturb, so retain immediate local echo.
+        dispatch({ type: 'SET_RUNNING' });
+        dispatch({ type: 'LOCAL_USER_PROMPT', text: task });
+      }
       sessionManager.onStatusChange(threadId);
       dispatch({
         type: 'SET_SESSIONS',
@@ -1443,10 +1420,30 @@ function TuiApp({
           task,
           {
             dispatch,
+            onAccepted: () => {
+              if (queuedPromptId !== undefined) {
+                if (threadIdRef.current === threadId) {
+                  dispatch({
+                    type: 'ACCEPT_QUEUED_PROMPT',
+                    id: queuedPromptId,
+                    sessionId: threadId,
+                    text: task,
+                  });
+                } else {
+                  dispatch({ type: 'DEQUEUE_LOCAL_PROMPT', id: queuedPromptId });
+                }
+                return;
+              }
+            },
           },
           requestedPhase,
           initialSkillActivations,
         );
+      } catch (error) {
+        if (threadIdRef.current === threadId) {
+          dispatch({ type: 'DROP_LOCAL_USER_PROMPT', text: task });
+        }
+        throw error;
       } finally {
         // Only dispatch global state changes if this session is still active.
         // A background session that finished must not corrupt the foreground's running/interrupt state.
@@ -1460,10 +1457,6 @@ function TuiApp({
           type: 'SET_SESSIONS',
           sessions: sessionManager.getSnapshot(),
         });
-        if (shouldSetIdleAfterRun(stillActive, runGeneration, runGenerationRef.current)) {
-          dispatch({ type: 'SET_IDLE' });
-        }
-
         // Fire-and-forget: generate smart session name once after first message
         // Guard: only if the session is still active to prevent cross-session writes.
         (async () => {
@@ -1496,10 +1489,11 @@ function TuiApp({
         skillId: string;
         input: Record<string, unknown>;
       }>,
+      queuedPromptId?: number,
     ): Promise<void> => {
       const submittedThreadId = threadIdRef.current;
       return promptSubmissionQueueRef.current!.enqueue(submittedThreadId, (targetThreadId) =>
-        runTaskNow(targetThreadId, task, requestedPhase, initialSkillActivations),
+        runTaskNow(targetThreadId, task, requestedPhase, initialSkillActivations, queuedPromptId),
       );
     },
     [runTaskNow],
@@ -1522,16 +1516,29 @@ function TuiApp({
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.
+      const submittedSessionId = threadIdRef.current;
+      const submittedRuntime = sessionManager.getRuntime(submittedSessionId);
+      const queued =
+        stateRef.current.running ||
+        submittedRuntime?.agentLoopActive === true ||
+        promptSubmissionQueueRef.current!.hasPending(submittedSessionId);
+      const queuedPromptId = queued ? ++queuedPromptIdRef.current : undefined;
+      if (queuedPromptId !== undefined) {
+        dispatchSessionLoad({
+          type: 'QUEUE_LOCAL_PROMPT',
+          id: queuedPromptId,
+          sessionId: submittedSessionId,
+          text: value,
+        });
+      }
       observeTuiPromptSubmission({
-        queued: stateRef.current.running,
-        submit: () => runTask(value, stateRef.current.status.phase),
-        onQueued: () => {
-          dispatchSessionLoad({
-            type: 'LOCAL_TEXT',
-            text: '  ⎿  Message queued; it will be sent after the current turn finishes.',
-          });
-        },
+        queued,
+        submit: () => runTask(value, stateRef.current.status.phase, undefined, queuedPromptId),
+        onQueued: () => {},
         onFailure: (error) => {
+          if (queuedPromptId !== undefined) {
+            dispatchSessionLoad({ type: 'DEQUEUE_LOCAL_PROMPT', id: queuedPromptId });
+          }
           dispatchSessionLoad({
             type: 'LOCAL_TEXT',
             text: `  ⎿  Message was not sent: ${toErrorMessage(error)}`,
@@ -1540,7 +1547,7 @@ function TuiApp({
         },
       });
     },
-    [dispatchSessionLoad, runTask],
+    [dispatchSessionLoad, runTask, sessionManager],
   );
 
   React.useEffect(() => {
@@ -1587,6 +1594,7 @@ function TuiApp({
           }
         }}
         onAbort={abortForegroundRun}
+        canToggleLastOutputBlock={canToggleLastOutputBlock}
         getRewindPreview={previewRewind}
         loadSessions={loadPersistedSessionsForSelector}
         resizeGeneration={resizeKey}

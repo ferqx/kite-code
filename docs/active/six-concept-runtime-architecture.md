@@ -72,7 +72,9 @@ KASD parent-owned App Server在同一条已initialize Protocol connection上增�
 Service stdio carrier在消息进入Runtime Server前处理这些App-owned方法，以单一SQLite read snapshot调用History projector，并用现有
 `kite-app-contract`逐方法codec调用App Control；Runtime Server只条件发布capability，不路由它们。Runtime Client复用现有correlation/
 connection并验证exact server version/capability，`kite-local-runtime/client`组合semantic App adapter、Native credential codec与
-parent-owned child。credential secret不进入App Control、response或diagnostic。默认TUI/CLI使用same-build stdio pairing；显式daemon
+parent-owned child。pending interaction随Session CAS重新投影，Native client消费每个权威projection的完整queue；
+`respond_interaction` wire command只接受相等的interaction/command revision，conflict不能把旧interaction拼接到新CAS。
+credential secret不进入App Control、response或diagnostic。默认TUI/CLI使用same-build stdio pairing；显式daemon
 在同一logical protocol上额外声明`server/status|shutdown`，以固定exact daemon version/capability兼容，而不把build ID提升为协议或Store authority。
 KASD-05将daemon exact identity提升为v2：status增加strict loopback `webOrigin`；同进程独立HTTP carrier提供同build static/API Docs与Browser
 read-only `/v1`，默认stdio仍不创建HTTP。
@@ -224,9 +226,10 @@ resolver 验证持久 digest。Builtin `canonicalPathForComparison()` 继续负�
 case-insensitive containment 与 equality，但不得再对它的 case-folded spelling 二次哈希；否则 drive letter、8.3
 alias 或 native realpath casing 会让同一个 Workspace 在 fresh session 创建时产生两个 Project identity。
 
-Approval rejection 的 durable settlement 同样只由当前 turn 的事实决定：Runner 在 sibling 收敛后的 `stop` 边界
-只检查 `createdAtTurnId` 等于 live `turnId` 的 rejected call、未终结 Tool 与 queue record；`activeTaskId` 不能替代
-turn identity，否则同一 Task 的旧 rejection 会错误终止 successor turn。
+Approval rejection的durable settlement同样只由当前turn的事实决定：interaction command在一个transaction内拒绝exact target、
+取消该turn全部未终结sibling并写入`turn.aborted(cause=user)`；提交后才传播AbortSignal。Runner不得等待sibling自行启动或收敛，
+也不得在拒绝后再次调用模型。恢复检查仍以`createdAtTurnId`等于live `turnId`为边界；`activeTaskId`不能替代turn identity，
+否则同一Task的旧rejection会错误终止successor turn。
 
 ## SQLite storage
 

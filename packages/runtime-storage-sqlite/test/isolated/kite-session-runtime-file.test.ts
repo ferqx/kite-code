@@ -10,7 +10,7 @@ import {
   KITE_SESSION_STORE_TABLE_COLUMNS,
   KiteSessionStoreOpenError,
   openKiteSessionStoreDatabase,
-} from '../src';
+} from '../../src';
 
 describe('Kite Session Store physical file', () => {
   test('initializes an absent or empty target file and reopens only the exact epoch', () => {
@@ -42,7 +42,7 @@ describe('Kite Session Store physical file', () => {
   test('serializes concurrent first-open initialization across real processes', async () => {
     const root = temporaryRoot('kite-session-store-concurrent-');
     const path = join(root, 'kite-session.sqlite');
-    const fixture = join(import.meta.dir, 'fixtures', 'open-kite-session-store-child.ts');
+    const fixture = join(import.meta.dir, '..', 'fixtures', 'open-kite-session-store-child.ts');
     try {
       const startAt = Date.now() + 250;
       const children = [

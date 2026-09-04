@@ -506,18 +506,26 @@ export async function* runStateRuntimeLoop(
   const backgroundGroups = new Map<string, number>();
   let backgroundCount = 0;
   let backgroundFailure: unknown;
-  let backgroundStopped = false;
+  let backgroundNoProgressRevision: number | undefined;
   let wakeBackground: (() => void) | undefined;
   const signalBackground = () => {
     wakeBackground?.();
     wakeBackground = undefined;
   };
   const waitForBackground = () =>
-    backgroundEvents.length > 0 || backgroundFailure || backgroundStopped
+    backgroundEvents.length > 0 ||
+    backgroundFailure ||
+    (backgroundCount === 0 && backgroundNoProgressRevision !== undefined)
       ? Promise.resolve()
       : new Promise<void>((resolve) => {
           wakeBackground = resolve;
         });
+  const consumeSettledBackgroundNoProgress = () => {
+    if (backgroundCount > 0 || backgroundNoProgressRevision === undefined) return false;
+    const candidateRevision = backgroundNoProgressRevision;
+    backgroundNoProgressRevision = undefined;
+    return kernel.getState().revision === candidateRevision;
+  };
   const launchShellEffect = (
     effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
     group: string,
@@ -532,7 +540,15 @@ export async function* runStateRuntimeLoop(
         while (true) {
           const step = await stream.next();
           if (step.done) {
-            if (!step.value.emitted) backgroundStopped = true;
+            // An event-free background attempt is only a candidate for stopping. Another
+            // sibling may still commit durable progress after this callback returns, so the
+            // main loop must wait for the complete background set and compare revisions again.
+            if (
+              !step.value.emitted &&
+              backgroundCount === 1 &&
+              kernel.getState().revision === lease.expectedRevision
+            )
+              backgroundNoProgressRevision = lease.expectedRevision;
             break;
           }
           backgroundEvents.push(step.value);
@@ -583,7 +599,7 @@ export async function* runStateRuntimeLoop(
     while (count < maxEffects) {
       while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
       if (backgroundFailure) throw backgroundFailure;
-      if (backgroundStopped) return;
+      if (consumeSettledBackgroundNoProgress()) return;
 
       const state = kernel.getState();
       let facts = schedulerFacts?.(state);
@@ -899,7 +915,7 @@ export async function* runStateRuntimeLoop(
             }
             while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
             if (backgroundFailure) throw backgroundFailure;
-            if (backgroundStopped) return;
+            if (consumeSettledBackgroundNoProgress()) return;
           }
           if (!resolved.ok) throw resolved.error;
           if (isPrecommittedInteractionAction(resolved.value)) {
@@ -961,11 +977,13 @@ export async function* runStateRuntimeLoop(
             }
           }
         }
-        // Rejecting one focused tool approval is a terminal result for that
-        // exact invocation only; the durable queue advances to its next
-        // record. Only an explicit whole-turn cancel drains background work.
+        // Rejecting a focused tool approval terminates the current turn. The
+        // committed settlement rejects that exact invocation, cancels every
+        // unfinished sibling, and records turn.aborted before this shared
+        // execution signal is propagated.
         const executionAuthorizationCancelled =
-          (effect.type === 'request_tool_approval' && action.type === 'cancel') ||
+          (effect.type === 'request_tool_approval' &&
+            (action.type === 'cancel' || action.type === 'reject')) ||
           (effect.type === 'request_plan_review' &&
             (action.type === 'cancel' ||
               (action.type === 'plan_review_decision' && action.decision.kind === 'cancel')));
@@ -1021,7 +1039,7 @@ export async function* runStateRuntimeLoop(
         if (!(await waitForRetryOrAbort(outcome.deferred.retryAfterMs, signal))) return;
         continue;
       }
-      if (!outcome.emitted) return;
+      if (!outcome.emitted && kernel.getState().revision === lease.expectedRevision) return;
       if (!outcome.applied) continue;
     }
     throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);

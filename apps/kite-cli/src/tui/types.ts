@@ -74,17 +74,21 @@ export type OutputBlock =
        * Local-only slash-command echoes intentionally omit it.
        */
       messageId?: string;
+      /** Live-only echo shown before the authoritative Runtime user.message arrives. */
+      pendingEcho?: boolean;
     }
   | {
       id: number;
       kind: 'text';
       content: string;
       streaming?: boolean;
-      /** Compatibility marker for mutable text that cannot enter Static yet. */
+      /** Hidden ownership buffer while an active Thought awaits model classification. */
       responsePending?: boolean;
       isError?: boolean;
       /** Model invocation that owns this live/reconnected response segment. */
       modelRequestId?: string;
+      /** The model terminal reconciled this component; later packets cannot mutate it. */
+      modelTerminal?: boolean;
       /** Terminal duration retained off-screen so reasoning that arrives after
        *  model.responded can still attach the one canonical Thinking header. */
       modelDurationMs?: number;
@@ -150,6 +154,9 @@ export type OutputBlock =
        *  excluding tool execution). When present, totalElapsedMs follows it
        *  (current "Thinking Xs" semantics); absent in old logs → wall clock. */
       modelMs?: number;
+      /** Wall-clock start of the currently active model invocation. Cleared by
+       * model.responded so tool and interaction waits are never counted. */
+      liveModelStartedAt?: number;
       summaryLine: string;
       active: boolean;
       /** Keep a just-closed streamed Thought dynamic until model.responded
@@ -165,25 +172,20 @@ export type OutputBlock =
        *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
        *  Controls the summary label: with thinking → "Thinking Xs · <tool stats>", without → just tool counts. */
       hasThinking?: boolean;
-      /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
-       *  Event timeline: records reason/tool_call ordering so the render layer
-       *  can interleave thinking lines with tool steps chronologically. */
+      /** 事件时间线：记录 reason / tool_call 的先后顺序，供归属与回放保留；
+       *  活动渲染只消费 latestActivity，不累计整条时间线。
+       *  Event timeline retained for ownership/replay; the active renderer
+       *  consumes only latestActivity instead of replaying the whole timeline. */
       timeline?: ThoughtTimelineEntry[];
       /** 时间线序列号 / Monotonic sequence counter for timeline entries */
       nextTimelineSeq?: number;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';
-      /** ADR-0030 / 规则 24：阶段内已确认的旁白文本（被随后的只读工具确认），
-       *  渲染于块顶部。多段按时间顺序累积。
-       *  Confirmed narration texts (confirmed by a subsequent read-only tool),
-       *  rendered at the top of the phase block in chronological order. */
+      /** Legacy in-memory narration residue consumed only by cancellation/settlement cleanup.
+       *  Current model-visible text must use ordinary text blocks and never enter this field. */
       captions?: string[];
-      /** ADR-0030 / 规则 24：待确认的旁白文本——文本在阶段块活跃时先吸收于此，
-       *  随后到来只读工具则确认进 captions；阶段结束时仍未确认则脱离为独立
-       *  文本块（最终回答）。纯思考块被文本关闭时并入该文本块题头（ADR-0026）。
-       *  Pending narration: absorbed while the phase block is active; confirmed
-       *  into captions when a read-only tool arrives, or detached as a standalone
-       *  text block (final answer) when the phase ends unconfirmed. */
+      /** Transitional tail used by terminal/cancellation settlement. Tool-bearing model-visible
+       *  text is published as a normal text block instead of being stored here. */
       pendingCaption?: string;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
@@ -317,6 +319,12 @@ export interface TuiState {
   status: StatusState;
   exited: boolean;
   running: boolean;
+  /** False only between local run reservation and the authoritative user.message projection. */
+  runPromptPresented?: boolean;
+  /** Live-only prompts waiting behind an active Run. They are presentation state, not turns. */
+  queuedPrompts?: Array<{ id: number; sessionId: string; text: string }>;
+  /** A local cancel command is in flight; durable Runtime terminal facts still own completion. */
+  cancellationPending: boolean;
   runCount: number;
   runStartTime?: number;
   runTokenBaseline?: number;
@@ -478,6 +486,10 @@ export interface SessionSnapshot {
   workspace: string;
   active: boolean;
   running: boolean;
+  /** Whether the active Run's user prompt has reached the visible message owner. */
+  runPromptPresented?: boolean;
+  /** A cancel command is in flight for this Session. */
+  cancellationPending?: boolean;
   pendingInterrupt: boolean;
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;

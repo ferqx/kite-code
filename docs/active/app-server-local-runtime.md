@@ -48,6 +48,10 @@ TUI/CLI 通过 release composition 解析 child：
 两者都使用 `app-server run-stdio` 和同一 exact protocol/capability set。initialize 的 build identity 必须与 client 配对；失败直接暴露，
 不回退 embedded、旧 Service 或 daemon。parent EOF/退出会关闭 child，但 durable facts 保留。
 
+client把默认same-build mismatch诊断为安装内容可能不完整，并提示更新或重新安装Kite Code；显式daemon mismatch则提示更新或使用
+matching client，升级后仍不兼容时关闭旧daemon再启动。该诊断只解释initialize已有的`server_mismatch`，不比较client semver，
+不自动stop、replace或upgrade任何进程。
+
 默认路径不监听 HTTP、不构建 Web、不发现 daemon，也不存在 build-drift replacement。
 
 ## 显式 daemon 与 Web

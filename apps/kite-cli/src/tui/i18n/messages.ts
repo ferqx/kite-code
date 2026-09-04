@@ -28,6 +28,13 @@ export const enUS = {
   'approval.authorizedQueued': 'Authorized · queued to run',
   'approval.submitting': 'Sending confirmation…',
   'approval.submissionFailed': 'Confirmation was not accepted. Press Enter to retry.',
+  'approval.submissionFailed.connection':
+    'The Runtime connection is unavailable. Restore it, then press Enter to retry.',
+  'approval.submissionFailed.expired':
+    'This confirmation is no longer pending. Wait for the current interaction state.',
+  'approval.submissionFailed.state_changed':
+    'The session changed while confirming. The latest interaction state could not be applied.',
+  'approval.submissionFailed.unknown': 'Confirmation was not accepted. Retry the confirmation.',
   'approval.batchReleased': 'Session batch released ({count})',
   'approval.sessionGrants': 'Session grants: {count}',
   'approval.clearSessionGrants': 'Clear session grants',
@@ -295,6 +302,10 @@ export const zhCN: { [K in MessageKey]: string } = {
   'approval.authorizedQueued': '已授权 · 等待执行',
   'approval.submitting': '正在提交确认…',
   'approval.submissionFailed': '确认未被接受，请按 Enter 重试。',
+  'approval.submissionFailed.connection': 'Runtime 连接不可用。恢复连接后，请按 Enter 重试。',
+  'approval.submissionFailed.expired': '该确认已不再等待处理，请等待当前交互状态刷新。',
+  'approval.submissionFailed.state_changed': '确认期间会话状态发生变化，最新交互状态未能应用。',
+  'approval.submissionFailed.unknown': '确认未被接受，请重试。',
   'approval.batchReleased': '会话批量释放（{count}）',
   'approval.sessionGrants': '会话授权：{count}',
   'approval.clearSessionGrants': '清除会话授权',

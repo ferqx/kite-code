@@ -1,3 +1,4 @@
+import type { SubAgentFailureDiagnostic } from './presentation';
 import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeClientInteraction,
@@ -275,6 +276,8 @@ export type RuntimeClientEvent =
       readonly subagentId: string;
       readonly role: 'explore' | 'plan' | 'code' | 'review';
       readonly name: string;
+      /** Opaque Runtime dispatch identity shared by concurrently admitted siblings. */
+      readonly concurrencyGroupId?: string;
     }
   | {
       readonly type: 'subagent.step';
@@ -288,8 +291,21 @@ export type RuntimeClientEvent =
       readonly durationMs?: number;
       readonly summary?: string;
     }
-  | { readonly type: 'subagent.completed'; readonly subagentId: string; readonly summary: string }
-  | { readonly type: 'subagent.failed'; readonly subagentId: string; readonly summary: string }
+  | {
+      readonly type: 'subagent.completed';
+      readonly subagentId: string;
+      readonly summary: string;
+      readonly toolCallCount: number;
+      readonly durationMs: number;
+    }
+  | {
+      readonly type: 'subagent.failed';
+      readonly subagentId: string;
+      readonly summary: string;
+      readonly toolCallCount?: number;
+      readonly durationMs?: number;
+      readonly diagnostic?: Pick<SubAgentFailureDiagnostic, 'code' | 'stage'>;
+    }
   | {
       readonly type: 'context.compaction';
       readonly status: 'requested' | 'completed' | 'failed' | 'reset';
@@ -551,6 +567,28 @@ export function assertRuntimeClientInteraction(
   if (!isRuntimeClientInteraction(value)) throw new TypeError('Invalid RuntimeClientInteraction');
 }
 
+function isRuntimeClientSubagentDiagnostic(
+  value: unknown,
+): value is Pick<SubAgentFailureDiagnostic, 'code' | 'stage'> {
+  if (!isRecord(value) || !hasExactKeys(value, ['code', 'stage'])) return false;
+  const validCode =
+    value.code === 'aborted' ||
+    value.code === 'timed_out' ||
+    value.code === 'invalid_input' ||
+    value.code === 'consumer_protocol' ||
+    value.code === 'model_step_failed' ||
+    value.code === 'internal_error';
+  const validStage =
+    value.stage === 'initialization' ||
+    value.stage === 'next_round_preparation' ||
+    value.stage === 'model_step' ||
+    value.stage === 'model_response_validation' ||
+    value.stage === 'tool_consumption' ||
+    value.stage === 'transcript_validation' ||
+    value.stage === 'terminal_projection';
+  return validCode && validStage;
+}
+
 export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
   switch (value.type) {
@@ -786,8 +824,12 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'subagent.started':
       return (
-        hasExactKeys(value, ['type', 'subagentId', 'role', 'name']) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'subagentId', 'role', 'name'], ['concurrencyGroupId']),
+        ) &&
         isIdentifier(value.subagentId) &&
+        (!Object.hasOwn(value, 'concurrencyGroupId') || isIdentifier(value.concurrencyGroupId)) &&
         (value.role === 'explore' ||
           value.role === 'plan' ||
           value.role === 'code' ||
@@ -816,11 +858,28 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
         (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs))
       );
     case 'subagent.completed':
+      return (
+        hasExactKeys(value, ['type', 'subagentId', 'summary', 'toolCallCount', 'durationMs']) &&
+        isIdentifier(value.subagentId) &&
+        isBoundedString(value.summary) &&
+        isNonNegativeSafeInteger(value.toolCallCount) &&
+        isNonNegativeSafeInteger(value.durationMs)
+      );
     case 'subagent.failed':
       return (
-        hasExactKeys(value, ['type', 'subagentId', 'summary']) &&
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'subagentId', 'summary'],
+            ['toolCallCount', 'durationMs', 'diagnostic'],
+          ),
+        ) &&
         isIdentifier(value.subagentId) &&
-        isBoundedString(value.summary)
+        isBoundedString(value.summary) &&
+        (!Object.hasOwn(value, 'toolCallCount') || isNonNegativeSafeInteger(value.toolCallCount)) &&
+        (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs)) &&
+        (!Object.hasOwn(value, 'diagnostic') || isRuntimeClientSubagentDiagnostic(value.diagnostic))
       );
     case 'context.compaction':
       return (

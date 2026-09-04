@@ -104,7 +104,7 @@ export function replaceBlockById(state: TuiState, blockId: number, next: OutputB
 }
 
 /** Finalize 最后 turn 中所有 mutable text block.
- *  need_approval、need_input、SET_IDLE、CTRL_C 时调用。 */
+ *  need_approval、need_input、terminal 与 session 切换时调用。 */
 export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   const last = state.turns.at(-1);
   if (!last) return state;

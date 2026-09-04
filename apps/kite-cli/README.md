@@ -23,22 +23,41 @@
 - 默认TUI `/status`展示`stdio` transport、source/installed profile、build、App Server version与initialize已证明的same-build pairing；
   显式`--server`显示Unix/named-pipe transport与exact-protocol compatible pairing，daemon build只作诊断；
   不展示Service PID、Web URL或build drift。
+- initialize返回`server_mismatch`时，启动入口按已选择的pairing给出恢复建议：默认same-build提示更新或重新安装不完整的Kite Code，
+  显式daemon提示更新或使用matching client，并在升级后关闭旧daemon再启动；不按client semver推断兼容性，也不自动操作daemon。
 - 完整 durable history 只走 `KiteAppServerConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
   subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
 - Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
   得到 Service-owned canonical identity；只有 trusted 后才 `connect()` 并取得 Workspace-bound one-shot Runtime ticket。
   untrusted/conflict/connection failure 均 fail closed，不打开 Runtime，也不回退 embedded。
+- Native interaction始终从最新权威Session projection取得完整queue。无关durable event推进CAS后，client用相同稳定identity和最新
+  `sessionRevision`重建`respond_interaction`；interaction revision必须等于command expected revision，过期Enter/Esc不得回退到active Session。
 - TUI exit只关闭本client connection、subscription、presentation resource及其parent-owned App Server；不删除durable facts，也不`abortAll()`。
+  确认退出后先同步unmount并归还terminal/cursor，再执行有界observability和connection清理，慢速清理不能让最后一帧继续占用终端。
   退出前按 exact Session projection确认Controller disposition：idle且无pending interaction时release，active/pending或query不确定时
   detach；Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
-- 连续普通prompt使用client-local FIFO；terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
+- 连续普通prompt使用per-Session client-local FIFO，不同Session互不阻塞；active Run期间的新prompt进入独立的live-only queued展示层，不插入当前Turn blocks、
+  不改变子Agent或工具卡。轮到执行时移除queued展示并建立新Turn；`runtime_busy`保持排队并使用新command identity重试，
+  不显示发送失败。等待期间到达的前序Run terminal按revision隔离，不能污染后继receipt的Run identity。queued展示只有在
+  `start_turn` receipt被接受后才移除并建立可见新Turn；后台Session也按prompt identity清理展示。receipt与durable `user.message`
+  允许乱序：queued entry与pending echo必须原子交接，message先到时消费对应live-only queue entry，receipt先到时建立pending echo，最终都只保留
+  一个以`messageId`为权威的用户块。活动Session的queued展示按FIFO逐条显示为浅色背景的单行`↵ 消息内容`，`Working`位于队列上方，首项前与相邻项之间各保留一行间距；稳定Footer owner与浅比较隔离的OutputArea保证queue增减不重挂载Working、
+  不重算或改变当前Thought、Tool及Delegating的折叠形态。非空prompt拥有提交Enter，OutputArea不得用同一个按键展开最后一个动态块；空prompt的Enter才保留既有展开/折叠入口。queued chrome不参与消息区的动态高度预算。Enter后普通idle启动同样先显示带live-only pending标记的本地prompt，durable `user.message`只原位补齐
+  `messageId`，提交失败移除仍未确认的pending echo。terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
   每轮只有applied receipt后才登记accepted completion identity，并启动2秒后、至多每2秒一次的bounded query fallback；它只在projection满足
   当前revision floor且权威idle时收敛current run，弥补terminal/idle notification gap，迟到waiter/finally不能清除后继轮状态。Ink flush只作展示屏障：
   正常等待真实commit，但最多1秒；UI promise迟到或失败不能停止canonical subscription、后续answer/terminal或下一条prompt。
 - run promise只接受跨过当前command revision floor、且与receipt canonical `runId`一致的`run.terminal|run.failure`；`turn.terminal`
-  与`task.terminal`只参与展示。上一轮迟到的Turn/Task终态不能结束刚applied的后继Run。
-- 普通模型正文仍只按完整Markdown组件发布；未到段落边界的cumulative text保存在request-scoped隐藏buffer。`model.responded`
-  可以省略optional summary，reducer必须用已接收buffer收口最后一段，不能把合法回答清成空白。
+  与`task.terminal`只参与展示。上一轮迟到的Turn/Task终态不能结束刚applied的后继Run。本地run Promise收尾不向
+  reducer生成idle/cancelled事实；subscription gap由authoritative Session projection query先收敛UI投影，再释放waiter。
+- 活动Turn收到Esc/Ctrl+C时，TUI在同一输入轮先显示`Cancelling`，并把重复按键合并到该Session唯一的in-flight
+  `cancel_turn` Promise；receipt失败清除本地pending状态并显示可重试诊断。排队后继只有在前驱Subagent Provider
+  cleanup全部确认后才可取得`start_turn` receipt，用户取消已经写入的waived capability终态不得在同进程cleanup中被改写为unknown。
+- 普通模型正文仍按完整Markdown组件提交；没有待判定Thought归属时，完成的段落、列表项和已闭合结构组件立即进入Static，
+  只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，完整前缀进入隐藏`responsePending` ownership buffer，
+  不结算Thought也不进入Static；`model.responded(toolCallCount=0)`才补齐并发布最终正文，`toolCallCount>0`删除该buffer、把过程旁白
+  留在同一Thought且不渲染，匹配工具和后续模型调用继续原聚合块。未到提交边界的cumulative text继续留在request source。
+  `model.responded`可以省略optional summary，reducer必须用已接收buffer收口最后一段，不能把合法回答清成空白。
 
 ## 不拥有职责
 
@@ -98,8 +117,7 @@ executable、release entrypoint与slot均已删除。
 ## 测试
 
 `bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
-Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前default runner的CLI owner为704 tests，加76个sandbox与
-1个native conformance，共781 tests；完整TUI system由独立PTY runner验证。
+Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前CLI workspace共833 tests；完整TUI system由独立PTY runner验证。
 
 ## 文档影响
 

@@ -1141,6 +1141,30 @@ function shellReadTargets(command: string): string[] {
         }
       }
     }
+    if (program === 'file') {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const token = stripQuotes(tokens[index]!);
+        if ((token === '-m' || token === '--magic-file') && tokens[index + 1]) {
+          targets.push(stripQuotes(tokens[index + 1]!));
+          index += 1;
+        } else if (token.startsWith('--magic-file=')) {
+          targets.push(token.slice('--magic-file='.length));
+        } else if (token.startsWith('-m') && token.length > 2) {
+          targets.push(token.slice(2));
+        }
+      }
+    }
+    if (program === 'git' && stripQuotes(tokens[1] ?? '').toLowerCase() === 'ls-files') {
+      for (let index = 2; index < tokens.length; index += 1) {
+        const token = stripQuotes(tokens[index]!);
+        if (token === '--exclude-from' && tokens[index + 1]) {
+          targets.push(stripQuotes(tokens[index + 1]!));
+          index += 1;
+        } else if (token.startsWith('--exclude-from=')) {
+          targets.push(token.slice('--exclude-from='.length));
+        }
+      }
+    }
     if (['grep', 'rg', 'sed', 'awk'].includes(program)) targets.push(...operands.slice(1));
     else if (!['echo', 'pwd', 'test'].includes(program)) targets.push(...operands);
   }

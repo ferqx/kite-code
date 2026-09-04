@@ -598,7 +598,6 @@ function gitEnvironment(): Readonly<Record<string, string>> {
     GIT_ASKPASS: '/bin/false',
     GIT_SSH_COMMAND: '/bin/false',
     GIT_PAGER: 'cat',
-    GIT_EXTERNAL_DIFF: '',
     GIT_OPTIONAL_LOCKS: '0',
     LC_ALL: 'C',
     LANG: 'C',

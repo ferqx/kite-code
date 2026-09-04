@@ -228,7 +228,9 @@ Service 的 closed client projector 也复用同一分类事实：只有 queued 
 loop variable与逐段复用现有只读grammar的body/suffix；它解决同一Policy allow fact被generic Shell
 `minimumApproval`重复升级为人工审批的问题，不是通用Shell parser或新的授权来源。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
 模式不得进入该 grammar；Git额外接受零操作数`git branch --show-current`、无pattern的branch列表
-（零参数或`-a/--all/-r/--remotes/--list/--no-color`组合），以及零参数或`-v/--verbose`的remote列表。
+（零参数、`-a/--all/-r/--remotes/--list/--no-color`、可选revision的`--contains/--no-contains/--merged/--no-merged`以及必需object值的`--points-at`组合），以及零参数或`-v/--verbose`的remote列表。
+`git status`接受版本化`--porcelain`，`git log`接受当前闭集内的展示/筛选参数，`git diff`接受当前闭集内的颜色、空白、quiet与word-diff参数；compound/pipeline整体未通过只读证明时，VCS mutation fallback仍须逐段
+识别上述参数敏感只读形态，不能仅因出现`git branch --show-current`就把整条命令标记为mutation。
 branch pattern/创建/删除/重命名与remote add/remove/rename/set/update/prune仍是非只读。例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
 file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
 substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
@@ -242,7 +244,8 @@ Workspace sandbox 兜底，因为 development 的 `workspace_only` capability �
 它们继续使用原sealed policy scope，不增加只读Sandbox变体或额外用户选项。
 `rg -f/--file` 保持只读，但其 pattern 文件与搜索路径都是读取目标；任一目标位于 Workspace 外时必须进入
 external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
-magic 文件与 `sort --random-source` 同样属于显式读取目标。`file -f/--files-from` 会从文件内容动态取得
+magic 文件、`git ls-files --exclude-from`与 `sort --random-source` 同样属于显式读取目标；当前scope extractor
+显式解析`file -m/--magic-file`和`git ls-files --exclude-from`的独立或`=`值。`file -f/--files-from` 会从文件内容动态取得
 更多路径，静态命令无法证明其完整读取范围，因此直接退出只读 fast path。
 这条只读证明同时依赖 executor 的 sanitized environment。SPI registry 只为重新通过同一
 classifier 的命令签发 Runtime-owned `policy_proven_read_only` 执行信任；模型参数、审批
@@ -257,8 +260,9 @@ payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `
 按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、`git log`、
 不写文件的`git diff`及由`head/tail/echo`组成的只读pipe可直接执行；`2>/dev/null`等只丢弃输出的redirect不产生
 Workspace mutation或人工审批。已知external/sensitive scope才按当前mode审查。
-命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment，固定关闭 system/global config、
-credential prompt、pager、external diff、optional locks 与 repository fsmonitor helper。Planning 与关键系统
+命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment：POSIX固定将`HOME/XDG_CONFIG_HOME`
+投影到不存在的中性路径，关闭system/global config、credential prompt、pager、optional locks与repository fsmonitor helper，
+且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git解释为待执行的空helper，不能用于关闭。Planning 与关键系统
 destructive hard deny保持独立且只匹配高置信executable位置；参数或输出中的危险词不能触发。`git_inspect`只保留为
 internal Runtime capability，所有模型Git命令统一走Shell Policy、approval、Sandbox与receipt链路。
 
@@ -267,6 +271,9 @@ internal Runtime capability，所有模型Git命令统一走Shell Policy、appro
 损坏 outcome 时直接 fail closed，不存在 historical decoder。Builtin catalog entry 只能提供 metadata-only
 result classifier，不能自报 dispatch、external effect 或 timing。Policy/approval deny 一律证明为
 `not_started/none` 且不产生新调用；timeout、cancel 与 unknown external effect 禁止自动重放。
+Shell进程已确定退出且`ok=false`时由Builtin投影不含stderr的`tool_reported_failure` advice，固定
+`disposition=never`；timeout、cancel与sandbox deny保留各自低基数detail。该规则只补齐结果分类，不能把
+post-GO终态不确定降级为普通失败。
 Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 safe-read，或已有可信
 idempotency receipt 的调用。配置或参数中的 idempotency key 本身不是 receipt，不能授权 replay；
 `correct_args` 只允许下一次模型响应提出一次新 invocation，绝不原样自动重放。
@@ -383,8 +390,11 @@ parent attempt。已经自动或人工获批的 active continuation 优先于 qu
 时必须提供当前用户任务、workspace root，以及可用时的 Subagent 身份和角色；reviewer 不得只依据
 脱离任务语境的单条命令做决定。实际并发派发的 task sibling 共用 Runtime 签发的
 `concurrencyGroupId`，使 TUI 能聚合显示 queued、auto-reviewing、awaiting-user 与恢复后的状态；该字段
-不是授权凭据，串行调用不得由 App 根据相邻卡片或时间顺序推断成并发批次。自动审查明确拒绝或
+必须由App projector保留在closed `subagent.started` Client Event中，并由同一exact codec用于live与History；
+它不是授权凭据，串行调用不得由 App 根据相邻卡片或时间顺序推断成并发批次。自动审查明确拒绝或
 error abort 必须把对应活动 child 投影为终态，不能留下永久“等待审批/进行中”的展示。
+App projector必须在child终态保留Runtime实测`toolCallCount/durationMs`；失败诊断只投影有界枚举`code/stage`，
+不得携带model invocation correlation。TUI以本地started时刻驱动活动计时，以Runtime终态duration冻结历史。
 并发组的紧凑 TUI 投影只保留一个组入口；每个 child 占两行，首行显示角色、任务、状态与其自身
 执行时长，次行用唯一的 `└─` 显示当前未结算工具或等待状态。后续同级 child 与首行文字对齐，
 
@@ -535,14 +545,14 @@ command deny 仍独立存在，且两者不得重新引入 Workspace 内名称�
    same-command 是否可复用仍由编译策略决定。
 6. 批量 tool calls 必须逐个进入相同策略；一个只读调用不能掩盖同批写入调用。连续调用仅在
    每项都已持久化为 `read_only + sideEffect=false`、属于无交互语义的内置读取工具且
-   Approval Policy 再确认无需审批时，才可组成最多 4 项的并行批次。`ask_user`、Plan/
+   Approval Policy 再确认无需审批时，才可组成同一模型响应范围内的兼容并行批次，不设置额外固定小批次上限。`ask_user`、Plan/
    Skill/Task/Tool Search、动态 MCP、已审批恢复、写入、未知分类和需要审批的调用都是
    独占屏障；屏障后的读取不得越过它。同一模型消息、同一任务中的连续
    `shell_execute` 逐项完成策略预检并进入 durable approval queue；获批调用先进入
    `authorized_queued`，仍受 scheduler concurrency 和独立 receipt/attempt 约束。单个调用的策略拒绝
-   只终结自身；Approval overlay 的 Esc 只拒绝 focused target，不主动取消 sibling，且在 sibling 自身收敛后以一个
-   exactly-once `turn.aborted` 关闭不可继续调模型的拒绝轮次。Ctrl+C 才立即取消整个当前 turn：其余未终结 sibling cancelled，
-   已启动执行收到 AbortSignal，Runner 不再继续审批、执行或调用模型。策略拒绝和系统失败不套用这一用户取消语义。Shell 重叠在非 Shell 调用、
+   只终结自身；Approval overlay的Esc/拒绝则原子拒绝focused target、取消当前turn全部未终结sibling并写入
+   `turn.aborted(cause=user)`，提交后才让已启动执行收到AbortSignal。Ctrl+C仍是独立的整轮取消输入；两条路径都禁止Runner继续审批、
+   执行或调用模型。策略拒绝和系统失败不套用这一用户取消语义。Shell 重叠在非 Shell 调用、
    不同模型消息或不同任务边界处截断，不得
    跨越 `ask_user`、方案审核或其他工具。当前事件集合不包含 `tool.execution_ready`；审批推进只接受
    带精确 interaction/tool identity 与 generation 的 canonical release：单调用为 `approval.granted`，

@@ -1869,8 +1869,12 @@ test('runStateRuntimeLoop starts each approved shell while later sibling approva
   release();
   await run;
   expect(events.filter((event) => event.type === 'tool.started')).toHaveLength(2);
+  expect(events.filter((event) => event.type === 'model.responded')).toHaveLength(1);
+  expect(events.filter((event) => event.type === 'run.completed')).toHaveLength(1);
+  expect(events.filter((event) => event.type === 'turn.completed')).toHaveLength(1);
   expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
   expect(kernel.getState().tools.calls['shell-2']?.status).toBe('succeeded');
+  expect(kernel.getState().turn.status).toBe('completed');
   kernel.close();
 });
 

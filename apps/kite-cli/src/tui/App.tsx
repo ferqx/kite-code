@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import type { LanguagePreference } from '#kite-cli/preferences';
 import type { SandboxBackend } from './client-types';
@@ -26,6 +27,10 @@ import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
 import { useI18n } from './i18n';
 import { createInitialState, initialState } from './initialState';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from './interaction-submission-diagnostic';
 import McpOverlay from './mcp/McpOverlay';
 import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
@@ -48,11 +53,15 @@ export { createInitialState, eventReducer };
 const MemoHeader = React.memo(Header);
 
 export function shouldShowRunStatus(state: TuiState): boolean {
-  if (state.interrupt) return false;
-  if (state.compactionProgress?.source === 'manual') return false;
   if (!state.running) return false;
-  if (state.status.retryState) return true;
+  if (state.runPromptPresented === false) return false;
   return true;
+}
+
+function queuedPromptPreview(value: string): string {
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? '';
+  const truncated = firstLine.length > 200 ? `${firstLine.slice(0, 199)}…` : firstLine;
+  return value.includes('\n') && truncated.length < 200 ? `${truncated}…` : truncated;
 }
 
 /** Compaction is non-modal; only an active interaction owns the prompt surface. */
@@ -82,6 +91,8 @@ export interface AppProps {
   onLanguageSelect?: (language: LanguagePreference) => void;
   /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
   onAbort?: () => void;
+  /** Read at key-dispatch time so prompt submission and block expansion have one Enter owner. */
+  canToggleLastOutputBlock?: () => boolean;
   getRewindPreview?: (
     checkpointId: string,
   ) => Promise<import('./runtime-presentation').RewindFilePreview | null>;
@@ -141,6 +152,7 @@ export default function App({
   languagePreference = 'system',
   onLanguageSelect,
   onAbort,
+  canToggleLastOutputBlock,
   getRewindPreview,
   resizeGeneration,
   loadSessions = () => Promise.reject(new Error('Session storage is unavailable.')),
@@ -179,6 +191,10 @@ export default function App({
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
   const layeredOverlayEscRef = useRef(false);
+  const [approvalEscapeFailure, setApprovalEscapeFailure] = useState<{
+    readonly interactionId: string;
+    readonly failure: InteractionSubmissionFailure;
+  }>();
   useGlobalKeys(
     dispatch,
     overlayOrInterrupt,
@@ -199,12 +215,12 @@ export default function App({
           })
           .then((accepted) => {
             if (!accepted) throw new Error('Approval rejection was not accepted.');
+            setApprovalEscapeFailure(undefined);
           })
-          .catch(() => {
-            dispatch({
-              type: 'LOCAL_TEXT',
-              text: 'Confirmation was not accepted. Press Esc to retry.',
-              isError: true,
+          .catch((error: unknown) => {
+            setApprovalEscapeFailure({
+              interactionId: approvalInteractionId,
+              failure: classifyInteractionSubmissionFailure(error),
             });
           });
         return true;
@@ -255,10 +271,11 @@ export default function App({
   );
   const selectInteractionMode = useCallback(
     (mode: 'accept_edits' | 'auto' | 'full') => {
+      if (mode === state.interactionMode) return;
       onInteractionModeChange?.(mode);
       dispatch({ type: 'SET_INTERACTION_MODE', mode });
     },
-    [dispatch, onInteractionModeChange],
+    [dispatch, onInteractionModeChange, state.interactionMode],
   );
   const selectModel = useCallback(
     async (model: ModelOption) => {
@@ -439,6 +456,9 @@ export default function App({
   const overlayActive = modalOverlayActive && !state.interrupt && !approvalQueueActive;
   const showRunStatus = shouldShowRunStatus(state);
   const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
+  const activeQueuedPrompts = (state.queuedPrompts ?? []).filter(
+    (prompt) => prompt.sessionId === state.activeSessionId,
+  );
 
   return (
     <Box flexDirection="column">
@@ -452,6 +472,7 @@ export default function App({
         onToggleReason={onToggleReason}
         onToggleToolExpand={onToggleToolExpand}
         onToggleSubagentExpand={onToggleSubagentExpand}
+        canToggleLastBlock={canToggleLastOutputBlock}
         // Footer interactions own Enter/Escape while visible. Passing the
         // complete capture boundary prevents the approval-confirming Enter
         // from also toggling the last dynamic tool/Subagent card.
@@ -463,55 +484,80 @@ export default function App({
         compactionPhase={state.compactionProgress?.phase}
       />
 
-      {/* ── Footer: 3-row interaction zone ── */}
-      {!overlayActive && (
-        <Footer
-          status={state.status}
-          runStatus={runStatus}
-          running={showRunStatus}
-          timerKey={state.runCount}
-          interactionMode={state.interactionMode}
-          hideGlobalStatus={Boolean(state.interrupt) || approvalQueueActive}
-        >
-          {/* Interaction row: input line or approval/input UI, mutually exclusive */}
-          {!state.interrupt && !approvalQueueActive && (
-            <>
-              {state.sessionServiceUnavailable && !state.showSessions && (
-                <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
-              )}
-              {children}
-            </>
-          )}
-          {activeApproval && (
-            <ApprovalBlock
-              key={`${state.interrupt?.interactionId ?? 'legacy'}:${activeApproval.generation}`}
-              approval={activeApproval}
-              provider={provider}
-              onResolved={resolveApproval}
-              queueEntry={focusedApprovalEntry}
-            />
-          )}
-          {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
-            <InputBlock
-              interactionId={state.interrupt?.interactionId}
-              question={interruptBlock.question}
-              provider={provider}
-              onResolved={resolveInput}
-              wizardEscBackRef={wizardEscBackRef}
-            />
-          )}
-          {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
-            <PlanReviewBlock
-              interactionId={state.interrupt.interactionId}
-              plan={state.interrupt.plan}
-              artifact={state.interrupt.artifact}
-              provider={provider}
-              onResolved={resolvePlanReview}
-              supplementEscRef={supplementEscRef}
-            />
-          )}
-        </Footer>
-      )}
+      {/* ── Footer: run status, queued prompts, and the active interaction ── */}
+      <Footer
+        key="footer"
+        status={state.status}
+        runStatus={runStatus}
+        running={showRunStatus}
+        timerKey={state.runCount}
+        interactionMode={state.interactionMode}
+        hideGlobalStatus={overlayActive || Boolean(state.interrupt) || approvalQueueActive}
+      >
+        {!overlayActive && (
+          <>
+            <Box
+              key="queued-prompts"
+              flexDirection="column"
+              marginTop={activeQueuedPrompts.length > 0 ? 1 : 0}
+            >
+              {activeQueuedPrompts.map((prompt, index) => (
+                <Box
+                  key={`queued-prompt-${prompt.id}`}
+                  width={columns}
+                  paddingX={1}
+                  marginTop={index === 0 ? 0 : 1}
+                  backgroundColor={t.userMsgBg}
+                >
+                  <Text wrap="truncate-end">{`↵ ${queuedPromptPreview(prompt.text)}`}</Text>
+                </Box>
+              ))}
+            </Box>
+            {/* Interaction row: input line or approval/input UI, mutually exclusive */}
+            {!state.interrupt && !approvalQueueActive && (
+              <>
+                {state.sessionServiceUnavailable && !state.showSessions && (
+                  <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
+                )}
+                {children}
+              </>
+            )}
+            {activeApproval && (
+              <ApprovalBlock
+                key={`${state.interrupt?.interactionId ?? 'legacy'}:${activeApproval.generation}`}
+                approval={activeApproval}
+                provider={provider}
+                onResolved={resolveApproval}
+                queueEntry={focusedApprovalEntry}
+                externalSubmissionFailure={
+                  approvalEscapeFailure?.interactionId === activeApproval.interactionId
+                    ? approvalEscapeFailure.failure
+                    : undefined
+                }
+              />
+            )}
+            {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
+              <InputBlock
+                interactionId={state.interrupt?.interactionId}
+                question={interruptBlock.question}
+                provider={provider}
+                onResolved={resolveInput}
+                wizardEscBackRef={wizardEscBackRef}
+              />
+            )}
+            {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
+              <PlanReviewBlock
+                interactionId={state.interrupt.interactionId}
+                plan={state.interrupt.plan}
+                artifact={state.interrupt.artifact}
+                provider={provider}
+                onResolved={resolvePlanReview}
+                supplementEscRef={supplementEscRef}
+              />
+            )}
+          </>
+        )}
+      </Footer>
 
       {/* ── Overlay: panels below Footer ── */}
       {!state.interrupt && state.showHelp && (

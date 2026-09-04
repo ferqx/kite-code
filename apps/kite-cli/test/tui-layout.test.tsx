@@ -193,6 +193,9 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         subagentId: event.subagent.id,
         role: event.subagent.role,
         name: 'name' in event.subagent ? event.subagent.name : event.subagent.task,
+        ...(event.subagent.concurrencyGroupId === undefined
+          ? {}
+          : { concurrencyGroupId: event.subagent.concurrencyGroupId }),
       };
     case 'subagent.step':
       return {
@@ -225,12 +228,28 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         type: 'subagent.completed',
         subagentId: event.subagent.id,
         summary: event.subagent.summary,
+        toolCallCount: event.subagent.toolCallCount,
+        durationMs: event.subagent.durationMs,
       };
     case 'subagent.failed':
       return {
         type: 'subagent.failed',
         subagentId: event.subagent.id,
         summary: event.subagent.summary ?? event.subagent.error,
+        ...(event.subagent.toolCallCount === undefined
+          ? {}
+          : { toolCallCount: event.subagent.toolCallCount }),
+        ...(event.subagent.durationMs === undefined
+          ? {}
+          : { durationMs: event.subagent.durationMs }),
+        ...(event.subagent.diagnostic === undefined
+          ? {}
+          : {
+              diagnostic: {
+                code: event.subagent.diagnostic.code,
+                stage: event.subagent.diagnostic.stage,
+              },
+            }),
       };
     case 'run.completed':
       return {
@@ -406,6 +425,19 @@ function fakeProvider(): TuiUserInputProvider {
 const onResolved = () => {};
 const noop = () => {};
 
+async function waitForFrameText(
+  lastFrame: () => string | undefined,
+  text: string,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (lastFrame()?.includes(text)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(lastFrame()).toContain(text);
+}
+
 // ── Footer ──
 
 describe('Footer', () => {
@@ -431,15 +463,16 @@ describe('Footer', () => {
     expect(typeof lastFrame()).toBe('string');
   });
 
-  test('hides global status while keeping blocking interaction content', () => {
+  test('keeps Working while hiding stats behind blocking interaction content', () => {
     const { lastFrame } = render(
-      <Footer {...footerProps} interactionMode="accept_edits" hideGlobalStatus>
+      <Footer {...footerProps} running interactionMode="accept_edits" hideGlobalStatus>
         <Text>blocking interaction</Text>
       </Footer>,
     );
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('blocking interaction');
+    expect(frame).toContain('Working');
     expect(frame).not.toContain('claude-opus');
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -584,6 +617,26 @@ describe('StatusBar', () => {
     );
     const lines = lastFrame()?.split('\n').filter(Boolean);
     expect(lines?.length).toBe(1);
+  });
+
+  test('shows Cancelling while a durable cancel command is pending', () => {
+    const { lastFrame } = render(
+      <StatusBar
+        status={fakeStatus()}
+        runStatus={{
+          phase: 'working',
+          verb: 'Cancelling',
+          tone: 'warning',
+          elapsedMs: 0,
+          runTokenDelta: 0,
+          retry: null,
+          waiting: null,
+        }}
+        running={true}
+        timerKey={1}
+      />,
+    );
+    expect(lastFrame()).toContain('Cancelling');
   });
 });
 
@@ -1426,6 +1479,34 @@ describe('ApprovalBlock', () => {
     });
   });
 
+  test('shows confirmation feedback immediately while the Runtime receipt is pending', async () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-slow', generation: 2 });
+    const provider = fakeProvider();
+    let accept!: () => void;
+    provider.setActionSink(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const view = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={provider}
+        onResolved={() => undefined}
+        queueEntry={fakeClientPendingApproval(approval)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(view.lastFrame()).toContain('Sending confirmation…');
+    expect(view.lastFrame()).not.toContain('Allow once');
+    accept();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
   test('keeps a failed confirmation visible and retries the same choice', async () => {
     const resolved: string[] = [];
     const approval = fakeClientApproval({ interactionId: 'approval-retry', generation: 4 });
@@ -1446,12 +1527,12 @@ describe('ApprovalBlock', () => {
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
     expect(resolved).toEqual([]);
 
     view.stdin.write('\r');
@@ -1460,6 +1541,23 @@ describe('ApprovalBlock', () => {
     }
     expect(resolved).toEqual(['approve']);
     expect(attempts).toBe(2);
+  });
+
+  test('renders an external Escape failure inside the approval footer', () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-escape-retry', generation: 5 });
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={fakeProvider()}
+        onResolved={() => undefined}
+        queueEntry={fakeClientPendingApproval(approval)}
+        externalSubmissionFailure="state_changed"
+      />,
+    );
+
+    expect(lastFrame()).toContain(
+      'The session changed while confirming. The latest interaction state could not be applied.',
+    );
   });
 });
 
@@ -1572,13 +1670,13 @@ describe('InputBlock', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(resolved).toBeUndefined();
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50 && resolved === undefined; attempt += 1) {
@@ -1940,13 +2038,13 @@ describe('PlanReviewBlock', () => {
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(resolved).toEqual([]);
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
@@ -2208,6 +2306,26 @@ describe('concurrent subagent dynamic height', () => {
       { id: 99, kind: 'text', content: 'mutable response', streaming: true },
     ];
     expect(concurrentSubagentStepLimit(mixedBlocks, 24)).toBe(0);
+  });
+
+  test('keeps child identities visible when Delegating shares the mutable tail', () => {
+    const mixedBlocks: OutputBlock[] = [
+      { id: 99, kind: 'text', content: 'mutable response', streaming: true },
+      ...childBlocks,
+    ];
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={mixedBlocks}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Delegating · 4 agents');
+    expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
   });
 
   test('renders concurrent children as one compact Thought-like activity block', () => {
@@ -2547,6 +2665,28 @@ describe('concurrent subagent dynamic height', () => {
   });
 });
 
+describe('ownership-pending model text', () => {
+  test('stays hidden while the active Thought awaits model classification', () => {
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={[
+          {
+            id: 1,
+            kind: 'text',
+            content: 'MUST_STAY_HIDDEN_PENDING_TEXT',
+            responsePending: true,
+          },
+        ]}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+      />,
+    );
+
+    expect(lastFrame()).not.toContain('MUST_STAY_HIDDEN_PENDING_TEXT');
+  });
+});
+
 describe('successor turn rendering', () => {
   test('keeps a successor shell card dynamic after the previous turn was cancelled', () => {
     const cancelled: OutputBlock = {
@@ -2648,6 +2788,24 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('Tool approval cancelled by user.');
     expect(frame).not.toContain('exit:');
     expect(frame.split('Tool approval cancelled by user.')).toHaveLength(2);
+  });
+
+  test('does not infer shell cancellation from terminal output text', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-error-containing-cancelled-text',
+      name: 'shell_execute',
+      args: { command: 'external-command' },
+      status: 'error',
+      summary: 'Command cancelled by the external program.',
+    };
+    const frame =
+      render(
+        <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('exit: error');
   });
 
   test('limits a large user message to thirty content lines while keeping both ends', () => {
@@ -2919,6 +3077,27 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('Cancelled');
   });
 
+  test('does not infer ask_user cancellation from a missing answer payload', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-missing-answer',
+      name: 'ask_user',
+      args: { questions: [{ id: 'scope', question: 'Scope?' }] },
+      status: 'done',
+      summary: '',
+      expanded: true,
+    };
+
+    const frame =
+      render(
+        <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('User:');
+    expect(frame).not.toContain('Cancelled');
+  });
+
   test('renders a single structured ask_user answer without a step prefix', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3080,6 +3259,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
+    expect(frame).toContain('custom-project-script');
     expect(frame).toContain('The shell command requires exact user approval.');
     expect(frame).toContain('rejected before execution');
     expect(frame).not.toContain('(No output)');
@@ -3154,7 +3334,7 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('cancelled');
   });
 
-  test('live and replay cancellation render the same collapsed shell outcome', () => {
+  test('cancel request waits for durable facts and then matches replay rendering', () => {
     const activeCard: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -3174,7 +3354,28 @@ describe('BlockRenderer', () => {
       nextBlockId: 2,
     };
 
-    const live = eventReducer(initial, { type: 'ESCAPE' });
+    let live = eventReducer(initial, { type: 'ESCAPE' });
+    expect(live.running).toBe(true);
+    expect(live.turns[0]!.blocks[0]).toEqual(
+      expect.objectContaining({ status: 'running', summary: '' }),
+    );
+    live = eventReducer(live, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'tool.cancelled',
+        toolCallId: 'shell-1',
+        reason: 'Cancelled by user.',
+      },
+    });
+    live = eventReducer(live, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'turn.aborted',
+        turnId: 'turn-1',
+        reason: 'Cancelled by user.',
+        cause: 'user',
+      },
+    });
     let replay = eventReducer(initial, {
       type: 'RUNTIME_EVENT',
       event: {
@@ -3259,6 +3460,28 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('find files');
   });
 
+  test('updates a running Thinking duration before model.responded arrives', async () => {
+    const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 900,
+      liveModelStartedAt: Date.now() - 900,
+      totalElapsedMs: 0,
+      summaryLine: '',
+      active: true,
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    };
+    const view = render(<BlockRenderer columns={80} block={block} isFocused={false} index={0} />);
+    expect(view.lastFrame()).toContain('Thinking 1s');
+
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+    expect(view.lastFrame()).toContain('Thinking 2s');
+    view.unmount();
+  });
+
   test('collapses settled tool_summary errors to the summary line', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3333,7 +3556,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('Thinking 1s · read 2 files, ran 1 shell command');
   });
 
-  test('phase block renders confirmed captions and pending caption at the top (ADR-0030)', () => {
+  test('phase block does not render accumulated tool-bearing narration', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3370,37 +3593,26 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 标题行 = 累加时长 + 合并统计；旁白与标题之间保留一行，随后位于步骤树之上
+    // 工具响应中的普通 text 只参与归属判断，不成为永久活动历史。
     expect(frame).toContain('Thinking 13s · read 2 files');
-    expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
-    expect(frame).toContain('继续检查运行时边界。');
-    expect(frame).toContain('Now the remaining pieces.');
-    const compactLines = frame.split('\n').map((line) => line.trim());
-    const headerLine = compactLines.findIndex((line) => line.includes('Thinking 13s'));
-    const firstCaptionLine = compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。');
-    expect(firstCaptionLine).toBe(headerLine + 2);
-    expect(compactLines[headerLine + 1]).toBe('');
-    expect(compactLines.indexOf('继续检查运行时边界。')).toBe(firstCaptionLine + 1);
-    expect(compactLines.indexOf('Now the remaining pieces.')).toBe(
-      compactLines.indexOf('继续检查运行时边界。') + 1,
-    );
-    const captionIdx = frame.indexOf('让我系统地阅读');
-    const headerIdx = frame.indexOf('Thinking 13s');
-    const stepsIdx = frame.indexOf('Read App.tsx');
-    expect(captionIdx).toBeGreaterThan(headerIdx);
-    expect(captionIdx).toBeLessThan(stepsIdx);
+    expect(frame).not.toContain('让我系统地阅读 TUI 模块的核心文件。');
+    expect(frame).not.toContain('继续检查运行时边界。');
+    expect(frame).not.toContain('Now the remaining pieces.');
+    expect(frame).toContain('└─ Read App.tsx');
+    expect(frame).toContain('Read types.ts');
   });
 
-  test('phase captions normalize only boundary newlines', () => {
+  test('settled phase keeps stored narration out of the archived summary', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
-      active: true,
+      active: false,
       createdAt: Date.now() - 1_000,
       totalElapsedMs: 1_000,
       summaryLine: 'read 1 file',
       hasThought: true,
       hasThinking: true,
+      result: 'done',
       captions: ['first caption\n', '\nsecond paragraph one\n\nsecond paragraph two\n'],
       tools: [
         {
@@ -3416,13 +3628,16 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
-    const lines = (lastFrame() ?? '').split('\n').map((line) => line.trim());
+    const frame = lastFrame() ?? '';
 
-    expect(lines.indexOf('second paragraph one')).toBe(lines.indexOf('first caption') + 1);
-    expect(lines.indexOf('second paragraph two')).toBe(lines.indexOf('second paragraph one') + 2);
+    expect(frame).toContain('Thinking 1s · read 1 file');
+    expect(frame).not.toContain('first caption');
+    expect(frame).not.toContain('second paragraph one');
+    expect(frame).not.toContain('second paragraph two');
+    expect(frame).not.toContain('Read README.md');
   });
 
-  test('Thinking phase shows the active reasoning preview', () => {
+  test('Thinking phase renders the latest completed reasoning in its activity window', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3445,6 +3660,79 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('Thinking 1s');
     expect(frame).toContain('└─ checking current Thought boundaries');
     expect(frame).not.toContain('├─ Read');
+  });
+
+  test('one Thought alternates reasoning and tool activity before archiving its summary', () => {
+    const tool = {
+      callId: 'sequence-read',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      ok: false,
+      summary: '',
+      status: 'running' as const,
+    };
+    const base = {
+      id: 1,
+      kind: 'tool_summary' as const,
+      active: true,
+      createdAt: Date.now() - 13_000,
+      totalElapsedMs: 13_000,
+      summaryLine: 'read 1 file',
+      hasThought: true,
+      hasThinking: true,
+      tools: [tool],
+    };
+    const { lastFrame, rerender } = render(
+      <BlockRenderer
+        columns={100}
+        block={{
+          ...base,
+          latestActivity: { kind: 'thinking', text: 'first reasoning' },
+        }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('└─ first reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{ ...base, latestActivity: { kind: 'tool', callId: tool.callId } }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).not.toContain('first reasoning');
+    expect(lastFrame()).toContain('└─ Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{
+          ...base,
+          latestActivity: { kind: 'thinking', text: 'second reasoning' },
+        }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('└─ second reasoning');
+    expect(lastFrame()).not.toContain('first reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{ ...base, active: false, result: 'done' }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('Thinking 13s · read 1 file');
+    expect(lastFrame()).not.toContain('second reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
   });
 
   test('awaiting-terminal Thought collapses details as soon as answer text starts', () => {
@@ -3484,35 +3772,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('●');
   });
 
-  test('Thought activity window shows the first five reasoning lines and an ellipsis', () => {
-    const block = {
-      id: 1,
-      kind: 'tool_summary',
-      active: true,
-      latestActivity: {
-        kind: 'thinking',
-        text: 'reason one\nreason two\nreason three\nreason four\nreason five\nreason six',
-      },
-      createdAt: Date.now() - 1000,
-      totalElapsedMs: 1000,
-      summaryLine: 'thinking',
-      hasThought: true,
-      hasThinking: true,
-      tools: [],
-    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
-    const frame =
-      render(
-        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
-      ).lastFrame() ?? '';
-
-    for (const line of ['one', 'two', 'three', 'four', 'five']) {
-      expect(frame).toContain(`reason ${line}`);
-    }
-    expect(frame).not.toContain('reason six');
-    expect(frame).toMatch(/\.\.\.|…/u);
-  });
-
-  test('Thought activity window removes blank lines before taking the head', () => {
+  test('Thinking phase renders multiline reasoning in a bounded activity window', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3520,17 +3780,9 @@ describe('BlockRenderer', () => {
       latestActivity: {
         kind: 'thinking',
         text: [
-          'kept first line',
-          '',
-          '   ',
-          'kept second line   ',
-          '',
-          'kept third line',
-          'kept fourth line',
-          '',
-          'kept fifth line',
-          'discarded sixth line',
-          '',
+          'The user asked to understand the current project.',
+          'This is an informational/exploration request.',
+          'I gathered README.md and CLAUDE.md.',
         ].join('\n'),
       },
       createdAt: Date.now() - 1000,
@@ -3545,12 +3797,10 @@ describe('BlockRenderer', () => {
         <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
       ).lastFrame() ?? '';
 
-    for (const line of ['first', 'second', 'third', 'fourth', 'fifth']) {
-      expect(frame).toContain(`kept ${line} line`);
-    }
-    expect(frame).not.toContain('discarded sixth line');
-    expect(frame).toMatch(/…|\.\.\./u);
-    expect(frame).not.toMatch(/\n\s*\n/u);
+    expect(frame).toContain('Thinking 1s');
+    expect(frame).toContain('The user asked');
+    expect(frame).toContain('informational/exploration');
+    expect(frame).toContain('README.md and CLAUDE.md');
   });
 
   test('latest tool activity replaces the reasoning window', () => {
@@ -3585,7 +3835,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('reasoning must be hidden');
   });
 
-  test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
+  test('latest reasoning replaces prior tool detail under the running Thought header', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3631,7 +3881,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('reviewing the project conventions');
+    expect(frame).toContain('└─ reviewing the project conventions');
     expect(frame).not.toContain('Read README.md');
     // 思考块标题 = "Thinking Xs · <工具统计>"（· 分隔，规则 22）
     expect(frame).toContain('Thinking 1s · read 3 files');
@@ -3744,7 +3994,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('├─');
   });
 
-  test('latest reasoning activity hides tool steps and uses the full activity window', () => {
+  test('latest reasoning activity is bounded and hides prior tool steps', () => {
     const longThought =
       'this is a very long thinking preview that should not spill across the entire terminal width';
     const block = {
@@ -3773,12 +4023,13 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
+    expect(frame).toContain('Thinking 1s');
     expect(frame).toContain('this is a very long thinking');
     expect(frame).not.toContain('运行中');
     expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('shows active reasoning while the cycle continues', () => {
+  test('shows the latest reasoning while the exploration cycle continues', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3808,6 +4059,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
+    expect(frame).toContain('Thinking 1s · read 1 file');
     expect(frame).toContain('still thinking after tools done');
     expect(frame).not.toContain('Read App.tsx');
   });
@@ -3966,7 +4218,7 @@ describe('BlockRenderer', () => {
     // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
     // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
     expect(lastFrame()).toContain('● Thinking 1s');
-    expect(lastFrame()).toContain('reviewing the layout rules');
+    expect(lastFrame()).toContain('└─ reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
   });
@@ -4938,7 +5190,7 @@ describe('OutputArea', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).not.toContain('Delegating · 2 agents');
+    expect(frame).toContain('Delegating · 2 agents');
     expect(frame).toContain('Explore · Inspect runtime files');
     expect(frame).toContain('Review · Review runtime behavior');
     expect(frame).not.toContain('● tool');
@@ -4975,7 +5227,7 @@ describe('OutputArea', () => {
     );
     const groupedFrame = groupedRender.lastFrame() ?? '';
 
-    expect(groupedFrame).not.toContain('Delegating · 2 agents');
+    expect(groupedFrame).toContain('Delegating · 2 agents');
     expect(groupedFrame).toContain('Explore · Inspect the runtime');
     expect(groupedFrame).toContain('Review · Review the tests');
     groupedRender.unmount();
@@ -5408,6 +5660,7 @@ describe('App', () => {
       status: fakeStatus(),
       exited: false,
       running: false,
+      cancellationPending: false,
       runCount: 0,
       showHelp: false,
       showModelSelector: false,
@@ -5442,6 +5695,328 @@ describe('App', () => {
     // Header (Kite Code) should appear before ActivityBar (since it renders first in layout)
     const headerIdx = frame?.indexOf('Kite Code');
     expect(headerIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  test('renders queued successor prompts after active output without changing the current turn', () => {
+    const state = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'subagent',
+              subagentId: 'child-1',
+              task: 'Inspect events',
+              role: 'explore',
+              status: 'running',
+              summary: '',
+              toolCallCount: 0,
+              durationMs: 0,
+              steps: [],
+            },
+          ],
+        },
+      ],
+      queuedPrompts: [
+        { id: 1, sessionId: 'session-a', text: '补充检查事件顺序' },
+        { id: 2, sessionId: 'session-a', text: '检查第二个候选' },
+        {
+          id: 3,
+          sessionId: 'session-a',
+          text: `检查第三个候选-${'长'.repeat(60)}-不应换行`,
+        },
+        { id: 4, sessionId: 'session-b', text: 'other session' },
+      ],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Explore · Inspect events');
+    expect(frame).toContain('↵ 补充检查事件顺序');
+    expect(frame).toContain('↵ 检查第二个候选');
+    expect(frame).toContain('↵ 检查第三个候选');
+    expect(frame).not.toContain('不应换行');
+    expect(frame).not.toContain('Queued — waiting for the current turn to finish');
+    expect(frame).not.toContain('more queued');
+    expect(frame).not.toContain('other session');
+    expect(frame.match(/Working/g)).toHaveLength(1);
+    expect(frame.indexOf('Explore · Inspect events')).toBeLessThan(frame.indexOf('Working'));
+    expect(frame.indexOf('Working')).toBeLessThan(frame.indexOf('↵ 补充检查事件顺序'));
+    const lines = frame.split('\n');
+    const workingLine = lines.findIndex((line) => line.includes('Working'));
+    const firstQueuedLine = lines.findIndex((line) => line.includes('↵ 补充检查事件顺序'));
+    const secondQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第二个候选'));
+    const thirdQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第三个候选'));
+    expect(firstQueuedLine).toBe(workingLine + 2);
+    expect(secondQueuedLine).toBe(firstQueuedLine + 2);
+    expect(thirdQueuedLine).toBe(secondQueuedLine + 2);
+    expect(lines[workingLine + 1]?.trim()).toBe('');
+    expect(lines[firstQueuedLine + 1]?.trim()).toBe('');
+    expect(lines[secondQueuedLine + 1]?.trim()).toBe('');
+  });
+
+  test('keeps the mounted Working spinner when a queued prompt appears', async () => {
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'tool_summary',
+              tools: [
+                {
+                  callId: 'read-before-queue',
+                  name: 'read_file',
+                  args: { path: 'README.md' },
+                  ok: true,
+                  status: 'done',
+                  summary: 'Read README.md',
+                },
+              ],
+              totalElapsedMs: 1_000,
+              createdAt: Date.now() - 1_000,
+              liveModelStartedAt: Date.now(),
+              summaryLine: 'read 1 file',
+              active: true,
+              hasThought: true,
+              hasThinking: true,
+            },
+          ],
+        },
+      ],
+    });
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    await waitForFrameText(view.lastFrame, '⋄ Working');
+    expect(view.lastFrame()?.match(/Thinking /g)).toHaveLength(1);
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          queuedPrompts: [{ id: 1, sessionId: 'session-a', text: 'queued while working' }],
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const queuedFrame = view.lastFrame() ?? '';
+    expect(queuedFrame).toContain('⋄ Working');
+    expect(queuedFrame).toContain('↵ queued while working');
+    expect(queuedFrame.match(/Working/g)).toHaveLength(1);
+    expect(queuedFrame.match(/Thinking /g)).toHaveLength(1);
+    expect(queuedFrame.match(/read 1 file/g)).toHaveLength(1);
+  });
+
+  test('keeps the Delegating projection identical when queued prompts change', () => {
+    const subagents = Array.from(
+      { length: 3 },
+      (_, index): OutputBlock => ({
+        id: index + 1,
+        kind: 'subagent',
+        subagentId: `queue-child-${index + 1}`,
+        task: `explore-area-${index + 1}`,
+        role: 'explore',
+        status: 'running',
+        summary: '',
+        toolCallCount: 4,
+        durationMs: 11_000,
+        concurrencyGroupId: 'queue-concurrency-group',
+        steps: Array.from({ length: 4 }, (_, stepIndex) => ({
+          toolName: `step_${index + 1}_${stepIndex + 1}`,
+          toolArgs: {},
+          status: stepIndex < 3 ? ('success' as const) : ('pending' as const),
+        })),
+      }),
+    );
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [{ blocks: subagents }],
+    });
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const before = view.lastFrame() ?? '';
+    const delegatingBefore = before.slice(before.indexOf('Delegating'), before.indexOf('Working'));
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          queuedPrompts: [
+            { id: 1, sessionId: 'session-a', text: '额' },
+            { id: 2, sessionId: 'session-a', text: '第二条' },
+          ],
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const after = view.lastFrame() ?? '';
+    const delegatingAfter = after.slice(after.indexOf('Delegating'), after.indexOf('Working'));
+
+    expect(delegatingAfter).toBe(delegatingBefore);
+    expect(after.match(/Delegating · 3 agents/g)).toHaveLength(1);
+    expect(after).toContain('↵ 额');
+    expect(after).toContain('↵ 第二条');
+
+    const completedSubagents = subagents.map((block) =>
+      block.kind === 'subagent'
+        ? { ...block, status: 'done' as const, summary: `${block.task} complete` }
+        : block,
+    );
+    const queuedPrompts = [
+      { id: 1, sessionId: 'session-a', text: '额' },
+      { id: 2, sessionId: 'session-a', text: '第二条' },
+    ];
+    view.rerender(
+      <App
+        state={{ ...initial, turns: [{ blocks: completedSubagents }], queuedPrompts }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const childrenDone = view.lastFrame() ?? '';
+    expect(childrenDone.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(childrenDone).toContain('↵ 额');
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          running: false,
+          turns: [{ blocks: completedSubagents }],
+          queuedPrompts,
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const predecessorTerminal = view.lastFrame() ?? '';
+    expect(predecessorTerminal.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(predecessorTerminal).toContain('↵ 额');
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          turns: [
+            { blocks: completedSubagents },
+            {
+              blocks: [
+                {
+                  id: 4,
+                  kind: 'user',
+                  content: '额',
+                  pendingEcho: true,
+                },
+              ],
+            },
+          ],
+          queuedPrompts: [{ id: 2, sessionId: 'session-a', text: '第二条' }],
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const successorAccepted = view.lastFrame() ?? '';
+    expect(successorAccepted.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(successorAccepted.match(/❯ 额/g)).toHaveLength(1);
+    expect(successorAccepted).toContain('↵ 第二条');
+  });
+
+  test('gives a non-empty prompt sole ownership of Enter while Delegating is active', async () => {
+    const actions: Action[] = [];
+    let promptValue = '';
+    const subagents = Array.from(
+      { length: 3 },
+      (_, index): OutputBlock => ({
+        id: index + 1,
+        kind: 'subagent',
+        subagentId: `enter-owner-child-${index + 1}`,
+        task: `inspect enter owner ${index + 1}`,
+        role: 'explore',
+        status: 'running',
+        summary: '',
+        toolCallCount: 2,
+        durationMs: 1_000,
+        concurrencyGroupId: 'enter-owner-group',
+        steps: [
+          {
+            toolName: `read_${index + 1}`,
+            toolArgs: {},
+            status: 'pending',
+          },
+        ],
+      }),
+    );
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [{ blocks: subagents }],
+    });
+
+    function Harness() {
+      const [state, setState] = useState(initial);
+      return (
+        <App
+          state={state}
+          dispatch={(action) => {
+            actions.push(action);
+            setState((current) => canonicalEventReducer(current, action));
+          }}
+          onToggleReason={noop}
+          provider={fakeProvider()}
+          canToggleLastOutputBlock={() => promptValue.trim().length === 0}
+        >
+          <InputLine
+            mode="prompt"
+            workspace={process.cwd()}
+            onValueChange={(value) => {
+              promptValue = value;
+            }}
+            onSubmit={(text) => {
+              setState((current) => ({
+                ...current,
+                queuedPrompts: [{ id: 1, sessionId: 'session-a', text }],
+              }));
+            }}
+          />
+        </App>
+      );
+    }
+
+    const view = render(<Harness />);
+    view.stdin.write('嗯');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(promptValue).toBe('嗯');
+    const before = view.lastFrame() ?? '';
+    const delegatingBefore = before.slice(before.indexOf('Delegating'), before.indexOf('Working'));
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const after = view.lastFrame() ?? '';
+    const delegatingAfter = after.slice(after.indexOf('Delegating'), after.indexOf('Working'));
+
+    expect(after).toContain('↵ 嗯');
+    expect(delegatingAfter).toBe(delegatingBefore);
+    expect(actions.some((action) => action.type === 'TOGGLE_SUBAGENT_EXPAND')).toBe(false);
   });
 
   test('shows HelpPanel when showHelp is true', () => {
@@ -5480,6 +6055,23 @@ describe('App', () => {
     expect(lastFrame()).toContain('Auto');
     expect(lastFrame()).not.toContain('permission-input-marker');
     expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
+  });
+
+  test('does not publish a redundant interaction-mode command for the selected mode', async () => {
+    const selected: string[] = [];
+    const view = render(
+      <App
+        state={fakeState({ showPermissionSelector: true, interactionMode: 'accept_edits' })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onInteractionModeChange={(mode) => selected.push(mode)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(selected).toEqual([]);
   });
 
   test('keeps Full orthogonal to sandbox availability and exposes session grants', async () => {
@@ -5533,7 +6125,7 @@ describe('App', () => {
     expect(view.lastFrame()?.match(/high/g) ?? []).toHaveLength(2);
   });
 
-  test('hides the Footer for every slash-command Overlay', () => {
+  test('hides Footer input but keeps Working for every slash-command Overlay', () => {
     for (const overlay of [
       { showHelp: true },
       { showModelSelector: true },
@@ -5546,7 +6138,7 @@ describe('App', () => {
     ]) {
       const { lastFrame, unmount } = render(
         <App
-          state={fakeState(overlay)}
+          state={fakeState({ ...overlay, running: true, runPromptPresented: true })}
           dispatch={noop}
           onToggleReason={noop}
           provider={fakeProvider()}
@@ -5555,8 +6147,35 @@ describe('App', () => {
         </App>,
       );
       expect(lastFrame()).not.toContain('footer-input-marker');
+      expect(lastFrame()).toContain('Working');
       unmount();
     }
+  });
+
+  test('keeps the mounted Working spinner when a slash-command Overlay opens', async () => {
+    const initial = fakeState({ running: true, runPromptPresented: true });
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
+        <Text>footer-input-marker</Text>
+      </App>,
+    );
+    await waitForFrameText(view.lastFrame, '⋄ Working');
+
+    view.rerender(
+      <App
+        state={{ ...initial, showHelp: true }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      >
+        <Text>footer-input-marker</Text>
+      </App>,
+    );
+
+    const overlayFrame = view.lastFrame() ?? '';
+    expect(overlayFrame).toContain('⋄ Working');
+    expect(overlayFrame).not.toContain('footer-input-marker');
+    expect(overlayFrame).toContain('Help');
   });
 
   test('hides slash suggestions while PermissionSelector is open', () => {
@@ -5951,13 +6570,21 @@ describe('App', () => {
     expect(aborts).toBe(0);
   });
 
-  test('hides run status once final assistant text is visible', () => {
+  test('keeps the fixed Working status visible while final text awaits terminal ownership', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 2_000,
+      thoughtPhaseStatus: 'awaiting_terminal',
       turns: [
         {
-          blocks: [{ id: 1, kind: 'text', content: 'Done. Here is the result.' }],
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Done. Here is the result.',
+              responsePending: true,
+            },
+          ],
         },
       ],
     });
@@ -5965,9 +6592,78 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Done. Here is the result.');
-    expect(frame).not.toContain('Thinking...');
-    expect(frame).not.toContain('Running...');
+    expect(frame).toContain('Working');
+  });
+
+  test('shows Finishing after the final model response while awaiting Run terminal', () => {
+    const state = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Done. Here is the result.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Finishing');
+    expect(frame).not.toContain('Working');
+  });
+
+  test('hides the run status after either authoritative failure projection', () => {
+    const active = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      nextBlockId: 2,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Final text before terminal persistence failed.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    });
+    const failures: RuntimeClientEvent[] = [
+      {
+        type: 'run.failure',
+        runId: 'run-failed',
+        code: 'persistence_unavailable',
+        retryable: false,
+        recoveryEntry: 'reconcile',
+      },
+      {
+        type: 'run.terminal',
+        runId: 'run-terminal-failed',
+        status: 'failed',
+      },
+    ];
+
+    for (const failure of failures) {
+      const failed = eventReducer(active, { type: 'RUNTIME_EVENT', event: failure });
+      expect(failed.running).toBe(false);
+      const view = render(
+        <App state={failed} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+      );
+      const frame = view.lastFrame() ?? '';
+      expect(frame).not.toContain('Working');
+      expect(frame).not.toContain('Finishing');
+      view.unmount();
+    }
   });
 
   test('keeps run status visible while interstitial text is streaming after tools', () => {
@@ -6009,19 +6705,24 @@ describe('App', () => {
     const state = fakeState({
       turns: [{ blocks: [{ id: 1, kind: 'question', question }] }],
       interrupt: { kind: 'input', blockId: 1 },
+      running: true,
+      runPromptPresented: true,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain(question.question);
+    expect(frame).toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
-  test('hides global status while reviewing a plan', () => {
+  test('keeps Working while reviewing a plan', () => {
     const state = fakeState({
       interrupt: { kind: 'plan_review', plan: fakePlan() },
+      running: true,
+      runPromptPresented: true,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -6029,6 +6730,7 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('Plan review');
+    expect(frame).toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });

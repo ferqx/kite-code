@@ -17,9 +17,13 @@ export type Action =
       interactionQueue: RuntimeInteractionQueueProjection;
     }
   | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
+  | { type: 'LOCAL_USER_PROMPT'; text: string }
+  | { type: 'DROP_LOCAL_USER_PROMPT'; text: string }
+  | { type: 'QUEUE_LOCAL_PROMPT'; id: number; sessionId: string; text: string }
+  | { type: 'ACCEPT_QUEUED_PROMPT'; id: number; sessionId: string; text: string }
+  | { type: 'DEQUEUE_LOCAL_PROMPT'; id: number }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }
-  | { type: 'SET_IDLE' }
   | {
       type: 'SET_COMPACTION_PROGRESS';
       phase: ContextCompactionProgressPhase;
@@ -52,6 +56,7 @@ export type Action =
   | { type: 'SET_PHASE'; phase: 'planning' | 'building' }
   | { type: 'ESCAPE' }
   | { type: 'CTRL_C' }
+  | { type: 'CANCEL_REQUEST_FAILED' }
   | { type: 'RESET_CTRL_C' }
   | { type: 'SWITCH_AUTH'; mode: string }
   | { type: 'EXPORT_SESSION' }

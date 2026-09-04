@@ -47,7 +47,7 @@ kill整个组。successor仍必须等Session lease并显式reconcile，不能因
 这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
 完成，KASD-02 App Server与KASD-03默认client均已接入该owner。真实双TUI同时读同一History，两个模拟client争用同Session mutation时只有
 一个成功；client close只收掉parent-owned child，不删除durable facts。验证：
-`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
+`bun test packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts`。
 
 KASD-04的显式daemon只新增process/endpoint lifecycle与logical-message carrier，不新增Session或Store authority。owner-only Unix socket/
 Windows named pipe可承载多个connection；每个connection仍经同一Runtime Server admission，disconnect只释放自身资源。`server/status`与
@@ -73,6 +73,8 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 ## Runtime Server / Client authority boundary
 
 `RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
+
+Effect lease在Model dispatch前仍绑定exact global revision：旧Surface的prepare/attempt-start不得跨revision执行。Provider已经取得durable attempt acknowledgement后，同一active Turn内的`interaction_mode.changed`等无关user control事实不撤销该exact invocation；Host只允许仍为prepared/dispatching的同一invocation继续投影stream，并提交封闭的retry或terminal批次，逐项限制为Model response、由该response排队的Tool及该invocation reservation终结。Turn aborted/completed、invocation已terminal、identity不匹配或批次混入其他事件时继续fail closed。该窄并发准入不移动lease、不建立第二套revision authority，也不允许stale attempt-start。
 
 App 为Server提供backend default admission，并可为每个logical connection绑定不同的canonical trusted Workspace。
 admission可以authorize frozen operation，但绝不从`clientInfo`、display name或request body派生authority，也不command、

@@ -119,6 +119,7 @@ Full 直接执行并保持 Plan lifecycle。空命令、关键系统递归删除
 deny，任何 mode 都不能覆盖。`isReadOnlyShellCommand`同时拥有可证明只读的免审事实、hardened environment、只读
 Subagent role ceiling与scheduler metadata；未命中只能生成`uncertainEffects`真人审批，不能生成destructive deny。
 `git_inspect`只保留为internal Runtime capability，所有模型Git/脚本命令统一通过`shell_execute`。
+主Agent的当前Prompt同时约束常规Workspace检查：优先使用file/search能力；Shell已经运行在当前Workspace，因此不生成冗余`cd`或当前Workspace的`git -C`，Git读取优先拆成单条简单命令，也不只为拼接、分组或裁剪输出引入`&&`、pipe和loop。该约束只降低无谓的unknown/审批与展示碎片，不能替代Builtin只读grammar，也不能让未证明命令取得read-only授权。
 
 ADR-0161把只读证明收敛到Builtin-owned、冻结的v1 Shell semantics registry；registry digest必须进入
 `shell_execute` capability revision，语义升级不能复用旧binding。普通只读program由descriptor声明，参数敏感program
@@ -200,8 +201,8 @@ TUI 同一时刻只显示 `activeApprovalId` 对应且可见的人工请求，�
 
 Subagent 内部工具触发审批时，持久化 interaction 由 parent `task` Tool Call 拥有，child/runtime id 保存在 continuation 与
 approval facts 中用于精确恢复。只有同一 model message/turn 中并发的多个 Explore children 在非 Full parent 下派生 Auto；single
-Explore、plan/code/review 继承 parent。Enter 必须绑定 exact interactionId+generation；Esc 在 Approval overlay 只 reject focused
-request，Ctrl+C 才提交 whole-turn cancel。每个新的 canonical interaction 必须重置审批面板焦点与输入缓冲；TUI 不能依赖 private
+Explore、plan/code/review 继承 parent。Enter 必须绑定 exact interactionId+generation；Esc在Approval overlay拒绝focused
+request并原子取消同turn sibling、结束turn；Ctrl+C仍是独立的whole-turn cancel输入。每个新的canonical interaction必须重置审批面板焦点与输入缓冲；TUI不能依赖private
 deferred slot 或 local acknowledgment。
 
 auto-review 的 Model/Prompt/response parsing 属于 Builtin reviewer；是否接受 reviewer 结果则由
@@ -223,7 +224,7 @@ App 不创建第二 reviewer model，也不存在 direct helper、第二 Gateway
 identity；Shell 的完整命令只保存在载荷的 `command` 字段。命令长度和展示文案变化不得改变 Kernel
 授权结论，也不得使 otherwise valid 的治理事实失效。
 
-Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应 `toolCallId`。Approval overlay 的用户 Esc 只将 focused target 记为 rejected 并推进焦点；不相关 sibling 保持排队。Ctrl+C 才将当前 turn 的 queued/awaiting/authorized/running sibling 记为 cancelled，写入 `turn.aborted(cause=user)` 并停止已启动执行。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，但审批目标仍保留对应终态记录。`approve_once` 与 `same_command` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。当前事件集合不包含 `tool.execution_ready`；State 26 已知历史 journal 中的未知或旧授权 event 只转为无副作用 `runtime.action_ignored`，current journal 的未知 event 仍只使所属会话恢复失败。
+Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应`toolCallId`。Approval overlay的用户Esc或“拒绝”会将focused target记为rejected，并在同一个durable command transaction中把当前turn其余queued/awaiting/authorized/running sibling记为cancelled、完成必要reconciliation并写入`turn.aborted(cause=user)`；拒绝后不得推进下一个审批、启动尚未开始的工具或再次调用模型。Ctrl+C复用相同整轮终止边界，但仍是独立的全局取消输入。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，但审批目标仍保留对应终态记录。`approve_once` 与 `same_command` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。当前事件集合不包含 `tool.execution_ready`；State 26 已知历史 journal 中的未知或旧授权 event 只转为无副作用 `runtime.action_ignored`，current journal 的未知 event 仍只使所属会话恢复失败。
 
 ## 入口覆盖
 

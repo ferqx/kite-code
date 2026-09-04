@@ -4,6 +4,10 @@ import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#kite-cli/tui/provider';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useI18n } from '../i18n';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from '../interaction-submission-diagnostic';
 import type { TuiPendingApproval } from '../types';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
@@ -13,6 +17,7 @@ export interface ApprovalBlockProps {
   provider: TuiUserInputProvider;
   onResolved: (action: string, grant?: string) => void;
   queueEntry?: TuiPendingApproval;
+  externalSubmissionFailure?: InteractionSubmissionFailure;
 }
 
 interface Option {
@@ -26,12 +31,14 @@ export default function ApprovalBlock({
   provider,
   onResolved,
   queueEntry,
+  externalSubmissionFailure,
 }: ApprovalBlockProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionFailed, setSubmissionFailed] = useState(false);
+  const [submissionFailure, setSubmissionFailure] = useState<InteractionSubmissionFailure>();
+  const visibleSubmissionFailure = submissionFailure ?? externalSubmissionFailure;
   const selectedIndexRef = useRef(0);
   const submittingRef = useRef(false);
   const rawInputBuffer = useRef('');
@@ -71,7 +78,7 @@ export default function ApprovalBlock({
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
-    setSubmissionFailed(false);
+    setSubmissionFailure(undefined);
     try {
       if (opt.action === 'approve') {
         const grant = opt.grant ?? 'approve_once';
@@ -94,8 +101,8 @@ export default function ApprovalBlock({
         if (!accepted) throw new Error('Approval rejection was not accepted.');
         onResolved('denied');
       }
-    } catch {
-      setSubmissionFailed(true);
+    } catch (error) {
+      setSubmissionFailure(classifyInteractionSubmissionFailure(error));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -132,6 +139,18 @@ export default function ApprovalBlock({
       return;
     }
   });
+
+  if (submitting) {
+    return (
+      <OverlayFrame
+        title={translate('approval.title', { tool: translate('approval.genericTool') })}
+      >
+        <Box marginLeft={1}>
+          <Text color={t.dim}>{translate('approval.submitting')}</Text>
+        </Box>
+      </OverlayFrame>
+    );
+  }
 
   return (
     <OverlayFrame
@@ -182,10 +201,10 @@ export default function ApprovalBlock({
           selectionBackground={false}
         />
       </Box>
-      {(submitting || submissionFailed) && (
+      {visibleSubmissionFailure && (
         <Box marginTop={1} marginLeft={1}>
-          <Text color={submissionFailed ? t.error : t.dim}>
-            {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+          <Text color={t.error}>
+            {translate(`approval.submissionFailed.${visibleSubmissionFailure}`)}
           </Text>
         </Box>
       )}

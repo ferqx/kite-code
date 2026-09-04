@@ -141,7 +141,6 @@ function parseAskUserAnswers(
 ): {
   answer: string;
   answerMap: Record<string, string> | undefined;
-  isCancelled: boolean;
 } {
   const questions = args.questions as AskQuestionItem[] | undefined;
   if (userInput) {
@@ -152,7 +151,7 @@ function parseAskUserAnswers(
     const rawAnswer = userInput.answer || '(no answer)';
     const answer =
       !questions || questions.length <= 1 ? withoutSingleQuestionKey(rawAnswer) : rawAnswer;
-    return { answer, answerMap, isCancelled: answer === 'Cancelled' };
+    return { answer, answerMap };
   }
 
   let answer: string | undefined;
@@ -182,9 +181,8 @@ function parseAskUserAnswers(
       }
     }
   }
-  const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
   const normalizedAnswer = !questions?.length && answer ? withoutSingleQuestionKey(answer) : answer;
-  return { answer: normalizedAnswer ?? '(no answer)', answerMap, isCancelled };
+  return { answer: normalizedAnswer ?? '(no answer)', answerMap };
 }
 
 /** ask_user 紧凑答案：单题仅显示 User 回答；多题以一条入口分支列出「问题: 回答」。
@@ -193,17 +191,18 @@ function parseAskUserAnswers(
 function renderAskUserSummary(
   args: Record<string, unknown>,
   summary: string,
+  status: Extract<OutputBlock, { kind: 'tool_card' }>['status'],
   dt: Theme,
   maxLine: number,
   translate: I18n['t'],
   userInput?: UserInputResult,
 ): React.ReactNode {
   const questions = askQuestions(args);
-  const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary, userInput);
+  const { answer, answerMap } = parseAskUserAnswers(args, summary, userInput);
 
-  // 已取消（结构化答案为 Cancelled，或无结构化答案且 summary 为空/Cancelled）→ 展示所有问题 + Cancelled 标记
-  // Cancelled (structured answer is Cancelled, or no structured result and summary is empty/Cancelled)
-  const cancelled = isCancelled || (!userInput && (!summary || summary.trim().length === 0));
+  // Cancellation is a structured terminal fact. Missing answer data can occur
+  // while projections are catching up and must not be rendered as cancelled.
+  const cancelled = status === 'cancelled';
   if (cancelled) {
     if (questions.length > 0) {
       return (
@@ -783,6 +782,7 @@ export default function ToolCardBlock({
             renderAskUserSummary(
               block.args,
               block.summary ?? '',
+              block.status,
               dt,
               columns - 2,
               translate,
@@ -838,9 +838,7 @@ export default function ToolCardBlock({
                           : block.status === 'timeout'
                             ? `timed out after ${block.timeoutMs ?? 15000}ms`
                             : 'fetched'
-                      : block.status === 'cancelled' ||
-                          block.summary?.startsWith('Command cancelled') ||
-                          block.summary?.includes('"cancelled":true')
+                      : block.status === 'cancelled'
                         ? 'cancelled'
                         : block.status === 'timeout'
                           ? block.timeoutMs != null

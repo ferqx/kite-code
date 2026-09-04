@@ -147,6 +147,26 @@ describe('Runtime Client event projector', () => {
     expect(
       projectRuntimeClientEvent(
         {
+          type: 'subagent.started',
+          subagent: {
+            id: 'child-1',
+            role: 'explore',
+            name: 'Inspect runtime files',
+            concurrencyGroupId: 'subagent-batch:tool-1',
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.started',
+      subagentId: 'child-1',
+      role: 'explore',
+      name: 'Inspect runtime files',
+      concurrencyGroupId: 'subagent-batch:tool-1',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
           type: 'subagent.step',
           subagent: {
             id: 'child-1',
@@ -191,6 +211,53 @@ describe('Runtime Client event projector', () => {
       summary: '[redacted]',
       totalLines: 3,
       durationMs: 20,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.completed',
+          subagent: {
+            id: 'child-1',
+            summary: 'Inspection complete.',
+            toolCallCount: 3,
+            durationMs: 12_345,
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.completed',
+      subagentId: 'child-1',
+      summary: 'Inspection complete.',
+      toolCallCount: 3,
+      durationMs: 12_345,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.failed',
+          subagent: {
+            id: 'child-2',
+            error: 'provider body must stay private',
+            summary: 'Inspection failed.',
+            toolCallCount: 2,
+            durationMs: 9_000,
+            diagnostic: {
+              code: 'model_step_failed',
+              stage: 'model_step',
+              modelInvocationId: 'private-correlation',
+            },
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.failed',
+      subagentId: 'child-2',
+      summary: 'Inspection failed.',
+      toolCallCount: 2,
+      durationMs: 9_000,
+      diagnostic: { code: 'model_step_failed', stage: 'model_step' },
     });
   });
 
@@ -476,5 +543,21 @@ describe('Runtime Client event projector', () => {
       },
     });
     expect(JSON.stringify(event)).not.toContain('/private/workspace');
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'approval.rejected',
+          interactionId: 'interaction-1',
+          toolCallId: 'tool-1',
+          generation: 7,
+          reason: 'Tool approval rejected by user.',
+        },
+        { sessionRevision: 13 },
+      ),
+    ).toEqual({
+      type: 'approval.rejected',
+      interactionId: 'interaction-1',
+      generation: 7,
+    });
   });
 });

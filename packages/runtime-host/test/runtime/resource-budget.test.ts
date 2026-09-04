@@ -78,8 +78,8 @@ describe('ResourceBudget', () => {
       maxRunOutputTokens: 250_000,
       maxConcurrentSubagents: 2,
       maxConcurrentWriters: 1,
-      maxConcurrentToolInvocations: 4,
-      maxConcurrentShellInvocations: 1,
+      maxConcurrentToolInvocations: 250,
+      maxConcurrentShellInvocations: 250,
       maxConcurrencyWaitMs: 15_000,
       maxArtifactBytes: 256 * 1024 * 1024,
     });

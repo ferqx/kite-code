@@ -1334,37 +1334,69 @@ const GIT_STATUS_VALUE_FLAG_ = new Set([
   '--column',
   '--find-renames',
   '--ignored',
+  '--porcelain',
   '--untracked-files',
 ]);
 const GIT_LOG_FLAG_ = new Set([
+  '--abbrev-commit',
   '--all',
   '--author-date-order',
   '--date-order',
   '--decorate',
   '--first-parent',
+  '--follow',
+  '--graph',
   '--merges',
   '--no-decorate',
   '--no-merges',
+  '--name-only',
+  '--name-status',
   '--oneline',
   '--reverse',
+  '--stat',
   '--topo-order',
 ]);
-const GIT_LOG_VALUE_FLAG_ = new Set(['--after', '--before', '--max-count', '--since', '--until']);
+const GIT_LOG_VALUE_FLAG_ = new Set([
+  '--after',
+  '--author',
+  '--before',
+  '--date',
+  '--decorate',
+  '--format',
+  '--grep',
+  '--max-count',
+  '--pretty',
+  '--since',
+  '--until',
+]);
 const GIT_DIFF_FLAG_ = new Set([
   '--cached',
   '--check',
+  '--exit-code',
+  '--ignore-all-space',
+  '--ignore-blank-lines',
+  '--ignore-space-at-eol',
+  '--ignore-space-change',
   '--name-only',
   '--name-status',
   '--no-color',
   '--no-ext-diff',
   '--no-index',
   '--numstat',
+  '--quiet',
   '--shortstat',
   '--staged',
   '--stat',
   '--summary',
+  '--word-diff',
 ]);
-const GIT_DIFF_VALUE_FLAG_ = new Set(['--diff-filter', '--relative', '--submodule']);
+const GIT_DIFF_VALUE_FLAG_ = new Set([
+  '--color',
+  '--diff-filter',
+  '--relative',
+  '--submodule',
+  '--word-diff',
+]);
 
 /** Closed direct-command grammar for Workspace-only Git metadata inspection. */
 function isReadOnlyGit(tokens: string[]): boolean {
@@ -1644,6 +1676,9 @@ export function isVcsMutationShellCommand(command: string): boolean {
     const subcommand = (tokens[1] ?? '').toLowerCase();
     if (subcommand === 'remote') {
       return isDeclaredGitRemoteMutation((tokens[2] ?? '').toLowerCase());
+    }
+    if (subcommand === 'branch') {
+      return !isDeclaredReadOnlyGitBranch(tokens.slice(2));
     }
     return isDeclaredGitMutation(subcommand);
   });

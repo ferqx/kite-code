@@ -12,6 +12,7 @@ import {
   type RuntimeInteractionResponse,
   type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
+import { formatAppServerMismatch } from '#kite-cli/app-server-diagnostic';
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
 import { connectKiteRuntimeMode, type KiteRuntimeModeConnector } from '#kite-cli/service-mode';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#kite-cli/trace/replay';
@@ -120,7 +121,10 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
           ? await daemon.status()
           : await daemon.stop();
     console.log(args.serverJson ? JSON.stringify(result) : formatAppServerDaemonResult(result));
-    if (result.state === 'incompatible' || result.state === 'unavailable') {
+    if (result.state === 'incompatible') {
+      throw new Error(formatAppServerMismatch('exact_protocol'));
+    }
+    if (result.state === 'unavailable') {
       throw new Error(`App Server daemon is ${String(result.state)}.`);
     }
     if (args.command === 'server-start' && result.state !== 'ready') {

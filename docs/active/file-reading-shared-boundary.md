@@ -315,7 +315,7 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 
 ### Runtime 工具结果渐进展示
 
-- Runtime 可将连续、免审且已证明无副作用的内置读取组成最多 4 项的并行批次；每项仍独立
+- Runtime 可将同一模型响应内连续、免审且已证明无副作用的兼容内置读取组成并行批次，不设置额外固定小批次上限；每项仍独立
   投影工具生命周期事件，TUI 在并发执行期间按实际 started/progress/terminal 事件渐进刷新。
 - `tool.queued` 只保留为 Runtime 调度事实，不创建可见工具块；启动前取消的读取不展示
   Cancelled；只有开始执行，或开始前直接失败且需要展示诊断时才进入消息列表。审批目标只在

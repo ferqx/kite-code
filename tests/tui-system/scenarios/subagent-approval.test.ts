@@ -12,12 +12,12 @@
  * approvalRequiredBlock → subagent.suspended → approval.requested chain.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitUserMessage } from '../harness/input-helpers';
+import { submitUserMessage, submitUserMessageForDeferredDelivery } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -26,7 +26,11 @@ import {
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -159,7 +163,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
           return (
             !screenContains(viewport, '人工审批队列') &&
             !screenContains(viewport, '工具授权') &&
-            (screenContains(viewport, '已授权 · 等待执行') || screenContains(viewport, '执行中'))
+            (screenContains(viewport, '已授权 · 等待执行') || screenContains(viewport, '进行中'))
           );
         },
         'exact child approval to leave the human queue after its durable acknowledgement',
@@ -441,6 +445,219 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       expect(screenContains(output, '工具授权')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Concurrent Sub-agent Aggregation', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    server.setResponses([
+      {
+        message: {
+          content: 'I will inspect two independent areas concurrently.',
+          tool_calls: [
+            {
+              id: 'call_parallel_runtime',
+              name: 'task',
+              args: {
+                name: 'Inspect runtime packages',
+                subagent_type: 'explore',
+                task: 'Inspect the runtime package layout and report a short summary.',
+              },
+            },
+            {
+              id: 'call_parallel_tests',
+              name: 'task',
+              args: {
+                name: 'Inspect test layout',
+                subagent_type: 'explore',
+                task: 'Inspect the test layout and report a short summary.',
+              },
+            },
+          ],
+        },
+      },
+      { delay: 1_000, message: { content: 'Runtime package inspection complete.' } },
+      { delay: 1_000, message: { content: 'Test layout inspection complete.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_parallel_runtime',
+              contentIncludes: ['inspection complete'],
+            },
+            {
+              toolCallId: 'call_parallel_tests',
+              contentIncludes: ['inspection complete'],
+            },
+          ],
+        },
+        message: { content: 'Concurrent delegation completed.' },
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'keeps concurrently dispatched children in one stable card without duplicate React keys',
+    async () => {
+      await submitUserMessage(tui, server, 'Inspect runtime and tests with parallel subagents', {
+        timeout: 15_000,
+      });
+      await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 2 agents', TIMEOUT);
+
+      const active = stripAnsi(tui.viewport());
+      expect(active).toContain('Explore · Inspect runtime packages');
+      expect(active).toContain('Explore · Inspect test layout');
+      expect(active).not.toContain('Encountered two children with the same key');
+
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Concurrent delegation completed.',
+        TIMEOUT,
+      );
+      const completed = stripAnsi(tui.viewport());
+      expect(completed).toContain('Delegated · 2 agents · 2 succeeded');
+      expect(completed.match(/Delegated · 2 agents/g)).toHaveLength(1);
+      expect(completed).not.toContain('Encountered two children with the same key');
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeEach(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will inspect four areas concurrently.',
+          tool_calls: Array.from({ length: 4 }, (_, index) => ({
+            id: `call_cancel_child_${index + 1}`,
+            name: 'task',
+            args: {
+              name: `Inspect cancellation area ${index + 1}`,
+              subagent_type: 'explore',
+              task: `Inspect cancellation area ${index + 1} and report a short summary.`,
+            },
+          })),
+        },
+      },
+      ...Array.from({ length: 4 }, (_, index) => ({
+        delay: 5_000,
+        message: { content: `Cancellation area ${index + 1} inspection complete.` },
+      })),
+      { message: { content: 'Queued successor completed after child cleanup.' } },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterEach(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'keeps child identities visible and admits a queued successor only after cancellation cleanup',
+    async () => {
+      await submitUserMessage(tui, server, 'Start four cancellable subagents', { timeout: 15_000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 4 agents', TIMEOUT);
+      const active = stripAnsi(tui.viewport());
+      for (let index = 1; index <= 4; index += 1) {
+        expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
+      }
+      const activeGroupStart = active.indexOf('Delegating · 4 agents');
+      const activeGroupEnd = active.indexOf('\n\n', activeGroupStart);
+      const activeGroup = active
+        .slice(activeGroupStart, activeGroupEnd < 0 ? undefined : activeGroupEnd)
+        .replace(/\d+s/g, '<elapsed>');
+
+      const queued = await submitUserMessageForDeferredDelivery(
+        tui,
+        server,
+        'Run after cancellation cleanup',
+        {
+          acceptWhen: (viewport) => screenContains(viewport, '↵ Run after cancellation cleanup'),
+          timeout: 15_000,
+        },
+      );
+      expect(
+        server.hasRequestMessage('Run after cancellation cleanup', queued.requestBaseline),
+      ).toBe(false);
+      const queuedViewport = stripAnsi(tui.viewport());
+      const queuedGroupStart = queuedViewport.indexOf('Delegating · 4 agents');
+      const queuedGroupEnd = queuedViewport.indexOf('\n\n', queuedGroupStart);
+      const queuedGroup = queuedViewport
+        .slice(queuedGroupStart, queuedGroupEnd < 0 ? undefined : queuedGroupEnd)
+        .replace(/\d+s/g, '<elapsed>');
+      expect(queuedGroup).toBe(activeGroup);
+
+      const cancelStartedAt = Date.now();
+      tui.write('\x1b');
+      await waitForText(() => tui.viewport(), 'Cancelling', 1_000);
+      expect(Date.now() - cancelStartedAt).toBeLessThan(1_000);
+      // Repeated keys must coalesce onto the same in-flight Runtime command.
+      tui.write('\x1b');
+      tui.write('\x1b');
+
+      await waitForCondition(
+        () =>
+          server
+            .getRequests()
+            .slice(queued.requestBaseline)
+            .some((request) =>
+              request.messages.some(
+                (message) =>
+                  message.role === 'user' && message.content === 'Run after cancellation cleanup',
+              ),
+            ),
+        'queued successor model request after subagent cleanup',
+        TIMEOUT,
+      );
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Queued successor completed after child cleanup.',
+        TIMEOUT,
+      );
+
+      const output = stripAnsi(tui.scrollback());
+      expect(output).not.toContain('Message was not sent: Internal error');
+      expect(output.split('Run after cancellation cleanup').length - 1).toBe(1);
+      const delegatedCount = output.match(/Delegated · 4 agents/g)?.length ?? 0;
+      if (delegatedCount !== 1) throw new Error(`duplicate delegated output:\n${output}`);
+
+      const persisted = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Start four cancellable subagents'),
+      );
+      if (!persisted) throw new Error('Expected the cancelled predecessor turn.');
+      const types = persisted.events.map((event) => event.type);
+      const successorMessageIndex = persisted.events.findIndex(
+        (event) =>
+          event.type === 'user.message_appended' &&
+          event.content === 'Run after cancellation cleanup',
+      );
+      const cleanupIndexes = types.flatMap((type, index) =>
+        type === 'capability.subagent_cleanup_completed' ? [index] : [],
+      );
+      expect(cleanupIndexes).toHaveLength(4);
+      expect(successorMessageIndex).toBeGreaterThan(Math.max(...cleanupIndexes));
+      expect(types).not.toContain('capability.execution_unknown');
     },
     TIMEOUT,
   );

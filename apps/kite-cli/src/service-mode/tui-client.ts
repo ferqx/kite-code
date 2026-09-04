@@ -12,7 +12,11 @@ import type {
   RuntimeRewindPreviewProjection,
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
-import { RUNTIME_COMMAND_SCHEMA_, RUNTIME_QUERY_SCHEMA_ } from '@kite-ai/runtime-contract';
+import {
+  RUNTIME_COMMAND_SCHEMA_,
+  RUNTIME_QUERY_SCHEMA_,
+  sameRuntimeClientInteractionIdentity,
+} from '@kite-ai/runtime-contract';
 import type {
   SessionListProjection,
   SessionPresentationAction,
@@ -39,6 +43,7 @@ const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
 const PRESENTATION_FLUSH_DEADLINE_MS = 1_000;
 const RUN_IDLE_QUERY_INITIAL_DELAY_MS = 2_000;
 const RUN_IDLE_QUERY_MAX_DELAY_MS = 2_000;
+const INTERACTION_CONFLICT_RETRY_DEADLINE_MS = 1_000;
 
 interface NativeSessionRecord {
   readonly threadId: string;
@@ -83,11 +88,13 @@ interface NativeSessionRecord {
     | { readonly resolveRun: () => void; readonly rejectRun: (error: unknown) => void }
     | undefined;
   runAcceptedRunId: string | undefined;
+  runTerminalCandidate: { readonly runId: string; readonly revision: number } | undefined;
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
   mutationAdmitted: boolean;
   resolveRun: (() => void) | undefined;
   rejectRun: ((error: unknown) => void) | undefined;
+  cancelPromise: Promise<void> | undefined;
 }
 
 export interface NativeTuiRuntimeClientOptions {
@@ -294,11 +301,13 @@ class NativeTuiRuntimeClient {
       runIdleResolution: undefined,
       runAcceptedResolution: undefined,
       runAcceptedRunId: undefined,
+      runTerminalCandidate: undefined,
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
       mutationAdmitted: false,
       resolveRun: undefined,
       rejectRun: undefined,
+      cancelPromise: undefined,
     };
     this.#sessions.set(threadId, record);
     return record;
@@ -438,6 +447,7 @@ class NativeTuiRuntimeClient {
       this.#snapshotCallback?.(record.threadId);
       return;
     }
+    if (reconcileSnapshot) this.#replaceInteractionsFromProjection(record);
     if (event.type === 'rewind.terminal') {
       const waiter = record.rewindWaiters.get(event.commandId);
       record.rewindWaiters.delete(event.commandId);
@@ -452,12 +462,19 @@ class NativeTuiRuntimeClient {
     if (event.type === 'reasoning.activity' && event.state === 'completed') {
       await this.#flushPresentationBounded();
     }
-    if (
-      isRunTerminalEvent(event) &&
-      authoritativeProjection &&
-      (record.runAcceptedRunId === undefined || record.runAcceptedRunId === event.runId)
-    ) {
-      record.runAcceptedRunId ??= event.runId;
+    if (isRunTerminalEvent(event) && authoritativeProjection) {
+      if (record.runAcceptedRunId === undefined) {
+        // A successor may still be waiting behind runtime_busy when the
+        // predecessor's terminal event arrives. Keep the revision with the
+        // identity so the later receipt can distinguish that stale terminal
+        // from a legitimate terminal-before-receipt delivery for the successor.
+        record.runTerminalCandidate = { runId: event.runId, revision: record.revision };
+      }
+      if (record.runAcceptedRunId !== event.runId) {
+        this.#syncSnapshot(record);
+        this.#snapshotCallback?.(record.threadId);
+        return;
+      }
       if (isActiveWork(record.projection?.activeWork)) {
         const resolveRun = record.resolveRun;
         if (resolveRun && record.runIdleResolution?.resolveRun !== resolveRun) {
@@ -481,12 +498,8 @@ class NativeTuiRuntimeClient {
   #reconcileRuntimeProjection(record: NativeSessionRecord): void {
     const work = record.projection?.activeWork;
     const active = isActiveWork(work);
-    const interactionQueue = record.projection!.interactionQueue;
-    record.interactions.clear();
-    for (const interaction of interactionQueue.interactions) {
-      record.interactions.set(interaction.interactionId, interaction);
-    }
-    record.pendingInterrupt = record.interactions.size > 0;
+    const interactionQueue = this.#replaceInteractionsFromProjection(record);
+    if (!interactionQueue) return;
     if (!active) {
       record.resolveRun?.();
       record.resolveRun = undefined;
@@ -499,6 +512,19 @@ class NativeTuiRuntimeClient {
         interactionQueue,
       });
     }
+  }
+
+  #replaceInteractionsFromProjection(
+    record: NativeSessionRecord,
+  ): RuntimeSessionProjection['interactionQueue'] | undefined {
+    const interactionQueue = record.projection?.interactionQueue;
+    if (!interactionQueue) return undefined;
+    record.interactions.clear();
+    for (const interaction of interactionQueue.interactions) {
+      record.interactions.set(interaction.interactionId, interaction);
+    }
+    record.pendingInterrupt = record.interactions.size > 0;
+    return interactionQueue;
   }
 
   #applyEventFacts(record: NativeSessionRecord, event: RuntimeClientEvent): void {
@@ -517,10 +543,18 @@ class NativeTuiRuntimeClient {
   #syncSnapshot(record: NativeSessionRecord): void {
     const current = this.#runtime.snapshotStore.getSnapshot().sessions[record.threadId];
     if (!current) return;
-    record.projection = current.projection;
-    record.revision = Math.max(record.revision, current.projection.revision);
-    record.agentLoopActive = isActiveWork(current.projection.activeWork);
-    if (current.projection.displayName) record.name = current.projection.displayName;
+    this.#applyAuthoritativeProjection(record, current.projection);
+  }
+
+  #applyAuthoritativeProjection(
+    record: NativeSessionRecord,
+    projection: RuntimeSessionProjection,
+  ): void {
+    if (projection.revision < (record.projection?.revision ?? 0)) return;
+    record.projection = projection;
+    record.revision = Math.max(record.revision, projection.revision);
+    record.agentLoopActive = isActiveWork(projection.activeWork);
+    if (projection.displayName) record.name = projection.displayName;
   }
 
   async #resolveRunAfterRemoteIdle(record: NativeSessionRecord): Promise<void> {
@@ -612,9 +646,7 @@ class NativeTuiRuntimeClient {
         requestedPhase?: import('@kite-ai/runtime-contract').AgentPhase,
         initialSkills?: TuiInitialSkillActivation[],
       ) => this.#runTask(record, task, dependencies, requestedPhase, initialSkills),
-      abort: () => {
-        void this.#cancelRuntime(record).catch(() => undefined);
-      },
+      abort: () => this.#requestCancel(record),
       setForeground: (foreground: boolean) => {
         record.foreground = foreground;
       },
@@ -661,69 +693,119 @@ class NativeTuiRuntimeClient {
     record.dispatch = dependencies.dispatch;
     record.agentLoopActive = true;
     record.reserved = false;
+    let resolveCompletion!: () => void;
+    let rejectCompletion!: (error: unknown) => void;
     const completion = new Promise<void>((resolve, reject) => {
-      record.resolveRun = resolve;
-      record.rejectRun = reject;
+      resolveCompletion = resolve;
+      rejectCompletion = reject;
     });
     record.runAcceptedResolution = undefined;
     record.runAcceptedRunId = undefined;
+    record.runTerminalCandidate = undefined;
     // `runTask()` is the public failure channel. A concurrent
     // waitForRunCompletion() must observe the same rejection, but the internal
     // completion Promise must not become an unhandled rejection when there is
     // no separate waiter.
     void completion.catch(() => undefined);
-    record.runPromise = completion;
     try {
       await this.#ensureMutationAdmission(record);
-      const commandId = this.#nextCommandId(record.threadId, 'turn');
       let expectedRevision = this.#revision(record);
       let receipt: RuntimeCommandReceipt | undefined;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        // Fence an event-free projection before sending the command. RuntimeClient
-        // can receive the next subscription message before this async continuation
-        // observes the accepted receipt.
-        record.runProjectionRevisionFloor = expectedRevision + 1;
-        receipt = await this.#runtime.command({
-          schema: RUNTIME_COMMAND_SCHEMA_,
-          commandId,
-          type: 'start_turn',
-          sessionId: record.threadId,
-          expectedRevision,
-          input: task,
-          ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
-          ...(initialSkills === undefined ? {} : { initialSkills }),
-        });
+      const admissionDeadline = Date.now() + RUN_WAIT_DEADLINE_MS;
+      let busyRetryDelayMs = 100;
+      while (!receipt) {
+        const commandId = this.#nextCommandId(record.threadId, 'turn');
+        let candidate: RuntimeCommandReceipt | undefined;
+        while (!candidate) {
+          // Fence an event-free projection before sending the command. RuntimeClient
+          // can receive the next subscription message before this async continuation
+          // observes the accepted receipt.
+          record.runProjectionRevisionFloor = expectedRevision + 1;
+          const result = await this.#runtime.command({
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId,
+            type: 'start_turn',
+            sessionId: record.threadId,
+            expectedRevision,
+            input: task,
+            ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
+            ...(initialSkills === undefined ? {} : { initialSkills }),
+          });
+          if (
+            result.status === 'conflict' &&
+            result.code === 'revision_conflict' &&
+            Date.now() < admissionDeadline
+          ) {
+            if (result.currentRevision !== undefined) {
+              expectedRevision = result.currentRevision;
+              record.revision = Math.max(record.revision, result.currentRevision);
+            }
+            // An active predecessor—especially concurrent Subagents—can advance
+            // the Session revision faster than a start_turn CAS round trip. Wait
+            // for its authoritative cleanup boundary before retrying the same
+            // queued command instead of failing after an arbitrary attempt count.
+            await this.#waitForRemoteIdle(record, admissionDeadline);
+            expectedRevision = this.#revision(record);
+            continue;
+          }
+          candidate = result;
+        }
         if (
-          receipt.status === 'conflict' &&
-          receipt.code === 'revision_conflict' &&
-          receipt.currentRevision !== undefined &&
-          attempt < 2
+          candidate?.status === 'rejected' &&
+          candidate.code === 'runtime_busy' &&
+          Date.now() < admissionDeadline
         ) {
-          // The rejected receipt proves that no turn was started. Reuse the
-          // exact command identity at the Service-provided CAS revision so a
-          // terminal-projection race cannot discard a queued user prompt.
-          expectedRevision = receipt.currentRevision;
-          record.revision = Math.max(record.revision, receipt.currentRevision);
+          if (candidate.currentRevision !== undefined) {
+            expectedRevision = candidate.currentRevision;
+            record.revision = Math.max(record.revision, candidate.currentRevision);
+          }
+          await Bun.sleep(busyRetryDelayMs);
+          busyRetryDelayMs = Math.min(busyRetryDelayMs * 2, 1_000);
           continue;
         }
-        break;
+        receipt = candidate;
       }
       if (!receipt) throw new Error('Runtime turn did not return a command receipt.');
       this.#assertApplied(receipt);
+      record.resolveRun = resolveCompletion;
+      record.rejectRun = rejectCompletion;
+      record.runPromise = completion;
       const receiptRunId =
         (receipt.status === 'applied' || receipt.status === 'idempotent_replay') &&
         receipt.resource?.kind === 'run'
           ? receipt.resource.run.runId
           : undefined;
+      const acceptedRevision =
+        receipt.status === 'applied'
+          ? receipt.revision
+          : receipt.status === 'idempotent_replay'
+            ? receipt.originalRevision
+            : expectedRevision;
+      // Read through a method boundary because the subscription consumer can
+      // update this field while the command await above is suspended.
+      const observedTerminalCandidate = this.#terminalCandidate(record);
+      const terminalCandidate =
+        observedTerminalCandidate !== undefined &&
+        observedTerminalCandidate.revision >= acceptedRevision
+          ? observedTerminalCandidate
+          : undefined;
       if (
         receiptRunId !== undefined &&
-        record.runAcceptedRunId !== undefined &&
-        record.runAcceptedRunId !== receiptRunId
+        terminalCandidate !== undefined &&
+        terminalCandidate.runId !== receiptRunId
       ) {
         throw new Error('Runtime turn receipt did not match its terminal Run identity.');
       }
-      record.runAcceptedRunId = receiptRunId ?? record.runAcceptedRunId;
+      record.runAcceptedRunId = receiptRunId ?? terminalCandidate?.runId;
+      record.runTerminalCandidate = undefined;
       this.#recordRevision(record, receipt);
+      dependencies.onAccepted?.();
+      if (record.revision > acceptedRevision && !isActiveWork(record.projection?.activeWork)) {
+        // The terminal projection may win delivery order over the start receipt. It could not
+        // resolve the successor before its callbacks were installed, so consume that already
+        // authoritative terminal here instead of waiting for a fallback query.
+        resolveCompletion();
+      }
       if (record.resolveRun && record.rejectRun) {
         const accepted = Object.freeze({
           resolveRun: record.resolveRun,
@@ -742,7 +824,7 @@ class NativeTuiRuntimeClient {
       await withDeadline(completion, RUN_WAIT_DEADLINE_MS, 'Runtime turn');
       await this.#flushPresentationBounded();
     } catch (error) {
-      record.rejectRun?.(error);
+      rejectCompletion(error);
       throw error;
     } finally {
       record.resolveRun = undefined;
@@ -750,11 +832,16 @@ class NativeTuiRuntimeClient {
       record.runPromise = undefined;
       record.runAcceptedResolution = undefined;
       record.runAcceptedRunId = undefined;
+      record.runTerminalCandidate = undefined;
       record.runProjectionRevisionFloor = undefined;
       record.agentLoopActive = false;
       record.reserved = false;
       this.#snapshotCallback?.(record.threadId);
     }
+  }
+
+  #terminalCandidate(record: NativeSessionRecord): NativeSessionRecord['runTerminalCandidate'] {
+    return record.runTerminalCandidate;
   }
 
   async #waitForRunCompletion(record: NativeSessionRecord): Promise<void> {
@@ -766,8 +853,10 @@ class NativeTuiRuntimeClient {
     if (record.agentLoopActive) await this.#waitForRemoteIdle(record);
   }
 
-  async #waitForRemoteIdle(record: NativeSessionRecord): Promise<void> {
-    const deadline = Date.now() + RUN_WAIT_DEADLINE_MS;
+  async #waitForRemoteIdle(
+    record: NativeSessionRecord,
+    deadline = Date.now() + RUN_WAIT_DEADLINE_MS,
+  ): Promise<void> {
     while (!this.#closed && Date.now() < deadline) {
       if (await this.#queryRemoteIdle(record)) return;
       await Bun.sleep(25);
@@ -829,11 +918,11 @@ class NativeTuiRuntimeClient {
       record.runProjectionRevisionFloor ?? record.revision,
     );
     if (result.session.revision < minimumRevision) return false;
-    if (result.session.revision >= (record.projection?.revision ?? 0)) {
-      record.projection = result.session;
-    }
-    record.revision = Math.max(record.revision, result.session.revision);
-    record.agentLoopActive = isActiveWork(result.session.activeWork);
+    this.#applyAuthoritativeProjection(record, result.session);
+    // A query fallback is authoritative in exactly the same way as a live
+    // projection update. Reconcile it before resolving the local run Promise
+    // so UI lifecycle cleanup never has to invent an idle domain state.
+    this.#reconcileRuntimeProjection(record);
     return !record.agentLoopActive;
   }
 
@@ -874,22 +963,18 @@ class NativeTuiRuntimeClient {
     if (matchingRecords.length > 1) {
       throw new Error('The Runtime interaction is ambiguous across sessions.');
     }
-    const record = matchingRecords[0] ?? this.#sessions.get(this.#activeId);
-    if (!record) throw new Error('The active Runtime session is unavailable.');
+    const record = matchingRecords[0];
+    if (!record) throw new Error('The Runtime interaction is no longer pending.');
     const pendingInteraction = record.interactions.get(action.interactionId);
-    if (!pendingInteraction) {
-      if (action.type === 'cancel') {
-        await this.#cancelRuntime(record);
-        return;
-      }
-      throw new Error('The Runtime interaction is no longer pending.');
-    }
+    if (!pendingInteraction) throw new Error('The Runtime interaction is no longer pending.');
     const commandId = this.#nextCommandId(record.threadId, 'interaction');
     await this.#waitForSessionReady(record.threadId);
     await this.#ensureMutationAdmission(record);
     let interaction = pendingInteraction;
     let expectedRevision = interaction.sessionRevision;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const conflictRetryDeadline = Date.now() + INTERACTION_CONFLICT_RETRY_DEADLINE_MS;
+    let identityRefreshAttempts = 0;
+    while (Date.now() <= conflictRetryDeadline) {
       const command = interactionCommandForAction(
         record.threadId,
         commandId,
@@ -903,18 +988,22 @@ class NativeTuiRuntimeClient {
         receipt.status === 'conflict' &&
         receipt.code === 'revision_conflict' &&
         receipt.currentRevision !== undefined &&
-        attempt < 2
+        Date.now() < conflictRetryDeadline
       ) {
-        // The interaction identity remains fenced by its original
-        // sessionRevision/generation. Unrelated durable events may advance the
-        // Host CAS without republishing that interaction, so retry the same
-        // command id at the proven current revision instead of waiting forever
-        // for an interaction refresh that is not part of the contract.
-        expectedRevision = receipt.currentRevision;
-        record.revision = Math.max(record.revision, receipt.currentRevision);
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        interaction = await this.#refreshInteractionAfterConflict(
+          record,
+          interaction,
+          receipt.currentRevision,
+        );
+        expectedRevision = interaction.sessionRevision;
         continue;
       }
-      if (receipt.status === 'rejected' && receipt.code === 'interaction_mismatch' && attempt < 2) {
+      if (
+        receipt.status === 'rejected' &&
+        receipt.code === 'interaction_mismatch' &&
+        identityRefreshAttempts < 2
+      ) {
         // Provider recovery persists `provider.action_started` before the Host publishes the
         // final pending interaction identity. A fast user can answer the preceding durable
         // notice first. This rejection proves no mutation was applied; wait only for the
@@ -925,6 +1014,7 @@ class NativeTuiRuntimeClient {
           interaction.sessionRevision,
         );
         if (!refreshed) throw new Error('The Runtime interaction identity could not be refreshed.');
+        identityRefreshAttempts += 1;
         interaction = refreshed;
         expectedRevision = refreshed.sessionRevision;
         continue;
@@ -949,11 +1039,55 @@ class NativeTuiRuntimeClient {
     return undefined;
   }
 
+  async #refreshInteractionAfterConflict(
+    record: NativeSessionRecord,
+    previous: RuntimeClientInteraction,
+    minimumRevision: number,
+  ): Promise<RuntimeClientInteraction> {
+    const result = await this.#runtime.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId: record.threadId,
+    });
+    if (
+      result.status !== 'ok' ||
+      result.queryType !== 'get_session_projection' ||
+      !result.session
+    ) {
+      throw new Error('The latest Runtime interaction projection is unavailable.');
+    }
+    if (result.session.revision < minimumRevision) {
+      throw new Error('The latest Runtime interaction projection is stale.');
+    }
+    this.#applyAuthoritativeProjection(record, result.session);
+    this.#replaceInteractionsFromProjection(record);
+    const current = record.interactions.get(previous.interactionId);
+    if (!current || !sameRuntimeClientInteractionIdentity(previous, current)) {
+      throw new Error('The Runtime interaction is no longer pending.');
+    }
+    if (
+      current.sessionRevision < minimumRevision ||
+      current.sessionRevision !== record.projection?.revision
+    ) {
+      throw new Error('The Runtime interaction projection revision is invalid.');
+    }
+    return current;
+  }
+
   async #cancelRuntimeOperations(sessionId: string): Promise<void> {
     const record = this.#sessions.get(sessionId);
     if (!record) return;
-    await this.#cancelRuntime(record);
+    await this.#requestCancel(record);
     await this.#waitForRunCompletion(record);
+  }
+
+  #requestCancel(record: NativeSessionRecord): Promise<void> {
+    if (record.cancelPromise) return record.cancelPromise;
+    const pending = this.#cancelRuntime(record).finally(() => {
+      if (record.cancelPromise === pending) record.cancelPromise = undefined;
+    });
+    record.cancelPromise = pending;
+    return pending;
   }
 
   async #cancelRuntime(record: NativeSessionRecord): Promise<void> {
@@ -993,7 +1127,7 @@ class NativeTuiRuntimeClient {
   #abortAll(): Promise<void> {
     const operations = [...this.#sessions.values()]
       .filter((record) => isActiveWork(record.projection?.activeWork))
-      .map((record) => this.#cancelRuntime(record));
+      .map((record) => this.#requestCancel(record));
     return Promise.all(operations).then(() => undefined);
   }
 
@@ -1074,8 +1208,9 @@ class NativeTuiRuntimeClient {
     if (result.status !== 'ok' || result.queryType !== 'get_session_projection') return null;
     const record = this.#sessions.get(sessionId);
     if (record && result.session) {
-      record.projection = result.session;
-      record.revision = result.session.revision;
+      this.#applyAuthoritativeProjection(record, result.session);
+      this.#reconcileRuntimeProjection(record);
+      return record.projection ?? null;
     }
     return result.session ?? null;
   }

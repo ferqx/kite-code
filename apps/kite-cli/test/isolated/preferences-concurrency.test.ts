@@ -9,7 +9,7 @@ test('independent TUI processes preserve concurrent preference fields', async ()
   const root = realpathSync.native(
     mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-preferences-concurrent-')),
   );
-  const fixture = join(import.meta.dir, 'fixtures', 'write-preference-child.ts');
+  const fixture = join(import.meta.dir, '..', 'fixtures', 'write-preference-child.ts');
   try {
     const startAt = Date.now() + 250;
     const children = [

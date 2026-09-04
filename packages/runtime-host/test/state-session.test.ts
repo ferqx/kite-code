@@ -185,6 +185,42 @@ function message(messageId: string, content = 'hello'): KernelEvent {
   return { type: 'user.message_appended', messageId, content };
 }
 
+function preparedModelEvent(invocationId = 'model-1'): KernelEvent {
+  const surfaceArtifact = {
+    kind: 'model_surface' as const,
+    artifactId: `pa_${'b'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+    byteLength: 1,
+  };
+  return {
+    type: 'model.invocation_prepared',
+    invocationId,
+    purpose: 'primary_agent',
+    surfaceArtifact,
+    surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+    routeFingerprint: `sha256:${'d'.repeat(64)}`,
+    budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+    limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
+    preparedStateRevision: 0,
+    parentInvocationId: null,
+    parentToolCallId: null,
+  };
+}
+
+function completedModelEvent(invocationId = 'model-1'): KernelEvent {
+  return {
+    type: 'model.invocation_completed',
+    invocationId,
+    responseArtifact: {
+      kind: 'model_response',
+      artifactId: `pa_${'e'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'f'.repeat(64)}`,
+      byteLength: 2,
+    },
+    finishReason: 'stop',
+  };
+}
+
 function commandEvidence(): RuntimeCommandCommitEvidence {
   return {
     scopeSessionId: 'scope-session',
@@ -546,6 +582,84 @@ describe('Runtime Host State session', () => {
     expect(f.acknowledgements).toEqual(['attempt_start']);
     expect(f.writes).toHaveLength(1);
     expect(session.getState().revision).toBe(1);
+  });
+
+  test('preserves dispatched Model completion across an unrelated interaction-mode revision', () => {
+    const f = fixture();
+    const session = createRuntimeHostStateSession(f.input);
+    const lease = session.beginEffect({ type: 'call_model' });
+    expect(session.applyEffectResult(lease, [preparedModelEvent()])).toBe(true);
+    expect(
+      session.applyEffectEvents(
+        lease,
+        [
+          {
+            type: 'model.invocation_attempt_started',
+            invocationId: 'model-1',
+            attempt: 1,
+            maxAttempts: 1,
+          },
+        ],
+        'attempt_start',
+      ),
+    ).toBe(true);
+
+    session.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(session.isEffectLeaseCurrent(lease)).toBe(false);
+    expect(session.applyEffectResult(lease, [completedModelEvent()])).toBe(true);
+    expect(session.getState().modelInvocations['model-1']?.status).toBe('completed');
+  });
+
+  test('rejects stale Model attempt-start and completion after its Turn is aborted', () => {
+    const staleAttemptFixture = fixture();
+    const staleAttemptSession = createRuntimeHostStateSession(staleAttemptFixture.input);
+    const staleAttemptLease = staleAttemptSession.beginEffect({ type: 'call_model' });
+    staleAttemptSession.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(
+      staleAttemptSession.applyEffectEvents(
+        staleAttemptLease,
+        [preparedModelEvent()],
+        'attempt_start',
+      ),
+    ).toBe(false);
+
+    const abortedFixture = fixture();
+    const abortedSession = createRuntimeHostStateSession(abortedFixture.input);
+    const abortedLease = abortedSession.beginEffect({ type: 'call_model' });
+    expect(abortedSession.applyEffectResult(abortedLease, [preparedModelEvent()])).toBe(true);
+    expect(
+      abortedSession.applyEffectEvents(
+        abortedLease,
+        [
+          {
+            type: 'model.invocation_attempt_started',
+            invocationId: 'model-1',
+            attempt: 1,
+            maxAttempts: 1,
+          },
+        ],
+        'attempt_start',
+      ),
+    ).toBe(true);
+    abortedSession.processEvent({
+      type: 'turn.aborted',
+      turnId: 'turn-1',
+      reason: 'cancelled',
+      cause: 'user',
+    });
+    expect(
+      abortedSession.applyEffectEvents(abortedLease, [completedModelEvent()], 'receipt_evidence'),
+    ).toBe(false);
   });
 
   test('does not run run_tools terminal validation for attempt-start facts', () => {

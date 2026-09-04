@@ -188,7 +188,7 @@ export interface TuiSessionFacade {
     requestedPhase?: AgentPhase,
     initialSkillActivations?: TuiInitialSkillActivation[],
   ): Promise<void>;
-  abort(): void;
+  abort(): Promise<void>;
   setForeground(foreground: boolean): void;
   setInteractionMode(mode: 'accept_edits' | 'auto' | 'full'): void;
   setDormant(dormant: boolean): void;
@@ -202,6 +202,8 @@ export interface TuiSessionFacade {
 /** Explicit run input accepted by the current InProcess adapter. */
 export interface TuiSessionRunDependencies {
   dispatch: (action: SessionPresentationAction) => void;
+  /** Called exactly once after start_turn is durably admitted, before its events are rendered. */
+  onAccepted?: () => void;
 }
 
 /** Closed client facade used by TUI code; no SessionManager passthrough. */

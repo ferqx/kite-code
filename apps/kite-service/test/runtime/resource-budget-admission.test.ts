@@ -385,6 +385,7 @@ describe('runtime resource budget admission', () => {
   test('queues descendant tool permits durably in FIFO order and promotes atomically', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
+      maxConcurrentShellInvocations: 1,
       maxConcurrencyWaitMs: 1_000,
     });
     if (state.resourceBudget.status === 'active') {
@@ -471,6 +472,7 @@ describe('runtime resource budget admission', () => {
   test('cancels a queued descendant permit with the child invocation signal', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
+      maxConcurrentShellInvocations: 1,
       maxConcurrencyWaitMs: 1_000,
     });
     if (state.resourceBudget.status === 'active') {
@@ -1041,6 +1043,7 @@ describe('runtime resource budget admission', () => {
   test('projects descendant permit timeout through the canonical run terminal policy', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
+      maxConcurrentShellInvocations: 1,
       maxConcurrencyWaitMs: 5,
     });
     if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');

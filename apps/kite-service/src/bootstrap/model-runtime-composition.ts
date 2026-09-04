@@ -98,6 +98,9 @@ export type InstalledKiteRuntimeComposition = {
   subagentRuntimeFactory: AppSubagentRuntimeFactory;
   reconcilePendingSubagents: (
     persistence: Parameters<typeof reconcilePendingSubagentProvidersAfterCrash>[0]['persistence'],
+    options?: Readonly<{
+      terminalDisposition?: 'unknown' | 'preserve_user_cancellation';
+    }>,
   ) => Promise<boolean>;
   subagentContinuationArtifacts: SubagentContinuationArtifactAccess;
   subagentTaskRequests: SubagentTaskRequestArtifactAccess;
@@ -189,10 +192,13 @@ export function resolveInstalledKiteRuntimeComposition(
     capabilityArtifacts,
     sandboxPreparationArtifacts,
     subagentRuntimeFactory: () => createPipelineSubagentRuntime(() => subagentComposition),
-    reconcilePendingSubagents: (persistence) =>
+    reconcilePendingSubagents: (persistence, options) =>
       reconcilePendingSubagentProvidersAfterCrash({
         composition: subagentComposition,
         persistence,
+        ...(options?.terminalDisposition
+          ? { terminalDisposition: options.terminalDisposition }
+          : {}),
       }),
     subagentContinuationArtifacts,
     subagentTaskRequests,

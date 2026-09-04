@@ -154,7 +154,6 @@ export function projectRuntimeClientEvent(
         type: 'approval.rejected',
         interactionId: event.interactionId,
         generation: event.generation,
-        summary: 'Approval rejected.',
       };
     case 'user_input.requested':
       return {
@@ -287,6 +286,9 @@ export function projectRuntimeClientEvent(
           'name' in event.subagent ? event.subagent.name : event.subagent.task,
           8_192,
         ),
+        ...(event.subagent.concurrencyGroupId === undefined
+          ? {}
+          : { concurrencyGroupId: event.subagent.concurrencyGroupId }),
       };
     case 'subagent.step':
       return {
@@ -325,12 +327,28 @@ export function projectRuntimeClientEvent(
         type: 'subagent.completed',
         subagentId: event.subagent.id,
         summary: projectRuntimeClientText(event.subagent.summary, 8_192),
+        toolCallCount: event.subagent.toolCallCount,
+        durationMs: event.subagent.durationMs,
       };
     case 'subagent.failed':
       return {
         type: 'subagent.failed',
         subagentId: event.subagent.id,
         summary: projectRuntimeClientText(event.subagent.summary ?? event.subagent.error, 8_192),
+        ...(event.subagent.toolCallCount === undefined
+          ? {}
+          : { toolCallCount: event.subagent.toolCallCount }),
+        ...(event.subagent.durationMs === undefined
+          ? {}
+          : { durationMs: event.subagent.durationMs }),
+        ...(event.subagent.diagnostic === undefined
+          ? {}
+          : {
+              diagnostic: {
+                code: event.subagent.diagnostic.code,
+                stage: event.subagent.diagnostic.stage,
+              },
+            }),
       };
     case 'context.compaction_requested':
       return {

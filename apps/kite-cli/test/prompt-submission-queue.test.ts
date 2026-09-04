@@ -44,7 +44,7 @@ test('TUI prompt session preserves a submitted identity and reuses an existing s
   expect(createCalls).toBe(0);
 });
 
-test('TUI prompt queue preserves FIFO order and the enqueue-time Session identity', async () => {
+test('TUI prompt queue preserves per-Session FIFO without blocking another Session', async () => {
   const queue = new TuiPromptSubmissionQueue();
   const order: string[] = [];
   let releaseFirst!: () => void;
@@ -65,15 +65,18 @@ test('TUI prompt queue preserves FIFO order and the enqueue-time Session identit
   });
 
   await Bun.sleep(0);
-  expect(order).toEqual(['start:session-a:first']);
+  expect(order).toEqual(['start:session-a:first', 'run:session-b:third']);
+  expect(queue.hasPending('session-a')).toBe(true);
+  expect(queue.hasPending('session-b')).toBe(false);
   releaseFirst();
   await Promise.all([first, second, third]);
   expect(order).toEqual([
     'start:session-a:first',
+    'run:session-b:third',
     'finish:session-a:first',
     'run:session-a:second',
-    'run:session-b:third',
   ]);
+  expect(queue.hasPending('session-a')).toBe(false);
 });
 
 test('TUI prompt queue exposes a submission failure without poisoning later prompts', async () => {

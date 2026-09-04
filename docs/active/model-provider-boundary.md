@@ -106,6 +106,7 @@ Gateway 的 `perAttemptTimeoutMs` 是单次尝试的无活动超时；当前默�
 请求同时受调用方取消信号约束：子代理使用自身总 deadline，前台请求使用用户取消或 Host deadline。Gateway 会主动
 与取消信号竞速，并在 attempt-start ack 后、Provider dispatch 前以及 pending completion commit 前重新检查同一信号。即使 Provider 忽略 AbortSignal，也不能在取消后发起新的 attempt、发布 Response Artifact 或完成事实；Gateway 继续独占
 retry/backoff 与失败后的 total retry budget。
+Model attempt取得durable acknowledgement之前继续服从exact global revision fence；旧Surface不得在并发控制变更后开始dispatch。attempt已经dispatch后，同一active Turn内的interaction mode等user control revision不撤销该exact invocation：其瞬态stream仍可投影，retry或completion/interruption batch仍可按精确invocation identity提交。Host只接受Gateway可能产生的封闭Model response、Tool queue和该invocation reservation终结形状；Turn已terminal、invocation已terminal、identity不匹配或批次夹带其他事件时拒绝。该规则不移动lease或创建第二套revision authority。
 live Source 将 Provider 的原始异常保留为进程内 `cause`，但 Gateway 对外始终抛出带结构化 attempt outcome
 的失败；Runtime 依据该 outcome（而非错误文案）把耗尽的 timeout、rate limit 与 server/connection retry
 统一收敛为 `model_retry_exhausted` terminal。该结构化分类不会把 Provider response body 写入 Runtime Event。
@@ -144,6 +145,7 @@ Artifact receipt；恢复路径不自动重放，也没有 live fallback。
 - Model Controller 将 provider 输出规范化为 Runtime transcript/events；上游不读取私有响应对象。
 - `model.responded` 事件必须把模型调用时长（`kite_code.model.duration_ms`，来自 `model.responded.durationMs`）持久化进会话日志属性；TUI 阶段块的 `Thinking Xs` 计时（thought-pre-consolidation.md 规则 11/22）依赖此字段，缺失时回放回退墙钟。
 - Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
+- 主Agent静态Prompt告知模型常规检查已经位于当前Workspace，并优先使用file/search能力；Git读取优先发出单条简单命令，不为组合或裁剪输出引入冗余`cd`、当前Workspace的`git -C`、`&&`、pipe或loop。这只减少无法证明的Shell形态和多余审批，实际read-only授权仍完全由Builtin grammar决定。
 - 模型发起 `ask_user` 时，每个选项必须提供 `label` 与 `description`，并将推荐项放在首位；
   `recommended` 布尔值可选，最多一个可为 true。Runtime/TUI 优先采用显式标记，否则稳定回退到
   首项，避免纯展示字段遗漏阻断交互。

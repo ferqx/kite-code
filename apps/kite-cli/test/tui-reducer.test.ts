@@ -113,6 +113,189 @@ describe('TUI RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('renders the original tool card when approval rejects it before dispatch', () => {
+    let state = createInitialState();
+    state = apply(state, {
+      type: 'tool.queued',
+      toolId: 'shell-rejected-by-user',
+      toolName: 'shell_execute',
+      presentation: 'standalone',
+      arguments: { command: 'git status' },
+      summary: 'Queued.',
+    });
+    state = apply(state, {
+      type: 'approval.queued',
+      queueSequence: 1,
+      interaction: {
+        kind: 'approval',
+        interactionId: 'approval-rejected-by-user',
+        sessionRevision: 3,
+        generation: 0,
+        grants: ['approve_once'],
+        command: 'git status',
+      },
+    });
+    state = apply(state, {
+      type: 'approval.rejected',
+      interactionId: 'approval-rejected-by-user',
+      generation: 0,
+    });
+    state = apply(state, {
+      type: 'tool.rejected',
+      toolId: 'shell-rejected-by-user',
+      summary: 'Cancelled by user.',
+    });
+
+    expect(blocks(state).filter((block) => block.kind === 'text')).toHaveLength(0);
+    expect(blocks(state)).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_card',
+        callId: 'shell-rejected-by-user',
+        name: 'shell_execute',
+        args: { command: 'git status' },
+        status: 'rejected',
+        summary: 'Cancelled by user.',
+      }),
+    );
+  });
+
+  test('keeps accepted approval tool metadata until authoritative tool events settle it', () => {
+    const queuedTool: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'approval-accepted-tool',
+      name: 'shell_execute',
+      args: { command: 'git status' },
+      status: 'queued',
+      summary: 'Queued.',
+    };
+    const queuedSummary: OutputBlock = {
+      id: 2,
+      kind: 'tool_summary',
+      tools: [
+        {
+          callId: 'approval-accepted-summary-tool',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          status: 'running',
+          ok: false,
+          summary: 'Running.',
+        },
+      ],
+      totalElapsedMs: 0,
+      createdAt: Date.now(),
+      summaryLine: 'read 1 file',
+      active: true,
+      hasThought: false,
+    };
+    const interaction = {
+      kind: 'approval' as const,
+      interactionId: 'approval-accepted',
+      sessionRevision: 4,
+      generation: 0,
+      grants: ['approve_once' as const],
+      command: 'git status',
+    };
+    let state = eventReducer(
+      {
+        ...createInitialState(),
+        running: true,
+        turns: [{ blocks: [queuedTool, queuedSummary] }],
+        nextBlockId: 3,
+        currentThoughtSummaryId: queuedSummary.id,
+        pendingToolCalls: {
+          [queuedTool.callId]: {
+            name: queuedTool.name,
+            args: queuedTool.args,
+            presentation: 'standalone',
+          },
+        },
+        pendingApprovals: new Map([
+          [
+            interaction.interactionId,
+            {
+              interactionId: interaction.interactionId,
+              toolCallId: queuedTool.callId,
+              route: 'user',
+              status: 'awaiting_user',
+              sequence: 0,
+              generation: interaction.generation,
+              clientInteraction: interaction,
+            },
+          ],
+        ]),
+        activeApprovalId: interaction.interactionId,
+        interrupt: {
+          kind: 'approval',
+          interactionId: interaction.interactionId,
+          toolCallId: queuedTool.callId,
+        },
+      },
+      {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      },
+    );
+    expect(state.pendingApprovals?.get(interaction.interactionId)?.status).toBe('approving');
+    state = eventReducer(state, {
+      type: 'RECONCILE_RUNTIME_PROJECTION',
+      active: true,
+      interactionQueue: {
+        revision: 5,
+        activeInteractionId: interaction.interactionId,
+        interactions: [{ ...interaction, sessionRevision: 5 }],
+      },
+    });
+
+    expect(blocks(state)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'approval-accepted-tool',
+          status: 'queued',
+        }),
+        expect.objectContaining({
+          kind: 'tool_summary',
+          id: queuedSummary.id,
+          active: true,
+          tools: [expect.objectContaining({ status: 'running' })],
+        }),
+      ]),
+    );
+    expect(state.pendingToolCalls[queuedTool.callId]).toEqual(
+      expect.objectContaining({ name: 'shell_execute', args: { command: 'git status' } }),
+    );
+
+    state = apply(state, { type: 'tool.started', toolId: queuedTool.callId });
+    expect(blocks(state)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: queuedTool.callId,
+          status: 'running',
+        }),
+      ]),
+    );
+    state = apply(state, {
+      type: 'tool.finished',
+      toolId: queuedTool.callId,
+      toolName: 'shell_execute',
+      presentation: 'standalone',
+      result: { ok: true, exitCode: 0, stdout: 'clean', stderr: '' },
+      summary: 'Completed.',
+    });
+    expect(blocks(state)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: queuedTool.callId,
+          status: 'done',
+          args: { command: 'git status' },
+        }),
+      ]),
+    );
+  });
+
   test('reconciles an approval directly from an authoritative Runtime snapshot', () => {
     const state = eventReducer(
       { ...createInitialState(), running: true },
@@ -260,6 +443,13 @@ describe('TUI RuntimeClientEvent reducer', () => {
         requestId: 'snapshot-request-1',
       },
     );
+    state = apply(state, {
+      type: 'reasoning.activity',
+      requestId: 'snapshot-request-1',
+      state: 'completed',
+      segmentId: 'snapshot-reasoning-1',
+      text: 'Selecting exploration tools.',
+    });
     state = eventReducer(state, {
       type: 'RECONCILE_RUNTIME_PROJECTION',
       active: false,
@@ -269,6 +459,16 @@ describe('TUI RuntimeClientEvent reducer', () => {
     expect(state.running).toBe(false);
     expect(state.exited).toBe(false);
     expect(state.interrupt).toBeNull();
+    expect(blocks(state)).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: false,
+        tools: [],
+      }),
+    ]);
+    expect(
+      (blocks(state)[0] as Extract<OutputBlock, { kind: 'tool_summary' }>).result,
+    ).toBeUndefined();
     expect(blocks(state)).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ content: expect.stringContaining('Cancel') }),
@@ -320,8 +520,13 @@ describe('TUI RuntimeClientEvent reducer', () => {
 
     expect(state.status.phase).toBe('planning');
     expect(state.interactionMode).toBe('full');
-    expect(state.currentModelReasoningStreamed).toBe(true);
+    expect(state.currentModelReasoningStreamed).toBe(false);
+    expect(state.currentModelReasoningRequestId).toBeUndefined();
+    expect(state.currentModelReasoningText).toBeUndefined();
     expect(state.running).toBe(false);
+    expect(blocks(state)).toContainEqual(
+      expect.objectContaining({ kind: 'tool_summary', active: false, hasThinking: true }),
+    );
     expect(blocks(state)).toContainEqual(
       expect.objectContaining({ content: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable' }),
     );
@@ -402,7 +607,13 @@ describe('TUI RuntimeClientEvent reducer', () => {
         role: 'review',
         name: 'Review changes',
       },
-      { type: 'subagent.completed', subagentId: 'subagent-1', summary: 'Review complete.' },
+      {
+        type: 'subagent.completed',
+        subagentId: 'subagent-1',
+        summary: 'Review complete.',
+        toolCallCount: 0,
+        durationMs: 2_000,
+      },
       { type: 'context.compaction', status: 'completed' },
       { type: 'unavailable', reason: 'redacted' },
     ];

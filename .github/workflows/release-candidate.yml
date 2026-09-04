@@ -56,8 +56,8 @@ jobs:
         run: >-
           bun test
           packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
-          packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts
-          packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts
+          packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts
+          packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts
           packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
           tests/release/app-server-daemon.test.ts
       - name: Release contract tests

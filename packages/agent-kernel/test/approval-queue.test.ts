@@ -49,7 +49,7 @@ function commandIdentity(
     sessionId: 'session-approval-queue',
     threadId: 'session-approval-queue',
     workspace: '/workspace/project',
-    canonicalWorkspaceIdentity: 'sha256:' + 'a'.repeat(64),
+    canonicalWorkspaceIdentity: `sha256:${'a'.repeat(64)}`,
     cwd: '/workspace/project',
     executor: 'shell',
     environment: 'env-digest-1',

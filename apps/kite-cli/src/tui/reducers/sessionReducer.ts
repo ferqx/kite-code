@@ -50,6 +50,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           state.sessions.find((s) => s.threadId === state.activeSessionId)?.workspace ?? '',
         active: true,
         running: false,
+        runPromptPresented: true,
+        cancellationPending: false,
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
@@ -74,6 +76,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         interrupt: null,
         exited: false,
         running: false,
+        cancellationPending: false,
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
@@ -119,6 +122,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              runPromptPresented: state.runPromptPresented,
+              cancellationPending: state.cancellationPending,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               pendingApprovals: state.pendingApprovals,
@@ -195,6 +200,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         interactionMode: action.interactionMode ?? target?.interactionMode ?? state.interactionMode,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
+        cancellationPending: false,
         ctrlCPressed: false,
         exitRequested: false,
         status: {
@@ -255,6 +261,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessionCommandGrantRevision: target?.sessionCommandGrantRevision ?? 0,
         exited: false,
         running: target?.running ?? false,
+        runPromptPresented: target?.runPromptPresented,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
@@ -267,6 +274,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
         sessionKey: state.sessionKey + 1,
+        cancellationPending: target?.cancellationPending ?? false,
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
@@ -342,7 +350,13 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       return { ...state, sessions };
     }
     case 'DELETE_SESSION':
-      return { ...state, showSessions: false };
+      return {
+        ...state,
+        showSessions: false,
+        queuedPrompts: (state.queuedPrompts ?? []).filter(
+          (prompt) => prompt.sessionId !== action.threadId,
+        ),
+      };
     case 'SET_THINKING_LEVEL':
       return {
         ...state,

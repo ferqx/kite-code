@@ -83,8 +83,8 @@ describe('ordinary open-source release candidate workflow', () => {
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
       'Verify Windows App Server endpoint and Session Store fencing',
       'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
-      'packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts',
-      'packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts',
       'tests/release/app-server-daemon.test.ts',
       'bun run release:build',
     ];

@@ -56,9 +56,23 @@
   或用 `stream_frame_sequence` 与 `stream_frame_delays` 精确构造
   `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
   原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
+- 最终回复journey必须分别覆盖无Thought归属歧义的组件级流式提交，以及active Thought下的分类等待。前者的首个完整Markdown
+  组件应在最后组件前进入真实VT/scrollback并由Static拥有；后者的完整前缀必须保持隐藏`responsePending`，直到
+  `model.responded(toolCallCount=0)`才发布，若`toolCallCount>0`则删除buffer并继续同一活动Thought。最终各组件在scrollback中
+  各出现一次，工具型多轮项目探索只能留下一个聚合Thinking标题；在最终模型调用期间加入queued successor后，Thinking数量和
+  工具统计必须保持不变，且后继prompt仍能正常执行。Headless terminal harness通过
+  `scrollViewport()`与`viewportPosition()`模拟原生滚动；回答完成后向上滚动并等待空闲渲染窗口，距`baseY`的偏移必须保持，
+  不得因Footer、焦点或长dynamic tree重绘回到默认位置。场景还必须在滚动后分别注入DEC FocusOut/FocusIn，并证明
+  两次报告不产生任何新PTY stdout；同一TUI进程必须在连续两个完成Turn后重复该断言，避免只覆盖首次回答的Static初始化窗口。
+  独立终态工具与全组终态Subagent也必须各有一条长回答journey，证明前置卡片不会阻塞后续组件Static、终态摘要只出现一次，
+  且完成后的原生滚动在焦点报告前后仍保持零stdout与原偏移。
+  仅验证headless `scrollLines()`后的buffer位置不足以覆盖真实滚动条交互。
 - `model.requested`不是可见边界；没有正文、standalone tool或interaction打断时，相邻read/search与服务端判定为read-only的shell继续聚合在
   同一个Thought。TUI只消费Service给出的`presentation`分类，不根据原始command重新推断工具风险或展示类别。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
+- 并发Subagent取消回归必须在真实PTY中同时验证child identity、Esc后1秒内`Cancelling`、重复Esc去重、queued successor
+  的模型响应、入队前后完全相同的`Delegating`投影，以及durable Provider cleanup全部早于successor message且不产生
+  `capability.execution_unknown`。
 - 普通消息输入必须覆盖当前 Turn 运行期间的连续 Enter：第二条消息先显示本地排队回执，再以提交时的 Session identity
   等待 Service 权威 idle projection；遇到明确 `revision_conflict` 只使用同一 commandId 与 Service 返回的 current revision
   有界重试，最终两条模型请求和渲染各一次，不得清空后静默丢失或因切换 Session 改投目标。

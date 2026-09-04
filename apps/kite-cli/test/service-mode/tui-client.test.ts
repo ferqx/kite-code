@@ -7,6 +7,7 @@ import type {
   RuntimeHistoryClient,
 } from '@kite-ai/runtime-client';
 import { RuntimeClient } from '@kite-ai/runtime-client';
+import type { RuntimeClientInteraction } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { SessionPresentationAction } from '../../src/adapters/tui/session-adapter';
 import { createNativeTuiRuntimeClient } from '../../src/service-mode';
@@ -93,6 +94,7 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   await approvalRun;
   expect(remote.commands).toContain('respond_interaction');
   expect(remote.interactionExpectedRevisions).toEqual([4, 5]);
+  expect(remote.interactionPayloadRevisions).toEqual([4, 5]);
 
   session!.setLocalReplayRecovery(true);
   const continued = await facade.forkRecoveredSessionForContinuation(sessionId);
@@ -157,6 +159,59 @@ test('Native TUI facade restores an approval from a snapshot without waiting for
   await facade.dispose();
 });
 
+test('Native TUI facade refreshes a pending interaction from an eventful projection', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.requestApprovalOnNextTurn();
+  remote.acceptNextInteractionWithoutConflict();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const run = facade
+    .getRuntime(sessionId)!
+    .runTask('confirm after sibling progress', { dispatch: () => {} });
+
+  await Bun.sleep(5);
+  remote.advancePendingApprovalWithDurableEvent(8);
+  await Bun.sleep(5);
+  await facade.submitUserAction({
+    type: 'approve',
+    interactionId: 'approval-native-receipt',
+    generation: 0,
+    grant: 'approve_once',
+  });
+
+  expect(remote.interactionExpectedRevisions).toEqual([8]);
+  expect(remote.interactionPayloadRevisions).toEqual([8]);
+  await run;
+  await facade.dispose();
+});
+
+test('Native TUI facade follows repeated interaction conflicts within a bounded deadline', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.requestApprovalOnNextTurn();
+  remote.conflictNextInteractionTimes(5);
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const run = facade
+    .getRuntime(sessionId)!
+    .runTask('confirm through sibling revisions', { dispatch: () => {} });
+
+  await Bun.sleep(5);
+  await facade.submitUserAction({
+    type: 'approve',
+    interactionId: 'approval-native-receipt',
+    generation: 0,
+    grant: 'approve_once',
+  });
+
+  expect(remote.interactionExpectedRevisions).toEqual([4, 5, 6, 7, 8, 9]);
+  expect(remote.interactionPayloadRevisions).toEqual(remote.interactionExpectedRevisions);
+  expect(new Set(remote.interactionCommandIds).size).toBe(1);
+  await run;
+  await facade.dispose();
+});
+
 test('Native TUI facade replaces stale interactions from an authoritative snapshot queue', async () => {
   const remote = new FakeRuntimeConnection();
   remote.replaceApprovalSnapshotOnNextTurn();
@@ -187,6 +242,21 @@ test('Native TUI facade replaces stale interactions from an authoritative snapsh
   await facade.dispose();
 });
 
+test('Native TUI facade never routes a stale interaction cancel to the active session', async () => {
+  const remote = new FakeRuntimeConnection();
+  const facade = facadeFor(remote);
+  const first = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(first);
+  const second = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(second);
+
+  await expect(
+    facade.submitUserAction({ type: 'cancel', interactionId: 'stale-interaction' }),
+  ).rejects.toThrow('no longer pending');
+  expect(remote.commands).not.toContain('cancel_turn');
+  await facade.dispose();
+});
+
 test('Native TUI facade completes an active run from an idle snapshot after a subscription gap', async () => {
   const remote = new FakeRuntimeConnection();
   remote.finishNextTurnWithSnapshot();
@@ -213,10 +283,11 @@ test('Native TUI facade polls an accepted run when its Run terminal notification
   const facade = facadeFor(remote);
   const sessionId = facade.createSession('/tmp/tui-client-workspace');
   await facade.waitForSessionReady(sessionId);
+  const actions: SessionPresentationAction[] = [];
 
   await Promise.race([
     facade.getRuntime(sessionId)!.runTask('recover terminal notification gap', {
-      dispatch: () => {},
+      dispatch: (action) => actions.push(action),
     }),
     Bun.sleep(3_500).then(() => {
       throw new Error('Accepted Runtime turn did not recover from a terminal notification gap.');
@@ -224,6 +295,11 @@ test('Native TUI facade polls an accepted run when its Run terminal notification
   ]);
 
   expect(remote.idleQueryRevisions).toContain(3);
+  expect(actions).toContainEqual({
+    type: 'RECONCILE_RUNTIME_PROJECTION',
+    active: false,
+    interactionQueue: { revision: 3, interactions: [] },
+  });
   await facade.dispose();
 });
 
@@ -341,17 +417,108 @@ test('Native TUI facade retries a queued turn after an exact revision conflict',
   await facade.dispose();
 });
 
-test('Native TUI facade bounds repeated start conflicts and preserves one command identity', async () => {
+test('Native TUI facade keeps a conflicted successor queued until active cleanup is idle', async () => {
   const remote = new FakeRuntimeConnection();
-  remote.advanceRevisionBeforeEveryStartTurn();
+  remote.restoreActiveTurnOnSubscribe();
+  remote.conflictNextStartTurnAt(2);
   const facade = facadeFor(remote);
   const sessionId = facade.createSession('/tmp/tui-client-workspace');
   await facade.waitForSessionReady(sessionId);
 
-  await expect(
-    facade.getRuntime(sessionId)!.runTask('never admitted', { dispatch: () => {} }),
-  ).rejects.toThrow('revision_conflict');
-  expect(remote.startTurnExpectedRevisions).toEqual([1, 2, 3]);
+  let accepted = 0;
+  const run = facade.getRuntime(sessionId)!.runTask('queued behind active revision churn', {
+    dispatch: () => {},
+    onAccepted: () => {
+      accepted += 1;
+    },
+  });
+  await Bun.sleep(10);
+  expect(accepted).toBe(0);
+  expect(remote.startTurnExpectedRevisions).toEqual([1]);
+
+  remote.releaseRestoredTurn();
+  await run;
+  expect(accepted).toBe(1);
+  expect(remote.startTurnExpectedRevisions).toEqual([1, 2]);
+  expect(new Set(remote.startTurnCommandIds).size).toBe(1);
+  await facade.dispose();
+});
+
+test('Native TUI facade keeps a queued successor pending across runtime_busy', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.rejectNextStartTurnAsBusy();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  let accepted = 0;
+  await facade.getRuntime(sessionId)!.runTask('queued behind active subagents', {
+    dispatch: () => {},
+    onAccepted: () => {
+      accepted += 1;
+      expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+    },
+  });
+
+  expect(accepted).toBe(1);
+  expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(2);
+  expect(new Set(remote.startTurnCommandIds).size).toBe(2);
+  await facade.dispose();
+});
+
+test('Native TUI facade coalesces repeated abort requests for the same active turn', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+
+  const first = session.abort();
+  const second = session.abort();
+  expect(first).toBe(second);
+  await Promise.all([first, second]);
+
+  expect(remote.commands.filter((command) => command === 'cancel_turn')).toHaveLength(1);
+  await facade.dispose();
+});
+
+test('Native TUI facade reproduces the latest real session and fences a predecessor terminal by revision', async () => {
+  // Regression extracted from tui-60771b71-c6d8-4944-b816-75c4dc723745:
+  // the queued "主要了解tui" start_turn first saw runtime_busy, then the
+  // predecessor completed before the successor receipt was accepted. The old
+  // client retained that predecessor Run ID and falsely rejected the successor.
+  const remote = new FakeRuntimeConnection();
+  remote.rejectNextStartTurnAsBusyAndFinishPredecessor();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  let accepted = 0;
+  await facade.getRuntime(sessionId)!.runTask('主要了解tui', {
+    dispatch: () => {},
+    onAccepted: () => {
+      accepted += 1;
+    },
+  });
+
+  expect(accepted).toBe(1);
+  expect(remote.startTurnExpectedRevisions).toEqual([1, 1, 2]);
+  expect(new Set(remote.startTurnCommandIds).size).toBe(2);
+  await facade.dispose();
+});
+
+test('Native TUI facade waits through repeated start conflicts and preserves one command identity', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.conflictNextStartTurns(3);
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.getRuntime(sessionId)!.runTask('admit after active revision churn', {
+    dispatch: () => {},
+  });
+  expect(remote.startTurnExpectedRevisions).toEqual([1, 2, 3, 4]);
   expect(new Set(remote.startTurnCommandIds).size).toBe(1);
   await facade.dispose();
 });
@@ -391,6 +558,8 @@ test('App Server TUI keeps historical open observer-only and resumes on the firs
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
   readonly interactionExpectedRevisions: number[] = [];
+  readonly interactionPayloadRevisions: number[] = [];
+  readonly interactionCommandIds: string[] = [];
   readonly startTurnExpectedRevisions: number[] = [];
   readonly startTurnCommandIds: string[] = [];
   readonly deferredTurnDeliveryOrder: string[] = [];
@@ -409,7 +578,9 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #restoredTurnReleased = false;
   #authoritativeRevision = 1;
   #nextStartTurnConflictRevision: number | undefined;
-  #advanceRevisionOnEveryStart = false;
+  #startTurnBusyRemaining = 0;
+  #finishPredecessorAfterBusy = false;
+  #startTurnConflictsRemaining = 0;
   #deferNextStartTurnReceipt = false;
   #overlapIdleWaiters = false;
   #omitSecondTerminalNotification = false;
@@ -417,10 +588,36 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #delayedIdleQueries = 0;
   #startTurnOrdinal = 0;
   #currentRunId = 'run-0';
+  #pendingInteraction: RuntimeClientInteraction | undefined;
+  #interactionConflictsRemaining = 1;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
     this.#approvalOnNextTurn = true;
+  }
+
+  acceptNextInteractionWithoutConflict(): void {
+    this.#interactionConflictsRemaining = 0;
+  }
+
+  conflictNextInteractionTimes(count: number): void {
+    this.#interactionConflictsRemaining = count;
+  }
+
+  advancePendingApprovalWithDurableEvent(revision: number): void {
+    if (!this.#pendingInteraction) throw new Error('No pending approval to advance.');
+    this.#authoritativeRevision = revision;
+    this.#pendingInteraction = { ...this.#pendingInteraction, sessionRevision: revision };
+    this.push(
+      subscriptionUpdate(this.#subscriptionBySession.get(this.#sessionId)!, 1, {
+        type: 'notification',
+        durability: 'durable',
+        sessionId: this.#sessionId,
+        revision,
+        session: projection(this.#sessionId, revision, 'waiting', this.#pendingInteraction),
+        event: { type: 'tool.started', toolId: 'sibling-shell', summary: 'Sibling tool started' },
+      }),
+    );
   }
 
   requestApprovalSnapshotOnNextTurn(): void {
@@ -452,8 +649,17 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
     this.#nextStartTurnConflictRevision = currentRevision;
   }
 
-  advanceRevisionBeforeEveryStartTurn(): void {
-    this.#advanceRevisionOnEveryStart = true;
+  rejectNextStartTurnAsBusy(): void {
+    this.#startTurnBusyRemaining = 1;
+  }
+
+  rejectNextStartTurnAsBusyAndFinishPredecessor(): void {
+    this.#startTurnBusyRemaining = 1;
+    this.#finishPredecessorAfterBusy = true;
+  }
+
+  conflictNextStartTurns(count: number): void {
+    this.#startTurnConflictsRemaining = count;
   }
 
   deliverNextStartTurnReceiptAfterTerminalProjection(): void {
@@ -472,6 +678,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   #emitApproval(sessionId: string): void {
     this.#authoritativeRevision = 4;
+    this.#pendingInteraction = approvalInteraction(4);
     this.push(
       subscriptionUpdate(this.#subscriptionBySession.get(sessionId)!, 1, {
         type: 'notification',
@@ -481,16 +688,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         session: projection(sessionId, 4, 'running'),
         event: {
           type: 'interaction.available',
-          interaction: {
-            kind: 'approval',
-            interactionId: 'approval-native-receipt',
-            sessionRevision: 4,
-            generation: 0,
-            grants: ['approve_once'],
-            command: 'echo approved',
-            title: 'shell_execute',
-            summary: 'Approve a shell command',
-          },
+          interaction: this.#pendingInteraction,
         },
       }),
     );
@@ -532,11 +730,16 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         const query = message.params.query;
         if (query.type === 'get_session_projection') {
           const respond = () => {
-            const session = this.#overlapIdleWaiters
-              ? idleProjection(query.sessionId, this.#authoritativeRevision)
-              : this.#restoreActiveTurn && !this.#restoredTurnReleased
-                ? projection(query.sessionId, 1, 'running')
-                : idleProjection(query.sessionId, Math.max(2, this.#authoritativeRevision));
+            const session = this.#pendingInteraction
+              ? projection(query.sessionId, this.#authoritativeRevision, 'waiting', {
+                  ...this.#pendingInteraction,
+                  sessionRevision: this.#authoritativeRevision,
+                })
+              : this.#overlapIdleWaiters
+                ? idleProjection(query.sessionId, this.#authoritativeRevision)
+                : this.#restoreActiveTurn && !this.#restoredTurnReleased
+                  ? projection(query.sessionId, 1, 'running')
+                  : idleProjection(query.sessionId, Math.max(2, this.#authoritativeRevision));
             this.idleQueryRevisions.push(session.revision);
             this.push(
               result(message.id, {
@@ -638,8 +841,14 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       }
       if (command.type === 'respond_interaction') {
         this.interactionExpectedRevisions.push(command.expectedRevision);
-        if (this.interactionExpectedRevisions.length === 1) {
-          this.#authoritativeRevision = 5;
+        this.interactionPayloadRevisions.push(command.interaction.sessionRevision);
+        this.interactionCommandIds.push(command.commandId);
+        if (this.#interactionConflictsRemaining > 0) {
+          this.#interactionConflictsRemaining -= 1;
+          this.#authoritativeRevision = Math.max(
+            this.#authoritativeRevision + 1,
+            command.expectedRevision + 1,
+          );
           this.push(
             result(message.id, {
               status: 'conflict',
@@ -650,6 +859,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
           );
           return;
         }
+        this.#pendingInteraction = undefined;
         this.push(
           result(message.id, {
             status: 'applied',
@@ -686,16 +896,76 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         this.#authoritativeRevision = command.expectedRevision + 2;
         return;
       }
+      if (command.type === 'cancel_turn') {
+        const revision = command.expectedRevision + 1;
+        this.#authoritativeRevision = revision;
+        this.#restoredTurnReleased = true;
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision,
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: command.sessionId,
+            revision,
+            session: projection(command.sessionId, revision, 'completed'),
+            event: {
+              type: 'turn.terminal',
+              turnId: command.turnId,
+              status: 'cancelled',
+              cause: 'user',
+            },
+          }),
+        );
+        return;
+      }
       if (command.type === 'start_turn') {
         this.#startTurnOrdinal += 1;
         this.#currentRunId = `run-${this.#startTurnOrdinal}`;
         this.startTurnExpectedRevisions.push(command.expectedRevision);
         this.startTurnCommandIds.push(command.commandId);
+        if (this.#startTurnBusyRemaining > 0) {
+          this.#startTurnBusyRemaining -= 1;
+          this.push(
+            result(message.id, {
+              status: 'rejected',
+              commandId: command.commandId,
+              code: 'runtime_busy',
+              currentRevision: this.#authoritativeRevision,
+            }),
+          );
+          if (this.#finishPredecessorAfterBusy) {
+            this.#finishPredecessorAfterBusy = false;
+            this.#authoritativeRevision += 1;
+            this.push(
+              subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+                type: 'notification',
+                durability: 'durable',
+                sessionId: command.sessionId,
+                revision: this.#authoritativeRevision,
+                session: projection(command.sessionId, this.#authoritativeRevision, 'completed'),
+                event: {
+                  type: 'run.terminal',
+                  runId: 'run-predecessor',
+                  status: 'completed',
+                },
+              }),
+            );
+          }
+          return;
+        }
         if (this.#nextStartTurnConflictRevision !== undefined) {
           this.#authoritativeRevision = this.#nextStartTurnConflictRevision;
           this.#nextStartTurnConflictRevision = undefined;
         }
-        if (this.#advanceRevisionOnEveryStart) {
+        if (this.#startTurnConflictsRemaining > 0) {
+          this.#startTurnConflictsRemaining -= 1;
           this.#authoritativeRevision = Math.max(
             this.#authoritativeRevision,
             command.expectedRevision + 1,
@@ -751,22 +1021,14 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         if (this.#approvalSnapshotOnNextTurn) {
           this.#approvalSnapshotOnNextTurn = false;
           this.#authoritativeRevision = 4;
+          this.#pendingInteraction = approvalInteraction(4);
           this.push(
             subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
               type: 'notification',
               durability: 'durable',
               sessionId: command.sessionId,
               revision: 4,
-              session: projection(command.sessionId, 4, 'waiting', {
-                kind: 'approval',
-                interactionId: 'approval-native-receipt',
-                sessionRevision: 4,
-                generation: 0,
-                grants: ['approve_once'],
-                command: 'echo approved',
-                title: 'shell_execute',
-                summary: 'Approve a shell command',
-              }),
+              session: projection(command.sessionId, 4, 'waiting', this.#pendingInteraction),
             }),
           );
           return;
@@ -789,6 +1051,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
             generation: 0,
             grants: ['approve_once'] as const,
           };
+          this.#pendingInteraction = replacement;
           this.push(
             subscriptionUpdate(subscriptionId, 1, {
               type: 'notification',
@@ -1070,6 +1333,19 @@ function initializeResult(instanceId: string): object {
       maxSubscriptions: 8,
       maxOutboundMessages: 8,
     },
+  };
+}
+
+function approvalInteraction(revision: number): RuntimeClientInteraction {
+  return {
+    kind: 'approval',
+    interactionId: 'approval-native-receipt',
+    sessionRevision: revision,
+    generation: 0,
+    grants: ['approve_once'],
+    command: 'echo approved',
+    title: 'shell_execute',
+    summary: 'Approve a shell command',
   };
 }
 

@@ -2,6 +2,7 @@ import { useInput } from 'ink';
 import type { Dispatch, MutableRefObject } from 'react';
 import { useRef } from 'react';
 import type { Action } from '../reducers';
+import { isTerminalFocusReport } from './terminal-focus-store';
 
 /**
  * 全局快捷键 hook。
@@ -40,6 +41,10 @@ export function useGlobalKeys(
         tab?: boolean;
       },
     ) => {
+      // Focus reports belong exclusively to TerminalFocusStore. FocusOut is
+      // otherwise parsed as Escape, which repaints the footer while the user
+      // drags the native scrollbar and forces real terminals to the bottom.
+      if (isTerminalFocusReport(input)) return;
       // Shift+Tab: 切换 plan mode（全局，任何时候都生效，无 overlay 限制）
       if (key.shift && key.tab) {
         onTogglePlanMode ? onTogglePlanMode() : dispatch({ type: 'TOGGLE_PLAN_MODE' });

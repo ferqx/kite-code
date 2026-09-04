@@ -6,6 +6,7 @@ import { agentReducer } from './agentReducer';
 import { checkpointReducer } from './checkpointReducer';
 import { handleClientEventAction, reconcileClientInteractionQueue } from './handleClientEvent';
 import { handleEventAction } from './handleEvent';
+import { appendUserMessage } from './helpers';
 import { sessionReducer } from './sessionReducer';
 import { skillReducer } from './skillReducer';
 import { uiReducer } from './uiReducer';
@@ -58,7 +59,7 @@ const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set(['EXECUTE_REWIND', 'SET_
 
 const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST_SKILLS']);
 
-// AGENT_ACTIONS：剩余所有非 RuntimeEvent action（SET_RUNNING, SET_IDLE, SET_EXITED,
+// AGENT_ACTIONS：剩余所有非 RuntimeEvent action（SET_RUNNING, SET_EXITED,
 // RESOLVE_INTERRUPT, SWITCH_AUTH, EXPORT_SESSION,
 // EXPORT_SESSION_DONE, INJECT_MCP_PROMPT,
 // SET_PHASE, CTRL_C, ESCAPE）
@@ -76,6 +77,61 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       type: 'text',
       data: { text: action.text },
     });
+  }
+  if (action.type === 'LOCAL_USER_PROMPT') {
+    return appendUserMessage(state, {
+      id: state.nextBlockId,
+      kind: 'user',
+      content: action.text,
+      pendingEcho: true,
+    });
+  }
+  if (action.type === 'QUEUE_LOCAL_PROMPT') {
+    return {
+      ...state,
+      queuedPrompts: [
+        ...(state.queuedPrompts ?? []),
+        { id: action.id, sessionId: action.sessionId, text: action.text },
+      ],
+    };
+  }
+  if (action.type === 'ACCEPT_QUEUED_PROMPT') {
+    const stillQueued = (state.queuedPrompts ?? []).some(
+      (prompt) => prompt.id === action.id && prompt.sessionId === action.sessionId,
+    );
+    const started = agentReducer(state, { type: 'SET_RUNNING' }) ?? state;
+    const dequeued = {
+      ...started,
+      queuedPrompts: (started.queuedPrompts ?? []).filter((prompt) => prompt.id !== action.id),
+    };
+    if (!stillQueued) {
+      // The durable user.message won delivery order over the accepted receipt.
+      // Preserve that authoritative block instead of appending a late local echo.
+      return { ...dequeued, runPromptPresented: true };
+    }
+    return appendUserMessage(dequeued, {
+      id: dequeued.nextBlockId,
+      kind: 'user',
+      content: action.text,
+      pendingEcho: true,
+    });
+  }
+  if (action.type === 'DEQUEUE_LOCAL_PROMPT') {
+    return {
+      ...state,
+      queuedPrompts: (state.queuedPrompts ?? []).filter((prompt) => prompt.id !== action.id),
+    };
+  }
+  if (action.type === 'DROP_LOCAL_USER_PROMPT') {
+    const turns = state.turns
+      .map((turn) => ({
+        blocks: turn.blocks.filter(
+          (block) =>
+            block.kind !== 'user' || block.pendingEcho !== true || block.content !== action.text,
+        ),
+      }))
+      .filter((turn) => turn.blocks.length > 0);
+    return { ...state, turns };
   }
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断

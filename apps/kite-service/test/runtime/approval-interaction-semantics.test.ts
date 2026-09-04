@@ -77,7 +77,7 @@ function withStatuses(
 }
 
 describe('SAQ-16/17 — approval interaction semantics', () => {
-  test('focused rejection durably settles the Tool and aborts only an otherwise idle turn', () => {
+  test('approval rejection durably settles the Tool and aborts the turn', () => {
     const state = withStatuses(addTool(initialState(), 'shell-a'), [
       ['shell-a', 'awaiting_approval'],
     ]);
@@ -103,7 +103,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     ]);
   });
 
-  test('focused rejection never cancels a queued sibling', () => {
+  test('approval rejection cancels queued siblings before aborting the turn', () => {
     const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'awaiting_approval'],
       ['shell-b', 'queued'],
@@ -118,11 +118,17 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       },
     ]);
 
-    expect(events.map((event) => event.type)).toEqual(['tool.rejected']);
-    expect(events).not.toContainEqual(expect.objectContaining({ toolCallId: 'shell-b' }));
+    expect(events.map((event) => event.type)).toEqual([
+      'tool.rejected',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'shell-b' }),
+    );
   });
 
-  test('after a sibling settles, approval rejection closes the turn exactly once', () => {
+  test('repairs a legacy approval rejection missing its turn terminal exactly once', () => {
     const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'rejected'],
       ['shell-b', 'succeeded'],
@@ -151,7 +157,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     ).toBeNull();
   });
 
-  test('runStateRuntimeLoop defers rejection abort until siblings settle and never replays it', async () => {
+  test('runStateRuntimeLoop repairs a legacy rejection terminal and never replays it', async () => {
     let state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'rejected'],
       ['shell-b', 'succeeded'],
@@ -669,7 +675,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     expect(events.some((event) => event.type === 'approval.batch_released')).toBe(false);
   });
 
-  test('Esc rejects only the focused approval; input and plan cancellation stay distinct', () => {
+  test('Esc rejection terminates the tool batch; input and plan cancellation stay distinct', () => {
     let state = addTool(initialState(), 'shell-a');
     state = addTool(state, 'shell-b');
     state = {
@@ -685,19 +691,23 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       },
     };
 
-    const approvalEsc = eventsForRuntimeAction(state, {
+    const approvalDecision = eventsForRuntimeAction(state, {
       type: 'reject',
       interactionId: 'approval-a',
       generation: 0,
       reason: 'focused Esc',
     });
+    const approvalEsc = [
+      ...approvalDecision,
+      ...approvalRejectionSettlementEvents(state, approvalDecision),
+    ];
     expect(approvalEsc.filter((event) => event.type === 'approval.rejected')).toHaveLength(1);
-    expect(approvalEsc.some((event) => event.type === 'turn.aborted')).toBe(false);
+    expect(approvalEsc.some((event) => event.type === 'turn.aborted')).toBe(true);
     expect(
       approvalEsc.some(
         (event) => event.type === 'tool.cancelled' && event.toolCallId === 'shell-b',
       ),
-    ).toBe(false);
+    ).toBe(true);
 
     const inputState: RuntimeState = {
       ...state,

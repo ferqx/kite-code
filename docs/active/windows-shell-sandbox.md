@@ -59,8 +59,8 @@ review；同一 invocation 的 sealed scope 仍须在 approval、recovery 与 di
 Full 正交：Planning + Full 可直接执行但仍保留 Plan lifecycle。只有同一轮并发多个 Explore children
 才派生 Auto；单个 Explore 及 plan/code/review children 继承 parent route。
 
-人工队列由 State 27/SAQ epoch 持久化。Enter 提交 exact interactionId/generation，Esc 只拒绝当前
-可见焦点，Ctrl+C 才取消 whole turn；`/permissions` 的 session grants 清除通过 canonical event
+人工队列由 State 27/SAQ epoch 持久化。Enter提交exact interactionId/generation；Esc拒绝当前可见焦点并原子取消同turn
+其余未终结sibling、结束turn，Ctrl+C仍是独立整轮取消输入；`/permissions` 的 session grants 清除通过 canonical event
 持久化，并在 session/revision/generation 不匹配时 no-op。旧 queue/grant 或旧 epoch 不能在 restore
 后复活。
 

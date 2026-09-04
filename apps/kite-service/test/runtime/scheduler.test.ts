@@ -5,11 +5,7 @@ import {
   type RuntimeState,
   type ToolCallRecord,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import {
-  decideNextEffect as decideKernelNextEffect,
-  MAX_PARALLEL_READ_TOOLS,
-  MAX_PARALLEL_SUBAGENTS,
-} from '#agent-kernel';
+import { decideNextEffect as decideKernelNextEffect, MAX_PARALLEL_SUBAGENTS } from '#agent-kernel';
 import { classifyFailure } from '#kite-service/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFacts } from '#kite-service/bootstrap/runtime/scheduler-facts';
 import { eventsForRuntimeAction } from '#kite-service/bootstrap/runtime/state-actions';
@@ -817,14 +813,14 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('caps one parallel read batch', () => {
+  test('schedules every compatible read in one model batch', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-reads',
       userId: 'u',
       workspace: '/workspace',
     });
-    for (let index = 0; index < MAX_PARALLEL_READ_TOOLS + 2; index++) {
+    for (let index = 0; index < 6; index++) {
       queueCall(state, `read-${index}`, {
         name: 'read_file',
         args: { path: `${index}.ts` },
@@ -835,7 +831,7 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: Array.from({ length: MAX_PARALLEL_READ_TOOLS }, (_, index) => `read-${index}`),
+      toolCallIds: Array.from({ length: 6 }, (_, index) => `read-${index}`),
     });
   });
 

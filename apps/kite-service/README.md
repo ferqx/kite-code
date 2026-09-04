@@ -53,6 +53,12 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 - release upgrade/rollback 只切换 active candidate；不发现、停止、替换或升级运行中的 daemon。
 - App Server 退出不删除 Session/History；同 Session takeover 只能通过 durable generation、cleanup 与 recovery rules。
 - unknown effect outcome 不重放；stale generation 不能 dispatch 或 commit。
+- 并发 Shell effect 即使把终态直接持久化并返回空事件数组，也必须依据共享 State revision 重新调度；空返回只能登记为
+  零进展候选，全部后台 sibling 收敛、待发布事件排空且 revision 仍完全未前进后才可停止。全部 sibling 终结后必须继续模型调用并
+  产生明确 Run/Turn terminal；runner 意外返回时必须在同一 durable batch 持久化失败与 Turn abort，不能留下孤立的 `running` Run或
+  投影虚假的 completed。
+- 用户取消并发Subagent后，当前execution owner必须在释放Session单飞权之前完成全部Provider lifecycle cleanup；cleanup pending时
+  后继`start_turn`只返回`runtime_busy`。同进程cleanup保留取消事务已写入的waived capability终态，只有真正的restore/crash恢复才收敛unknown。
 - default TUI/CLI 不启动 HTTP，也不发现 daemon；`kite web` 只读取已经运行的 daemon status。
 - 不提供 remote/LAN、多租户、Browser mutation、dual write、旧 Store 自动迁移或 embedded fallback。
 

@@ -113,6 +113,8 @@ describe('TUI PTY System — Tool Approve', () => {
       // File contents stay outside the closed Runtime Client presentation surface.
       expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(false);
       expect(screenContains(executionHistory, 'exit: error')).toBe(false);
+      expect(screenContains(executionHistory, '已取消')).toBe(false);
+      expect(screenContains(executionHistory, 'cancelled')).toBe(false);
       expect(readFileSync(approvalMarkerPath, 'utf8')).toBe('TUI_APPROVAL_EXECUTED\n');
       expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
       expect(clean.match(/APPROVAL_FLOW_COMPLETE/g) ?? []).toHaveLength(1);

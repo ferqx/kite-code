@@ -64,6 +64,7 @@ function toolVerb(name: string): { verb: string; tone: RunStatusTone } {
 
 function derivePhase(state: TuiState): RunPhase {
   const last = state.turns.at(-1);
+  const lastBlock = last?.blocks.at(-1);
   const hasActivity =
     last?.blocks.some(
       (b) =>
@@ -72,6 +73,23 @@ function derivePhase(state: TuiState): RunPhase {
         b.kind === 'subagent' ||
         b.kind === 'file_change',
     ) ?? false;
+
+  // A completed model-owned answer is visually final, but the Runtime may
+  // still be persisting and projecting the authoritative Run terminal. Expose
+  // that narrow tail as Finishing without claiming the Session is already
+  // idle. A tool-bearing response keeps its explicit continuation identity and
+  // therefore remains Working.
+  if (
+    lastBlock?.kind === 'text' &&
+    lastBlock.modelRequestId !== undefined &&
+    lastBlock.streaming !== true &&
+    lastBlock.responsePending !== true &&
+    state.currentModelRequestId === undefined &&
+    state.toolBearingModelRequestId === undefined &&
+    state.status.currentNode !== 'tools'
+  ) {
+    return 'finishing';
+  }
 
   // Streaming text after tool activity is often interstitial narration before
   // the next tool batch. Keep the run visibly in Working until the run idles.
@@ -163,6 +181,7 @@ function currentVerb(
   state: TuiState,
   phase: RunPhase,
 ): { verb: string; tone: RunStatusTone; note?: string } {
+  if (state.cancellationPending) return { verb: 'Cancelling', tone: 'warning' };
   const compactionVerb = {
     context_preparing: 'Preparing context',
     context_summarizing: 'Summarizing context',

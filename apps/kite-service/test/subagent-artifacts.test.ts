@@ -376,6 +376,69 @@ describe('durable Subagent lifecycle recovery', () => {
     });
   });
 
+  test('same-process user cancellation preserves its waived capability terminal during cleanup', async () => {
+    const value = fixture();
+    const authority = new SubagentGrantAuthority();
+    const driver = new BuiltinChildRuntimeDriver();
+    const provider = new LocalSubagentProvider(authority.verifier(), driver, value.taskStore);
+    let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
+    const published = value.taskStore.write({ owner: value.owner, task: 'cancel before dispatch' });
+    const dispatchIntentDigest = `sha256:${digestCapabilityValue({ value: 'cancelled-intent' })}`;
+    state = reduceRuntimeState(state, {
+      type: 'capability.subagent_dispatch_intent_recorded',
+      invocationId: value.owner.parentInvocationId,
+      attempt: value.owner.parentAttempt,
+      purpose: 'start',
+      childInvocationId: value.owner.childInvocationId,
+      taskArtifact: published.ref,
+      dispatchIntentDigest,
+      recordedAt: new Date().toISOString(),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.reconciliation_resolved',
+      invocationId: value.owner.parentInvocationId,
+      decision: 'waived',
+      reconciledAt: new Date().toISOString(),
+      reason: 'User cancelled the run.',
+    });
+    const events: RuntimeEvent[] = [];
+
+    const recovered = await reconcilePendingSubagentProvidersAfterCrash({
+      composition: {
+        grants: authority,
+        driver,
+        provider,
+        taskArtifacts: value.taskStore,
+        lifecycleArtifacts: value.lifecycleStore,
+      },
+      terminalDisposition: 'preserve_user_cancellation',
+      persistence: {
+        getState: () => state,
+        persistEvents: async (batch) => {
+          for (const event of batch) {
+            state = reduceRuntimeState(state, event);
+            events.push(event);
+          }
+          return true;
+        },
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(events.map((event) => event.type)).toEqual([
+      'capability.subagent_cleanup_started',
+      'capability.subagent_cleanup_completed',
+    ]);
+    expect(state.capabilities.invocations[value.owner.parentInvocationId]).toMatchObject({
+      status: 'failed',
+      reconciliation: 'waived',
+      subagentProviderLifecycle: {
+        status: 'cleanup_completed',
+        cleanupConfirmed: true,
+      },
+    });
+  });
+
   test('a new same-key composition reads and reconciles a sealed dead-owner handle', async () => {
     const value = fixture();
     const { authority, handle, published } = issueHandle(value);

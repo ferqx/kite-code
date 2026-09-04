@@ -10,7 +10,22 @@
 - TUI本地只缓存`model.responded.messageId → requestId`与tool queue的opaque `presentationGroupId`配对；匹配结果只
   决定Presentation step归属，不参与Runtime command、approval或execution identity。新事件不按“当前block/上一条event”
   猜group；identity缺失或不匹配的工具保持独立neutral group，不得把当前Thought当作wildcard owner。
-- 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
+- 普通prompt在Enter后立即追加带`pendingEcho`标记的live-only本地回显；RuntimeClient的durable `user.message`按内容只匹配这一条显式pending记录，将其原位升级为`messageId`身份，不新增副本。未标记的同文消息不得按文本去重。提交失败只移除仍为pending的本地回显。本地`SET_RUNNING`先建立Run边界，消息列表先渲染prompt，durable echo到达后Footer再显示`Working`。
+- active Run期间输入的新prompt先进入按Session绑定的live-only queued展示层，显示有界原文预览，但不追加到当前
+  Turn的blocks，因此并发子Agent/工具仍能原位更新。FIFO轮到该prompt时先移除queued展示，再建立新Turn和pending echo。
+  活动Session按FIFO逐条显示浅色背景的单行`↵ 消息内容`，不再附加`Queued`解释行或折叠剩余数量；`Working`固定显示在队列上方，首项前与相邻队列行之间各留一行。
+  队列由稳定Footer owner持有，queue增减不能重挂载spinner，也不能让OutputArea重算或拆分当前Thought；消息区使用稳定投影引用和浅比较隔离队列专属更新。
+  queued chrome不进入消息区动态高度预算，不能因为新增或移除队列项改变Tool、Thought或Delegating的展开、折叠与可见步骤。
+  非空prompt提交时，InputLine独占该次Enter；OutputArea在key-dispatch时读取prompt ref并禁止同一次Enter切换最后一个
+  Tool/Subagent块。只有空prompt的Enter继续作为动态块展开/折叠入口，不能用队列state到达后的重渲染补救按键双消费。
+  FIFO按Session隔离，不同Session的prompt可以独立admit。只有`start_turn` receipt被接受后才能移除queued展示、建立新Turn和
+  pending echo；后台Session也必须按稳定prompt identity清理展示。receipt与durable `user.message`可乱序：message先到时按本Session
+  FIFO消费对应live-only queued entry，receipt先到时原子把queued entry升级为pending echo；两条路径最终都只保留一个带`messageId`
+  的用户块，相同正文的不同durable identity仍不得被合并。若`start_turn`返回`runtime_busy`，说明旧Run的本地completion
+  早于Service执行边界；client必须保留队列项、使用新的command identity有界退避重试。若active Subagent持续推进revision并返回
+  `revision_conflict`，client必须在同一command identity下等待authoritative remote-idle/cleanup边界，再以最新revision重试。两者在既有Run deadline内都不能报发送失败、取消旧Run或清理队列与Subagent展示。
+  等待期间到达的前序Run terminal必须连同其revision暂存；只有terminal revision不早于后继receipt的accepted revision时，
+  才能参与该后继Run的identity校验与完成收敛，较早的terminal不得导致伪造的identity mismatch。
   reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
   两个不同轮次的相同文本仍保留两条。`LOCAL_COMMAND`只用于不会进入Runtime的本地slash echo，并追加到当前presentation tail；
   它不能创建真实user turn或把仍在动态尾部的上一轮提升进Ink Static，否则终端scrollback会重复写出已有消息。
@@ -42,8 +57,9 @@
   safe snapshot中的canonical只读roots并把scope digest绑定到decision，不按命令名自行推断。scope/revision conflict会刷新
   snapshot并回到普通授权选项，用户再次确认即可继续；decline或真实unavailable时不发送Runtime initialize，
   不以cwd或wire path绕过，也不回退embedded。Trust status枚举只用于内部路由，不作为用户可见状态行。
-- TUI exit、first-run、Workspace Trust与config error统一调用一个idempotent exit coordinator。退出只关闭client
-  connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
+- TUI exit、first-run、Workspace Trust与config error统一调用一个idempotent exit coordinator。确认退出后先同步unmount、归还
+  terminal与cursor，再执行有界observability和client connection清理，慢速清理不得让最后一帧继续占用终端。退出只关闭client
+  connection，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。
 
 ## App Server 状态
@@ -51,6 +67,9 @@
 默认TUI启动一个配套的parent-owned stdio App Server，不启动HTTP listener或Web assets。`/status`显示transport、source/installed
 profile、build、App Server version、client version和initialize已证明的same-build pairing；不显示Service PID、启动时间、Web URL或build drift。
 source与installed mismatch都在TUI mount前fail closed，不形成可继续使用的“版本不一致”状态。
+启动诊断按已注入pairing区分恢复动作：same-build mismatch表示安装内容可能不完整，提示更新或重新安装；显式daemon的
+exact-protocol mismatch提示更新Kite Code或使用matching client，并在升级后关闭旧daemon再启动。该提示只解释既有
+`server_mismatch`，不按client版本字符串推断兼容性，也不自动操作daemon。
 
 显式`--server <endpoint>`改用调用者选择的owner-only Unix socket/Windows named pipe；状态显示exact-protocol compatible，而daemon
 build只作诊断。daemon固定一个canonical Workspace，连接不同Workspace会在进入TUI前失败。该动作只读取composition注入的已验证identity，
@@ -63,7 +82,8 @@ Runtime identity/pairing，不请求HTTP origin。
 - Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。
 - Slash suggestion 只拥有 partial completion；已经精确匹配的命令由主输入的 Enter 路径提交一次。
   Esc 可关闭当前 suggestion，后续输入变化才重新打开，不能由 suggestion 与 TextInput 各提交一次或互相吞掉。
-- Modal 可见时隐藏主输入提示、Footer 状态栏和 slash suggestion，不允许两个交互表面同时取得键盘 authority。
+- Modal可见时隐藏主输入提示和slash suggestion，不允许两个交互表面同时取得键盘authority；若当前Run仍active，固定英文
+  `Working`状态行继续显示。Approval、Input、Plan review等Footer交互只隐藏统计行，不能隐藏或清除底层Run状态。
 - 页面只解释展示状态；route、selection、draft、controller command 与 Runtime facts 仍由宿主 owner 管理。
 - First-run/setup 使用独立 `FirstRunShell`，不复用普通 Overlay lifecycle。
 
@@ -81,13 +101,26 @@ Runtime identity/pairing，不请求HTTP origin。
 ## 审批、问答与方案审核
 
 - Approval Overlay 只绑定 durable queue 当前 `activeApprovalId`；后台 pending record 不抢占 Footer 或键盘。
-- Enter/Esc 携带 exact `interactionId` 与 generation；Enter 提交当前 grant，Esc 只拒绝当前焦点，迟到 action 为 no-op。
-- Ctrl+C 取消整轮 queued/awaiting/authorized/running siblings，不能退化为 focused reject。
+- Enter/Esc 携带 exact `interactionId` 与 generation；Enter 提交当前 grant，Esc拒绝当前焦点并原子取消同turn其余
+  queued/awaiting/authorized/running sibling、结束turn；迟到action为no-op。
+- Ctrl+C仍是独立的整轮取消输入；审批拒绝保留focused target为rejected、其他调用为cancelled。
 - approval、ask_user、Plan review及其Enter/Esc动作在`respond_interaction`获得applied/idempotent receipt前保持可见；
   accepted receipt后才允许本地结束提交态，canonical granted/batch-released/rejected/input/plan event仍拥有durable结果。
   transport/protocol/identity失败不得被吞掉，UI显示可重试错误且不伪造已授权、已回答或已取消事实。
+- Esc拒绝提交失败属于当前Footer瞬态，不进入会话消息流；成功拒绝不追加匿名approval notice。approval settlement与其配对的
+  pre-dispatch Tool rejection仍分别保留durable facts，presentation只渲染一张带queued安全参数的rejected Tool卡。
+- pending interaction的Session CAS随同Session兄弟event推进时，Native client从每个权威projection刷新完整queue；conflict后必须
+  重新取得相同稳定identity的最新interaction，并保持`interaction.sessionRevision === expectedRevision`再提交。过期interaction的
+  Enter/Esc不得回退作用于当前active Session；迟到query也不得用低revision覆盖较新的subscription projection。
 - 不存在interrupt清除后自动补发cancel的旁路。交互只由当前用户动作的一次receipt链路与后续authoritative queue/event
   收敛；否则已接受动作可能被第二个fire-and-forget cancel覆盖。
+- 审批receipt已接受后，本地`runTask` Promise收尾不得清理tool queue metadata或改写Runtime运行状态。仅live
+  event或authoritative Session projection可以收敛运行与interaction；queued/running Tool、Thought和Subagent只能由明确的
+  Runtime terminal进入cancelled。
+- Esc/Ctrl+C当下只提交取消请求与管理本地按键状态，不生成Tool、Thought、Subagent或interaction终态；
+  同一输入轮立即把固定状态行切换为`Cancelling`，持久terminal或权威idle snapshot到达前当前轮次仍保持active投影。
+  同一Session已有取消请求时，后续Esc/Ctrl+C复用同一个Promise，不得发送第二个`cancel_turn`；receipt失败恢复原运行投影并显示错误。
+  queued successor继续等待前驱Subagent Provider cleanup的权威边界，不能因用户可见的`turn.aborted`已到达就提前提交新Turn。
 - `ask_user` 单题把问题放入标题，多题使用 `n / total` meta；自定义输入留在原列表，已完成回答不得在恢复时重开。
 - Plan review、MCP recovery/admission 与其他交互同样只由 canonical terminal event 清除。
 - Plan approval 由单个 `plan.approved.executionMode` 同时固定本次 Task 执行模式与 Session/TUI 镜像；不得
@@ -101,6 +134,7 @@ Runtime identity/pairing，不请求HTTP origin。
 
 - 模型 identity 是 `provider + model name`；不同 provider 的同名模型保持独立 key 和 route。
 - `/model`、`/permissions`、`/effort`、`/theme`、`/language` 不接受选择参数，必须打开选择器并显式确认。
+- `/permissions`确认当前已经生效的同一mode只关闭选择器，不再次发送Runtime command或制造无意义revision；真实mode变化仍可在active Turn中提交，并由Host的exact invocation并发边界保证已经dispatch的Model evidence不因该控制事实丢失。
 - `full` 是唯一 unrestricted interaction mode；restricted backend 不可兑现 scope 时 fail closed。
 - Session 切换恢复各自模型 route、interaction mode、context 与 Runtime projection，不继承上一 Session 的瞬时状态。
 - 历史 Session 先等待 typed Runtime readiness/recovery，再通过 HistoryClient 读取 persisted head 并提交 navigation；迟到 load 不覆盖新选择。
@@ -114,8 +148,8 @@ Runtime identity/pairing，不请求HTTP origin。
 ## 主输入与状态行
 
 - `InputLine` 在首次 Ink effect flush 注册 `useInput` 后立即可编辑；注册前不显示假焦点，不使用固定延时作为门禁。
-- 状态阶段单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。
-- Retry、Approval、Input 与 Compaction 是覆盖态，不改变底层阶段。手动 compaction 使用消息区动画，自动 compaction 与当前 run 状态并存。
+- 内部状态阶段仍单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。Footer在普通执行期显示不参与本地化的英文`Working`；已完成的无工具模型正文进入Static、但权威Run终态尚未到达时显示`Finishing`。任一权威完成或失败终态到达后都立即隐藏状态行。
+- Retry、Approval、Input、Compaction与slash modal都是覆盖态，不改变底层阶段，也不隐藏active Run的`Working`。手动 compaction 使用消息区动画，自动 compaction 与当前 run 状态并存。
 - 工具卡可乐观显示 running，但执行耗时从 durable `tool.started` 开始；迟到 started 不复活终态卡片。
 - 工具 policy/formatter 只使用封闭 canonical category；动态 MCP/Provider 工具另携带 App 投影的有界
   `displayLabel`，所以本地界面保留具体名称而不把任意字符串提升成 capability。不得用通用 `tool` 占位

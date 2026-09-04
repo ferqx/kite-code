@@ -14,6 +14,10 @@
 - `model.text_delta` 与 `reasoning.activity` 必须携带对应 model request identity；live projector 保留 Kernel
   event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
   opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
+- `subagent.started`可携带Runtime签发的opaque `concurrencyGroupId`；同一并发派发批次的child在live与History中
+  保留该字段，使展示层能按真实dispatch identity聚合，串行child不携带该字段。
+- `subagent.completed`携带Runtime实测`toolCallCount + durationMs`；`subagent.failed`可携带同类终态计量和仅含
+  `code + stage`的低敏感度诊断，App projector不得把`modelInvocationId` correlation带入Client边界。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
 - 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
   Run resource；这些DTO不代表Public Agent API route已开放。
@@ -69,6 +73,8 @@
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。
 - 新写入的tool queue projection用`presentationGroupId`与`model.responded.messageId`精确配对；该字段只参与
   Presentation grouping，不是execution、authorization或settlement identity。旧History没有该可选字段时仍可回放。
+- `subagent.started.concurrencyGroupId`同样只属于Presentation grouping，不授予调度或授权能力；Contract validator
+  对其执行bounded identifier校验，缺少该字段的串行或旧History事件保持合法。
 - Contract 不泄漏具体执行、存储或展示 authority。
 
 ## 测试

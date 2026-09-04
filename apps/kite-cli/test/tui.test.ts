@@ -2,11 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TuiUserInputProvider } from '../src/tui/provider';
-import {
-  shouldAbortStoppedRun,
-  shouldProjectRunExited,
-  shouldSetIdleAfterRun,
-} from '../src/tui/run-lifecycle';
 
 describe('TuiUserInputProvider', () => {
   test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
@@ -21,52 +16,6 @@ describe('TuiUserInputProvider', () => {
   test('does not expose the retired AgentEvent forwarding method', () => {
     const provider = new TuiUserInputProvider();
     expect('onEvent' in provider).toBe(false);
-  });
-
-  test('does not let an older cancelled run clear a successor prompt', () => {
-    expect(shouldSetIdleAfterRun(true, 1, 2)).toBe(false);
-    expect(shouldSetIdleAfterRun(true, 2, 2)).toBe(true);
-    expect(shouldSetIdleAfterRun(false, 1, 1)).toBe(false);
-  });
-  test('does not project terminal exit from a generator closed by cancellation', () => {
-    expect(shouldProjectRunExited({ aborted: false, signalAborted: true, foreground: true })).toBe(
-      false,
-    );
-    expect(shouldProjectRunExited({ aborted: true, signalAborted: false, foreground: true })).toBe(
-      false,
-    );
-    expect(
-      shouldProjectRunExited({ aborted: false, signalAborted: false, foreground: false }),
-    ).toBe(false);
-    expect(shouldProjectRunExited({ aborted: false, signalAborted: false, foreground: true })).toBe(
-      true,
-    );
-  });
-  test('does not abort a run that already emitted its terminal exit state', () => {
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: true,
-        running: false,
-        ctrlCPressed: false,
-        exited: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: true,
-        running: false,
-        ctrlCPressed: false,
-        exited: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: false,
-        running: false,
-        ctrlCPressed: false,
-        exited: false,
-      }),
-    ).toBe(false);
   });
 
   test('requestAction blocks until submitAction is called', async () => {

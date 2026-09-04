@@ -46,7 +46,9 @@
 ## 关键不变量
 
 - Provider work 前必须完成 durable attempt acknowledgement。
+- Effect lease的global revision fence在dispatch前保持严格：stale Model preparation/attempt-start不得执行。精确Model invocation已经dispatch后，同一active Turn内无关的user control revision可以与其stream/retry/terminal evidence并发；Host只接受匹配live invocation的封闭Model/Tool/resource批次，Turn终止、invocation替换或identity漂移后仍拒绝迟到结果。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。
+- Tool/Shell活动数量不再形成Resource Budget permit；`maxToolInvocations`仍限制整轮累计调用，Subagent、writer、deadline与取消继续走原有账本。
 - Session lifecycle、mailbox、effect lease、cleanup、recovery 与 persistent scoped receipt decision 只有一个 Host owner；Server 仅通过 `RuntimeAccess` 调用它。
 - Host从同一`SessionLifecycleSupervisor`投影`hasActiveSessionOperations()`聚合只读事实，供Service在关闭mutation admission后判断普通stop是否
   必须返回busy；该方法不创建第二份Run registry、不取消Session，也不把terminal projection误报为active。

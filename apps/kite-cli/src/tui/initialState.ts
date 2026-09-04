@@ -31,6 +31,7 @@ export const initialState: TuiState = {
   },
   exited: false,
   running: false,
+  cancellationPending: false,
   runCount: 0,
   currentRunReasonId: undefined,
   showHelp: false,

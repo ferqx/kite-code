@@ -64,6 +64,7 @@ import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-depe
 import type { RuntimeUserAction } from './state-actions';
 import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
+import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 import type {
   PrecommittedStartTurnDescriptor,
   StartTurnSkillPlanningContext,
@@ -374,6 +375,13 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
       if (this.#running) return terminal(this.#rejected(command, 'runtime_busy'));
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
       if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      // A previous cancelled Turn may have reached its user-visible terminal
+      // before bounded Provider cleanup finishes. Never admit a successor
+      // into those recovery facts; the active execution owns reconciliation
+      // until its generator releases the Session.
+      if (hasPendingSubagentProviderRecovery(coordinator.getState())) {
+        return terminal(this.#rejected(command, 'runtime_busy'));
+      }
       return {
         kind: 'accepted',
         decision: {
@@ -1095,7 +1103,11 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
       }
       this.#running = false;
       this.#activePublish = undefined;
-      this.#revision = coordinator.getState().revision;
+      const terminalState = coordinator.getState();
+      this.#revision = terminalState.revision;
+      if (terminalState.turn.status === 'active') {
+        status = signal.aborted ? 'cancelled' : 'failed';
+      }
       this.#activeWork = terminalizeActiveWork(this.#activeWork, status);
       if (this.#revision >= publishedRevision) {
         publish({

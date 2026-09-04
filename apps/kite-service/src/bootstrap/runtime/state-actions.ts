@@ -280,45 +280,50 @@ function approvalCancellationEvents(
   interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
   reason: string,
 ): RuntimeEvent[] {
+  return [
+    focusedApprovalRejectionEvent(state, interaction, reason),
+    ...approvalRejectedTurnTerminationEvents(state, interaction.toolCallId, reason),
+  ];
+}
+
+function approvalRejectedTurnTerminationEvents(
+  state: Readonly<RuntimeState>,
+  rejectedToolCallId: string,
+  reason: string,
+  alreadyTerminalToolCallIds: ReadonlySet<string> = new Set(),
+  turnAlreadyAborted = false,
+): RuntimeEvent[] {
   const siblingCancellations = unfinishedToolCancellationEvents(
     state,
     reason,
-    interaction.toolCallId,
-  );
+    rejectedToolCallId,
+  ).filter((event) => !alreadyTerminalToolCallIds.has(event.toolCallId));
   const terminalToolCallIds = new Set([
-    interaction.toolCallId,
+    rejectedToolCallId,
     ...siblingCancellations.map((event) => event.toolCallId),
   ]);
   return [
-    {
-      type: 'approval.rejected',
-      interactionId: interaction.interactionId,
-      toolCallId: interaction.toolCallId,
-      generation:
-        state.pendingApprovals.get(interaction.interactionId)?.generation ??
-        state.approvalGeneration,
-      reason,
-      failure: classifyFailure('approval_rejected', reason),
-    },
-    {
-      type: 'tool.rejected',
-      toolCallId: interaction.toolCallId,
-      reason,
-    },
+    ...(alreadyTerminalToolCallIds.has(rejectedToolCallId)
+      ? []
+      : [{ type: 'tool.rejected' as const, toolCallId: rejectedToolCallId, reason }]),
     ...siblingCancellations,
     ...capabilityWaiverEventsForToolTerminals(
       state,
       terminalToolCallIds,
-      'User cancelled the run and waived reconciliation of the abandoned attempt.',
+      'User rejected tool approval and waived reconciliation of the abandoned turn.',
     ),
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
-    {
-      type: 'turn.aborted',
-      turnId: state.turn.turnId,
-      reason,
-      cause: 'user',
-    },
+    ...(turnAlreadyAborted || state.turn.status !== 'active'
+      ? []
+      : [
+          {
+            type: 'turn.aborted' as const,
+            turnId: state.turn.turnId,
+            reason,
+            cause: 'user' as const,
+          },
+        ]),
   ];
 }
 
@@ -587,58 +592,31 @@ export function approvalRejectionSettlementEvents(
   );
   if (!rejection) return [];
 
-  const toolAlreadySettled = events.some(
-    (event) => event.type === 'tool.rejected' && event.toolCallId === rejection.toolCallId,
+  const alreadyTerminalToolCallIds = new Set(
+    events
+      .filter(
+        (event): event is Extract<RuntimeEvent, { type: 'tool.rejected' | 'tool.cancelled' }> =>
+          event.type === 'tool.rejected' || event.type === 'tool.cancelled',
+      )
+      .map((event) => event.toolCallId),
   );
   const turnAlreadyAborted = events.some(
     (event) => event.type === 'turn.aborted' && event.turnId === state.turn.turnId,
   );
-
-  const siblingExists = Object.values(state.tools.calls).some(
-    (call) =>
-      call.toolCallId !== rejection.toolCallId &&
-      NON_TERMINAL_TOOL_STATUSES.has(call.status) &&
-      call.createdAtTurnId === state.turn.turnId,
+  if (turnAlreadyAborted) return [];
+  return approvalRejectedTurnTerminationEvents(
+    state,
+    rejection.toolCallId,
+    rejection.reason,
+    alreadyTerminalToolCallIds,
+    turnAlreadyAborted,
   );
-  const queuedApprovalSibling = [...state.pendingApprovals.values()].some((pending) => {
-    const call = state.tools.calls[pending.toolCallId];
-    return (
-      call?.createdAtTurnId === state.turn.turnId &&
-      pending.toolCallId !== rejection.toolCallId &&
-      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status)
-    );
-  });
-
-  const settled: RuntimeEvent[] = toolAlreadySettled
-    ? []
-    : [
-        {
-          type: 'tool.rejected',
-          toolCallId: rejection.toolCallId,
-          reason: rejection.reason,
-        },
-      ];
-  if (
-    !turnAlreadyAborted &&
-    !siblingExists &&
-    !queuedApprovalSibling &&
-    state.turn.status === 'active'
-  ) {
-    settled.push({
-      type: 'turn.aborted',
-      turnId: state.turn.turnId,
-      reason: rejection.reason,
-      cause: 'user',
-    });
-  }
-  return settled;
 }
 
 /**
- * A sibling may still be executing when the focused approval is rejected.
- * Once that sibling reaches a terminal state, the scheduler intentionally
- * stops on the recorded approval rejection. Close the turn at that stop
- * boundary instead of leaving an active turn with no runnable effects.
+ * Repair a restored/legacy State that contains an approval rejection without
+ * its turn terminal. Current rejection commands persist sibling cancellation
+ * and turn.aborted atomically, so this path must normally be a no-op.
  */
 export function deferredApprovalRejectionTurnAbortEvent(
   state: Readonly<RuntimeState>,

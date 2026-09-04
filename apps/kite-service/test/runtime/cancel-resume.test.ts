@@ -651,7 +651,11 @@ describe('bounded Runtime cancellation', () => {
       runId: 'run-1',
       startedAt: new Date(now).toISOString(),
       deadlineAt: new Date(now + 30_000).toISOString(),
-      budget: { ...LIMITED_RESOURCE_BUDGET_, maxConcurrentToolInvocations: 1 },
+      budget: {
+        ...LIMITED_RESOURCE_BUDGET_,
+        maxConcurrentToolInvocations: 1,
+        maxConcurrentShellInvocations: 1,
+      },
     });
     const upper = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     upper.counters.toolInvocations = 1;

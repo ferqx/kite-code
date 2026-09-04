@@ -21,6 +21,8 @@ export interface ShellProgramSemanticDescriptor {
 
 export interface ShellGitSemanticDescriptor {
   readonly branchListFlags: readonly string[];
+  readonly branchListOptionalValueFlags: readonly string[];
+  readonly branchListRequiredValueFlags: readonly string[];
   readonly branchIdentityShape: readonly string[];
   readonly remoteListFlags: readonly string[];
   readonly mutationSubcommands: readonly string[];
@@ -95,6 +97,13 @@ export const SHELL_SEMANTICS_REGISTRY_: ShellSemanticsRegistry = Object.freeze({
   ]),
   git: Object.freeze({
     branchListFlags: Object.freeze(['--all', '--list', '--no-color', '--remotes', '-a', '-r']),
+    branchListOptionalValueFlags: Object.freeze([
+      '--contains',
+      '--merged',
+      '--no-contains',
+      '--no-merged',
+    ]),
+    branchListRequiredValueFlags: Object.freeze(['--points-at']),
     branchIdentityShape: Object.freeze(['--show-current']),
     remoteListFlags: Object.freeze(['--verbose', '-v']),
     mutationSubcommands: Object.freeze([
@@ -150,8 +159,31 @@ export function isDeclaredReadOnlyGitBranch(arguments_: readonly string[]): bool
   ) {
     return true;
   }
-  const allowed = new Set(SHELL_SEMANTICS_REGISTRY_.git.branchListFlags);
-  return arguments_.every((argument) => allowed.has(argument));
+  const flags = new Set(SHELL_SEMANTICS_REGISTRY_.git.branchListFlags);
+  const optionalValueFlags = new Set(SHELL_SEMANTICS_REGISTRY_.git.branchListOptionalValueFlags);
+  const requiredValueFlags = new Set(SHELL_SEMANTICS_REGISTRY_.git.branchListRequiredValueFlags);
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index] ?? '';
+    if (flags.has(argument)) continue;
+    const name = argument.split('=', 1)[0]!;
+    if (optionalValueFlags.has(name)) {
+      if (argument.includes('=')) {
+        if (!argument.slice(argument.indexOf('=') + 1)) return false;
+      } else if (arguments_[index + 1] && !arguments_[index + 1]!.startsWith('-')) {
+        index += 1;
+      }
+      continue;
+    }
+    if (!requiredValueFlags.has(name)) return false;
+    if (argument.includes('=')) {
+      if (!argument.slice(argument.indexOf('=') + 1)) return false;
+    } else {
+      const value = arguments_[index + 1] ?? '';
+      if (!value || value.startsWith('-')) return false;
+      index += 1;
+    }
+  }
+  return true;
 }
 
 export function isDeclaredReadOnlyGitRemote(arguments_: readonly string[]): boolean {

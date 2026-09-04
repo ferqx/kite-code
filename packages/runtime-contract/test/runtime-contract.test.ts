@@ -416,6 +416,55 @@ describe('runtime contract package boundary', () => {
     ).toBe(false);
     expect(
       isRuntimeClientEvent({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: 'subagent-batch:tool-1',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: '',
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.completed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection complete.',
+        toolCallCount: 3,
+        durationMs: 12_345,
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection failed.',
+        toolCallCount: 2,
+        durationMs: 9_000,
+        diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection failed.',
+        diagnostic: {
+          code: 'model_step_failed',
+          stage: 'model_step',
+          modelInvocationId: 'private-correlation',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeClientEvent({
         type: 'subagent.step',
         subagentId: 'subagent-1',
         toolName: 'read_file',

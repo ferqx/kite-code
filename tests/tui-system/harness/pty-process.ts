@@ -64,6 +64,10 @@ export interface PtyProcess {
   setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
   resize(cols: number, rows: number): PtyOutputMark;
+  /** Scroll the modeled native terminal viewport; negative lines move upward. */
+  scrollViewport(lines: number): Promise<void>;
+  /** Current modeled native viewport and scrollback-bottom positions. */
+  viewportPosition(): { viewportY: number; baseY: number };
   /** Get the current terminal viewport after VT/ANSI control sequences are applied. */
   viewport(): string;
   /** Get the end-cursor input projection used by harness-owned input actions. */
@@ -612,6 +616,14 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
         proc.terminal.resize(newCols, newRows);
       }
       return lastActionMark;
+    },
+
+    scrollViewport(lines: number) {
+      return terminalScreen.scrollLines(lines);
+    },
+
+    viewportPosition() {
+      return terminalScreen.viewportPosition();
     },
 
     viewport(): string {

@@ -127,6 +127,19 @@ describe('Runtime Protocol', () => {
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
+        id: 'rpc-input-stale-revision',
+        method: 'runtime/command',
+        params: {
+          command: {
+            ...inputCancelCommand,
+            expectedRevision: inputCancelCommand.expectedRevision + 1,
+          },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
         id: 'rpc-input-cancel-mismatch',
         method: 'runtime/command',
         params: {
@@ -388,6 +401,62 @@ describe('Runtime Protocol', () => {
     expect(
       mapRuntimeClientEventToProtocol({ type: 'model.text_delta', text: 'visible' } as never),
     ).toBeUndefined();
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: 'subagent-batch:tool-1',
+      }),
+    ).toEqual({
+      type: 'subagent.started',
+      subagentId: 'subagent-1',
+      role: 'explore',
+      name: 'Inspect the runtime',
+      concurrencyGroupId: 'subagent-batch:tool-1',
+    });
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: '',
+      }).success,
+    ).toBeFalse();
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.completed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection complete.',
+        toolCallCount: 3,
+        durationMs: 12_345,
+      }),
+    ).toEqual({
+      type: 'subagent.completed',
+      subagentId: 'subagent-1',
+      summary: 'Inspection complete.',
+      toolCallCount: 3,
+      durationMs: 12_345,
+    });
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection failed.',
+        toolCallCount: 2,
+        durationMs: 9_000,
+        diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+      }),
+    ).toEqual({
+      type: 'subagent.failed',
+      subagentId: 'subagent-1',
+      summary: 'Inspection failed.',
+      toolCallCount: 2,
+      durationMs: 9_000,
+      diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+    });
     expect(
       mapRuntimeClientEventToProtocol({
         type: 'tool.queued',
@@ -821,7 +890,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '4e3ecc9f:186273a0';
+    const expectedDigest = 'ba75d415:186273a0';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

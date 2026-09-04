@@ -131,6 +131,6 @@ State 27 的 `pendingApprovals` 与 `activeApprovalId` 独立于 Plan Artifact�
 Plan、切换 phase 或跳过 review/completion。只有同一 model message/turn 的并发 Explore children（parent 非 Full）派生 Auto；single
 Explore、plan/code/review 继承 parent。
 
-Approval overlay 的 Enter 提交 exact interactionId+generation+grant；Esc 只 focused reject，Plan/Input Esc 保留各自语义；Ctrl+C
-才取消 whole turn。`/permissions` 的 mode 与 `session_grants_cleared` event 不改变 Plan phase；Session switch/restart 恢复各自
+Approval overlay的Enter提交exact interactionId+generation+grant；Esc拒绝focused target并取消同turn sibling、结束turn，
+Plan/Input Esc保留各自语义；Ctrl+C仍是独立整轮取消输入。`/permissions` 的 mode 与 `session_grants_cleared` event 不改变 Plan phase；Session switch/restart 恢复各自
 queue、mode revision、Plan identity 和 grants，旧 generation/session event no-op。

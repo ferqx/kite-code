@@ -29,6 +29,7 @@
 - 根 state/event union 和 Reducer 顺序均为编译期固定。
 - 当前 writer 只产生 State 27/SAQ epoch；State 26 只在封闭兼容边界投影为 inert history。
 - 授权、完成、恢复与 verification decision 只有一个 Kernel owner。
+- Resource Budget限制整轮工具总量、Subagent与writer并发，但不把普通Tool或Shell按活动数量分批；一次模型响应中通过traits冲突检查的调用可直接并行。
 - Shell `uncertainEffects`在未持有exact approval时始终投影为真人审批；`risk`只描述风险，不能替代Compiler的
   `allowed/decision/requiresApproval`生成第二个hard deny。
 

@@ -8,7 +8,7 @@ const fixtureRoots: string[] = [];
 
 afterAll(() => {
   for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
-});
+}, 30_000);
 
 function createFixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'kite-runtime-packages-'));

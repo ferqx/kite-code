@@ -42,18 +42,15 @@ const HEADER_SENTINEL = { __header: true } as const;
  * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
  * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
  *
- * - user：永不修改；但作为当前 turn 唯一 block 时暂留 dynamic，避免提交长消息时
- *   立即触发 Static/dynamic 交接清屏。首个后续 block 到达后再提升。
- * - text：只有活动结构组件或待终态调和的块不稳定。Runtime delta 路径把完整
- *   Markdown 段落/组件追加为新的 immutable text block；已经提交的相邻 text 是
- *   append-only 前缀，必须立即冻结。
- * - tool_card：只有终态稳定；探索工具仍可能被聚合为 tool_summary，必须留在动态树。
- * - 其余生命周期块只在其 exact terminal 条件满足后冻结。
+ * user prompt 在出现后续 block 后可以进入 Static。tool_summary 必须先关闭聚合
+ * owner、结束 awaiting-terminal 状态，并由 reducer 发布整体 result；渲染层不从
+ * 子工具状态重复推导完成。
  */
 export function isBlockSettledInRun(
   block: OutputBlock,
   _blocks: OutputBlock[],
   _index: number,
+  _runActive = false,
 ): boolean {
   switch (block.kind) {
     case 'user':
@@ -62,6 +59,7 @@ export function isBlockSettledInRun(
       return (
         !block.streaming &&
         !block.responsePending &&
+        (block.modelRequestId === undefined || block.modelTerminal === true) &&
         block.streamingSource === undefined &&
         block.streamingComponent === undefined
       );
@@ -75,18 +73,7 @@ export function isBlockSettledInRun(
         block.status === 'exhausted'
       );
     case 'tool_summary':
-      return (
-        !block.active &&
-        !block.responsePending &&
-        block.tools.every(
-          (tool) =>
-            tool.status === 'done' ||
-            tool.status === 'error' ||
-            tool.status === 'cancelled' ||
-            tool.status === 'timeout' ||
-            tool.status === 'exhausted',
-        )
-      );
+      return !block.active && !block.responsePending && block.result !== undefined;
     case 'reason':
     case 'file_change':
       return true;
@@ -97,6 +84,16 @@ export function isBlockSettledInRun(
         candidate.status === 'cancelled';
       if (!terminal(block)) return false;
       if (block.concurrencyGroupId === undefined) return true;
+      // Group identity does not reveal siblings whose start event has not
+      // arrived yet. A later presentation block proves this sibling group is
+      // closed; otherwise do not hand it to append-only Static mid-Run.
+      const hasLaterBoundary = _blocks.some(
+        (candidate, candidateIndex) =>
+          candidateIndex > _index &&
+          (candidate.kind !== 'subagent' ||
+            candidate.concurrencyGroupId !== block.concurrencyGroupId),
+      );
+      if (_runActive && !hasLaterBoundary) return false;
       return _blocks.every(
         (candidate) =>
           candidate.kind !== 'subagent' ||
@@ -107,8 +104,6 @@ export function isBlockSettledInRun(
     case 'approval':
     case 'question':
       return block.resolved !== undefined;
-    default:
-      return false;
   }
 }
 
@@ -120,6 +115,9 @@ export function isBlockSettledInRun(
 export function blockFingerprint(b: OutputBlock): string {
   let extra = '';
   switch (b.kind) {
+    case 'user':
+      extra = b.pendingEcho ? ':pending' : `:durable:${b.messageId ?? 'local'}`;
+      break;
     case 'text':
       extra =
         (b.streaming ? `:s:${b.content.length}` : b.responsePending ? ':pending' : ':f') +
@@ -137,15 +135,12 @@ export function blockFingerprint(b: OutputBlock): string {
     case 'tool_summary':
       // Every tool status change must trigger a split recomputation
       extra =
-        `:${b.active ? 'a' : b.responsePending ? 'pending' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.result ?? '_'}` +
+        `:${b.active ? 'a' : b.responsePending ? 'pending' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.liveModelStartedAt ?? '_'}:${b.result ?? '_'}` +
         (b.latestActivity
           ? b.latestActivity.kind === 'thinking'
             ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
             : `:tc:${b.latestActivity.callId}`
-          : '') +
-        // ADR-0030 旁白字幕变化同样触发重算 / caption changes invalidate too
-        (b.captions?.length ? `:cap${b.captions.length}:${b.captions.join('|').length}` : '') +
-        (b.pendingCaption != null ? `:pc${b.pendingCaption.length}` : '');
+          : '');
       break;
     case 'subagent':
       extra =
@@ -239,7 +234,6 @@ export function useStaticContent({
   // immutable; a new run (SET_RUNNING) restores the live-tail split.
   const prevRunningRef = useRef(running);
   const allSettledRef = useRef(false);
-
   const needsClear =
     sessionKey !== prevSessionKeyRef.current || presentationKey !== prevPresentationKeyRef.current;
   const isResize = (resizeGeneration ?? 0) > 0;
@@ -280,12 +274,11 @@ export function useStaticContent({
   prevRunningRef.current = running;
 
   // ── Stable-history / live-tail split ──
-  // Keep the latest turn dynamic while a run is live or while it remains the
-  // latest turn after an idle run. Promoting it to Ink <Static> in the same
-  // terminal frame as model.responded/SET_EXITED leaves earlier dynamic frames
-  // in Windows scrollback and visibly duplicates the terminal answer. The turn
-  // becomes immutable history when a newer user turn is appended or the
-  // session is remounted (handled above via allSettledRef).
+  // Older turns are immutable wholesale. Within the latest turn, only the
+  // contiguous prefix whose reducer-owned completion facts are final may move
+  // to Static. In particular, a tool_summary is complete only after reducer
+  // publishes its aggregate result; active and child tool states are not a
+  // second completion authority.
   const allSettled = allSettledRef.current;
   const settledTurns = allSettled ? turns : turns.slice(0, -1);
   const activeTurn = allSettled ? undefined : turns.at(-1);
@@ -360,27 +353,22 @@ export function useStaticContent({
     let nextDynamic: OutputBlock[];
 
     if (activeTurn && activeTurn.blocks.length > 0) {
-      // 运行中就把已完成（绝对不可变）的连续前缀提升进 <Static>，只把活跃
+      // active turn 中已完成（绝对不可变）的连续前缀提升进 <Static>，只把活跃
       // 后缀留在动态树。Ink <Static> 是 append-only 的（items.slice(index) 只
       // 渲染新增项），所以只有 isBlockSettledInRun 判定的、后续事件绝不再
       // 修改的 block 才能离开动态树；一旦遇到第一个仍可变的块，其后的块
       // 全部留在动态树（保证 Static→动态的渲染顺序）。
       const blocks = activeTurn.blocks;
-      let split = activeSettledRef.current.length;
-      if (running) {
-        split = 0;
-        while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
-          split++;
-        }
+      let split = 0;
+      while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split, running)) {
+        split++;
       }
 
-      // Ink Static is append-only. Once the run reaches an idle/cancelled
-      // terminal frame, do not promote any more of the latest turn: doing so
-      // writes content that was already visible in the dynamic tree into
-      // terminal scrollback a second time. Preserve only the prefix that was
-      // committed while the run was live and keep the terminal suffix dynamic
-      // until a successor turn or remount makes this turn immutable history.
-      nextSettled = running ? blocks.slice(0, split) : activeSettledRef.current;
+      // Terminal facts can close the remaining contiguous prefix on the same
+      // frame that the Run becomes idle.  ADR-0168/0171/0172 make those block
+      // facts—not Run liveness—the completion authority, so retain no stale
+      // dynamic owner once the prefix is proven immutable.
+      nextSettled = blocks.slice(0, split);
       nextDynamic = blocks.slice(split);
     } else {
       nextSettled = [];

@@ -138,7 +138,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136/0160 | status/log grammar恢复可证明只读免审；typed Git不再进入模型工具面 |
 | [0135](0135-mode-aware-workspace-authorization-boundary.md) | partially superseded by ADR-0136 | 文件工具边界保留；Shell/Git 的 Workspace grammar 直通已取消 |
 | [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
-| [0137](0137-shell-sandbox-durable-approval-queue.md) | partially superseded by ADR-0160 | durable queue/sandbox保留；未知Shell baseline改为exact真人审批 |
+| [0137](0137-shell-sandbox-durable-approval-queue.md) | partially superseded by ADR-0160/0170 | durable queue/sandbox保留；未知Shell baseline改为exact真人审批；focused-only拒绝被取消 |
 | [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
 | [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
@@ -168,3 +168,9 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0164](0164-active-candidate-service-build-convergence.md) | superseded by ADR-0166 | active-candidate/previous-build换代控制面已删除；release切换只影响后续App Server启动 |
 | [0165](0165-source-tui-standalone-service-topology.md) | superseded by ADR-0166 | 临时进程隔离保留为参考；临时Store/History与source/installed拓扑差异被取消 |
 | [0166](0166-decouple-app-server-process-from-durable-session-authority.md) | accepted | Client启动同build App Server；Session独立持久并按Session writer fencing；daemon/Web显式化 |
+| [0167](0167-separate-block-completion-from-terminal-static-ownership.md) | accepted | Block按自身生命周期完成；已绘制live tail只在后继Turn或清屏重挂载后进入Static |
+| [0168](0168-result-owned-tool-summary-static-promotion.md) | accepted | 聚合封口、terminal协调与整体result共同控制`tool_summary`的连续前缀Static提升 |
+| [0169](0169-thought-latest-activity-window.md) | accepted | active Thought在最新completed reasoning与探索工具步骤之间交替，settle后只保留聚合标题 |
+| [0170](0170-approval-rejection-terminates-tool-batch.md) | accepted | 人工工具审批拒绝原子拒绝目标、取消同批sibling并中止turn；TUI保留被拒绝工具上下文 |
+| [0171](0171-completed-response-components-use-immediate-static-ownership.md) | accepted | 最终回复的普通完成组件立即进入Static；只有仍增长的表格/代码容器留在dynamic，并保持完成后原生滚动稳定 |
+| [0172](0172-terminal-presentation-blocks-use-static-ownership.md) | accepted | standalone工具、终态Subagent组、resolved交互与不可变展示块立即进入Static，不再阻塞后续最终组件 |

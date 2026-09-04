@@ -137,6 +137,7 @@ export {
   assertCapabilityToolTerminalBatch,
   attachSuspendedCapabilityTerminals,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,
   suspendedCapabilityTerminalRequirements,
@@ -337,7 +338,6 @@ export type { SchedulerFacts } from './scheduler';
 export {
   decideNextEffect,
   isValidSchedulerFacts,
-  MAX_PARALLEL_READ_TOOLS,
   MAX_PARALLEL_SUBAGENTS,
   selectPendingEffects as selectScheduledEffects,
 } from './scheduler';

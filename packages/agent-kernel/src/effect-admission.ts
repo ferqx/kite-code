@@ -329,3 +329,154 @@ export function isConcurrentShellEffectBatchCurrent(
   }
   return true;
 }
+
+function modelInvocationIdForConcurrentBatch(
+  state: Readonly<AgentState>,
+  lease: AgentEffectLeaseIdentity,
+  events: readonly RuntimeEvent[],
+): string | undefined {
+  if (
+    lease.turnId !== state.turn.turnId ||
+    state.turn.status !== 'active' ||
+    lease.effect.type !== 'call_model'
+  ) {
+    return undefined;
+  }
+  const first = events[0];
+  if (!first) return undefined;
+  if (
+    first.type === 'model.reasoning_delta' ||
+    first.type === 'model.reasoning_completed' ||
+    first.type === 'model.text_delta'
+  ) {
+    const invocation = state.modelInvocations[first.requestId];
+    return events.length === 1 && invocation?.status === 'dispatching'
+      ? first.requestId
+      : undefined;
+  }
+  if (first.type === 'model.retry') {
+    const invocation = state.modelInvocations[first.invocationId];
+    return events.length === 1 && invocation?.status === 'dispatching'
+      ? first.invocationId
+      : undefined;
+  }
+  if (
+    first.type !== 'model.invocation_completed' &&
+    first.type !== 'model.invocation_interrupted'
+  ) {
+    return undefined;
+  }
+  const invocation = state.modelInvocations[first.invocationId];
+  if (first.type === 'model.invocation_completed' && invocation?.status !== 'dispatching') {
+    return undefined;
+  }
+  if (
+    first.type === 'model.invocation_interrupted' &&
+    invocation?.status !== 'prepared' &&
+    invocation?.status !== 'dispatching'
+  ) {
+    return undefined;
+  }
+  return first.invocationId;
+}
+
+function isConcurrentModelEffectEvent(
+  state: Readonly<AgentState>,
+  event: RuntimeEvent,
+  invocationId: string,
+  terminalType: RuntimeEvent['type'],
+  index: number,
+): boolean {
+  const invocation = state.modelInvocations[invocationId];
+  if (index === 0) {
+    if (
+      terminalType === 'model.reasoning_delta' ||
+      terminalType === 'model.reasoning_completed' ||
+      terminalType === 'model.text_delta'
+    ) {
+      return (
+        ((terminalType === 'model.reasoning_delta' && event.type === 'model.reasoning_delta') ||
+          (terminalType === 'model.reasoning_completed' &&
+            event.type === 'model.reasoning_completed') ||
+          (terminalType === 'model.text_delta' && event.type === 'model.text_delta')) &&
+        event.requestId === invocationId
+      );
+    }
+    if (terminalType === 'model.retry') {
+      return event.type === 'model.retry' && event.invocationId === invocationId;
+    }
+    if (terminalType === 'model.invocation_completed') {
+      return event.type === 'model.invocation_completed' && event.invocationId === invocationId;
+    }
+    return (
+      terminalType === 'model.invocation_interrupted' &&
+      event.type === 'model.invocation_interrupted' &&
+      event.invocationId === invocationId
+    );
+  }
+  if (terminalType === 'model.invocation_interrupted') {
+    return (
+      (event.type === 'resource_budget.released' || event.type === 'resource_budget.unknown') &&
+      invocation?.budget.kind === 'reservation' &&
+      event.reservationId === invocation.budget.reservationId
+    );
+  }
+  if (terminalType !== 'model.invocation_completed') return false;
+  switch (event.type) {
+    case 'model.responded':
+      return event.invocationId === invocationId;
+    case 'tool.queued':
+      return event.modelInvocationId === invocationId;
+    case 'model.context_metrics':
+    case 'model.cache_metrics':
+      return true;
+    case 'resource_budget.reconciled':
+      return (
+        invocation?.budget.kind === 'reservation' &&
+        event.reservationId === invocation.budget.reservationId
+      );
+    default:
+      return false;
+  }
+}
+
+/**
+ * A user control event may advance the global State revision while an exact
+ * Model invocation is already dispatching. Preserve only that invocation's
+ * retry or terminal evidence; preparation and attempt-start remain fenced to
+ * the original revision so a stale Model Surface can never begin dispatch.
+ */
+export function isConcurrentModelEffectBatchCurrent(
+  state: Readonly<AgentState>,
+  lease: AgentEffectLeaseIdentity,
+  events: readonly RuntimeEvent[],
+  occurredAtForEvent: (index: number) => string,
+): boolean {
+  const invocationId = modelInvocationIdForConcurrentBatch(state, lease, events);
+  if (!invocationId) return false;
+  const terminalType = events[0]!.type;
+  let projectedState = state;
+  for (const [index, event] of events.entries()) {
+    if (!isConcurrentModelEffectEvent(projectedState, event, invocationId, terminalType, index)) {
+      return false;
+    }
+    const occurredAt = occurredAtForEvent(index);
+    if (!occurredAt || !Number.isFinite(Date.parse(occurredAt))) return false;
+    const canonicalEvent = normalizeAgentEvent(event, projectedState, occurredAt);
+    projectedState = reduce(projectedState, [canonicalEvent]);
+  }
+  const terminal = events[0];
+  const projectedInvocation = projectedState.modelInvocations[invocationId];
+  if (terminal?.type === 'model.invocation_completed') {
+    return projectedInvocation?.status === 'completed';
+  }
+  if (terminal?.type === 'model.invocation_interrupted') {
+    return projectedInvocation?.status === 'interrupted';
+  }
+  return (
+    terminal?.type === 'model.retry' ||
+    terminal?.type === 'model.reasoning_delta' ||
+    terminal?.type === 'model.reasoning_completed' ||
+    terminal?.type === 'model.text_delta'
+  );
+}

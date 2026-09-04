@@ -16,7 +16,7 @@ import {
   acquireConfigFileMutationLock,
   ConfigFileMutationLockError,
   replaceConfigFileAtomically,
-} from '../src/config';
+} from '../../src/config';
 
 const identity = () => 'test-process-start';
 const nonce = () => new Uint8Array(24).fill(7);
@@ -125,7 +125,7 @@ describe('config file mutation lock', () => {
   test('serializes the same config target across real processes', async () => {
     const root = temporaryRoot();
     const target = join(root, 'kite-code.jsonc');
-    const childPath = join(import.meta.dir, 'fixtures', 'config-lock-child.ts');
+    const childPath = join(import.meta.dir, '..', 'fixtures', 'config-lock-child.ts');
     try {
       const startAt = Date.now() + 250;
       const children = [

@@ -3,9 +3,9 @@ import { render } from 'ink-testing-library';
 import React from 'react';
 import CompactionProgress from '../src/tui/components/CompactionProgress';
 import Header from '../src/tui/Header';
+import { I18nProvider } from '../src/tui/i18n';
 import type { RunStatusSnapshot } from '../src/tui/run-status';
-import StatusBar, { runStatusColor } from '../src/tui/StatusBar';
-import { darkTheme } from '../src/tui/theme';
+import StatusBar from '../src/tui/StatusBar';
 
 function fakeStatus() {
   return {
@@ -68,19 +68,6 @@ describe('Header', () => {
 });
 
 describe('StatusBar', () => {
-  test('maps run status tones to the active theme colors', () => {
-    expect(runStatusColor(darkTheme, 'primary')).toBe(darkTheme.primary);
-    expect(runStatusColor(darkTheme, 'success')).toBe(darkTheme.success);
-    expect(runStatusColor(darkTheme, 'warning')).toBe(darkTheme.warning);
-    expect(runStatusColor(darkTheme, 'muted')).toBe(darkTheme.muted);
-    expect(runStatusColor(darkTheme, 'error')).toBe(darkTheme.error);
-  });
-
-  test('keeps Working on the theme primary color', () => {
-    expect(runStatusColor(darkTheme, 'success', 'working')).toBe(darkTheme.primary);
-    expect(runStatusColor(darkTheme, 'warning', 'working')).toBe(darkTheme.primary);
-  });
-
   test('shows fixed Working text and spinner when running', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
@@ -139,19 +126,38 @@ describe('StatusBar', () => {
     expect(lastFrame()).toContain('Working');
   });
 
-  test('thinking phase uses verb-only format without Working prefix', () => {
+  test('thinking phase still renders only the fixed English Working text', () => {
+    const { lastFrame } = render(
+      React.createElement(
+        I18nProvider,
+        { language: 'zh-CN' },
+        React.createElement(StatusBar, {
+          status: fakeStatus(),
+          runStatus: fakeRunStatus({ phase: 'thinking', verb: 'Thinking' }),
+          timerKey: 0,
+          running: true,
+        }),
+      ),
+    );
+    const output = lastFrame();
+    expect(output).toContain('Working');
+    expect(output).not.toContain('Thinking');
+    expect(output).not.toContain('思考');
+    expect(output).not.toContain('工作');
+  });
+
+  test('shows Finishing after the final answer while awaiting the Run terminal', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         status: fakeStatus(),
-        runStatus: fakeRunStatus({ phase: 'thinking', verb: 'Thinking' }),
+        runStatus: fakeRunStatus({ phase: 'finishing', verb: 'Finishing' }),
         timerKey: 0,
         running: true,
       }),
     );
-    const output = lastFrame();
-    expect(output).toContain('Thinking');
-    // Thinking phase shouldn't have the "Working ·" prefix
-    expect(output).not.toMatch(/Working/);
+
+    expect(lastFrame()).toContain('Finishing');
+    expect(lastFrame()).not.toContain('Working');
   });
 });
 

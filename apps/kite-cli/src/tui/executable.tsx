@@ -2,6 +2,7 @@ import packageJson from '../../package.json' with { type: 'json' };
 import type { KiteRuntimeModeConnector } from '../service-mode';
 import { createKiteRuntimeModeAdapter } from '../service-mode';
 import { runTui as runTuiClient, type TuiBootstrapProps } from './index';
+import { formatTuiStartupError } from './startup-diagnostic';
 
 export type KiteTuiProps = Omit<TuiBootstrapProps, 'createSessionManager'> & {
   /** Explicit parent-owned Runtime connector supplied by the release composition. */
@@ -9,13 +10,14 @@ export type KiteTuiProps = Omit<TuiBootstrapProps, 'createSessionManager'> & {
 };
 
 export function runTui(props: KiteTuiProps = {}): void {
+  const pairing = props.appServerRuntime?.pairing;
   if (props.runtimeMode) {
     const runtimeMode = props.runtimeMode;
     void runtimeMode.connection
       .prepareAppControl()
       .then(() => runTuiClient(props))
       .catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : String(error));
+        console.error(formatTuiStartupError(error, pairing));
         process.exitCode = 1;
       });
     return;
@@ -38,7 +40,7 @@ export function runTui(props: KiteTuiProps = {}): void {
       });
     })
     .catch(async (error: unknown) => {
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(formatTuiStartupError(error, pairing));
       process.exitCode = 1;
     });
 }

@@ -55,6 +55,27 @@ describe('cli argument parsing', () => {
     }
   });
 
+  test('explains how to recover from an incompatible explicit App Server daemon', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      process.argv = ['bun', 'kite', 'server', 'status'];
+      await expect(
+        main({
+          appServerDaemon: {
+            start: async () => ({ state: 'incompatible' }),
+            status: async () => ({ state: 'incompatible', endpoint: '/tmp/kite.sock' }),
+            stop: async () => ({ state: 'incompatible' }),
+          },
+        }),
+      ).rejects.toThrow('请更新 Kite Code');
+      expect(output.mock.calls.at(-1)).toEqual(['App Server: incompatible /tmp/kite.sock']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
   test('recognizes only the explicit App Server daemon Web root command', () => {
     expect(parseArgs(['web']).command).toBe('web-open');
     expect(parseArgs(['web', '--json'])).toMatchObject({

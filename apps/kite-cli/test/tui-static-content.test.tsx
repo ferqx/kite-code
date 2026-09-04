@@ -44,7 +44,7 @@ function Harness({
 }
 
 describe('useStaticContent session remount promotion', () => {
-  test('does not promote the visible answer when a local command is appended', () => {
+  test('promotes finalized response text before later local commands', () => {
     const runningTurn: Turn = {
       blocks: [
         { id: 1, kind: 'user', content: '你好' },
@@ -72,6 +72,8 @@ describe('useStaticContent session remount promotion', () => {
         sessionKey: 6,
       }),
     );
+    expect(view.lastFrame()).toContain('staticIds=1,2');
+    expect(view.lastFrame()).toContain('dynamicIds=');
 
     const localCommandTurn: Turn = {
       blocks: [
@@ -89,8 +91,8 @@ describe('useStaticContent session remount promotion', () => {
     );
 
     const frame = view.lastFrame();
-    expect(frame).toContain('staticIds=1');
-    expect(frame).toContain('dynamicIds=2,3,4');
+    expect(frame).toContain('staticIds=1,2,3,4');
+    expect(frame).toContain('dynamicIds=');
   });
 
   test('single-turn idle session is fully promoted to Static after remount', async () => {
@@ -114,7 +116,7 @@ describe('useStaticContent session remount promotion', () => {
     expect(frame).toContain('dynamic=0');
   });
 
-  test('running session promotes completed blocks inside the live tail after remount', async () => {
+  test('running session still promotes text whose response owner is final', async () => {
     const turns = [makeTurn([1, 2], 'text'), makeTurn([3, 4], 'text')];
     const { lastFrame } = render(
       React.createElement(Harness, { turns, running: true, sessionKey: 9 }),
@@ -124,7 +126,7 @@ describe('useStaticContent session remount promotion', () => {
     expect(frame).toContain('dynamic=0');
   });
 
-  test('running session keeps only the mutable live component dynamic after remount', async () => {
+  test('running session promotes only the completed prefix before a streaming tail', async () => {
     const live = makeTurn([3, 4], 'text');
     live.blocks[1] = { ...live.blocks[1]!, streaming: true } as OutputBlock;
     const turns = [makeTurn([1, 2], 'text'), live];
@@ -134,6 +136,7 @@ describe('useStaticContent session remount promotion', () => {
     const frame = lastFrame();
     expect(frame).toContain('static=3');
     expect(frame).toContain('dynamic=1');
+    expect(frame).toContain('staticIds=1,2,3');
     expect(frame).toContain('dynamicIds=4');
   });
 

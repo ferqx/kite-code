@@ -42,6 +42,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 - New Contract discriminants do not become wire capabilities until an explicit exhaustive mapper and codec change admits them. Raw Runtime events, credentials, headers, provider bodies, authority identities and Store locators do not cross this boundary. User-local presentation may carry bounded reasoning, ordinary tool paths/commands/arguments and terminal output through their exact closed DTOs; obvious credential-shaped values remain redacted.
 - `model.text_delta` and `reasoning.activity` carry a required `requestId`; codecs and mappers preserve it exactly and reject missing or additional fields.
 - `tool.queued.presentationGroupId`, when present, is a bounded opaque identifier copied from the App projection. It pairs the tool with `model.responded.messageId` for presentation only; it grants no Runtime authority and unknown/additional grouping fields fail closed.
+- `subagent.started.concurrencyGroupId`, when present, is the bounded opaque Runtime dispatch identity copied by the App projector. The wire codec preserves it for live and History presentation grouping; it is neither scheduling nor authorization authority, and sequential or older events may omit it.
+- `subagent.completed` preserves the required Runtime-measured tool count and duration. `subagent.failed` admits optional terminal count/duration plus an exact content-free `{code,stage}` diagnostic; opaque model invocation correlation is not part of the wire shape.
 - Every wire Session carries one complete `interactionQueue` replacement projection. Queue revision equals Session revision,
   every interaction carries that revision, identities are unique, and the optional active identity must name one queue member.
   `sessionRevision` is the current settlement CAS rather than a creation-time identity; stable kind-specific identity fields
@@ -50,6 +52,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
   Contract-to-wire mapping materializes independent closed values so JSON/WebSocket and in-process logical messages have
   identical ownership and cycle behavior.
 - Approval interactions admit the same optional, control-filtered command projection in notifications, session projections, and `respond_interaction` commands. The wire value is bounded to 16,384 UTF-16 code units; cwd, sandbox evidence, grant subjects, credentials, and hidden execution arguments remain excluded.
+- `respond_interaction.expectedRevision`必须与所携interaction的`sessionRevision`相等；客户端在revision conflict后必须先取得
+  最新权威interaction projection再重建命令，codec在消息进入Server前拒绝旧interaction与新CAS拼接的请求。
 - Approval response只接纳`approve_once|same_command|reject`；未知grant在路由前fail closed，不使用
   compatibility alias或字符串fallback。
 - Session deletion is admitted only as the explicit `delete_session` V1 command with scoped command identity and revision fencing. It does not expose a Store/SQLite operation or an alternate App delete path.

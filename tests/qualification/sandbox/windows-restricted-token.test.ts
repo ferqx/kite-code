@@ -393,6 +393,8 @@ describe('Windows restricted-token environment', () => {
     expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
     expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
     expect(env.GIT_CONFIG_VALUE_0).toBe('false');
+    expect(env.HOME).toBe('C:\\runtime');
+    expect(env).not.toHaveProperty('GIT_EXTERNAL_DIFF');
   });
 
   test('accepts only canonical Bun executable names for the PATH entry', () => {

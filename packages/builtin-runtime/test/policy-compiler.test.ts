@@ -330,9 +330,21 @@ describe('Builtin operation policy compiler', () => {
       'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
     expect(isReadOnlyShellCommand(inspection)).toBe(true);
     expect(isVcsMutationShellCommand(inspection)).toBe(false);
+    const graphedInspection =
+      'git branch --show-current && git log --oneline -3 --all --graph | head -20';
+    expect(isReadOnlyShellCommand(graphedInspection)).toBe(true);
+    expect(isVcsMutationShellCommand(graphedInspection)).toBe(false);
+    expect(isReadOnlyShellCommand('git log -1 --stat 412f8bf7')).toBe(true);
+    expect(
+      isReadOnlyShellCommand("git log --oneline -30 --date=short --pretty=format:'%h %ad %an %s'"),
+    ).toBe(true);
     expect(isReadOnlyShellCommand('git branch --show-current 2>/dev/null')).toBe(true);
     expect(isVcsMutationShellCommand('git branch --show-current 2>/dev/null')).toBe(false);
     expect(isReadOnlyShellCommand('git branch -a --no-color | head -20')).toBe(true);
+    expect(isReadOnlyShellCommand('git branch -a --contains HEAD | head -5')).toBe(true);
+    expect(isVcsMutationShellCommand('git branch -a --contains HEAD | head -5')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch --merged')).toBe(true);
+    expect(isReadOnlyShellCommand('git branch --points-at HEAD')).toBe(true);
     expect(isVcsMutationShellCommand('git branch -a --no-color | head -20')).toBe(false);
     expect(isReadOnlyShellCommand('git remote -v | head -4')).toBe(true);
     expect(isVcsMutationShellCommand('git remote -v | head -4')).toBe(false);
@@ -346,12 +358,23 @@ describe('Builtin operation policy compiler', () => {
       'git branch -d old',
       'git branch -a feature/new',
       'git branch --show-current feature/new',
+      'git branch --points-at',
       'git branch --show-current && git branch feature/new',
       'git remote add origin https://example.invalid/repo',
       'git remote set-url origin https://example.invalid/repo',
     ]) {
       expect(isReadOnlyShellCommand(command)).toBe(false);
       expect(isVcsMutationShellCommand(command)).toBe(true);
+    }
+    expect(isReadOnlyShellCommand('git branch --show-current && unknown-command')).toBe(false);
+    expect(isVcsMutationShellCommand('git branch --show-current && unknown-command')).toBe(false);
+    for (const command of [
+      'git status --porcelain=v2 -z',
+      'git log --follow --name-status --decorate=short --author=ferqx --grep=runtime',
+      'git diff --color=never --word-diff --ignore-space-change --exit-code',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(true);
+      expect(isVcsMutationShellCommand(command)).toBe(false);
     }
   });
 
@@ -506,6 +529,14 @@ describe('Builtin operation policy compiler', () => {
       },
       {
         input: { command: 'rg -f /tmp/kite-patterns src' },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+      },
+      {
+        input: { command: 'file --magic-file=/tmp/kite-magic input.txt' },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+      },
+      {
+        input: { command: 'git ls-files --exclude-from=/tmp/kite-excludes' },
         expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
       },
       {

@@ -10,7 +10,9 @@ generation/revision fence约束。adapter不读取descriptor/access/control
 token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
 默认parent-child必须exact build；显式daemon只按exact protocol/capability判断兼容。任何mismatch都fail closed，不执行previous-build
-stop、replacement或fallback。
+stop、replacement或fallback。默认配套模式的mismatch在TUI启动前提示安装可能不完整并要求更新或重新安装；显式daemon的mismatch
+提示更新Kite Code或改用matching client，升级后仍不兼容时由用户关闭旧daemon再显式启动。提示不比较client semver，也不自动stop、
+replace或upgrade daemon。
 
 默认`/status`展示stdio transport、profile mode、build、App Server version与same-build pairing。显式`--server`只连接指定的
 Unix socket/Windows named pipe，展示exact-protocol compatible pairing；daemon的build ID只用于诊断，不参与兼容判断。client/server mismatch在initialize时关闭连接，
@@ -46,8 +48,12 @@ presentation state machine，Runtime Client cache不是第二套UI lifecycle aut
 Host idle，再取得唯一prompt reservation并发送`start_turn`；连续输入按提交顺序逐条执行。重连/恢复时即使本地没有
 `runPromise`，只要authoritative projection仍是queued/running/waiting，client就轮询exact Session projection直到远端
 cleanup barrier idle后才放行下一条消息。等待或command失败必须返回TUI可见的“未发送”错误，不能只清空输入框。
-若terminal projection与下一条`start_turn`交叉而返回明确未执行的`revision_conflict`，client只可使用原command ID与
-Service返回的`currentRevision`有界重试；重复冲突必须失败可见，不能无限重放或创建第二Turn。
+活动Turn的重复Esc/Ctrl+C共享每Session唯一的in-flight取消Promise；第一次按键即可进入`Cancelling`展示，只有权威终态或
+取消receipt失败才清除该pending状态。前驱含Subagent时，Service返回`runtime_busy`直至Provider lifecycle cleanup全部确认；
+client保留queued prompt并退避重试，不能在前驱用户可见终态与实际cleanup之间启动后继。
+若terminal projection与下一条`start_turn`交叉而返回明确未执行的`revision_conflict`，client使用原command ID并更新
+Service返回的`currentRevision`。active Subagent可能在每次CAS往返期间继续推进revision，因此client不得按固定尝试次数失败；它在既有Run deadline内等待
+authoritative remote-idle/cleanup边界，再以最新projection revision重试。deadline耗尽仍必须失败可见，且全过程不能创建第二Turn。
 terminal event若先于event-free idle projection到达，adapter会为当前`resolveRun`建立remote-idle waiter；waiter identity与该轮
 completion callback绑定，旧轮waiter的迟到finally不能占用或清除后继轮waiter。applied receipt后另登记current accepted completion；
 每轮同时启动2秒后、至多每2秒一次的bounded query fallback，只有projection满足current revision floor且权威idle时才收敛accepted run，
@@ -62,9 +68,10 @@ Native interaction提交必须等待`respond_interaction`的applied/idempotent r
 transport/protocol/identity错误。确认失败时approval仍保留并允许用户显式重试；TUI不能在receipt前显示已授权。
 React owner切换时action sink按实例释放，旧effect cleanup不能清除新Runtime client binding。
 pending interaction期间若无关durable event推进Host revision，后续snapshot会以相同稳定interaction identity和新的
-`sessionRevision` settlement CAS替换本地queue；client提交该current projection，Service在receipt transaction内再次
-核对当前State。只有command admission与最新snapshot竞态产生的revision conflict才用新的command ID和
-`currentRevision`有界重试；不等待Service重发未改变的interaction。durable settlement在async提交期间
+`sessionRevision` settlement CAS替换本地queue；client对每个权威durable projection同步内部interaction Map，即使notification同时携带event。
+client提交该current projection，Service在receipt transaction内再次核对当前State。command admission与最新projection竞态产生
+revision conflict时，client在有界deadline内查询权威projection、核对稳定interaction identity，并以相同command ID及相等的
+`interaction.sessionRevision/expectedRevision`重建请求；不把旧interaction与新CAS拼接。durable settlement在async提交期间
 清除Footer时属于该用户动作，React cleanup不得补发cancel。
 
 checkpoint list/preview是同一Runtime query surface上的只读操作，不等待目标Session的long-lived subscription ready；目标bridge可由

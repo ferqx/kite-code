@@ -1,6 +1,7 @@
 import { getToolDetail } from '../components/render-utils';
 import type { ConsolidatedToolEntry, OutputBlock, TuiState } from '../types';
 import { buildToolSummaryLine } from './consolidateTools';
+import { deriveToolSummaryResult } from './tool-summary-result';
 
 type ToolCardBlock = Extract<OutputBlock, { kind: 'tool_card' }>;
 type ToolSummaryBlock = Extract<OutputBlock, { kind: 'tool_summary' }>;
@@ -15,7 +16,7 @@ type CancellationClock = {
  *
  * Terminal states are monotonic: a late cancellation fact must never overwrite
  * done/error/timeout/exhausted. The function is intentionally idempotent so the
- * local optimistic path and the later durable event can share it safely.
+ * per-tool and whole-turn durable cancellation projections can share it safely.
  */
 export function settleCancelledToolCard(
   block: ToolCardBlock,
@@ -48,25 +49,6 @@ function cancelledEntry(entry: ConsolidatedToolEntry): ConsolidatedToolEntry | n
     status: 'cancelled',
     summary: 'Cancelled',
   };
-}
-
-function resultForTools(tools: ConsolidatedToolEntry[]): ToolSummaryBlock['result'] {
-  if (
-    tools.some(
-      (tool) => tool.status === 'error' || tool.status === 'timeout' || tool.status === 'exhausted',
-    )
-  ) {
-    return 'error';
-  }
-  if (
-    tools.some(
-      (tool) =>
-        tool.status === 'cancelled' || tool.status === 'queued' || tool.status === 'running',
-    )
-  ) {
-    return 'cancelled';
-  }
-  return 'done';
 }
 
 function narrationBlocks(
@@ -111,7 +93,7 @@ function settleCancelledSummaryForTurn(
     latestActivity: undefined,
     totalElapsedMs: block.modelMs ?? now - block.createdAt,
     pendingCaption: undefined,
-    result: resultForTools(tools),
+    result: deriveToolSummaryResult(tools),
   };
   if (block.pendingCaption == null) {
     return { blocks: [settled], nextBlockId, changed: true };
@@ -148,7 +130,7 @@ function projectCancelledSummaryEntry(
         ...block,
         tools,
         summaryLine: buildToolSummaryLine(tools),
-        ...(allSettled ? { result: resultForTools(tools) } : {}),
+        ...(allSettled ? { result: deriveToolSummaryResult(tools) } : {}),
       },
     ],
     changed: true,
@@ -197,10 +179,10 @@ export function projectToolCancelled(
 }
 
 /**
- * Shared whole-turn user cancellation projection used by local input and
- * durable turn.aborted replay. It owns visual normalization, not Runtime facts.
+ * Project one durable whole-turn user cancellation into visual terminal state.
+ * Keyboard input must not call this before Runtime confirms the cancellation.
  */
-export function projectUserCancelledTurn(
+export function projectDurableUserCancelledTurn(
   state: TuiState,
   options: { now?: number; clearPendingToolCalls?: boolean } = {},
 ): TuiState {

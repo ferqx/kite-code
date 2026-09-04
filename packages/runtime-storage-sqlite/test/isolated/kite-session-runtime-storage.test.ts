@@ -9,8 +9,8 @@ import {
   KiteSessionRuntimeStorageError,
   openKiteSessionRuntimeStorage,
   openKiteSessionStoreDatabase,
-} from '../src';
-import { checksum } from '../src/preflight';
+} from '../../src';
+import { checksum } from '../../src/preflight';
 
 type Event = { readonly type: string };
 type State = {
@@ -269,7 +269,7 @@ describe('multi-connection Kite Session Runtime storage', () => {
 
   test('allows real App Server processes to write different Sessions but only one to write the same Session', async () => {
     const different = createFixture(['session-1', 'session-2']);
-    const child = join(import.meta.dir, 'fixtures', 'mutate-kite-session-runtime-child.ts');
+    const child = join(import.meta.dir, '..', 'fixtures', 'mutate-kite-session-runtime-child.ts');
     try {
       const results = await runMutationChildren(child, different.path, [
         ['session-1', 'host-1', 'First'],
@@ -493,7 +493,7 @@ describe('multi-connection Kite Session Runtime storage', () => {
 
   test('persists recovery_required and no-replay evidence after a real SIGKILL', async () => {
     const fixture = createFixture(['session-1']);
-    const childPath = join(import.meta.dir, 'fixtures', 'crash-kite-session-effect-child.ts');
+    const childPath = join(import.meta.dir, '..', 'fixtures', 'crash-kite-session-effect-child.ts');
     const child = Bun.spawn([process.execPath, childPath, fixture.path], {
       stdout: 'pipe',
       stderr: 'pipe',

@@ -1,5 +1,27 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { resolveSandboxRuntime } from '@kite-ai/builtin-runtime/sandbox';
+import {
+  buildPolicyProvenReadOnlyEnv,
+  resolveSandboxRuntime,
+} from '@kite-ai/builtin-runtime/sandbox';
+
+describe('policy-proven read-only environment', () => {
+  test('neutralizes POSIX user configuration without enabling an empty external diff', () => {
+    const env = buildPolicyProvenReadOnlyEnv('/workspace', {
+      platform: 'darwin',
+      env: {
+        HOME: '/Users/example',
+        XDG_CONFIG_HOME: '/Users/example/.config',
+        PATH: '/usr/bin:/bin',
+      },
+      canonicalize: (path) => path,
+    });
+
+    expect(env.HOME).toBe('/nonexistent');
+    expect(env.XDG_CONFIG_HOME).toBe('/nonexistent');
+    expect(env.GIT_CONFIG_GLOBAL).toBe('/dev/null');
+    expect(env).not.toHaveProperty('GIT_EXTERNAL_DIFF');
+  });
+});
 
 describe('resolveSandboxRuntime', () => {
   test('default discovery never launches a backend usability probe', () => {

@@ -9,6 +9,7 @@ import {
   finalizeAgentEvent,
   getEffectiveInteractionMode,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   type KernelEvent,
   normalizeAgentEvent,
@@ -651,7 +652,14 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
     requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
-    if (events.length === 0 || !this.isEffectLeaseCurrent(lease)) return false;
+    if (events.length === 0) return false;
+    const current = this.isEffectLeaseCurrent(lease);
+    if (
+      !current &&
+      (acknowledgement === 'attempt_start' || !this.#concurrentEventsCurrent(lease, events))
+    ) {
+      return false;
+    }
     if (requiredEffectLease && !this.#validRequiredLease(requiredEffectLease)) return false;
     if (acknowledgement !== 'attempt_start' && lease.effect.type === 'run_tools') {
       if (
@@ -793,11 +801,18 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     events: readonly KernelEvent[],
   ): boolean {
     if (!this.#isConcurrentEffectEventCurrent) {
-      if (lease.effect.type !== 'run_tools') return false;
       try {
-        return isConcurrentShellEffectBatchCurrent(this.#state, lease, events, () =>
-          this.#eventTimestamp(),
-        );
+        if (lease.effect.type === 'run_tools') {
+          return isConcurrentShellEffectBatchCurrent(this.#state, lease, events, () =>
+            this.#eventTimestamp(),
+          );
+        }
+        if (lease.effect.type === 'call_model') {
+          return isConcurrentModelEffectBatchCurrent(this.#state, lease, events, () =>
+            this.#eventTimestamp(),
+          );
+        }
+        return false;
       } catch {
         return false;
       }

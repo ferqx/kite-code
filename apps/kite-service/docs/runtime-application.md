@@ -44,6 +44,9 @@ owner，browser-safe App Contract不携带secret。Trust query另投影Workspace
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
 Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
 grant subject与Host内部payload仍不进入client interaction。
+用户拒绝的`approval.rejected`只结算interaction，不投影匿名“command not run”正文；配对`tool.rejected`作为独立durable fact
+投影，由terminal presentation复用queued Tool的安全名称与参数渲染未执行卡片。同一interaction command还原子取消当前turn
+所有未终结sibling并写入`turn.aborted(cause=user)`，提交后才传播AbortSignal。
 公开interaction的`sessionRevision`是本次projection的当前Host CAS；`interactionId`及kind-specific
 generation/plan digest/provider revision/verification revision/input和有界command组成稳定身份。无关State event推进revision
 时，Service可在相同稳定身份上重新投影当前CAS；Client必须先取得该新projection。Host一旦接受
@@ -92,6 +95,13 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 execution authority；Service不得让TUI从事件相邻关系反推该归属。queued Shell 只有已携带 Runtime 的
 `effectClass=read_only + sideEffect=false` 事实时才发布 `presentation=exploration`；缺失分类、写入或有副作用均保持
 `standalone`，terminal event 不重新猜测命令语义。
+Runtime已在`subagent.started` payload签发的`concurrencyGroupId`必须由Client Event projector原样收窄并保留，随后由
+同一closed Contract与Protocol codec服务live订阅和History回放；不得丢弃该字段后让TUI按相邻child、名称或时间窗口猜测并发组。
+`subagent.completed`的Runtime实测`toolCallCount/durationMs`同样必须保留；failed事件可保留这两个计量与
+content-free `diagnostic.code/stage`，但必须删除`modelInvocationId`和raw provider/error correlation。
+并发Subagent的用户取消可以先发布可见`turn.aborted`，但执行generator仍拥有Session，直到每个durable Provider lifecycle都进入
+`cleanup_completed(cleanupConfirmed=true)`。该窗口内Bridge拒绝后继`start_turn`为`runtime_busy`；同进程cleanup只补Provider
+cleanup事实并保留取消事务的`capability.reconciliation_resolved(decision=waived)`，不得复用crash语义追加`capability.execution_unknown`。
 
 Native Runtime admission 在 prepared command closure 中固定传递 authenticated `RuntimeCommandContext`（connection、request 与
 opaque Controller binding reference）。App Server从每条command的已认证client/connection generation读取当前Session execution authority，

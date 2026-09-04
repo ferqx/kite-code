@@ -6,6 +6,7 @@ import {
   attachSuspendedCapabilityTerminals,
   createInitialAgentState,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,
   type KernelEvent,
@@ -81,6 +82,47 @@ const finished: KernelEvent = {
     stderr: '',
   },
 };
+
+function dispatchingModelState(): AgentState {
+  const artifact = {
+    kind: 'model_surface' as const,
+    artifactId: `pa_${'b'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+    byteLength: 1,
+  };
+  let state = createInitialAgentState({
+    threadId: 'model-session',
+    userId: 'user-1',
+    workspace: '/workspace',
+    turnId: 'turn-1',
+    recoveryIdentityKey: RECOVERY_KEY,
+  });
+  const events: KernelEvent[] = [
+    {
+      type: 'model.invocation_prepared',
+      invocationId: 'model-1',
+      purpose: 'primary_agent',
+      surfaceArtifact: artifact,
+      surfaceIntegrityIdentifier: artifact.integrityIdentifier,
+      routeFingerprint: `sha256:${'d'.repeat(64)}`,
+      budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      limits: { maxAttempts: 2, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 2_000 },
+      preparedStateRevision: 0,
+      parentInvocationId: null,
+      parentToolCallId: null,
+    },
+    {
+      type: 'model.invocation_attempt_started',
+      invocationId: 'model-1',
+      attempt: 1,
+      maxAttempts: 2,
+    },
+  ];
+  for (const event of events) {
+    state = reduce(state, [normalizeAgentEvent(event, state, '2026-08-20T00:00:00.000Z')]);
+  }
+  return state;
+}
 
 describe('State effect admission policy', () => {
   test('requires and atomically attaches one suspended capability terminal', () => {
@@ -188,6 +230,89 @@ describe('State effect admission policy', () => {
     expect(isConcurrentShellEffectBatchCurrent(state, lease, [finished], () => 'not-a-time')).toBe(
       false,
     );
+  });
+
+  test('admits only the exact live Model retry or terminal batch across control revisions', () => {
+    const state = dispatchingModelState();
+    const modelLease = { turnId: 'turn-1', effect: { type: 'call_model' as const } };
+    const responseArtifact = {
+      kind: 'model_response' as const,
+      artifactId: `pa_${'e'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'f'.repeat(64)}`,
+      byteLength: 2,
+    };
+    const completion: KernelEvent[] = [
+      {
+        type: 'model.invocation_completed',
+        invocationId: 'model-1',
+        responseArtifact,
+        finishReason: 'stop',
+      },
+      {
+        type: 'model.responded',
+        invocationId: 'model-1',
+        messageId: 'assistant-1',
+        text: 'done',
+        toolCalls: [],
+      },
+    ];
+    const occurredAt = () => '2026-08-20T00:00:02.000Z';
+
+    expect(isConcurrentModelEffectBatchCurrent(state, modelLease, completion, occurredAt)).toBe(
+      true,
+    );
+    expect(
+      isConcurrentModelEffectBatchCurrent(
+        state,
+        modelLease,
+        [
+          {
+            type: 'model.retry',
+            invocationId: 'model-1',
+            attempt: 1,
+            maxAttempts: 2,
+            error: 'transient_model_connection_error',
+            delayMs: 500,
+          },
+        ],
+        occurredAt,
+      ),
+    ).toBe(true);
+    expect(
+      isConcurrentModelEffectBatchCurrent(
+        state,
+        modelLease,
+        [{ type: 'model.text_delta', requestId: 'model-1', text: 'streaming' }],
+        occurredAt,
+      ),
+    ).toBe(true);
+    expect(
+      isConcurrentModelEffectBatchCurrent(
+        state,
+        modelLease,
+        [{ ...completion[0]!, invocationId: 'other-model' } as KernelEvent],
+        occurredAt,
+      ),
+    ).toBe(false);
+    expect(
+      isConcurrentModelEffectBatchCurrent(
+        { ...state, turn: { ...state.turn, status: 'aborted', abortReason: 'cancelled' } },
+        modelLease,
+        completion,
+        occurredAt,
+      ),
+    ).toBe(false);
+    expect(
+      isConcurrentModelEffectBatchCurrent(
+        state,
+        modelLease,
+        [
+          ...completion,
+          { type: 'user.message_appended', messageId: 'injected', content: 'not model evidence' },
+        ],
+        occurredAt,
+      ),
+    ).toBe(false);
   });
 
   test('admits verification only in the atomic batch that commits its source receipt', () => {

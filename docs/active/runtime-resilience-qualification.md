@@ -18,11 +18,11 @@ fork source fence、target generation 1与全部target事实同事务并覆盖�
 effect matrix证明prepare/dispatch/renew、State receipt settle、late terminal与unknown generation binding。真实SIGKILL fixture在prepared effect后杀死
 owner；successor等待lease失效只能得到durable `recovery_required`，显式reconciliation把遗留effect改为unknown并与cleanup confirmation同事务，
 随后才可取得更高generation，不能自动重放。该证据仍不覆盖KASD-02 App Server的Provider/child cancellation、stdio EOF/signal、完整response-loss
-Host恢复或TUI lifecycle，因此不是release qualification。验证：`bun test packages/runtime-storage-sqlite/test/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/kite-session-runtime-storage.test.ts`。
+Host恢复或TUI lifecycle，因此不是release qualification。验证：`bun test packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts`。
 
 global config局部资格以真实process证明同一文件互斥、不同文件无global lock、两个TUI并发保留不同preference字段，以及TUI与模拟App Server并发
 保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整
-App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/config-file-mutation-lock.test.ts apps/kite-cli/test/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
+App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/isolated/config-file-mutation-lock.test.ts apps/kite-cli/test/isolated/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
 
 KASD-02真实process局部资格覆盖：stdio initialize/list/History/App Control只写protocol stdout且不创建global endpoint；History/App Control在
 initialize前拒绝，未组合owner时fail closed，组合owner后可从同一SQLite read snapshot加载已创建Session的完整closed transcript；active model收到parent EOF后cancel并在
@@ -52,6 +52,8 @@ loopback Web listener及Browser/Native Store共享证据。
 ## Runtime Server V1 恢复与 transport 资格
 
 Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
+
+Model lease并发资格还必须覆盖运行中user control revision：durable attempt-start之后切换interaction mode，原exact invocation的stream继续投影，response/retry/terminal evidence仍原子提交且Run继续；同一变化发生在attempt-start之前必须拒绝旧Surface dispatch。Turn abort、不同invocation ID、已terminal invocation或夹带非Model批次事件必须拒绝迟到结果。该测试证明无关revision不会产生`Model invocation evidence acknowledgement was rejected`，不放宽跨Turn、跨identity或pre-dispatch revision fence。
 
 Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
 untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
@@ -115,8 +117,13 @@ gap/reset snapshot还必须携带完整、同revision的interaction queue替换�
 InProcess logical-message必须得到同一Client state；共享对象引用不能被误判为cycle或静默关闭subscription。Service
 启动/index hydration从纯持久State生成该完整queue，不得提交伪空替换集。pending interaction的公开`sessionRevision`
 随当前CAS前进，稳定kind-specific identity不变；Host inspect接受后结算CAS固定，inspect→commit间revision前进必须失败，
+Native client必须消费eventful durable notification中的完整queue；revision conflict后重新查询权威projection，并以相等的
+`interaction.sessionRevision/expectedRevision`重建同command ID请求。Protocol codec必须在Server路由前拒绝二者不等的请求。
 旧generation/digest或被修改的input/command字段仍拒绝。activeTurn/queue同ID但完整身份漂移也拒绝。双Client相同response
-只有一个applied，另一个只可idempotent replay。真实process-death资格还必须覆盖pending approval从Store恢复、response receipt、
+只有一个applied，另一个只可idempotent replay。审批response receipt与后续`tool.started`之间的展示窗口不能产生
+synthetic cancellation：TUI的本地`runTask` Promise收尾不得生成idle/cancelled投影或清理tool metadata；query fallback必须先消费
+authoritative Session projection再释放run waiter。Esc/Ctrl+C只提交取消请求，queued/running Tool、Thought及Subagent只能由durable
+取消terminal进入cancelled状态，渲染层也不得从空summary/缺失answer推断取消。真实process-death资格还必须覆盖pending approval从Store恢复、response receipt、
 原Turn continuation与Tool一次dispatch；进程内broker/waiter不能作为恢复证据。batch中每个notification必须携带自身revision的
 exact post-event queue，无法读取时unavailable而不是空queue。
 
@@ -217,6 +224,10 @@ legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 D
 不能随进程寿命无界增长：grant tombstone 按 sealed expiry 回收，其他 recovery hint 按短 TTL/固定总容量回收；
 expiry clock 必须是 finite safe integer 的非递减 high-water，wall-clock 回拨后不能让旧 grant/hint 重新有效；
 丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。
+
+same-process user cancel的资格证据还必须覆盖多个并发Subagent、重复Esc与queued successor：UI在1秒内进入`Cancelling`，
+只发送一个取消command，全部Provider cleanup receipt早于successor user/turn事实，已waived capability不出现unknown，
+后继最终进入模型并完成。真实crash restore仍须以unknown闭合，不能借用户取消特例放宽恢复路径。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与
@@ -366,11 +377,13 @@ cancel 在 signal 前提交、successor 等待 cleanup、dispose 等待 drain，
 失败关闭。`bun run test:runtime:soak` 仍只是 7-case CI profile smoke；它可以形成 RM-06 stage evidence，但不能
 升级为正式 release qualification。当前单-Store lease 没有被解释为 cross-Host Project fence。
 
-focused approval rejection 也必须穿过同一 durable terminal boundary。无未终结 sibling 时，一个 action transaction
-按序提交 `approval.rejected`、`tool.rejected` 与 `turn.aborted(cause=user)`；存在 sibling 时先只终结 exact target，
-等 sibling 自身收敛后由 scheduler `stop` 边界 exactly-once 追加 `turn.aborted`。恢复后重复进入 runner 不得再次追加
-abort，也不得产生新的 `model.requested` 或重放已拒绝 invocation。fault/PTY cleanup 只有观察到该 terminal fact 才能
-结束 fixture；仅看到输入提示符或本地 TUI idle 投影不构成持久化完成证据。
+focused approval rejection也必须穿过同一durable terminal boundary。一个action transaction按序提交
+`approval.rejected`、exact target的`tool.rejected`、全部未终结sibling的`tool.cancelled`、必要reconciliation与
+`turn.aborted(cause=user)`；提交后才传播AbortSignal。恢复后重复进入runner不得再次追加abort，也不得产生新的
+`tool.started`、`model.requested`或重放已拒绝invocation。fault/PTY cleanup只有观察到该terminal fact才能结束fixture；
+仅看到输入提示符或本地TUI idle投影不构成持久化完成证据。
+TUI不把`approval.rejected`投影成匿名普通文本；配对pre-dispatch Tool rejection复用queued时的安全工具名称和参数，形成一张
+保留原命令/目标且明确未执行的rejected工具卡。Esc提交失败仍只是在Footer显示的瞬态，不能进入持久消息流。
 
 当前链路将 Runtime State input 经纯 `@kite-ai/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
 commit 成功后推进。Required Kernel/reducer 与 scheduling/completion suite 证明 snapshot/terminal/revision 行为

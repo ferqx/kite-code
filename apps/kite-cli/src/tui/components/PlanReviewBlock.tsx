@@ -5,6 +5,10 @@ import { type MutableRefObject, useState } from 'react';
 import type { TuiUserInputProvider } from '#kite-cli/tui/provider';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useI18n } from '../i18n';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from '../interaction-submission-diagnostic';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -31,7 +35,7 @@ export default function PlanReviewBlock({
   const [supplementText, setSupplementText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionFailed, setSubmissionFailed] = useState(false);
+  const [submissionFailure, setSubmissionFailure] = useState<InteractionSubmissionFailure>();
 
   // Mode: 'options' = choose approve/supplement/reject; 'supplement' = type feedback
   const [mode, setMode] = useState<'options' | 'supplement'>('options');
@@ -95,13 +99,13 @@ export default function PlanReviewBlock({
         return;
     }
     setSubmitting(true);
-    setSubmissionFailed(false);
+    setSubmissionFailure(undefined);
     try {
       const accepted = await provider.submitActionAsync(submission);
       if (!accepted) throw new Error('Plan review submission was not accepted.');
       onResolved(action, feedback);
-    } catch {
-      setSubmissionFailed(true);
+    } catch (error) {
+      setSubmissionFailure(classifyInteractionSubmissionFailure(error));
     } finally {
       setSubmitting(false);
     }
@@ -177,9 +181,11 @@ export default function PlanReviewBlock({
         />
       }
     >
-      {(submitting || submissionFailed) && (
-        <Text color={submissionFailed ? t.error : t.dim}>
-          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+      {(submitting || submissionFailure) && (
+        <Text color={submissionFailure ? t.error : t.dim}>
+          {submissionFailure
+            ? translate(`approval.submissionFailed.${submissionFailure}`)
+            : translate('approval.submitting')}
         </Text>
       )}
       {mode === 'options' ? (

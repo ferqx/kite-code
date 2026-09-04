@@ -20,11 +20,7 @@ function withQueuedTools(names: string[]): RuntimeState {
     runId: 'run-tools',
     startedAt: '2026-07-30T00:00:00Z',
     deadlineAt: '2026-07-30T00:30:00Z',
-    budget: {
-      ...LIMITED_RESOURCE_BUDGET_,
-      maxConcurrentToolInvocations: 2,
-      maxConcurrentShellInvocations: 1,
-    },
+    budget: LIMITED_RESOURCE_BUDGET_,
   });
   for (const [index, name] of names.entries()) {
     state = reduceRuntimeState(state, {
@@ -73,7 +69,7 @@ describe('tool concurrency budget', () => {
     ).toHaveLength(1);
   });
 
-  test('shrinks a batch to available permits and queues the remainder in FIFO order', () => {
+  test('admits every ordinary tool in one model batch without concurrency waiters', () => {
     let state = withQueuedTools(['read_file', 'search_files', 'read_file']);
     const running = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     running.counters.toolInvocations = 1;
@@ -101,15 +97,17 @@ describe('tool concurrency budget', () => {
       new Date('2026-07-30T00:00:01Z'),
     );
     expect(plan.status).toBe('admitted');
-    expect(plan.effect).toEqual({ type: 'run_tools', toolCallIds: ['call-0'] });
-    expect(plan.preparationEvents.map((event) => event.type)).toEqual([
-      'resource_budget.reserved',
-      'resource_budget.waiter_enqueued',
-      'resource_budget.waiter_enqueued',
-    ]);
+    expect(plan.effect).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['call-0', 'call-1', 'call-2'],
+    });
+    expect(plan.reservationIds).toHaveLength(3);
+    expect(
+      plan.preparationEvents.filter((event) => event.type === 'resource_budget.waiter_enqueued'),
+    ).toHaveLength(0);
   });
 
-  test('never grants the tool half of a compound shell permit', () => {
+  test('admits another shell while an earlier shell is still active', () => {
     let state = withQueuedTools(['shell_execute']);
     const running = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     running.counters.toolInvocations = 1;
@@ -136,15 +134,11 @@ describe('tool concurrency budget', () => {
       { type: 'run_tools', toolCallIds: ['call-0'] },
       new Date('2026-07-30T00:00:01Z'),
     );
-    expect(plan).toMatchObject({
-      status: 'waiting',
-      reason: 'shell_concurrency_saturated',
-      reservationIds: [],
-      dispatchEvents: [],
-    });
-    expect(plan.preparationEvents[0]).toMatchObject({
-      type: 'resource_budget.waiter_enqueued',
-      waiter: { requiredPermits: ['tool', 'shell_invocation'], sequence: 0 },
-    });
+    expect(plan.status).toBe('admitted');
+    expect(plan.effect).toEqual({ type: 'run_tools', toolCallIds: ['call-0'] });
+    expect(plan.reservationIds).toHaveLength(1);
+    expect(
+      plan.preparationEvents.some((event) => event.type === 'resource_budget.waiter_enqueued'),
+    ).toBe(false);
   });
 });

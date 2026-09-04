@@ -7,9 +7,9 @@
  * - Double Ctrl+C exits the TUI process (exitRequested → process.exit(0))
  *
  * Ctrl+C state machine (from agentReducer.ts CTRL_C handler):
- *   running=true           → cancelInterrupt(…, true) → running=false, ctrlCPressed=true
- *   running=false ∧ ctrlCPressed  → exitRequested=true → process.exit(0)
- *   running=false ∧ !ctrlCPressed → ctrlCPressed=true
+ *   first press  → synchronously request Runtime cancellation and set ctrlCPressed
+ *   durable Runtime terminal → project running=false and the cancelled outcome
+ *   second press while ctrlCPressed → exitRequested=true → process.exit(0)
  *
  * ctrlCPressed is reset by any other key press OR a 1-second timer.
  */
@@ -138,20 +138,23 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       // Send a message to trigger the agent run.
       await submitUserMessage(tui, server, 'Exit after double Ctrl+C');
 
-      // First Ctrl+C: cancels the run (running=true → cancelInterrupt).
-      // Sets running=false and ctrlCPressed=true.
+      // First Ctrl+C requests durable Runtime cancellation. The terminal event
+      // then projects running=false while ctrlCPressed remains true.
       tui.write('\x03');
       await waitForTuiReady(tui);
 
-      // Second Ctrl+C: running=false ∧ ctrlCPressed=true → exitRequested=true.
+      // Second Ctrl+C while ctrlCPressed=true → exitRequested=true.
       // This triggers process.exit(0) in the TUI's useEffect.
+      const exitStartedAt = Date.now();
       tui.write('\x03');
 
       // Wait for the process to exit.
       const exitCode = await tui.waitForExit();
-      console.log('  TUI process exited with code:', exitCode);
+      const exitElapsedMs = Date.now() - exitStartedAt;
+      console.log('  TUI process exited with code:', exitCode, `in ${exitElapsedMs}ms`);
 
       expect(exitCode).toBe(0);
+      expect(exitElapsedMs).toBeLessThan(1_000);
     },
     TIMEOUT,
   );

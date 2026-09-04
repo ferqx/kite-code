@@ -10,10 +10,17 @@ import {
   getToolPreview,
 } from '../components/render-utils';
 import type { OutputBlock, TuiPendingApproval, TuiState } from '../types';
-import { projectToolCancelled, projectUserCancelledTurn } from './cancellation-projection';
+import { projectDurableUserCancelledTurn, projectToolCancelled } from './cancellation-projection';
 import { buildToolSummaryLine } from './consolidateTools';
 import { handleEventAction } from './handleEvent';
-import { appendBlock, appendUserMessage, findBlock, replaceBlockById } from './helpers';
+import {
+  appendBlock,
+  appendUserMessage,
+  finalizeLastTurnStreaming,
+  findBlock,
+  replaceBlockById,
+} from './helpers';
+import { deriveToolSummaryResult } from './tool-summary-result';
 
 /** Client-safe presentation reducer. It accepts no Runtime/Kernel event shape. */
 export function handleClientEventAction(state: TuiState, event: RuntimeClientEvent): TuiState {
@@ -23,17 +30,52 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       // A subscription may replay the durable notification after reconnect;
       // retaining the first projection keeps live and replay rendering
       // idempotent without collapsing distinct prompts with equal text.
-      if (
-        findBlock(state, (block) => block.kind === 'user' && block.messageId === event.messageId)
-      ) {
-        return state;
+      const pendingEcho = findBlock(
+        state,
+        (block) =>
+          block.kind === 'user' && block.pendingEcho === true && block.content === event.text,
+      );
+      if (pendingEcho?.kind === 'user') {
+        return {
+          ...replaceBlockById(state, pendingEcho.id, {
+            ...pendingEcho,
+            messageId: event.messageId,
+            pendingEcho: undefined,
+          }),
+          runPromptPresented: true,
+        };
       }
-      return appendUserMessage(state, {
-        id: state.nextBlockId,
-        kind: 'user',
-        content: event.text,
-        messageId: event.messageId,
-      });
+      const queuedPromptIndex = (state.queuedPrompts ?? []).findIndex(
+        (prompt) => prompt.sessionId === state.activeSessionId && prompt.text === event.text,
+      );
+      const withQueuedPromptConsumed =
+        queuedPromptIndex < 0
+          ? state
+          : {
+              ...state,
+              queuedPrompts: (state.queuedPrompts ?? []).filter(
+                (_prompt, index) => index !== queuedPromptIndex,
+              ),
+            };
+      if (
+        findBlock(
+          withQueuedPromptConsumed,
+          (block) => block.kind === 'user' && block.messageId === event.messageId,
+        )
+      ) {
+        return withQueuedPromptConsumed.running
+          ? { ...withQueuedPromptConsumed, runPromptPresented: true }
+          : withQueuedPromptConsumed;
+      }
+      return {
+        ...appendUserMessage(withQueuedPromptConsumed, {
+          id: withQueuedPromptConsumed.nextBlockId,
+          kind: 'user',
+          content: event.text,
+          messageId: event.messageId,
+        }),
+        runPromptPresented: true,
+      };
     }
     case 'model.requested': {
       // A provider invocation is not itself a visible presentation boundary.
@@ -42,6 +84,8 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       // that adjacent phase open; visible text, a standalone tool, an
       // interaction, or a terminal event remains responsible for settling it.
       const next = continueActiveThought(state, event.requestId);
+      const carriesHiddenReasoning =
+        next.currentThoughtSummaryId === undefined && next.currentModelReasoningText !== undefined;
       return {
         ...next,
         currentModelRequestId: event.requestId,
@@ -50,8 +94,11 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningSegmentId: undefined,
-        currentModelReasoningText: undefined,
-        currentModelReasoningRequestId: undefined,
+        currentModelReasoningStreamed: false,
+        currentModelReasoningText: carriesHiddenReasoning
+          ? next.currentModelReasoningText
+          : undefined,
+        currentModelReasoningRequestId: carriesHiddenReasoning ? event.requestId : undefined,
         running: true,
       };
     }
@@ -63,7 +110,7 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       return projectModelResponded(state, event);
     case 'model.retry':
       return {
-        ...settleCurrentThought(state),
+        ...settlePresentationBoundary(state),
         status: {
           ...state.status,
           retryState: {
@@ -101,35 +148,39 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       return projectToolCancelled(state, event.toolId);
     case 'tool.file_changed':
       return appendNotice(
-        settleCurrentThought(state),
+        settlePresentationBoundary(state),
         event.summary ?? `Tool ${event.toolId} ${event.change} a file.`,
       );
     case 'interaction.available':
-      return projectInteraction(settleCurrentThought(state), event.interaction);
+      return projectInteraction(settlePresentationBoundary(state), event.interaction);
     case 'interaction.settled':
       return settleInteraction(state, event.interactionId, event.outcome);
     case 'approval.queued':
-      return projectApproval(settleCurrentThought(state), event.interaction, event.queueSequence);
+      return projectApproval(
+        settlePresentationBoundary(state),
+        event.interaction,
+        event.queueSequence,
+      );
     case 'approval.granted':
       return settleApproval(state, event.interactionId, 'authorized');
     case 'approval.rejected':
       return settleApproval(state, event.interactionId, 'rejected', event.summary);
     case 'input.requested':
-      return projectInteraction(settleCurrentThought(state), event.interaction);
+      return projectInteraction(settlePresentationBoundary(state), event.interaction);
     case 'input.answered':
       return settleInteraction(state, event.interactionId, 'completed', event.summary);
     case 'input.cancelled':
       return settleInteraction(state, event.interactionId, 'cancelled');
     case 'plan.review_requested':
-      return projectInteraction(settleCurrentThought(state), event.interaction);
+      return projectInteraction(settlePresentationBoundary(state), event.interaction);
     case 'plan.progress':
       return appendNotice(
-        settleCurrentThought(state),
+        settlePresentationBoundary(state),
         event.summary ?? `Plan ${event.planId} is ${event.status}.`,
       );
     case 'plan.completed':
       return appendNotice(
-        settleCurrentThought(state),
+        settlePresentationBoundary(state),
         event.summary ?? `Plan ${event.planId} completed.`,
       );
     case 'plan.approved': {
@@ -148,16 +199,16 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       return { ...state, interactionMode: event.mode };
     case 'provider.action':
       return event.status === 'required'
-        ? projectInteraction(settleCurrentThought(state), event.interaction)
+        ? projectInteraction(settlePresentationBoundary(state), event.interaction)
         : appendNotice(
-            settleCurrentThought(state),
+            settlePresentationBoundary(state),
             event.summary ?? `Provider action is ${event.status}.`,
           );
     case 'verification.status':
       return event.status === 'pending' || event.status === 'failed'
-        ? projectInteraction(settleCurrentThought(state), event.interaction)
+        ? projectInteraction(settlePresentationBoundary(state), event.interaction)
         : appendNotice(
-            settleCurrentThought(state),
+            settlePresentationBoundary(state),
             event.summary ?? `Verification is ${event.status}.`,
           );
     case 'subagent.started':
@@ -169,27 +220,34 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
       ) {
         return state;
       }
-      return appendBlock(settleCurrentThought(state), {
-        id: state.nextBlockId,
-        kind: 'subagent',
-        subagentId: event.subagentId,
-        role: event.role,
-        task: event.name,
-        status: 'running',
-        summary: '',
-        toolCallCount: 0,
-        durationMs: 0,
-        steps: [],
-      });
+      {
+        const prepared = settlePresentationBoundary(state);
+        return appendBlock(prepared, {
+          id: prepared.nextBlockId,
+          kind: 'subagent',
+          subagentId: event.subagentId,
+          role: event.role,
+          task: event.name,
+          status: 'running',
+          summary: '',
+          toolCallCount: 0,
+          durationMs: 0,
+          startedAt: Date.now(),
+          steps: [],
+          ...(event.concurrencyGroupId === undefined
+            ? {}
+            : { concurrencyGroupId: event.concurrencyGroupId }),
+        });
+      }
     case 'subagent.step':
       return projectSubagentStep(state, event);
     case 'subagent.completed':
-      return settleSubagent(state, event.subagentId, 'done', event.summary);
+      return settleSubagent(state, event.subagentId, 'done', event);
     case 'subagent.failed':
-      return settleSubagent(state, event.subagentId, 'error', event.summary);
+      return settleSubagent(state, event.subagentId, 'error', event);
     case 'context.compaction':
       return appendNotice(
-        settleCurrentThought(state),
+        settlePresentationBoundary(state),
         event.summary ?? `Context compaction ${event.status}.`,
       );
     case 'task.terminal':
@@ -197,18 +255,19 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
     case 'turn.terminal':
       return event.status === 'cancelled' && event.cause === 'user'
         ? settleUserCancelledTerminal(state)
-        : settleTerminal(state, event.summary, false);
+        : { ...settleTerminal(state, event.summary, false), cancellationPending: false };
     case 'run.terminal':
       return settleTerminal(state, event.summary, true);
     case 'run.failure':
       return {
         ...appendNotice(
-          settleCurrentThought(state),
+          settlePresentationBoundary(state),
           event.retryable
             ? `MODEL_ATTEMPT_RETRYABLE_FAILURE:${event.code}`
             : `RUN_FAILURE:${event.code}`,
         ),
         running: false,
+        cancellationPending: false,
         exited: true,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
@@ -220,15 +279,15 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
     case 'rewind.terminal':
       return event.status === 'failed'
         ? appendNotice(
-            settleCurrentThought(state),
+            settlePresentationBoundary(state),
             `Rewind failed: ${event.failureCode ?? 'execution_failed'}.`,
           )
         : state;
     case 'session.notice':
-      return appendNotice(settleCurrentThought(state), event.message ?? event.code);
+      return appendNotice(settlePresentationBoundary(state), event.message ?? event.code);
     case 'unavailable':
       return appendNotice(
-        settleCurrentThought(state),
+        settlePresentationBoundary(state),
         `Runtime update unavailable: ${event.reason}.`,
       );
   }
@@ -241,6 +300,7 @@ function continueActiveThought(state: TuiState, requestId: string): TuiState {
   return replaceBlockById(state, summary.id, {
     ...summary,
     modelRequestId: requestId,
+    liveModelStartedAt: Date.now(),
   });
 }
 
@@ -484,12 +544,7 @@ function prepareThoughtForCommittedText(
   thoughtElapsedMs?: number;
 } {
   const summary = findSummaryById(state, state.currentThoughtSummaryId);
-  if (!summary) {
-    return {
-      state,
-      ...(state.currentModelReasoningRequestId === undefined ? { responsePending: true } : {}),
-    };
-  }
+  if (!summary) return { state };
   if (summary.tools.length > 0) {
     return {
       state: {
@@ -632,6 +687,9 @@ function reconcileStreamedModelText(
       kind: 'text',
       content: remainder,
       streaming: false,
+      responsePending: modelTextBlocks(next, event.requestId).some(
+        (block) => block.responsePending === true,
+      ),
       modelRequestId: event.requestId,
     });
   }
@@ -645,6 +703,8 @@ function reconcileStreamedModelText(
     kind: 'text',
     content: summary,
     streaming: false,
+    responsePending:
+      findSummaryById(next, next.currentThoughtSummaryId)?.responsePending === true || undefined,
     modelRequestId: event.requestId,
   });
 }
@@ -659,7 +719,6 @@ function annotateFirstModelText(
   return replaceBlockById(state, first.id, {
     ...first,
     streaming: false,
-    responsePending: undefined,
     modelRequestId: event.requestId,
     ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
     ...(input.thoughtElapsedMs === undefined
@@ -699,9 +758,10 @@ function projectReasoningActivity(
     const preceding = precedingToolSummary(cached, answer.id);
     if (preceding?.modelRequestId === event.requestId) {
       const durationMs = answer.modelDurationMs;
+      const modelMs = preceding.modelMs ?? durationMs;
       return replaceBlockById(cached, preceding.id, {
         ...preceding,
-        ...(durationMs === undefined ? {} : { modelMs: durationMs, totalElapsedMs: durationMs }),
+        ...(modelMs === undefined ? {} : { modelMs, totalElapsedMs: modelMs }),
         modelRequestId: event.requestId,
         hasThought: true,
         hasThinking: true,
@@ -724,7 +784,22 @@ function projectReasoningActivity(
   if (state.thoughtPhaseStatus === 'awaiting_terminal') {
     return cached;
   }
-  const next = ensureContentFreeThought(cached, event.requestId);
+  const activeSummary = findSummaryById(cached, cached.currentThoughtSummaryId);
+  const bridgesCompletedExploration =
+    cached.currentModelRequestId === undefined &&
+    activeSummary?.active === true &&
+    activeSummary.tools.length > 0 &&
+    activeSummary.tools.every((tool) => tool.status !== 'queued' && tool.status !== 'running');
+  // Ephemeral reasoning and durable model.requested use different delivery
+  // lanes. The next invocation's reasoning can therefore reach the client
+  // first. A terminal exploration tail is still the current Thought owner,
+  // so adopt the new request instead of settling that owner and creating a
+  // visually adjacent duplicate. An already-observed model request keeps the
+  // normal strict identity path below.
+  const continued = bridgesCompletedExploration
+    ? continueActiveThought(cached, event.requestId)
+    : cached;
+  const next = ensureContentFreeThought(continued, event.requestId);
   if (event.state !== 'completed') return next;
   const summary = findSummaryById(next, next.currentThoughtSummaryId);
   if (!summary) return next;
@@ -734,7 +809,9 @@ function projectReasoningActivity(
     hasThought: true,
     hasThinking: true,
     latestActivity: { kind: 'thinking', text },
-    ...appendCompletedReasoning(summary, text),
+    totalElapsedMs:
+      summary.modelMs ?? Math.max(summary.totalElapsedMs, Date.now() - summary.createdAt),
+    ...(event.state === 'completed' ? appendCompletedReasoning(summary, text) : {}),
   });
 }
 
@@ -749,37 +826,97 @@ function projectModelTextDelta(
   ) {
     return state;
   }
+  if (!/\S/u.test(event.text)) return state;
 
-  const streamed = {
-    ...awaitSafeThoughtTerminal(state),
+  const accepted = {
+    ...state,
     currentModelTextStreamed: true as const,
+    currentModelTextSource: event.text,
   };
-  const renderedSource = renderedModelTextSource(streamed, event.requestId);
+  const activeSummary = findSummaryById(accepted, accepted.currentThoughtSummaryId);
+  if (
+    activeSummary?.active === true &&
+    activeSummary.modelRequestId === event.requestId &&
+    modelTextBlocks(accepted, event.requestId).every((block) => block.responsePending === true)
+  ) {
+    // The provider does not reveal whether a response also contains tools
+    // until model.responded. While a continuous exploration Thought owns the
+    // request, keep cumulative text in the existing component splitter as a
+    // classification-pending sequence. A final response will settle it as the
+    // answer, while a tool-bearing response will remove it and keep the
+    // progress caption on this same owner. Promoting a complete paragraph here
+    // would irreversibly split the Thought before that classification is known.
+    const renderedSource = renderedModelTextSource(accepted, event.requestId);
+    if (!event.text.startsWith(renderedSource)) return accepted;
+    const unpublishedSource = event.text.slice(renderedSource.length);
+    if (unpublishedSource.length === 0) return accepted;
+    const { committed, live } = splitStreamingMarkdown(unpublishedSource);
+    let buffered = removeStreamingModelComponent(accepted, event.requestId);
+    if (committed) {
+      buffered = appendBlock(buffered, {
+        id: buffered.nextBlockId,
+        kind: 'text',
+        content: committed,
+        streaming: false,
+        responsePending: true,
+        modelRequestId: event.requestId,
+      });
+    }
+    if (live) {
+      buffered = showStreamingModelComponent(buffered, event.requestId, unpublishedSource, live);
+      const structural = findModelAnswerText(buffered, event.requestId);
+      if (structural) {
+        buffered = replaceBlockById(buffered, structural.id, {
+          ...structural,
+          responsePending: true,
+        });
+      }
+    }
+    return buffered;
+  }
+  const renderedSource = renderedModelTextSource(accepted, event.requestId);
   if (!event.text.startsWith(renderedSource)) {
     // Retry visibility is prefix-fenced by the model gateway. A stale or
     // divergent ephemeral packet cannot rewrite already committed output;
     // the durable terminal remains the authoritative reconciliation point.
-    return streamed;
+    return accepted;
   }
-  const accepted = { ...streamed, currentModelTextSource: event.text };
   const unpublishedSource = event.text.slice(renderedSource.length);
   if (unpublishedSource.length === 0) return accepted;
   const { committed, live } = splitStreamingMarkdown(unpublishedSource);
 
   if (!committed) {
     if (!live) return accepted;
-    return {
-      ...showStreamingModelComponent(
-        awaitSafeThoughtTerminal(accepted),
-        event.requestId,
-        unpublishedSource,
-        live,
-      ),
-      thoughtPhaseStatus: 'awaiting_terminal',
-    };
+    const prepared = prepareThoughtForCommittedText(
+      removeStreamingModelComponent(awaitSafeThoughtTerminal(accepted), event.requestId),
+      event.requestId,
+    );
+    let shown = showStreamingModelComponent(
+      prepared.state,
+      event.requestId,
+      unpublishedSource,
+      live,
+    );
+    const answer = findModelAnswerText(shown, event.requestId);
+    if (answer) {
+      shown = replaceBlockById(shown, answer.id, {
+        ...answer,
+        ...(prepared.responsePending === true ? { responsePending: true } : {}),
+        ...(prepared.thoughtElapsedMs === undefined
+          ? {}
+          : { thoughtElapsedMs: prepared.thoughtElapsedMs }),
+        ...(prepared.thoughtContent === undefined
+          ? {}
+          : { thoughtContent: prepared.thoughtContent }),
+      });
+    }
+    return { ...shown, thoughtPhaseStatus: 'awaiting_terminal' };
   }
 
-  const withoutLive = removeStreamingModelComponent(accepted, event.requestId);
+  const withoutLive = removeStreamingModelComponent(
+    awaitSafeThoughtTerminal(accepted),
+    event.requestId,
+  );
   const prepared = prepareThoughtForCommittedText(withoutLive, event.requestId);
   const next = appendBlock(prepared.state, {
     id: prepared.state.nextBlockId,
@@ -799,12 +936,6 @@ function projectModelTextDelta(
 function settledSummary(
   block: Extract<OutputBlock, { kind: 'tool_summary' }>,
 ): Extract<OutputBlock, { kind: 'tool_summary' }> {
-  const hasError = block.tools.some(
-    (tool) => tool.status === 'error' || tool.status === 'timeout' || tool.status === 'exhausted',
-  );
-  const hasPending = block.tools.some(
-    (tool) => tool.status === 'queued' || tool.status === 'running' || tool.status === 'cancelled',
-  );
   return {
     ...block,
     active: false,
@@ -812,7 +943,7 @@ function settledSummary(
     latestActivity: undefined,
     totalElapsedMs: block.modelMs ?? Date.now() - block.createdAt,
     pendingCaption: undefined,
-    result: hasError ? 'error' : hasPending ? 'cancelled' : 'done',
+    result: deriveToolSummaryResult(block.tools),
   };
 }
 
@@ -820,6 +951,9 @@ function detachFinalCaption(state: TuiState, caption: string): TuiState {
   const summary = findSummaryById(state, state.currentThoughtSummaryId);
   if (!summary) return appendFinalOnce(state, caption);
   if (summary.tools.length === 0) {
+    const timelineThought = [...(summary.timeline ?? [])]
+      .reverse()
+      .find((entry) => entry.kind === 'thinking')?.text;
     const turnIndex = state.turns.length - 1;
     const turns = state.turns.slice();
     const turn = turns[turnIndex]!;
@@ -841,7 +975,9 @@ function detachFinalCaption(state: TuiState, caption: string): TuiState {
         ...(state.currentModelReasoningRequestId === summary.modelRequestId &&
         state.currentModelReasoningText
           ? { thoughtContent: state.currentModelReasoningText }
-          : {}),
+          : timelineThought
+            ? { thoughtContent: timelineThought }
+            : {}),
       },
     );
   }
@@ -901,34 +1037,58 @@ function projectModelResponded(
   ) {
     return state;
   }
-  const durationOwnerId = findSummaryById(state, state.currentThoughtSummaryId)?.id;
-  let next = addSafeThoughtDuration(state, event.durationMs);
-  if (state.currentModelTextStreamed === true) {
+  const classificationPendingText = modelTextBlocks(state, event.requestId).filter(
+    (block) => block.responsePending === true,
+  );
+  const discardClassificationPendingText =
+    event.toolCallCount > 0 &&
+    activeSummary?.active === true &&
+    classificationPendingText.length > 0 &&
+    classificationPendingText.length === modelTextBlocks(state, event.requestId).length;
+  let next = discardClassificationPendingText
+    ? removeModelTextBlocks(state, event.requestId)
+    : state;
+  if (
+    event.toolCallCount > 0 &&
+    findSummaryById(next, next.currentThoughtSummaryId) === undefined &&
+    next.currentModelReasoningRequestId === event.requestId &&
+    modelTextBlocks(next, event.requestId).length === 0
+  ) {
+    next = ensureContentFreeThought(next, event.requestId);
+  }
+  next = addSafeThoughtDuration(next, event.durationMs);
+  const bufferedToolNarration =
+    state.currentModelTextStreamed === true &&
+    event.toolCallCount > 0 &&
+    modelTextBlocks(next, event.requestId).length === 0;
+  if (state.currentModelTextStreamed === true && !bufferedToolNarration) {
     next = reconcileStreamedModelText(next, event);
-    const answer = findModelAnswerText(next, event.requestId);
-    const preceding = answer ? precedingToolSummary(next, answer.id) : undefined;
+    const firstAnswer = modelTextBlocks(next, event.requestId)[0];
+    const preceding = firstAnswer ? precedingToolSummary(next, firstAnswer.id) : undefined;
     const precedingOwnsReasoning = preceding?.modelRequestId === event.requestId;
-    if (
-      precedingOwnsReasoning &&
-      event.durationMs !== undefined &&
-      preceding.id !== durationOwnerId
-    ) {
-      const modelMs = (preceding.modelMs ?? 0) + event.durationMs;
-      next = replaceBlockById(next, preceding.id, {
-        ...preceding,
-        modelMs,
-        totalElapsedMs: modelMs,
-      });
-    }
     const current = findSummaryById(next, next.currentThoughtSummaryId);
 
     if (event.toolCallCount > 0) {
-      const settled = settleCurrentThought(next);
+      let settled = next;
+      if (current?.tools.length === 0) {
+        settled = {
+          ...removeBlockById(settled, current.id),
+          currentThoughtSummaryId: undefined,
+          thoughtPhaseStatus: undefined,
+        };
+        settled = annotateFirstModelText(settled, event, {
+          thoughtElapsedMs: current.modelMs ?? current.totalElapsedMs,
+          ...(state.currentModelReasoningRequestId === event.requestId &&
+          state.currentModelReasoningText
+            ? { thoughtContent: state.currentModelReasoningText }
+            : {}),
+        });
+      } else {
+        settled = settleCurrentThought(settled);
+      }
+      settled = clearCompletedModelState(settled, event.requestId);
       return {
         ...settled,
-        currentModelRequestId: undefined,
-        currentModelTextStreamed: undefined,
-        currentModelTextSource: undefined,
         toolBearingModelRequestId: event.requestId,
         toolBearingPresentationGroupId: event.messageId,
         thoughtPhaseStatus: 'running',
@@ -950,7 +1110,14 @@ function projectModelResponded(
           : {}),
       });
     } else {
-      completed = settleCurrentThought(completed);
+      completed = settleCurrentThought(
+        current?.pendingCaption === undefined
+          ? completed
+          : replaceBlockById(completed, current.id, {
+              ...current,
+              pendingCaption: undefined,
+            }),
+      );
       completed = annotateFirstModelText(
         completed,
         event,
@@ -968,9 +1135,11 @@ function projectModelResponded(
             },
       );
     }
-    return clearCompletedModelState(completed, event.requestId);
+    return finalizeLastTurnStreaming(clearCompletedModelState(completed, event.requestId));
   }
-  const streamedAnswer = existingAnswer ?? findModelAnswerText(next, event.requestId);
+  const streamedAnswer = discardClassificationPendingText
+    ? undefined
+    : (existingAnswer ?? findModelAnswerText(next, event.requestId));
   if (streamedAnswer && event.toolCallCount === 0) {
     const current = findSummaryById(next, next.currentThoughtSummaryId);
     if (current?.tools.length === 0) {
@@ -980,21 +1149,48 @@ function projectModelResponded(
         thoughtPhaseStatus: undefined,
       };
     }
-    return clearCompletedModelState(annotateModelAnswer(next, event), event.requestId);
+    return finalizeLastTurnStreaming(
+      clearCompletedModelState(annotateModelAnswer(next, event), event.requestId),
+    );
   }
   if (event.toolCallCount > 0) {
     const hasNarration = event.summary !== undefined && /\S/u.test(event.summary);
-    if (streamedAnswer || hasNarration) {
-      next = settleCurrentThought(next);
-      if (streamedAnswer) {
-        next = replaceBlockById(next, streamedAnswer.id, {
-          ...streamedAnswer,
-          ...(hasNarration ? { content: event.summary! } : {}),
-          streaming: false,
+    if (streamedAnswer) {
+      // A component already published by model.text_delta is user-visible and
+      // therefore remains a real presentation boundary even when the terminal
+      // response also contains tools. Never pull painted output back into the
+      // Thought owner.
+      const prepared = prepareThoughtForCommittedText(next, event.requestId);
+      next = prepared.state;
+      next = replaceBlockById(next, streamedAnswer.id, {
+        ...streamedAnswer,
+        ...(hasNarration ? { content: event.summary! } : {}),
+        streaming: false,
+        modelRequestId: event.requestId,
+        ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
+        ...(prepared.thoughtElapsedMs === undefined
+          ? {}
+          : { thoughtElapsedMs: prepared.thoughtElapsedMs }),
+        ...(prepared.thoughtContent === undefined
+          ? {}
+          : { thoughtContent: prepared.thoughtContent }),
+      });
+    } else if (hasNarration) {
+      // A terminal-only tool-bearing caption has never been painted. It is
+      // progress narration inside the continuous exploration phase, not a
+      // user-visible answer boundary. Keep it on the current owner so the
+      // matching tools and following model invocation extend one Thought.
+      const owner = findSummaryById(next, next.currentThoughtSummaryId);
+      if (owner) {
+        next = replaceBlockById(next, owner.id, {
+          ...owner,
           modelRequestId: event.requestId,
-          ...(event.durationMs === undefined ? {} : { modelDurationMs: event.durationMs }),
+          pendingCaption: mergeCumulativeText(owner.pendingCaption, event.summary!),
         });
       } else {
+        // Without a live Thought there is no exploration owner to preserve.
+        // Keep the model's visible text as an ordinary boundary; the later
+        // tool presentation will decide its own standalone/exploration shape.
         next = appendBlock(next, {
           id: next.nextBlockId,
           kind: 'text',
@@ -1005,21 +1201,37 @@ function projectModelResponded(
         });
       }
     }
-    const current = findSummaryById(next, next.currentThoughtSummaryId);
-    const resumed = current
-      ? replaceBlockById(next, current.id, {
-          ...current,
+    const remaining = findSummaryById(next, next.currentThoughtSummaryId);
+    const resumed = remaining
+      ? replaceBlockById(next, remaining.id, {
+          ...remaining,
           modelRequestId: event.requestId,
           active: true,
           responsePending: false,
         })
       : next;
+    const completed = clearCompletedModelState(resumed, event.requestId);
     return {
-      ...resumed,
-      currentModelRequestId: undefined,
+      ...completed,
       toolBearingModelRequestId: event.requestId,
       toolBearingPresentationGroupId: event.messageId,
       thoughtPhaseStatus: 'running',
+    };
+  }
+  if (
+    streamedAnswer === undefined &&
+    (event.summary === undefined || !/\S/u.test(event.summary)) &&
+    next.currentModelReasoningRequestId === event.requestId &&
+    next.currentModelReasoningText !== undefined &&
+    findSummaryById(next, next.currentThoughtSummaryId) === undefined
+  ) {
+    return {
+      ...next,
+      currentModelRequestId: undefined,
+      currentModelTextStreamed: undefined,
+      currentModelTextSource: undefined,
+      currentModelReasoningSegmentId: undefined,
+      currentModelReasoningStreamed: false,
     };
   }
   const summary = findSummaryById(next, next.currentThoughtSummaryId);
@@ -1041,11 +1253,13 @@ function projectModelResponded(
     finalText && /\S/u.test(finalText)
       ? detachFinalCaption(next, finalText)
       : settleCurrentThought(next);
-  return clearCompletedModelState(annotateModelAnswer(completed, event), event.requestId);
+  return finalizeLastTurnStreaming(
+    clearCompletedModelState(annotateModelAnswer(completed, event), event.requestId),
+  );
 }
 
 function settleUserCancelledTerminal(state: TuiState): TuiState {
-  const cancelled = projectUserCancelledTurn(state);
+  const cancelled = projectDurableUserCancelledTurn(state);
   const settled = settleCurrentThought(cancelled);
   return {
     ...settled,
@@ -1054,6 +1268,7 @@ function settleUserCancelledTerminal(state: TuiState): TuiState {
     pendingApprovals: new Map(),
     activeApprovalId: null,
     running: false,
+    cancellationPending: false,
     exited: false,
     currentModelRequestId: undefined,
     currentModelTextStreamed: undefined,
@@ -1095,16 +1310,22 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
       ownedText.map((block) => block.content).join('\n') === summary);
   let next = summary === undefined || alreadyRendered ? settled : appendFinalOnce(settled, summary);
   const answer = next.turns.at(-1)?.blocks.at(-1);
-  if (answer?.kind === 'text' && terminalRequestId !== undefined) {
+  if (
+    answer?.kind === 'text' &&
+    terminalRequestId !== undefined &&
+    answer.modelRequestId !== terminalRequestId
+  ) {
     next = replaceBlockById(next, answer.id, {
       ...answer,
       modelRequestId: terminalRequestId,
     });
   }
+  next = finalizeLastTurnStreaming(next);
   return finalRun
     ? {
         ...next,
         running: false,
+        cancellationPending: false,
         exited: true,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
@@ -1113,6 +1334,31 @@ function settleTerminal(state: TuiState, summary: string | undefined, finalRun: 
         toolBearingPresentationGroupId: undefined,
       }
     : next;
+}
+
+function settlePresentationBoundary(state: TuiState): TuiState {
+  let prepared = state;
+  if (
+    state.currentThoughtSummaryId === undefined &&
+    state.currentModelReasoningRequestId !== undefined &&
+    state.currentModelReasoningText !== undefined
+  ) {
+    prepared = ensureContentFreeThought(state, state.currentModelReasoningRequestId);
+  }
+  const summary = findSummaryById(prepared, prepared.currentThoughtSummaryId);
+  const settled = summary?.pendingCaption
+    ? detachFinalCaption(prepared, summary.pendingCaption)
+    : settleCurrentThought(prepared);
+  // An interaction or standalone tool consumes the preceding reasoning as a
+  // presentation phase. Later boundaries in the same tool batch must not
+  // materialize that request-scoped payload again.
+  return {
+    ...settled,
+    currentModelReasoningRequestId: undefined,
+    currentModelReasoningSegmentId: undefined,
+    currentModelReasoningStreamed: false,
+    currentModelReasoningText: undefined,
+  };
 }
 
 function settleCurrentThought(state: TuiState): TuiState {
@@ -1129,7 +1375,15 @@ function settleCurrentThought(state: TuiState): TuiState {
   const blocks = turn.blocks.map((block) => {
     if (block.kind !== 'tool_summary' || (!block.active && !block.responsePending)) return block;
     changed = true;
-    return { ...block, active: false, responsePending: false };
+    const toolsTerminal =
+      block.tools.length > 0 &&
+      block.tools.every((tool) => tool.status !== 'queued' && tool.status !== 'running');
+    return {
+      ...block,
+      active: false,
+      responsePending: false,
+      ...(toolsTerminal ? { result: deriveToolSummaryResult(block.tools) } : {}),
+    };
   });
   if (
     !changed &&
@@ -1167,9 +1421,32 @@ function ensureContentFreeThought(state: TuiState, requestId?: string): TuiState
     return replaceBlockById(state, current.id, {
       ...current,
       ...(requestId === undefined ? {} : { modelRequestId: requestId }),
+      ...(current.liveModelStartedAt === undefined ? { liveModelStartedAt: Date.now() } : {}),
       hasThought: true,
       hasThinking: true,
     });
+  }
+  const resumable =
+    requestId === undefined
+      ? undefined
+      : findBlock(
+          state,
+          (block) =>
+            block.kind === 'tool_summary' &&
+            block.modelRequestId === requestId &&
+            block.tools.length === 0 &&
+            block.hasThinking === true,
+        );
+  if (resumable?.kind === 'tool_summary') {
+    return {
+      ...replaceBlockById(state, resumable.id, {
+        ...resumable,
+        active: true,
+        responsePending: false,
+      }),
+      currentThoughtSummaryId: resumable.id,
+      thoughtPhaseStatus: 'running',
+    };
   }
   const base = current?.active ? settleCurrentThought(state) : state;
   const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
@@ -1178,6 +1455,7 @@ function ensureContentFreeThought(state: TuiState, requestId?: string): TuiState
     tools: [],
     totalElapsedMs: 0,
     createdAt: Date.now(),
+    liveModelStartedAt: Date.now(),
     summaryLine: '',
     active: true,
     ...(requestId === undefined ? {} : { modelRequestId: requestId }),
@@ -1196,8 +1474,17 @@ function addSafeThoughtDuration(state: TuiState, durationMs: number | undefined)
   if (durationMs === undefined || durationMs < 0) return state;
   const summary = findSummaryById(state, state.currentThoughtSummaryId);
   if (!summary) return state;
+  const visibleAnswerStarted =
+    summary.modelRequestId !== undefined &&
+    modelTextBlocks(state, summary.modelRequestId).length > 0;
+  if (!summary.active && !summary.responsePending && visibleAnswerStarted) return state;
   const modelMs = (summary.modelMs ?? 0) + durationMs;
-  return replaceBlockById(state, summary.id, { ...summary, modelMs, totalElapsedMs: modelMs });
+  return replaceBlockById(state, summary.id, {
+    ...summary,
+    modelMs,
+    totalElapsedMs: modelMs,
+    liveModelStartedAt: undefined,
+  });
 }
 
 function appendSafeTool(
@@ -1253,7 +1540,7 @@ function updateSafeTool(
         status,
         summary,
       })
-    : appendSafeTool(state, toolId, toolName, status, summary);
+    : appendSafeTool(state, toolId, toolName, status, summary, args ?? {});
 }
 
 type SafeToolStatus = Extract<OutputBlock, { kind: 'tool_card' }>['status'];
@@ -1367,6 +1654,7 @@ function updateSafeSummaryEntry(
     tools,
     summaryLine: buildToolSummaryLine(tools),
     latestActivity: { kind: 'tool', callId: toolId },
+    ...(summary.active ? {} : { result: deriveToolSummaryResult(tools) }),
   });
 }
 
@@ -1380,7 +1668,15 @@ function materializeSafeClientTool(
   totalLines?: number,
   modelRequestId?: string,
 ): TuiState {
-  const withoutPending = removePendingTool(state, toolId);
+  let withoutPending = removePendingTool(state, toolId);
+  if (
+    withoutPending.currentThoughtSummaryId === undefined &&
+    modelRequestId !== undefined &&
+    withoutPending.currentModelReasoningRequestId === modelRequestId &&
+    withoutPending.currentModelReasoningText !== undefined
+  ) {
+    withoutPending = ensureContentFreeThought(withoutPending, modelRequestId);
+  }
   const existing = findSummaryById(withoutPending, withoutPending.explorationSummaryIds[toolId]);
   if (existing)
     return updateSafeSummaryEntry(
@@ -1392,7 +1688,11 @@ function materializeSafeClientTool(
       totalLines,
     );
 
-  const active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
+  let active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
+  if (modelRequestId === undefined && active?.active === true && active.hasThought === true) {
+    withoutPending = settlePresentationBoundary(withoutPending);
+    active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
+  }
   const activeOwnsRequest =
     modelRequestId === undefined
       ? active?.modelRequestId === undefined && active?.hasThought !== true
@@ -1500,7 +1800,7 @@ function startSafeClientTool(state: TuiState, toolId: string, summary: string): 
     );
   }
   return appendSafeTool(
-    settleCurrentThought(removePendingTool(state, toolId)),
+    settlePresentationBoundary(removePendingTool(state, toolId)),
     toolId,
     pending.displayName ?? pending.name,
     'running',
@@ -1567,11 +1867,6 @@ function finishSafeClientTool(
     // approval notice and must not disappear from the transcript.
     if (status === 'cancelled') {
       return removePendingTool(state, toolId);
-    }
-    if (status === 'rejected' && summary === 'Tool approval rejected by user.') {
-      // The interaction settlement already renders the explicit user decision. The queued
-      // payload never reached tool.started, so do not materialize it as an executed Tool card.
-      return settleCurrentThought(removePendingTool(state, toolId));
     }
     return updateSafeTool(
       settleCurrentThought(removePendingTool(state, toolId)),
@@ -1941,7 +2236,7 @@ function settleSubagent(
   state: TuiState,
   subagentId: string,
   status: 'done' | 'error',
-  summary: string,
+  event: Extract<RuntimeClientEvent, { type: 'subagent.completed' | 'subagent.failed' }>,
 ): TuiState {
   const block = findBlock(
     state,
@@ -1951,10 +2246,15 @@ function settleSubagent(
     ? replaceBlockById(state, block.id, {
         ...block,
         status,
-        summary,
-        ...(status === 'error' ? { error: summary } : {}),
+        summary: event.summary,
+        ...(event.toolCallCount === undefined ? {} : { toolCallCount: event.toolCallCount }),
+        ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+        ...(status === 'error' ? { error: event.summary } : {}),
+        ...(event.type === 'subagent.failed' && event.diagnostic !== undefined
+          ? { failureDiagnostic: event.diagnostic }
+          : {}),
       })
-    : appendNotice(state, summary);
+    : appendNotice(state, event.summary);
 }
 
 function appendNotice(state: TuiState, text: string): TuiState {

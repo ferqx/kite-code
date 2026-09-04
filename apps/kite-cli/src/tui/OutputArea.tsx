@@ -24,6 +24,8 @@ interface OutputAreaProps {
   onToggleReason: (id: number) => void;
   onToggleToolExpand?: (id: number) => void;
   onToggleSubagentExpand?: (id: number) => void;
+  /** Current prompt owns Enter whenever it contains a submission candidate. */
+  canToggleLastBlock?: () => boolean;
   overlayActive?: boolean;
   /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
   awaitingApproval?: boolean;
@@ -142,7 +144,7 @@ function visibleDynamicBlocksForApproval(
  * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
  * once they become truly immutable (tool done, text complete, etc.).
  */
-export default function OutputArea({
+function OutputArea({
   staticItems,
   staticKey,
   staticHeader,
@@ -151,6 +153,7 @@ export default function OutputArea({
   onToggleReason,
   onToggleToolExpand,
   onToggleSubagentExpand,
+  canToggleLastBlock,
   overlayActive,
   awaitingApproval,
   awaitingInput,
@@ -164,8 +167,16 @@ export default function OutputArea({
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
+  const canToggleLastBlockRef = useRef(canToggleLastBlock);
+  canToggleLastBlockRef.current = canToggleLastBlock;
   const visibleDynamicBlocks = useMemo(
-    () => visibleDynamicBlocksForApproval(activeDynamicBlocks, awaitingApproval),
+    () =>
+      visibleDynamicBlocksForApproval(
+        activeDynamicBlocks.filter(
+          (block) => block.kind !== 'text' || block.responsePending !== true,
+        ),
+        awaitingApproval,
+      ),
     [activeDynamicBlocks, awaitingApproval],
   );
   const staticRenderItems = useMemo(
@@ -191,6 +202,7 @@ export default function OutputArea({
       const last = blocks[blocks.length - 1];
       if (!last) return;
       if (key.return) {
+        if (canToggleLastBlockRef.current?.() === false) return;
         if (last.kind === 'reason') {
           onToggleReasonRef.current?.(last.id);
         } else if (last.kind === 'tool_card') {
@@ -269,16 +281,12 @@ export default function OutputArea({
                   blocks={item.blocks}
                   columns={Math.max(1, columns)}
                   maxVisibleSteps={maxVisibleSubagentSteps}
-                  maxVisibleChildren={
-                    dynamicRenderItems.length === 1
-                      ? Math.max(
-                          0,
-                          Math.floor(
-                            (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
-                          ),
-                        )
-                      : 0
-                  }
+                  maxVisibleChildren={Math.max(
+                    0,
+                    Math.floor(
+                      (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
+                    ),
+                  )}
                   allowExpanded={
                     dynamicRenderItems.length === 1 &&
                     1 +
@@ -304,7 +312,9 @@ export default function OutputArea({
               awaitingApproval={awaitingApproval}
               awaitingInput={awaitingInput}
               columns={innerColumns}
-              maxVisibleSubagentSteps={maxVisibleSubagentSteps}
+              maxVisibleSubagentSteps={
+                item.kind === 'subagent' ? maxVisibleSubagentSteps : undefined
+              }
             />
           );
         })}
@@ -313,3 +323,5 @@ export default function OutputArea({
     </Box>
   );
 }
+
+export default React.memo(OutputArea);

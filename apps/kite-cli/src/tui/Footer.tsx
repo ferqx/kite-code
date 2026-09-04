@@ -26,9 +26,7 @@ export default function Footer({
 }: FooterProps) {
   return (
     <Box flexDirection="column">
-      {!hideGlobalStatus && (
-        <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
-      )}
+      <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
       {children}
       {!hideGlobalStatus && (
         <StatsLine

@@ -69,8 +69,32 @@ describe('run phase progression', () => {
     expect(shouldDisablePromptInput(createInitialState())).toBe(false);
   });
 
+  test('shows Working only after the authoritative user prompt is presented', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    expect(shouldShowRunStatus(state)).toBe(false);
+
+    state = handleClientEventAction(state, {
+      type: 'user.message',
+      messageId: 'message-1',
+      kind: 'task',
+      text: 'Inspect the project.',
+    });
+
+    expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
+      kind: 'user',
+      messageId: 'message-1',
+    });
+    expect(shouldShowRunStatus(state)).toBe(true);
+  });
+
   test('keeps the active agent run status during automatic compaction', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = handleClientEventAction(state, {
+      type: 'user.message',
+      messageId: 'message-1',
+      kind: 'task',
+      text: 'Continue.',
+    });
     state = dispatch(state, {
       type: 'SET_COMPACTION_PROGRESS',
       phase: 'summarizing',
@@ -81,18 +105,104 @@ describe('run phase progression', () => {
     expect(shouldShowRunStatus(state)).toBe(true);
   });
 
-  test('hides agent run status during manual compaction', () => {
+  test('keeps the active agent run status during manual compaction', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = handleClientEventAction(state, {
+      type: 'user.message',
+      messageId: 'message-1',
+      kind: 'task',
+      text: 'Continue.',
+    });
     state = dispatch(state, {
       type: 'SET_COMPACTION_PROGRESS',
       phase: 'preparing',
       source: 'manual',
     });
     expect(state.compactionProgress).toEqual({ phase: 'preparing', source: 'manual' });
-    expect(shouldShowRunStatus(state)).toBe(false);
+    expect(shouldShowRunStatus(state)).toBe(true);
     state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS' });
     expect(state.compactionProgress).toBeUndefined();
     expect(shouldShowRunStatus(state)).toBe(true);
+  });
+
+  test('keeps the animated run status until the final response becomes terminal', () => {
+    const state = {
+      ...createInitialState(),
+      running: true,
+      thoughtPhaseStatus: 'awaiting_terminal' as const,
+    };
+
+    expect(shouldShowRunStatus(state)).toBe(true);
+    expect(
+      shouldShowRunStatus({
+        ...state,
+        status: {
+          ...state.status,
+          retryState: { attempt: 2, maxAttempts: 3, error: 'temporary', delayMs: 500 },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('acknowledges cancellation immediately and clears it only at a terminal boundary', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, { type: 'ESCAPE' });
+
+    expect(state.running).toBe(true);
+    expect(state.cancellationPending).toBe(true);
+    expect(deriveRunStatusSnapshot(state).verb).toBe('Cancelling');
+
+    state = handleClientEventAction(state, {
+      type: 'turn.terminal',
+      turnId: 'turn-cancelled',
+      status: 'cancelled',
+      cause: 'user',
+    });
+    expect(state.running).toBe(false);
+    expect(state.cancellationPending).toBe(false);
+  });
+
+  test('enters finishing after a completed model answer while the Run remains active', () => {
+    const state = {
+      ...createInitialState(),
+      running: true,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text' as const,
+              content: 'Done.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(deriveRunStatusSnapshot(state).phase).toBe('finishing');
+  });
+
+  test('does not finish completed narration that owns a pending tool batch', () => {
+    const state = {
+      ...createInitialState(),
+      running: true,
+      toolBearingModelRequestId: 'request-tools',
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text' as const,
+              content: 'I will inspect that next.',
+              modelRequestId: 'request-tools',
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(deriveRunStatusSnapshot(state).phase).not.toBe('finishing');
   });
 
   test('starts in thinking phase', () => {

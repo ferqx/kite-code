@@ -10,7 +10,7 @@ import {
   createKiteSessionExecutionAuthority,
   KiteSessionExecutionAuthorityError,
   openKiteSessionStoreDatabase,
-} from '../src';
+} from '../../src';
 
 describe('Kite Session execution authority', () => {
   test('acquires, renews, detaches and cleanly hands off one monotonic generation', () => {
@@ -178,7 +178,12 @@ describe('Kite Session execution authority', () => {
   test('allows one real-process writer per Session while different Sessions both acquire', async () => {
     const fixture = createStore(['session-1', 'session-2', 'session-3']);
     fixture.database.close(false);
-    const executable = join(import.meta.dir, 'fixtures', 'acquire-kite-session-authority-child.ts');
+    const executable = join(
+      import.meta.dir,
+      '..',
+      'fixtures',
+      'acquire-kite-session-authority-child.ts',
+    );
     try {
       const sameSession = await runChildren(executable, fixture.path, [
         ['session-1', 'host-1'],

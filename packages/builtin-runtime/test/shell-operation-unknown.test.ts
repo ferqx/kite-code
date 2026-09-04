@@ -97,6 +97,11 @@ describe('Builtin Shell operation terminal certainty', () => {
       executorRevision: PLANNING_EXECUTOR_REVISION_,
       value: {
         ok: false,
+        classifierAdvice: {
+          detailCode: 'sandbox_denied',
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+        },
         resultMeta: {
           executionPhase: 'not_started',
           sandboxFailure: {
@@ -105,6 +110,39 @@ describe('Builtin Shell operation terminal certainty', () => {
             cleanupConfirmed: true,
           },
           processCleanup: { confirmedExited: true, unconfirmedDescendantCount: 0 },
+        },
+      },
+    });
+  });
+
+  test('classifies a confirmed non-zero exit without inspecting stderr', async () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const executor = registry.executor('builtin:shell_execute');
+    if (!executor) throw new Error('Shell executor is unavailable.');
+
+    const receipt = await executor.execute(
+      request(),
+      context(async () => ({
+        ok: false,
+        command: 'printf ok',
+        exitCode: 128,
+        stdout: '',
+        stderr: 'arbitrary private process diagnostic',
+        intent: 'git',
+        executionPhase: 'go_started',
+      })),
+    );
+
+    expect(receipt).toMatchObject({
+      status: 'succeeded',
+      value: {
+        ok: false,
+        classifierAdvice: {
+          detailCode: 'tool_reported_failure',
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          requiresNewModelResponse: false,
+          safeAutomaticRetry: false,
         },
       },
     });
