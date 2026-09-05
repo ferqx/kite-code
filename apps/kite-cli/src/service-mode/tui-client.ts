@@ -1258,6 +1258,7 @@ class NativeTuiRuntimeClient {
     const runId = run?.runId ?? accepted!.runId;
     const turnId = run?.activeTurnId ?? accepted!.runId;
     let expectedRevision = this.#revision(record);
+    let recoveryAttempted = false;
     for (let attempt = 0; attempt < CANCEL_RETRY_LIMIT; attempt += 1) {
       const commandId = this.#nextCommandId(record.threadId, 'cancel');
       record.cancelCommand = { state: 'submitting', runId, turnId, commandId };
@@ -1275,6 +1276,33 @@ class NativeTuiRuntimeClient {
         return;
       }
       if (receipt.status === 'not_found' && receipt.code === 'turn_not_found') return;
+      if (
+        receipt.status === 'rejected' &&
+        receipt.code === 'session_unavailable' &&
+        !recoveryAttempted
+      ) {
+        // A transport reconnect can leave this facade with a valid durable
+        // projection while the replacement Service controller has not yet
+        // recovered the Session for mutations. The rejected command proves
+        // cancellation was not committed, so resume the same Session and retry
+        // once with its refreshed revision and a new command identity.
+        recoveryAttempted = true;
+        record.mutationAdmitted = false;
+        await this.#ensureMutationAdmission(record);
+        this.#syncSnapshot(record);
+        const refreshed = record.projection?.currentRun;
+        if (
+          !refreshed ||
+          refreshed.runId !== runId ||
+          (refreshed.status !== 'queued' &&
+            refreshed.status !== 'running' &&
+            refreshed.status !== 'waiting')
+        ) {
+          return;
+        }
+        expectedRevision = this.#revision(record);
+        continue;
+      }
       if (
         receipt.status === 'conflict' &&
         receipt.code === 'revision_conflict' &&

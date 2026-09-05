@@ -53,7 +53,8 @@
   reducer生成idle/cancelled事实；Session投影暂缺`currentRun`也不结束Run。subscription gap只查询exact Run resource；
   `unknown/recovery_required`返回recovery-needed错误并继续阻塞successor，failed拒绝，completed/cancelled按现有facade语义收敛。
 - 活动Turn收到Esc/Ctrl+C时，TUI在同一输入轮先显示`Cancelling`，并把重复按键合并到该Session唯一的in-flight
-  `cancel_turn` Promise；receipt失败清除本地pending状态并显示可重试诊断。排队后继只有在前驱Subagent Provider
+  `cancel_turn` Promise。连接恢复后若替换的Service controller尚未恢复该Session，首个`session_unavailable`拒绝证明取消未提交；
+  client先用同一Session恢复mutation authority，再核对仍是原Run并以刷新revision重试一次。其他receipt失败清除本地pending状态并显示可重试诊断。排队后继只有在前驱Subagent Provider
   cleanup全部确认后才可取得`start_turn` receipt，用户取消已经写入的waived capability终态不得在同进程cleanup中被改写为unknown。
 - 普通模型正文仍按完整Markdown组件提交；没有待判定Thought归属时，完成的段落、列表项和已闭合结构组件立即进入Static，
   只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，待分类正文只保存在有界`RequestAssembly`，

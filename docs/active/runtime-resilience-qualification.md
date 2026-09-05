@@ -145,7 +145,9 @@ Store qualification覆盖两个真实进程首次open、同Workspace不同Sessio
 lease renewal/takeover、effect response loss、SIGKILL recovery_required与explicit reconciliation。release upgrade/rollback只切换pointer，
 不运行任何process discovery/stop；测试以candidate invocation log保持absent证明。
 
-Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
+Native TUI client的Esc/Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
+若重连后的替换controller尚未恢复该Session而明确拒绝`session_unavailable`，client先恢复同一Session的mutation authority，
+再核对active Run identity并以刷新revision重试一次；该未提交拒绝不得让同一Esc不断追加失败诊断，也不得跨Run取消successor。
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
 Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
 conversation rewind使用Service返回的target Session加载safe History，file outcome只含bounded path/error/conflict投影，

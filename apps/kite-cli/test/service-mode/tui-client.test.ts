@@ -515,6 +515,27 @@ test('Native TUI facade coalesces repeated abort requests for the same active tu
   await facade.dispose();
 });
 
+test('Native TUI facade recovers the Session before retrying cancellation', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  remote.rejectNextCancelAsSessionUnavailable();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+
+  await facade.getRuntime(sessionId)!.abort();
+
+  expect(remote.commands.filter((command) => command === 'cancel_turn')).toHaveLength(2);
+  expect(remote.commands.filter((command) => command === 'resume_session')).toHaveLength(1);
+  expect(remote.commands.indexOf('resume_session')).toBeGreaterThan(
+    remote.commands.indexOf('cancel_turn'),
+  );
+  expect(remote.commands.lastIndexOf('cancel_turn')).toBeGreaterThan(
+    remote.commands.indexOf('resume_session'),
+  );
+  await facade.dispose();
+});
+
 test('Native TUI facade reproduces the latest real session and fences a predecessor terminal by revision', async () => {
   // Regression extracted from tui-60771b71-c6d8-4944-b816-75c4dc723745:
   // the queued "主要了解tui" start_turn first saw runtime_busy, then the
@@ -643,6 +664,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #currentRunTerminalRevision: number | undefined;
   #pendingInteraction: RuntimeClientInteraction | undefined;
   #interactionConflictsRemaining = 1;
+  #cancelSessionUnavailableRemaining = 0;
   readonly #subscriptionBySession = new Map<string, string>();
 
   requestApprovalOnNextTurn(): void {
@@ -713,6 +735,10 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   conflictNextStartTurns(count: number): void {
     this.#startTurnConflictsRemaining = count;
+  }
+
+  rejectNextCancelAsSessionUnavailable(): void {
+    this.#cancelSessionUnavailableRemaining = 1;
   }
 
   deliverNextStartTurnReceiptAfterTerminalProjection(): void {
@@ -998,6 +1024,18 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         return;
       }
       if (command.type === 'cancel_turn') {
+        if (this.#cancelSessionUnavailableRemaining > 0) {
+          this.#cancelSessionUnavailableRemaining -= 1;
+          this.push(
+            result(message.id, {
+              status: 'rejected',
+              commandId: command.commandId,
+              code: 'session_unavailable',
+              currentRevision: this.#authoritativeRevision,
+            }),
+          );
+          return;
+        }
         const revision = command.expectedRevision + 1;
         this.#authoritativeRevision = revision;
         this.#restoredTurnReleased = true;
