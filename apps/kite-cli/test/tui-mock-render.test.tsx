@@ -146,7 +146,7 @@ describe('StatusBar', () => {
     expect(output).not.toContain('工作');
   });
 
-  test('shows Finishing after the final answer while awaiting the Run terminal', () => {
+  test('keeps showing Working after the final answer while awaiting the Run terminal', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         status: fakeStatus(),
@@ -156,8 +156,8 @@ describe('StatusBar', () => {
       }),
     );
 
-    expect(lastFrame()).toContain('Finishing');
-    expect(lastFrame()).not.toContain('Working');
+    expect(lastFrame()).toContain('Working');
+    expect(lastFrame()).not.toContain('Finishing');
   });
 });
 

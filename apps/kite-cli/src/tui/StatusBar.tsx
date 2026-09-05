@@ -70,16 +70,9 @@ export default function StatusBar({ runStatus, running, timerKey }: StatusBarPro
   if (!running) return null;
 
   const cancelling = runStatus?.verb === 'Cancelling';
-  const finishing = !cancelling && runStatus?.phase === 'finishing';
-  const retrying = !cancelling && !finishing && Boolean(runStatus?.retry);
-  const color = cancelling ? t.warning : finishing ? t.success : t.primary;
-  const verb = cancelling
-    ? 'Cancelling'
-    : finishing
-      ? 'Finishing'
-      : retrying
-        ? 'Retrying'
-        : 'Working';
+  const retrying = !cancelling && Boolean(runStatus?.retry);
+  const color = cancelling || retrying ? t.warning : t.primary;
+  const verb = cancelling ? 'Cancelling' : retrying ? 'Retrying' : 'Working';
 
   return (
     <Box>

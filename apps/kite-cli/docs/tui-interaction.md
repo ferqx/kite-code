@@ -155,7 +155,7 @@ Runtime identity/pairing，不请求HTTP origin。
 ## 主输入与状态行
 
 - `InputLine` 在首次 Ink effect flush 注册 `useInput` 后立即可编辑；注册前不显示假焦点，不使用固定延时作为门禁。
-- 内部状态阶段仍单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。Footer在普通执行期显示不参与本地化的英文`Working`；已完成的无工具模型正文进入Static、但权威Run终态尚未到达时显示`Finishing`。任一权威完成或失败终态到达后都立即隐藏状态行。
+- 内部状态阶段仍单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。Footer在所有非取消、非重试的活动阶段统一显示不参与本地化的英文`Working`，包括正文已完成但权威Run终态尚未到达的内部Finishing窗口。任一权威完成或失败终态到达后都立即隐藏状态行。
 - Retry、Approval、Input、Compaction与slash modal都是覆盖态，不改变底层阶段。Approval、Input与Plan review取得Footer焦点时隐藏
   active Run状态行；普通slash modal、Retry和自动compaction仍可与底层Run状态并存。手动compaction使用消息区动画。
 - 工具卡可乐观显示 running，但执行耗时从 durable `tool.started` 开始；迟到 started 不复活终态卡片。

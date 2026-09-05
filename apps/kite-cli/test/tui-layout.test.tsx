@@ -6703,7 +6703,7 @@ describe('App', () => {
     expect(frame).toContain('Working');
   });
 
-  test('shows Finishing after the final model response while awaiting Run terminal', () => {
+  test('keeps showing Working after the final model response while awaiting Run terminal', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 2_000,
@@ -6724,8 +6724,8 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Finishing');
-    expect(frame).not.toContain('Working');
+    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Finishing');
   });
 
   test('hides the run status after either authoritative failure projection', () => {

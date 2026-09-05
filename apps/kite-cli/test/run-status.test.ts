@@ -609,7 +609,7 @@ describe('formatRunStatusLine', () => {
     expect(line).toBe('Thinking… (3s · thinking with max effort)');
   });
 
-  test('finishing phase shows verb without prefix', () => {
+  test('finishing phase keeps the same visible Working label', () => {
     const line = formatRunStatusLine(
       {
         phase: 'finishing',
@@ -622,7 +622,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Finishing… (30s)');
+    expect(line).toBe('Working');
   });
 
   test('working phase remains minimal on narrow terminals', () => {

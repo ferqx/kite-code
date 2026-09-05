@@ -208,7 +208,7 @@ function currentVerb(
     }
 
     case 'finishing':
-      return { verb: 'Finishing', tone: 'success' };
+      return { verb: 'Working', tone: 'primary' };
   }
 }
 
@@ -275,7 +275,7 @@ export function formatRunStatusLine(
 ): string {
   // Detailed tool state already lives in the activity blocks. Keep the footer's
   // Working phase deliberately stable and minimal.
-  if (snapshot.phase === 'working') return workingLabel;
+  if (snapshot.phase === 'working' || snapshot.phase === 'finishing') return workingLabel;
 
   const elapsed = formatDuration(snapshot.elapsedMs);
   const note = snapshot.note ? ` · ${snapshot.note}` : '';
