@@ -6,7 +6,7 @@
 
 - TUI 使用终端主屏缓冲区；不可变 history 在安全物理边界进入 `<Static>` 并保留在原生 scrollback。
 - `<Static>` 必须位于 OutputArea 的 `Box(height={0} overflow="hidden")` 内，不外置到 App root。
-- 活跃 streaming/running/interrupt block 留在 dynamic tree。没有active Thought归属时，普通Markdown段落、完整列表项和已闭合结构组件一旦提交就作为连续settled前缀立即进入`<Static>`。已有active Thought时，完整前缀使用`streaming=true + responsePending=true`保留在隐藏dynamic ownership buffer；`model.responded(toolCallCount=0)`补齐正文、结算Thought并释放组件，`toolCallCount>0`删除buffer并让过程旁白、匹配工具与后续模型调用继续同一Thought。`tool_summary`仅在聚合封口且reducer已发布整体`result`后进入`<Static>`（ADR-0168/0171）。
+- 活跃 streaming/running/interrupt block 留在 dynamic tree。没有active Thought归属时，普通Markdown段落、完整列表项和已闭合结构组件一旦提交就作为连续settled前缀立即进入`<Static>`。已有active Thought时，待分类正文只保存在有界`RequestAssembly`，不创建隐藏Timeline/OutputBlock；`model.responded(toolCallCount=0)`补齐正文、结算Thought并发布组件，`toolCallCount>0`丢弃待分类正文并让过程旁白、匹配工具与后续模型调用继续同一Thought。`tool_summary`仅在聚合封口且reducer已发布整体`result`后进入`<Static>`（ADR-0168/0171/0173）。
 - standalone `tool_card`在done/error/rejected/cancelled/timeout/exhausted终态进入Static；resolved interaction与不再变化的presentation-only block同样不得阻塞后续正文。单个Subagent终态即可Static；带`concurrencyGroupId`的并发siblings必须等全组终态后一起提升，使一张`Delegated`摘要和后续最终组件只写入scrollback一次（ADR-0172）。
 - presentation-only slash echo通过`LOCAL_COMMAND`追加到当前dynamic tail，不创建新的user turn。它不能改变仍活动的结构组件或
   `tool_summary`的完成状态；此前已经完成的普通正文组件本来就属于Static，无需由本地命令再次提升。
@@ -21,8 +21,9 @@
 - resize、Session 切换和需要整体重绘的路径使用终端 DEC synchronized-output 包围一次完整帧，防止半帧闪烁。
 - resize 事件去抖后更新 columns/rows 与 generation；Static key 只在真实布局 generation 变化时重建。
 - App root 不使用 `height="100%"` 或 Footer 下方 `flexGrow` spacer；Footer 与 OutputArea 保持固定一行视觉间距。
-- queued-prompt由稳定Footer owner持有，Footer与独立StatusBar使用稳定key；queue增减不能改变Working spinner的React identity。
-  活动Session按FIFO完整展示每个候选，每条使用浅色背景的单行`↵ 消息内容`；`Working`在队列上方，首项前与相邻队列行之间各留一行。
+- queued-prompt由稳定Footer owner持有，Footer与独立StatusBar使用稳定key；queue增减不能改变其他presentation item的React identity。
+  活动Session按FIFO完整展示每个候选，每条使用浅色背景的单行`↵ 消息内容`；队列可见时隐藏Run状态行（包括`Working`），首项前与相邻队列行之间各留一行。
+  Approval/Input/Plan interaction拥有Footer时同样隐藏Run状态行；审批弹窗的生命周期由interaction projection表达，不额外保留`Working`。
   OutputArea使用浅比较隔离queue-only render，queued state不得重算、重挂载或拆分当前Thought，也不得改变Tool或Delegating的折叠形态。
   queued chrome不参与消息区动态高度预算；它只在Footer中增加自身行，不把队列数量提升为Subagent可见步骤的第二权威。
 - active `Delegating`与其他mutable sibling同时存在时仍按终端剩余行预算展示child identity，不能因dynamic tail包含多个item就把
@@ -34,10 +35,17 @@
 ## 引用稳定与渐进冻结
 
 - `useStaticContent` 使用 ref + block fingerprint，而不是依赖每帧新引用的 `useMemo`。
-- fingerprint 只包含影响可见结构的 kind/status/step/text completion 等字段；timer 和 spinner tick 不改变它。
+- `blockRenderCacheKey`委托有限的renderer-visible投影与canonical serialization生成`visualDigest`；正文、状态、可见工具参数、
+  Subagent聚合/展开状态等实际像素输入参与摘要，Runtime identity、lifecycle fence与内部bookkeeping不参与。`presentationState`
+  单独进入cache key以触发Live→Sealed提升；只要进入Static，digest在同一RenderEpoch内不可变。
 - split 重算后逐元素比较数组引用，未变化 block 继续命中 `React.memo(BlockRenderer)`。
-- 新增 OutputBlock variant 必须同时定义 fingerprint 与 settled 条件。
+- 新增 OutputBlock render adapter 必须定义 canonical render model 与 projector-owned `presentationState`；renderer 不得为新 variant 增加第二套 settled 判断。
 - 并发 group identity 只来自 Runtime 明确的 `concurrencyGroupId`，TUI 不从相邻 block 猜测。
+- Timeline projector是Live→Sealed的唯一生命周期入口；OutputArea只消费其render model，不能从Tool/Subagent/Thought/Interaction字段再次推导terminal。
+- session、`/clear`、theme/language、model header与双向resize均递增独立RenderEpoch；epoch包含在Static与动态React identity中，本地block id自身也保持单调且不因`/clear`归零，因此不会撞上Ink ledger。清屏与DEC synchronized-output只在commit/layout effect中执行，React render阶段不写stdout。
+- Overlay只挂载自身子树，不作为App根key；不同Preference selector使用各自子树key，不能继承另一overlay的选中索引。
+  模型选择请求完成前selector保持提交中。活跃Run固定使用admission时的model snapshot，选择的新model记录为下一Run配置；
+  主题和语言在当前viewport一次性重绘，不重发Run或追加第二份scrollback。
 
 ## Client-safe 交互渲染
 
@@ -49,8 +57,9 @@
   普通授权页只显示工作区、external roots与选择，真实故障只显示本地化错误。ModelSelector identity固定为
   `provider + name`，不读取raw config/API key。MCP endpoint只
   显示origin，command只显示executable，TUI不从Service Supervisor或Repository补全被省略字段。
-- 动态MCP execution card固定显示closed `mcp:dynamic_tool` lifecycle label；raw
-  `mcp__server__tool_hash`不能进入card或scrollback，具体工具名只由独立safe summary拥有。
+- 动态MCP execution card固定使用closed `mcp_tool` category，并在没有 descriptor label 时回退为
+  `mcp:dynamic_tool`；admission 已携带的 bounded `displayLabel` 可展示具体工具名。raw
+  `mcp__server__tool_hash`不能进入card或scrollback，TUI不得从 hashed name 反解或自行推断标签。
 
 - Approval overlay 只消费封闭的 `RuntimeClientInteraction`：Shell审批必须优先显示Service投影的有界原始`command`，
   策略`summary`不得替代命令；同时显示允许的`approve_once | same_command`。不得从TUI本地重新读取cwd、sandbox
@@ -98,11 +107,11 @@
   更新 queued 时创建的同一条目；缺少 queued fact 时不猜测、不聚合。
 - Block完成语义与Static物理所有权通常按ADR-0167分离；`tool_summary`与已完成的普通text组件是明确例外
   （ADR-0168/0171）。`tool_summary`的
-  `active=false + responsePending!==true + result=done|error|cancelled`共同构成完成条件。`active`表示该Thought已封口、不能再
+  `active=false + result=done|error|cancelled`共同构成完成条件。`active`表示该Thought已封口、不能再
   聚合后续模型调用或探索工具；`result`表示封口后的工具整体结果。尚无已物化工具的纯Thinking不能用空集合推导`done`；
   `active=true`时即使当前工具全terminal或残留旧result也必须留在dynamic tree。渲染层不得遍历子工具生成第三套完成判断。
   条件成立且该块位于active turn的连续settled前缀时立即提升。无active Thought时，普通text形成完整Markdown组件后直接提升；
-  有active Thought时，完整前缀和结构预览保持隐藏`responsePending`，直到`model.responded.toolCallCount`分类后发布或删除。
+  有active Thought时，完整前缀和结构预览只进入`RequestAssembly`，直到`model.responded.toolCallCount`分类后发布或丢弃。
   standalone block继续按ADR-0167等待安全物理边界。
 - 尚无工具或其他稳定消息owner的纯reasoning在request-scoped state保留内容并物化dynamic Thought；streaming期间只显示
   `● Thinking Ns`题头，completed后在有界`└─`活动窗口原子显示完整reasoning。首个完整正文组件出现时，该动态owner并入正文
@@ -127,7 +136,7 @@
   尚无已确认的新模型请求时，该reasoning直接接管同一owner的request identity，不得结算旧卡再新建相邻Thought。
   reasoning/text delta都按request identity累计。已有工具Thought时，completed reasoning更新`latestActivity=thinking`并在
   题头下显示最新完整内容；exploration工具started/progress/terminal将同一窗口切回工具步骤，后续completed reasoning
-  再覆盖工具窗口。活动Thought下的完整正文前缀保持隐藏`responsePending`，不结算该owner；
+  再覆盖工具窗口。活动Thought下的完整正文前缀只进入`RequestAssembly`，不结算该owner；
   `model.responded(toolCallCount>0)`删除buffer并让后续exploration工具继续原活动块，`toolCallCount=0`才发布最终正文。
   terminal不得制造第二个Thinking owner。
 - reasoning delta/completed都是无State revision的ephemeral presentation fact，Server按原序交给client sink。delta只缓存，
@@ -143,7 +152,7 @@
   但迟到/失败的UI promise不能停止canonical event消费或prompt FIFO；deadline不是用固定延迟猜测正常渲染时序。
 - 不完整的普通paragraph继续只存在于request-scoped cumulative text buffer。无active Thought时，普通回答一旦形成完整Markdown
   组件，就按既有提交器成为不可变text并立即进入连续Static前缀。已有active Thought时，完整前缀只形成隐藏、可删除的
-  `responsePending` buffer；无工具模型终态补齐并发布，带工具终态删除它并继续原Thought，同时校准耗时；
+  `RequestAssembly`；无工具模型终态补齐并发布，带工具终态丢弃待分类正文并继续原Thought，同时校准耗时；
   `model.responded.summary`是optional，缺失时使用同request最后一条已接受delta收口尾段。
 - `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
   更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
@@ -154,7 +163,7 @@
   projector必须提供并验证该identity。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
-- 带工具响应在active Thought下属于待分类过程旁白：完整前缀保持隐藏`responsePending`，未完成尾段留在request source；
+- 带工具响应在active Thought下属于待分类过程旁白：完整前缀与未完成尾段都留在request-scoped assembly；
   `model.responded(toolCallCount>0)`删除text buffer并把终态全文转入不渲染的`pendingCaption/captions`，后续匹配工具继续同一
   Thought。没有active Thought或终态确认无工具的正文仍走普通Markdown消息路径。request identity负责累计流去重；活动区只在
   最新completed reasoning与exploration工具步骤之间交替。
@@ -172,13 +181,20 @@
 
 ## 性能边界
 
+- prompt echo由accepted receipt的canonical messageId绑定；message-first只消费本Session FIFO submission，不按正文匹配。
+  RequestAssembly按requestId保存尚未分类的text/reasoning，单request最多1 MiB、同时最多64项；超限或stream gap保持
+  presentation_incomplete，model terminal不得把截断内容seal。物化为OutputBlock兼容DTO后立即删除assembly。
+- Message Projector显式写入每个OutputBlock adapter的`presentationState`，组合 reducer 在每次 presentation action 后推进保存在 `TuiState` 中的规范化 Timeline，并把它单向映射为
+  `LiveItem | SealedItem`；缺少marker时fail closed为live。生产 renderer 只消费该 reducer-owned Timeline 的 state、digest 与 render model，不在 React hook 中重新投影，也不再从
+  Tool/Thought/Subagent/Interaction子字段自行决定业务terminal，也不保留per-kind compatibility推导。
+
 - 减少 Yoga 节点数优先于仅使用 React.memo。
 - Overlay VirtualList 只渲染 visible items，禁止因 selectedIndex 变化预计算全部行。
 - timer lifecycle 只依赖真实 running/focus 状态，不依赖每帧 elapsed 值。
-- 新Run的本地reservation先设置内部`running`并立即渲染带显式pending标记的prompt；Footer须等RuntimeClient的权威`user.message`完成原位身份升级后才显示`Working`，保证视觉顺序稳定且不制造重复消息。
-- 首个完整回答组件进入`awaiting_terminal`后，只要Run仍为`running`，Footer继续显示animated run status；
-  普通执行文案为不参与本地化的英文`Working`。当最后一个可见块是已完成的model-owned正文、当前模型请求已结束且不存在待续工具批次时，文案切换为`Finishing`，直到权威终态到达；`run.terminal`的completed/failed与`run.failure`都清除running owner，不得残留`Working`或`Finishing`。两者都不展示工具详情或耗时。interrupt、审批/问答/方案
-  Footer和slash modal只能覆盖输入或统计区域，不能卸载该状态行。普通完成组件必须逐个离开
+- 新Run的本地reservation只建立本地Start command时间窗并立即渲染带显式pending标记的prompt；Footer须等RuntimeClient的权威`user.message`完成原位身份升级后才显示`Working`，保证视觉顺序稳定且不制造重复消息。
+- 首个完整回答组件发布后，只要canonical `currentRun`仍为active，Footer继续显示animated run status；
+  普通执行文案为不参与本地化的英文`Working`。当最后一个可见块是已完成的model-owned正文、当前模型请求已结束且不存在待续工具批次时，文案切换为`Finishing`，直到权威终态到达；`run.terminal`的completed/failed/cancelled都清除Run selector，不得残留`Working`或`Finishing`。该状态不展示工具详情或耗时。interrupt、审批/问答/方案
+  Footer中的审批/问答/方案interaction取得焦点时隐藏该状态行，避免与`Working`竞争；slash modal只覆盖输入或统计区域。普通完成组件必须逐个离开
   dynamic tree，避免Footer或焦点重绘反复处理整篇长回答并触发Ink全屏清除、重置原生scroll位置。
 - dynamic 帧高度必须保留 Ink 全屏阈值安全余量，不能为速度删除内容或 Runtime 事实。
 

@@ -254,6 +254,7 @@ function autoReviewState(
     reason: 'Requires App review.',
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: false,
+    owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
     approval: {
       scope: 'once',
       cwd: retainedWorkspace,
@@ -710,6 +711,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision,
             turnId: 'other-turn',
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_wrong_turn'),
         ),
@@ -723,6 +725,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision + 1,
             turnId: started.descriptor.turnId,
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_wrong_revision'),
         ),
@@ -736,6 +739,7 @@ describe('retained TUI session coordinator', () => {
           sessionId,
           expectedRevision: revision,
           turnId: started.descriptor.turnId,
+          runId: started.descriptor.turnId,
         },
         commandEvidence(sessionId, 'command_cancel_fixture'),
       );
@@ -775,6 +779,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision,
             turnId: started.descriptor.turnId,
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_rollback'),
         ),
@@ -828,6 +833,7 @@ describe('retained TUI session coordinator', () => {
           sessionId,
           expectedRevision: coordinator.getState().revision,
           turnId: coordinator.getState().turn.turnId,
+          runId: coordinator.getState().turn.turnId,
         },
         commandEvidence(sessionId, 'command_prepare_idle_close'),
       );

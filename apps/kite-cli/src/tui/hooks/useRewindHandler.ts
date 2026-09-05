@@ -193,8 +193,9 @@ export function useRunRewind(deps: RewindDeps) {
         }
       } catch {
         deps.dispatch({
-          type: 'RUNTIME_EVENT',
-          event: { type: 'unavailable', reason: 'unknown_event' },
+          type: 'LOCAL_TEXT',
+          text: 'Rewind result is unavailable.',
+          isError: true,
         });
       } finally {
         rewindInProgressRef.current = false;

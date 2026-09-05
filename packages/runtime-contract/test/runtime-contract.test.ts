@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  assertAcceptedPresentationEnvelope,
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
   assertRuntimeClientEvent,
@@ -8,6 +9,7 @@ import {
   assertRuntimeQuery,
   assertRuntimeSessionIndexNotification,
   assertRuntimeSubscriptionSpec,
+  isAcceptedPresentationEnvelope,
   isRuntimeClientEvent,
   isRuntimeClientInteraction,
   isRuntimeCommand,
@@ -124,6 +126,7 @@ describe('runtime contract package boundary', () => {
       sessionRevision: 7,
       generation: 3,
       grants: ['approve_once', 'same_command'] as const,
+      owner: { kind: 'root_tool' as const, toolCallId: 'tool-1' },
       command: 'git status --short',
       title: 'Allow tool',
     };
@@ -299,20 +302,28 @@ describe('runtime contract package boundary', () => {
     expect(isRuntimeClientEvent({ type: 'interaction_mode.changed', mode: 'full' })).toBe(true);
     expect(
       isRuntimeClientEvent({
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: 'turn-1',
-        code: 'resource_saturated',
-        retryable: true,
-        recoveryEntry: 'retry',
+        status: 'failed',
+        outcome: {
+          status: 'resource_saturated',
+          reasonCode: 'resource_saturated',
+          safeRetry: true,
+          recoveryEntry: 'retry',
+        },
       }),
     ).toBe(true);
     expect(
       isRuntimeClientEvent({
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: 'turn-1',
-        code: 'resource_saturated',
-        retryable: true,
-        recoveryEntry: 'retry',
+        status: 'failed',
+        outcome: {
+          status: 'resource_saturated',
+          reasonCode: 'resource_saturated',
+          safeRetry: true,
+          recoveryEntry: 'retry',
+        },
         message: 'private failure detail',
       }),
     ).toBe(false);
@@ -367,6 +378,15 @@ describe('runtime contract package boundary', () => {
         presentation: 'exploration',
         result: { ok: true, exitCode: 0, stdout: '', stderr: '' },
         summary: 'Completed.',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.progress',
+        toolId: 'tool-1',
+        summary: 'stdout line one\nstdout line two\n',
+        stream: 'stdout',
+        lineCount: 2,
       }),
     ).toBe(true);
     expect(
@@ -467,9 +487,121 @@ describe('runtime contract package boundary', () => {
       isRuntimeClientEvent({
         type: 'subagent.step',
         subagentId: 'subagent-1',
+        stepId: 'step-1',
+        toolCallId: 'child-tool-1',
         toolName: 'read_file',
         status: 'completed',
-        args: { path: '/private/workspace' },
+        arguments: { path: '/private/workspace' },
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.step',
+        subagentId: 'subagent-1',
+        stepId: 'step-1',
+        toolCallId: 'child-tool-1',
+        toolName: 'read_file',
+        status: 'cancelled',
+        result: { ok: false },
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.failed',
+        toolId: 'tool-1',
+        presentation: 'standalone',
+        summary: 'Tool failed.',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({ type: 'tool.failed', toolId: 'tool-1', summary: 'Tool failed.' }),
+    ).toBe(false);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.phase',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-call-1',
+        status: 'suspended',
+        approvalState: 'awaiting_user',
+        interactionId: 'approval-1',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.review',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-call-1',
+        reviewId: 'review-1',
+        toolCallId: 'child-tool-1',
+        status: 'reviewing',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.step',
+        subagentId: 'subagent-1',
+        stepId: 'step-1',
+        toolCallId: 'child-tool-1',
+        toolName: 'read_file',
+        status: 'completed',
+        extra: true,
+      }),
+    ).toBe(false);
+
+    const accepted = {
+      sessionId: 'session-1',
+      connectionGeneration: 2,
+      durability: 'ephemeral' as const,
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      stream: {
+        actorId: 'agent-1',
+        attemptId: 'attempt-1',
+        compositionRevision: 'composition-1',
+        streamId: 'stream-1',
+        sequence: 1,
+      },
+      event: { type: 'model.text_delta' as const, requestId: 'request-1', text: 'delta' },
+    };
+    expect(isAcceptedPresentationEnvelope(accepted)).toBe(true);
+    expect(() => assertAcceptedPresentationEnvelope(accepted)).not.toThrow();
+    expect(
+      isAcceptedPresentationEnvelope({
+        ...accepted,
+        connectionGeneration: 0,
+      }),
+    ).toBe(false);
+    expect(
+      isAcceptedPresentationEnvelope({
+        ...accepted,
+        durability: 'durable',
+      }),
+    ).toBe(false);
+    expect(
+      isAcceptedPresentationEnvelope({
+        ...accepted,
+        durability: 'bogus',
+      }),
+    ).toBe(false);
+    const { stream: _ephemeralStream, ...withoutEphemeralStream } = accepted;
+    expect(isAcceptedPresentationEnvelope(withoutEphemeralStream)).toBe(false);
+    expect(isAcceptedPresentationEnvelope({ ...accepted, turnId: undefined })).toBe(false);
+    const { stream: _stream, ...durableAccepted } = accepted;
+    expect(
+      isAcceptedPresentationEnvelope({
+        ...durableAccepted,
+        durability: 'durable',
+        turnId: 'turn-1',
+        event: { type: 'model.requested' as const, requestId: 'request-1' },
+      }),
+    ).toBe(false);
+    expect(
+      isAcceptedPresentationEnvelope({
+        ...durableAccepted,
+        durability: 'durable',
+        turnId: 'turn-1',
+        event: { type: 'turn.terminal', turnId: 'predecessor-turn', status: 'completed' },
       }),
     ).toBe(false);
 
@@ -533,19 +665,6 @@ describe('runtime contract package boundary', () => {
     for (const interactionQueue of [
       { revision: 6, interactions: [] },
       { revision: 7, activeInteractionId: 'missing', interactions: [] },
-      {
-        revision: 7,
-        activeInteractionId: 'queue-only-focus',
-        interactions: [
-          {
-            kind: 'approval',
-            interactionId: 'queue-only-focus',
-            sessionRevision: 7,
-            generation: 1,
-            grants: ['approve_once'],
-          },
-        ],
-      },
       {
         revision: 7,
         interactions: [

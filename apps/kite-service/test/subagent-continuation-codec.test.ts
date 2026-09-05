@@ -156,10 +156,11 @@ describe('sub-agent continuation codec', () => {
       toolCallCount: 2,
       steps: [
         {
+          stepId: 'step-1',
+          toolCallId: 'call-1',
           toolName: 'read_file',
           toolArgs: { path: 'src/index.ts' },
           status: 'success',
-          ok: true,
           totalLines: 1,
         },
       ],
@@ -438,6 +439,8 @@ describe('sub-agent continuation codec', () => {
       toolCallCount: 1,
       steps: [
         {
+          stepId: 'step-2',
+          toolCallId: 'call-isolated',
           toolName: 'read_file',
           toolArgs: { path: { value: 'src/index.ts' } },
           status: 'awaiting_approval',
@@ -585,6 +588,8 @@ describe('resume-specific safety invariants', () => {
       toolCallCount: 1,
       steps: [
         {
+          stepId: 'step-3',
+          toolCallId: originalCallId,
           toolName: 'shell_execute',
           toolArgs: { command: 'echo test' },
           status: 'awaiting_approval',
@@ -688,7 +693,13 @@ describe('resume-specific safety invariants', () => {
       ],
       toolCallCount: 1,
       steps: [
-        { toolName: 'shell_execute', toolArgs: { command: 'ls' }, status: 'awaiting_approval' },
+        {
+          stepId: 'step-4',
+          toolCallId: realId,
+          toolName: 'shell_execute',
+          toolArgs: { command: 'ls' },
+          status: 'awaiting_approval',
+        },
       ],
       toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };

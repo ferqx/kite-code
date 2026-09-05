@@ -211,11 +211,19 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
           next: running,
         }),
       ).toBe('applied');
-      expect(() =>
+      expect(
         store.transition({
           sessionId: 'session-1',
           runId: 'run-6',
           expectedLastRevision: 6,
+          next: { ...running, lastRevision: 7 },
+        }),
+      ).toBe('applied');
+      expect(() =>
+        store.transition({
+          sessionId: 'session-1',
+          runId: 'run-6',
+          expectedLastRevision: 7,
           next: {
             ...running,
             status: 'waiting',
@@ -228,7 +236,7 @@ describe('Store 8 canonical Runtime Run schema and port', () => {
         store.transition({
           sessionId: 'session-1',
           runId: 'run-6',
-          expectedLastRevision: 6,
+          expectedLastRevision: 7,
           next: completedRun({ ...running, lastRevision: 8 }),
         }),
       ).toBe('applied');

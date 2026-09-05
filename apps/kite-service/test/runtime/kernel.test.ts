@@ -1467,14 +1467,38 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     userId: 'u',
     workspace: '/',
   });
-  initial.tools.calls['task-1'] = {
-    toolCallId: 'task-1',
-    modelMessageId: 'model-1',
-    name: 'task',
-    args: { task: 'Run a nested command.' },
-    status: 'awaiting_approval',
-    createdAtTurnId: initial.turn.turnId,
-  };
+  for (const event of [
+    {
+      type: 'tool.queued',
+      toolCallId: 'task-1',
+      modelMessageId: 'model-1',
+      name: 'task',
+      args: { task: 'Run a nested command.' },
+    },
+    {
+      type: 'capability.invocation_recorded',
+      invocationId: 'parent-task-1',
+      toolCallId: 'task-1',
+      capabilityId: 'builtin:task',
+      capabilityRevision: 'task-v1',
+      argumentsDigest: 'args',
+      authorizationDigest: 'auth',
+      admissionDigest: 'admission',
+      effectiveEffectsDigest: 'effects',
+      effectiveEffects: { filesystem: 'write', network: 'none', externalState: 'write' },
+      receiptRequirement: 'control_receipt',
+      recordedAt: '2026-09-05T00:00:00.000Z',
+    },
+    {
+      type: 'capability.execution_started',
+      invocationId: 'parent-task-1',
+      startedAt: '2026-09-05T00:00:01.000Z',
+      attempt: 1,
+    },
+    { type: 'tool.started', toolCallId: 'task-1', createdAt: '2026-09-05T00:00:01.000Z' },
+  ] satisfies RuntimeEvent[]) {
+    initial = reduceRuntimeState(initial, event);
+  }
   const approval = {
     scope: 'once' as const,
     cwd: '/',
@@ -1499,6 +1523,15 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     approvalRoute: 'user',
     queueGeneration: 0,
     queueSequence: 0,
+    parentToolCallId: 'task-1',
+    childSubagentId: 'subagent-1',
+    runtimeToolCallId: 'nested-1',
+    owner: {
+      kind: 'subagent_tool',
+      toolCallId: 'nested-1',
+      subagentId: 'subagent-1',
+      parentToolCallId: 'task-1',
+    },
     approval,
   });
   initial.suspendedSubagents['task-1'] = {
@@ -1518,11 +1551,18 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-1',
+      runtimeToolCallId: 'nested-1',
       toolName: 'shell_execute',
     },
   };
 
+  expect(initial.interactions.kind).toBe('awaiting_tool_approval');
+  expect(initial.pendingApprovals.get('approval-1')?.status).toBe('awaiting_user');
+
   const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  expect(kernel.selectPendingEffects()).toEqual([
+    { type: 'request_tool_approval', interactionId: 'approval-1', toolCallId: 'task-1' },
+  ]);
   const events: string[] = [];
   for await (const event of runStateRuntimeLoop(kernel, async () => [], {
     requestAction: async () => ({ type: 'cancel', interactionId: 'approval-1' }),
@@ -1530,7 +1570,12 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     events.push(event.type);
   }
 
-  expect(events).toEqual(['approval.rejected', 'tool.rejected', 'turn.aborted']);
+  expect(events).toEqual([
+    'approval.rejected',
+    'capability.reconciliation_resolved',
+    'tool.rejected',
+    'turn.aborted',
+  ]);
   expect(kernel.getState().interactions.kind).toBe('idle');
   expect(kernel.getState().suspendedSubagents).toEqual({});
   expect(kernel.getState().tools.calls['task-1']?.status).toBe('rejected');
@@ -1794,6 +1839,7 @@ test('runStateRuntimeLoop starts each approved shell while later sibling approva
             toolCallId,
             fullModeBypassEligible: false,
             fullModePolicyBypassAllowed: false,
+            owner: { kind: 'root_tool', toolCallId },
             approval: {
               scope: 'once',
               cwd: '/',
@@ -1930,6 +1976,7 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
           toolCallId,
           fullModeBypassEligible: false,
           fullModePolicyBypassAllowed: false,
+          owner: { kind: 'root_tool', toolCallId },
           approval: {
             scope: 'once',
             cwd: '/',

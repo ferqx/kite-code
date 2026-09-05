@@ -83,7 +83,6 @@ function derivePhase(state: TuiState): RunPhase {
     lastBlock?.kind === 'text' &&
     lastBlock.modelRequestId !== undefined &&
     lastBlock.streaming !== true &&
-    lastBlock.responsePending !== true &&
     state.currentModelRequestId === undefined &&
     state.toolBearingModelRequestId === undefined &&
     state.status.currentNode !== 'tools'
@@ -181,7 +180,7 @@ function currentVerb(
   state: TuiState,
   phase: RunPhase,
 ): { verb: string; tone: RunStatusTone; note?: string } {
-  if (state.cancellationPending) return { verb: 'Cancelling', tone: 'warning' };
+  if (state.cancelRequestedRunId) return { verb: 'Cancelling', tone: 'warning' };
   const compactionVerb = {
     context_preparing: 'Preparing context',
     context_summarizing: 'Summarizing context',

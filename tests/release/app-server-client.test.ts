@@ -10,6 +10,7 @@ import {
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
+import { RUNTIME_PROTOCOL_SCHEMA, RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { trustWorkspace } from '../../apps/kite-service/src/config/workspace-trust';
 import {
   createManagedLocalAppServerComposition,
@@ -268,8 +269,8 @@ class InitializeChild implements BunStdioChild {
           jsonrpc: '2.0',
           id: request.id,
           result: {
-            protocolVersion: 1,
-            protocolSchema: 'kite.runtime-protocol.v1',
+            protocolVersion: RUNTIME_PROTOCOL_VERSION,
+            protocolSchema: RUNTIME_PROTOCOL_SCHEMA,
             serverInfo: { version: this.#version, instanceId: 'installed-fixture' },
             capabilities: {
               methods: [

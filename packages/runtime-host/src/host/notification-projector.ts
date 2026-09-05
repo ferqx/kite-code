@@ -36,8 +36,16 @@ interface IndexSeed {
 
 interface StreamCursor {
   readonly attemptId: string;
+  readonly compositionRevision: string;
   readonly streamId: string;
   readonly sequence: number;
+}
+
+interface ClosedEphemeralRun {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
 }
 
 /** Owns Host-local projection/index ordering, never Runtime execution authority. */
@@ -50,6 +58,7 @@ export class NotificationProjector {
   >();
   readonly #subscribers = new Set<Subscriber>();
   readonly #streamCursors = new Map<string, StreamCursor>();
+  readonly #closedEphemeralRuns = new Map<string, ClosedEphemeralRun>();
   readonly #stopRegistryListener: () => void;
   #indexRevision = 0;
   #nextGeneration = 0;
@@ -73,7 +82,28 @@ export class NotificationProjector {
       ) {
         throw new Error('Durable Runtime notification identity is inconsistent');
       }
-      if (this.#registry.commitProjection(notification.projection.session) === 'unchanged') return;
+      if (this.#registry.commitProjection(notification.projection.session) === 'unchanged') {
+        this.#observeDurableTerminal(notification);
+        // A historical Session can be registered by the query used to prepare
+        // an initial subscription boundary. In that race the following query
+        // snapshot is equal to the registry entry, but the newly registered
+        // subscriber still has no baseline. Seed only those uninitialized
+        // subscribers; established revision cursors must not see duplicates.
+        for (const subscriber of this.#subscribers) {
+          if (
+            subscriber.closed ||
+            subscriber.scope !== 'session' ||
+            subscriber.sessionId !== notification.sessionId ||
+            subscriber.lastRevision !== undefined
+          ) {
+            continue;
+          }
+          this.#enqueue(subscriber, notification);
+          subscriber.lastRevision = notification.revision;
+        }
+        return;
+      }
+      this.#observeDurableTerminal(notification);
       const history = this.#history.get(notification.sessionId) ?? [];
       if (history.at(-1)?.revision === notification.revision) {
         history[history.length - 1] = notification;
@@ -108,6 +138,10 @@ export class NotificationProjector {
   removeSession(sessionId: string): boolean {
     if (this.#closed) return false;
     this.#history.delete(sessionId);
+    this.#deleteClosedEphemeralRuns(sessionId);
+    for (const key of this.#streamCursors.keys()) {
+      if (key.startsWith(`${sessionId}\u0000`)) this.#streamCursors.delete(key);
+    }
     return this.#registry.removeProjection(sessionId);
   }
 
@@ -162,6 +196,7 @@ export class NotificationProjector {
     for (const subscriber of [...this.#subscribers]) this.#closeSubscriber(subscriber);
     this.#history.clear();
     this.#streamCursors.clear();
+    this.#closedEphemeralRuns.clear();
   }
 
   #seedSession(subscriber: Subscriber, afterRevision: number | undefined): void {
@@ -277,10 +312,15 @@ export class NotificationProjector {
     notification: Extract<RuntimeNotification, { durability: 'ephemeral' }>,
   ): boolean {
     const projection = this.#registry.projection(notification.sessionId);
-    const activeWork = projection?.activeWork;
-    if (activeWork && activeWork.workId !== notification.workId) return false;
-    if (activeWork?.activeTurn && activeWork.activeTurn.turnId !== notification.turnId)
+    const currentRun = projection?.currentRun;
+    if (this.#isClosedEphemeral(notification, currentRun)) return false;
+    if (
+      currentRun?.taskId &&
+      currentRun.taskId !== notification.workId &&
+      currentRun.runId !== notification.workId
+    )
       return false;
+    if (currentRun?.activeTurnId && currentRun.activeTurnId !== notification.turnId) return false;
 
     const key = [
       notification.sessionId,
@@ -291,6 +331,7 @@ export class NotificationProjector {
     const cursor = this.#streamCursors.get(key);
     if (
       cursor?.attemptId === notification.attemptId &&
+      cursor.compositionRevision === notification.compositionRevision &&
       cursor.streamId === notification.streamId &&
       notification.sequence <= cursor.sequence
     ) {
@@ -298,17 +339,76 @@ export class NotificationProjector {
     }
     if (
       cursor &&
-      (cursor.attemptId !== notification.attemptId || cursor.streamId !== notification.streamId) &&
+      (cursor.attemptId !== notification.attemptId ||
+        cursor.compositionRevision !== notification.compositionRevision ||
+        cursor.streamId !== notification.streamId) &&
       notification.sequence !== 1
     ) {
       return false;
     }
     this.#streamCursors.set(key, {
       attemptId: notification.attemptId,
+      compositionRevision: notification.compositionRevision,
       streamId: notification.streamId,
       sequence: notification.sequence,
     });
     return true;
+  }
+
+  #observeDurableTerminal(
+    notification: Extract<RuntimeNotification, { readonly durability: 'durable' }>,
+  ): void {
+    const projection = notification.projection.session;
+    const run = projection.currentRun;
+    const event = notification.projection.event;
+    const eventRunId = event?.type === 'run.terminal' ? event.runId : undefined;
+    if (run && isTerminalRunStatus(run.status)) {
+      this.#closedEphemeralRuns.set(closedEphemeralRunKey(notification.sessionId, run.runId), {
+        sessionId: notification.sessionId,
+        runId: run.runId,
+        ...(run.taskId === undefined ? {} : { taskId: run.taskId }),
+        ...(run.activeTurnId === undefined ? {} : { turnId: run.activeTurnId }),
+      });
+    } else if (eventRunId) {
+      this.#closedEphemeralRuns.set(closedEphemeralRunKey(notification.sessionId, eventRunId), {
+        sessionId: notification.sessionId,
+        runId: eventRunId,
+        ...(run?.taskId === undefined ? {} : { taskId: run.taskId }),
+        ...(run?.activeTurnId === undefined ? {} : { turnId: run.activeTurnId }),
+      });
+    }
+  }
+
+  #isClosedEphemeral(
+    notification: Extract<RuntimeNotification, { readonly durability: 'ephemeral' }>,
+    currentRun: RuntimeSessionProjection['currentRun'],
+  ): boolean {
+    if (currentRun && isTerminalRunStatus(currentRun.status)) {
+      if (notification.runId !== undefined && notification.runId !== currentRun.runId) return false;
+      if (
+        notification.taskId !== undefined &&
+        currentRun.taskId !== undefined &&
+        notification.taskId !== currentRun.taskId
+      ) {
+        return false;
+      }
+      return notification.turnId === currentRun.activeTurnId;
+    }
+    for (const fence of this.#closedEphemeralRuns.values()) {
+      if (fence.sessionId !== notification.sessionId) continue;
+      if (notification.runId !== undefined) return notification.runId === fence.runId;
+      const taskMatches =
+        fence.taskId === undefined || (notification.taskId ?? notification.workId) === fence.taskId;
+      const turnMatches = fence.turnId === undefined || notification.turnId === fence.turnId;
+      if (taskMatches && turnMatches) return true;
+    }
+    return false;
+  }
+
+  #deleteClosedEphemeralRuns(sessionId: string): void {
+    for (const [key, fence] of this.#closedEphemeralRuns) {
+      if (fence.sessionId === sessionId) this.#closedEphemeralRuns.delete(key);
+    }
   }
 
   #enqueue(subscriber: Subscriber, notification: RuntimeAccessNotification): void {
@@ -430,4 +530,12 @@ function snapshotNotification(
 function indexProjection(projection: RuntimeSessionProjection): RuntimeSessionProjection {
   const { workspace: _workspace, ...safe } = projection;
   return safe;
+}
+
+function closedEphemeralRunKey(sessionId: string, runId: string): string {
+  return `${sessionId}\u0000${runId}`;
+}
+
+function isTerminalRunStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }

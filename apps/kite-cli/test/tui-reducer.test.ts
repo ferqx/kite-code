@@ -1,15 +1,68 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
+import type {
+  RuntimeClientEvent,
+  RuntimeInteractionQueueProjection,
+} from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
-import { eventReducer } from '../src/tui/reducers';
-import type { OutputBlock, TuiState } from '../src/tui/types';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
+import type { Action } from '../src/tui/reducers';
+import { eventReducer as reduceEvent } from '../src/tui/reducers';
+import type { OutputBlock, TuiRuntimeAuthorityProjection, TuiState } from '../src/tui/types';
+import { acceptedEnvelopeForState } from './helpers/accepted-envelope';
+
+type AcceptedEnvelopeAction = { type: 'ACCEPT_PRESENTATION_ENVELOPE'; event: RuntimeClientEvent };
+
+/** Test-only adapter: production eventReducer accepts envelopes exclusively. */
+function eventReducer(state: TuiState, action: Action | AcceptedEnvelopeAction): TuiState {
+  if (action.type !== 'ACCEPT_PRESENTATION_ENVELOPE') return reduceEvent(state, action);
+  const event =
+    typeof action.event === 'object' && action.event !== null && 'event' in action.event
+      ? action.event
+      : acceptedEnvelopeForState(action.event, state);
+  return reduceEvent(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+}
 
 function apply(state: TuiState, event: RuntimeClientEvent): TuiState {
-  return eventReducer(state, { type: 'RUNTIME_EVENT', event });
+  return eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 }
 
 function blocks(state: TuiState) {
   return state.turns.flatMap((turn) => turn.blocks);
+}
+
+function activeRuntimeAuthority(runId = 'run-1', turnId = 'turn-1'): TuiRuntimeAuthorityProjection {
+  return {
+    revision: 1,
+    currentRun: {
+      runId,
+      initialTurnId: turnId,
+      activeTurnId: turnId,
+      status: 'running',
+      revision: 1,
+    },
+    interactionQueue: { revision: 1, interactions: [] },
+  };
+}
+
+function runtimeProjection(
+  interactionQueue: RuntimeInteractionQueueProjection,
+  active = true,
+): TuiRuntimeAuthorityProjection {
+  return {
+    revision: interactionQueue.revision,
+    ...(active
+      ? {
+          currentRun: {
+            runId: 'run-snapshot',
+            initialTurnId: 'turn-snapshot',
+            activeTurnId: 'turn-snapshot',
+            status: 'waiting' as const,
+            revision: interactionQueue.revision,
+          },
+        }
+      : {}),
+    interactionQueue,
+  };
 }
 
 describe('TUI RuntimeClientEvent reducer', () => {
@@ -40,8 +93,35 @@ describe('TUI RuntimeClientEvent reducer', () => {
     ]);
   });
 
+  test('clear output preserves monotonic block identities for the next epoch', () => {
+    let state = apply(createInitialState(), {
+      type: 'user.message',
+      messageId: 'user-before-clear',
+      kind: 'task',
+      text: 'Before clear',
+    });
+    const firstId = state.turns.at(-1)?.blocks.at(-1)?.id;
+    expect(firstId).toBeDefined();
+
+    state = eventReducer(state, { type: 'CLEAR_OUTPUT' });
+    expect(state.turns).toEqual([]);
+    expect(state.nextBlockId).toBeGreaterThan(firstId!);
+
+    state = apply(state, {
+      type: 'user.message',
+      messageId: 'user-after-clear',
+      kind: 'task',
+      text: 'After clear',
+    });
+    expect(state.turns.at(-1)?.blocks.at(-1)?.id).toBe(state.nextBlockId - 1);
+    expect(state.turns.at(-1)?.blocks.at(-1)?.id).toBeGreaterThan(firstId!);
+  });
+
   test('renders safe user, model, tool, and terminal facts', () => {
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: activeRuntimeAuthority(),
+    };
     const events: readonly RuntimeClientEvent[] = [
       { type: 'user.message', messageId: 'user-1', kind: 'task', text: 'Update the client.' },
       { type: 'model.requested', requestId: 'request-1' },
@@ -74,7 +154,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
     ];
     for (const event of events) state = apply(state, event);
 
-    expect(state.running).toBe(false);
+    expect(isTuiRunActive(state)).toBe(false);
     expect(state.exited).toBe(true);
     expect(blocks(state)).toEqual(
       expect.arrayContaining([
@@ -95,6 +175,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
         sessionRevision: 8,
         generation: 2,
         grants: ['approve_once'],
+        owner: { kind: 'root_tool', toolCallId: 'approval-1' },
       },
     });
 
@@ -132,6 +213,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
         sessionRevision: 3,
         generation: 0,
         grants: ['approve_once'],
+        owner: { kind: 'root_tool', toolCallId: 'approval-rejected-by-user' },
         command: 'git status',
       },
     });
@@ -139,10 +221,12 @@ describe('TUI RuntimeClientEvent reducer', () => {
       type: 'approval.rejected',
       interactionId: 'approval-rejected-by-user',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'approval-rejected-by-user' },
     });
     state = apply(state, {
       type: 'tool.rejected',
       toolId: 'shell-rejected-by-user',
+      presentation: 'standalone',
       summary: 'Cancelled by user.',
     });
 
@@ -194,12 +278,13 @@ describe('TUI RuntimeClientEvent reducer', () => {
       sessionRevision: 4,
       generation: 0,
       grants: ['approve_once' as const],
+      owner: { kind: 'root_tool' as const, toolCallId: 'approval-accepted' },
       command: 'git status',
     };
     let state = eventReducer(
       {
         ...createInitialState(),
-        running: true,
+        runPromptPresented: false,
         turns: [{ blocks: [queuedTool, queuedSummary] }],
         nextBlockId: 3,
         currentThoughtSummaryId: queuedSummary.id,
@@ -216,6 +301,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
             {
               interactionId: interaction.interactionId,
               toolCallId: queuedTool.callId,
+              owner: interaction.owner,
               route: 'user',
               status: 'awaiting_user',
               sequence: 0,
@@ -239,12 +325,11 @@ describe('TUI RuntimeClientEvent reducer', () => {
     expect(state.pendingApprovals?.get(interaction.interactionId)?.status).toBe('approving');
     state = eventReducer(state, {
       type: 'RECONCILE_RUNTIME_PROJECTION',
-      active: true,
-      interactionQueue: {
+      projection: runtimeProjection({
         revision: 5,
         activeInteractionId: interaction.interactionId,
         interactions: [{ ...interaction, sessionRevision: 5 }],
-      },
+      }),
     });
 
     expect(blocks(state)).toEqual(
@@ -298,11 +383,10 @@ describe('TUI RuntimeClientEvent reducer', () => {
 
   test('reconciles an approval directly from an authoritative Runtime snapshot', () => {
     const state = eventReducer(
-      { ...createInitialState(), running: true },
+      { ...createInitialState(), runPromptPresented: false, runStartTime: Date.now() },
       {
         type: 'RECONCILE_RUNTIME_PROJECTION',
-        active: true,
-        interactionQueue: {
+        projection: runtimeProjection({
           revision: 12,
           activeInteractionId: 'snapshot-approval-1',
           interactions: [
@@ -312,14 +396,15 @@ describe('TUI RuntimeClientEvent reducer', () => {
               sessionRevision: 12,
               generation: 4,
               grants: ['approve_once'],
+              owner: { kind: 'root_tool', toolCallId: 'snapshot-approval-1' },
               command: 'ls packages',
             },
           ],
-        },
+        }),
       },
     );
 
-    expect(state.running).toBe(true);
+    expect(isTuiRunActive(state)).toBe(true);
     expect(state.interrupt).toEqual({
       kind: 'approval',
       interactionId: 'snapshot-approval-1',
@@ -343,12 +428,12 @@ describe('TUI RuntimeClientEvent reducer', () => {
         sessionRevision: 8,
         generation: 1,
         grants: ['approve_once'],
+        owner: { kind: 'root_tool', toolCallId: 'snapshot-old' },
       },
     });
     state = eventReducer(state, {
       type: 'RECONCILE_RUNTIME_PROJECTION',
-      active: true,
-      interactionQueue: {
+      projection: runtimeProjection({
         revision: 9,
         activeInteractionId: 'snapshot-new',
         interactions: [
@@ -358,9 +443,10 @@ describe('TUI RuntimeClientEvent reducer', () => {
             sessionRevision: 9,
             generation: 2,
             grants: ['approve_once'],
+            owner: { kind: 'root_tool', toolCallId: 'snapshot-new' },
           },
         ],
-      },
+      }),
     });
 
     expect([...state.pendingApprovals!.keys()]).toEqual(['snapshot-new']);
@@ -369,11 +455,10 @@ describe('TUI RuntimeClientEvent reducer', () => {
     );
 
     state = eventReducer(
-      { ...state, running: false, interrupt: null },
+      { ...state, runPromptPresented: true, interrupt: null },
       {
         type: 'RECONCILE_RUNTIME_PROJECTION',
-        active: false,
-        interactionQueue: { revision: 10, interactions: [] },
+        projection: runtimeProjection({ revision: 10, interactions: [] }, false),
       },
     );
     expect(state.pendingApprovals).toEqual(new Map());
@@ -418,12 +503,11 @@ describe('TUI RuntimeClientEvent reducer', () => {
       let state = createInitialState();
       const action = {
         type: 'RECONCILE_RUNTIME_PROJECTION' as const,
-        active: true,
-        interactionQueue: {
+        projection: runtimeProjection({
           revision: 12,
           activeInteractionId: interaction.interactionId,
           interactions: [interaction],
-        },
+        }),
       };
       state = eventReducer(state, action);
       const firstInterrupt = state.interrupt;
@@ -436,13 +520,10 @@ describe('TUI RuntimeClientEvent reducer', () => {
   });
 
   test('settles presentation activity from an idle snapshot without inventing cancellation', () => {
-    let state = apply(
-      { ...createInitialState(), running: true },
-      {
-        type: 'model.requested',
-        requestId: 'snapshot-request-1',
-      },
-    );
+    let state = apply(eventReducer(createInitialState(), { type: 'SET_RUNNING' }), {
+      type: 'model.requested',
+      requestId: 'snapshot-request-1',
+    });
     state = apply(state, {
       type: 'reasoning.activity',
       requestId: 'snapshot-request-1',
@@ -452,11 +533,10 @@ describe('TUI RuntimeClientEvent reducer', () => {
     });
     state = eventReducer(state, {
       type: 'RECONCILE_RUNTIME_PROJECTION',
-      active: false,
-      interactionQueue: { revision: 3, interactions: [] },
+      projection: runtimeProjection({ revision: 3, interactions: [] }, false),
     });
 
-    expect(state.running).toBe(false);
+    expect(isTuiRunActive(state)).toBe(false);
     expect(state.exited).toBe(false);
     expect(state.interrupt).toBeNull();
     expect(blocks(state)).toEqual([
@@ -477,13 +557,19 @@ describe('TUI RuntimeClientEvent reducer', () => {
   });
 
   test('uses only closed approval fields and does not duplicate model terminal text', () => {
-    let state = apply(createInitialState(), {
-      type: 'model.responded',
-      requestId: 'request-1',
-      messageId: 'message-1',
-      toolCallCount: 0,
-      summary: 'Completed safely.',
-    });
+    let state = apply(
+      {
+        ...createInitialState(),
+        runtimeAuthority: activeRuntimeAuthority(),
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-1',
+        messageId: 'message-1',
+        toolCallCount: 0,
+        summary: 'Completed safely.',
+      },
+    );
     state = apply(state, {
       type: 'run.terminal',
       runId: 'run-1',
@@ -496,12 +582,18 @@ describe('TUI RuntimeClientEvent reducer', () => {
         block.kind === 'text' && block.content === 'Completed safely.',
     );
     expect(rendered).toHaveLength(1);
-    expect(state.running).toBe(false);
+    expect(isTuiRunActive(state)).toBe(false);
     expect(state.exited).toBe(true);
   });
 
   test('projects content-free lifecycle and failure facts', () => {
-    let state = apply(createInitialState(), { type: 'planning.entered', taskId: 'task-1' });
+    let state = apply(
+      {
+        ...createInitialState(),
+        runtimeAuthority: activeRuntimeAuthority(),
+      },
+      { type: 'planning.entered', taskId: 'task-1' },
+    );
     state = apply(state, { type: 'interaction_mode.changed', mode: 'full' });
     state = apply(state, {
       type: 'reasoning.activity',
@@ -511,11 +603,15 @@ describe('TUI RuntimeClientEvent reducer', () => {
       text: 'Thinking.',
     });
     state = apply(state, {
-      type: 'run.failure',
+      type: 'run.terminal',
       runId: 'run-1',
-      code: 'provider_unavailable',
-      retryable: true,
-      recoveryEntry: 'retry',
+      status: 'failed',
+      outcome: {
+        status: 'unknown',
+        reasonCode: 'provider_unavailable',
+        safeRetry: true,
+        recoveryEntry: 'retry',
+      },
     });
 
     expect(state.status.phase).toBe('planning');
@@ -523,7 +619,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
     expect(state.currentModelReasoningStreamed).toBe(false);
     expect(state.currentModelReasoningRequestId).toBeUndefined();
     expect(state.currentModelReasoningText).toBeUndefined();
-    expect(state.running).toBe(false);
+    expect(isTuiRunActive(state)).toBe(false);
     expect(blocks(state)).toContainEqual(
       expect.objectContaining({ kind: 'tool_summary', active: false, hasThinking: true }),
     );

@@ -7,10 +7,10 @@ import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccessNotification,
+  type RuntimeClientEvent,
   type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeInteractionResponse,
-  type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
 import { formatAppServerMismatch } from '#kite-cli/app-server-diagnostic';
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
@@ -299,7 +299,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         if (!('durability' in notification)) continue;
         const status =
           notification.durability === 'durable'
-            ? notification.projection.session.activeWork?.status
+            ? notification.projection.session.currentRun?.status
             : undefined;
         if (status && ['completed', 'cancelled', 'failed'].includes(status)) {
           break;
@@ -347,7 +347,7 @@ function formatExternalReadScope(roots: readonly string[]): string {
 }
 
 function interactionFromRuntimeNotificationEvent(
-  event: RuntimeNotificationEvent,
+  event: RuntimeClientEvent,
 ): RuntimeClientInteraction | undefined {
   switch (event.type) {
     case 'interaction.available':
@@ -510,18 +510,18 @@ function readCliStdin(): Promise<string> {
 
 function projectRuntimeNotificationForCli(
   notification: RuntimeAccessNotification,
-): RuntimeNotificationEvent | undefined {
+): RuntimeClientEvent | undefined {
   if (!('durability' in notification)) return undefined;
   if (notification.durability === 'durable') return notification.projection.event;
   return notification.event;
 }
 
 export function projectCliRuntimeEvent(
-  event: RuntimeNotificationEvent,
+  event: RuntimeClientEvent,
   terminalOutcomeEnabled = true,
 ):
-  | RuntimeNotificationEvent
-  | (RuntimeNotificationEvent & {
+  | RuntimeClientEvent
+  | (RuntimeClientEvent & {
       terminalPresentation: ClientTerminalOutcomePresentation;
     }) {
   if (terminalOutcomeEnabled && event.type === 'run.terminal' && event.outcome) {

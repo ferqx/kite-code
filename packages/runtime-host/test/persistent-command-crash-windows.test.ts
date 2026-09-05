@@ -392,7 +392,7 @@ function idempotentReplay(sessionId = 'session-1') {
 
 function projection(sessionId: string): RuntimeSessionProjection {
   return {
-    schema: 'kite.runtime-projection.v1',
+    schema: 'kite.runtime-projection.v2',
     sessionId,
     revision: 0,
     lifecycle: 'open',

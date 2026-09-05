@@ -44,7 +44,7 @@ const RESP3_FILES = [
   'apps/kite-cli/src/tui/App.tsx',
   'apps/kite-cli/src/tui/reducers/index.ts',
   'apps/kite-cli/src/tui/reducers/actions.ts',
-  'apps/kite-service/src/runtime/session/runtime-session.ts',
+  'apps/kite-service/src/runtime-client/event-projector.ts',
   'apps/kite-service/src/bootstrap/runtime/runtime-agent-input.ts',
 ];
 const RESP4_FILES = [
@@ -57,7 +57,7 @@ const RESP4_FILES = [
 ];
 const RESP5_FILES = [
   'apps/kite-cli/src/tui/reducers/agentReducer.ts',
-  'apps/kite-cli/src/tui/reducers/handleEvent.ts',
+  'apps/kite-cli/src/tui/reducers/handleClientEvent.ts',
   'apps/kite-cli/src/tui/reducers/uiReducer.ts',
   'apps/kite-cli/src/tui/reducers/sessionReducer.ts',
   'apps/kite-cli/src/tui/reducers/consolidateTools.ts',
@@ -128,7 +128,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   });
 
   test(
-    'real-session replay archives one aggregate without tool-bearing narration',
+    'real-session replay preserves server groups without tool-bearing narration',
     async () => {
       toolSeq = 0;
       const response1Calls = [
@@ -224,10 +224,11 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const clean = stripAnsi(output);
 
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, 'read 30 files')).toBe(true);
-      expect(screenContains(output, 'read 6 files')).toBe(false);
+      expect(screenContains(output, 'read 30 files')).toBe(false);
+      expect(clean.match(/Thinking \d+s · read 6 files/gu)?.length ?? 0).toBe(4);
+      expect(screenContains(output, 'read 5 files')).toBe(true);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
-      expect(tui.scrollback().match(/Thinking /g)?.length ?? 0).toBe(1);
+      expect(tui.scrollback().match(/Thinking /g)?.length ?? 0).toBe(6);
       expect(screenContains(output, 'Let me continue reading')).toBe(false);
       expect(screenContains(output, 'Let me read the core files systematically.')).toBe(false);
       expect(screenContains(output, '继续读取其余关键文件：')).toBe(false);

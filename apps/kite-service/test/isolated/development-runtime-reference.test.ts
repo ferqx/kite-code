@@ -203,7 +203,7 @@ function session(
   displayName?: string,
 ): RuntimeSessionProjection {
   return {
-    schema: 'kite.runtime-projection.v1',
+    schema: 'kite.runtime-projection.v2',
     sessionId,
     revision,
     ...(displayName === undefined ? {} : { displayName }),
@@ -284,7 +284,7 @@ function indexReset(value: RuntimeSessionProjection): RuntimeAccessNotification[
 
 function durable(value: RuntimeSessionProjection): RuntimeAccessNotification {
   return {
-    schema: 'kite.runtime-notification.v1',
+    schema: 'kite.runtime-notification.v2',
     durability: 'durable',
     sessionId: value.sessionId,
     revision: value.revision,

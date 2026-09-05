@@ -86,7 +86,7 @@ export function resolveRuntimeCommandReceipt(
       code: 'invalid_command',
     });
   }
-  const resource = parseRuntimeStoredCommandResource(record.resourceResult);
+  const resource = parseRuntimeStoredCommandResource(record.resourceResult, record.commandId);
   return Object.freeze({
     status: 'idempotent_replay',
     commandId: applied.commandId,

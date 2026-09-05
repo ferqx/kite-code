@@ -174,3 +174,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0170](0170-approval-rejection-terminates-tool-batch.md) | accepted | 人工工具审批拒绝原子拒绝目标、取消同批sibling并中止turn；TUI保留被拒绝工具上下文 |
 | [0171](0171-completed-response-components-use-immediate-static-ownership.md) | accepted | 最终回复的普通完成组件立即进入Static；只有仍增长的表格/代码容器留在dynamic，并保持完成后原生滚动稳定 |
 | [0172](0172-terminal-presentation-blocks-use-static-ownership.md) | accepted | standalone工具、终态Subagent组、resolved交互与不可变展示块立即进入Static，不再阻塞后续最终组件 |
+| [0173](0173-server-run-and-tui-presentation-lifecycle-authority.md) | accepted | Server Run、Client command、Presentation 与 Render 使用分层生命周期权威 |
+| [0174](0174-tui-message-projection-event-format-epoch.md) | accepted | Subagent step稳定identity、accepted presentation envelope、Timeline唯一sealed权威与完整candidate格式升级 |

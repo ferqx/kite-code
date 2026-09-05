@@ -292,10 +292,10 @@ bun run typecheck
 bun test tests/isolated/tools.test.ts
 bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-policy.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
 bun test tests/tui-system/scenarios/subagent-approval.test.ts
-bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/session-manager.test.ts
+bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts
 ```
 
-### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleEvent.ts`、`helpers.ts`）
+### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleClientEvent.ts`、`helpers.ts`）
 
 `LOAD_SESSION` 从 DB 加载会话的 turns/blocks 后未更新 `nextBlockId`，新事件创建的
 block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换了 wrong block → `tool_done` 永远找不到目标。
@@ -328,9 +328,10 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
   受治理执行，仍应如实计入。`tool_done` handler 使用这条基线计算 `elapsedMs`，且不得被后续
   投影覆盖。
 
-### `<Static key={blockFingerprint}>`（`useStaticContent.tsx`、`App.tsx`）
+### `<Static key={blockRenderCacheKey}>`（`useStaticContent.tsx`、`App.tsx`）
 
-- `<Static>` item key 从 `block.id` 改为 `blockFingerprint(block)`，status 变化时 Ink 视为新 item 正确重渲染
+- `<Static>` item key 使用`blockRenderCacheKey(block)`的canonical visual digest；只有projector sealed item可以提交，
+  同一RenderEpoch内已提交item不可变。
 - settled turns 缓存从纯计数改为 fingerprint 驱动，捕获取消后 block 状态变更
 
 ## 关联文档

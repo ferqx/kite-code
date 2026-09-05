@@ -6,6 +6,7 @@ import {
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
 } from '@kite-ai/kite-local-runtime/service';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 
 const descriptor = {
   schema: LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
@@ -16,7 +17,7 @@ const descriptor = {
     origin: 'http://127.0.0.1:43123',
     websocketUrl: 'ws://127.0.0.1:43123/rpc',
   },
-  protocolVersion: 1,
+  protocolVersion: RUNTIME_PROTOCOL_VERSION,
   clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   serverVersion: '0.1.0',
   buildId: 'dev:0123456789012345678901234567890123456789',

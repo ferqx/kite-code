@@ -6,6 +6,7 @@ import {
 } from '@kite-ai/runtime-contract';
 import { runtimeHostStateAssertCurrentRuntimeEvent } from '@kite-ai/runtime-host';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
+import { runtimeClientEventCoverageDecision } from './event-coverage';
 import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
 
 export interface RuntimeClientEventProjectionContext {
@@ -74,7 +75,7 @@ export function projectRuntimeClientEvent(
           ? {}
           : { presentationGroupId: event.modelMessageId }),
         toolName: projectRuntimeToolDisplayName(event.name),
-        ...toolDisplayLabelField(event.name),
+        ...toolDisplayLabelField(event.name, event.displayLabel),
         presentation: projectRuntimeToolPresentation(event),
         arguments: projectRuntimeClientArguments(event.args),
         summary: 'Queued.',
@@ -100,17 +101,27 @@ export function projectRuntimeClientEvent(
         summary: event.result.ok ? 'Completed.' : 'Failed.',
       };
     case 'tool.failed':
-      return { type: 'tool.failed', toolId: event.toolCallId, summary: 'Tool execution failed.' };
+      return {
+        type: 'tool.failed',
+        toolId: event.toolCallId,
+        presentation: projectRuntimeTerminalToolPresentation(event),
+        summary: 'Tool execution failed.',
+      };
     case 'tool.rejected':
       return {
         type: 'tool.rejected',
         toolId: event.toolCallId,
+        presentation:
+          event.failure?.kind === 'approval_rejected'
+            ? projectRuntimeTerminalToolPresentation(event)
+            : 'hidden',
         summary: projectRuntimeClientText(event.reason, 512),
       };
     case 'tool.cancelled':
       return {
         type: 'tool.cancelled',
         toolId: event.toolCallId,
+        presentation: projectRuntimeTerminalToolPresentation(event),
         summary: 'Tool execution cancelled.',
       };
     case 'tool.file_change':
@@ -127,6 +138,7 @@ export function projectRuntimeClientEvent(
         sessionRevision: context.sessionRevision,
         generation: event.queueGeneration ?? 0,
         grants: event.approval.grantOptions,
+        owner: event.owner,
         command: projectRuntimeClientCommand(event.approval.command),
         title: projectRuntimeClientText(event.approval.tool, 8_192),
         summary: projectRuntimeClientText(event.approval.summary, 8_192),
@@ -142,18 +154,22 @@ export function projectRuntimeClientEvent(
         type: 'approval.granted',
         interactionId: event.interactionId,
         generation: event.generation,
+        owner: event.owner,
       };
     case 'approval.batch_released':
       return {
         type: 'approval.granted',
         interactionId: event.interactionId,
         generation: event.generation,
+        owner: event.owner,
       };
     case 'approval.rejected':
       return {
         type: 'approval.rejected',
         interactionId: event.interactionId,
         generation: event.generation,
+        owner: event.owner,
+        summary: projectRuntimeClientText(event.reason, 8_192),
       };
     case 'user_input.requested':
       return {
@@ -265,17 +281,47 @@ export function projectRuntimeClientEvent(
     case 'verification.requested':
       return {
         type: 'verification.status',
-        interaction: {
-          kind: 'verification',
-          interactionId: event.verificationId,
-          sessionRevision: context.sessionRevision,
-          verification: {
-            verificationId: event.verificationId,
-            revision: event.requestedAt,
-          },
-          title: 'Verification required',
-        },
+        interaction: verificationInteraction(
+          event.verificationId,
+          event.requestedAt,
+          context.sessionRevision,
+          'Verification required',
+        ),
         status: 'pending',
+      };
+    case 'verification.started':
+      return {
+        type: 'verification.status',
+        interaction: verificationInteraction(
+          event.verificationId,
+          event.startedAt,
+          context.sessionRevision,
+          'Verification running',
+        ),
+        status: 'running',
+      };
+    case 'verification.completed':
+      return {
+        type: 'verification.status',
+        interaction: verificationInteraction(
+          event.verificationId,
+          event.completedAt,
+          context.sessionRevision,
+          'Verification completed',
+        ),
+        status: event.outcome === 'passed' ? 'passed' : 'failed',
+      };
+    case 'verification.waived':
+      return {
+        type: 'verification.status',
+        interaction: verificationInteraction(
+          event.verificationId,
+          event.waivedAt,
+          context.sessionRevision,
+          'Verification waived',
+        ),
+        status: 'waived',
+        summary: projectRuntimeClientText(event.reason, 8_192),
       };
     case 'subagent.started':
       return {
@@ -294,6 +340,8 @@ export function projectRuntimeClientEvent(
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: projectRuntimeClientText(event.subagent.toolName, 8_192),
         status: 'started',
         ...toolDisplayLabelField(event.subagent.toolName),
@@ -306,10 +354,11 @@ export function projectRuntimeClientEvent(
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: projectRuntimeClientText(event.subagent.toolName, 8_192),
-        status: event.subagent.ok ? 'completed' : 'failed',
+        status: event.subagent.status,
         ...toolDisplayLabelField(event.subagent.toolName),
-        result: { ok: event.subagent.ok },
         ...(event.subagent.summary === undefined
           ? event.subagent.failureReason === undefined
             ? {}
@@ -322,6 +371,52 @@ export function projectRuntimeClientEvent(
           ? {}
           : { durationMs: event.subagent.durationMs }),
       };
+    case 'subagent.suspended':
+      return {
+        type: 'subagent.phase',
+        subagentId: event.snapshot.subagentId,
+        parentToolCallId: event.toolCallId,
+        status: 'suspended',
+        approvalState:
+          event.snapshot.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'
+            ? 'queued_auto_review'
+            : 'queued_user_approval',
+      };
+    case 'subagent.approval_deferred':
+      return {
+        type: 'subagent.phase',
+        subagentId: event.subagentId,
+        parentToolCallId: event.parentToolCallId,
+        status: 'suspended',
+        approvalState: 'authorized_queued',
+        ...(event.interactionId === undefined ? {} : { interactionId: event.interactionId }),
+      };
+    case 'auto_review.requested':
+      return event.owner.kind === 'subagent_tool'
+        ? {
+            type: 'subagent.review',
+            subagentId: event.owner.subagentId,
+            parentToolCallId: event.owner.parentToolCallId,
+            reviewId: event.reviewId,
+            toolCallId: event.owner.toolCallId,
+            status: 'queued',
+            summary: projectRuntimeClientText(event.reason, 8_192),
+          }
+        : { type: 'unavailable', reason: 'redacted' };
+    case 'auto_review.completed':
+      return event.owner.kind === 'subagent_tool'
+        ? {
+            type: 'subagent.review',
+            subagentId: event.owner.subagentId,
+            parentToolCallId: event.owner.parentToolCallId,
+            reviewId: event.reviewId,
+            toolCallId: event.owner.toolCallId,
+            status: event.result.ok ? (event.result.approved ? 'approved' : 'rejected') : 'failed',
+            ...(event.result.reason === undefined
+              ? {}
+              : { summary: projectRuntimeClientText(event.result.reason, 8_192) }),
+          }
+        : { type: 'unavailable', reason: 'redacted' };
     case 'subagent.completed':
       return {
         type: 'subagent.completed',
@@ -397,28 +492,35 @@ export function projectRuntimeClientEvent(
           : {}),
       };
     case 'run.error': {
+      // A Run-scoped failure requires a real durable Turn/Run correlation.
+      // Unattributed failures remain Session diagnostics at their owner; they
+      // must not resolve a Run waiter under a synthetic identity.
+      if (!event.turnId) return { type: 'unavailable', reason: 'redacted' };
       // An exhausted model-attempt outcome describes the terminal wrapper;
       // the classified attempt remains the actionable, content-free cause.
       const attemptFailure =
         event.outcome?.reasonCode === 'model_retry_exhausted' && event.failure?.kind !== 'unknown'
           ? event.failure
           : undefined;
+      const reasonCode =
+        attemptFailure?.kind ?? event.outcome?.reasonCode ?? event.failure?.kind ?? 'runtime_error';
+      const safeRetry =
+        attemptFailure?.retryable ??
+        event.outcome?.safeRetry ??
+        event.failure?.retryable ??
+        event.recoverable;
       return {
-        type: 'run.failure',
-        runId: event.turnId ?? 'runtime-run',
-        code:
-          attemptFailure?.kind ??
-          event.outcome?.reasonCode ??
-          event.failure?.kind ??
-          'runtime_error',
-        retryable:
-          attemptFailure?.retryable ??
-          event.outcome?.safeRetry ??
-          event.failure?.retryable ??
-          event.recoverable,
-        recoveryEntry:
-          event.outcome?.recoveryEntry ??
-          (event.failure?.retryable || event.recoverable ? 'retry' : 'new_run'),
+        type: 'run.terminal',
+        runId: event.turnId,
+        status: 'failed',
+        outcome: {
+          status: event.outcome?.status ?? 'unknown',
+          reasonCode,
+          safeRetry,
+          recoveryEntry:
+            event.outcome?.recoveryEntry ??
+            (event.failure?.retryable || event.recoverable ? 'retry' : 'new_run'),
+        },
       };
     }
     case 'model.reasoning_delta':
@@ -436,7 +538,15 @@ export function projectRuntimeClientEvent(
         event.text,
       );
     default:
-      return undefined;
+      switch (runtimeClientEventCoverageDecision(event.type)) {
+        case 'internal_only':
+        case 'normalized_by':
+          return undefined;
+        case 'client_unavailable':
+          return { type: 'unavailable', reason: 'redacted' };
+        case 'client_visible':
+          throw new Error(`Client-visible Runtime event has no projector: ${event.type}`);
+      }
   }
 }
 
@@ -464,15 +574,25 @@ export function projectRuntimeToolDisplayName(name: string): RuntimeToolDisplayN
 }
 
 /** Keeps canonical categories closed while retaining bounded local dynamic labels. */
-export function projectRuntimeToolDisplayLabel(name: string): string | undefined {
+export function projectRuntimeToolDisplayLabel(
+  name: string,
+  admittedLabel?: string,
+): string | undefined {
   if (RUNTIME_TOOL_DISPLAY_NAME_SET.has(name)) return undefined;
-  if (name.startsWith('mcp__')) return 'mcp:dynamic_tool';
+  if (name.startsWith('mcp__')) {
+    const label =
+      admittedLabel === undefined ? undefined : projectRuntimeClientText(admittedLabel, 512);
+    return label && label !== 'mcp:dynamic_tool' ? label : 'mcp:dynamic_tool';
+  }
   const label = projectRuntimeClientText(name, 512);
   return label.length === 0 ? undefined : label;
 }
 
-function toolDisplayLabelField(name: string): Readonly<Record<string, string>> {
-  const displayLabel = projectRuntimeToolDisplayLabel(name);
+function toolDisplayLabelField(
+  name: string,
+  admittedLabel?: string,
+): Readonly<Record<string, string>> {
+  const displayLabel = projectRuntimeToolDisplayLabel(name, admittedLabel);
   return displayLabel === undefined ? {} : { displayLabel };
 }
 
@@ -483,33 +603,23 @@ function projectRuntimeReasoningActivity(
   text: string,
 ): RuntimeClientEvent | undefined {
   if (!isIdentifier(requestId) || segmentId === undefined || !isIdentifier(segmentId))
-    return undefined;
+    return { type: 'unavailable', reason: 'redacted' };
   const projectedText = projectRuntimeClientText(text);
   return projectedText.length === 0
-    ? undefined
+    ? { type: 'unavailable', reason: 'redacted' }
     : { type: 'reasoning.activity', requestId, state, segmentId, text: projectedText };
 }
 
 /**
- * The one content-free rendering classification produced while the App still
- * owns raw arguments. It carries no execution authority to the Client.
+ * Project the Kernel's closed presentation fact. The effect facts are only a
+ * conservative read-only fallback for legacy in-memory fixtures; current
+ * writers attach `presentation` at admission.
  */
 export function projectRuntimeToolPresentation(
   event: Extract<RuntimeEvent, { type: 'tool.queued' }>,
 ) {
-  if (event.name === 'task' || event.toolCallId.startsWith('subagent-tool:'))
-    return 'hidden' as const;
-  if (
-    event.name === 'read_file' ||
-    event.name === 'search_content' ||
-    event.name === 'search_files' ||
-    event.name === 'read_mcp_resource'
-  ) {
-    return 'exploration' as const;
-  }
-  return event.name === 'shell_execute' &&
-    event.effectClass === 'read_only' &&
-    event.sideEffect === false
+  if (event.presentation !== undefined) return event.presentation;
+  return event.effectClass === 'read_only' && event.sideEffect === false
     ? ('exploration' as const)
     : ('standalone' as const);
 }
@@ -581,21 +691,14 @@ function projectRuntimeClientToolResult(
   };
 }
 
-/**
- * A terminal event has no arguments. Preserve only classifications provable
- * from its closed name/ID facts; shell intentionally fails closed.
- */
+/** Preserve the presentation fact carried through terminal normalization. */
 function projectRuntimeTerminalToolPresentation(
-  event: Extract<RuntimeEvent, { type: 'tool.finished' }>,
+  event: Extract<
+    RuntimeEvent,
+    { type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled' }
+  >,
 ) {
-  if (event.name === 'task' || event.toolCallId.startsWith('subagent-tool:'))
-    return 'hidden' as const;
-  return event.name === 'read_file' ||
-    event.name === 'search_content' ||
-    event.name === 'search_files' ||
-    event.name === 'read_mcp_resource'
-    ? ('exploration' as const)
-    : ('standalone' as const);
+  return event.presentation ?? ('standalone' as const);
 }
 
 function settled(
@@ -604,4 +707,22 @@ function settled(
   outcome: 'completed' | 'rejected' | 'cancelled' | 'expired',
 ): RuntimeClientEvent {
   return { type: 'interaction.settled', interactionId, sessionRevision, outcome };
+}
+
+function verificationInteraction(
+  verificationId: string,
+  revision: string,
+  sessionRevision: number,
+  title: string,
+): Extract<
+  import('@kite-ai/runtime-contract').RuntimeClientInteraction,
+  { readonly kind: 'verification' }
+> {
+  return {
+    kind: 'verification',
+    interactionId: verificationId,
+    sessionRevision,
+    verification: { verificationId, revision },
+    title,
+  };
 }

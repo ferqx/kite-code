@@ -5,7 +5,12 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AuthorizedExecutionControl } from '#kite-service/bootstrap/runtime/RuntimeSessionCoordinator';
 import type { RuntimeEvent } from '#kite-service/bootstrap/runtime/state-runtime';
-import type { PlanningModeExitResult } from './runtime-session';
+
+export interface PlanningModeExitResult {
+  readonly events: RuntimeEvent[];
+  /** Runtime-authoritative phase after evaluating the exit request. */
+  readonly phase: import('@kite-ai/runtime-contract').AgentPhase;
+}
 
 type PlanningControl = Pick<AuthorizedExecutionControl, 'getState' | 'processEventBatch'>;
 

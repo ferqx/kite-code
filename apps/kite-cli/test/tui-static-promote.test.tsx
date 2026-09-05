@@ -3,19 +3,29 @@ import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React from 'react';
 import OutputArea, { useStaticContent } from '../src/tui/OutputArea';
+import { projectOutputBlockTimelineItem } from '../src/tui/presentation/timeline';
 import { deriveToolSummaryResult } from '../src/tui/reducers/tool-summary-result';
-import { isBlockSettledInRun } from '../src/tui/render/useStaticContent';
 import { getDarkTheme, ThemeContext } from '../src/tui/theme';
 import type { OutputBlock } from '../src/tui/types';
 
 type ToolStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+
+const isBlockSettledInRun = (block: OutputBlock): boolean =>
+  projectOutputBlockTimelineItem(block).state === 'sealed';
 
 function textBlock(
   id: number,
   content: string,
   extra: Partial<Extract<OutputBlock, { kind: 'text' }>> = {},
 ): OutputBlock {
-  return { id, kind: 'text', content, streaming: false, ...extra };
+  return {
+    id,
+    kind: 'text',
+    content,
+    streaming: false,
+    presentationState: extra.presentationState ?? (extra.streaming ? 'live' : 'sealed'),
+    ...extra,
+  };
 }
 function toolBlock(id: number, status: ToolStatus): OutputBlock {
   return {
@@ -25,6 +35,9 @@ function toolBlock(id: number, status: ToolStatus): OutputBlock {
     name: 'write_file',
     args: { path: '/tmp/x.txt' },
     status,
+    presentationState: ['done', 'error', 'cancelled', 'timeout', 'exhausted'].includes(status)
+      ? 'sealed'
+      : 'live',
     summary: status === 'done' ? 'Wrote /tmp/x.txt' : '',
   } as OutputBlock;
 }
@@ -41,6 +54,11 @@ function subagentBlock(
     role: 'explore',
     task: `task ${id}`,
     status,
+    presentationState:
+      concurrencyGroupId == null &&
+      (status === 'done' || status === 'error' || status === 'cancelled')
+        ? 'sealed'
+        : 'live',
     summary: '',
     toolCallCount: 0,
     durationMs: 10,
@@ -155,7 +173,7 @@ describe('deriveToolSummaryResult', () => {
 describe('isBlockSettledInRun', () => {
   test('settles a finished non-exploration tool card', () => {
     const blocks = [toolBlock(1, 'done') as OutputBlock, textBlock(2, 'answer')];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(true);
   });
 
   test('settles a terminal standalone Shell card', () => {
@@ -166,44 +184,53 @@ describe('isBlockSettledInRun', () => {
       name: 'shell_execute',
       args: { intent: 'inspect', command: 'rg pattern src' },
       status: 'done',
+      presentationState: 'sealed',
       summary: 'Completed.',
     };
-    expect(isBlockSettledInRun(shell, [shell], 0)).toBe(true);
+    expect(isBlockSettledInRun(shell)).toBe(true);
+  });
+
+  test('fails closed when a block has no projector lifecycle marker', () => {
+    const unmarked = {
+      id: 1,
+      kind: 'tool_card' as const,
+      callId: 'unmarked-tool',
+      name: 'shell_execute',
+      args: { command: 'echo done' },
+      status: 'done' as const,
+      summary: 'Completed.',
+    } satisfies OutputBlock;
+    expect(isBlockSettledInRun(unmarked)).toBe(false);
   });
 
   test('running tool card is NOT settled', () => {
     const blocks = [toolBlock(1, 'running') as OutputBlock];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
   });
 
   test('queued tool card is NOT settled', () => {
     const blocks = [toolBlock(1, 'queued') as OutputBlock];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
   });
 
   test('streaming text is NOT settled', () => {
     const blocks = [textBlock(1, 'partial', { streaming: true })];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
   });
 
   test('completed ordinary text is settled immediately', () => {
     const blocks = [textBlock(1, 'done'), toolBlock(2, 'done') as OutputBlock];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
-  });
-
-  test('keeps ownership-pending text out of Static until model classification', () => {
-    const blocks = [textBlock(1, 'pending', { responsePending: true })];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(true);
   });
 
   test('the last terminal text component is settled', () => {
     const blocks = [textBlock(1, 'a'), textBlock(2, 'b')];
-    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(true);
+    expect(isBlockSettledInRun(blocks[1]!)).toBe(true);
   });
 
   test('promotes terminal components while retaining only the mutable structural tail', () => {
     const blocks: OutputBlock[] = [
-      { id: 1, kind: 'user', content: 'long answer' },
+      { id: 1, kind: 'user', content: 'long answer', presentationState: 'sealed' },
       ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}\n\n`)),
       textBlock(102, '```ts\nconst partial = true;\n', {
         streaming: true,
@@ -212,7 +239,7 @@ describe('isBlockSettledInRun', () => {
       }),
     ];
     let split = 0;
-    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!)) {
       split += 1;
     }
 
@@ -221,11 +248,16 @@ describe('isBlockSettledInRun', () => {
   });
 
   test('a newly submitted user block stays dynamic until a following block arrives', () => {
-    const blocks: OutputBlock[] = [{ id: 1, kind: 'user', content: 'hi' }];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'user', content: 'hi', presentationState: 'live' },
+    ];
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
 
-    const withResponse = [...blocks, textBlock(2, 'answer')];
-    expect(isBlockSettledInRun(withResponse[0]!, withResponse, 0)).toBe(true);
+    const withResponse = [
+      { ...blocks[0]!, presentationState: 'sealed' as const },
+      textBlock(2, 'answer'),
+    ];
+    expect(isBlockSettledInRun(withResponse[0]!)).toBe(true);
   });
 
   test('settles a completed subagent so it cannot pin later answer text', () => {
@@ -237,6 +269,7 @@ describe('isBlockSettledInRun', () => {
         role: 'explore',
         task: 't',
         status: 'done',
+        presentationState: 'sealed',
         summary: '',
         toolCallCount: 1,
         durationMs: 5,
@@ -245,7 +278,7 @@ describe('isBlockSettledInRun', () => {
       ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}`)),
     ];
     let split = 0;
-    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!)) {
       split += 1;
     }
     expect(split).toBe(blocks.length);
@@ -257,14 +290,16 @@ describe('isBlockSettledInRun', () => {
       subagentBlock(2, 'running', 'batch-1'),
       subagentBlock(3, 'done', 'batch-1'),
     ];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
 
     const settled = blocks.map((block) =>
-      block.kind === 'subagent' ? { ...block, status: 'done' as const } : block,
+      block.kind === 'subagent'
+        ? { ...block, status: 'done' as const, presentationState: 'sealed' as const }
+        : block,
     );
-    expect(isBlockSettledInRun(settled[0]!, settled, 0)).toBe(true);
-    expect(isBlockSettledInRun(settled[1]!, settled, 1)).toBe(true);
-    expect(isBlockSettledInRun(settled[2]!, settled, 2)).toBe(true);
+    expect(isBlockSettledInRun(settled[0]!)).toBe(true);
+    expect(isBlockSettledInRun(settled[1]!)).toBe(true);
+    expect(isBlockSettledInRun(settled[2]!)).toBe(true);
   });
 
   test('settles a resolved approval so it cannot pin later answer text', () => {
@@ -287,29 +322,44 @@ describe('isBlockSettledInRun', () => {
           recommendedGrant: 'approve_once',
         },
         resolved: { action: 'approved' },
+        presentationState: 'sealed',
       },
       ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}`)),
     ];
     let split = 0;
-    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!)) {
       split += 1;
     }
     expect(split).toBe(blocks.length);
   });
 
   test('settles resolved questions and inert presentation-only blocks', () => {
-    const reason: OutputBlock = { id: 1, kind: 'reason', content: 'hidden', folded: true };
-    const fileChange: OutputBlock = { id: 2, kind: 'file_change', changes: [] };
+    const reason: OutputBlock = {
+      id: 1,
+      kind: 'reason',
+      content: 'hidden',
+      folded: true,
+      presentationState: 'sealed',
+    };
+    const fileChange: OutputBlock = {
+      id: 2,
+      kind: 'file_change',
+      changes: [],
+      presentationState: 'sealed',
+    };
     const question: OutputBlock = {
       id: 3,
       kind: 'question',
       question: { question: 'Continue?', options: [], allow_free_text: true },
       resolved: 'yes',
+      presentationState: 'sealed',
     };
-    expect(isBlockSettledInRun(reason, [reason], 0)).toBe(true);
-    expect(isBlockSettledInRun(fileChange, [fileChange], 0)).toBe(true);
-    expect(isBlockSettledInRun(question, [question], 0)).toBe(true);
-    expect(isBlockSettledInRun({ ...question, resolved: undefined }, [question], 0)).toBe(false);
+    expect(isBlockSettledInRun(reason)).toBe(true);
+    expect(isBlockSettledInRun(fileChange)).toBe(true);
+    expect(isBlockSettledInRun(question)).toBe(true);
+    expect(
+      isBlockSettledInRun({ ...question, resolved: undefined, presentationState: 'live' }),
+    ).toBe(false);
   });
 
   test('active tool_summary is NOT settled', () => {
@@ -323,9 +373,10 @@ describe('isBlockSettledInRun', () => {
         summaryLine: 'x',
         active: true,
         hasThought: false,
+        presentationState: 'live',
       },
     ];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
   });
 
   test('an active aggregate never enters Static even if it carries a stale result', () => {
@@ -348,15 +399,21 @@ describe('isBlockSettledInRun', () => {
       active: true,
       result: 'done',
       hasThought: true,
+      presentationState: 'live',
     };
 
-    expect(isBlockSettledInRun(summary, [summary], 0)).toBe(false);
+    expect(isBlockSettledInRun(summary)).toBe(false);
     expect(
-      isBlockSettledInRun({ ...summary, active: false, responsePending: true }, [summary], 0),
+      isBlockSettledInRun({
+        ...summary,
+        active: false,
+        result: undefined,
+        presentationState: 'live',
+      }),
     ).toBe(false);
-    expect(
-      isBlockSettledInRun({ ...summary, active: false, responsePending: false }, [summary], 0),
-    ).toBe(true);
+    expect(isBlockSettledInRun({ ...summary, active: false, presentationState: 'sealed' })).toBe(
+      true,
+    );
   });
 
   test('soft-closed Thought stays dynamic until the reducer publishes its overall result', () => {
@@ -370,13 +427,20 @@ describe('isBlockSettledInRun', () => {
         summaryLine: 'x',
         active: false,
         hasThought: true,
+        presentationState: 'live',
       },
-      textBlock(2, 'pending answer', { responsePending: true }),
+      textBlock(2, 'pending answer', {
+        modelRequestId: 'request-1',
+        modelTerminal: false,
+        presentationState: 'live',
+      }),
     ];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
-    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(false);
+    expect(isBlockSettledInRun(blocks[0]!)).toBe(false);
+    expect(isBlockSettledInRun(blocks[1]!)).toBe(false);
     const summary = blocks[0] as Extract<OutputBlock, { kind: 'tool_summary' }>;
-    expect(isBlockSettledInRun({ ...summary, result: 'done' }, blocks, 0)).toBe(true);
+    expect(isBlockSettledInRun({ ...summary, result: 'done', presentationState: 'sealed' })).toBe(
+      true,
+    );
   });
 
   test('a terminal result completes only a closed aggregate', () => {
@@ -400,10 +464,16 @@ describe('isBlockSettledInRun', () => {
       hasThought: true,
     };
 
-    expect(isBlockSettledInRun(base, [base], 0)).toBe(false);
-    expect(isBlockSettledInRun({ ...base, result: 'done' }, [base], 0)).toBe(true);
-    expect(isBlockSettledInRun({ ...base, result: 'error' }, [base], 0)).toBe(true);
-    expect(isBlockSettledInRun({ ...base, result: 'cancelled' }, [base], 0)).toBe(true);
+    expect(isBlockSettledInRun(base)).toBe(false);
+    expect(isBlockSettledInRun({ ...base, result: 'done', presentationState: 'sealed' })).toBe(
+      true,
+    );
+    expect(isBlockSettledInRun({ ...base, result: 'error', presentationState: 'sealed' })).toBe(
+      true,
+    );
+    expect(isBlockSettledInRun({ ...base, result: 'cancelled', presentationState: 'sealed' })).toBe(
+      true,
+    );
   });
 });
 
@@ -413,6 +483,7 @@ describe('promotion does not duplicate output', () => {
       id: 1,
       kind: 'user',
       content: 'inspect this',
+      presentationState: 'sealed',
     };
     const thinking: Extract<OutputBlock, { kind: 'tool_summary' }> = {
       id: 2,
@@ -425,6 +496,7 @@ describe('promotion does not duplicate output', () => {
       result: 'done',
       hasThought: true,
       hasThinking: true,
+      presentationState: 'live',
     };
     const view = render(
       React.createElement(
@@ -450,6 +522,7 @@ describe('promotion does not duplicate output', () => {
       summaryLine: 'searched 1 file pattern',
       active: false,
       result: 'done',
+      presentationState: 'sealed',
     };
     view.rerender(
       React.createElement(
@@ -469,7 +542,12 @@ describe('promotion does not duplicate output', () => {
   test('promotes a result-bearing Thought together with its terminal answer', () => {
     const completedTurn = {
       blocks: [
-        { id: 1, kind: 'user' as const, content: 'inspect this' },
+        {
+          id: 1,
+          kind: 'user' as const,
+          content: 'inspect this',
+          presentationState: 'sealed',
+        },
         {
           id: 2,
           kind: 'tool_summary' as const,
@@ -491,6 +569,7 @@ describe('promotion does not duplicate output', () => {
           result: 'done' as const,
           hasThought: true,
           hasThinking: true,
+          presentationState: 'sealed',
         },
         textBlock(3, 'Summary complete.'),
       ] satisfies OutputBlock[],
@@ -506,6 +585,7 @@ describe('promotion does not duplicate output', () => {
       id: 1,
       kind: 'user',
       content: 'inspect this',
+      presentationState: 'sealed',
     };
     const thinking: Extract<OutputBlock, { kind: 'tool_summary' }> = {
       id: 2,
@@ -517,6 +597,7 @@ describe('promotion does not duplicate output', () => {
       active: true,
       hasThought: true,
       hasThinking: true,
+      presentationState: 'live',
     };
     const view = render(
       React.createElement(SplitHarness, { blocks: [user, thinking], running: true }),
@@ -525,7 +606,10 @@ describe('promotion does not duplicate output', () => {
 
     view.rerender(
       React.createElement(SplitHarness, {
-        blocks: [{ ...user }, { ...thinking, active: false, result: 'cancelled' }],
+        blocks: [
+          { ...user },
+          { ...thinking, active: false, result: 'cancelled', presentationState: 'sealed' },
+        ],
         running: false,
       }),
     );
@@ -549,7 +633,9 @@ describe('promotion does not duplicate output', () => {
     expect(view.lastFrame()).toContain('Delegating · 3 agents');
 
     const settled = early.map((block) =>
-      block.kind === 'subagent' ? { ...block, status: 'done' as const } : block,
+      block.kind === 'subagent'
+        ? { ...block, status: 'done' as const, presentationState: 'sealed' as const }
+        : block,
     );
     view.rerender(
       React.createElement(
@@ -575,8 +661,14 @@ describe('promotion does not duplicate output', () => {
 
   test('keeps a terminal sibling group Static when a queued successor is accepted', () => {
     const settled: OutputBlock[] = [
-      subagentBlock(1, 'done', 'queued-successor-batch'),
-      subagentBlock(2, 'done', 'queued-successor-batch'),
+      {
+        ...subagentBlock(1, 'done', 'queued-successor-batch'),
+        presentationState: 'sealed',
+      },
+      {
+        ...subagentBlock(2, 'done', 'queued-successor-batch'),
+        presentationState: 'sealed',
+      },
     ];
     const view = render(
       React.createElement(TurnSplitHarness, {
@@ -584,7 +676,7 @@ describe('promotion does not duplicate output', () => {
         running: true,
       }),
     );
-    expect(view.lastFrame()).toContain('static:;dynamic:1,2');
+    expect(view.lastFrame()).toContain('static:1,2;dynamic:');
 
     // The predecessor terminal arrives while the locally queued prompt waits.
     view.rerender(
@@ -598,8 +690,15 @@ describe('promotion does not duplicate output', () => {
     // ACCEPT_QUEUED_PROMPT atomically starts the run and appends the local
     // successor turn; a durable user.message that wins the race also creates
     // this turn before the acceptance receipt is reduced.
-    const successorTurn = {
-      blocks: [{ id: 3, kind: 'user' as const, content: 'queued successor' }],
+    const successorTurn: { blocks: OutputBlock[] } = {
+      blocks: [
+        {
+          id: 3,
+          kind: 'user' as const,
+          content: 'queued successor',
+          presentationState: 'live' as const,
+        },
+      ],
     };
     view.rerender(
       React.createElement(TurnSplitHarness, {

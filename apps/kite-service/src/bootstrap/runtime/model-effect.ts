@@ -144,6 +144,10 @@ export function eventsForInvalidModelToolCalls(
       modelMessageId: messageId,
       ordinal: ordinalStart + index,
       invocationFingerprint,
+      // Invalid arguments have no trustworthy capability classification; keep
+      // the terminal diagnostic standalone rather than reclassifying it from
+      // the provider-supplied tool name in the Client projector.
+      presentation: 'standalone' as const,
     };
     events.push(queued, {
       type: 'tool.failed' as const,
@@ -733,12 +737,25 @@ export async function projectPrimaryModelEffect(params: {
           modelInvocationId: completion.invocationId,
           taskId: params.state.activeTaskId ?? undefined,
           name: call.name,
+          ...(bindingEntry?.descriptor.kind === 'mcp_tool' &&
+          bindingEntry.descriptor.displayName.length > 0
+            ? { displayLabel: bindingEntry.descriptor.displayName }
+            : {}),
           args: durableCall.args,
           modelMessageId: completion.messageId,
           ordinal: ordinal++,
           effectClass: capability.effectClass,
           sideEffect: capability.sideEffect,
           classificationReason: capability.classificationReason,
+          // This is the canonical admission fact consumed by the Runtime
+          // Client projector. The presentation layer must never rediscover it
+          // from a tool name or a namespaced child call id.
+          presentation:
+            capability.effectClass === 'read_only' && capability.sideEffect === false
+              ? call.name === 'task'
+                ? ('hidden' as const)
+                : ('exploration' as const)
+              : ('standalone' as const),
           invocationFingerprint,
           unknownFields,
           ...(binding

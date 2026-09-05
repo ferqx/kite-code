@@ -37,6 +37,7 @@ import type {
   AgentSubagentHandleArtifactRef as StateSubagentHandleArtifactRef,
   AgentSubagentTaskArtifactRef as StateSubagentTaskArtifactRef,
   AgentToolApprovalPayload as StateToolApprovalPayload,
+  AgentToolPresentation as StateToolPresentation,
   AgentToolResultMeta as StateToolResultMeta,
   AgentUserInputPayload as StateUserInputPayload,
 } from './state';
@@ -51,7 +52,7 @@ import type {
  */
 export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'approval.command_replaced': ['interactionId', 'command'],
-  'approval.granted': ['interactionId', 'toolCallId', 'grant', 'receiptId', 'generation'],
+  'approval.granted': ['interactionId', 'toolCallId', 'grant', 'receiptId', 'generation', 'owner'],
   'approval.batch_released': [
     'interactionId',
     'toolCallId',
@@ -60,19 +61,21 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'sessionRevision',
     'generation',
     'commandIdentity',
+    'owner',
     'matches',
     'createdAt',
   ],
   'approval.session_grants_cleared': ['sessionId', 'sessionRevision', 'generation', 'clearedAt'],
-  'approval.rejected': ['interactionId', 'toolCallId', 'generation', 'reason'],
+  'approval.rejected': ['interactionId', 'toolCallId', 'generation', 'reason', 'owner'],
   'approval.requested': [
     'interactionId',
     'toolCallId',
     'approval',
     'fullModeBypassEligible',
     'fullModePolicyBypassAllowed',
+    'owner',
   ],
-  'auto_review.completed': ['reviewId', 'toolCallId', 'result'],
+  'auto_review.completed': ['reviewId', 'toolCallId', 'result', 'owner'],
   'auto_review.requested': [
     'reviewId',
     'toolCallId',
@@ -81,6 +84,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'approval',
     'fullModeBypassEligible',
     'fullModePolicyBypassAllowed',
+    'owner',
   ],
   'capability.bindings_issued': ['catalogRevision', 'bindings'],
   'capability.execution_failed': ['invocationId', 'error', 'finishedAt'],
@@ -482,7 +486,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'scope',
     'failureCode',
   ],
-  'subagent.approval_deferred': ['toolCallId'],
+  'subagent.approval_deferred': ['toolCallId', 'subagentId', 'parentToolCallId'],
   'subagent.cache_metrics': ['subagent'],
   'subagent.completed': ['subagent'],
   'subagent.failed': ['subagent'],
@@ -633,6 +637,7 @@ type ToolEffectClass =
   | 'workspace_write'
   | 'external_side_effect'
   | 'unknown';
+type ToolPresentation = StateToolPresentation;
 type InteractionMode = 'accept_edits' | 'auto' | 'full';
 type UserInputResult = { answer: string; answers?: Record<string, string> };
 
@@ -677,6 +682,9 @@ type ProviderDataAdmissionReason =
 type CapabilitySearchResult = StateCapabilitySearchResult;
 
 type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
+export type KernelInteractionOwner =
+  | { kind: 'root_tool'; toolCallId: string }
+  | { kind: 'subagent_tool'; toolCallId: string; subagentId: string; parentToolCallId: string };
 type SubAgentStartPayload =
   | {
       id: string;
@@ -693,6 +701,8 @@ type SubAgentStartPayload =
     };
 type SubAgentStepPayload = {
   id: string;
+  stepId: string;
+  toolCallId: string;
   modelInvocationId?: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
@@ -700,8 +710,10 @@ type SubAgentStepPayload = {
 };
 type SubAgentToolResultPayload = {
   id: string;
+  stepId: string;
+  toolCallId: string;
   toolName: string;
-  ok: boolean;
+  status: 'completed' | 'failed' | 'cancelled';
   summary?: string;
   totalLines?: number;
   toolTokenCount?: number;
@@ -1137,12 +1149,21 @@ type StateEventMap = ResourceBudgetEventMap &
       modelInvocationId?: string;
       taskId?: string;
       name: string;
+      /**
+       * Bounded presentation label admitted from the canonical capability
+       * descriptor. This is intentionally separate from `name`: dynamic MCP
+       * names may be hashed for model/tool binding and cannot be recovered by
+       * the Client projector.
+       */
+      displayLabel?: string;
       args: unknown;
       modelMessageId?: string;
       ordinal?: number;
       effectClass?: ToolEffectClass;
       sideEffect?: boolean;
       classificationReason?: string;
+      /** Kernel admission fact consumed by the Runtime Client projector. */
+      presentation?: ToolPresentation;
       bindingId?: string;
       capabilityId?: string;
       capabilityRevision?: string;
@@ -1170,6 +1191,8 @@ type StateEventMap = ResourceBudgetEventMap &
       toolCallId: string;
       createdAt?: string;
       name: string;
+      /** Preserved from the admitted Tool fact for terminal projection. */
+      presentation?: ToolPresentation;
       result: {
         ok: boolean;
         command: string;
@@ -1193,6 +1216,8 @@ type StateEventMap = ResourceBudgetEventMap &
       createdAt?: string;
       outcome?: ToolOutcome;
       failure: ClassifiedFailure;
+      /** Preserved from the admitted Tool fact for terminal projection. */
+      presentation?: ToolPresentation;
     };
     'tool.rejected': {
       type: 'tool.rejected';
@@ -1201,6 +1226,8 @@ type StateEventMap = ResourceBudgetEventMap &
       failure?: ClassifiedFailure;
       createdAt?: string;
       outcome?: ToolOutcome;
+      /** Preserved from the admitted Tool fact for terminal projection. */
+      presentation?: ToolPresentation;
     };
     'tool.cancelled': {
       type: 'tool.cancelled';
@@ -1208,6 +1235,8 @@ type StateEventMap = ResourceBudgetEventMap &
       reason: string;
       createdAt?: string;
       outcome?: ToolOutcome;
+      /** Preserved from the admitted Tool fact for terminal projection. */
+      presentation?: ToolPresentation;
     };
     'tool.retry_recorded': {
       type: 'tool.retry_recorded';
@@ -1302,6 +1331,7 @@ type StateEventMap = ResourceBudgetEventMap &
       approvalRoute?: 'user' | 'auto';
       fullModeBypassEligible: boolean;
       fullModePolicyBypassAllowed: boolean;
+      owner: KernelInteractionOwner;
       queueGeneration?: number;
       queueSequence?: number;
       createdAt?: string;
@@ -1313,6 +1343,7 @@ type StateEventMap = ResourceBudgetEventMap &
       grant: 'approve_once';
       receiptId: string;
       generation: number;
+      owner: KernelInteractionOwner;
       createdAt?: string;
     };
     'approval.batch_released': {
@@ -1324,11 +1355,13 @@ type StateEventMap = ResourceBudgetEventMap &
       sessionRevision: number;
       generation: number;
       commandIdentity: StateApprovalCommandIdentity;
+      owner: KernelInteractionOwner;
       matches: readonly {
         interactionId: string;
         toolCallId: string;
         receiptId: string;
         generation: number;
+        owner: KernelInteractionOwner;
         bindingDigest?: string;
       }[];
       cancelledReviewIds?: readonly string[];
@@ -1350,6 +1383,7 @@ type StateEventMap = ResourceBudgetEventMap &
       failure?: ClassifiedFailure;
       createdAt?: string;
       outcome?: ToolOutcome;
+      owner: KernelInteractionOwner;
     };
     'provider.action_required': {
       type: 'provider.action_required';
@@ -1429,6 +1463,7 @@ type StateEventMap = ResourceBudgetEventMap &
       commandIdentity?: StateApprovalCommandIdentity;
       fullModeBypassEligible: boolean;
       fullModePolicyBypassAllowed: boolean;
+      owner: KernelInteractionOwner;
       parentToolCallId?: string;
       childSubagentId?: string;
       runtimeToolCallId?: string;
@@ -1461,6 +1496,7 @@ type StateEventMap = ResourceBudgetEventMap &
             reviewerModelName: string;
             durationMs: number;
           };
+      owner: KernelInteractionOwner;
       outcome?: ToolOutcome;
       createdAt?: string;
     };
@@ -1760,7 +1796,19 @@ type StateEventMap = ResourceBudgetEventMap &
       toolCallId: string;
       snapshot: PrivateSuspendedSubagent;
     };
-    'subagent.approval_deferred': { type: 'subagent.approval_deferred'; toolCallId: string };
+    'subagent.approval_deferred': {
+      type: 'subagent.approval_deferred';
+      toolCallId: string;
+      subagentId: string;
+      parentToolCallId: string;
+      interactionId?: string;
+      approvalState?:
+        | 'queued_auto_review'
+        | 'auto_reviewing'
+        | 'queued_user_approval'
+        | 'awaiting_user'
+        | 'authorized_queued';
+    };
     'subagent.recovery_journal_merged': {
       type: 'subagent.recovery_journal_merged';
       toolCallId: string;

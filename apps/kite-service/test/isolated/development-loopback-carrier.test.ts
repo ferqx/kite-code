@@ -7,6 +7,7 @@ import type {
   RuntimeQuery,
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
 import {
   createDevelopmentLoopbackCarrier,
@@ -115,7 +116,7 @@ describe('development loopback WebSocket carrier', () => {
     socket.send(JSON.stringify(initializeRequest()));
     expect(await messages.next()).toMatchObject({
       id: 'initialize',
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
     });
     socket.send(JSON.stringify(pingRequest()));
     expect(await messages.next()).toMatchObject({ id: 'ping', result: { status: 'ok' } });
@@ -253,7 +254,7 @@ describe('development loopback WebSocket carrier', () => {
     second.send(JSON.stringify(initializeRequest('fresh-init')));
     expect(await messages.next()).toMatchObject({
       id: 'fresh-init',
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
     });
     second.send(JSON.stringify(pingRequest('fresh-ping')));
     expect(await messages.next()).toMatchObject({ id: 'fresh-ping', result: { status: 'ok' } });
@@ -451,7 +452,7 @@ function initializeRequest(id = 'initialize') {
     id,
     method: 'initialize' as const,
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: { name: 'test', version: '1', instanceId: 'socket' },
     },
   };

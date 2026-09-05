@@ -271,6 +271,13 @@ function structuredSubagentFailureReason(result: ToolExecutionResult): string {
   return 'tool_reported_failure';
 }
 
+function subagentToolResultStatus(
+  result: Pick<ToolExecutionResult, 'ok' | 'terminationReason'>,
+): 'completed' | 'failed' | 'cancelled' {
+  if (result.terminationReason === 'cancelled') return 'cancelled';
+  return result.ok === false ? 'failed' : 'completed';
+}
+
 export async function executeSubagentStartWithCoreToolAdapter(
   input: SubAgentRunnerInput,
 ): Promise<SubAgentResult> {
@@ -327,12 +334,19 @@ export async function executeSubagentResumeWithCoreToolAdapter(
   };
   const toolOutput = toolExecutionModelContent(toolResult.result);
   const actualOk = toolResult.result.ok !== false;
+  const resultStatus = subagentToolResultStatus(toolResult.result);
+  const resumedStep = continuation.steps.find((step) => step.toolCallId === toolResult.toolCallId);
+  if (!resumedStep || resumedStep.toolName !== toolResult.toolName) {
+    throw new Error('Subagent tool result does not match its admitted step identity.');
+  }
   normalizedInput.eventSink({
     type: 'tool_result',
     data: {
       id: continuation.id,
+      stepId: resumedStep.stepId,
+      toolCallId: resumedStep.toolCallId,
       toolName: toolResult.toolName,
-      ok: actualOk,
+      status: resultStatus,
       summary: toolOutput.slice(0, 200),
       durationMs: 0,
       ...(typeof toolResult.result.totalLines === 'number'
@@ -345,22 +359,19 @@ export async function executeSubagentResumeWithCoreToolAdapter(
     },
   });
 
-  // Sync step snapshot with actual result — the blocked case didn't set ok,
-  // so the last step in the continuation still has ok: undefined.
-  // The Core receipt adapter is the authority on the actual tool outcome (approved → ok,
-  // rejected → !ok), so update the snapshot here before the loop continues.
-  const lastStep = continuation.steps[continuation.steps.length - 1];
-  if (lastStep && lastStep.toolName === toolResult.toolName) {
-    lastStep.ok = actualOk;
-    lastStep.status = actualOk
-      ? 'success'
-      : toolResult.result.status === 'rejected'
-        ? 'rejected'
-        : 'error';
-  }
+  // Sync the exact admitted step with its canonical terminal status. The Core
+  // receipt adapter remains the authority on the underlying execution result.
+  resumedStep.status =
+    resultStatus === 'cancelled'
+      ? 'cancelled'
+      : actualOk
+        ? 'success'
+        : toolResult.result.status === 'rejected'
+          ? 'rejected'
+          : 'error';
 
   const priorRecovery = continuation.toolRecovery;
-  const resumeArgs = continuation.steps.at(-1)?.toolArgs ?? {};
+  const resumeArgs = resumedStep.toolArgs;
   const resumeBinding = input.mcpBindings?.find(
     (entry) => entry.binding.exposedToolName === toolResult.toolName,
   );
@@ -646,6 +657,8 @@ async function executeCoreSubagentToolAdapter(
           });
           for (const tc of responseToolCalls) {
             if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
+            const admittedToolCallId = tc.id ?? `subagent-${toolCallCount + 1}`;
+            const stepId = `subagent-step:${id}:${invocationId}:${admittedToolCallId}`;
             const tool = tools[tc.name];
             if (!tool) {
               const available = Object.keys(tools).sort().join(', ');
@@ -659,21 +672,35 @@ async function executeCoreSubagentToolAdapter(
                 }),
               );
               input.eventSink({
+                type: 'step',
+                data: {
+                  id,
+                  stepId,
+                  toolCallId: admittedToolCallId,
+                  modelInvocationId: invocationId,
+                  toolName: tc.name,
+                  toolArgs: tc.args ?? {},
+                },
+              });
+              input.eventSink({
                 type: 'tool_result',
                 data: {
                   id,
+                  stepId,
+                  toolCallId: admittedToolCallId,
                   toolName: tc.name,
-                  ok: false,
+                  status: 'failed',
                   summary: errMsg.slice(0, 200),
                   durationMs: 0,
                   failureReason: 'tool_not_available',
                 },
               });
               steps.push({
+                stepId,
+                toolCallId: admittedToolCallId,
                 toolName: tc.name,
                 toolArgs: tc.args ?? {},
                 status: 'error' as const,
-                ok: false,
               });
               const fingerprint = toolInvocationFingerprint({
                 toolName: tc.name,
@@ -683,7 +710,7 @@ async function executeCoreSubagentToolAdapter(
               });
               const modelMessageId = responseMessageId;
               const admission = admitRecoveryAttempt(toolRecovery, {
-                toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+                toolCallId: admittedToolCallId,
                 toolName: tc.name,
                 invocationFingerprint: fingerprint,
                 modelMessageId,
@@ -693,7 +720,7 @@ async function executeCoreSubagentToolAdapter(
               });
               if (admission.admitted && admission.recoveryOf) {
                 toolRecovery = recordRecoveryInvocation(toolRecovery, {
-                  toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+                  toolCallId: admittedToolCallId,
                   recoveryOf: admission.recoveryOf,
                   mode: 'model_correction',
                 });
@@ -718,7 +745,7 @@ async function executeCoreSubagentToolAdapter(
                   : {}),
               });
               const unavailableFailure = {
-                toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+                toolCallId: admittedToolCallId,
                 toolName: tc.name,
                 invocationFingerprint: fingerprint,
                 modelMessageId,
@@ -737,6 +764,8 @@ async function executeCoreSubagentToolAdapter(
               input.workspace,
             );
             const stepSnapshot: SubAgentStepSnapshot = {
+              stepId,
+              toolCallId: admittedToolCallId,
               toolName: tc.name,
               toolArgs,
               status: 'pending',
@@ -746,6 +775,8 @@ async function executeCoreSubagentToolAdapter(
               type: 'step',
               data: {
                 id,
+                stepId,
+                toolCallId: admittedToolCallId,
                 modelInvocationId: invocationId,
                 toolName: tc.name,
                 toolArgs,
@@ -837,14 +868,15 @@ async function executeCoreSubagentToolAdapter(
                     status: 'error',
                   }),
                 );
-                stepSnapshot.ok = false;
                 stepSnapshot.status = 'error';
                 input.eventSink({
                   type: 'tool_result',
                   data: {
                     id,
+                    stepId,
+                    toolCallId: admittedToolCallId,
                     toolName: tc.name,
-                    ok: false,
+                    status: 'failed',
                     summary: bindingError,
                     durationMs: 0,
                     failureReason: 'invalid_mcp_binding',
@@ -948,14 +980,15 @@ async function executeCoreSubagentToolAdapter(
                   status: 'exhausted',
                 }),
               );
-              stepSnapshot.ok = false;
               stepSnapshot.status = 'error';
               input.eventSink({
                 type: 'tool_result',
                 data: {
                   id,
+                  stepId,
+                  toolCallId: admittedToolCallId,
                   toolName: tc.name,
-                  ok: false,
+                  status: 'failed',
                   summary: blockedOutput,
                   durationMs: 0,
                   failureReason: recoveryAdmission.detailCode,
@@ -1293,8 +1326,12 @@ async function executeCoreSubagentToolAdapter(
             }
 
             const durationMs = Date.now() - toolStart;
-            stepSnapshot.ok = ok;
-            stepSnapshot.status = ok ? 'success' : 'error';
+            stepSnapshot.status =
+              executionResult?.terminationReason === 'cancelled'
+                ? 'cancelled'
+                : ok
+                  ? 'success'
+                  : 'error';
             if (totalLines != null) stepSnapshot.totalLines = totalLines;
 
             const toolTokenCount = countTokens(toolOutput);
@@ -1302,8 +1339,15 @@ async function executeCoreSubagentToolAdapter(
               type: 'tool_result',
               data: {
                 id,
+                stepId,
+                toolCallId: admittedToolCallId,
                 toolName: tc.name,
-                ok,
+                status:
+                  executionResult?.terminationReason === 'cancelled'
+                    ? 'cancelled'
+                    : ok
+                      ? 'completed'
+                      : 'failed',
                 summary: toolOutput.slice(0, 200),
                 durationMs,
                 ...(totalLines != null ? { totalLines } : {}),

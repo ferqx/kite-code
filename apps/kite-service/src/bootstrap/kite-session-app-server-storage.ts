@@ -197,7 +197,9 @@ export function createKiteSessionAppServerStorage(input: {
     >[0],
   ): void => {
     if (target.storage.sessions.loadSnapshotRecord(transaction.sessionId)) {
-      target.storage.transactions[channel](transaction);
+      runWithSessionExecution(transaction.sessionId, () =>
+        target.storage.transactions[channel](transaction),
+      );
       return;
     }
     if (channel !== 'commitDecision' || !transaction.commandReceipt) {
@@ -320,7 +322,12 @@ export function createKiteSessionAppServerStorage(input: {
         });
       } catch {
         if (!cleanupConfirmed) continue;
-        const current = target.authority.read(sessionId);
+        let current: KiteSessionExecutionAuthorityRecord;
+        try {
+          current = target.authority.read(sessionId);
+        } catch {
+          continue;
+        }
         if (current.status !== 'active' || current.hostInstanceId !== input.hostInstanceId)
           continue;
         target.authority.release({

@@ -636,6 +636,7 @@ test('process cancellation on one child approval settles deferred siblings witho
     toolCallId: 'task-a',
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: false,
+    owner: { kind: 'root_tool', toolCallId: 'task-a' },
     approval: state.interactions.approval,
   });
 

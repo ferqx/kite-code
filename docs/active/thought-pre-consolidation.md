@@ -2,13 +2,13 @@
 
 状态：active
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
-读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done/text/model_requested）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks/settleActiveThought）、`compaction.ts`（折叠引擎）时必读。
-验证：`bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/model-invoke.test.ts apps/kite-service/test/isolated/session-manager.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle cancel-successor-render`
+读取时机：修改 `consolidateTools.ts`、`handleClientEvent.ts`（Runtime Client tool/model 事件投影）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts` 或 `compaction.ts`（折叠引擎）时必读。
+验证：`bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/model-invoke.test.ts apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle cancel-successor-render`
 最后更新：2026-09-04
 
 ## 约束
 
-1. **Thought 边界（阶段模型，ADR-0030 / ADR-0167）**：Thought = 一段连续只读探索阶段，跨模型调用、reasoning与exploration工具保持同一owner，直到出现已分类的模型可见正文。`model.requested`不是边界。没有active Thought归属时，`model.text_delta`形成的完整Markdown组件渐进显示，但在`model.responded`调和前保持dynamic；已有active Thought时，完整前缀使用`streaming=true + responsePending=true`留在隐藏ownership buffer，不结算Thought也不进入Static。`model.responded(toolCallCount>0)`删除该未绘制buffer、把过程旁白留在同一Thought并继续吸收匹配工具；`toolCallCount=0`才补齐最终正文、结算Thought并设置`modelTerminal`释放组件。standalone工具、人机交互、重试、失败、取消和Turn/Run terminal仍是强边界。纯空白文本忽略。
+1. **Thought 边界（阶段模型，ADR-0030 / ADR-0167 / ADR-0173）**：Thought = 一段连续只读探索阶段，跨模型调用、reasoning与exploration工具保持同一owner，直到出现已分类的模型可见正文。`model.requested`不是边界。没有active Thought归属时，`model.text_delta`形成的完整Markdown组件渐进显示，但在`model.responded`调和前保持dynamic；已有active Thought时，待分类正文只保存在有界`RequestAssembly`，不创建隐藏Timeline/OutputBlock。`model.responded(toolCallCount>0)`丢弃待分类正文、把过程旁白留在同一Thought并继续吸收匹配工具；`toolCallCount=0`才补齐最终正文、结算Thought并设置`modelTerminal`释放组件。standalone工具、人机交互、重试、失败、取消和Turn/Run terminal仍是强边界。纯空白文本忽略。
 
 2. **探索工具不经 tool_card**：Service在仍拥有可信Runtime分类事实时，为`tool.queued`签发closed
    `presentation=exploration|standalone|hidden`。TUI只消费该值，不解析command、`intent`或工具名前缀。
@@ -46,13 +46,13 @@
 13. **聚合块圆点 = 阶段存活**（ADR-0030 修订）：`active=true`（阶段进行中）→ 暗色闪烁圆点；标题中的 `Thinking Xs` 已表达进行状态与耗时，运行态不再重复渲染 footer「运行中 (Xs)」。即使所有工具已完成，模型调用间隙仍属于阶段内部，圆点持续动画。`active=false`（阶段结束）→ Thought 与非 Thought 工具聚合摘要都移除圆点并保留两个空格列位，折叠为单行摘要，不渲染 footer 或活动明细。独立工具卡仍使用自身的运行及结果状态语义。
 
 14. **聚合完成与Static边界（ADR-0167）**：`tool_summary`只有同时满足`active=false`、
-    `responsePending!==true`和`result=done|error|cancelled`才算完成，并在位于active turn的连续settled前缀时进入
+    `result=done|error|cancelled`才算完成，并在位于active turn的连续settled前缀时进入
     `<Static>`。`active`拥有“是否仍可继续聚合后续模型调用/探索工具”的封口事实；`result`只拥有封口后全部已物化工具的
     终态结果。尚未started的exploration sibling仍在`pendingToolCalls`、不在`tools[]`中，因此`tools.every(terminal)`不能
     证明聚合已完成。仅当前工具全terminal但`active=true`、或已软关闭但仍在等待model terminal/工具terminal，都必须
     留在dynamic tree。Static分界不得遍历子工具重新生成第三份完成判断。普通完整text按ADR-0171即时提升，并在需要时先结算
     活动Thought。没有待定Thought归属的普通完整text立即Static；已有active Thought时，完整前缀和结构预览保持隐藏的
-    `responsePending` dynamic buffer，等待`model.responded.toolCallCount`分类并设置`modelTerminal`。其他block继续遵守ADR-0167。
+    request-scoped `RequestAssembly`，等待`model.responded.toolCallCount`分类并设置`modelTerminal`。其他block继续遵守ADR-0167。
 
 15. **整体结果由reducer发布**：`tool_summary.result`是唯一聚合结果权威，使用共享结果投影从非空子工具集合的终态生成
     `done | error | cancelled`；渲染层和Static分界不得再次从工具状态推导另一份完成事实。尚未物化工具的纯Thinking、工具仍
@@ -66,7 +66,7 @@
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
-19. **纯思考题头**：尚无工具或其他稳定message owner的纯reasoning正文保存在request-scoped reducer state，同时物化dynamic Thought。streaming期间只显示Thinking题头，completed后在同一有界活动窗口原子显示完整reasoning；同request正文在`model.responded`分类前仍由该Thought拥有，完整前缀只进入隐藏`responsePending` buffer。无工具终态把它发布为最终正文并消费纯Thought；带工具终态删除buffer并让后续exploration工具原位升级该Thought。人机交互或standalone工具仍结算对应Thought摘要；settle后reasoning正文不进入历史，不得留下重复Thinking或scrollback副本。纯空白文本不触发题头。
+19. **纯思考题头**：尚无工具或其他稳定message owner的纯reasoning正文保存在request-scoped reducer state，同时物化dynamic Thought。streaming期间只显示Thinking题头，completed后在同一有界活动窗口原子显示完整reasoning；同request正文在`model.responded`分类前仍由该Thought拥有，但只进入`RequestAssembly`。无工具终态把它发布为最终正文并消费纯Thought；带工具终态丢弃待分类正文并让后续exploration工具原位升级该Thought。人机交互或standalone工具仍结算对应Thought摘要；settle后reasoning正文不进入历史，不得留下重复Thinking或scrollback副本。纯空白文本不触发题头。
 
 20. **非思考链聚合（纯统计标签的唯一来源）**：阶段内尚未出现 reasoning 时，探索聚合使用纯工具统计标签（如 `read 2 files`，`hasThought=false`），不带 `Thinking` 前缀、无 thinking 条目。阶段内任一次真实 `reason` 到达后，该活动聚合原位升级为 `Thinking Xs · <统计>`（规则 23/24、ADR-0047/0030）。注意：无 reasoning 的调用其 `durationMs` 仍计入阶段 Σ 时长（规则 11），只不影响标签前缀。
 
@@ -74,15 +74,15 @@
 
 22. **标签与计时语义**：思考阶段块（`hasThinking=true`，由本阶段真实 `reason` 设置）标题行为 `Thinking Xs · <工具统计>`——有工具时以 ` · ` 分隔附加 `buildToolSummaryLine` 统计（如 `Thinking 2s · read 3 files`），统计随工具事件实时刷新；无工具的纯思考块保持裸 `Thinking Xs`。统计后缀由渲染层按终端宽度截断（`truncateToFit`），放不下时整体省略后缀、不留孤悬分隔符；工具明细仍在步骤树展示。非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thinking Xs` 的已完成时长 = **阶段内 Σ 各次模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行；无 reasoning 的调用同样计入，规则 11）；当前调用尚未完成时，在该累计值上实时叠加本地墙钟预览，终态再由 `durationMs` 校正并冻结。工具执行期间 elapsed 不增长。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。纯思考块被文本关闭时不产生独立标题行，其时长以文本块题头形式展示（ADR-0026，见规则 19）。最终回答脱离为独立文本块时**不重复出题头**——回答前的思考时长已计入阶段块（ADR-0030）；settled Thinking 摘要与紧随其后的独立回答保持标准消息块间距，不得在回答内部再制造第二个 Thought 分段。
 
-23. **思考标签单次消费（ADR-0047/0167，覆盖 ADR-0027）**：Thought 块被非探索工具、人机交互等待或已由`model.responded(toolCallCount=0)`确认的模型可见正文关闭后，其reasoning内容与`Thinking Xs`标签均已完成展示，不向后续块延续。分类前的`responsePending`正文不是边界；带工具终态必须删除它并继续原owner。真正边界后的探索工具仍按执行顺序建立新聚合，初始使用纯工具统计标题；若该聚合仍活跃时收到新的真实reason，原位升级为`Thinking Xs · ...`，不得另建独立Thought。非探索工具继续使用独立富渲染块，Thought树不跨越它们。
+23. **思考标签单次消费（ADR-0047/0167，覆盖 ADR-0027）**：Thought 块被非探索工具、人机交互等待或已由`model.responded(toolCallCount=0)`确认的模型可见正文关闭后，其reasoning内容与`Thinking Xs`标签均已完成展示，不向后续块延续。分类前的RequestAssembly正文不是边界；带工具终态必须丢弃它并继续原owner。真正边界后的探索工具仍按执行顺序建立新聚合，初始使用纯工具统计标题；若该聚合仍活跃时收到新的真实reason，原位升级为`Thinking Xs · ...`，不得另建独立Thought。非探索工具继续使用独立富渲染块，Thought树不跨越它们。
 
-24. **探索响应正文归属（ADR-0030 / ADR-0167）**：`model.text_delta`按request identity累计。没有active Thought时，完整Markdown组件可见但保持dynamic；已有active Thought时，完整前缀只进入隐藏、可删除的`responsePending` buffer。`model.responded(toolCallCount>0)`删除该buffer，把终态过程旁白存入同一owner但不渲染，匹配`presentationGroupId`的exploration工具started继续该活动块；`toolCallCount=0`才补齐并发布最终正文、设置`modelTerminal`。缺失或不匹配的工具identity仍只能形成detached neutral summary，不能跨请求合并。
+24. **探索响应正文归属（ADR-0030 / ADR-0167 / ADR-0173）**：`model.text_delta`按request identity累计。没有active Thought时，完整Markdown组件可见但保持dynamic；已有active Thought时，正文只进入有界`RequestAssembly`。`model.responded(toolCallCount>0)`丢弃待分类正文，把终态过程旁白存入同一owner但不渲染，匹配`presentationGroupId`的exploration工具started继续该活动块；`toolCallCount=0`才补齐并发布最终正文、设置`modelTerminal`。缺失或不匹配的工具identity仍只能形成detached neutral summary，不能跨请求合并。
 
-25. **模型流式增量与重复思考段（ADR-0045 / ADR-0167）**：Runtime继续按`requestId + segmentId`发送累计reasoning/text与completed边界。reasoning delta保持request-scoped，completed后才进入当前Thought的有界活动窗口。无Thought归属歧义时，普通完整段落、列表项或闭合结构组件渐进显示但保持dynamic；已有active Thought时，完整前缀保持隐藏`responsePending`，活动表格/围栏代码也不得取得Static owner。模型终态按toolCallCount原子发布最终正文或撤去过程旁白并设置`modelTerminal`；终态后的迟到reasoning不再修改可见block，已有工具Thought跨相邻`model.requested`继续存活；模型时长累加但工具执行和人机等待不计时。
+25. **模型流式增量与重复思考段（ADR-0045 / ADR-0167 / ADR-0173）**：Runtime继续按`requestId + segmentId`发送累计reasoning/text与completed边界。reasoning delta保持request-scoped，completed后才进入当前Thought的有界活动窗口。无Thought归属歧义时，普通完整段落、列表项或闭合结构组件渐进显示但保持dynamic；已有active Thought时，待分类正文保持在`RequestAssembly`，活动表格/围栏代码也不得取得Static owner。模型终态按toolCallCount原子发布最终正文或撤去过程旁白并设置`modelTerminal`；终态后的迟到reasoning不再修改可见block，已有工具Thought跨相邻`model.requested`继续存活；模型时长累加但工具执行和人机等待不计时。
 
 26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前已经提交的完整 Markdown 块；尚未闭合的文本尾部和 reasoning delta 从未进入渲染树，因此断线时仍保持隐藏。重连后的累计文本按新的提交边界继续处理；终态 `model.responded` 以权威全文补齐或在分歧时替换当前请求的文本块，并清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
 
-27. **流式 Markdown 组件层级（ADR-0037 / ADR-0038 / ADR-0046 / ADR-0167）**：空行是普通段落和引用的顶层提交边界；列表采用item级边界，下一个同级marker提交前一个完整item，缩进子列表与续行仍归属父item。围栏代码在完整起始围栏到达后建立Dynamic组件，表格在完整表头与分隔行到达后建立Dynamic组件；两者只追加已换行完成的内部行。无active Thought时，普通完成组件和闭合结构按既有边界渐进显示并等待模型终态后Static；已有active Thought时，相同splitter结果只进入隐藏`responsePending` buffer，等模型终态分类后整体发布或删除。断线后的新段仍是独立Markdown文档。
+27. **流式 Markdown 组件层级（ADR-0037 / ADR-0038 / ADR-0046 / ADR-0167 / ADR-0173）**：空行是普通段落和引用的顶层提交边界；列表采用item级边界，下一个同级marker提交前一个完整item，缩进子列表与续行仍归属父item。围栏代码在完整起始围栏到达后建立Dynamic组件，表格在完整表头与分隔行到达后建立Dynamic组件；两者只追加已换行完成的内部行。无active Thought时，普通完成组件和闭合结构按既有边界渐进显示并等待模型终态后Static；已有active Thought时，相同splitter结果只进入`RequestAssembly`，等模型终态分类后整体发布或丢弃。断线后的新段仍是独立Markdown文档。
 
 28. **结构块子行渲染（ADR-0039 / ADR-0046）**：已识别的表格与围栏代码由 `MarkdownBlock` 使用稳定父级和子行增量渲染，只把完整内部行交给可见组件；表格保持单一父级 `Text` 以维持连续边框，按容器真实宽度和 Unicode grapheme 显示宽度换行，并保留单元格内的强调、代码、链接与 Markdown 转义语义。转义或代码区间内的管道符不得拆分成新列。尚未识别的结构、当前未完成行以及普通段落尾部保持隐藏。
 
@@ -110,12 +110,12 @@
 修改以下文件时，必须先阅读上述设计文档：
 - `apps/kite-cli/src/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
 - `apps/kite-cli/src/tui/reducers/consolidateTools.ts` — 已签发探索条目的统计文案
-- `apps/kite-cli/src/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
+- `apps/kite-cli/src/tui/reducers/handleClientEvent.ts` — Accepted Presentation Envelope 的 tool lifecycle 投影
 - `apps/kite-cli/src/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染
 - `apps/kite-cli/src/tui/components/BlockRenderer.tsx` — tool_summary case
 - `apps/kite-cli/src/tui/components/render-utils.ts` — actionName/getToolPreview/getToolDetail
 - `apps/kite-cli/src/tui/types.ts` — ConsolidatedToolEntry / tool_summary / text 块 `thoughtElapsedMs` 类型
-- `apps/kite-cli/src/tui/render/useStaticContent.tsx` — isSettled / blockFingerprint for tool_summary
+- `apps/kite-cli/src/tui/render/useStaticContent.tsx` — Timeline sealed state / `blockRenderCacheKey` for tool_summary
 - `apps/kite-cli/src/tui/App.tsx` — explorationSummaryIds 初始状态
 - `apps/kite-cli/src/tui/reducers/agentReducer.ts` — cancelRunningBlocks 处理 tool_summary
 - `apps/kite-cli/test/tui-reducer.test.ts` — 预整合测试

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeNotificationEvent } from '@kite-ai/runtime-contract';
+import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { projectCliRuntimeEvent } from '#kite-cli/cli';
 
 describe('CLI Runtime Client failure projection', () => {
   test('adds terminal presentation only to the closed client event', () => {
-    const event: RuntimeNotificationEvent = {
+    const event: RuntimeClientEvent = {
       type: 'run.terminal',
       runId: 'run-client-fixture',
       status: 'failed',
@@ -29,14 +29,27 @@ describe('CLI Runtime Client failure projection', () => {
     expect(projectCliRuntimeEvent(event, false)).toEqual(event);
   });
 
-  test('passes content-free failure facts through unchanged', () => {
-    const event: RuntimeNotificationEvent = {
-      type: 'run.failure',
+  test('passes canonical failed Run terminal facts through unchanged', () => {
+    const event: RuntimeClientEvent = {
+      type: 'run.terminal',
       runId: 'run-client-fixture',
-      code: 'verification_inconclusive',
-      retryable: false,
-      recoveryEntry: 'operator_action',
+      status: 'failed',
+      outcome: {
+        status: 'unknown',
+        reasonCode: 'verification_inconclusive',
+        safeRetry: false,
+        recoveryEntry: 'operator_action',
+      },
     };
-    expect(projectCliRuntimeEvent(event)).toEqual(event);
+    expect(projectCliRuntimeEvent(event)).toEqual({
+      ...event,
+      terminalPresentation: {
+        label: 'verification inconclusive',
+        severity: 'warning',
+        complete: false,
+        safeRetry: false,
+        recoveryEntry: 'operator_action',
+      },
+    });
   });
 });

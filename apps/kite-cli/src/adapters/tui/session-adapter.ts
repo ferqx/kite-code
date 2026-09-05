@@ -1,10 +1,10 @@
 import type {
+  AcceptedPresentationEnvelope,
   AgentPhase,
   AgentPlan,
   ContextCompactionProgressPhase,
   ContextStatusSnapshot,
   RuntimeCheckpointProjection,
-  RuntimeClientEvent,
   RuntimeCommandReceipt,
   RuntimeInteractionQueueProjection,
   RuntimeRewindPreviewProjection,
@@ -12,11 +12,10 @@ import type {
   WorkspaceAccess,
 } from '@kite-ai/runtime-contract';
 import type { SessionData, SessionInfo } from '#kite-cli/session-types';
-import type { RuntimePresentationEvent } from '#kite-cli/tui/runtime-presentation';
 
 /** Presentation-only action emitted by the Native Runtime client adapter. */
 export type SessionPresentationAction =
-  | { readonly type: 'RUNTIME_EVENT'; readonly event: RuntimeClientEvent }
+  | { readonly type: 'ACCEPT_PRESENTATION_ENVELOPE'; readonly event: AcceptedPresentationEnvelope }
   | {
       /**
        * Authoritative activity reconciliation for a Runtime snapshot. A
@@ -25,8 +24,12 @@ export type SessionPresentationAction =
        * subscription gap.
        */
       readonly type: 'RECONCILE_RUNTIME_PROJECTION';
-      readonly active: boolean;
-      readonly interactionQueue: RuntimeInteractionQueueProjection;
+      readonly projection: {
+        readonly revision: number;
+        readonly activeTask?: RuntimeSessionProjection['activeTask'];
+        readonly currentRun?: RuntimeSessionProjection['currentRun'];
+        readonly interactionQueue: RuntimeInteractionQueueProjection;
+      };
     }
   | { readonly type: 'LOCAL_TEXT'; readonly text: string; readonly isError?: boolean }
   | { readonly type: 'SET_EXITED' }
@@ -84,7 +87,7 @@ export type TuiContextStatusSnapshot = ContextStatusSnapshot | undefined;
 
 /** Explicit client-safe compaction result DTO; concrete service types stay private. */
 export interface TuiContextCompactionResult {
-  readonly events: RuntimeClientEvent[];
+  readonly events: AcceptedPresentationEnvelope[];
   readonly text: string;
   readonly isError?: boolean;
   readonly failureCode?: 'runtime_control_unavailable';
@@ -171,7 +174,7 @@ export interface TuiSessionFacade {
   readonly agentLoopActive: boolean;
   pendingInterrupt: boolean;
   readonly name: string;
-  eventBuffer: RuntimePresentationEvent[];
+  eventBuffer: AcceptedPresentationEnvelope[];
   readonly modelProvider: string;
   readonly modelName: string;
   readonly reasoningEnabled: boolean;
@@ -196,21 +199,30 @@ export interface TuiSessionFacade {
   setInteractionModeMirror(mode: 'accept_edits' | 'auto' | 'full'): void;
   setThinkingLevel(level: string | null): void;
   setConversationHistory(history: readonly string[]): void;
-  appendBufferedEvents(events: readonly RuntimePresentationEvent[]): void;
+  appendBufferedEvents(events: readonly AcceptedPresentationEnvelope[]): void;
 }
 
 /** Explicit run input accepted by the current InProcess adapter. */
 export interface TuiSessionRunDependencies {
   dispatch: (action: SessionPresentationAction) => void;
   /** Called exactly once after start_turn is durably admitted, before its events are rendered. */
-  onAccepted?: () => void;
+  onAccepted?: (identity: {
+    readonly commandId: string;
+    readonly runId: string;
+    readonly messageId: string;
+    readonly revisionFloor: number;
+  }) => void;
 }
 
 /** Closed client facade used by TUI code; no SessionManager passthrough. */
 export interface TuiRuntimeClientFacade {
   submitUserAction(action: TuiSubmittedInteractionAction): Promise<void>;
   createSession(workspace: string): string;
-  registerSession(sessionId: string, workspace: string): TuiSessionFacade;
+  registerSession(
+    sessionId: string,
+    workspace: string,
+    options?: { readonly recoverBeforeSubscribe?: boolean },
+  ): TuiSessionFacade;
   hasRuntime(sessionId: string): boolean;
   getRuntime(sessionId: string): TuiSessionFacade | undefined;
   forkRecoveredSessionForContinuation(sessionId: string): Promise<TuiSessionFacade | undefined>;

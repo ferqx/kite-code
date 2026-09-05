@@ -457,7 +457,7 @@ describe('Agent API context and route shell', () => {
                   queryType: query.type,
                   revision: 2,
                   session: {
-                    schema: 'kite.runtime-projection.v1',
+                    schema: 'kite.runtime-projection.v2',
                     sessionId: query.sessionId,
                     revision: 2,
                     lifecycle: 'open',

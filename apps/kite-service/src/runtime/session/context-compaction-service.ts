@@ -12,6 +12,7 @@ import {
 } from '@kite-ai/builtin-runtime/model';
 import type {
   ContextStatusSnapshot,
+  RuntimeClientEvent,
   RuntimeCommandErrorCode,
   SkillManifest,
 } from '@kite-ai/runtime-contract';
@@ -27,15 +28,27 @@ import {
 import type { RuntimeEvent, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
 import { getFeatureFlags } from '#kite-service/config/features';
 import { projectStateRuntimeEventForPresentation } from '#kite-service/runtime-client/presentation-history';
-import {
-  type ContextCompactionCommandResult,
-  contextCompactionRequiresLiveControl,
-} from './runtime-session';
+
+export interface ContextCompactionCommandResult {
+  readonly events: RuntimeClientEvent[];
+  readonly text: string;
+  readonly isError?: boolean;
+  readonly failureCode?: 'runtime_control_unavailable';
+}
+
+export function contextCompactionRequiresLiveControl(): ContextCompactionCommandResult {
+  return {
+    events: [],
+    text: 'Context compaction requires an active Runtime execution control.',
+    isError: true,
+    failureCode: 'runtime_control_unavailable',
+  };
+}
 
 /**
  * The narrow runtime view required by compaction.  The Service bridge uses the
  * same view for Host command planning/execution; it never constructs a second
- * SessionManager or State owner.
+ * runtime or State owner.
  */
 export interface ContextCompactionRuntime {
   readonly config: import('#kite-service/config').AgentConfig;
@@ -354,7 +367,7 @@ export class ContextCompactionService {
     }
 
     // Manual compaction is a Kernel effect, not an App-side recovery helper.
-    // An idle SessionRuntime currently has no retained execution control that
+    // An idle runtime coordinator currently has no retained execution control that
     // can safely own the State 27 transition, lease, and Store 4 commit. Keep
     // the operation fail-closed until Host/session lifecycle supplies that
     // single coordinator; never open a second Kernel or executor here.

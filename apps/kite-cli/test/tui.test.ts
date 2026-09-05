@@ -4,13 +4,15 @@ import { join } from 'node:path';
 import { TuiUserInputProvider } from '../src/tui/provider';
 
 describe('TuiUserInputProvider', () => {
-  test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
+  test('TUI reducer exposes accepted presentation envelopes as its streamed event action', () => {
     const root = join(import.meta.dir, '..', '..', '..');
     const actions = readFileSync(join(root, 'apps/kite-cli/src/tui/reducers/actions.ts'), 'utf8');
     const reducer = readFileSync(join(root, 'apps/kite-cli/src/tui/reducers/index.ts'), 'utf8');
 
     expect(actions).not.toContain("type: 'EVENT'");
     expect(reducer).not.toContain("action.type === 'EVENT'");
+    expect(actions).toContain("type: 'ACCEPT_PRESENTATION_ENVELOPE'");
+    expect(actions).not.toContain("type: 'RUNTIME_EVENT'");
   });
 
   test('does not expose the retired AgentEvent forwarding method', () => {
@@ -27,6 +29,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 1,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-1' },
       title: 'shell_execute',
       summary: 'run echo',
     });
@@ -81,6 +84,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 1,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-2' },
       title: 'shell_execute',
       summary: 'run echo',
     });
@@ -99,6 +103,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 2,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-generation-2' },
       title: 'shell_execute',
       summary: 'run echo',
     });

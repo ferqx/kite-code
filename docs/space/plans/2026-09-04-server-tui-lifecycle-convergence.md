@@ -1,6 +1,6 @@
 # Server Run 与 TUI 展示生命周期收敛方案
 
-状态：draft（须完成 LFC-00 基线与 ADR 后方可进入实施）
+状态：completed（2026-09-05；LFC-00～LFC-08全部完成）
 
 日期：2026-09-04
 
@@ -9,7 +9,7 @@
 依赖：当前 Runtime Kernel、Run-resource-enabled App Server Store、Runtime Contract/Protocol V1、App Server Session
 projection、Provider Action continuation、TUI live/history reducer 与真实 PTY 验证。
 
-相关：ADR-0150、ADR-0167、ADR-0168、ADR-0169、ADR-0170、ADR-0171、ADR-0172；当前行为仍以源码、测试、
+相关：ADR-0150、ADR-0167、ADR-0168、ADR-0169、ADR-0170、ADR-0171、ADR-0172、ADR-0173；当前行为仍以源码、测试、
 workspace README 与 `docs/active/` 为准。本计划不改写任何已接受 ADR 的历史结论。
 
 ## 1. 背景与结论
@@ -788,6 +788,9 @@ Render quiescent 只表示没有待输出 frame，不能表示 Server idle 或�
 
 ### LFC-00：基线、词汇与 ADR
 
+状态：completed（2026-09-04；基线见 `docs/space/understanding/2026-09-04-server-tui-lifecycle-baseline.md`，
+决策见 ADR-0173）
+
 - 固定 Task、Turn、RuntimeRun、BudgetScope alias、SessionOperation、RunView、Presentation 与 Render 的定义；
 - 新增 ADR，明确 `runId=initialTurnId` 的 V1 创建兼容、同 Run Provider continuation Turn、Work 不是领域实体、
   precise terminal 与 recovery-required 分离、三层 terminal 不可互相替代；
@@ -805,6 +808,9 @@ Render quiescent 只表示没有待输出 frame，不能表示 Server idle 或�
 
 ### LFC-01：Server 内部 view 与 identity assertion
 
+状态：completed（2026-09-04；stable execution handle、continuation Run row、pure activeWork compatibility、busy recovery与
+fake identity清理已完成）
+
 - 引入 `RuntimeExecutionHandle(runId/initialTurnId/activeTurnId)`、TaskView、RunView、BudgetScope alias；
 - `activeWork` 改为纯 compatibility projector，不再由 terminal helper 就地维护；
 - 修复 recovery 将 active `running|waiting` 都视为 busy；
@@ -820,6 +826,9 @@ Render quiescent 只表示没有待输出 frame，不能表示 Server idle 或�
 
 ### LFC-02：Server 唯一 terminal closure
 
+状态：completed（2026-09-04；continuation terminal使用stable Run row，bridge unexpected/flush failure进入原子
+unknown outcome + Turn abort，normal/cancel/deadline/approval/recovery定向矩阵通过）
+
 - 所有 normal、cancel、deadline、approval reject、recovery failure 与 unexpected return 走统一收口；
 - Task、Turn、RuntimeRun 分别终结，禁止 `terminalizeActiveWork()` 跨实体传播；
 - continuation Turn 结束同一个 stable Run，不按 final turnId 寻找新的 Run row；
@@ -832,6 +841,9 @@ Render quiescent 只表示没有待输出 frame，不能表示 Server idle 或�
 
 ### LFC-03：Client Run completion fencing
 
+状态：completed（2026-09-04；AcceptedRunIdentity、terminal-before-receipt join、exact Run query fallback与
+recovery-required/failed fencing完成）
+
 - Native client 分离 local reservation、accepted Run、terminal candidate 与 Server Run status；
 - completion waiter 绑定 `sessionId/runId/commandId/revisionFloor`；
 - terminal-before-receipt 按 identity join；
@@ -842,6 +854,9 @@ Render quiescent 只表示没有待输出 frame，不能表示 Server idle 或�
 完成门禁：全部 out-of-order、stale projection、busy successor、terminal gap 与 replay tests 通过。
 
 ### LFC-04：Contract 与 Session projection 收敛
+
+状态：completed（2026-09-04；projection v2 activeTask/currentRun、stable live/history terminal、derived receipt messageId、
+required cancel runId、accept-before-dispatch与gap resubscribe完成）
 
 - 引入 `activeTask`、带 active/terminal/recovery-required 的 `currentRun` 与 real-identity terminal projection；
 - Provider continuation transaction 推进唯一 active Run row，Host terminal 从 committed Run transition 生成，不修改 current
@@ -862,6 +877,9 @@ compatibility tests 通过。
 
 ### LFC-05：TUI RunView、command 与 Session identity
 
+状态：completed（2026-09-04；per-Session runtimeAuthority、Start/Cancel command state、currentRun selector、
+cancel-after-accept与Session切换保存完成）
+
 - 每 Session 建立 RunView、StartCommand、CancelCommand 与 PromptSubmission；
 - Native client 只 dispatch 已被 generation/revision store 接受的 event envelope；
 - `SET_RUNNING` 降级为 local command/presentation action，`running` 改为 selector；
@@ -874,6 +892,9 @@ compatibility tests 通过。
 
 ### LFC-06：Prompt、Request、Thought 与 Timeline projection
 
+状态：completed（2026-09-04；messageId/FIFO prompt join、bounded RequestAssembly、Timeline live/sealed projector与
+OutputBlock单向render compatibility完成）
+
 - prompt join 改用 promptId/commandId/messageId；
 - 标量 current request fields 迁入 `Map<requestId, RequestAssembly>`；
 - 未分类正文留在 RequestAssembly，不创建隐藏 Timeline text；
@@ -885,6 +906,9 @@ compatibility tests 通过。
 
 ### LFC-07：Render lifecycle 与 Static owner
 
+状态：completed（2026-09-04；RenderEpoch/commit ledger、Store 8 PTY fixture、终态摘要封口与同 revision MCP
+poll 静默完成，cancel-successor/long-answer/subagent/resize 真实 PTY 全部通过）
+
 - 引入 sealed digest、RenderEpoch 与 commit ledger；
 - renderer 只消费连续 sealed 前缀和 dynamic suffix；
 - 保留现有 Static prefix、fingerprint、zero-height Static、synchronized output 与 dynamic tail；
@@ -895,6 +919,10 @@ compatibility tests 通过。
 完成门禁：Static/scrollback/focus/resize/overlay/long-answer/subagent PTY；每个 block 只出现一次；完成后零 stdout。
 
 ### LFC-08：退休客户端/TUI兼容层
+
+状态：completed（2026-09-05；依赖计划
+[`TUI Message Projection & Rendering Convergence`](2026-09-05-tui-message-projection-rendering-convergence.md)
+已完成；generation/identity fencing、reducer-owned Timeline、复杂PTY矩阵与兼容层清理全部收敛）
 
 - 保留 current raw `run.completed` writer，但所有领域逻辑只消费 canonical Task completion normalization；事件改名另立未来计划；
 - 统一 client Run terminal vocabulary，删除 `run.failure` 重复分支；
@@ -916,7 +944,7 @@ compatibility tests 通过。
 | LFC-05 | LFC-04 | per-Session RunView/command/prompt identity | TUI reducer/FIFO/session/cancel | 旧 fields 暂作 selector；不得恢复第二权威 |
 | LFC-06 | LFC-05 | RequestAssembly/Thought/Timeline + OutputBlock adapter | ownership/retry/replay/interaction | adapter 单向；逐实体回滚，不 dual write |
 | LFC-07 | LFC-06 | RenderEpoch/sealed/commit ledger | Ink + PTY scroll/focus/resize | 保留当前物理策略直至 PTY 通过 |
-| LFC-08 | LFC-07 | 客户端/TUI旧语义与兼容层删除 | full runtime/CLI/TUI/release/qualification | current持久format不变；无 live fallback |
+| LFC-08 | LFC-07、TMR-08 | 客户端/TUI旧语义与兼容层删除 | full runtime/CLI/TUI/release/qualification | 跟随 ADR-0174 exact format candidate；无 live fallback |
 
 ## 12. 定向验证矩阵
 

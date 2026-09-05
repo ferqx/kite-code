@@ -16,6 +16,7 @@ import type {
   RuntimeQuery,
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
 import {
   createNodeRuntimeStdioOutput,
@@ -57,13 +58,13 @@ describe('Runtime stdio carrier', () => {
 
     input.pushText('{"jsonrpc":"2.0","id":"init","method":"initial');
     input.pushText(
-      'ize","params":{"protocolVersion":1,"clientInfo":{"name":"test","version":"1","instanceId":"a"}}}\r\n',
+      `ize","params":{"protocolVersion":${RUNTIME_PROTOCOL_VERSION},"clientInfo":{"name":"test","version":"1","instanceId":"a"}}}\r\n`,
     );
     input.pushText('{"jsonrpc":"2.0","id":"ping","method":"server/ping","params":{}}\n');
 
     await eventually(() => protocolFrames(output).length === 2);
     expect(protocolFrames(output)).toMatchObject([
-      { id: 'init', result: { protocolVersion: 1 } },
+      { id: 'init', result: { protocolVersion: RUNTIME_PROTOCOL_VERSION } },
       { id: 'ping', result: { status: 'ok' } },
     ]);
     expect(output.text()).toMatch(/^\{.*\}\n\{.*\}\n$/s);
@@ -85,7 +86,10 @@ describe('Runtime stdio carrier', () => {
       id: null,
       error: { code: -32700, data: { code: 'parse_error' } },
     });
-    expect(protocolFrames(output)[1]).toMatchObject({ id: 'init', result: { protocolVersion: 1 } });
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'init',
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
+    });
 
     input.close();
     await carrier.done;
@@ -111,7 +115,7 @@ describe('Runtime stdio carrier', () => {
         }),
         expect.objectContaining({
           id: 'init',
-          result: expect.objectContaining({ protocolVersion: 1 }),
+          result: expect.objectContaining({ protocolVersion: RUNTIME_PROTOCOL_VERSION }),
         }),
       ]),
     );
@@ -444,7 +448,7 @@ function initializeLine(): string {
     id: 'init',
     method: 'initialize',
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: { name: 'test', version: '1', instanceId: 'a' },
     },
   })}\n`;

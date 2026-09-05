@@ -310,7 +310,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(result.steps?.find((step) => step.toolName === 'read_file')).toMatchObject({
-        ok: false,
         status: 'error',
       });
       const readResult = events.find(
@@ -589,9 +588,9 @@ describe('SubAgentRunner integration', () => {
       expect(result.ok).toBe(true);
       expect(result.terminalStatus).toBe('completed');
       expect(
-        result.steps?.map((step) => step.ok),
+        result.steps?.map((step) => step.status),
         JSON.stringify(result.steps),
-      ).toEqual([false, true, true]);
+      ).toEqual(['error', 'success', 'success']);
       expect(result.toolRecovery?.order).toHaveLength(1);
       const recoveredFailureId = result.toolRecovery?.order[0];
       expect(
@@ -970,7 +969,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(child.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
-        ok: false,
         status: 'error',
       });
       expect(readFileSync(join(ws, 'owned.ts'), 'utf8')).toBe('export const owner = "parent";\n');
@@ -1049,7 +1047,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(resumed.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
-        ok: true,
         status: 'success',
       });
       expect(readFileSync(join(ws, 'continued.ts'), 'utf8')).toBe('export const value = 2;\n');
@@ -1250,7 +1247,7 @@ describe('SubAgentRunner integration', () => {
       const writeResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',
       );
-      expect(writeResult?.data.ok).toBe(true);
+      expect(writeResult?.data.status).toBe('completed');
       expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -1294,7 +1291,7 @@ describe('SubAgentRunner integration', () => {
       const readResult = events.find(
         (e) => e.type === 'tool_result' && e.data.toolName === 'read_file',
       );
-      expect(readResult?.data.ok).toBe(true);
+      expect(readResult?.data.status).toBe('completed');
       expect(String(readResult?.data.summary)).toContain('"name":"fixture"');
       expect(String(readResult?.data.summary)).not.toContain('"command"');
     } finally {

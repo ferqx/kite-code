@@ -94,7 +94,6 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
       generation: 0,
       createdAt: '2026-08-25T00:00:00.000Z',
       status: 'awaiting_user',
-      state: 'awaiting_user',
     };
     (state.pendingApprovals as Map<string, AgentPendingApproval>).set(
       pending.interactionId,

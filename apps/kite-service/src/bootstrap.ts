@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   type BuiltinToolCatalogProjection,
   createBuiltinContextCompilerPort,
@@ -48,7 +48,9 @@ import type {
   RuntimeLogEventReadPage,
   RuntimeLogQueryPort,
   RuntimeLogSessionReadPage,
+  RuntimeRunStorePort,
   RuntimeStorage,
+  RuntimeStoredRun,
 } from '@kite-ai/runtime-host/storage';
 import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
@@ -105,6 +107,7 @@ import { createInstalledKiteRuntimeCompositionFactory } from './bootstrap/model-
 import {
   type CliRuntimeBridgeInput,
   type CliRuntimeInteractionResolution,
+  type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
@@ -116,6 +119,7 @@ import type {
 } from './bootstrap/runtime/state-runtime';
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
+import type { AgentConfig } from './config';
 import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
@@ -129,6 +133,50 @@ import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+/**
+ * Rebuild the Client-facing currentRun from Store 8 even when no Run is
+ * active.  A restarted TUI must retain the last settled Run for history
+ * rendering and late-ephemeral fencing; getActive() alone loses that
+ * authoritative identity as soon as the Run reaches a terminal state.
+ */
+function resolveStoredSessionRun(
+  runs: RuntimeRunStorePort | undefined,
+  sessionId: string,
+): RuntimeStoredRun | undefined {
+  if (!runs) return undefined;
+  const active = runs.getActive(sessionId);
+  if (active) return active;
+
+  // Unknown rows are not returned by getActive().  One unambiguous recovery
+  // candidate remains visible as recovery_required; multiple candidates stay
+  // hidden until an operator reconciliation resolves the ambiguity.
+  const unknown = runs.list({ sessionId, status: 'unknown', limit: 2 }).entries;
+  if (unknown.length === 1) return unknown[0];
+  if (unknown.length > 1) return undefined;
+
+  // The Store orders pages by (createdRevision, runId). Walk all pages so a
+  // long-lived Session does not accidentally hydrate an older settled Run
+  // merely because the first page reached the 200-row storage limit.
+  let latest: RuntimeStoredRun | undefined;
+  let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
+  do {
+    const page = runs.list({
+      sessionId,
+      limit: 200,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const candidate of page.entries) {
+      if (isSettledStoredRun(candidate)) latest = candidate;
+    }
+    cursor = page.hasMore ? page.nextCursor : undefined;
+  } while (cursor !== undefined);
+  return latest;
+}
+
+function isSettledStoredRun(run: RuntimeStoredRun): boolean {
+  return run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
+}
 
 export function createKiteAppServerAgentApiReadContext(input: {
   readonly directory: KiteHomeDirectoryQueryPort;
@@ -305,6 +353,8 @@ export interface KiteMultiWorkspaceRuntimeServerOwner extends AsyncDisposable {
   /** Bindings used by native carriers; disconnect only releases this client identity. */
   readonly bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => void;
   readonly releaseConnection: (connectionId: string) => void;
+  /** Update the desired model configuration used by subsequently admitted Runs. */
+  readonly applySelectedConfig: (workspace: AdmittedWorkspace, config: AgentConfig) => void;
   open(options?: RuntimeServerInProcessOpenOptions): RuntimeServerInProcessPair;
 }
 
@@ -1167,6 +1217,7 @@ function createKiteRuntimeHost(
     builtinToolCatalog: BuiltinToolCatalogProjection,
   ) => RuntimeHostExecutionBridge,
   ownsSessionExecution?: (sessionId: string) => boolean,
+  runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
   return createRuntimeHost({
     storage,
@@ -1175,6 +1226,7 @@ function createKiteRuntimeHost(
     ),
     contextCompiler: createBuiltinContextCompilerPort(),
     ...(ownsSessionExecution ? { ownsSessionExecution } : {}),
+    ...(runWithSessionExecution ? { runWithSessionExecution } : {}),
   });
 }
 
@@ -1221,11 +1273,22 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
 function createKiteCliRuntimeHost(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const owner = createKiteSessionAppServerStorageComposition({
+    databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
+    hostInstanceId: `cli_${randomBytes(16).toString('hex')}`,
+  });
+  const storage: RuntimeStorage<RuntimeEvent, RuntimeState> = Object.freeze({
+    ...owner.storage,
+    close: () => {
+      owner.storage.close();
+      owner.releaseExecutions(true);
+      owner.disposeStorage();
+    },
+  });
   const projectIdentity = resolveProjectIdentity(input.workspace);
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
   const host = createKiteRuntimeHost(
-    owner.storage,
+    storage,
     (context, builtinToolCatalog) => {
       const { services, capabilities, capabilityRegistrySnapshot } = context;
       const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
@@ -1258,6 +1321,7 @@ function createKiteCliRuntimeHost(
       );
     },
     owner.ownsSessionExecution,
+    owner.runWithSessionExecution,
   );
   return host;
 }
@@ -1310,7 +1374,12 @@ export function createKiteMultiWorkspaceRuntimeServer(
   // Worker composition injects the already-admitted Store 8 owner here.  The legacy Service path
   // remains lazy only when no owner is supplied; no compatibility wrapper is ever introduced for
   // an injected Store.
-  const owner = input.storageOwner ?? createKiteRuntimeStorageOwner(input.checkpointPath);
+  const owner =
+    input.storageOwner ??
+    createKiteSessionAppServerStorageComposition({
+      databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
+      hostInstanceId: `service_${randomBytes(16).toString('hex')}`,
+    });
   const artifactBackends = owner.artifactStore
     ? createKiteHomeBuiltinArtifactBackends(owner.artifactStore)
     : undefined;
@@ -1377,6 +1446,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
             (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
           );
     const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
+    const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
+    const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
     return Object.freeze({
       schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId: threadId,
@@ -1384,226 +1455,272 @@ export function createKiteMultiWorkspaceRuntimeServer(
       workspace: snapshot.session.workspace,
       lifecycle: 'open' as const,
       interactionQueue,
-      ...(activeInteraction === undefined
+      ...(activeTask === undefined
         ? {}
         : {
-            activeWork: {
-              workId: activeTask?.taskId ?? snapshot.turn.turnId,
+            activeTask: {
+              taskId: activeTask.taskId,
               phase:
-                activeTask?.planning.kind === 'executing'
+                activeTask.planning.kind === 'executing'
                   ? ('building' as const)
                   : ('planning' as const),
-              status: 'waiting' as const,
-              activeTurn: {
-                turnId: snapshot.turn.turnId,
-                status: 'waiting' as const,
-                interaction: activeInteraction,
-              },
+            },
+          }),
+      ...(storedRun === null || storedRun === undefined
+        ? {}
+        : {
+            currentRun: {
+              runId: storedRun.runId,
+              initialTurnId: storedRun.runId,
+              activeTurnId: snapshot.turn.turnId,
+              ...(activeTask === undefined ? {} : { taskId: activeTask.taskId }),
+              status: ownsExecution
+                ? storedRun.status === 'unknown'
+                  ? ('recovery_required' as const)
+                  : storedRun.status
+                : ('recovery_required' as const),
+              revision: storedRun.lastRevision,
+              ...(activeInteraction === undefined
+                ? {}
+                : { activeInteractionId: activeInteraction.interactionId }),
+              ...(ownsExecution
+                ? storedRun.terminal === undefined
+                  ? {}
+                  : { outcome: { ...storedRun.terminal } }
+                : {
+                    outcome: {
+                      reasonCode: 'recovery_required',
+                      safeRetry: false,
+                      recoveryEntry: 'reconcile' as const,
+                    },
+                  }),
             },
           }),
       ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
     });
   };
-  const bridges = new Map<string, RuntimeHostExecutionBridge>();
-  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
-    const { services, capabilities, capabilityRegistrySnapshot } = context;
-    const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
-    const modelOperationExecution = createKiteModelOperationExecutionPort(
-      capabilities,
-      builtinToolCatalog,
-    );
-    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
-      modelOperationExecution,
-      artifactBackends,
-    );
-    const modelInvocationRuntimeFactory = (workspace: string) => ({
-      ...modelRuntime(workspace),
-      builtinToolCatalog,
-      toolPipelineComposition,
-    });
-    runtimeCoordinatorBinding.bind({
-      services,
-      capabilities,
-      capabilityRegistrySnapshot,
-      builtinToolCatalog,
-      toolPipelineComposition,
-      modelRuntimeFactory: modelRuntime,
-      store: createRuntimeStorageAccess(services),
-    });
-    const contexts = createRuntimeWorkspaceContextFactory({
-      create: async (admission) => {
-        input.storageOwner?.admitWorkspace?.(admission);
-        const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
-        const registered =
-          byWorkspace.get(key) ??
-          (input.workspaceTemplateFor
-            ? Object.freeze({
-                admission,
-                input: {
-                  ...(await input.workspaceTemplateFor(admission)),
-                  workspace: admission.canonicalPath,
-                  checkpointPath: input.checkpointPath,
+  const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
+  const desiredConfigs = new Map<string, AgentConfig>();
+  const host = createKiteRuntimeHost(
+    owner.storage,
+    (context, builtinToolCatalog) => {
+      const { services, capabilities, capabilityRegistrySnapshot } = context;
+      const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
+      const modelOperationExecution = createKiteModelOperationExecutionPort(
+        capabilities,
+        builtinToolCatalog,
+      );
+      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
+        modelOperationExecution,
+        artifactBackends,
+      );
+      const modelInvocationRuntimeFactory = (workspace: string) => ({
+        ...modelRuntime(workspace),
+        builtinToolCatalog,
+        toolPipelineComposition,
+      });
+      runtimeCoordinatorBinding.bind({
+        services,
+        capabilities,
+        capabilityRegistrySnapshot,
+        builtinToolCatalog,
+        toolPipelineComposition,
+        modelRuntimeFactory: modelRuntime,
+        store: createRuntimeStorageAccess(services),
+      });
+      const contexts = createRuntimeWorkspaceContextFactory({
+        create: async (admission) => {
+          input.storageOwner?.admitWorkspace?.(admission);
+          const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
+          const registered =
+            byWorkspace.get(key) ??
+            (input.workspaceTemplateFor
+              ? Object.freeze({
+                  admission,
+                  input: {
+                    ...(await input.workspaceTemplateFor(admission)),
+                    workspace: admission.canonicalPath,
+                    checkpointPath: input.checkpointPath,
+                  },
+                })
+              : undefined);
+          if (!registered) throw new Error('Runtime Workspace is not registered for execution.');
+          byWorkspace.set(key, registered);
+          const sessionBridges = new Map<string, ConfigurableCliRuntimeBridge>();
+          const pendingSessionBridges = new Map<string, Promise<ConfigurableCliRuntimeBridge>>();
+          const bridgeForSession = async (
+            sessionId: string,
+          ): Promise<ConfigurableCliRuntimeBridge> => {
+            const current = sessionBridges.get(sessionId);
+            if (current) return current;
+            const pending = pendingSessionBridges.get(sessionId);
+            if (pending) return pending;
+            const creation = (async (): Promise<ConfigurableCliRuntimeBridge> => {
+              const persisted = persistedAdmissionForSession(sessionId);
+              if (persisted && !sameAdmission(persisted, admission)) {
+                throw new Error('Runtime Session belongs to a different Workspace.');
+              }
+              bySession.set(sessionId, admission);
+              const bridge = createCliRuntimeBridge(
+                {
+                  ...registered.input,
+                  config: desiredConfigs.get(key) ?? registered.input.config,
+                  sessionId,
+                  projectIdentity: resolveProjectIdentity(admission.canonicalPath),
                 },
-              })
-            : undefined);
-        if (!registered) throw new Error('Runtime Workspace is not registered for execution.');
-        byWorkspace.set(key, registered);
-        const sessionBridges = new Map<string, RuntimeHostExecutionBridge>();
-        const pendingSessionBridges = new Map<string, Promise<RuntimeHostExecutionBridge>>();
-        const bridgeForSession = async (sessionId: string): Promise<RuntimeHostExecutionBridge> => {
-          const current = sessionBridges.get(sessionId);
-          if (current) return current;
-          const pending = pendingSessionBridges.get(sessionId);
-          if (pending) return pending;
-          const creation = (async (): Promise<RuntimeHostExecutionBridge> => {
-            const persisted = persistedAdmissionForSession(sessionId);
-            if (persisted && !sameAdmission(persisted, admission)) {
-              throw new Error('Runtime Session belongs to a different Workspace.');
-            }
-            bySession.set(sessionId, admission);
-            const bridge = createCliRuntimeBridge(
-              {
-                ...registered.input,
-                sessionId,
-                projectIdentity: resolveProjectIdentity(admission.canonicalPath),
-              },
-              capabilities,
-              modelInvocationRuntimeFactory,
-              (resolvedSessionId) => resolveKiteRecoveryIdentity(services, resolvedSessionId),
-              runtimeCoordinatorBinding.access(),
-              interactionBroker,
-              (resolvedSessionId) => {
-                const resolved = persistedAdmissionForSession(resolvedSessionId);
-                if (!resolved) return [];
-                return [...connectionWorkspaces.entries()]
-                  .filter(([, workspace]) => sameAdmission(workspace, resolved))
-                  .map(([connectionId]) => connectionId);
-              },
-            );
-            if (owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId)) {
-              await bridge.recoverSession(sessionId, () => undefined);
-            }
-            sessionBridges.set(sessionId, bridge);
-            return bridge;
-          })();
-          pendingSessionBridges.set(sessionId, creation);
-          try {
-            return await creation;
-          } finally {
-            if (pendingSessionBridges.get(sessionId) === creation) {
-              pendingSessionBridges.delete(sessionId);
-            }
-          }
-        };
-        const bridge: RuntimeHostExecutionBridge = Object.freeze({
-          recoverSession: async (
-            sessionId: string,
-            publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
-          ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
-          inspectCommand: async (
-            command: RuntimeCommand,
-            context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
-          ) =>
-            (
-              await bridgeForSession(
-                command.type === 'fork_session' ? command.sourceSessionId : context.targetSessionId,
-              )
-            ).inspectCommand(command, context),
-          query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
-            if (query.type === 'list_sessions') {
-              const results = await Promise.all(
-                [...sessionBridges.values()].map((sessionBridge) => sessionBridge.query(query)),
+                capabilities,
+                modelInvocationRuntimeFactory,
+                (resolvedSessionId) => resolveKiteRecoveryIdentity(services, resolvedSessionId),
+                runtimeCoordinatorBinding.access(),
+                interactionBroker,
+                (resolvedSessionId) => {
+                  const resolved = persistedAdmissionForSession(resolvedSessionId);
+                  if (!resolved) return [];
+                  return [...connectionWorkspaces.entries()]
+                    .filter(([, workspace]) => sameAdmission(workspace, resolved))
+                    .map(([connectionId]) => connectionId);
+                },
               );
-              return {
-                status: 'ok' as const,
-                queryType: 'list_sessions' as const,
-                sessions: results.flatMap((result) =>
-                  result.status === 'ok' ? (result.sessions ?? []) : [],
-                ),
-              };
+              if (owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId)) {
+                await bridge.recoverSession(sessionId, () => undefined);
+              }
+              sessionBridges.set(sessionId, bridge);
+              return bridge;
+            })();
+            pendingSessionBridges.set(sessionId, creation);
+            try {
+              return await creation;
+            } finally {
+              if (pendingSessionBridges.get(sessionId) === creation) {
+                pendingSessionBridges.delete(sessionId);
+              }
             }
-            return (await bridgeForSession(query.sessionId)).query(query);
-          },
-          shutdownSession: async (
-            sessionId: string,
-            reason: string,
-            publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
-          ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
-          close: async () => {
-            await Promise.allSettled(pendingSessionBridges.values());
-            pendingSessionBridges.clear();
-            sessionBridges.clear();
-          },
-        });
-        bridges.set(key, bridge);
-        return {
-          admission,
-          bridge,
-          close: async () => {
-            bridges.delete(key);
-          },
-        };
-      },
-      resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
-    });
-    const admission = createRuntimeWorkspaceAdmission({
-      admitForCreate: async (workspace) => {
-        const registered = [...byWorkspace.values()].find(
-          (candidate) => candidate.admission.canonicalPath === workspace,
-        );
-        if (registered) return registered.admission;
-        if (input.workspaceTemplateFor) {
-          const canonicalPath = realpathSync.native(workspace);
-          const project = resolveProjectIdentity(canonicalPath);
-          return Object.freeze({
-            canonicalPath,
-            projectId: project.projectId,
-            workspaceDigest: project.workspaceDigest,
-          });
-        }
-        throw new Error('Runtime Workspace is not admitted for creation.');
-      },
-      resolveForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
-    });
-    const router = createRuntimeExecutionBridgeRouter({
-      contexts,
-      admission,
-      queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
-        if (query.type !== 'list_sessions') {
-          return {
-            status: 'rejected',
-            queryType: query.type,
-            code: 'unsupported',
           };
-        }
-        // The process-wide index is Store authority. Reading it must never
-        // instantiate a Workspace context (which can load project config,
-        // start MCP, or scan Skills for a Workspace the caller did not admit).
-        const projections = owner
-          .listCurrentSessions('', 1_000)
-          .map(({ threadId }) => projectStoredSession(threadId));
-        return {
-          status: 'ok',
-          queryType: 'list_sessions',
-          sessions: projections.filter((projection) => projection !== undefined),
-        };
-      },
-    });
-    return Object.freeze({
-      recoverSession: router.recoverSession.bind(router),
-      inspectCommand: router.inspectCommand.bind(router),
-      query: router.query.bind(router),
-      shutdownSession: router.shutdownSession.bind(router),
-      close: async () => {
-        interactionBroker.close('Runtime owner closed.');
-        try {
-          await router.close();
-        } finally {
-          await runtimeCoordinatorBinding.access().close();
-        }
-      },
-    });
-  });
+          const bridge: ConfigurableCliRuntimeBridge = Object.freeze({
+            applySelectedConfig: (config: AgentConfig) => {
+              desiredConfigs.set(key, config);
+              for (const sessionBridge of sessionBridges.values()) {
+                sessionBridge.applySelectedConfig(config);
+              }
+              for (const pendingBridge of pendingSessionBridges.values()) {
+                void pendingBridge.then((sessionBridge) =>
+                  sessionBridge.applySelectedConfig(config),
+                );
+              }
+            },
+            recoverSession: async (
+              sessionId: string,
+              publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
+            ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
+            inspectCommand: async (
+              command: RuntimeCommand,
+              context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
+            ) =>
+              (
+                await bridgeForSession(
+                  command.type === 'fork_session'
+                    ? command.sourceSessionId
+                    : context.targetSessionId,
+                )
+              ).inspectCommand(command, context),
+            query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+              if (query.type === 'list_sessions') {
+                const results = await Promise.all(
+                  [...sessionBridges.values()].map((sessionBridge) => sessionBridge.query(query)),
+                );
+                return {
+                  status: 'ok' as const,
+                  queryType: 'list_sessions' as const,
+                  sessions: results.flatMap((result) =>
+                    result.status === 'ok' ? (result.sessions ?? []) : [],
+                  ),
+                };
+              }
+              return (await bridgeForSession(query.sessionId)).query(query);
+            },
+            shutdownSession: async (
+              sessionId: string,
+              reason: string,
+              publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
+            ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
+            close: async () => {
+              await Promise.allSettled(pendingSessionBridges.values());
+              pendingSessionBridges.clear();
+              sessionBridges.clear();
+            },
+          });
+          bridges.set(key, bridge);
+          return {
+            admission,
+            bridge,
+            close: async () => {
+              bridges.delete(key);
+            },
+          };
+        },
+        resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+      });
+      const admission = createRuntimeWorkspaceAdmission({
+        admitForCreate: async (workspace) => {
+          const registered = [...byWorkspace.values()].find(
+            (candidate) => candidate.admission.canonicalPath === workspace,
+          );
+          if (registered) return registered.admission;
+          if (input.workspaceTemplateFor) {
+            const canonicalPath = realpathSync.native(workspace);
+            const project = resolveProjectIdentity(canonicalPath);
+            return Object.freeze({
+              canonicalPath,
+              projectId: project.projectId,
+              workspaceDigest: project.workspaceDigest,
+            });
+          }
+          throw new Error('Runtime Workspace is not admitted for creation.');
+        },
+        resolveForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+      });
+      const router = createRuntimeExecutionBridgeRouter({
+        contexts,
+        admission,
+        queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
+          if (query.type !== 'list_sessions') {
+            return {
+              status: 'rejected',
+              queryType: query.type,
+              code: 'unsupported',
+            };
+          }
+          // The process-wide index is Store authority. Reading it must never
+          // instantiate a Workspace context (which can load project config,
+          // start MCP, or scan Skills for a Workspace the caller did not admit).
+          const projections = owner
+            .listCurrentSessions('', 1_000)
+            .map(({ threadId }) => projectStoredSession(threadId));
+          return {
+            status: 'ok',
+            queryType: 'list_sessions',
+            sessions: projections.filter((projection) => projection !== undefined),
+          };
+        },
+      });
+      return Object.freeze({
+        recoverSession: router.recoverSession.bind(router),
+        inspectCommand: router.inspectCommand.bind(router),
+        query: router.query.bind(router),
+        shutdownSession: router.shutdownSession.bind(router),
+        close: async () => {
+          interactionBroker.close('Runtime owner closed.');
+          try {
+            await router.close();
+          } finally {
+            await runtimeCoordinatorBinding.access().close();
+          }
+        },
+      });
+    },
+    owner.ownsSessionExecution,
+    owner.runWithSessionExecution,
+  );
   const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
     authorize: async () => ({
       allowed: false as const,
@@ -1612,12 +1729,9 @@ export function createKiteMultiWorkspaceRuntimeServer(
   });
   const runHostCommand = (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) => {
     try {
-      const sessionId = appServerExecutionSessionId(command);
-      const result =
-        sessionId && owner.runWithSessionExecution
-          ? owner.runWithSessionExecution(sessionId, () => host.command(command, context))
-          : host.command(command, context);
-      return Promise.resolve(result).catch((error) => appServerCommandFailure(command, error));
+      return Promise.resolve(host.command(command, context)).catch((error) =>
+        appServerCommandFailure(command, error),
+      );
     } catch (error) {
       return Promise.resolve(appServerCommandFailure(command, error));
     }
@@ -1699,6 +1813,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     await Promise.all(
       owner
         .ownedSessionIds()
+        .filter((sessionId) => owner.storage.sessions.loadSnapshotRecord(sessionId) !== null)
         .map((sessionId) =>
           owner.runWithSessionExecution!(sessionId, () => host.cancelSession(sessionId, reason)),
         ),
@@ -1740,6 +1855,11 @@ export function createKiteMultiWorkspaceRuntimeServer(
     releaseConnection: (connectionId: string) => {
       connectionWorkspaces.delete(connectionId);
       interactionBroker.disconnect(connectionId);
+    },
+    applySelectedConfig: (workspace: AdmittedWorkspace, config: AgentConfig) => {
+      const key = `${workspace.workspaceDigest}\0${workspace.projectId}\0${workspace.canonicalPath}`;
+      desiredConfigs.set(key, config);
+      bridges.get(key)?.applySelectedConfig(config);
     },
     open: (options?: RuntimeServerInProcessOpenOptions) => {
       const requestedAdmission = options?.admission ?? denyByDefault;
@@ -1835,12 +1955,6 @@ export function createKiteMultiWorkspaceRuntimeServer(
       return disposePromise;
     },
   });
-}
-
-function appServerExecutionSessionId(command: RuntimeCommand): string | undefined {
-  if (command.type === 'create_session') return undefined;
-  if (command.type === 'fork_session') return command.sourceSessionId;
-  return command.sessionId;
 }
 
 function appServerCommandFailure(command: RuntimeCommand, error: unknown) {

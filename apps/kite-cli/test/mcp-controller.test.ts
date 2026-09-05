@@ -79,6 +79,24 @@ function createClient(initial = makeSnapshot()) {
 }
 
 describe('TuiMcpController', () => {
+  test('does not republish an unchanged polled revision', async () => {
+    const client = createClient();
+    const controller = new TuiMcpController(client, workspace);
+    let notifications = 0;
+    const unsubscribe = controller.subscribe(() => {
+      notifications += 1;
+    });
+
+    try {
+      await controller.start();
+      await Bun.sleep(600);
+      expect(notifications).toBe(1);
+    } finally {
+      unsubscribe();
+      await controller.stop();
+    }
+  });
+
   test('loads the safe App Control snapshot and preserves workspace identity', async () => {
     const client = createClient();
     const controller = new TuiMcpController(client, workspace);

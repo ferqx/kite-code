@@ -123,7 +123,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 “切换会话”是否表示取消属于 App 适配层交互语义，不是 Kernel 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
 
-历史会话打开采用两阶段前台提交：SessionManager 可以先完成目标 Runtime 的注册与切换，但 metadata-only
+历史会话打开采用两阶段前台提交：TUI Runtime client adapter 可以先完成目标 Runtime 的注册与切换，但 metadata-only
 `SET_SESSIONS` 在 `LOAD_SESSION_PENDING` 期间不得提前改变 TUI 的 `activeSessionId`。只有 `LOAD_SESSION` 才能在同一
 reducer transition 中把当前可见 turns 保存到 outgoing snapshot、加载目标 replay turns 并推进 `sessionKey`。否则旧会话
 内容会被错绑到目标 snapshot，用户按“会话 A → 会话 B → 会话 A”切回时得到空白投影。该不变量由
@@ -142,7 +142,9 @@ Session 列表后，`sessions[].active` 必须从唯一 `activeSessionId` 派生
 `close_session` cancellation 或推进 durable revision；已有 active operation 或显式删除仍走 canonical cancel/close，并且只写
 一次取消。readiness、close 或 coordinator release 失败不能让 target 留在 Runtime/client/readiness/authority map：cleanup 必须
 best-effort 执行所有释放步骤、保留首个错误供上层作为 secondary diagnostic，并允许随后重新 register exact session。
-对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite-service/test/isolated/session-manager.test.ts`。
+对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于
+`apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts` 与
+`apps/kite-service/test/runtime/runtime-session-coordinator.test.ts`。
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 

@@ -11,6 +11,7 @@ import type {
   RuntimeSessionProjection,
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
 import {
   createDevelopmentLoopbackCarrier,
@@ -182,7 +183,7 @@ describe('development WebSocket RuntimeClient qualification', () => {
         control.send(JSON.stringify(initializeRequest('control-initialize')));
         await expect(within(controlMessages.next())).resolves.toMatchObject({
           id: 'control-initialize',
-          result: { protocolVersion: 1 },
+          result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
         });
         control.send(JSON.stringify(pingRequest('control-ping')));
         await expect(within(controlMessages.next())).resolves.toMatchObject({
@@ -288,7 +289,7 @@ async function bootstrapCookie(carrier: DevelopmentLoopbackCarrier): Promise<str
 
 function session(sessionId: string, revision: number): RuntimeSessionProjection {
   return {
-    schema: 'kite.runtime-projection.v1',
+    schema: 'kite.runtime-projection.v2',
     sessionId,
     revision,
     lifecycle: 'open',
@@ -298,7 +299,7 @@ function session(sessionId: string, revision: number): RuntimeSessionProjection 
 
 function durable(value: RuntimeSessionProjection): RuntimeNotification {
   return {
-    schema: 'kite.runtime-notification.v1',
+    schema: 'kite.runtime-notification.v2',
     durability: 'durable',
     sessionId: value.sessionId,
     revision: value.revision,
@@ -453,7 +454,7 @@ function initializeRequest(id: string) {
     id,
     method: 'initialize' as const,
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: { name: 'qualification', version: '1', instanceId: id },
     },
   };

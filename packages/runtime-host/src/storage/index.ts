@@ -43,6 +43,11 @@ export interface RuntimeCompatibleRecordFormat {
   readonly formatEpoch: string;
 }
 
+/** Persistence-order context required to synthesize deterministic legacy identities. */
+export interface RuntimeCompatibleEventContext {
+  readonly sequence: number;
+}
+
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */
 export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
@@ -54,7 +59,11 @@ export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
    * in-memory event contract. Unknown formats return null and stay isolated
    * to their source session.
    */
-  decodeCompatibleEvent?(json: string, format: RuntimeCompatibleRecordFormat): Event | null;
+  decodeCompatibleEvent?(
+    json: string,
+    format: RuntimeCompatibleRecordFormat,
+    context?: RuntimeCompatibleEventContext,
+  ): Event | null;
   encodeState(state: State): string;
   decodeState<T = State>(json: string): T;
   /** Read-side State migration. Current encodeState remains single-format. */

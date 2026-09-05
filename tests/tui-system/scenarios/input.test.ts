@@ -95,7 +95,7 @@ describe('TUI PTY System — Input & Message', () => {
 
       expect(server.getRequestCount()).toBe(queuedDelivery.requestBaseline);
       const queuedViewport = stripAnsi(tui.viewport());
-      expect(queuedViewport.match(/Working/g)).toHaveLength(1);
+      expect(queuedViewport).not.toContain('Working');
       expect(queuedViewport).toContain('Second queued message');
       await queuedDelivery.waitForRuntimeRequest();
       await waitForText(() => tui.viewport(), 'Queued turn completed.', 15000);

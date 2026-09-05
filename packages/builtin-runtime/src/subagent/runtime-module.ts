@@ -695,21 +695,20 @@ function projectSubagentSteps(value: unknown): RuntimeJsonValue {
       const record = requirePlainRecord(step, `result.steps[${index}]`);
       assertExactKeys(
         record,
-        ['ok', 'status', 'toolArgs', 'toolName', 'totalLines'],
-        ['status', 'toolArgs', 'toolName'],
+        ['status', 'stepId', 'toolArgs', 'toolCallId', 'toolName', 'totalLines'],
+        ['status', 'stepId', 'toolArgs', 'toolCallId', 'toolName'],
       );
       const projected: Record<string, RuntimeJsonValue> = {
+        stepId: requireNonEmptyString(record.stepId, `result.steps[${index}].stepId`),
+        toolCallId: requireNonEmptyString(record.toolCallId, `result.steps[${index}].toolCallId`),
         toolName: requireNonEmptyString(record.toolName, `result.steps[${index}].toolName`),
         toolArgs: cloneRecordJson(record.toolArgs, `result.steps[${index}].toolArgs`),
         status: requireOneOf(
           record.status,
-          ['pending', 'awaiting_approval', 'success', 'rejected', 'error'] as const,
+          ['pending', 'awaiting_approval', 'success', 'rejected', 'error', 'cancelled'] as const,
           `result.steps[${index}].status`,
         ),
       };
-      if (Object.hasOwn(record, 'ok')) {
-        projected.ok = requireBoolean(record.ok, `result.steps[${index}].ok`);
-      }
       if (Object.hasOwn(record, 'totalLines')) {
         projected.totalLines = requireNonNegativeSafeInteger(
           record.totalLines,

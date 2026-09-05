@@ -178,13 +178,17 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return {
         ...state,
         turns: [],
-        nextBlockId: 0,
+        // Logical block identities stay monotonic across a visual clear;
+        // RenderEpoch owns the physical viewport reset and must not reuse a
+        // committed Static/ledger identity.
+        nextBlockId: state.nextBlockId,
         interrupt: null,
         toolStartTimes: undefined,
         pendingToolCalls: {},
+        presentationGroupSummaryIds: {},
+        pendingSubagentTerminals: new Map(),
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         currentModelTextSource: undefined,
@@ -193,6 +197,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
+        settledModelRequestIds: new Set(),
       };
     case 'ESCAPE': {
       if (state.showHelp) return { ...state, showHelp: false };

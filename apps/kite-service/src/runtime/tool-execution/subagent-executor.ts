@@ -39,6 +39,10 @@ import {
   isAuthenticAppApprovalBinding,
 } from '#kite-service/bootstrap/runtime/approval-binding';
 import { classifyFailure } from '#kite-service/bootstrap/runtime/failures';
+import {
+  rootToolInteractionOwner,
+  subagentToolInteractionOwner,
+} from '#kite-service/bootstrap/runtime/interaction-owner';
 import type { RuntimeEvent, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
 import {
   deserializeSubagentContinuation,
@@ -579,6 +583,14 @@ export function blockedSubagentReviewEvent(input: {
   const queueMetadata = {
     parentToolCallId: input.parentToolCallId,
     childSubagentId: blocked.continuation.id,
+    owner: subagentToolInteractionOwner({
+      subagentId: blocked.continuation.id,
+      parentToolCallId: input.parentToolCallId,
+      // Interaction ownership follows the child model/admission identity.
+      // runtimeToolCallId is an internal execution binding and is not stable
+      // across the pre-admission approval boundary.
+      toolCallId: blocked.toolCallId,
+    }),
     fullModeBypassEligible: effectiveMode === 'full' && exact.fullModePolicyBypassAllowed,
     fullModePolicyBypassAllowed: exact.fullModePolicyBypassAllowed,
     ...(blocked.runtimeToolCallId ? { runtimeToolCallId: blocked.runtimeToolCallId } : {}),
@@ -938,6 +950,10 @@ export function createAppSharedChildToolDispatcher(input: {
             args: childInput.request.args,
             modelMessageId: childInput.modelInvocationId,
             ordinal: 0,
+            // Child tool rows are represented by the parent Subagent card;
+            // this canonical admission fact prevents the Client projector
+            // from guessing that from the namespaced runtimeToolCallId.
+            presentation: 'hidden' as const,
             ...(childInput.binding
               ? {
                   bindingId: childInput.binding.bindingId,
@@ -2053,6 +2069,7 @@ export async function executeAppTaskToolPipeline(input: {
               type: 'auto_review.requested',
               reviewId: genInteractionId(),
               toolCallId,
+              owner: rootToolInteractionOwner(toolCallId),
               toolName: request.name,
               reason: result.decision.decision.reason,
               approval,
@@ -2066,6 +2083,7 @@ export async function executeAppTaskToolPipeline(input: {
               type: 'approval.requested',
               interactionId: genInteractionId(),
               toolCallId,
+              owner: rootToolInteractionOwner(toolCallId),
               approval,
               fullModeBypassEligible,
               fullModePolicyBypassAllowed,

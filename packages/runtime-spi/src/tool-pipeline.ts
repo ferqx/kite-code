@@ -1,4 +1,5 @@
 import type {
+  InteractionOwner,
   CapabilityBinding as RuntimeCapabilityBinding,
   CapabilityDescriptor as RuntimeCapabilityDescriptor,
   CapabilityDisclosure as RuntimeCapabilityDisclosure,
@@ -44,6 +45,12 @@ export type ToolPipelineCapabilityDisclosure =
   | Readonly<RuntimeCapabilityDisclosure>;
 
 export type ToolExecutionFamily = 'builtin' | 'mcp' | 'skill' | 'subagent';
+
+/** Suspension events in this file always belong to a concrete child tool. */
+type ToolPipelineSubagentInteractionOwner = Extract<
+  InteractionOwner,
+  { readonly kind: 'subagent_tool' }
+>;
 
 /** Explicit provenance prevents private Runtime DTOs from being inferred from fields alone. */
 export type ToolArgumentOrigin = 'model_public' | 'runtime_private';
@@ -627,6 +634,8 @@ export interface ToolPipelineSkillForkApprovalRequestedEvent<TToolCallId extends
   readonly type: 'approval.requested';
   readonly interactionId: string;
   readonly toolCallId: TToolCallId;
+  /** Exact root/child owner binding carried through queue and settlement. */
+  readonly owner: Readonly<ToolPipelineSubagentInteractionOwner>;
   readonly approval: Readonly<ToolApprovalPayload>;
   readonly fullModeBypassEligible: boolean;
   readonly fullModePolicyBypassAllowed: boolean;
@@ -648,6 +657,8 @@ export interface ToolPipelineSkillForkAutoReviewRequestedEvent<
   readonly type: 'auto_review.requested';
   readonly reviewId: string;
   readonly toolCallId: TToolCallId;
+  /** Exact root/child owner binding carried through queue and settlement. */
+  readonly owner: Readonly<ToolPipelineSubagentInteractionOwner>;
   readonly toolName: string;
   readonly reason: string;
   readonly approval: Readonly<ToolApprovalPayload>;
@@ -704,13 +715,15 @@ export interface ToolPipelineTaskSubagentParentIdentity<TToolCallId extends stri
   readonly attempt: number;
 }
 
-/** State's approval payload for a blocked task child; no live owner crosses SPI. */
+/** State's approval payload for a blocked task child; only stable owner identity crosses SPI. */
 export interface ToolPipelineTaskSubagentApprovalRequestedEvent<
   TToolCallId extends string = string,
 > {
   readonly type: 'approval.requested';
   readonly interactionId: string;
   readonly toolCallId: TToolCallId;
+  /** Exact child owner binding; settlement must match this identity. */
+  readonly owner: Readonly<ToolPipelineSubagentInteractionOwner>;
   readonly approval: Readonly<ToolApprovalPayload>;
   readonly fullModeBypassEligible: boolean;
   readonly fullModePolicyBypassAllowed: boolean;
@@ -732,6 +745,8 @@ export interface ToolPipelineTaskSubagentAutoReviewRequestedEvent<
   readonly type: 'auto_review.requested';
   readonly reviewId: string;
   readonly toolCallId: TToolCallId;
+  /** Exact child owner binding; settlement must match this identity. */
+  readonly owner: Readonly<ToolPipelineSubagentInteractionOwner>;
   readonly toolName: string;
   readonly reason: string;
   readonly approval: Readonly<ToolApprovalPayload>;

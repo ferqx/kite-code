@@ -19,7 +19,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage, submitUserMessageForDeferredDelivery } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -210,6 +210,152 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
   );
 });
 
+describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
+
+  beforeEach(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'accept_edits',
+      },
+    });
+    externalFile = join(workspace.home, 'cancelled-subagent-write.txt');
+
+    // Keep both model responses explicitly aborted.  The first response still
+    // creates a real child; the second response reaches the child approval
+    // boundary.  No continuation response is allowed after any cancellation
+    // key, which makes an accidental parent-model continuation observable as
+    // an exhausted/invalid fixture request.
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will delegate the external write.',
+          tool_calls: [
+            {
+              id: 'call_cancelled_child',
+              name: 'task',
+              args: {
+                name: 'Cancel child write',
+                subagent_type: 'code',
+                task: `Write a file at ${externalFile}. This operation will be cancelled by the user.`,
+              },
+            },
+          ],
+        },
+      },
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will write the delegated file.',
+          tool_calls: [
+            {
+              id: 'call_cancelled_child_write',
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'must not be written',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterEach(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test.each(['reject', 'escape', 'ctrl-c'] as const)(
+    'child approval %s leaves no manual approval or Working surface and never executes the tool',
+    async (action) => {
+      const prompt = `Cancel child approval with ${action}`;
+      await submitUserMessage(tui, server, prompt, { timeout: 15_000 });
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '工具授权') &&
+            screenContains(viewport, '❯ 允许一次') &&
+            screenContains(viewport, '拒绝')
+          );
+        },
+        'child approval modal to become interactive',
+        15_000,
+      );
+
+      const approvalFrame = tui.viewport();
+      expect(screenContains(approvalFrame, '工具授权')).toBe(true);
+      expect(screenContains(approvalFrame, 'Working')).toBe(false);
+      expect(screenContains(approvalFrame, 'cancelled-subagent-write')).toBe(true);
+      const requestCountBeforeAction = server.getRequestCount();
+
+      if (action === 'reject') {
+        tui.write('\x1b[B');
+        await waitForText(() => tui.viewport(), '❯ 拒绝', 5_000);
+        tui.write('\r');
+      } else if (action === 'escape') {
+        tui.write('\x1b');
+      } else {
+        tui.write('\x03');
+      }
+
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '❯') &&
+            !screenContains(viewport, '工具授权') &&
+            !screenContains(viewport, 'Working')
+          );
+        },
+        `child approval ${action} to return to the prompt`,
+        15_000,
+      );
+      await waitForTuiReady(tui);
+
+      const output = stripAnsi(tui.viewport());
+      expect(output).not.toContain('工具授权');
+      expect(output).not.toContain('Working');
+      expect(output).toContain('❯');
+      expect(existsSync(externalFile)).toBe(false);
+      // Cancellation/rejection is terminal for this fixture; a parent model
+      // continuation would consume a third response and fail cleanup.
+      expect(server.getRequestCount()).toBe(requestCountBeforeAction);
+
+      const persisted = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, prompt));
+      expect(persisted).toBeDefined();
+      expect(
+        persisted!.events.some(
+          (event) =>
+            event.type === 'turn.aborted' ||
+            event.type === 'task.cancelled' ||
+            event.type === 'turn.completed' ||
+            event.type === 'run.error',
+        ),
+      ).toBe(true);
+      expect(
+        persisted!.events.some(
+          (event) =>
+            (event.type === 'capability.execution_started' ||
+              event.type === 'capability.execution_succeeded' ||
+              event.type === 'capability.execution_result_recorded') &&
+            'toolCallId' in event &&
+            event.toolCallId === 'call_cancelled_child_write',
+        ),
+      ).toBe(false);
+    },
+    TIMEOUT,
+  );
+});
+
 describe('TUI PTY System — Sub-agent Automatic Review', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
@@ -315,9 +461,33 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
   test(
     'auto review completes durably without relying on a transient client state',
     async () => {
+      const reviewFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Use a subagent to perform the external fixture write', {
         timeout: 15000,
       });
+
+      // The reviewer response is deliberately delayed. Capture the actual
+      // child phase instead of treating the final parent answer as proof that
+      // the intermediate projection was rendered correctly.
+      await waitForCondition(
+        () => {
+          const frames = tui.screenFramesSince(reviewFrames).map(stripAnsi);
+          return frames.some(
+            (frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'),
+          );
+        },
+        'auto-review child phase to become visible',
+        15_000,
+      );
+      const phaseFrame = tui
+        .screenFramesSince(reviewFrames)
+        .map(stripAnsi)
+        .find((frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'));
+      expect(phaseFrame).toBeDefined();
+      expect(phaseFrame).not.toContain('工具授权');
+      expect(phaseFrame).not.toContain('人工审批');
+      expect(phaseFrame).not.toContain('人工审批队列');
+      expect(phaseFrame).not.toContain('Working');
 
       await waitForText(
         () => tui.outputSinceLastAction(),
@@ -609,8 +779,16 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       expect(queuedGroup).toBe(activeGroup);
 
       const cancelStartedAt = Date.now();
+      const cancellationFrames = tui.markScreen();
       tui.write('\x1b');
-      await waitForText(() => tui.viewport(), 'Cancelling', 1_000);
+      await waitForCondition(
+        () =>
+          tui
+            .screenFramesSince(cancellationFrames)
+            .some((frame) => screenContains(frame, 'Cancelling')),
+        'visible cancellation acknowledgement before authoritative terminal',
+        1_000,
+      );
       expect(Date.now() - cancelStartedAt).toBeLessThan(1_000);
       // Repeated keys must coalesce onto the same in-flight Runtime command.
       tui.write('\x1b');
@@ -638,7 +816,12 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
 
       const output = stripAnsi(tui.scrollback());
       expect(output).not.toContain('Message was not sent: Internal error');
-      expect(output.split('Run after cancellation cleanup').length - 1).toBe(1);
+      const successorPromptCount = output.split('Run after cancellation cleanup').length - 1;
+      if (successorPromptCount !== 1) {
+        throw new Error(
+          `expected one visible successor prompt, found ${successorPromptCount}:\n${output}`,
+        );
+      }
       const delegatedCount = output.match(/Delegated · 4 agents/g)?.length ?? 0;
       if (delegatedCount !== 1) throw new Error(`duplicate delegated output:\n${output}`);
 

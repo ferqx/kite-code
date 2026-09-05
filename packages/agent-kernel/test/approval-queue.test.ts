@@ -17,6 +17,7 @@ import {
  * contract visible without coupling the test to reducer internals.
  */
 
+// biome-ignore lint/suspicious/noExplicitAny: deliberate structural test helper for private state assertions
 type JsonRecord = Record<string, any>;
 
 function record(value: unknown): JsonRecord {
@@ -103,6 +104,7 @@ function approvalRequested(
     commandIdentity: commandIdentity(overrides.commandIdentity ?? {}),
     fullModeBypassEligible: overrides.fullModeBypassEligible === true,
     fullModePolicyBypassAllowed: overrides.fullModePolicyBypassAllowed === true,
+    owner: { kind: 'root_tool', toolCallId },
     createdAt: '2026-08-25T00:00:00.000Z',
   } as KernelEvent;
 }
@@ -113,7 +115,7 @@ function reduce(state: AgentState, ...events: KernelEvent[]): AgentState {
 
 function sameCommandBatchEvent(overrides: JsonRecord = {}): KernelEvent {
   const identity = commandIdentity();
-  return {
+  const event = {
     type: 'approval.batch_released',
     interactionId: 'approval-a',
     toolCallId: 'call-a',
@@ -122,13 +124,34 @@ function sameCommandBatchEvent(overrides: JsonRecord = {}): KernelEvent {
     sessionRevision: 0,
     generation: 0,
     commandIdentity: identity,
+    owner: { kind: 'root_tool' as const, toolCallId: 'call-a' },
     matches: [
-      { interactionId: 'approval-a', toolCallId: 'call-a', receiptId: 'receipt-a', generation: 0 },
-      { interactionId: 'approval-b', toolCallId: 'call-b', receiptId: 'receipt-b', generation: 0 },
+      {
+        interactionId: 'approval-a',
+        toolCallId: 'call-a',
+        receiptId: 'receipt-a',
+        generation: 0,
+        owner: { kind: 'root_tool' as const, toolCallId: 'call-a' },
+      },
+      {
+        interactionId: 'approval-b',
+        toolCallId: 'call-b',
+        receiptId: 'receipt-b',
+        generation: 0,
+        owner: { kind: 'root_tool' as const, toolCallId: 'call-b' },
+      },
     ],
     cancelledReviewIds: [],
     createdAt: '2026-08-25T00:00:01.000Z',
     ...overrides,
+  };
+  return {
+    ...event,
+    owner: overrides.owner ?? { kind: 'root_tool' as const, toolCallId: event.toolCallId },
+    matches: event.matches.map((match: JsonRecord) => ({
+      ...match,
+      owner: match.owner ?? { kind: 'root_tool' as const, toolCallId: match.toolCallId },
+    })),
   } as KernelEvent;
 }
 
@@ -175,6 +198,7 @@ describe('durable approval queue', () => {
       grant: 'approve_once',
       receiptId: 'receipt-approve-once-a',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'call-a' },
       createdAt: '2026-08-25T00:00:02.000Z',
     } as KernelEvent);
 
@@ -200,7 +224,7 @@ describe('durable approval queue', () => {
 
     const state = reduce(queued, sameCommandBatchEvent());
     const projection = approvalProjection(state);
-    const grantKey = approvalCommandGrantKey(commandIdentity() as any);
+    const grantKey = approvalCommandGrantKey(commandIdentity());
 
     expect(projection.sessionCommandGrants.get(grantKey)).toMatchObject({
       grant: 'same_command',
@@ -256,6 +280,7 @@ describe('durable approval queue', () => {
       toolCallId: 'call-a',
       generation,
       reason: 'No longer approved.',
+      owner: { kind: 'root_tool', toolCallId: 'call-a' },
       outcome: {
         schemaVersion: 1,
         status: 'rejected',
@@ -282,6 +307,7 @@ describe('durable approval queue', () => {
       grant: 'approve_once',
       receiptId: 'receipt-after-clear',
       generation,
+      owner: { kind: 'root_tool', toolCallId: 'call-b' },
       createdAt: '2026-08-25T00:00:03.000Z',
     } as KernelEvent);
     expect(approved.pendingApprovals.get('approval-b')).toMatchObject({
@@ -335,14 +361,13 @@ describe('durable approval queue', () => {
       grant: 'approve_once',
       receiptId: 'receipt-a',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'call-a' },
       createdAt: '2026-08-25T00:00:03.000Z',
     } as KernelEvent);
 
     expect(record(state).interactions).toMatchObject({ kind: 'idle' });
     expect(record(state).tools.calls['call-a'].status).toBe('authorized_queued');
-    expect(selectPendingEffects(state).some((effect: any) => effect.type === 'run_tools')).toBe(
-      true,
-    );
+    expect(selectPendingEffects(state).some((effect) => effect.type === 'run_tools')).toBe(true);
   });
 
   test('auto review escalation moves the same queued item to human review', () => {
@@ -350,6 +375,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.requested',
       reviewId: 'review-auto',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       toolName: 'shell_execute',
       reason: 'auto-review for shell command',
       approval: approvalPayload(),
@@ -363,6 +389,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.completed',
       reviewId: 'review-auto',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       result: {
         ok: true,
         approved: false,
@@ -382,6 +409,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.requested',
       reviewId: 'review-failed',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       toolName: 'shell_execute',
       reason: 'technical reviewer failure',
       approval: approvalPayload(),
@@ -394,6 +422,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.completed',
       reviewId: 'review-failed',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       result: {
         ok: false,
         approved: false,
@@ -414,6 +443,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.requested',
       reviewId: 'review-auto',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       toolName: 'shell_execute',
       reason: 'auto-review for shell command',
       approval: approvalPayload(),
@@ -442,6 +472,7 @@ describe('durable approval queue', () => {
       type: 'auto_review.completed',
       reviewId: 'review-auto',
       toolCallId: 'call-auto',
+      owner: { kind: 'root_tool', toolCallId: 'call-auto' },
       result: {
         ok: true,
         approved: true,
@@ -512,6 +543,7 @@ describe('durable approval queue', () => {
         grant: 'approve_once',
         receiptId: 'receipt-aborted',
         generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'call-a' },
       } as KernelEvent,
     );
     const aborted = reduce(queued, {
@@ -533,6 +565,7 @@ describe('durable approval queue', () => {
         grant: 'approve_once',
         receiptId: 'late-receipt',
         generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'call-a' },
       } as KernelEvent),
     ).toEqual(aborted);
   });

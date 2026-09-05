@@ -1,11 +1,68 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
-import { eventReducer } from '../src/tui/reducers';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
+import type { Action } from '../src/tui/reducers';
+import { eventReducer as reduceEvent } from '../src/tui/reducers';
 import { sessionDataToUI } from '../src/tui/replay-blocks';
-import type { OutputBlock } from '../src/tui/types';
+import type { OutputBlock, TuiState } from '../src/tui/types';
+import { acceptedEnvelope, acceptedEnvelopeForState } from './helpers/accepted-envelope';
+
+type AcceptedEnvelopeAction = { type: 'ACCEPT_PRESENTATION_ENVELOPE'; event: RuntimeClientEvent };
+
+/** Test-only adapter: production eventReducer accepts envelopes exclusively. */
+function eventReducer(state: TuiState, action: Action | AcceptedEnvelopeAction): TuiState {
+  if (action.type !== 'ACCEPT_PRESENTATION_ENVELOPE') return reduceEvent(state, action);
+  const event =
+    typeof action.event === 'object' && action.event !== null && 'event' in action.event
+      ? action.event
+      : acceptedEnvelopeForState(action.event, state);
+  return reduceEvent(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+}
+
+function runtimeAuthority(
+  runId: string,
+  turnId = `turn-for-${runId}`,
+): NonNullable<TuiState['runtimeAuthority']> {
+  return {
+    revision: 1,
+    currentRun: {
+      runId,
+      initialTurnId: turnId,
+      activeTurnId: turnId,
+      status: 'running',
+      revision: 1,
+    },
+    interactionQueue: { revision: 1, interactions: [] },
+  };
+}
 
 describe('closed RuntimeClientEvent reducer', () => {
+  test('fails closed when the bounded request assembly set overflows', () => {
+    let state = createInitialState();
+    for (let index = 0; index < 65; index += 1) {
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: { type: 'model.requested', requestId: `request-${index}` },
+      });
+    }
+    expect(state.requestAssemblies?.size).toBe(64);
+    expect(state.requestAssemblyOverflow).toBe(true);
+
+    const beforeTerminal = state;
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'model.responded',
+        requestId: 'request-64',
+        messageId: 'message-overflow',
+        toolCallCount: 0,
+        summary: 'must not seal',
+      },
+    });
+    expect(state).toBe(beforeTerminal);
+  });
+
   test('shows a local prompt immediately and upgrades only its marked durable echo', () => {
     let state = eventReducer(createInitialState(), { type: 'SET_RUNNING' });
     state = eventReducer(state, { type: 'LOCAL_USER_PROMPT', text: 'Same prompt' });
@@ -14,7 +71,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'message-1',
@@ -32,7 +89,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'message-2',
@@ -59,6 +116,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       id: 1,
       sessionId: 'session-1',
       text: 'Queued prompt',
+      messageId: 'queued-message-1',
     });
     expect(state.queuedPrompts).toEqual([]);
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
@@ -66,7 +124,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'queued-message-1',
@@ -96,7 +154,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       text: 'Queued prompt',
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'queued-message-1',
@@ -111,6 +169,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       id: 1,
       sessionId: 'session-1',
       text: 'Queued prompt',
+      messageId: 'queued-message-1',
     });
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
       expect.objectContaining({
@@ -140,7 +199,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       text: 'Same prompt',
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'earlier-message',
@@ -181,10 +240,9 @@ describe('closed RuntimeClientEvent reducer', () => {
     const state = {
       ...initial,
       activeSessionId: 'session-1',
-      running: true,
+      runPromptPresented: false,
       turns,
       currentThoughtSummaryId: 1,
-      thoughtPhaseStatus: 'running' as const,
       currentModelRequestId: 'active-request',
     };
 
@@ -197,7 +255,6 @@ describe('closed RuntimeClientEvent reducer', () => {
 
     expect(queued.turns).toBe(turns);
     expect(queued.currentThoughtSummaryId).toBe(1);
-    expect(queued.thoughtPhaseStatus).toBe('running');
     expect(queued.currentModelRequestId).toBe('active-request');
   });
 
@@ -219,10 +276,13 @@ describe('closed RuntimeClientEvent reducer', () => {
     // identical text under another durable identity remains another turn.
     const sameTextNewMessage = { ...first, messageId: 'message-identity-2' };
 
-    let state = eventReducer(createInitialState(), { type: 'RUNTIME_EVENT', event: first });
-    state = eventReducer(state, { type: 'RUNTIME_EVENT', event: first });
+    let state = eventReducer(createInitialState(), {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: first,
+    });
+    state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event: first });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: sameTextNewMessage,
     });
 
@@ -245,7 +305,7 @@ describe('closed RuntimeClientEvent reducer', () => {
   test('renders safe user/model/tool facts without raw tool arguments or paths', () => {
     let state = createInitialState();
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'message-1',
@@ -254,11 +314,11 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'model.requested', requestId: 'request-safe-facts' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-safe-facts',
@@ -266,7 +326,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'request-safe-facts',
@@ -276,7 +336,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'tool-1',
@@ -287,7 +347,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'tool-1', summary: 'Running tool.' },
     });
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -336,7 +396,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     let state = createInitialState();
-    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 
     const toolEntries = state.turns.flatMap((turn) =>
       turn.blocks.flatMap((block) =>
@@ -412,7 +473,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     let state = createInitialState();
-    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
     expect(blocks).toContainEqual(
@@ -505,7 +567,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const summaries = state.turns
@@ -571,7 +633,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     let state = createInitialState();
-    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 
     const summaries = state.turns
       .flatMap((turn) => turn.blocks)
@@ -633,7 +696,10 @@ describe('closed RuntimeClientEvent reducer', () => {
       ['find-2', 'search_files', { pattern: 'private-second-pattern' }],
       ['read-3', 'read_file', { path: '/private/three.ts' }],
     ] as const) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: queue(toolCallId, name, args) });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: queue(toolCallId, name, args),
+      });
     }
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(0);
@@ -646,8 +712,14 @@ describe('closed RuntimeClientEvent reducer', () => {
       ['read-3', 'read_file'],
       ['find-2', 'search_files'],
     ] as const) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: started(toolCallId) });
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: finished(toolCallId, name) });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: started(toolCallId),
+      });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: finished(toolCallId, name),
+      });
     }
 
     const summaries = state.turns
@@ -734,7 +806,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'Running tool.',
       },
     ]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
@@ -743,12 +815,17 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('does not invent a generic card for an unpaired started/cancelled lifecycle', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'missing-queued', summary: 'Running tool.' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'tool.cancelled', toolId: 'missing-queued', summary: 'Cancelled.' },
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'tool.cancelled',
+        toolId: 'missing-queued',
+        presentation: 'standalone',
+        summary: 'Cancelled.',
+      },
     });
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
@@ -756,11 +833,11 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('deduplicates a late cumulative text delta after its durable model terminal', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'model.requested', requestId: 'request-late-delta' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'request-late-delta',
@@ -770,7 +847,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-late-delta',
@@ -786,12 +863,15 @@ describe('closed RuntimeClientEvent reducer', () => {
   });
 
   test('detaches a pending final caption once when a run terminal wins delivery order', () => {
-    let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'model.requested', requestId: 'request-terminal-race' },
-    });
+    let state = eventReducer(
+      { ...createInitialState(), runtimeAuthority: runtimeAuthority('run-terminal-race') },
+      {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: { type: 'model.requested', requestId: 'request-terminal-race' },
+      },
+    );
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-terminal-race',
@@ -801,7 +881,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-terminal-race',
@@ -809,7 +889,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'run.terminal',
         runId: 'run-terminal-race',
@@ -833,7 +913,10 @@ describe('closed RuntimeClientEvent reducer', () => {
   test('binds text-first reasoning and model terminal facts to one answer block', () => {
     const requestId = 'request-text-first';
     const answer = '你好！我是 Kite，可以帮你处理编码任务。';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-text-first'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -859,7 +942,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: answer,
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -875,10 +958,13 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('enriches the same answer when responded and reasoning arrive after run terminal', () => {
+  test('keeps the sealed answer immutable when model and reasoning packets arrive after run terminal', () => {
     const requestId = 'request-terminal-first';
     const answer = 'One terminal-first answer.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-terminal-first'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -904,7 +990,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: answer,
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -912,17 +998,20 @@ describe('closed RuntimeClientEvent reducer', () => {
       expect.objectContaining({
         kind: 'text',
         modelRequestId: requestId,
-        thoughtElapsedMs: 1_400,
-        thoughtContent: 'Late but correlated reasoning.',
+        presentationState: 'sealed',
       }),
     ]);
+    expect(blocks[0]).not.toHaveProperty('thoughtContent');
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('keeps late reasoning owned by its answer after a later notice block', () => {
+  test('keeps a sealed answer unchanged when reasoning arrives after a later notice block', () => {
     const requestId = 'request-reasoning-after-notice';
     const answer = 'The original answer.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-reasoning-last'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -947,7 +1036,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         text: 'Late correlated reasoning.',
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -956,10 +1045,11 @@ describe('closed RuntimeClientEvent reducer', () => {
         kind: 'text',
         content: answer,
         modelRequestId: requestId,
-        thoughtContent: 'Late correlated reasoning.',
+        presentationState: 'sealed',
       }),
       expect.objectContaining({ kind: 'text', content: 'Runtime reconnected.' }),
     ]);
+    expect(blocks[0]).not.toHaveProperty('thoughtContent');
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
@@ -967,9 +1057,12 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-reasoning-last';
     const answer = 'One reasoning-last answer.';
     const trailingReasoning = 'Inspecting the curl result before answering.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-reasoning-last'),
+    };
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     for (const event of [
@@ -989,7 +1082,6 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
       expect.objectContaining({ kind: 'tool_summary', active: true, tools: [] }),
     ]);
-    expect(state.thoughtPhaseStatus).toBe('running');
 
     for (const event of [
       {
@@ -1056,7 +1148,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-component-commit';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -1117,7 +1209,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-terminal-without-summary';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -1146,7 +1238,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-structural-commit';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -1189,7 +1281,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-visible-code-freezes-thought';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -1215,14 +1307,8 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(
       state.turns
         .flatMap((turn) => turn.blocks)
-        .some(
-          (block) =>
-            block.kind === 'text' &&
-            block.streaming === true &&
-            block.responsePending === true &&
-            block.content === '```ts\nconst visible = true;\n',
-        ),
-    ).toBe(true);
+        .some((block) => block.kind === 'text' && block.modelRequestId === requestId),
+    ).toBe(false);
 
     dispatch({
       type: 'model.responded',
@@ -1284,9 +1370,12 @@ describe('closed RuntimeClientEvent reducer', () => {
         text: 'Visible answer paragraph.\n\nTail',
       },
     ] satisfies RuntimeClientEvent[];
-    const visible = events.reduce(
-      (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
-      createInitialState(),
+    const visible = events.reduce<TuiState>(
+      (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      {
+        ...createInitialState(),
+        runtimeAuthority: runtimeAuthority('freeze-answer-run'),
+      },
     );
     const visibleSummary = visible.turns
       .flatMap((turn) => turn.blocks)
@@ -1301,19 +1390,13 @@ describe('closed RuntimeClientEvent reducer', () => {
     const visibleText = visible.turns
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.kind === 'text');
-    expect(visibleText).toEqual([
-      expect.objectContaining({
-        content: 'Visible answer paragraph.\n\n',
-        streaming: false,
-        responsePending: true,
-      }),
-    ]);
+    expect(visibleText).toEqual([]);
     expect(visible.turns.flatMap((turn) => turn.blocks)).not.toContainEqual(
       expect.objectContaining({ kind: 'text', content: expect.stringContaining('Tail') }),
     );
 
     const terminal = eventReducer(visible, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'freeze-answer-request',
@@ -1326,9 +1409,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const terminalSummary = terminal.turns
       .flatMap((turn) => turn.blocks)
       .find((block) => block.kind === 'tool_summary');
-    expect(terminalSummary).toEqual(
-      expect.objectContaining({ responsePending: false, result: 'done' }),
-    );
+    expect(terminalSummary).toEqual(expect.objectContaining({ result: 'done' }));
     expect(terminalSummary?.pendingCaption).toBeUndefined();
     const terminalText = terminal.turns
       .flatMap((turn) => turn.blocks)
@@ -1336,10 +1417,9 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(terminalText.map((block) => block.content).join('')).toBe(
       'Visible answer paragraph.\n\nTail complete.',
     );
-    expect(terminalText.every((block) => block.responsePending !== true)).toBe(true);
 
     const completed = eventReducer(terminal, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'run.terminal',
         runId: 'freeze-answer-run',
@@ -1404,7 +1484,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ] satisfies RuntimeClientEvent[];
     const pending = events.reduce(
-      (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
+      (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const pendingSummary = pending.turns
@@ -1419,16 +1499,10 @@ describe('closed RuntimeClientEvent reducer', () => {
     const pendingText = pending.turns
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.kind === 'text');
-    expect(pendingText).toEqual([
-      expect.objectContaining({
-        content: 'I will inspect one more file.\n\n',
-        streaming: false,
-        responsePending: true,
-      }),
-    ]);
+    expect(pendingText).toEqual([]);
 
     let toolBearing = eventReducer(pending, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'rollback-narration-request',
@@ -1439,7 +1513,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     toolBearing = eventReducer(toolBearing, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'rollback-search',
@@ -1451,31 +1525,39 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     toolBearing = eventReducer(toolBearing, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'rollback-search' },
     });
     const blocks = toolBearing.turns.flatMap((turn) => turn.blocks);
     const summaries = blocks.filter((block) => block.kind === 'tool_summary');
-    expect(summaries).toHaveLength(1);
+    // Distinct Server presentation groups are distinct Thought items even
+    // when their events are adjacent in the same model continuation.
+    expect(summaries).toHaveLength(2);
     expect(summaries[0]).toEqual(
       expect.objectContaining({
         id: pendingSummary?.id,
-        active: true,
-        tools: [
-          expect.objectContaining({ callId: 'rollback-read', status: 'done' }),
-          expect.objectContaining({ callId: 'rollback-search', status: 'running' }),
-        ],
+        active: false,
+        presentationGroupId: 'rollback-tools-message',
+        tools: [expect.objectContaining({ callId: 'rollback-read', status: 'done' })],
       }),
     );
+    expect(summaries[1]).toEqual(
+      expect.objectContaining({
+        active: true,
+        presentationGroupId: 'rollback-narration-message',
+        tools: [expect.objectContaining({ callId: 'rollback-search', status: 'running' })],
+      }),
+    );
+    // A tool-bearing response is progress metadata, not a standalone answer.
     expect(blocks.filter((block) => block.kind === 'text')).toEqual([]);
-    expect(blocks.map((block) => block.kind)).toEqual(['tool_summary']);
+    expect(blocks.map((block) => block.kind)).toEqual(['tool_summary', 'tool_summary']);
   });
 
   test('commits streaming lists one complete item at a time', () => {
     const requestId = 'request-list-items';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
     dispatch({ type: 'model.requested', requestId });
     dispatch({ type: 'model.text_delta', requestId, text: '- first item\n- second' });
@@ -1535,7 +1617,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
       { type: 'tool.started', toolId: 'content-before-tool-terminal-search' },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -1559,7 +1641,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps standalone tools hidden until started, then closes the active Thought before its named card', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-write-reason',
@@ -1569,7 +1651,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-1',
@@ -1584,7 +1666,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'write-1', summary: 'Running tool.' },
     });
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -1605,7 +1687,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('drops an unstarted standalone cancellation without creating a card', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-cancelled',
@@ -1616,8 +1698,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'tool.cancelled', toolId: 'write-cancelled' },
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: { type: 'tool.cancelled', toolId: 'write-cancelled', presentation: 'standalone' },
     });
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
     expect(state.pendingToolCalls).toEqual({});
@@ -1625,7 +1707,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('retains an unstarted rejection as a terminal diagnostic without claiming execution', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-rejected',
@@ -1636,10 +1718,11 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.rejected',
         toolId: 'write-rejected',
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       },
     });
@@ -1655,10 +1738,11 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.pendingToolCalls).toEqual({});
 
     const gapState = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.rejected',
         toolId: 'write-rejected-after-gap',
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       },
     });
@@ -1693,18 +1777,30 @@ describe('closed RuntimeClientEvent reducer', () => {
         arguments: { path: 'src/future.ts' },
         summary: 'Queued.',
       },
-      { type: 'tool.cancelled' as const, toolId: 'write-running' },
+      {
+        type: 'tool.cancelled' as const,
+        toolId: 'write-running',
+        presentation: 'standalone' as const,
+      },
       {
         type: 'turn.terminal' as const,
         turnId: 'turn-user-cancelled',
         status: 'cancelled' as const,
         cause: 'user' as const,
       },
+      {
+        type: 'run.terminal' as const,
+        runId: 'run-user-cancelled',
+        status: 'cancelled' as const,
+      },
     ];
     const reduce = () =>
-      events.reduce(
-        (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
-        createInitialState(),
+      events.reduce<TuiState>(
+        (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+        {
+          ...createInitialState(),
+          runtimeAuthority: runtimeAuthority('run-user-cancelled', 'turn-user-cancelled'),
+        },
       );
     const live = reduce();
     const replay = reduce();
@@ -1726,7 +1822,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
     expect(visible(live)).toEqual(visible(replay));
     expect(live.pendingToolCalls).toEqual({});
-    expect(live.running).toBe(false);
+    expect(isTuiRunActive(live)).toBe(false);
     expect(visible(live)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1743,7 +1839,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('updates subagent steps in their owning block without emitting a text fragment', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.started',
         subagentId: 'child-1',
@@ -1752,10 +1848,12 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.step',
         subagentId: 'child-1',
+        stepId: 'child-1-step-1',
+        toolCallId: 'child-1-tool-1',
         toolName: 'read_file',
         status: 'started',
         arguments: { path: 'src/child.ts' },
@@ -1763,13 +1861,14 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.step',
         subagentId: 'child-1',
+        stepId: 'child-1-step-1',
+        toolCallId: 'child-1-tool-1',
         toolName: 'read_file',
         status: 'completed',
-        result: { ok: true },
         totalLines: 42,
         durationMs: 18,
         summary: 'Read complete.',
@@ -1798,7 +1897,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('retains authoritative subagent duration, count, and bounded failure diagnostics', () => {
     let completed = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.started',
         subagentId: 'completed-child',
@@ -1809,7 +1908,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const started = completed.turns[0]?.blocks[0];
     expect(typeof (started?.kind === 'subagent' ? started.startedAt : undefined)).toBe('number');
     completed = eventReducer(completed, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.completed',
         subagentId: 'completed-child',
@@ -1828,7 +1927,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
 
     let failed = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.started',
         subagentId: 'failed-child',
@@ -1837,7 +1936,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     failed = eventReducer(failed, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.failed',
         subagentId: 'failed-child',
@@ -1860,7 +1959,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps boundary text and concurrent subagents on unique block ids', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = dispatch(createInitialState(), {
       type: 'model.requested',
       requestId: 'delegate-request',
@@ -1911,7 +2010,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps incomplete tool-bearing narration inside the active Thought', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = dispatch(createInitialState(), {
       type: 'model.requested',
       requestId: 'request-1',
@@ -1996,7 +2095,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('publishes the aggregate result when the last tool settles after a soft close', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = dispatch(createInitialState(), {
       type: 'model.requested',
       requestId: 'soft-close-request',
@@ -2057,7 +2156,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('continues terminal exploration into the following model reasoning', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     const events = [
       {
@@ -2177,7 +2276,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps one exploration phase across adjacent model presentation identities', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId: 'group-request-1' },
@@ -2233,7 +2332,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps terminal exploration when next reasoning overtakes model.requested', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId: 'race-request-1' },
@@ -2315,7 +2414,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps missing and mismatched tool identities outside the active Thought', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId: 'identity-request-1' },
@@ -2456,12 +2555,21 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'POST_BASH_RESUME_DONE',
       },
     ] satisfies RuntimeClientEvent[];
-    const reduce = (runtimeEvents: readonly RuntimeClientEvent[], initial = createInitialState()) =>
-      runtimeEvents.reduce(
-        (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
+    const reduce = (
+      runtimeEvents: readonly RuntimeClientEvent[],
+      initial: TuiState = {
+        ...createInitialState(),
+        runtimeAuthority: runtimeAuthority('post-bash-resume-run'),
+      },
+    ) =>
+      runtimeEvents.reduce<TuiState>(
+        (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
         initial,
       );
-    const assertProjection = (blocks: ReturnType<typeof reduce>['turns'][number]['blocks']) => {
+    const assertProjection = (
+      blocks: ReturnType<typeof reduce>['turns'][number]['blocks'],
+      expectThinking = true,
+    ) => {
       const summaries = blocks.filter(
         (block): block is Extract<(typeof blocks)[number], { kind: 'tool_summary' }> =>
           block.kind === 'tool_summary',
@@ -2472,10 +2580,17 @@ describe('closed RuntimeClientEvent reducer', () => {
           summaryLine: 'searched 2 file patterns',
         }),
       );
-      expect(summaries[0]?.hasThinking).toBe(true);
-      expect(summaries[0]?.timeline ?? []).toContainEqual(
-        expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
-      );
+      if (expectThinking) {
+        expect(summaries[0]?.hasThinking).toBe(true);
+        expect(summaries[0]?.timeline ?? []).toContainEqual(
+          expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
+        );
+      } else {
+        expect(summaries[0]?.hasThinking).toBeUndefined();
+        expect(summaries[0]?.timeline ?? []).not.toContainEqual(
+          expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
+        );
+      }
       expect(blocks).toContainEqual(
         expect.objectContaining({
           kind: 'text',
@@ -2501,13 +2616,14 @@ describe('closed RuntimeClientEvent reducer', () => {
     const replay = sessionDataToUI({
       threadId: 'post-bash-resume-session',
       messages: [],
-      runtimeEvents: events,
+      runtimeEvents: events.map((event) => acceptedEnvelope(event)),
       interrupt: null,
       modelProvider: 'test',
       modelName: 'test',
       thinkingLevel: null,
       plan: null,
       interactionMode: 'accept_edits',
+      recovery: 'normal',
     });
     assertProjection(replay.blocks);
 
@@ -2524,12 +2640,15 @@ describe('closed RuntimeClientEvent reducer', () => {
       events[reasoningIndex]!,
       ...events.slice(modelRespondedIndex + 1),
     ];
-    assertProjection(reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks));
+    assertProjection(
+      reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks),
+      false,
+    );
   });
 
   test('keeps late narration as text before the following tool-bearing summary', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     const caption = 'I found the first result; checking the remaining files.';
     let state = createInitialState();
     const events = [
@@ -2604,7 +2723,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('settles an active Thought at an approval boundary and falls back from a missing terminal queue', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-approval-reason',
@@ -2614,7 +2733,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'approval.queued',
         queueSequence: 0,
@@ -2624,6 +2743,7 @@ describe('closed RuntimeClientEvent reducer', () => {
           sessionRevision: 1,
           generation: 0,
           grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: 'approval-boundary-tool' },
         },
       },
     });
@@ -2633,7 +2753,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.finished',
         toolId: 'missing-queue',
@@ -2666,6 +2786,7 @@ describe('closed RuntimeClientEvent reducer', () => {
           sessionRevision,
           generation: 0,
           grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: interactionId },
         },
       }) satisfies RuntimeClientEvent;
     const events = [
@@ -2707,13 +2828,14 @@ describe('closed RuntimeClientEvent reducer', () => {
         type: 'approval.granted',
         interactionId: 'approval-boundary-1',
         generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'approval-boundary-1' },
       },
       { type: 'tool.started', toolId: 'approval-shell-1' },
       approval('approval-boundary-2', 2),
     ] satisfies RuntimeClientEvent[];
 
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -2734,7 +2856,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('projects a live Thinking owner without exposing its reasoning as message text', () => {
     const state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-cached-reason',
@@ -2757,7 +2879,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('turns closed provider and verification facts into actionable safe interactions', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'provider.action',
         status: 'required',
@@ -2785,7 +2907,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'interaction.settled',
         interactionId: 'provider-1',
@@ -2794,7 +2916,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'verification.status',
         status: 'pending',
@@ -2813,7 +2935,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('preserves approval generation and interaction identity without a raw approval payload', () => {
     const state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'approval.queued',
         queueSequence: 4,
@@ -2823,6 +2945,7 @@ describe('closed RuntimeClientEvent reducer', () => {
           sessionRevision: 8,
           generation: 3,
           grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: 'approval-1' },
         },
       },
     });

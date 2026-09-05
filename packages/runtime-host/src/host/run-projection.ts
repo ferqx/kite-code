@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   RuntimeCommandReceipt,
   RuntimeRunPhase,
@@ -66,6 +67,7 @@ function isNonterminal(status: RuntimeRunStatus): boolean {
 
 export function parseRuntimeStoredCommandResource(
   result: RuntimeStoredCommandResourceResult | undefined,
+  commandId?: string,
 ): Extract<RuntimeCommandReceipt, { status: 'applied' | 'idempotent_replay' }>['resource'] {
   if (result === undefined) return undefined;
   assertRuntimeStoredCommandResourceResult(result);
@@ -112,7 +114,18 @@ export function parseRuntimeStoredCommandResource(
   if (canonical !== result.json) {
     throw new Error('Runtime Run resource result is not the closed canonical projection.');
   }
-  return Object.freeze({ kind: 'run', run });
+  if (!commandId) throw new Error('Runtime Run resource projection requires command identity.');
+  return Object.freeze({ kind: 'run', run, messageId: runtimeStartMessageId(commandId) });
+}
+
+export function runtimeStartMessageId(commandId: string): string {
+  if (typeof commandId !== 'string' || commandId.length === 0 || commandId.includes('\0')) {
+    throw new Error('Runtime start command identity is invalid.');
+  }
+  const digest = createHash('sha256')
+    .update(`kite.runtime.start-turn.v1\0message\0${commandId}`)
+    .digest('hex');
+  return `message_${digest.slice(0, 32)}`;
 }
 
 function plainRecord(value: unknown): Record<string, unknown> {

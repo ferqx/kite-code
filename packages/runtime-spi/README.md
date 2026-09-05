@@ -9,6 +9,8 @@
 - 定义 capability、execution、model context、normalizer、adapter 与 module lifecycle port。
 - 提供同步注册、重复检测和冻结的 `RuntimeModuleRegistry` snapshot。
 - 定义 filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 的中立接口。
+- Subagent continuation step 必须携带 admission 时分配的 `stepId + toolCallId`；Task/Skill approval 与 auto-review
+  suspension 必须携带完整 `InteractionOwner`，resume/settlement 不通过工具名或 pending 顺序匹配。
 
 ## 不拥有职责
 

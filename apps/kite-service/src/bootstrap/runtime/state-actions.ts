@@ -6,6 +6,7 @@ import {
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from './failures';
+import { rootToolInteractionOwner, runtimeInteractionOwnerForPending } from './interaction-owner';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type ToolCallStatus = RuntimeState['tools']['calls'][string]['status'];
@@ -305,7 +306,14 @@ function approvalRejectedTurnTerminationEvents(
   return [
     ...(alreadyTerminalToolCallIds.has(rejectedToolCallId)
       ? []
-      : [{ type: 'tool.rejected' as const, toolCallId: rejectedToolCallId, reason }]),
+      : [
+          {
+            type: 'tool.rejected' as const,
+            toolCallId: rejectedToolCallId,
+            reason,
+            failure: classifyFailure('approval_rejected', reason),
+          },
+        ]),
     ...siblingCancellations,
     ...capabilityWaiverEventsForToolTerminals(
       state,
@@ -332,12 +340,15 @@ function focusedApprovalRejectionEvent(
   interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
   reason: string,
 ): RuntimeEvent {
+  const pending = state.pendingApprovals.get(interaction.interactionId);
   return {
     type: 'approval.rejected',
     interactionId: interaction.interactionId,
     toolCallId: interaction.toolCallId,
-    generation:
-      state.pendingApprovals.get(interaction.interactionId)?.generation ?? state.approvalGeneration,
+    generation: pending?.generation ?? state.approvalGeneration,
+    owner: pending
+      ? runtimeInteractionOwnerForPending(pending)
+      : rootToolInteractionOwner(interaction.toolCallId),
     reason,
     failure: classifyFailure('approval_rejected', reason),
   };
@@ -364,6 +375,7 @@ function eventsForPendingApprovalAction(
         interactionId: pending.interactionId,
         toolCallId: pending.toolCallId,
         generation: pending.generation,
+        owner: runtimeInteractionOwnerForPending(pending),
         reason,
         failure: classifyFailure('approval_rejected', reason),
         createdAt: new Date().toISOString(),
@@ -383,6 +395,7 @@ function eventsForPendingApprovalAction(
         grant: 'approve_once',
         receiptId: crypto.randomUUID(),
         generation: pending.generation,
+        owner: runtimeInteractionOwnerForPending(pending),
         createdAt: new Date().toISOString(),
       },
     ];
@@ -403,6 +416,7 @@ function eventsForPendingApprovalAction(
       toolCallId: candidate.toolCallId,
       receiptId: crypto.randomUUID(),
       generation: candidate.generation,
+      owner: runtimeInteractionOwnerForPending(candidate),
       bindingDigest: candidate.bindingDigest,
     }));
   if (!matches.some((candidate) => candidate.interactionId === pending.interactionId)) return [];
@@ -415,6 +429,7 @@ function eventsForPendingApprovalAction(
       grantKey: pending.commandKey,
       sessionRevision: state.revision,
       generation: pending.generation,
+      owner: runtimeInteractionOwnerForPending(pending),
       commandIdentity: pending.commandIdentity,
       matches,
       cancelledReviewIds: [...state.pendingApprovals.values()]
@@ -761,6 +776,12 @@ export function eventsForRuntimeAction(
           grant: 'approve_once',
           receiptId: crypto.randomUUID(),
           generation: state.approvalGeneration,
+          owner:
+            state.pendingApprovals.get(action.interactionId) === undefined
+              ? rootToolInteractionOwner(interaction.toolCallId)
+              : runtimeInteractionOwnerForPending(
+                  state.pendingApprovals.get(action.interactionId)!,
+                ),
         },
       ];
     }

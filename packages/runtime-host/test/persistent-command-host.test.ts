@@ -388,7 +388,7 @@ function applied(commandId: string, sessionId: string, revision: number) {
 
 function projection(sessionId: string): RuntimeSessionProjection {
   return {
-    schema: 'kite.runtime-projection.v1',
+    schema: 'kite.runtime-projection.v2',
     sessionId,
     revision: 0,
     lifecycle: 'open',

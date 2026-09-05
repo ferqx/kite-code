@@ -13,6 +13,7 @@ import {
   isConcurrentShellEffectBatchCurrent,
   type KernelEvent,
   normalizeAgentEvent,
+  normalizeCanonicalTaskCompletionFact,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEffect,
@@ -24,6 +25,10 @@ import {
   type VerificationSchemaAdmissionFact,
 } from '@kite-ai/agent-kernel';
 import type {
+  RuntimeSessionRunProjection,
+  RuntimeSessionTaskProjection,
+} from '@kite-ai/runtime-contract';
+import type {
   RuntimeHostExecutionServices,
   RuntimeLeaseRequirement,
   RuntimeTransactionAcknowledgement,
@@ -33,6 +38,7 @@ import type {
   RuntimeEventMetadata,
   RuntimeRestoreBoundary,
   RuntimeRunStatus,
+  RuntimeRunStorePort,
   RuntimeRunTransactionMutation,
   RuntimeStoredCommandReceipt,
   RuntimeStoredCommandResourceResult,
@@ -158,6 +164,10 @@ export interface StateRuntimeSession {
   getState(): Readonly<AgentState>;
   /** True only when the injected storage owner has passed Store 8 preflight. */
   supportsRunStorage(): boolean;
+  getLifecycleProjection(state?: Readonly<AgentState>): Readonly<{
+    readonly activeTask?: RuntimeSessionTaskProjection;
+    readonly currentRun?: RuntimeSessionRunProjection;
+  }>;
   /** Row-only post-commit activation; Store 6/7 remain an explicit no-op. */
   activateRun(runId: string): void;
   processEvent(event: KernelEvent): StateRuntimeProcessEventResult;
@@ -277,6 +287,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   #lastAppliedEvents: readonly KernelEvent[] = [];
   #lastProcessedEventId: string | undefined;
   #runnerId: string | null = null;
+  #currentRunId: string | undefined;
 
   constructor(input: StateRuntimeSessionInput) {
     assertStateRuntimeSessionState(input.state);
@@ -324,6 +335,68 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
 
   supportsRunStorage(): boolean {
     return this.#services.runs !== undefined;
+  }
+
+  getLifecycleProjection(exactState: Readonly<AgentState> = this.#state): Readonly<{
+    readonly activeTask?: RuntimeSessionTaskProjection;
+    readonly currentRun?: RuntimeSessionRunProjection;
+  }> {
+    const state = exactState;
+    if (this.#services.runs && this.#currentRunId === undefined) {
+      this.#currentRunId = resolveRuntimeExecutionRun(
+        this.#services.runs,
+        this.sessionId,
+        state,
+      )?.runId;
+    }
+    const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+    const run =
+      this.#services.runs && this.#currentRunId
+        ? this.#services.runs.get(this.sessionId, this.#currentRunId)
+        : undefined;
+    const activeInteractionId =
+      state.interactions.kind === 'idle' ? undefined : state.interactions.interactionId;
+    const runVisibleAtRevision = run && run.lastRevision <= state.revision;
+    const projectedRunStatus = runVisibleAtRevision
+      ? run.status === 'unknown'
+        ? ('recovery_required' as const)
+        : run.status
+      : state.turn.status === 'completed'
+        ? ('completed' as const)
+        : state.turn.status === 'aborted'
+          ? state.turn.abortCause === 'user'
+            ? ('cancelled' as const)
+            : ('failed' as const)
+          : state.interactions.kind === 'idle'
+            ? ('running' as const)
+            : ('waiting' as const);
+    return Object.freeze({
+      ...(task
+        ? {
+            activeTask: Object.freeze({
+              taskId: task.taskId,
+              phase:
+                task.planning.kind === 'executing' ? ('building' as const) : ('planning' as const),
+            }),
+          }
+        : {}),
+      ...(run
+        ? {
+            currentRun: Object.freeze({
+              runId: run.runId,
+              initialTurnId: run.runId,
+              activeTurnId: state.turn.turnId,
+              ...(task ? { taskId: task.taskId } : {}),
+              status: projectedRunStatus,
+              revision: runVisibleAtRevision ? run.lastRevision : state.revision,
+              ...(activeInteractionId === undefined ? {} : { activeInteractionId }),
+              ...(!runVisibleAtRevision || run.terminal === undefined
+                ? {}
+                : { outcome: Object.freeze({ ...run.terminal }) }),
+            }),
+          }
+        : {}),
+    });
   }
 
   activateRun(runId: string): void {
@@ -468,6 +541,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const runCommit = this.#runCommitForDecision(
       previousState,
       decision.nextState,
+      decision.events,
       metadata,
       commandEvidence,
     );
@@ -503,6 +577,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     // The durable transaction is the publication boundary. Never expose a
     // speculative reducer result to an executor or caller before this point.
     this.#state = decision.nextState;
+    if (runCommit?.mutation.type === 'insert') this.#currentRunId = runCommit.mutation.run.runId;
     this.#lastAppliedEvents = [...decision.events];
     this.#lastProcessedEventId = decision.envelopes[0]?.eventId;
     const completedTurn = decision.events.find(
@@ -854,6 +929,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   #runCommitForDecision(
     previousState: Readonly<AgentState>,
     nextState: Readonly<AgentState>,
+    events: readonly KernelEvent[],
     metadata: readonly RuntimeEventMetadata[],
     commandEvidence?: RuntimeCommandCommitEvidence,
   ):
@@ -894,12 +970,26 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     }
 
     const runs = this.#services.runs;
-    const runId = previousState.turn.turnId;
-    if (!runs || !runId) return undefined;
-    const current = runs.get(this.sessionId, runId);
+    if (!runs || !previousState.turn.turnId) return undefined;
+    const current = resolveRuntimeExecutionRun(runs, this.sessionId, previousState);
     if (!current || isFinalRunStatus(current.status)) return undefined;
-    const status = projectRunStatus(previousState, nextState, current.status);
-    if (!status || status === current.status) return undefined;
+    const handle = runtimeExecutionHandle(current, previousState);
+    const completion = events.find(
+      (event): event is Extract<KernelEvent, { readonly type: 'run.completed' }> =>
+        event.type === 'run.completed',
+    );
+    if (
+      completion &&
+      !normalizeCanonicalTaskCompletionFact(previousState, completion, handle.runId)
+    ) {
+      throw new Error('Runtime Task completion could not be normalized against its stable Run.');
+    }
+    const continuationAdvanced =
+      nextState.turn.status === 'active' && previousState.turn.turnId !== nextState.turn.turnId;
+    const status =
+      projectRunStatus(previousState, nextState, current.status) ??
+      (continuationAdvanced ? current.status : undefined);
+    if (!status || (status === current.status && !continuationAdvanced)) return undefined;
     if (current.status === 'unknown' && !isPreciseTerminalRunStatus(status)) return undefined;
     const occurredAtMs = Math.max(
       current.startedAtMs ?? current.createdAtMs,
@@ -929,7 +1019,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         type: 'transition',
         transition: Object.freeze({
           sessionId: this.sessionId,
-          runId,
+          runId: handle.runId,
           expectedLastRevision: current.lastRevision,
           next,
         }),
@@ -970,6 +1060,98 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       finalizeAgentEvent(normalizeAgentEvent(event, state, occurredAt), occurredAt),
     );
   }
+}
+
+interface RuntimeExecutionHandle {
+  readonly sessionId: string;
+  readonly taskId?: string;
+  readonly runId: string;
+  readonly initialTurnId: string;
+  readonly activeTurnId: string;
+  readonly startCommandId: string;
+}
+
+/**
+ * Build the process-local execution handle from current durable facts. V1
+ * uses the accepted initial Turn as the Run identity; a continuation advances
+ * activeTurnId without creating or guessing a second Run.
+ */
+function runtimeExecutionHandle(
+  run: Readonly<RuntimeStoredRun>,
+  state: Readonly<AgentState>,
+): RuntimeExecutionHandle {
+  if (
+    run.sessionId !== state.session.threadId ||
+    run.createdRevision > state.revision ||
+    run.lastRevision > state.revision ||
+    state.turn.turnId.length === 0
+  ) {
+    throw new Error('Runtime Run authority does not match the current Session revision and Turn.');
+  }
+  const taskId = state.activeTaskId;
+  return Object.freeze({
+    sessionId: run.sessionId,
+    ...(taskId === null ? {} : { taskId }),
+    runId: run.runId,
+    initialTurnId: run.runId,
+    activeTurnId: state.turn.turnId,
+    startCommandId: run.startCommandId,
+  });
+}
+
+function resolveRuntimeExecutionRun(
+  runs: RuntimeRunStorePort,
+  sessionId: string,
+  state: Readonly<AgentState>,
+): RuntimeStoredRun | undefined {
+  const active = runs.getActive(sessionId);
+  if (active) return active;
+
+  // An unknown row deliberately sits outside getActive(): it blocks admission
+  // until explicit reconciliation. Refine it only when the Store proves there
+  // is exactly one candidate, including after a continuation changed Turn id.
+  const unknown = runs.list({ sessionId, status: 'unknown', limit: 2 }).entries;
+  if (unknown.length === 1) {
+    const candidate = unknown[0]!;
+    if (candidate.createdRevision > state.revision || candidate.lastRevision > state.revision) {
+      throw new Error('Recovered Runtime Run is ahead of the current Session revision.');
+    }
+    return candidate;
+  }
+  if (unknown.length > 1) return undefined;
+
+  // Hydration must retain the most recently settled Run as the authoritative
+  // currentRun projection.  It is needed for a restarted TUI to render the
+  // final answer and to fence late ephemeral packets even when no Run is active.
+  // Walk all keyset pages: a long-lived Session can have more than the Store's
+  // page limit of settled Runs.
+  let candidate: RuntimeStoredRun | undefined;
+  let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
+  for (;;) {
+    const page = runs.list({
+      sessionId,
+      limit: 200,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const entry of page.entries) {
+      if (isFinalRunStatus(entry.status)) candidate = entry;
+    }
+    if (!page.hasMore) break;
+    if (
+      page.nextCursor === undefined ||
+      (cursor !== undefined &&
+        page.nextCursor.createdRevision === cursor.createdRevision &&
+        page.nextCursor.runId === cursor.runId)
+    ) {
+      throw new Error('Runtime Run hydration pagination did not advance.');
+    }
+    cursor = page.nextCursor;
+  }
+  if (!candidate) return undefined;
+  if (candidate.createdRevision > state.revision || candidate.lastRevision > state.revision) {
+    throw new Error('Settled Runtime Run is ahead of the current Session revision.');
+  }
+  return candidate;
 }
 
 function projectRunStatus(

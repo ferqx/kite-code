@@ -90,6 +90,7 @@ import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
 } from '#runtime-spi';
+import { rootToolInteractionOwner } from '../../bootstrap/runtime/interaction-owner';
 import { modelBuiltinEntry } from './builtin-executor';
 import { prepareDynamicMcpMechanism } from './mcp-executor';
 import { type AppSkillForkRequest, runAppSkillFork } from './skill-executor';
@@ -1409,6 +1410,7 @@ export async function executeAppRuntimeTools(params: {
                 type: 'auto_review.requested',
                 reviewId: genInteractionId(),
                 toolCallId,
+                owner: rootToolInteractionOwner(toolCallId),
                 toolName: request.name,
                 reason: outcome.decision.decision.reason,
                 approval,
@@ -1421,6 +1423,7 @@ export async function executeAppRuntimeTools(params: {
                 type: 'approval.requested',
                 interactionId: genInteractionId(),
                 toolCallId,
+                owner: rootToolInteractionOwner(toolCallId),
                 approval,
                 fullModeBypassEligible,
                 fullModePolicyBypassAllowed,

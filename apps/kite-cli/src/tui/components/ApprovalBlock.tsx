@@ -177,18 +177,9 @@ export default function ApprovalBlock({
       >
         <Text wrap="truncate-end">{approvalLabel}</Text>
       </Box>
-      {(route === 'auto' ||
-        (queueEntry?.matchCount != null && queueEntry.matchCount > 1) ||
-        queueEntry?.status === 'authorized_queued') && (
+      {(route === 'auto' || queueEntry?.status === 'authorized_queued') && (
         <Box marginTop={1} marginLeft={1} flexDirection="column">
           {route === 'auto' && <Text color={t.dim}>{translate('approval.routeAuto')}</Text>}
-          {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
-            <Text color={t.dim}>
-              {queueEntry.grant === 'same_command'
-                ? translate('approval.batchReleased', { count: queueEntry.matchCount })
-                : translate('approval.matchCount', { count: queueEntry.matchCount })}
-            </Text>
-          )}
           {queueEntry?.status === 'authorized_queued' && (
             <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
           )}

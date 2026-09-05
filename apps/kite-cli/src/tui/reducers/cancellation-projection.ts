@@ -1,3 +1,8 @@
+/**
+ * Canonical cancellation projection helpers. This module is intentionally
+ * imported only by handleClientEvent.ts; local Agent/UI reducers must never
+ * derive tool terminality from child fields or seal blocks themselves.
+ */
 import { getToolDetail } from '../components/render-utils';
 import type { ConsolidatedToolEntry, OutputBlock, TuiState } from '../types';
 import { buildToolSummaryLine } from './consolidateTools';
@@ -33,6 +38,7 @@ export function settleCancelledToolCard(
   return {
     ...block,
     status: 'cancelled',
+    presentationState: 'sealed',
     summary: 'Cancelled',
     detail: block.detail ?? getToolDetail(block.name, block.args),
     expanded: true,
@@ -61,7 +67,7 @@ function narrationBlocks(
   ].join('\n');
   if (!narration) return { blocks: [], nextBlockId };
   return {
-    blocks: [{ id: block.id, kind: 'text', content: narration }],
+    blocks: [{ id: block.id, kind: 'text', content: narration, presentationState: 'sealed' }],
     nextBlockId,
   };
 }
@@ -90,6 +96,7 @@ function settleCancelledSummaryForTurn(
     tools,
     summaryLine: buildToolSummaryLine(tools),
     active: false,
+    presentationState: 'sealed',
     latestActivity: undefined,
     totalElapsedMs: block.modelMs ?? now - block.createdAt,
     pendingCaption: undefined,
@@ -99,7 +106,15 @@ function settleCancelledSummaryForTurn(
     return { blocks: [settled], nextBlockId, changed: true };
   }
   return {
-    blocks: [settled, { id: nextBlockId, kind: 'text', content: block.pendingCaption }],
+    blocks: [
+      settled,
+      {
+        id: nextBlockId,
+        kind: 'text',
+        content: block.pendingCaption,
+        presentationState: 'sealed',
+      },
+    ],
     nextBlockId: nextBlockId + 1,
     changed: true,
   };
@@ -130,6 +145,7 @@ function projectCancelledSummaryEntry(
         ...block,
         tools,
         summaryLine: buildToolSummaryLine(tools),
+        presentationState: allSettled && !block.active ? 'sealed' : 'live',
         ...(allSettled ? { result: deriveToolSummaryResult(tools) } : {}),
       },
     ],
@@ -207,6 +223,7 @@ export function projectDurableUserCancelledTurn(
         {
           ...block,
           status: 'cancelled',
+          presentationState: 'sealed',
           summary: 'Cancelled',
           error: 'Cancelled',
           toolCallCount: block.steps.length,
@@ -256,8 +273,7 @@ export function projectDurableUserCancelledTurn(
     nextBlockId !== state.nextBlockId ||
     toolStartTimes !== state.toolStartTimes ||
     pendingToolCalls !== state.pendingToolCalls ||
-    state.currentThoughtSummaryId != null ||
-    state.thoughtPhaseStatus != null;
+    state.currentThoughtSummaryId != null;
   if (!globalChanged) return state;
 
   return {
@@ -267,6 +283,5 @@ export function projectDurableUserCancelledTurn(
     toolStartTimes,
     pendingToolCalls,
     currentThoughtSummaryId: undefined,
-    thoughtPhaseStatus: undefined,
   };
 }

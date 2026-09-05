@@ -54,7 +54,7 @@ describe('TUI PTY System — model streaming', () => {
   });
 
   test(
-    'streams complete answer components under one stable Thinking owner',
+    'buffers classification-pending answer components under one stable Thinking owner',
     async () => {
       const responseFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Stream an answer', { timeout: 15_000 });
@@ -72,7 +72,12 @@ describe('TUI PTY System — model streaming', () => {
         .screenFramesSince(responseFrames)
         .findIndex((frame) => screenContains(frame, 'STREAM_FIRST'));
       expect(firstAnswerFrameIndex).toBeGreaterThanOrEqual(0);
-      expect(screenContains(tui.viewport(), 'STREAM_FINAL')).toBe(false);
+      expect(
+        screenContains(
+          tui.screenFramesSince(responseFrames)[firstAnswerFrameIndex]!,
+          'STREAM_FINAL',
+        ),
+      ).toBe(true);
 
       await waitForText(() => tui.viewport(), 'STREAM_FINAL', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -89,6 +94,41 @@ describe('TUI PTY System — model streaming', () => {
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);
+
+      // The same runnable journey now switches to a content-only response and
+      // proves that the first committed frame is genuinely incremental.
+      server.setResponses([
+        {
+          message: {
+            content_chunks: ['CONTENT_FIRST\n\n', 'CONTENT_MIDDLE\n\n', 'CONTENT_FINAL'],
+          },
+          chunk_delay: 250,
+        },
+      ]);
+      const contentFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Stream content first', { timeout: 15_000 });
+      await waitForCondition(
+        () =>
+          tui
+            .screenFramesSince(contentFrames)
+            .some((frame) => screenContains(frame, 'CONTENT_FIRST')),
+        'the first content-first answer frame',
+        10_000,
+      );
+      const firstFrame = tui
+        .screenFramesSince(contentFrames)
+        .find((frame) => screenContains(frame, 'CONTENT_FIRST'));
+      expect(firstFrame).toBeDefined();
+      expect(screenContains(firstFrame!, 'CONTENT_FINAL')).toBe(false);
+      await waitForText(() => tui.viewport(), 'CONTENT_FINAL', 10_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      const contentClean = stripAnsi(tui.viewport());
+      expect(contentClean.lastIndexOf('CONTENT_FIRST')).toBeLessThan(
+        contentClean.lastIndexOf('CONTENT_MIDDLE'),
+      );
+      expect(contentClean.lastIndexOf('CONTENT_MIDDLE')).toBeLessThan(
+        contentClean.lastIndexOf('CONTENT_FINAL'),
+      );
     },
     TIMEOUT,
   );

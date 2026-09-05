@@ -56,8 +56,10 @@ export function useGlobalKeys(
         // while an approval overlay is focused.  It must never be translated
         // into the overlay's focused-reject action; that would leave queued,
         // authorized, or running siblings alive.
-        onAbort?.();
         dispatch({ type: 'CTRL_C' });
+        // Paint the presentation-only cancellation receipt before the async
+        // Runtime command can synchronously deliver its terminal projection.
+        onAbort?.();
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         ctrlCTimerRef.current = setTimeout(() => {
           dispatch({ type: 'RESET_CTRL_C' });
@@ -73,8 +75,10 @@ export function useGlobalKeys(
         if (wizardEscBackRef?.current) return;
         if (layeredOverlayEscRef?.current) return;
         if (overlayActiveRef.current && onCancelInterrupt?.() === true) return;
-        if (!overlayActiveRef.current) onAbort?.();
         dispatch({ type: 'ESCAPE' });
+        // The local action owns only acknowledgement/keyboard coalescing; the
+        // Server terminal remains the lifecycle authority.
+        if (!overlayActiveRef.current) onAbort?.();
         return;
       }
       // 在任何其他键按下时重置 ctrlCPressed

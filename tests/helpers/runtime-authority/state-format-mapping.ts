@@ -63,7 +63,7 @@ export function mapHistoricalStateToState(input: {
   return Object.freeze({
     ...structuredClone(input.state),
     schemaVersion: 27,
-    formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
+    formatEpoch: 'kite-runtime-saq-v2-2026-09-05',
     session: Object.freeze({
       ...(session as Readonly<Record<string, unknown>>),
       projectId: input.projectId,

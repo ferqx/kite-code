@@ -449,7 +449,7 @@ function sessionMetadata(sessionId: string, updatedAt: number): RuntimeLogSessio
 
 function sessionProjection(sessionId: string, revision: number, status: 'idle' | 'running') {
   return {
-    schema: 'kite.runtime-projection.v1' as const,
+    schema: 'kite.runtime-projection.v2' as const,
     sessionId,
     revision,
     displayName: sessionId,
@@ -457,7 +457,17 @@ function sessionProjection(sessionId: string, revision: number, status: 'idle' |
     lifecycle: 'open' as const,
     interactionQueue: { revision, interactions: [] },
     ...(status === 'running'
-      ? { activeWork: { workId: `work-${sessionId}`, phase: 'building' as const, status } }
+      ? {
+          activeTask: { taskId: `task-${sessionId}`, phase: 'building' as const },
+          currentRun: {
+            runId: `run-${sessionId}`,
+            initialTurnId: `turn-${sessionId}`,
+            activeTurnId: `turn-${sessionId}`,
+            taskId: `task-${sessionId}`,
+            status,
+            revision,
+          },
+        }
       : {}),
   };
 }

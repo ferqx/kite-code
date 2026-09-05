@@ -521,6 +521,12 @@ function taskSuspension(
           childSubagentId: 'task-subagent-1',
           runtimeToolCallId: 'runtime-task-child-call-1',
           bindingDigest: 'task-approval-binding-1',
+          owner: {
+            kind: 'subagent_tool' as const,
+            toolCallId: 'task-child-call-1',
+            subagentId: 'task-subagent-1',
+            parentToolCallId: 'call-1',
+          },
           approval,
           createdAt: NEXT,
         }
@@ -538,6 +544,12 @@ function taskSuspension(
           childSubagentId: 'task-subagent-1',
           runtimeToolCallId: 'runtime-task-child-call-1',
           bindingDigest: 'task-approval-binding-1',
+          owner: {
+            kind: 'subagent_tool' as const,
+            toolCallId: 'task-child-call-1',
+            subagentId: 'task-subagent-1',
+            parentToolCallId: 'call-1',
+          },
           reason: 'The task child write requires auto review.',
           approval,
           requestFingerprint: 'task-request-fingerprint-1',
@@ -1848,6 +1860,7 @@ describe('App State Tool Pipeline persistence', () => {
       parentToolCallId: occupiedApproval.parentToolCallId,
       childSubagentId: occupiedApproval.childSubagentId,
       runtimeToolCallId: occupiedApproval.runtimeToolCallId,
+      owner: occupiedApproval.owner,
       approval: { ...occupiedApproval.approval, callId: 'occupied-call', tool: 'shell_execute' },
     });
     const beforeInteraction = seeded.getState().interactions;
@@ -2006,6 +2019,7 @@ describe('App State Tool Pipeline persistence', () => {
           grant: 'approve_once',
           receiptId: 'receipt-interaction-task-1',
           generation: 0,
+          owner: startSuspension.event.owner,
         });
       } else {
         harness.session.processEvent({
@@ -2018,6 +2032,7 @@ describe('App State Tool Pipeline persistence', () => {
             reviewerModelName: 'fixture-reviewer',
             durationMs: 1,
           },
+          owner: startSuspension.event.owner,
         });
       }
       expect(harness.session.getState().tools.calls['call-1']?.status).toBe('authorized_queued');
@@ -2070,6 +2085,7 @@ describe('App State Tool Pipeline persistence', () => {
       grant: 'approve_once',
       receiptId: 'receipt-interaction-task-1',
       generation: 0,
+      owner: startSuspension.event.owner,
     });
     harness.replaceLease();
     const resumeAcknowledgement = await harness.persistence.recordAttempt(

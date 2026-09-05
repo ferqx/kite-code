@@ -928,7 +928,8 @@ function sessionStatus(
 ): AgentApiSession['status'] {
   if (projection.lifecycle === 'unavailable') return 'unavailable';
   if (hasActiveInteraction) return 'waiting';
-  switch (projection.activeWork?.status) {
+  const status = projection.currentRun?.status;
+  switch (status) {
     case 'queued':
       return 'queued';
     case 'running':
@@ -936,6 +937,7 @@ function sessionStatus(
     case 'waiting':
       return 'waiting';
     case 'failed':
+    case 'recovery_required':
       return 'error';
     default:
       return 'idle';

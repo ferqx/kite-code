@@ -44,6 +44,8 @@ import OutputArea, {
   concurrentSubagentStepLimit,
   useStaticContent,
 } from '../src/tui/OutputArea';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
+import { projectOutputBlockTimeline } from '../src/tui/presentation/timeline';
 import { TuiUserInputProvider } from '../src/tui/provider';
 import { type Action, eventReducer as canonicalEventReducer } from '../src/tui/reducers';
 import type { RunStatusSnapshot } from '../src/tui/run-status';
@@ -57,22 +59,57 @@ import type {
   TuiState,
   Turn,
 } from '../src/tui/types';
+import { acceptedEnvelope } from './helpers/accepted-envelope';
 
 // ── Shared helpers ──
 
 type LayoutTestAction =
-  | Exclude<Action, { type: 'RUNTIME_EVENT' }>
+  | Exclude<Action, { type: 'ACCEPT_PRESENTATION_ENVELOPE' }>
   | {
-      type: 'RUNTIME_EVENT';
+      type: 'ACCEPT_PRESENTATION_ENVELOPE';
       event: RuntimeEvent | RuntimeClientEvent;
     };
 
 function eventReducer(state: TuiState, action: LayoutTestAction): TuiState {
-  if (action.type !== 'RUNTIME_EVENT') return canonicalEventReducer(state, action);
+  if (action.type !== 'ACCEPT_PRESENTATION_ENVELOPE') return canonicalEventReducer(state, action);
   const event = toClientEvent(action.event);
+  const currentRun = state.runtimeAuthority?.currentRun;
+  const currentTaskId = state.runtimeAuthority?.activeTask?.taskId ?? currentRun?.taskId;
+  const currentTurnId = currentRun?.activeTurnId ?? currentRun?.initialTurnId;
   return event === undefined
     ? state
-    : canonicalEventReducer(state, { type: 'RUNTIME_EVENT', event });
+    : canonicalEventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: acceptedEnvelope(event, {
+          ...(event.type === 'run.terminal' || currentRun?.runId === undefined
+            ? {}
+            : { runId: currentRun.runId }),
+          ...(event.type === 'task.terminal' || currentTaskId === undefined
+            ? {}
+            : { taskId: currentTaskId }),
+          ...(event.type === 'turn.terminal' || currentTurnId === undefined
+            ? {}
+            : { turnId: currentTurnId }),
+        }),
+      });
+}
+
+function activeRuntimeAuthority(
+  revision = 1,
+  runId = 'run-layout',
+  turnId = 'turn-layout',
+): NonNullable<TuiState['runtimeAuthority']> {
+  return {
+    revision,
+    interactionQueue: { revision, interactions: [] },
+    currentRun: {
+      runId,
+      initialTurnId: turnId,
+      activeTurnId: turnId,
+      status: 'running',
+      revision,
+    },
+  };
 }
 
 /**
@@ -167,17 +204,24 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         summary: event.result.ok ? 'Completed.' : 'Failed.',
       };
     case 'tool.failed':
-      return { type: 'tool.failed', toolId: event.toolCallId, summary: 'Tool execution failed.' };
+      return {
+        type: 'tool.failed',
+        toolId: event.toolCallId,
+        presentation: 'standalone',
+        summary: 'Tool execution failed.',
+      };
     case 'tool.rejected':
       return {
         type: 'tool.rejected',
         toolId: event.toolCallId,
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       };
     case 'tool.cancelled':
       return {
         type: 'tool.cancelled',
         toolId: event.toolCallId,
+        presentation: 'standalone',
         summary: 'Tool execution cancelled.',
       };
     case 'tool.file_change':
@@ -201,6 +245,8 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: event.subagent.toolName,
         status: 'started',
         arguments: event.subagent.toolArgs,
@@ -212,9 +258,10 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: event.subagent.toolName,
-        status: event.subagent.ok ? 'completed' : 'failed',
-        result: { ok: event.subagent.ok },
+        status: event.subagent.status,
         ...(event.subagent.summary === undefined ? {} : { summary: event.subagent.summary }),
         ...(event.subagent.totalLines === undefined
           ? {}
@@ -260,11 +307,15 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
       };
     case 'run.error':
       return {
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: event.turnId ?? 'runtime-run',
-        code: event.failure?.kind ?? event.outcome?.reasonCode ?? 'runtime_error',
-        retryable: event.failure?.retryable ?? event.recoverable,
-        recoveryEntry: event.outcome?.recoveryEntry ?? (event.recoverable ? 'retry' : 'new_run'),
+        status: 'failed',
+        outcome: {
+          status: event.outcome?.status ?? 'unknown',
+          reasonCode: event.failure?.kind ?? event.outcome?.reasonCode ?? 'runtime_error',
+          safeRetry: event.failure?.retryable ?? event.recoverable,
+          recoveryEntry: event.outcome?.recoveryEntry ?? (event.recoverable ? 'retry' : 'new_run'),
+        },
       };
     default:
       return undefined;
@@ -382,6 +433,7 @@ function fakeClientApproval(
     sessionRevision: 1,
     generation: 1,
     grants: ['approve_once', 'same_command'],
+    owner: { kind: 'root_tool', toolCallId: 'approval-client-test' },
     command: 'npm test',
     summary: 'Runtime requests your decision.',
     ...overrides,
@@ -395,6 +447,7 @@ function fakeClientPendingApproval(
   return {
     interactionId: interaction.interactionId,
     toolCallId: interaction.interactionId,
+    owner: interaction.owner,
     route: 'user',
     status: 'awaiting_user',
     sequence: 1,
@@ -1315,7 +1368,9 @@ describe('ModelSelector', () => {
         currentModel="model-0"
         currentProvider="provider-0"
         models={models}
-        onSelect={(model) => selected.push(model.name)}
+        onSelect={(model) => {
+          selected.push(model.name);
+        }}
         onClose={noop}
       />,
     );
@@ -1324,6 +1379,7 @@ describe('ModelSelector', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(lastFrame()).toContain('model-19');
     stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(selected).toEqual(['model-19']);
 
     const secondSelection: string[] = [];
@@ -1332,7 +1388,9 @@ describe('ModelSelector', () => {
         currentModel="model-0"
         currentProvider="provider-0"
         models={models}
-        onSelect={(model) => secondSelection.push(model.name)}
+        onSelect={(model) => {
+          secondSelection.push(model.name);
+        }}
         onClose={noop}
       />,
     );
@@ -1341,6 +1399,7 @@ describe('ModelSelector', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(secondRender.lastFrame()).toContain('provider-0');
     secondRender.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(secondSelection).toEqual(['model-0']);
   });
@@ -1435,7 +1494,6 @@ describe('ApprovalBlock', () => {
         queueEntry={fakeClientPendingApproval(approval, {
           sequence: 7,
           route: 'auto',
-          matchCount: 2,
         })}
       />,
     );
@@ -1444,7 +1502,6 @@ describe('ApprovalBlock', () => {
     expect(frame).not.toContain('Queue #7');
     expect(frame).not.toContain('Generation 3');
     expect(frame).not.toContain('approval-queue-7');
-    expect(frame).toContain('2 matching requests');
     expect(frame).not.toContain('workspace_write');
   });
 
@@ -2289,6 +2346,8 @@ describe('concurrent subagent dynamic height', () => {
       startedAt: Date.now(),
       concurrencyGroupId: 'batch-1',
       steps: Array.from({ length: 10 }, (_, stepIndex) => ({
+        stepId: `child-${childIndex + 1}-step-${stepIndex + 1}`,
+        toolCallId: `child-${childIndex + 1}-tool-${stepIndex + 1}`,
         toolName: `child_${childIndex + 1}_step_${String(stepIndex + 1).padStart(2, '0')}`,
         toolArgs: {},
         status: 'success' as const,
@@ -2381,6 +2440,8 @@ describe('concurrent subagent dynamic height', () => {
         ...block,
         steps: [
           {
+            stepId: `child-${index + 1}-step-1`,
+            toolCallId: `child-${index + 1}-tool-1`,
             toolName: 'read_file',
             toolArgs: { path: `/workspace/child-${index + 1}.ts` },
             status: 'pending' as const,
@@ -2662,28 +2723,6 @@ describe('concurrent subagent dynamic height', () => {
       <OutputAreaTestWrap running={true} turns={[{ blocks: queuedUser }]} onToggleReason={noop} />,
     );
     expect(view.lastFrame()).toContain('人工审批排队中');
-  });
-});
-
-describe('ownership-pending model text', () => {
-  test('stays hidden while the active Thought awaits model classification', () => {
-    const { lastFrame } = render(
-      <OutputArea
-        activeDynamicBlocks={[
-          {
-            id: 1,
-            kind: 'text',
-            content: 'MUST_STAY_HIDDEN_PENDING_TEXT',
-            responsePending: true,
-          },
-        ]}
-        mergedStaticBlocks={[]}
-        onToggleReason={noop}
-        columns={80}
-      />,
-    );
-
-    expect(lastFrame()).not.toContain('MUST_STAY_HIDDEN_PENDING_TEXT');
   });
 });
 
@@ -3349,18 +3388,18 @@ describe('BlockRenderer', () => {
     };
     const initial: TuiState = {
       ...createInitialState(),
-      running: true,
+      runtimeAuthority: activeRuntimeAuthority(),
       turns: [{ blocks: [activeCard] }],
       nextBlockId: 2,
     };
 
     let live = eventReducer(initial, { type: 'ESCAPE' });
-    expect(live.running).toBe(true);
+    expect(isTuiRunActive(live)).toBe(true);
     expect(live.turns[0]!.blocks[0]).toEqual(
       expect.objectContaining({ status: 'running', summary: '' }),
     );
     live = eventReducer(live, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.cancelled',
         toolCallId: 'shell-1',
@@ -3368,7 +3407,7 @@ describe('BlockRenderer', () => {
       },
     });
     live = eventReducer(live, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'turn.aborted',
         turnId: 'turn-1',
@@ -3377,7 +3416,7 @@ describe('BlockRenderer', () => {
       },
     });
     let replay = eventReducer(initial, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.cancelled',
         toolCallId: 'shell-1',
@@ -3385,7 +3424,7 @@ describe('BlockRenderer', () => {
       },
     });
     replay = eventReducer(replay, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'turn.aborted',
         turnId: 'turn-1',
@@ -3740,7 +3779,6 @@ describe('BlockRenderer', () => {
       id: 1,
       kind: 'tool_summary',
       active: false,
-      responsePending: true,
       latestActivity: {
         kind: 'thinking',
         text: 'the complete reasoning stream appears atomically',
@@ -4783,8 +4821,8 @@ describe('OutputArea', () => {
         },
       },
     ];
-    const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+    const state = events.reduce<TuiState>(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4824,7 +4862,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4868,7 +4906,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4904,7 +4942,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4929,7 +4967,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4978,7 +5016,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -5030,9 +5068,12 @@ describe('OutputArea', () => {
         recoverable: true,
       },
     ];
-    const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
-      createInitialState(),
+    const state = events.reduce<TuiState>(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      {
+        ...createInitialState(),
+        runtimeAuthority: activeRuntimeAuthority(1, 'runtime-run'),
+      },
     );
 
     const { lastFrame } = render(
@@ -5065,6 +5106,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'subagent-1',
+          stepId: 'subagent-1-step-1',
+          toolCallId: 'subagent-1-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'apps/kite-cli/src/tui/session-manager.ts' },
         },
@@ -5073,8 +5116,10 @@ describe('OutputArea', () => {
         type: 'subagent.tool_result',
         subagent: {
           id: 'subagent-1',
+          stepId: 'subagent-1-step-1',
+          toolCallId: 'subagent-1-tool-1',
           toolName: 'read_file',
-          ok: true,
+          status: 'completed',
           summary: 'found route',
         },
       },
@@ -5089,7 +5134,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
 
@@ -5127,6 +5172,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'interleaved-explore',
+          stepId: 'interleaved-explore-step-1',
+          toolCallId: 'interleaved-explore-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'ls -la' },
         },
@@ -5142,6 +5189,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'interleaved-review',
+          stepId: 'interleaved-review-step-1',
+          toolCallId: 'interleaved-review-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'README.md' },
         },
@@ -5169,14 +5218,16 @@ describe('OutputArea', () => {
         type: 'subagent.tool_result',
         subagent: {
           id: 'interleaved-explore',
+          stepId: 'interleaved-explore-step-1',
+          toolCallId: 'interleaved-explore-tool-1',
           toolName: 'shell_execute',
-          ok: true,
+          status: 'completed',
           summary: 'listed workspace',
         },
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
 
@@ -5219,7 +5270,7 @@ describe('OutputArea', () => {
       },
     ];
     const groupedState = groupedEvents.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const groupedRender = render(
@@ -5238,7 +5289,7 @@ describe('OutputArea', () => {
       return { type: 'subagent.started', subagent: { ...subagent, id: `sequential-${index}` } };
     });
     const sequentialState = sequentialEvents.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const sequentialRender = render(
@@ -5650,8 +5701,9 @@ describe('OutputArea', () => {
 // ── App (main layout) ──
 
 describe('App', () => {
-  function fakeState(overrides: Partial<TuiState> = {}): TuiState {
-    return {
+  function fakeState(overrides: Partial<TuiState> & { readonly running?: boolean } = {}): TuiState {
+    const { running, presentationTimeline, ...stateOverrides } = overrides;
+    const state: TuiState = {
       sessions: [],
       activeSessionId: null,
       turns: [],
@@ -5659,8 +5711,6 @@ describe('App', () => {
       interrupt: null,
       status: fakeStatus(),
       exited: false,
-      running: false,
-      cancellationPending: false,
       runCount: 0,
       showHelp: false,
       showModelSelector: false,
@@ -5681,8 +5731,21 @@ describe('App', () => {
       sessionServiceUnavailable: false,
       explorationSummaryIds: {},
       pendingToolCalls: {},
+      presentationTimeline: { renderEpoch: 0, items: [] },
       interactionMode: 'accept_edits',
-      ...overrides,
+      ...stateOverrides,
+      ...(running === true && stateOverrides.runtimeAuthority === undefined
+        ? { runtimeAuthority: activeRuntimeAuthority() }
+        : {}),
+    };
+    return {
+      ...state,
+      presentationTimeline:
+        presentationTimeline ??
+        projectOutputBlockTimeline(
+          state.turns.flatMap((turn) => turn.blocks),
+          state.sessionKey,
+        ),
     };
   }
 
@@ -5743,23 +5806,22 @@ describe('App', () => {
     expect(frame).not.toContain('Queued — waiting for the current turn to finish');
     expect(frame).not.toContain('more queued');
     expect(frame).not.toContain('other session');
-    expect(frame.match(/Working/g)).toHaveLength(1);
-    expect(frame.indexOf('Explore · Inspect events')).toBeLessThan(frame.indexOf('Working'));
-    expect(frame.indexOf('Working')).toBeLessThan(frame.indexOf('↵ 补充检查事件顺序'));
+    expect(frame).not.toContain('Working');
+    expect(frame.indexOf('Explore · Inspect events')).toBeLessThan(
+      frame.indexOf('↵ 补充检查事件顺序'),
+    );
     const lines = frame.split('\n');
-    const workingLine = lines.findIndex((line) => line.includes('Working'));
     const firstQueuedLine = lines.findIndex((line) => line.includes('↵ 补充检查事件顺序'));
     const secondQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第二个候选'));
     const thirdQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第三个候选'));
-    expect(firstQueuedLine).toBe(workingLine + 2);
     expect(secondQueuedLine).toBe(firstQueuedLine + 2);
     expect(thirdQueuedLine).toBe(secondQueuedLine + 2);
-    expect(lines[workingLine + 1]?.trim()).toBe('');
+    expect(lines[firstQueuedLine - 1]?.trim()).toBe('');
     expect(lines[firstQueuedLine + 1]?.trim()).toBe('');
     expect(lines[secondQueuedLine + 1]?.trim()).toBe('');
   });
 
-  test('keeps the mounted Working spinner when a queued prompt appears', async () => {
+  test('hides the Working status when a queued prompt appears', async () => {
     const initial = fakeState({
       activeSessionId: 'session-a',
       running: true,
@@ -5810,11 +5872,26 @@ describe('App', () => {
       />,
     );
     const queuedFrame = view.lastFrame() ?? '';
-    expect(queuedFrame).toContain('⋄ Working');
     expect(queuedFrame).toContain('↵ queued while working');
-    expect(queuedFrame.match(/Working/g)).toHaveLength(1);
+    expect(queuedFrame).not.toContain('Working');
     expect(queuedFrame.match(/Thinking /g)).toHaveLength(1);
     expect(queuedFrame.match(/read 1 file/g)).toHaveLength(1);
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          queuedPrompts: [{ id: 1, sessionId: 'session-a', text: 'queued while cancelling' }],
+          cancelRequestedRunId: 'run-layout',
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const cancellingFrame = view.lastFrame() ?? '';
+    expect(cancellingFrame).toContain('↵ queued while cancelling');
+    expect(cancellingFrame).toContain('Cancelling');
   });
 
   test('keeps the Delegating projection identical when queued prompts change', () => {
@@ -5832,6 +5909,8 @@ describe('App', () => {
         durationMs: 11_000,
         concurrencyGroupId: 'queue-concurrency-group',
         steps: Array.from({ length: 4 }, (_, stepIndex) => ({
+          stepId: `queue-child-${index + 1}-step-${stepIndex + 1}`,
+          toolCallId: `queue-child-${index + 1}-tool-${stepIndex + 1}`,
           toolName: `step_${index + 1}_${stepIndex + 1}`,
           toolArgs: {},
           status: stepIndex < 3 ? ('success' as const) : ('pending' as const),
@@ -5844,28 +5923,47 @@ describe('App', () => {
       runPromptPresented: true,
       turns: [{ blocks: subagents }],
     });
+    const updateInitial = (overrides: Partial<TuiState>): TuiState => {
+      const state = { ...initial, ...overrides };
+      return {
+        ...state,
+        presentationTimeline: projectOutputBlockTimeline(
+          state.turns.flatMap((turn) => turn.blocks),
+          state.sessionKey,
+        ),
+      };
+    };
     const view = render(
       <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const before = view.lastFrame() ?? '';
-    const delegatingBefore = before.slice(before.indexOf('Delegating'), before.indexOf('Working'));
+    const delegationProjection = (frame: string): string => {
+      const start = frame.indexOf('Delegating');
+      const queued = frame.indexOf('↵ ', start);
+      const stats = frame.indexOf('claude-opus', start);
+      const working = frame.indexOf('Working', start);
+      const workingStart = working >= 0 ? frame.lastIndexOf('\n', working) + 1 : working;
+      const boundaries = [queued, stats, workingStart].filter((index) => index >= 0);
+      const end = boundaries.length > 0 ? Math.min(...boundaries) : frame.length;
+      return frame.slice(start, end).trimEnd();
+    };
+    const delegatingBefore = delegationProjection(before);
 
     view.rerender(
       <App
-        state={{
-          ...initial,
+        state={updateInitial({
           queuedPrompts: [
             { id: 1, sessionId: 'session-a', text: '额' },
             { id: 2, sessionId: 'session-a', text: '第二条' },
           ],
-        }}
+        })}
         dispatch={noop}
         onToggleReason={noop}
         provider={fakeProvider()}
       />,
     );
     const after = view.lastFrame() ?? '';
-    const delegatingAfter = after.slice(after.indexOf('Delegating'), after.indexOf('Working'));
+    const delegatingAfter = delegationProjection(after);
 
     expect(delegatingAfter).toBe(delegatingBefore);
     expect(after.match(/Delegating · 3 agents/g)).toHaveLength(1);
@@ -5883,7 +5981,7 @@ describe('App', () => {
     ];
     view.rerender(
       <App
-        state={{ ...initial, turns: [{ blocks: completedSubagents }], queuedPrompts }}
+        state={updateInitial({ turns: [{ blocks: completedSubagents }], queuedPrompts })}
         dispatch={noop}
         onToggleReason={noop}
         provider={fakeProvider()}
@@ -5895,12 +5993,10 @@ describe('App', () => {
 
     view.rerender(
       <App
-        state={{
-          ...initial,
-          running: false,
+        state={updateInitial({
           turns: [{ blocks: completedSubagents }],
           queuedPrompts,
-        }}
+        })}
         dispatch={noop}
         onToggleReason={noop}
         provider={fakeProvider()}
@@ -5912,8 +6008,7 @@ describe('App', () => {
 
     view.rerender(
       <App
-        state={{
-          ...initial,
+        state={updateInitial({
           turns: [
             { blocks: completedSubagents },
             {
@@ -5928,7 +6023,7 @@ describe('App', () => {
             },
           ],
           queuedPrompts: [{ id: 2, sessionId: 'session-a', text: '第二条' }],
-        }}
+        })}
         dispatch={noop}
         onToggleReason={noop}
         provider={fakeProvider()}
@@ -5958,6 +6053,8 @@ describe('App', () => {
         concurrencyGroupId: 'enter-owner-group',
         steps: [
           {
+            stepId: `enter-owner-child-${index + 1}-step-1`,
+            toolCallId: `enter-owner-child-${index + 1}-tool-1`,
             toolName: `read_${index + 1}`,
             toolArgs: {},
             status: 'pending',
@@ -6007,12 +6104,22 @@ describe('App', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(promptValue).toBe('嗯');
     const before = view.lastFrame() ?? '';
-    const delegatingBefore = before.slice(before.indexOf('Delegating'), before.indexOf('Working'));
+    const delegationProjection = (frame: string): string => {
+      const start = frame.indexOf('Delegating');
+      const queued = frame.indexOf('↵ ', start);
+      const stats = frame.indexOf('claude-opus', start);
+      const working = frame.indexOf('Working', start);
+      const workingStart = working >= 0 ? frame.lastIndexOf('\n', working) + 1 : working;
+      const boundaries = [queued, stats, workingStart].filter((index) => index >= 0);
+      const end = boundaries.length > 0 ? Math.min(...boundaries) : frame.length;
+      return frame.slice(start, end).trimEnd();
+    };
+    const delegatingBefore = delegationProjection(before);
 
     view.stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 20));
     const after = view.lastFrame() ?? '';
-    const delegatingAfter = after.slice(after.indexOf('Delegating'), after.indexOf('Working'));
+    const delegatingAfter = delegationProjection(after);
 
     expect(after).toContain('↵ 嗯');
     expect(delegatingAfter).toBe(delegatingBefore);
@@ -6314,6 +6421,7 @@ describe('App', () => {
     expect(frame).toContain('Tool approval');
     expect(frame).toContain('Allow once');
     expect(frame).not.toContain('Waiting...');
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -6375,6 +6483,8 @@ describe('App', () => {
       approvalState: 'awaiting_user',
       steps: [
         {
+          stepId: 'approval-child-no-key-leak-step-1',
+          toolCallId: 'approval-child-no-key-leak-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'find apps/kite-cli/src -type f' },
           status: 'awaiting_approval',
@@ -6574,7 +6684,6 @@ describe('App', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 2_000,
-      thoughtPhaseStatus: 'awaiting_terminal',
       turns: [
         {
           blocks: [
@@ -6582,7 +6691,6 @@ describe('App', () => {
               id: 1,
               kind: 'text',
               content: 'Done. Here is the result.',
-              responsePending: true,
             },
           ],
         },
@@ -6638,13 +6746,17 @@ describe('App', () => {
         },
       ],
     });
-    const failures: RuntimeClientEvent[] = [
+    const failures: Array<Extract<RuntimeClientEvent, { type: 'run.terminal' }>> = [
       {
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: 'run-failed',
-        code: 'persistence_unavailable',
-        retryable: false,
-        recoveryEntry: 'reconcile',
+        status: 'failed',
+        outcome: {
+          status: 'unknown',
+          reasonCode: 'persistence_unavailable',
+          safeRetry: false,
+          recoveryEntry: 'reconcile',
+        },
       },
       {
         type: 'run.terminal',
@@ -6654,8 +6766,20 @@ describe('App', () => {
     ];
 
     for (const failure of failures) {
-      const failed = eventReducer(active, { type: 'RUNTIME_EVENT', event: failure });
-      expect(failed.running).toBe(false);
+      const failed = eventReducer(
+        {
+          ...active,
+          runtimeAuthority: {
+            ...active.runtimeAuthority!,
+            currentRun: {
+              ...active.runtimeAuthority!.currentRun!,
+              runId: failure.runId,
+            },
+          },
+        },
+        { type: 'ACCEPT_PRESENTATION_ENVELOPE', event: failure },
+      );
+      expect(isTuiRunActive(failed)).toBe(false);
       const view = render(
         <App state={failed} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
       );
@@ -6713,12 +6837,12 @@ describe('App', () => {
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain(question.question);
-    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
-  test('keeps Working while reviewing a plan', () => {
+  test('hides the run status while reviewing a plan', () => {
     const state = fakeState({
       interrupt: { kind: 'plan_review', plan: fakePlan() },
       running: true,
@@ -6730,7 +6854,7 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('Plan review');
-    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -6789,12 +6913,16 @@ describe('SubAgentBlock rendering', () => {
       durationMs: 0,
       steps: [
         {
+          stepId: 'sub-1-read-step-1',
+          toolCallId: 'sub-1-read-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'auth.ts' },
           status: 'success' as const,
           ok: true,
         },
         {
+          stepId: 'sub-1-edit-step-1',
+          toolCallId: 'sub-1-edit-tool-1',
           toolName: 'edit_file',
           toolArgs: { path: 'auth.ts' },
           status: 'success' as const,
@@ -6860,6 +6988,7 @@ describe('SubAgentBlock rendering', () => {
     ['queued_auto_review', '等待自动审查'],
     ['queued_user_approval', '人工审批排队中'],
     ['auto_reviewing', '自动审查中'],
+    ['authorized_queued', '已授权 · 等待执行'],
     ['awaiting_user', '等待你的批准'],
   ] as const)('renders a suspended subagent in the %s approval phase', (approvalState, label) => {
     const block = {
@@ -6876,6 +7005,8 @@ describe('SubAgentBlock rendering', () => {
       approvalState,
       steps: [
         {
+          stepId: 'sub-waiting-step-1',
+          toolCallId: 'sub-waiting-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'pwd' },
           status: 'awaiting_approval' as const,
@@ -6986,7 +7117,15 @@ describe('SubAgentBlock rendering', () => {
       summary: longSummary,
       toolCallCount: 3,
       durationMs: 1200,
-      steps: [{ toolName: 'read_file', toolArgs: {}, status: 'success' as const }],
+      steps: [
+        {
+          stepId: 'sub-1-read-step-1',
+          toolCallId: 'sub-1-read-tool-1',
+          toolName: 'read_file',
+          toolArgs: {},
+          status: 'success' as const,
+        },
+      ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
@@ -7000,6 +7139,8 @@ describe('SubAgentBlock rendering', () => {
   test('running block limits visible steps', () => {
     const steps = Array.from({ length: 15 }, (_, i) => ({
       status: 'pending' as const,
+      stepId: `sub-1-step-${i + 1}`,
+      toolCallId: `sub-1-tool-${i + 1}`,
       toolName: `step_${String(i + 1).padStart(2, '0')}`,
       toolArgs: {},
     }));
@@ -7035,8 +7176,20 @@ describe('SubAgentBlock rendering', () => {
       toolCallCount: 2,
       durationMs: 0,
       steps: [
-        { toolName: 'read_file', toolArgs: { path: 'one.ts' }, status: 'success' as const },
-        { toolName: 'read_file', toolArgs: { path: 'two.ts' }, status: 'success' as const },
+        {
+          stepId: 'sub-compact-step-1',
+          toolCallId: 'sub-compact-tool-1',
+          toolName: 'read_file',
+          toolArgs: { path: 'one.ts' },
+          status: 'success' as const,
+        },
+        {
+          stepId: 'sub-compact-step-2',
+          toolCallId: 'sub-compact-tool-2',
+          toolName: 'read_file',
+          toolArgs: { path: 'two.ts' },
+          status: 'success' as const,
+        },
       ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} maxVisibleSteps={0} />);

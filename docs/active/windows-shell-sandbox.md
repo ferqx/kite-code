@@ -12,7 +12,7 @@ tests/qualification/sandbox/windows-network-setup.test.ts tests/qualification/sa
 tests/qualification/sandbox/platform-capability-verifier.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
 apps/kite-service/test/sandbox/app-sandbox-composition.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
 apps/kite-service/test/git-broker.test.ts apps/kite-service/test/runtime/git-tool-controller.test.ts
-apps/kite-cli/test/tui-exit-coordinator.test.ts apps/kite-service/test/isolated/session-manager.test.ts apps/kite-cli/test/tui-reducer.test.ts`、
+apps/kite-cli/test/tui-exit-coordinator.test.ts apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts apps/kite-cli/test/tui-reducer.test.ts`、
 `bun run typecheck`、`bun run check:docs`。native runner
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为

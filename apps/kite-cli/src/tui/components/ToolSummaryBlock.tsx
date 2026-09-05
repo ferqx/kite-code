@@ -298,10 +298,8 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // stateful rows (running blink / tool outcome colors); a settled pure
   // thought carries no status. Two leading spaces keep the label aligned
   // with tool-block names. Placed after all hooks (rules-of-hooks).
-  // `responsePending` keeps the block mutable until the terminal model event,
-  // but it is not a visual expansion state. The first visible text event has
-  // already ended the Thought from the user's perspective, so collapse its
-  // reasoning/tool details immediately while retaining terminal ownership.
+  // A sealed summary is not a visual expansion state. The first visible text
+  // event has already ended the Thought from the user's perspective.
   if (!isRunning) {
     return (
       <Box flexDirection="column">

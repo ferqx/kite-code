@@ -57,6 +57,14 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
   零进展候选，全部后台 sibling 收敛、待发布事件排空且 revision 仍完全未前进后才可停止。全部 sibling 终结后必须继续模型调用并
   产生明确 Run/Turn terminal；runner 意外返回时必须在同一 durable batch 持久化失败与 Turn abort，不能留下孤立的 `running` Run或
   投影虚假的 completed。
+- `CliRuntimeBridge`不维护`#running/#activeWork`影子生命周期；admission读取Coordinator，投影读取committed
+  Task与Store Run。bridge/presentation异常若发生在active Turn内，会原子持久化unknown outcome与`turn.aborted`，使Store Run进入
+  recovery-required边界；缺少真实Turn identity的`run.error`不会伪造Run id进入Client。
+- 模型选择保存成功后只更新desired config；active Run继续使用`start_turn` admission时冻结的完整配置与真实Provider route，
+  下一Run才解析desired config。Runtime投影在active期间保持该Run的model identity，不能让Header先于Provider request切换。
+- Kernel event到Runtime Client的投影使用穷尽coverage表；每个event必须明确归类为client-visible、internal-only、
+  client-unavailable或由canonical event规范化。新增event不得通过`default: undefined`静默消失，无法安全投影时只发布有界
+  `unavailable`。
 - 用户取消并发Subagent后，当前execution owner必须在释放Session单飞权之前完成全部Provider lifecycle cleanup；cleanup pending时
   后继`start_turn`只返回`runtime_busy`。同进程cleanup保留取消事务已写入的waived capability终态，只有真正的restore/crash恢复才收敛unknown。
 - default TUI/CLI 不启动 HTTP，也不发现 daemon；`kite web` 只读取已经运行的 daemon status。
