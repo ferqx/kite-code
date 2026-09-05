@@ -65,6 +65,7 @@ export {
   runtimeHostCurrentStateEventTypes,
   runtimeHostStateAdmitCurrentRuntimeEvent,
   runtimeHostStateAssertCurrentRuntimeEvent,
+  runtimeHostStateAssertReadableRuntimeEvent,
 } from './format/event-codec';
 export type {
   StateRuntimeRestoreInput,

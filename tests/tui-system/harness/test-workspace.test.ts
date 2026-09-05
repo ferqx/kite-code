@@ -38,7 +38,7 @@ function writeStoreObserverFixture(
     databasePath,
     codec: {
       encodeEvent: JSON.stringify,
-      decodeEvent: JSON.parse,
+      decodeEvent: (json: string) => JSON.parse(json) as Record<string, unknown>,
       encodeState: JSON.stringify,
       decodeState: <T>(json: string) => JSON.parse(json) as T,
       snapshotMetadata: (state) => ({

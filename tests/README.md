@@ -64,6 +64,8 @@ candidate解析；两条路径都要求client/child build identity与initialize 
 source profile读取第一个的History；两边`/status`均无Service PID、Web URL或build drift。`startup`与`session-persistence`同时固定
 strict JSON可选字段、退出后facts保留与新TUI恢复。`file-rewind`还固定恢复目标先完成continuation准入：历史打开保持observer-only，
 第一次真实mutation才发送`resume_session`，连续rewind产生三个durable Session。
+TUI system harness 的最小Store codec保持与production storage port签名一致，包括event decode的可选持久sequence context；fixture本身
+仍只解析测试JSON，不实现第二套兼容或identity逻辑。
 
 `tests/release/app-server-daemon.test.ts`固定显式daemon start/status/stop、同protocol跨build client、未知capability拒绝、双client History共享
 与普通disconnect不终止owner；`tests/tui-system/scenarios/app-server-daemon.test.ts`通过真实PTY固定显式`--server`连接以及active Turn stop/drain。

@@ -47,6 +47,19 @@ const TERMINAL_APPROVAL_STATUSES = new Set([
   'rejected',
   'expired',
 ]);
+const IMMEDIATELY_PRECEDING_EVENT_TYPES = new Set([
+  'approval.requested',
+  'approval.granted',
+  'approval.rejected',
+  'approval.command_replaced',
+  'approval.batch_released',
+  'approval.session_grants_cleared',
+  'auto_review.requested',
+  'auto_review.completed',
+  'subagent.step',
+  'subagent.tool_result',
+  'model.retry',
+]);
 
 /** Exact State half of a Runtime Store generation offline-maintenance barrier. */
 export function isRuntimeHostStateSettledForMigration(state: Readonly<AgentState>): boolean {
@@ -102,8 +115,45 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
       assertCurrentRuntimeEvent(event);
       return encodeCurrentRuntimeEventJson(event);
     },
-    decodeEvent(json: string): RuntimeEvent {
-      return decodeCurrentRuntimeEventJson(json);
+    decodeEvent(json: string, context?: RuntimeCompatibleEventContext): RuntimeEvent {
+      try {
+        const decoded = decodeCurrentRuntimeEventJson(json);
+        try {
+          assertCurrentRuntimeEventForWrite(decoded);
+          return decoded;
+        } catch (error) {
+          if (decoded.type !== 'subagent.step' && decoded.type !== 'subagent.tool_result') {
+            return decoded;
+          }
+          const converted = convertLegacyRuntimeEventJson(json, context?.sequence ?? 0);
+          if (converted.status !== 'converted') throw error;
+          assertCurrentRuntimeEvent(converted.event);
+          return converted.event as unknown as RuntimeEvent;
+        }
+      } catch (error) {
+        let value: unknown;
+        try {
+          value = JSON.parse(json) as unknown;
+        } catch {
+          throw error;
+        }
+        const candidate = record(value);
+        if (
+          !candidate ||
+          typeof candidate.type !== 'string' ||
+          !IMMEDIATELY_PRECEDING_EVENT_TYPES.has(candidate.type)
+        ) {
+          throw error;
+        }
+        const converted = convertLegacyRuntimeEventJson(json, context?.sequence ?? 0);
+        if (converted.status !== 'converted') throw error;
+        try {
+          assertCurrentRuntimeEvent(converted.event);
+          return converted.event as unknown as RuntimeEvent;
+        } catch {
+          throw error;
+        }
+      }
     },
     decodeCompatibleEvent(
       json: string,
@@ -142,7 +192,20 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
       return encodeCurrentAgentStateJson(requireState(state));
     },
     decodeState<T = AgentState>(json: string): T {
-      return decodeCurrentAgentStateJson(json) as unknown as T;
+      try {
+        return decodeCurrentAgentStateJson(json) as unknown as T;
+      } catch (error) {
+        let value: unknown;
+        try {
+          value = JSON.parse(json) as unknown;
+        } catch {
+          throw error;
+        }
+        if (classifyAgentStateFormat(value) !== 'state27') throw error;
+        const migrated = decodeAgentStateWithCompatibility(json);
+        if (migrated.status !== 'migrated') throw error;
+        return migrated.state as unknown as T;
+      }
     },
     decodeCompatibleState(json: string, format: RuntimeCompatibleRecordFormat): AgentState | null {
       let value: unknown;

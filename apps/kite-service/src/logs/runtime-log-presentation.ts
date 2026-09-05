@@ -5,7 +5,7 @@ import type {
 } from '@kite-ai/runtime-contract';
 import {
   type StateRuntimeEvent as RuntimeEvent,
-  runtimeHostStateAssertCurrentRuntimeEvent,
+  runtimeHostStateAssertReadableRuntimeEvent,
 } from '@kite-ai/runtime-host';
 import type { RuntimeLogEventReadPage, RuntimeLogEventRecord } from '@kite-ai/runtime-host/storage';
 import { projectRuntimeClientText as safeText } from '../runtime-client/safe-text';
@@ -86,7 +86,7 @@ export function projectRuntimeLogEvent(
   record: RuntimeLogEventRecord<RuntimeEvent>,
 ): RuntimeLogEventEntry {
   const event = record.event;
-  runtimeHostStateAssertCurrentRuntimeEvent(event);
+  runtimeHostStateAssertReadableRuntimeEvent(event);
   const base: RuntimeLogEventEntry = {
     sessionId: record.sessionId,
     sequence: record.sequence,

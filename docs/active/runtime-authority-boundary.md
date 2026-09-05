@@ -30,6 +30,11 @@ reconciliation把上一generation全部prepared事实改为unknown，并与clean
 SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
 scope；无Session归属的Artifact GC仍关闭。App Server owner不取得Workspace process lock；旧lock不再有production caller。
 
+State 27 的 `saq-v1 → saq-v2` 只读过渡不改变 Store generation，因此现有 `kite-session.sqlite` 可以同时包含旧
+snapshot/event bytes 与新 writer。Store codec 在读侧仅接受这个精确前代 State epoch，并在内存中迁移；旧 Subagent event identity
+按持久 sequence 合成，旧 approval/review authority 投影为 inert history。写侧仍只接纳当前 State/event，未知或损坏事件继续 fail closed。
+History/日志 projector 使用独立的 readable-event validator，不能把兼容事件重新送回 writer admission。
+
 KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App进程按Session command显式acquire/renew execution handle，并让整条异步
 Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
 execution projection并在cancel/dispose处理；Store list/get/checkpoint在一个read snapshot完成，不会因另一个App Server读取或退出而取得/释放

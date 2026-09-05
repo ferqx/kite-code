@@ -4,7 +4,7 @@ import {
   type RuntimeClientEvent,
   type RuntimeToolDisplayName,
 } from '@kite-ai/runtime-contract';
-import { runtimeHostStateAssertCurrentRuntimeEvent } from '@kite-ai/runtime-host';
+import { runtimeHostStateAssertReadableRuntimeEvent } from '@kite-ai/runtime-host';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { runtimeClientEventCoverageDecision } from './event-coverage';
 import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
@@ -21,7 +21,7 @@ export function projectRuntimeClientEvent(
   event: RuntimeEvent,
   context: RuntimeClientEventProjectionContext,
 ): RuntimeClientEvent | undefined {
-  runtimeHostStateAssertCurrentRuntimeEvent(event);
+  runtimeHostStateAssertReadableRuntimeEvent(event);
   switch (event.type) {
     case 'user.message_appended':
       return {

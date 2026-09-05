@@ -104,7 +104,7 @@ export function createSqliteEventStore<Event>(input: {
     return rows.map((row) => ({
       id: row.id,
       thread_id: row.thread_id,
-      event: input.codec.decodeEvent(row.event_json),
+      event: input.codec.decodeEvent(row.event_json, { sequence: row.revision }),
       created_at: row.created_at,
       ...(row.event_id ? { event_id: row.event_id } : {}),
       revision: row.revision,
@@ -125,7 +125,9 @@ export function createSqliteEventStore<Event>(input: {
       const rows = selectEventSummaryBatch.all(sessionId, sequence);
       for (const row of rows) {
         sequence = row.sequence;
-        const summary = input.codec.eventSummary(input.codec.decodeEvent(row.event_json));
+        const summary = input.codec.eventSummary(
+          input.codec.decodeEvent(row.event_json, { sequence: row.sequence }),
+        );
         if (summary?.isSessionNameCandidate) return summary;
       }
       if (rows.length < 32) return null;

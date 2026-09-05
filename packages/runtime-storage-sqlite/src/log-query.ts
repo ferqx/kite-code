@@ -129,7 +129,7 @@ function pageEventRow<Event>(
   }
   let event: Event;
   try {
-    event = codec.decodeEvent(row.event_json);
+    event = codec.decodeEvent(row.event_json, { sequence: row.sequence });
   } catch {
     throw new SqliteRuntimeLogQueryError('corrupt_event', 'A durable event could not be decoded.');
   }

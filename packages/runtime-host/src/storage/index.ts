@@ -53,7 +53,7 @@ export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
   /** Re-encode already-decoded history while preserving read-only compatibility during fork. */
   encodeHistoricalEvent?(event: Event): string;
-  decodeEvent(json: string): Event;
+  decodeEvent(json: string, context?: RuntimeCompatibleEventContext): Event;
   /**
    * Decode one explicitly supported historical event into the current
    * in-memory event contract. Unknown formats return null and stay isolated
