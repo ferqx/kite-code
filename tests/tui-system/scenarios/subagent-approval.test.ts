@@ -12,21 +12,27 @@
  * approvalRequiredBlock → subagent.suspended → approval.requested chain.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS } from '@kite-ai/builtin-runtime/subagent';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitUserMessage } from '../harness/input-helpers';
+import { submitUserMessage, submitUserMessageForDeferredDelivery } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
   waitForCondition,
+  waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -159,7 +165,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
           return (
             !screenContains(viewport, '人工审批队列') &&
             !screenContains(viewport, '工具授权') &&
-            (screenContains(viewport, '已授权 · 等待执行') || screenContains(viewport, '执行中'))
+            (screenContains(viewport, '已授权 · 等待执行') || screenContains(viewport, '进行中'))
           );
         },
         'exact child approval to leave the human queue after its durable acknowledgement',
@@ -203,6 +209,152 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     'runs the complete external-write approval journey',
     () => journey.run(),
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
+});
+
+describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
+
+  beforeEach(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'accept_edits',
+      },
+    });
+    externalFile = join(workspace.home, 'cancelled-subagent-write.txt');
+
+    // Keep both model responses explicitly aborted.  The first response still
+    // creates a real child; the second response reaches the child approval
+    // boundary.  No continuation response is allowed after any cancellation
+    // key, which makes an accidental parent-model continuation observable as
+    // an exhausted/invalid fixture request.
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will delegate the external write.',
+          tool_calls: [
+            {
+              id: 'call_cancelled_child',
+              name: 'task',
+              args: {
+                name: 'Cancel child write',
+                subagent_type: 'code',
+                task: `Write a file at ${externalFile}. This operation will be cancelled by the user.`,
+              },
+            },
+          ],
+        },
+      },
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will write the delegated file.',
+          tool_calls: [
+            {
+              id: 'call_cancelled_child_write',
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'must not be written',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterEach(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test.each(['reject', 'escape', 'ctrl-c'] as const)(
+    'child approval %s leaves no manual approval or Working surface and never executes the tool',
+    async (action) => {
+      const prompt = `Cancel child approval with ${action}`;
+      await submitUserMessage(tui, server, prompt, { timeout: 15_000 });
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '工具授权') &&
+            screenContains(viewport, '❯ 允许一次') &&
+            screenContains(viewport, '拒绝')
+          );
+        },
+        'child approval modal to become interactive',
+        15_000,
+      );
+
+      const approvalFrame = tui.viewport();
+      expect(screenContains(approvalFrame, '工具授权')).toBe(true);
+      expect(screenContains(approvalFrame, 'Working')).toBe(false);
+      expect(screenContains(approvalFrame, 'cancelled-subagent-write')).toBe(true);
+      const requestCountBeforeAction = server.getRequestCount();
+
+      if (action === 'reject') {
+        tui.write('\x1b[B');
+        await waitForText(() => tui.viewport(), '❯ 拒绝', 5_000);
+        tui.write('\r');
+      } else if (action === 'escape') {
+        tui.write('\x1b');
+      } else {
+        tui.write('\x03');
+      }
+
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '❯') &&
+            !screenContains(viewport, '工具授权') &&
+            !screenContains(viewport, 'Working')
+          );
+        },
+        `child approval ${action} to return to the prompt`,
+        15_000,
+      );
+      await waitForTuiReady(tui);
+
+      const output = stripAnsi(tui.viewport());
+      expect(output).not.toContain('工具授权');
+      expect(output).not.toContain('Working');
+      expect(output).toContain('❯');
+      expect(existsSync(externalFile)).toBe(false);
+      // Cancellation/rejection is terminal for this fixture; a parent model
+      // continuation would consume a third response and fail cleanup.
+      expect(server.getRequestCount()).toBe(requestCountBeforeAction);
+
+      const persisted = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, prompt));
+      expect(persisted).toBeDefined();
+      expect(
+        persisted!.events.some(
+          (event) =>
+            event.type === 'turn.aborted' ||
+            event.type === 'task.cancelled' ||
+            event.type === 'turn.completed' ||
+            event.type === 'run.error',
+        ),
+      ).toBe(true);
+      expect(
+        persisted!.events.some(
+          (event) =>
+            (event.type === 'capability.execution_started' ||
+              event.type === 'capability.execution_succeeded' ||
+              event.type === 'capability.execution_result_recorded') &&
+            'toolCallId' in event &&
+            event.toolCallId === 'call_cancelled_child_write',
+        ),
+      ).toBe(false);
+    },
+    TIMEOUT,
   );
 });
 
@@ -311,9 +463,33 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
   test(
     'auto review completes durably without relying on a transient client state',
     async () => {
+      const reviewFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Use a subagent to perform the external fixture write', {
         timeout: 15000,
       });
+
+      // The reviewer response is deliberately delayed. Capture the actual
+      // child phase instead of treating the final parent answer as proof that
+      // the intermediate projection was rendered correctly.
+      await waitForCondition(
+        () => {
+          const frames = tui.screenFramesSince(reviewFrames).map(stripAnsi);
+          return frames.some(
+            (frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'),
+          );
+        },
+        'auto-review child phase to become visible',
+        15_000,
+      );
+      const phaseFrame = tui
+        .screenFramesSince(reviewFrames)
+        .map(stripAnsi)
+        .find((frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'));
+      expect(phaseFrame).toBeDefined();
+      expect(phaseFrame).not.toContain('工具授权');
+      expect(phaseFrame).not.toContain('人工审批');
+      expect(phaseFrame).not.toContain('人工审批队列');
+      expect(phaseFrame).not.toContain('Working');
 
       await waitForText(
         () => tui.outputSinceLastAction(),
@@ -441,6 +617,358 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       expect(screenContains(output, '工具授权')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Bounded Sub-agent Finalization', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let finalizationWasToolFree = false;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    const evidenceFiles = Array.from({ length: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }, (_, index) => {
+      const filename = `bounded-evidence-${index + 1}.txt`;
+      writeFileSync(join(workspace.workspace, filename), `evidence ${index + 1}\n`);
+      return filename;
+    });
+    server.setResponses([
+      {
+        message: {
+          content: 'I will delegate a bounded exploration.',
+          tool_calls: [
+            {
+              id: 'call_bounded_explore',
+              name: 'task',
+              args: {
+                name: 'Bounded exploration',
+                subagent_type: 'explore',
+                task: 'Read the available evidence and report a concise result.',
+              },
+            },
+          ],
+        },
+      },
+      ...evidenceFiles.map((filename, index) => ({
+        ...(index === 0
+          ? {}
+          : {
+              expectedRequest: {
+                toolResults: [{ toolCallId: `call_bounded_read_${index}` }],
+              },
+            }),
+        message: {
+          tool_calls: [
+            {
+              id: `call_bounded_read_${index + 1}`,
+              name: 'read_file',
+              args: { path: filename },
+            },
+          ],
+        },
+      })),
+      {
+        response: (request) => {
+          const tools = request.body.tools;
+          finalizationWasToolFree = !Array.isArray(tools) || tools.length === 0;
+          return {
+            expectedRequest: {
+              toolResults: [
+                { toolCallId: `call_bounded_read_${DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS}` },
+              ],
+            },
+            message: { content: 'BOUNDED_CHILD_FINAL' },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_bounded_explore', contentIncludes: ['BOUNDED_CHILD_FINAL'] },
+          ],
+        },
+        message: { content: 'BOUNDED_PARENT_FINAL' },
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'forces a tool-free child summary and lets the parent Run complete',
+    async () => {
+      await submitUserMessage(tui, server, 'Run a bounded explore child', { timeout: 15_000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'BOUNDED_PARENT_FINAL', TIMEOUT);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const output = stripAnsi(tui.scrollback());
+      expect(finalizationWasToolFree).toBe(true);
+      expect(server.getRequestCount()).toBe(DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS + 3);
+      expect(output).toContain('BOUNDED_PARENT_FINAL');
+      expect(output).not.toContain('Working');
+      expect(output).not.toContain('Cancellation was not accepted');
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Concurrent Sub-agent Aggregation', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    server.setResponses([
+      {
+        message: {
+          content: 'I will inspect two independent areas concurrently.',
+          tool_calls: [
+            {
+              id: 'call_parallel_runtime',
+              name: 'task',
+              args: {
+                name: 'Inspect runtime packages',
+                subagent_type: 'explore',
+                task: 'Inspect the runtime package layout and report a short summary.',
+              },
+            },
+            {
+              id: 'call_parallel_tests',
+              name: 'task',
+              args: {
+                name: 'Inspect test layout',
+                subagent_type: 'explore',
+                task: 'Inspect the test layout and report a short summary.',
+              },
+            },
+          ],
+        },
+      },
+      { delay: 1_000, message: { content: 'Runtime package inspection complete.' } },
+      { delay: 1_000, message: { content: 'Test layout inspection complete.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_parallel_runtime',
+              contentIncludes: ['inspection complete'],
+            },
+            {
+              toolCallId: 'call_parallel_tests',
+              contentIncludes: ['inspection complete'],
+            },
+          ],
+        },
+        message: { content: 'Concurrent delegation completed.' },
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'keeps concurrently dispatched children in one stable card without duplicate React keys',
+    async () => {
+      await submitUserMessage(tui, server, 'Inspect runtime and tests with parallel subagents', {
+        timeout: 15_000,
+      });
+      await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 2 agents', TIMEOUT);
+
+      const active = stripAnsi(tui.viewport());
+      expect(active).toContain('Explore · Inspect runtime packages');
+      expect(active).toContain('Explore · Inspect test layout');
+      expect(active).not.toContain('Encountered two children with the same key');
+
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Concurrent delegation completed.',
+        TIMEOUT,
+      );
+      const completed = stripAnsi(tui.viewport());
+      expect(completed).toContain('Delegated · 2 agents · 2 succeeded');
+      expect(completed.match(/Delegated · 2 agents/g)).toHaveLength(1);
+      expect(completed).not.toContain('Encountered two children with the same key');
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeEach(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will inspect four areas concurrently.',
+          tool_calls: Array.from({ length: 4 }, (_, index) => ({
+            id: `call_cancel_child_${index + 1}`,
+            name: 'task',
+            args: {
+              name: `Inspect cancellation area ${index + 1}`,
+              subagent_type: 'explore',
+              task: `Inspect cancellation area ${index + 1} and report a short summary.`,
+            },
+          })),
+        },
+      },
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'call_cancel_empty_search',
+              name: 'search_content',
+              args: { pattern: 'KITE_EMPTY_SUBAGENT_CANCEL_SENTINEL_7D7C', path: '.' },
+            },
+          ],
+        },
+      },
+      ...Array.from({ length: 3 }, (_, index) => ({
+        delay: 5_000,
+        message: { content: `Cancellation area ${index + 2} inspection complete.` },
+      })),
+      {
+        expectedRequest: { toolResults: [{ toolCallId: 'call_cancel_empty_search' }] },
+        delay: 5_000,
+        message: { content: 'Cancellation area 1 inspection complete.' },
+      },
+      { message: { content: 'Queued successor completed after child cleanup.' } },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterEach(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'keeps child identities visible and admits a queued successor only after cancellation cleanup',
+    async () => {
+      await submitUserMessage(tui, server, 'Start four cancellable subagents', { timeout: 15_000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 4 agents', TIMEOUT);
+      const active = stripAnsi(tui.viewport());
+      for (let index = 1; index <= 4; index += 1) {
+        expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
+      }
+      await waitForCondition(
+        () => server.getRequestCount() === 6,
+        'an empty child search result to reach the next model request',
+        TIMEOUT,
+      );
+      expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 3_000, 300, false);
+      const idleConcurrentFrames = tui.markScreen();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await tui.settleScreen();
+      expect(tui.screenFramesSince(idleConcurrentFrames)).toEqual([]);
+      const activeGroupStart = active.indexOf('Delegating · 4 agents');
+      const activeGroupEnd = active.indexOf('\n\n', activeGroupStart);
+      const activeGroup = active
+        .slice(activeGroupStart, activeGroupEnd < 0 ? undefined : activeGroupEnd)
+        .replace(/\d+s/g, '<elapsed>');
+
+      const queued = await submitUserMessageForDeferredDelivery(
+        tui,
+        server,
+        'Run after cancellation cleanup',
+        {
+          acceptWhen: (viewport) => screenContains(viewport, '↵ Run after cancellation cleanup'),
+          timeout: 15_000,
+        },
+      );
+      expect(
+        server.hasRequestMessage('Run after cancellation cleanup', queued.requestBaseline),
+      ).toBe(false);
+      const queuedViewport = stripAnsi(tui.viewport());
+      const queuedGroupStart = queuedViewport.indexOf('Delegating · 4 agents');
+      const queuedGroupEnd = queuedViewport.indexOf('\n\n', queuedGroupStart);
+      const queuedGroup = queuedViewport
+        .slice(queuedGroupStart, queuedGroupEnd < 0 ? undefined : queuedGroupEnd)
+        .replace(/\d+s/g, '<elapsed>');
+      expect(queuedGroup).toBe(activeGroup);
+
+      const cancelStartedAt = Date.now();
+      const cancellationFrames = tui.markScreen();
+      tui.write('\x1b');
+      await waitForCondition(
+        () =>
+          tui
+            .screenFramesSince(cancellationFrames)
+            .some((frame) => screenContains(frame, 'Cancelling')),
+        'visible cancellation acknowledgement before authoritative terminal',
+        1_000,
+      );
+      expect(Date.now() - cancelStartedAt).toBeLessThan(1_000);
+      // Repeated keys must coalesce onto the same in-flight Runtime command.
+      tui.write('\x1b');
+      tui.write('\x1b');
+
+      await waitForCondition(
+        () =>
+          server
+            .getRequests()
+            .slice(queued.requestBaseline)
+            .some((request) =>
+              request.messages.some(
+                (message) =>
+                  message.role === 'user' && message.content === 'Run after cancellation cleanup',
+              ),
+            ),
+        'queued successor model request after subagent cleanup',
+        TIMEOUT,
+      );
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Queued successor completed after child cleanup.',
+        TIMEOUT,
+      );
+
+      const output = stripAnsi(tui.scrollback());
+      expect(output).not.toContain('Message was not sent: Internal error');
+      expect(output).not.toContain('Cancellation was not accepted');
+      expect(output).not.toContain('Invalid AcceptedPresentationEnvelope');
+      const successorPromptCount = output.split('Run after cancellation cleanup').length - 1;
+      if (successorPromptCount !== 1) {
+        throw new Error(
+          `expected one visible successor prompt, found ${successorPromptCount}:\n${output}`,
+        );
+      }
+      const delegatedCount = output.match(/Delegated · 4 agents/g)?.length ?? 0;
+      if (delegatedCount !== 1) throw new Error(`duplicate delegated output:\n${output}`);
+
+      const persisted = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Start four cancellable subagents'),
+      );
+      if (!persisted) throw new Error('Expected the cancelled predecessor turn.');
+      const types = persisted.events.map((event) => event.type);
+      const successorMessageIndex = persisted.events.findIndex(
+        (event) =>
+          event.type === 'user.message_appended' &&
+          event.content === 'Run after cancellation cleanup',
+      );
+      const cleanupIndexes = types.flatMap((type, index) =>
+        type === 'capability.subagent_cleanup_completed' ? [index] : [],
+      );
+      expect(cleanupIndexes).toHaveLength(4);
+      expect(successorMessageIndex).toBeGreaterThan(Math.max(...cleanupIndexes));
+      expect(types).not.toContain('capability.execution_unknown');
     },
     TIMEOUT,
   );

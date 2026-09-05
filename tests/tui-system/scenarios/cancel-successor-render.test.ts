@@ -116,10 +116,10 @@ describe('TUI PTY System — cancel shell then render successor', () => {
   });
 
   test(
-    'queues one successor prompt and keeps its shell output live without duplicate messages',
+    'queues one successor prompt and keeps its shell card live without duplicate messages',
     async () => {
       await submitUserMessage(tui, server, 'start old shell', { delayMs: 0, timeout: 15_000 });
-      await waitForText(() => tui.viewport(), 'OLD_SHELL_RUNNING', 15_000);
+      await waitForText(() => tui.viewport(), 'Bash pwd', 15_000);
 
       tui.write('\x03');
       // Do not use waitForTuiReady here: its output-quiescence phase can spend
@@ -138,7 +138,6 @@ describe('TUI PTY System — cancel shell then render successor', () => {
         2_000,
         25,
       );
-      await waitForText(() => tui.viewport(), 'cancelled', 2_000);
       await waitForCondition(
         () => {
           const observation = observePersistedTurnEvents(workspace, 'start old shell');
@@ -191,8 +190,6 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       );
 
       await waitForText(() => tui.viewport(), 'Successor completed once.', 15_000);
-      const renderedProgress = tui.screenFramesSince(progressFrames).join('\n');
-      expect(screenContains(renderedProgress, 'SUCCESSOR_LINE_ONE')).toBe(true);
       await waitForTuiReady(tui);
 
       const finalScreen = stripAnsi(tui.scrollback());

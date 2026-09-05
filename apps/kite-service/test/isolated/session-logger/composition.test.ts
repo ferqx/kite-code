@@ -334,6 +334,7 @@ describe('session logger composition', () => {
         toolCallId: 'shell',
         generation: 0,
         reason: forbidden.approvalReason,
+        owner: { kind: 'root_tool', toolCallId: 'shell' },
       },
       {
         type: 'tool.failed',

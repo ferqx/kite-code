@@ -1,7 +1,50 @@
 export {
+  createSqliteWorkspaceAuthority,
+  SQLITE_WORKSPACE_AUTHORITY_SCHEMA,
+  SQLITE_WORKSPACE_CONTROLLER_RECEIPT_SCHEMA,
+  SQLITE_WORKSPACE_DETACHED_RECOVERY_SCHEMA,
+  SQLITE_WORKSPACE_EFFECT_EVIDENCE_SCHEMA,
+  SQLITE_WORKSPACE_RECOVERY_STATE_SCHEMA,
+  SQLITE_WORKSPACE_RESOURCE_LEASE_SCHEMA,
+  type SqliteWorkspaceAbandonDetachedControllerInput,
+  type SqliteWorkspaceAuthority,
+  SqliteWorkspaceAuthorityError,
+  type SqliteWorkspaceAuthorityErrorCode,
+  type SqliteWorkspaceControllerLease,
+  type SqliteWorkspaceControllerLeaseBinding,
+  type SqliteWorkspaceControllerOperation,
+  type SqliteWorkspaceControllerOperationCode,
+  type SqliteWorkspaceControllerOperationInput,
+  type SqliteWorkspaceControllerOperationReceipt,
+  type SqliteWorkspaceControllerOperationResult,
+  type SqliteWorkspaceControllerState,
+  type SqliteWorkspaceControllerStatus,
+  type SqliteWorkspaceDetachControllerInput,
+  type SqliteWorkspaceEffectEvidence,
+  type SqliteWorkspaceEffectInspection,
+  type SqliteWorkspaceEffectPreparationInput,
+  type SqliteWorkspaceEffectPreparationResult,
+  type SqliteWorkspaceEffectTerminalInput,
+  type SqliteWorkspaceEffectTerminalResult,
+  type SqliteWorkspaceInitialControllerInput,
+  type SqliteWorkspaceIssueResumeCapabilityInput,
+  type SqliteWorkspaceLeaseOwner,
+  type SqliteWorkspaceMintDetachedRecoveryCapabilityInput,
+  type SqliteWorkspaceRecoveryState,
+  type SqliteWorkspaceRecoveryStatus,
+  type SqliteWorkspaceReleaseControlInput,
+  type SqliteWorkspaceRequestControlInput,
+  type SqliteWorkspaceResourceLease,
+  type SqliteWorkspaceResourceLeaseInput,
+  type SqliteWorkspaceResumeCapabilityValidation,
+  type SqliteWorkspaceResumeCapabilityValidationInput,
+  type SqliteWorkspaceResumeControllerInput,
+} from './authority';
+export {
   createSqliteRuntimeCompatibilityWriter,
   discoverSqliteRuntimeCompatibilitySource,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
+  SQLITE_RUNTIME_RUN_MIGRATION_SOURCE_PROFILE,
   type SqliteRuntimeCompatibilityEvent,
   type SqliteRuntimeCompatibilityFilePreimage,
   type SqliteRuntimeCompatibilityImportResult,
@@ -18,27 +61,219 @@ export {
   type SqliteRuntimeCompatibilityWriter,
 } from './compatibility';
 export {
+  createSqliteWorkspaceDirectoryOutbox,
+  SQLITE_SESSION_DIRECTORY_OUTBOX_MAX_PAGE_SIZE,
+  SQLITE_SESSION_DIRECTORY_OUTBOX_TABLE_,
+  type SqliteWorkspaceDirectoryOutbox,
+  type SqliteWorkspaceDirectoryOutboxEntry,
+  type SqliteWorkspaceDirectoryOutboxPage,
+} from './directory-outbox';
+export {
+  createKiteHomeArtifactStore,
+  KiteHomeArtifactError,
+  type KiteHomeArtifactErrorCode,
+  type KiteHomeArtifactGarbageCollectionInput,
+  type KiteHomeArtifactGarbageCollectionResult,
+  type KiteHomeArtifactStore,
+  type KiteHomeModelArtifactKind,
+  type KiteHomePlanArtifactReference,
+  type KiteHomePrivateArtifactReference,
+  type KiteHomeSubagentTaskArtifactKind,
+} from './kite-home-artifacts';
+export { createKiteHomeWorkspaceAuthority } from './kite-home-authority';
+export { createKiteHomeCheckpointStore } from './kite-home-checkpoints';
+export {
+  createKiteHomeCommandReceiptStore,
+  type KiteHomeCommandReceiptStore,
+} from './kite-home-command-receipts';
+export {
+  createKiteHomeDirectoryQuery,
+  type KiteHomeDirectoryQueryOptions,
+  type KiteHomeDirectoryQueryPort,
+  type KiteHomeDirectorySession,
+  type KiteHomeDirectoryWorkspace,
+} from './kite-home-directory';
+export {
+  createKiteHomeRecoveryIdentityLedger,
+  type KiteHomeRecoveryIdentityLedger,
+} from './kite-home-recovery-identities';
+export { createKiteHomeRuntimeRunStore } from './kite-home-runs';
+export { openKiteHomeRuntimeStorage } from './kite-home-runtime-file';
+export {
+  createKiteHomeWorkspaceRuntimeJournal,
+  type KiteHomeWorkspaceRuntimeJournal,
+} from './kite-home-runtime-journal';
+export {
+  createKiteHomeRuntimeStorageForConnection,
+  type KiteHomeRuntimeStorageOwner,
+} from './kite-home-runtime-storage';
+export {
+  assertKiteHomeStoreSchema,
+  assertKiteSessionStoreSchema,
+  initializeKiteHomeStoreSchema,
+  initializeKiteSessionStoreIfNeeded,
+  KITE_HOME_STORE_DDL,
+  KITE_HOME_STORE_FORMAT_EPOCH,
+  KITE_HOME_STORE_INDEXES,
+  KITE_HOME_STORE_SCHEMA_VERSION,
+  KITE_HOME_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+  KITE_SESSION_STORE_TABLE_COLUMNS,
+  KiteHomeStoreSchemaError,
+} from './kite-home-store';
+export {
+  createKiteHomeWorkspaceAdmissionPort,
+  createKiteHomeWorkspaceSessionStore,
+  type KiteHomeSessionBinding,
+  type KiteHomeWorkspaceAdmission,
+  type KiteHomeWorkspaceAdmissionPort,
+  type KiteHomeWorkspaceAdmissionResult,
+  type KiteHomeWorkspaceSessionStore,
+  KiteHomeWorkspaceStoreError,
+  type KiteHomeWorkspaceStoreErrorCode,
+} from './kite-home-workspaces';
+export {
+  createKiteHomeWriteTransactionPort,
+  KiteHomeWriteError,
+  type KiteHomeWriteTransactionPort,
+} from './kite-home-write';
+export {
+  createKiteSessionEffectPort,
+  KiteSessionEffectError,
+  type KiteSessionEffectErrorCode,
+  type KiteSessionEffectPort,
+  type KiteSessionEffectRecord,
+  type KiteSessionEffectState,
+} from './kite-session-effects';
+export {
+  createKiteSessionExecutionAuthority,
+  KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
+  type KiteSessionAcquireResult,
+  type KiteSessionExecutionAuthority,
+  KiteSessionExecutionAuthorityError,
+  type KiteSessionExecutionAuthorityErrorCode,
+  type KiteSessionExecutionAuthorityRecord,
+  type KiteSessionExecutionBinding,
+  type KiteSessionExecutionStatus,
+  type KiteSessionInitialExecutionInput,
+} from './kite-session-execution-authority';
+export {
+  createKiteSessionMutationPort,
+  KiteSessionMutationError,
+  type KiteSessionMutationErrorCode,
+  type KiteSessionMutationInput,
+  type KiteSessionMutationPort,
+} from './kite-session-mutation';
+export {
+  KiteSessionStoreOpenError,
+  type KiteSessionStoreOpenErrorCode,
+  openKiteSessionStoreDatabase,
+} from './kite-session-runtime-file';
+export {
+  type KiteSessionExecutionControl,
+  type KiteSessionExecutionHandle,
+  type KiteSessionRecoveryPort,
+  KiteSessionRuntimeStorageError,
+  type KiteSessionRuntimeStorageOwner,
+  openKiteSessionRuntimeStorage,
+} from './kite-session-runtime-storage';
+export {
+  admitNewWorkspaceStore,
+  assertSqliteCoordinatorCatalogActive,
+  assertSqliteRuntimeRunStoreActive,
+  assertSqliteWorkspaceStoreActive,
+  canRollbackSqliteRuntimeLayout,
+  createSqliteRuntimeLayoutCutover,
+  ensureSqliteRuntimeGenerationRoot,
+  ensureSqliteRuntimeLayoutRoot,
+  ensureSqliteWorkspaceStoreDirectory,
+  markSqliteCoordinatorCatalogWritten,
+  markSqliteRuntimeRunStoreWritten,
+  markSqliteWorkspaceStoreWritten,
+  materializeAndAdmitNewWorkspaceStore,
+  readSqliteActiveLayoutPointer,
+  readSqliteRuntimeLayoutManifest,
+  readSqliteRuntimeMigrationFence,
+  readSqliteRuntimeMigrationJournal,
+  resolveSqliteActiveCatalogPath,
+  resolveSqliteCatalogPath,
+  resolveSqliteRuntimeLayoutPaths,
+  resolveSqliteWorkspaceStorePath,
+  type SqliteRuntimeActiveLayoutPointer,
+  SqliteRuntimeLayoutError,
+  type SqliteRuntimeLayoutManifest,
+  type SqliteRuntimeLayoutPaths,
+  type SqliteRuntimeMigrationFence,
+  type SqliteRuntimeMigrationJournal,
+  type SqliteRuntimeWorkspaceStoreAdmission,
+  writeSqliteActiveLayoutPointer,
+  writeSqliteRuntimeLayoutManifest,
+  writeSqliteRuntimeMigrationFence,
+  writeSqliteRuntimeMigrationJournal,
+} from './layout';
+export {
   createSqliteRuntimeLogQueryPort,
+  createSqliteWorkspaceRuntimeLogQueryPort,
   SqliteRuntimeLogQueryError,
   type SqliteRuntimeLogQueryInput,
+  type SqliteWorkspaceRuntimeLogQueryInput,
 } from './log-query';
 export {
+  migrateSqliteRuntimeStoreToWorkspaceLayout,
+  type SqliteRuntimeMigrationCatalogBuilder,
+  type SqliteRuntimeMigrationCatalogSession,
+  type SqliteRuntimeMigrationSessionIdentity,
+  type SqliteRuntimeMigrationSourceGuard,
+  type SqliteRuntimeMigrationWorkspaceBinding,
+  SqliteRuntimeWorkspaceMigrationError,
+  type SqliteRuntimeWorkspaceMigrationOptions,
+  type SqliteRuntimeWorkspaceMigrationResult,
+  sqliteRuntimeStoreDigest,
+  sqliteRuntimeStoreFingerprint,
+} from './migration';
+export {
   assertSqliteRuntimeStorageCanOpen,
+  assertSqliteRuntimeWorkspaceBinding,
+  assertWorkspaceSqliteRuntimeStoreConnection,
   defaultSqliteRuntimeJournalMode,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+  SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
   SqliteRuntimeCommandReceiptConflictError,
   SqliteRuntimeCommandReceiptValidationError,
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeFormatMismatchError,
   type SqliteRuntimeJournalMode,
   SqliteRuntimeRevisionConflictError,
+  type SqliteRuntimeSessionBinding,
   type SqliteRuntimeSnapshotCodec,
   type SqliteRuntimeStorageInput,
   SqliteRuntimeStorageOpenError,
   type SqliteRuntimeStorageOptions,
+  type SqliteRuntimeWorkspaceBinding,
 } from './preflight.js';
+export {
+  inspectSqliteRuntimeRunMigrationSource,
+  migrateSqliteRuntimeLayoutToRunStore,
+  type SqliteRuntimeRunMigrationBlockedReason,
+  type SqliteRuntimeRunMigrationCatalogPort,
+  SqliteRuntimeRunMigrationError,
+  type SqliteRuntimeRunMigrationMaintenanceBarrier,
+  type SqliteRuntimeRunMigrationOptions,
+  type SqliteRuntimeRunMigrationResult,
+  type SqliteRuntimeRunMigrationSourceEvidence,
+  type SqliteRuntimeRunMigrationSourceGuard,
+} from './run-migration';
+export {
+  assertSqliteRuntimeRunStoreConnection,
+  createSqliteRuntimeRunStore,
+  type SqliteRuntimeRunStoreInput,
+} from './run-store';
 export {
   assertSqliteSessionMetadataCanOpen,
   createSqliteSessionTokenStats,
@@ -46,10 +281,32 @@ export {
   type SqliteSessionMetadataInput,
 } from './session-metadata.js';
 export {
+  createSqliteRuntimeRunProfile,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
+  createSqliteWorkspaceRuntimeProfile,
   SQLITE_RUNTIME_DDL,
+  SQLITE_RUNTIME_RUN_DDL,
+  SQLITE_WORKSPACE_RUNTIME_DDL,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from './store';
+export {
+  createSqliteWorkspaceTombstoneStore,
+  type SqliteRuntimeWorkspaceTombstone,
+  type SqliteRuntimeWorkspaceTombstoneStore,
+} from './tombstones';
+export type {
+  SqliteWorkspaceSessionCreationInput,
+  SqliteWorkspaceSessionCreationPort,
+  SqliteWorkspaceSessionCreationResult,
+} from './transaction';
+export {
+  createSqliteWorkspaceCheckpointQuery,
+  SQLITE_WORKSPACE_CHECKPOINT_MAX_PAGE_SIZE,
+  type SqliteWorkspaceCheckpointCursor,
+  type SqliteWorkspaceCheckpointEntry,
+  type SqliteWorkspaceCheckpointPage,
+  type SqliteWorkspaceCheckpointQuery,
+} from './workspace-checkpoint-query';

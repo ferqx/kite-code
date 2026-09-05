@@ -325,20 +325,22 @@ function deserializeMessageImpl(message: PersistedSubagentMessage): BaseMessage 
 
 function serializeStep(step: SubAgentStepSnapshot): PersistedSubagentStep {
   return {
+    stepId: step.stepId,
+    toolCallId: step.toolCallId,
     toolName: step.toolName,
     toolArgs: toJsonObject(step.toolArgs, `step.${step.toolName}.toolArgs`),
     status: step.status,
-    ...(step.ok === undefined ? {} : { ok: step.ok }),
     ...(step.totalLines === undefined ? {} : { totalLines: step.totalLines }),
   };
 }
 
 function deserializeStep(step: PersistedSubagentStep): SubAgentStepSnapshot {
   return {
+    stepId: step.stepId,
+    toolCallId: step.toolCallId,
     toolName: step.toolName,
     toolArgs: cloneJsonObject(step.toolArgs),
     status: step.status,
-    ...(step.ok === undefined ? {} : { ok: step.ok }),
     ...(step.totalLines === undefined ? {} : { totalLines: step.totalLines }),
   };
 }

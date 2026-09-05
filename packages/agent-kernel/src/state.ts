@@ -63,7 +63,7 @@ export type WorkspaceAccess = 'write';
 
 /** The only State format emitted by the RA production runtime. */
 export const RUNTIME_STATE_SCHEMA_VERSION = 27 as const;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-saq-v1-2026-08-25' as const;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-saq-v2-2026-09-05' as const;
 export const APPLIED_EVENT_ID_TAIL_LIMIT = 4096 as const;
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -741,6 +741,14 @@ export type AgentApprovalStatus =
   | 'rejected'
   | 'expired';
 
+/**
+ * Canonical presentation classification attached to a Tool admission fact.
+ * This is deliberately a Kernel-owned projection fact, separate from the
+ * Runtime Contract's TUI vocabulary. Consumers must use this value rather
+ * than reclassifying a tool from its display name or runtime id.
+ */
+export type AgentToolPresentation = 'exploration' | 'standalone' | 'hidden';
+
 /** Stable invocation subject used by same_command matching. */
 export interface AgentApprovalCommandIdentity {
   readonly sessionId: string;
@@ -762,6 +770,13 @@ export interface AgentPendingApproval {
   readonly toolCallId: string;
   readonly parentToolCallId?: string;
   readonly childSubagentId?: string;
+  /**
+   * Stable model/admission identity of the child tool that owns this
+   * interaction.  This is deliberately distinct from runtimeToolCallId:
+   * the latter is an internal namespaced execution identity and must never
+   * become the presentation/settlement owner.
+   */
+  readonly childToolCallId?: string;
   readonly runtimeToolCallId?: string;
   readonly route: AgentApprovalRoute;
   /** Sealed result of canonical governance re-evaluation under Full mode. */
@@ -778,8 +793,6 @@ export interface AgentPendingApproval {
   readonly generation: number;
   readonly createdAt: string;
   readonly status: AgentApprovalStatus;
-  /** Compatibility projection used by existing subagent queue consumers. */
-  readonly state: AgentApprovalStatus;
   readonly receiptId?: string;
   readonly authorizationSource?: 'mode_full' | 'approve_once' | 'same_command';
   readonly dispatchState?: 'before_dispatch' | 'dispatch_acked' | 'unknown';
@@ -852,6 +865,8 @@ export interface AgentTaskState {
 export interface AgentToolCallState {
   readonly toolCallId: string;
   readonly name: string;
+  /** Safe label captured from the admission-time capability descriptor. */
+  readonly displayLabel?: string;
   /** The committed model message and parsed arguments are required State facts. */
   readonly modelMessageId: string;
   readonly args: unknown;
@@ -890,6 +905,8 @@ export interface AgentToolCallState {
     | 'unknown';
   readonly sideEffect?: boolean;
   readonly classificationReason?: string;
+  /** Stable presentation classification decided at Tool admission. */
+  readonly presentation?: AgentToolPresentation;
   readonly networkDecisions?: readonly AgentNetworkDecisionReceipt[];
   readonly status:
     | 'queued'

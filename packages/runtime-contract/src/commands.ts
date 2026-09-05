@@ -1,5 +1,5 @@
 import { isRuntimeClientInteraction } from './notifications';
-import type { RuntimeClientInteraction } from './projections';
+import type { RuntimeClientInteraction, RuntimeRunProjection } from './projections';
 import {
   hasExactKeys,
   isBoundedString,
@@ -48,7 +48,7 @@ export interface StartTurnCommand extends RuntimeSessionCommandBase {
 export interface CancelTurnCommand extends RuntimeSessionCommandBase {
   readonly type: 'cancel_turn';
   readonly turnId: string;
-  readonly runId?: string;
+  readonly runId: string;
 }
 
 export type RuntimeInteractionResponse =
@@ -160,6 +160,7 @@ export type RuntimeCommandErrorCode =
   | 'session_not_found'
   | 'revision_conflict'
   | 'turn_not_found'
+  | 'run_not_found'
   | 'interaction_mismatch'
   | 'checkpoint_unavailable'
   | 'policy_denied'
@@ -174,6 +175,11 @@ export type RuntimeCommandReceipt =
       readonly commandId: string;
       readonly sessionId: string;
       readonly revision: number;
+      readonly resource?: {
+        readonly kind: 'run';
+        readonly run: RuntimeRunProjection;
+        readonly messageId: string;
+      };
     }
   | {
       readonly status: 'conflict' | 'rejected' | 'not_found';
@@ -186,6 +192,11 @@ export type RuntimeCommandReceipt =
       readonly commandId: string;
       readonly sessionId: string;
       readonly originalRevision: number;
+      readonly resource?: {
+        readonly kind: 'run';
+        readonly run: RuntimeRunProjection;
+        readonly messageId: string;
+      };
     };
 
 const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
@@ -247,7 +258,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
       return (
         isSessionCommand(candidate, ['turnId', 'runId']) &&
         isIdentifier(candidate.turnId) &&
-        (!Object.hasOwn(candidate, 'runId') || isIdentifier(candidate.runId))
+        isIdentifier(candidate.runId)
       );
     case 'respond_interaction':
       return (

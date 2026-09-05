@@ -565,6 +565,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
       toolCallId: 'other-tool',
       generation: 0,
       reason: 'Rejected by user.',
+      owner: { kind: 'root_tool', toolCallId: 'other-tool' },
     });
 
     expect(next).toBe(state);
@@ -1118,6 +1119,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
       toolCallId: 'tool-cancel',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'tool-cancel' },
       approval: makeToolApproval('bun test'),
     });
 
@@ -1215,6 +1217,8 @@ describe('reduceRuntimeState — suspended subagents', () => {
     const next = reduceRuntimeState(suspended, {
       type: 'subagent.approval_deferred',
       toolCallId: 'task-1',
+      subagentId: 'subagent-1',
+      parentToolCallId: 'task-1',
     });
 
     expect(next.tools.calls['task-1']!.status).toBe('queued');
@@ -1285,6 +1289,15 @@ describe('reduceRuntimeState — suspended subagents', () => {
       toolCallId: 'task-1',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      parentToolCallId: 'task-1',
+      childSubagentId: 'subagent-1',
+      runtimeToolCallId: 'nested-tool-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'nested-tool-1',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-1',
+      },
       approval: makeToolApproval('pwd'),
     });
 
@@ -1294,6 +1307,12 @@ describe('reduceRuntimeState — suspended subagents', () => {
       toolCallId: 'task-1',
       generation: 0,
       reason: 'Cancelled by user.',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'nested-tool-1',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-1',
+      },
     });
 
     expect(next.suspendedSubagents).toEqual({});
@@ -1429,6 +1448,7 @@ describe('reduceRuntimeState — interaction state', () => {
       toolCallId: 'tool-10',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'tool-10' },
       approval: approvalPayload,
     };
 
@@ -1450,6 +1470,7 @@ describe('reduceRuntimeState — interaction state', () => {
       toolCallId: 'tool-10',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'tool-10' },
       approval: {
         scope: 'once',
         cwd: '/tmp',
@@ -1472,6 +1493,7 @@ describe('reduceRuntimeState — interaction state', () => {
       grant: 'approve_once',
       receiptId: 'receipt-approval-1',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'tool-10' },
     };
 
     const next = reduceRuntimeState(state, event);
@@ -1487,6 +1509,7 @@ describe('reduceRuntimeState — interaction state', () => {
       toolCallId: 'tool-11',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'tool-11' },
       approval: {
         scope: 'once',
         cwd: '/tmp',
@@ -1508,6 +1531,7 @@ describe('reduceRuntimeState — interaction state', () => {
       toolCallId: 'tool-11',
       generation: 0,
       reason: 'too dangerous',
+      owner: { kind: 'root_tool', toolCallId: 'tool-11' },
     };
 
     const next = reduceRuntimeState(state, event);
@@ -2772,6 +2796,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       createdAt: '2026-08-11T00:00:00.000Z',
     };
     const next = reduceRuntimeState(withTool, event);
@@ -2808,6 +2833,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       approval,
     });
     const event: RuntimeEvent = {
@@ -2822,6 +2848,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 1500,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
     };
     const next = reduceRuntimeState(awaiting, event);
     expect(next.interactions.kind).toBe('idle');
@@ -2853,6 +2880,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       approval,
     });
     const event: RuntimeEvent = {
@@ -2866,6 +2894,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 1200,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
     };
     const next = reduceRuntimeState(awaiting, event);
     expect(next.interactions.kind).toBe('idle');
@@ -2892,6 +2921,15 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'review child command',
+      parentToolCallId: 'task-auto',
+      childSubagentId: 'subagent-1',
+      runtimeToolCallId: 'nested-tool-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'nested-tool-1',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-auto',
+      },
       approval,
     });
     const suspended = {
@@ -2909,6 +2947,12 @@ describe('reduceRuntimeState — auto-review events', () => {
         reason: 'unsafe child command',
         reviewerModelName: 'reviewer',
         durationMs: 10,
+      },
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'nested-tool-1',
+        subagentId: 'subagent-1',
+        parentToolCallId: 'task-auto',
       },
     });
 
@@ -2933,6 +2977,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-risk' },
       approval,
     });
     const reviewed = reduceRuntimeState(awaiting, {
@@ -2947,6 +2992,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'reviewer',
         durationMs: 50,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-risk' },
     });
     expect(reviewed.interactions.kind).toBe('awaiting_tool_approval');
     expect(reviewed.tools.calls['tool-risk']!.status).toBe('awaiting_approval');
@@ -2971,6 +3017,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-technical' },
       approval,
     });
     const failed = reduceRuntimeState(awaiting, {
@@ -2986,6 +3033,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 100,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-technical' },
     });
     expect(failed.interactions.kind).toBe('awaiting_tool_approval');
     expect(failed.tools.calls['tool-technical']!.status).toBe('awaiting_approval');
@@ -3013,6 +3061,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       approval,
     });
     const event: RuntimeEvent = {
@@ -3026,6 +3075,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 100,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
     };
     const next = reduceRuntimeState(awaiting, event);
     // Should NOT transition — interactionId mismatch
@@ -3053,6 +3103,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       approval,
     });
 
@@ -3067,6 +3118,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 100,
       },
+      owner: { kind: 'root_tool', toolCallId: 'other-tool' },
     });
 
     expect(next.interactions.kind).toBe('awaiting_auto_review');
@@ -3099,6 +3151,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'test',
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
       approval,
     });
     // Third consecutive rejection → should trip
@@ -3113,6 +3166,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         reviewerModelName: 'haiku',
         durationMs: 100,
       },
+      owner: { kind: 'root_tool', toolCallId: 'tool-99' },
     };
     const next = reduceRuntimeState(awaiting, event);
     expect(next.tools.calls['tool-99']!.status).toBe('rejected');

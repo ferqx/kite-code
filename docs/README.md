@@ -39,25 +39,53 @@ carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime
 fixture。后续新增 Service 或 package 时，只有在 source 与 owner README 实际存在的同一改动中才加入 V2
 规则，不以无效 future path 或空 workspace 预占 documentation owner。
 
-Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
-`kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
-使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+当前Browser Web workspace的规范路径是`apps/kite-web`。它是独立的private presentation workspace，
+只消费 browser-safe `@kite-ai/agent-api-client`与`@kite-ai/agent-api-contract`，不属于 Service/Runtime composition，也不得依赖 Native、Host、
+Store、Protocol、Service、CLI 或 raw Runtime source；其 `@/` alias 只解析到自身 `src/`，不新增 `#kite-web/*` alias。
+Web使用`react-router` Declarative Mode管理目录、Session与API Docs的Browser SPA切换；该展示依赖不改变Web→Agent API client→contract的唯一业务依赖边，
+也不允许Web直接依赖Service或Runtime workspace。
+源码中的完整Web启动入口是根`package.json`的`bun run web:dev`：它依次执行Web build、显式App Server daemon start和Web origin
+discovery。`apps/kite-web`的Vite dev server只是资源开发入口，Browser与`kite web`都不拥有隐式启动daemon的authority；当前角色见
+[`active/app-server-local-runtime.md`](active/app-server-local-runtime.md)，旧Gateway恢复仅见transition文档。
+Agent API contract是zero-workspace-dependency的browser-safe Public wire owner；`packages/agent-api-client`是只被Web消费的typed HTTP read
+client。Runtime package owner gate检查Service→contract与Web→client→contract依赖边，独立`check:agent-api-packages`强化Public
+contract/client/consumer边界；`apps/kite-web`仍不成为Runtime
+composition owner。KASAPI-01B后，该owner rule同时覆盖package-local generator script与committed `generated/**`，确保artifact变化命中同一
+current authority；generator不成为runtime export。KASAPI-02C后，Web build逐字节把canonical OpenAPI装入固定
+`payload/web/api-docs/openapi.json`，只读`/api-docs` renderer不发现Worker、不保存credential也不提供在线执行。Agent API跨包当前边界见
+[`active/agent-api-contract.md`](active/agent-api-contract.md)。
 
-KLSV1-06 clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
-MCP、Sandbox、Observability、Session Logger、release 与 process harness 使用互斥 owner；`manager/**` 已迁入
-`kite-local-runtime-manager`。不得添加覆盖整个 Service source 的 generic 通配规则，也不得让已迁出的 CLI 路径
-继续满足 Service authority。Native filesystem primitive 仍由 `kite-local-runtime-service-state` 独占；代表路径测试
+Local Runtime Service 的客户端边界已经分成browser-safe Agent API client、terminal App Control contract与Bun/Node-only
+`kite-local-runtime`；App Control使用独立source owner，Native client与Service state primitive
+使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+KASD的`apps/kite-service/src/app-server.ts`与`app-server-daemon.ts`由Service application规则拥有；前者复用Runtime carrier/Host，
+默认由TUI/CLI父进程通过`kite-local-runtime` typed stdio client启动；后者只由显式`kite server start`创建owner-only本机daemon，
+二者都不进入legacy local-runtime manager规则。
+CLI与Service共享的per-file config mutation primitive使用独立`kite-local-runtime-config`规则；它从通用local-runtime client rule排除，避免把
+用户配置lock/atomic replacement误写成Runtime connection行为。
+当前default parent-owned App Server、Durable Session Store与显式daemon边界见
+[`active/app-server-local-runtime.md`](active/app-server-local-runtime.md)。
+
+KASD clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
+MCP、Sandbox、Observability、Session Logger与release使用互斥owner；旧`manager/**`与process harness已经删除，不再是映射source。
+不得添加覆盖整个Service source的generic通配规则，也不得让已迁出的CLI路径继续满足Service authority。Native filesystem primitive
+仍由`kite-local-runtime-service-state`独占；代表路径测试
 固定验证每个生产文件只命中一个 owner，并验证 `apps/kite-cli` 仍有真实 package consumer，不能靠放宽 public entry
 消除 consumer gate。
 
-process harness 继续是未公开 fake-application fixture，不能用其 source 满足真实 composition 或 release authority。
 CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager、carrier 或 backend。
 
 ## 并发开发
 
-每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree
-的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority 不能由两个任务并发拥有；
-后开始的任务必须等待、rebase 并重新验证。不得建立文档锁服务、临时 authority 副本或兼容重定向来规避冲突。
+可写任务可直接使用只有本任务改动、唯一 Git owner且没有authority冲突的当前工作树。独立 branch/worktree只用于隔离无关dirty状态、
+并发写入、用户明确要求或长期独立分支；它不是默认前置步骤。临时worktree完成验证后默认fast-forward合并并清理，不能安全合并时再请求方向。
+默认 `all` 作用域检查当前任务工作树的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority不能由两个任务并发拥有；
+后开始的任务必须等待、rebase并重新验证。不得建立文档锁服务、临时authority副本或兼容重定向来规避冲突。
+
+本地TUI开发中，`bun run tui`直接启动当前源码同build的parent-owned App Server，不预构建Web、不发现shared Service，也不需要
+`tui:fresh`。source按canonical repository/worktree使用持久`source-profiles/<digest>/kite-session.sqlite`，installed使用canonical
+`kite-session.sqlite`；二者共享用户配置root但不共享Runtime Store。TUI退出只回收自身child，不删除durable Session。显式
+`server start/status/stop`与`--server`提供显式本机daemon；`kite web`只发现该daemon。旧`service-*`、独立`web-*`与Runtime fallback均已删除。
 
 ## 目录职责
 

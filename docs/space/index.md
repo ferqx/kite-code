@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-27（Kite Local Runtime Service V1 已激活，KLSV1-00～02 完成）
+最后更新：2026-08-30（单Service/单Store本机Runtime current authority已登记）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -20,9 +20,10 @@
 
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
+| `../active/agent-api-contract.md` | active | browser-safe Public Agent API V1 DTO、codec、limits与compatibility；当前无listener | 修改Agent API contract、HTTP/SSE adapter、OpenAPI/schema、SDK或静态API docs时。 |
 | `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
 | `../active/runtime-authority-boundary.md` | active | RAV1 authority sequence、可信域、attacker、持久完整性、真实 process boundary 与短生命周期 frame material | 修改 identity、Grant/Receipt、持久完整性、子进程协议、Model/MCP transport、Credential broker 或 State/Store cutover 时。 |
-| `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
+| `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleClientEvent.ts`（Runtime Client tool lifecycle）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`、`compaction.ts`（折叠引擎）时必读。 |
 | `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
 | `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
 | `../active/private-artifact-storage.md` | active | Model evidence 的私有不可变存储、keyed opaque ref、原子发布与全 fork reachability GC | 修改 private immutable storage primitive、Model Artifact Store、权限、完整性 key、retention 或 GC 时。 |
@@ -38,6 +39,9 @@
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
 | `../active/sqlite-runtime-log-query.md` | active | SQLite Runtime Store 的只读会话与事件查询、展示投影与数据边界 | 修改 Runtime Store event/session 数据、日志查询 Contract、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。 |
+| `../active/coordinator-workspace-worker-web.md` | active | 单Service内复用的Workspace/Controller模块、同listener只读Web与retired companion边界 | 修改Coordinator/Workspace/Web源码、browser auth或native Controller时。 |
+| `../active/app-server-local-runtime.md` | active | paired App Server、Durable Session fencing、显式daemon/Web与最小endpoint owner | 修改CLI/TUI本机连接、App Server lifecycle、Session Store、daemon/Web、profile或release内容时。 |
+| `../deprecated/single-service-local-runtime.md` | superseded | ADR-0152/0159/0164/0165历史边界 | 仅追溯历史决策时。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |
@@ -107,6 +111,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-09-03-app-server-session-decoupling.md` | completed | 记录KASD-00～06、App Server/Session authority解耦、旧single-Service控制面删除、本机验证与implementation head `af7c7596`的macOS/Ubuntu/Windows release qualification。 |
 | `execution/completed/2026-08-26-kite-runtime-server-v1.md` | completed | 记录 KRSV1-00～10、唯一 Runtime Host authority、Protocol/Server/Client、Store 6 原子 receipt、TUI/CLI 单路径、stdio/development WebSocket、展示保真与 PR #65 三平台 Gate。 |
 | `execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md` | completed | 记录 ADR-0127 简化切换、过度设计删除、State26/Store5、用户 model 修复保留、本地 Gate 与 final-SHA GitHub qualification。 |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |

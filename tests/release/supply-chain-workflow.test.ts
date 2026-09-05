@@ -4,6 +4,14 @@ import { resolve } from 'node:path';
 
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
 const candidateBuilder = readFileSync(resolve('scripts/release/oss-candidate.ts'), 'utf8');
+const candidateInstaller = readFileSync(
+  resolve('scripts/release/install-oss-candidate.ts'),
+  'utf8',
+);
+const windowsPublication = readFileSync(
+  resolve('packages/builtin-runtime/src/filesystem/descriptor-relative.ts'),
+  'utf8',
+);
 const windowsRunnerBuilder = readFileSync(
   resolve('scripts/release/build-windows-runner.ts'),
   'utf8',
@@ -73,7 +81,11 @@ describe('ordinary open-source release candidate workflow', () => {
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
-      'bun test packages/kite-local-runtime/test/isolated/service-state.test.ts',
+      'Verify Windows App Server endpoint and Session Store fencing',
+      'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts',
+      'tests/release/app-server-daemon.test.ts',
       'bun run release:build',
     ];
     let previousIndex = -1;
@@ -94,6 +106,18 @@ describe('ordinary open-source release candidate workflow', () => {
     ]) {
       expect(candidateBuilder).toContain(asset);
     }
+  });
+
+  test('publishes Windows install metadata through bounded native atomic commits', () => {
+    expect(candidateInstaller).toContain(
+      "import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem'",
+    );
+    expect(candidateInstaller.match(/flushFileBuffers: false/g)).toHaveLength(3);
+    expect(candidateInstaller.match(/writeThroughFile: false/g)).toHaveLength(3);
+    expect(candidateInstaller.match(/writeThroughMove: false/g)).toHaveLength(3);
+    expect(windowsPublication).toContain('WINDOWS_FILE_FLAG_WRITE_THROUGH');
+    expect(windowsPublication).toContain('WINDOWS_MOVEFILE_WRITE_THROUGH');
+    expect(windowsPublication).toContain('input.flushFileBuffers !== false');
   });
 
   test('does not ship the retired evaluation or live-Provider jobs', () => {

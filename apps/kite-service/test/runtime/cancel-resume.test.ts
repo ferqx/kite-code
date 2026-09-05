@@ -651,7 +651,11 @@ describe('bounded Runtime cancellation', () => {
       runId: 'run-1',
       startedAt: new Date(now).toISOString(),
       deadlineAt: new Date(now + 30_000).toISOString(),
-      budget: { ...LIMITED_RESOURCE_BUDGET_, maxConcurrentToolInvocations: 1 },
+      budget: {
+        ...LIMITED_RESOURCE_BUDGET_,
+        maxConcurrentToolInvocations: 1,
+        maxConcurrentShellInvocations: 1,
+      },
     });
     const upper = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     upper.counters.toolInvocations = 1;
@@ -724,13 +728,15 @@ describe('bounded Runtime cancellation', () => {
     });
     const controller = new AbortController();
     let executorCalls = 0;
+    let persistAfterClose: ((event: RuntimeEvent) => Promise<boolean>) | undefined;
     const startedAt = Date.now();
     setTimeout(() => controller.abort('Cancellation requested.'), 10);
 
     for await (const _event of runStateRuntimeLoop(
       kernel,
-      async () => {
+      async (_effect, _state, _emit, context) => {
         executorCalls += 1;
+        persistAfterClose = context?.persistEvent;
         return new Promise<never>(() => {});
       },
       { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
@@ -743,6 +749,16 @@ describe('bounded Runtime cancellation', () => {
 
     expect(executorCalls).toBe(1);
     expect(Date.now() - startedAt).toBeLessThan(5_000);
+    const latePersistence = await Promise.race([
+      persistAfterClose!({
+        type: 'tool.progress',
+        toolCallId: 'late-tool',
+        chunk: 'late',
+        stream: 'stdout',
+      }),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 100)),
+    ]);
+    expect(latePersistence).toBe(false);
     kernel.close();
   });
 

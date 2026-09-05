@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import type { LanguagePreference } from '#kite-cli/preferences';
 import type { SandboxBackend } from './client-types';
@@ -26,14 +27,19 @@ import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
 import { useI18n } from './i18n';
 import { createInitialState, initialState } from './initialState';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from './interaction-submission-diagnostic';
 import McpOverlay from './mcp/McpOverlay';
 import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
+import { isTuiRunActive } from './presentation/selectors';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
 import type { ThemePreset } from './theme';
 import { useTheme } from './theme';
-import type { OutputBlock, TuiPendingApproval, TuiState } from './types';
+import type { TuiPendingApproval, TuiState } from './types';
 
 type SafeApprovalEntry = TuiPendingApproval & {
   readonly clientInteraction?: Extract<
@@ -48,11 +54,15 @@ export { createInitialState, eventReducer };
 const MemoHeader = React.memo(Header);
 
 export function shouldShowRunStatus(state: TuiState): boolean {
-  if (state.interrupt) return false;
-  if (state.compactionProgress?.source === 'manual') return false;
-  if (!state.running) return false;
-  if (state.status.retryState) return true;
+  if (!isTuiRunActive(state)) return false;
+  if (state.runPromptPresented === false) return false;
   return true;
+}
+
+function queuedPromptPreview(value: string): string {
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? '';
+  const truncated = firstLine.length > 200 ? `${firstLine.slice(0, 199)}…` : firstLine;
+  return value.includes('\n') && truncated.length < 200 ? `${truncated}…` : truncated;
 }
 
 /** Compaction is non-modal; only an active interaction owns the prompt surface. */
@@ -82,6 +92,15 @@ export interface AppProps {
   onLanguageSelect?: (language: LanguagePreference) => void;
   /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
   onAbort?: () => void;
+  /** Read at key-dispatch time so prompt submission and block expansion have one Enter owner. */
+  canToggleLastOutputBlock?: () => boolean;
+  /** Model snapshot that owns the currently visible Run. A selector change
+   * during that Run is desired configuration for the next Run only. */
+  modelForDisplay?: Pick<ProviderModelRoute, 'provider' | 'name'> & {
+    readonly reasoningEnabled?: boolean;
+  };
+  /** Presentation identity for static history redraws (theme/language/model). */
+  presentationKey?: string;
   getRewindPreview?: (
     checkpointId: string,
   ) => Promise<import('./runtime-presentation').RewindFilePreview | null>;
@@ -141,6 +160,9 @@ export default function App({
   languagePreference = 'system',
   onLanguageSelect,
   onAbort,
+  canToggleLastOutputBlock,
+  modelForDisplay,
+  presentationKey,
   getRewindPreview,
   resizeGeneration,
   loadSessions = () => Promise.reject(new Error('Session storage is unavailable.')),
@@ -179,6 +201,10 @@ export default function App({
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
   const layeredOverlayEscRef = useRef(false);
+  const [approvalEscapeFailure, setApprovalEscapeFailure] = useState<{
+    readonly interactionId: string;
+    readonly failure: InteractionSubmissionFailure;
+  }>();
   useGlobalKeys(
     dispatch,
     overlayOrInterrupt,
@@ -199,12 +225,12 @@ export default function App({
           })
           .then((accepted) => {
             if (!accepted) throw new Error('Approval rejection was not accepted.');
+            setApprovalEscapeFailure(undefined);
           })
-          .catch(() => {
-            dispatch({
-              type: 'LOCAL_TEXT',
-              text: 'Confirmation was not accepted. Press Esc to retry.',
-              isError: true,
+          .catch((error: unknown) => {
+            setApprovalEscapeFailure({
+              interactionId: approvalInteractionId,
+              failure: classifyInteractionSubmissionFailure(error),
             });
           });
         return true;
@@ -255,10 +281,11 @@ export default function App({
   );
   const selectInteractionMode = useCallback(
     (mode: 'accept_edits' | 'auto' | 'full') => {
+      if (mode === state.interactionMode) return;
       onInteractionModeChange?.(mode);
       dispatch({ type: 'SET_INTERACTION_MODE', mode });
     },
-    [dispatch, onInteractionModeChange],
+    [dispatch, onInteractionModeChange, state.interactionMode],
   );
   const selectModel = useCallback(
     async (model: ModelOption) => {
@@ -339,52 +366,19 @@ export default function App({
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
-      // Runtime remains the durable source of truth. ApprovalBlock invokes this
-      // callback only after respond_interaction has an accepted receipt. Project
-      // that acknowledgement immediately so a suspended child does not keep saying
-      // "Awaiting your approval" until the continuation emits its next event.
-      // Rejections stay durable-event-driven because approval.rejected owns the
-      // terminal projection for the interrupted turn.
+      // The receipt only acknowledges the focused Footer interaction. Durable
+      // approval.granted/rejected events remain the sole owner of child/tool
+      // settlement, so concurrent children cannot be changed by a heuristic.
       if (action !== 'approve') return;
-      const suspendedSubagents = state.turns.flatMap((turn) =>
-        turn.blocks.filter(
-          (block): block is Extract<OutputBlock, { kind: 'subagent' }> =>
-            block.kind === 'subagent' && block.status === 'suspended',
-        ),
-      );
-      const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
-      const identityTarget =
-        approvalInterrupt?.toolCallId == null
-          ? undefined
-          : suspendedSubagents.find(
-              (block) => block.parentToolCallId === approvalInterrupt.toolCallId,
-            );
-      const awaitingUserTargets = suspendedSubagents.filter(
-        (block) =>
-          block.approvalState === 'awaiting_user' ||
-          (block.approvalState == null && block.awaitingApproval === true),
-      );
-      const approvalTarget =
-        identityTarget ?? (awaitingUserTargets.length === 1 ? awaitingUserTargets[0] : undefined);
       dispatch({
         type: 'RESOLVE_INTERRUPT',
-        ...(approvalTarget == null
-          ? {}
-          : {
-              approvalTarget: {
-                subagentId: approvalTarget.subagentId,
-                ...(approvalTarget.parentToolCallId == null
-                  ? {}
-                  : { parentToolCallId: approvalTarget.parentToolCallId }),
-              },
-            }),
         resolution: {
           action: 'approved',
           ...(grant === undefined ? {} : { grant }),
         },
       });
     },
-    [dispatch, state.interrupt, state.turns],
+    [dispatch],
   );
 
   const resolveInput = useCallback(
@@ -403,9 +397,9 @@ export default function App({
   const header = useMemo(
     () => (
       <MemoHeader
-        modelName={state.status.modelName}
+        modelName={modelForDisplay?.name ?? state.status.modelName}
         thinkingMode={state.status.thinkingMode}
-        reasoningEnabled={state.status.reasoningEnabled}
+        reasoningEnabled={modelForDisplay?.reasoningEnabled ?? state.status.reasoningEnabled}
         workspace={activeWorkspace}
         columns={columns}
       />
@@ -413,6 +407,8 @@ export default function App({
     [
       activeWorkspace,
       columns,
+      modelForDisplay?.name,
+      modelForDisplay?.reasoningEnabled,
       state.status.modelName,
       state.status.reasoningEnabled,
       state.status.thinkingMode,
@@ -423,22 +419,55 @@ export default function App({
     staticItems,
     staticKey,
     header: staticHeader,
+    renderEpoch,
     mergedStaticBlocks,
     activeDynamicBlocks,
+    mergedStaticTimeline,
+    activeDynamicTimeline,
   } = useStaticContent({
     turns: state.turns,
-    running: state.running,
+    presentationTimeline: state.presentationTimeline,
+    running: isTuiRunActive(state),
     sessionKey: state.sessionKey,
     header,
     resizeGeneration,
-    presentationKey: language,
+    presentationKey: presentationKey ?? language,
+    awaitingApproval,
   });
 
   // Runtime decisions supersede any stale local selector state while the
   // reducer transitions the UI to its single interrupt surface.
   const overlayActive = modalOverlayActive && !state.interrupt && !approvalQueueActive;
   const showRunStatus = shouldShowRunStatus(state);
-  const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
+  const activeQueuedPrompts = (state.queuedPrompts ?? []).filter(
+    (prompt) => prompt.sessionId === state.activeSessionId,
+  );
+  const subagentReviewPhaseActive = state.turns.some((turn) =>
+    turn.blocks.some(
+      (block) =>
+        block.kind === 'subagent' &&
+        block.status === 'suspended' &&
+        (block.approvalState === 'queued_auto_review' ||
+          block.approvalState === 'auto_reviewing' ||
+          block.approvalState === 'queued_user_approval' ||
+          block.approvalState === 'awaiting_user' ||
+          block.approvalState === 'authorized_queued'),
+    ),
+  );
+  const visibleRunStatus =
+    showRunStatus && !state.interrupt && !approvalQueueActive && !subagentReviewPhaseActive;
+  const runStatus = visibleRunStatus ? deriveRunStatusSnapshot(state) : undefined;
+  const renderedStatus = useMemo(() => {
+    if (!modelForDisplay) return state.status;
+    return {
+      ...state.status,
+      modelProvider: modelForDisplay.provider,
+      modelName: modelForDisplay.name,
+      ...(modelForDisplay.reasoningEnabled === undefined
+        ? {}
+        : { reasoningEnabled: modelForDisplay.reasoningEnabled }),
+    };
+  }, [modelForDisplay, state.status]);
 
   return (
     <Box flexDirection="column">
@@ -447,11 +476,15 @@ export default function App({
         staticItems={staticItems}
         staticKey={staticKey}
         staticHeader={staticHeader}
+        renderEpoch={renderEpoch}
         activeDynamicBlocks={activeDynamicBlocks}
         mergedStaticBlocks={mergedStaticBlocks}
+        mergedStaticTimeline={mergedStaticTimeline}
+        activeDynamicTimeline={activeDynamicTimeline}
         onToggleReason={onToggleReason}
         onToggleToolExpand={onToggleToolExpand}
         onToggleSubagentExpand={onToggleSubagentExpand}
+        canToggleLastBlock={canToggleLastOutputBlock}
         // Footer interactions own Enter/Escape while visible. Passing the
         // complete capture boundary prevents the approval-confirming Enter
         // from also toggling the last dynamic tool/Subagent card.
@@ -463,55 +496,79 @@ export default function App({
         compactionPhase={state.compactionProgress?.phase}
       />
 
-      {/* ── Footer: 3-row interaction zone ── */}
-      {!overlayActive && (
-        <Footer
-          status={state.status}
-          runStatus={runStatus}
-          running={showRunStatus}
-          timerKey={state.runCount}
-          interactionMode={state.interactionMode}
-          hideGlobalStatus={Boolean(state.interrupt) || approvalQueueActive}
-        >
-          {/* Interaction row: input line or approval/input UI, mutually exclusive */}
-          {!state.interrupt && !approvalQueueActive && (
-            <>
-              {state.sessionServiceUnavailable && !state.showSessions && (
-                <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
-              )}
-              {children}
-            </>
-          )}
-          {activeApproval && (
-            <ApprovalBlock
-              key={`${state.interrupt?.interactionId ?? 'legacy'}:${activeApproval.generation}`}
-              approval={activeApproval}
-              provider={provider}
-              onResolved={resolveApproval}
-              queueEntry={focusedApprovalEntry}
-            />
-          )}
-          {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
-            <InputBlock
-              interactionId={state.interrupt?.interactionId}
-              question={interruptBlock.question}
-              provider={provider}
-              onResolved={resolveInput}
-              wizardEscBackRef={wizardEscBackRef}
-            />
-          )}
-          {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
-            <PlanReviewBlock
-              interactionId={state.interrupt.interactionId}
-              plan={state.interrupt.plan}
-              artifact={state.interrupt.artifact}
-              provider={provider}
-              onResolved={resolvePlanReview}
-              supplementEscRef={supplementEscRef}
-            />
-          )}
-        </Footer>
-      )}
+      {/* ── Footer: run status, queued prompts, and the active interaction ── */}
+      <Footer
+        key="footer"
+        status={renderedStatus}
+        runStatus={runStatus}
+        running={visibleRunStatus}
+        interactionMode={state.interactionMode}
+        hideGlobalStatus={overlayActive || Boolean(state.interrupt) || approvalQueueActive}
+      >
+        {!overlayActive && (
+          <>
+            <Box
+              key="queued-prompts"
+              flexDirection="column"
+              marginTop={activeQueuedPrompts.length > 0 ? 1 : 0}
+            >
+              {activeQueuedPrompts.map((prompt, index) => (
+                <Box
+                  key={`queued-prompt-${prompt.id}`}
+                  width={columns}
+                  paddingX={1}
+                  marginTop={index === 0 ? 0 : 1}
+                  backgroundColor={t.userMsgBg}
+                >
+                  <Text wrap="truncate-end">{`↵ ${queuedPromptPreview(prompt.text)}`}</Text>
+                </Box>
+              ))}
+            </Box>
+            {/* Interaction row: input line or approval/input UI, mutually exclusive */}
+            {!state.interrupt && !approvalQueueActive && (
+              <>
+                {state.sessionServiceUnavailable && !state.showSessions && (
+                  <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
+                )}
+                {children}
+              </>
+            )}
+            {activeApproval && (
+              <ApprovalBlock
+                key={`${state.interrupt?.interactionId ?? 'legacy'}:${activeApproval.generation}`}
+                approval={activeApproval}
+                provider={provider}
+                onResolved={resolveApproval}
+                queueEntry={focusedApprovalEntry}
+                externalSubmissionFailure={
+                  approvalEscapeFailure?.interactionId === activeApproval.interactionId
+                    ? approvalEscapeFailure.failure
+                    : undefined
+                }
+              />
+            )}
+            {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
+              <InputBlock
+                interactionId={state.interrupt?.interactionId}
+                question={interruptBlock.question}
+                provider={provider}
+                onResolved={resolveInput}
+                wizardEscBackRef={wizardEscBackRef}
+              />
+            )}
+            {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
+              <PlanReviewBlock
+                interactionId={state.interrupt.interactionId}
+                plan={state.interrupt.plan}
+                artifact={state.interrupt.artifact}
+                provider={provider}
+                onResolved={resolvePlanReview}
+                supplementEscRef={supplementEscRef}
+              />
+            )}
+          </>
+        )}
+      </Footer>
 
       {/* ── Overlay: panels below Footer ── */}
       {!state.interrupt && state.showHelp && (
@@ -551,6 +608,7 @@ export default function App({
       )}
       {!state.interrupt && state.showEffortSelector && (
         <PreferenceSelector
+          key="effort-selector"
           title={translate('effort.title')}
           currentValue={state.status.thinkingMode}
           options={[
@@ -581,6 +639,7 @@ export default function App({
       )}
       {!state.interrupt && state.showThemeSelector && (
         <PreferenceSelector
+          key="theme-selector"
           title={translate('theme.title')}
           currentValue={themePreset ?? 'teal'}
           options={[
@@ -616,6 +675,7 @@ export default function App({
       )}
       {!state.interrupt && state.showLanguageSelector && (
         <PreferenceSelector
+          key="language-selector"
           title={translate('language.title')}
           currentValue={languagePreference}
           options={[

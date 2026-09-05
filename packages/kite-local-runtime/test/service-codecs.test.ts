@@ -3,13 +3,10 @@ import {
   createKiteHomeIdentity,
   decodeLocalRuntimeServiceDescriptor,
   decodeLocalRuntimeToken,
-  decodeLocalServiceLockIdentity,
   LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
-  LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
-  resolveLocalRuntimeServiceStatePaths,
-  safeDecodeLocalRuntimeServiceDescriptor,
 } from '@kite-ai/kite-local-runtime/service';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 
 const descriptor = {
   schema: LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA_,
@@ -20,7 +17,7 @@ const descriptor = {
     origin: 'http://127.0.0.1:43123',
     websocketUrl: 'ws://127.0.0.1:43123/rpc',
   },
-  protocolVersion: 1,
+  protocolVersion: RUNTIME_PROTOCOL_VERSION,
   clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   serverVersion: '0.1.0',
   buildId: 'dev:0123456789012345678901234567890123456789',
@@ -46,51 +43,14 @@ describe('kite-local-runtime service codecs', () => {
     ).toThrow();
   });
 
-  test('safe descriptor decoding is fail closed', () => {
-    expect(safeDecodeLocalRuntimeServiceDescriptor(descriptor)).toMatchObject({ success: true });
-    expect(safeDecodeLocalRuntimeServiceDescriptor({ ...descriptor, pid: 0 })).toMatchObject({
-      success: false,
-    });
-  });
-
-  test('validates lock identity and bounded token material', () => {
-    expect(
-      decodeLocalServiceLockIdentity({
-        schema: LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
-        nonce: 'nonce-1',
-        pid: 42,
-        operation: 'ensure',
-        createdAt: descriptor.startedAt,
-      }),
-    ).toMatchObject({ operation: 'ensure' });
-    expect(() =>
-      decodeLocalServiceLockIdentity({
-        schema: LOCAL_RUNTIME_SERVICE_LOCK_SCHEMA_,
-        nonce: 'nonce-1',
-        pid: 42,
-        operation: 'kill',
-        createdAt: descriptor.startedAt,
-      }),
-    ).toThrow();
+  test('validates bounded token material', () => {
     expect(decodeLocalRuntimeToken('A'.repeat(32))).toBe('A'.repeat(32));
     expect(() => decodeLocalRuntimeToken('too-short')).toThrow();
     expect(() => decodeLocalRuntimeToken(`${'A'.repeat(32)}.`)).toThrow();
   });
 });
 
-describe('kite-local-runtime service state layout', () => {
-  test('derives the fixed state root without reading or mutating files', () => {
-    const identity = createKiteHomeIdentity('/tmp/kite-local-runtime-test');
-    expect(resolveLocalRuntimeServiceStatePaths(identity)).toEqual({
-      root: '/tmp/kite-local-runtime-test/runtime-service/v1',
-      descriptor: '/tmp/kite-local-runtime-test/runtime-service/v1/instance.json',
-      accessToken: '/tmp/kite-local-runtime-test/runtime-service/v1/access.token',
-      controlToken: '/tmp/kite-local-runtime-test/runtime-service/v1/control.token',
-      instanceLock: '/tmp/kite-local-runtime-test/runtime-service/v1/instance.lock',
-      lifecycleLock: '/tmp/kite-local-runtime-test/runtime-service/v1/lifecycle.lock',
-    });
-  });
-
+describe('kite-local-runtime profile identity', () => {
   test('requires an absolute explicit home identity', () => {
     expect(() => createKiteHomeIdentity('relative-home')).toThrow();
     expect(createKiteHomeIdentity('/tmp/kite-home', 'os_user_home').source).toBe('os_user_home');

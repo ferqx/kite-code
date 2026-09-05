@@ -1,21 +1,30 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   type BuiltinToolCatalogProjection,
   createBuiltinContextCompilerPort,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
+import { canonicalModelJson, ModelArtifactStore } from '@kite-ai/builtin-runtime/model';
+import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import { ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
 import {
   RuntimeClient,
   type RuntimeClientTransport,
   type RuntimeHistoryClient,
 } from '@kite-ai/runtime-client';
 import {
+  assertListRuntimeLogEventsRequest,
+  assertListRuntimeLogSessionsRequest,
+  type ListRuntimeLogEventsRequest,
+  type ListRuntimeLogSessionsRequest,
   RUNTIME_CONTRACT_BOUNDARY_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
@@ -35,7 +44,14 @@ import {
   resolveProjectIdentity,
   runtimeHostCurrentStateEventTypes,
 } from '@kite-ai/runtime-host';
-import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import type {
+  RuntimeLogEventReadPage,
+  RuntimeLogQueryPort,
+  RuntimeLogSessionReadPage,
+  RuntimeRunStorePort,
+  RuntimeStorage,
+  RuntimeStoredRun,
+} from '@kite-ai/runtime-host/storage';
 import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
@@ -47,26 +63,51 @@ import {
 } from '@kite-ai/runtime-server';
 import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 import {
+  assertSqliteRuntimeRunStoreActive,
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
   discoverSqliteRuntimeCompatibilitySource,
+  type KiteHomeArtifactStore,
+  type KiteHomeDirectoryQueryPort,
+  openKiteSessionRuntimeStorage,
+  resolveSqliteRuntimeLayoutPaths,
+  resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   type SqliteRuntimeCompatibilityImportResult,
+  type SqliteRuntimeLayoutPaths,
+  type SqliteRuntimeStorageOptions,
+  type SqliteRuntimeWorkspaceBinding,
+  type SqliteWorkspaceAuthority,
+  type SqliteWorkspaceSessionCreationPort,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
+import type {
+  AgentApiModelContextReadPort,
+  AgentApiModelContextSourcePart,
+  AgentApiReadContext,
+} from './agent-api';
 import type { KiteInProcessAppControlComposition } from './app-control';
+import { createKiteHomeBuiltinArtifactBackends } from './bootstrap/kite-home-artifact-backends';
+import {
+  createKiteSessionAppServerStorage,
+  KiteAppServerSessionError,
+  type KiteSessionAppServerStorageOwner,
+} from './bootstrap/kite-session-app-server-storage';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import { createInstalledKiteRuntimeCompositionFactory } from './bootstrap/model-runtime-composition';
 import {
   type CliRuntimeBridgeInput,
   type CliRuntimeInteractionResolution,
+  type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
@@ -78,6 +119,7 @@ import type {
 } from './bootstrap/runtime/state-runtime';
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
+import type { AgentConfig } from './config';
 import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
@@ -91,6 +133,202 @@ import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+/**
+ * Rebuild the Client-facing currentRun from Store 8 even when no Run is
+ * active.  A restarted TUI must retain the last settled Run for history
+ * rendering and late-ephemeral fencing; getActive() alone loses that
+ * authoritative identity as soon as the Run reaches a terminal state.
+ */
+function resolveStoredSessionRun(
+  runs: RuntimeRunStorePort | undefined,
+  sessionId: string,
+): RuntimeStoredRun | undefined {
+  if (!runs) return undefined;
+  const active = runs.getActive(sessionId);
+  if (active) return active;
+
+  // Unknown rows are not returned by getActive().  One unambiguous recovery
+  // candidate remains visible as recovery_required; multiple candidates stay
+  // hidden until an operator reconciliation resolves the ambiguity.
+  const unknown = runs.list({ sessionId, status: 'unknown', limit: 2 }).entries;
+  if (unknown.length === 1) return unknown[0];
+  if (unknown.length > 1) return undefined;
+
+  // The Store orders pages by (createdRevision, runId). Walk all pages so a
+  // long-lived Session does not accidentally hydrate an older settled Run
+  // merely because the first page reached the 200-row storage limit.
+  let latest: RuntimeStoredRun | undefined;
+  let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
+  do {
+    const page = runs.list({
+      sessionId,
+      limit: 200,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const candidate of page.entries) {
+      if (isSettledStoredRun(candidate)) latest = candidate;
+    }
+    cursor = page.hasMore ? page.nextCursor : undefined;
+  } while (cursor !== undefined);
+  return latest;
+}
+
+function isSettledStoredRun(run: RuntimeStoredRun): boolean {
+  return run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
+}
+
+export function createKiteAppServerAgentApiReadContext(input: {
+  readonly directory: KiteHomeDirectoryQueryPort;
+  readonly runtime: RuntimeAccess;
+  readonly history: RuntimeHistoryClient;
+  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  readonly artifactStore: KiteHomeArtifactStore;
+  readonly checkpoints: Pick<
+    RuntimeStorage<RuntimeEvent, RuntimeState>['checkpoints'],
+    'getNamedSnapshotEntry' | 'listNamedSnapshots'
+  >;
+}): AgentApiReadContext {
+  const modelArtifacts = new ModelArtifactStore({
+    backend: createKiteHomeBuiltinArtifactBackends(input.artifactStore).model,
+  });
+  const modelContexts = createAppServerModelContextReadPort(input.storage, modelArtifacts);
+  const checkpoints: AgentApiReadContext['checkpoints'] = Object.freeze({
+    list(request: Parameters<AgentApiReadContext['checkpoints']['list']>[0]) {
+      const entries = input.checkpoints
+        .listNamedSnapshots(request.sessionId)
+        .map((entry) => ({
+          checkpointId: entry.snapshotId,
+          sessionId: request.sessionId,
+          revision: entry.eventPosition,
+          eventPosition: entry.eventPosition,
+          createdAt: entry.createdAt,
+          affectedFileCount: entry.affectedFileCount ?? 0,
+        }))
+        .sort(
+          (left, right) =>
+            left.revision - right.revision || left.checkpointId.localeCompare(right.checkpointId),
+        );
+      const start = request.cursor
+        ? entries.findIndex(
+            (entry) =>
+              entry.revision === request.cursor!.revision &&
+              entry.checkpointId === request.cursor!.checkpointId,
+          ) + 1
+        : 0;
+      if (request.cursor && start === 0) {
+        return { entries: [], hasMore: false };
+      }
+      const selected = entries.slice(start, start + request.limit);
+      const hasMore = start + selected.length < entries.length;
+      const last = selected.at(-1);
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && last
+          ? { nextCursor: { revision: last.revision, checkpointId: last.checkpointId } }
+          : {}),
+      };
+    },
+    get(sessionId: string, checkpointId: string) {
+      const entry = input.checkpoints.getNamedSnapshotEntry(sessionId, checkpointId);
+      return entry
+        ? {
+            checkpointId: entry.snapshotId,
+            sessionId,
+            revision: entry.eventPosition,
+            eventPosition: entry.eventPosition,
+            createdAt: entry.createdAt,
+            affectedFileCount: entry.affectedFileCount ?? 0,
+          }
+        : undefined;
+    },
+  });
+  return Object.freeze({
+    query: (query: RuntimeQuery) => input.runtime.query(query),
+    history: input.history,
+    checkpoints,
+    modelContexts,
+    directory: input.directory,
+    close: async () => undefined,
+    [Symbol.asyncDispose]: async () => undefined,
+  });
+}
+
+function createAppServerModelContextReadPort(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+  artifacts: Pick<ModelArtifactStore, 'readSurface'>,
+): AgentApiModelContextReadPort {
+  return Object.freeze({
+    get(sessionId: string, invocationId: string) {
+      const record = storage.sessions
+        .loadEventsStrict(sessionId)
+        .find(
+          (candidate) =>
+            candidate.event.type === 'model.invocation_prepared' &&
+            candidate.event.invocationId === invocationId,
+        );
+      if (record?.event.type !== 'model.invocation_prepared') return undefined;
+      const event = record.event;
+      const surface = artifacts.readSurface(event.surfaceArtifact);
+      if (
+        event.surfaceArtifact.integrityIdentifier !== event.surfaceIntegrityIdentifier ||
+        surface.route.routeFingerprint !== event.routeFingerprint ||
+        surface.purpose !== event.purpose
+      ) {
+        throw new Error('Model Context evidence binding is invalid.');
+      }
+      return {
+        sessionId,
+        invocationId,
+        sequence: record.id,
+        purpose: surface.purpose,
+        provider: surface.route.providerKind,
+        model: surface.route.modelName,
+        systemPrompt: surface.request.system,
+        messages: surface.request.messages.map((message) => ({
+          role: message.role,
+          parts: message.content.map(projectModelContextSourcePart),
+        })),
+        tools: surface.request.tools.map((tool) => ({
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          inputSchemaJson: canonicalModelJson(tool.inputSchema),
+        })),
+        settings: {
+          transport: surface.request.transport,
+          temperature: surface.request.temperature,
+          maxOutputTokens: surface.request.maxOutputTokens,
+          stopPolicy: surface.request.stopPolicy,
+        },
+      };
+    },
+  });
+}
+
+function projectModelContextSourcePart(
+  part:
+    | import('@kite-ai/runtime-spi').CanonicalModelMessage['content'][number]
+    | import('@kite-ai/runtime-spi').CanonicalModelToolResultPart,
+): AgentApiModelContextSourcePart {
+  if (part.type === 'text' || part.type === 'reasoning') {
+    return { type: part.type, text: part.text };
+  }
+  if (part.type === 'tool_call') {
+    return {
+      type: 'tool_call',
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      inputJson: canonicalModelJson(part.input),
+    };
+  }
+  return {
+    type: 'tool_result',
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    output: part.output.value,
+  };
+}
 
 interface KiteRuntimeClientAccess extends RuntimeAccess {
   readonly history?: RuntimeHistoryClient;
@@ -115,6 +353,8 @@ export interface KiteMultiWorkspaceRuntimeServerOwner extends AsyncDisposable {
   /** Bindings used by native carriers; disconnect only releases this client identity. */
   readonly bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => void;
   readonly releaseConnection: (connectionId: string) => void;
+  /** Update the desired model configuration used by subsequently admitted Runs. */
+  readonly applySelectedConfig: (workspace: AdmittedWorkspace, config: AgentConfig) => void;
   open(options?: RuntimeServerInProcessOpenOptions): RuntimeServerInProcessPair;
 }
 
@@ -122,8 +362,18 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   readonly checkpointPath: string;
   /** Service process identity shared with descriptor/carrier handshake. */
   readonly serverInstanceId?: string;
+  readonly serverVersion?: string;
+  /** Only the parent-owned App Server carrier may advertise App-owned protocol methods. */
+  readonly appServerProtocol?: boolean;
+  /** Explicit daemon lifecycle methods; absent from parent-owned stdio children. */
+  readonly appServerDaemonProtocol?: boolean;
   /** Optional shared gate for Runtime and App Control mutations. */
   readonly operationGate?: RuntimeOperationGate;
+  /**
+   * Optional already-open Store owner. Worker composition supplies this exact Store 8 owner so
+   * this Host cannot open a second SQLite writer or route a read through compatibility import.
+   */
+  readonly storageOwner?: KiteRuntimeStorageOwner;
   readonly workspaces?: readonly Omit<
     CliRuntimeBridgeInput,
     'checkpointPath' | 'projectIdentity' | 'sessionId'
@@ -209,7 +459,10 @@ function createKiteInProcessRuntimeAccess(input: {
           authorize: async (request: RuntimeServerAdmissionInput) => {
             const sessionId = admissionSessionId(request);
             if (sessionId !== undefined && !input.ownsSession(sessionId)) {
-              return { allowed: false as const, reason: 'unauthorized' as const };
+              return {
+                allowed: false as const,
+                reason: 'unauthorized' as const,
+              };
             }
             return { allowed: true as const, workspace: canonicalPath };
           },
@@ -324,6 +577,152 @@ function createKiteRuntimeStorage(
     databasePath,
     codec: stateBinding.codec,
   });
+}
+
+export const WORKSPACE_WORKER_STORE_PROFILE_ = SQLITE_RUNTIME_RUN_FORMAT_EPOCH;
+export const WORKSPACE_WORKER_STORE_SCHEMA_VERSION_ = SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION;
+export const WORKSPACE_WORKER_STATE_SCHEMA_VERSION_ = SQLITE_RUNTIME_STATE_SCHEMA_VERSION;
+
+export interface WorkspaceWorkerStoreProfile {
+  readonly stateSchemaVersion: typeof WORKSPACE_WORKER_STATE_SCHEMA_VERSION_;
+  readonly storeSchemaVersion: typeof WORKSPACE_WORKER_STORE_SCHEMA_VERSION_;
+  readonly formatEpoch: typeof WORKSPACE_WORKER_STORE_PROFILE_;
+}
+
+export const WORKSPACE_WORKER_STORE_PROFILE: WorkspaceWorkerStoreProfile = Object.freeze({
+  stateSchemaVersion: WORKSPACE_WORKER_STATE_SCHEMA_VERSION_,
+  storeSchemaVersion: WORKSPACE_WORKER_STORE_SCHEMA_VERSION_,
+  formatEpoch: WORKSPACE_WORKER_STORE_PROFILE_,
+});
+
+export interface WorkspaceWorkerStoreContext {
+  readonly home: import('@kite-ai/kite-local-runtime/service').KiteHomeIdentity;
+  readonly layout: SqliteRuntimeLayoutPaths;
+  readonly binding: SqliteRuntimeWorkspaceBinding;
+  readonly databasePath: string;
+  readonly profile: WorkspaceWorkerStoreProfile;
+}
+
+export interface WorkspaceWorkerStoreOwner extends RuntimeStorage<RuntimeEvent, RuntimeState> {
+  readonly workspaceAuthority: SqliteWorkspaceAuthority;
+  readonly runs: NonNullable<RuntimeStorage<RuntimeEvent, RuntimeState>['runs']>;
+  /** Store 8 atomic Runtime-session + initial Controller creation owner. */
+  readonly workspaceSessionCreation: SqliteWorkspaceSessionCreationPort<RuntimeEvent, RuntimeState>;
+}
+
+export type WorkspaceWorkerStoreAuthority = SqliteWorkspaceAuthority;
+export type WorkspaceWorkerStoreStorageOptions = SqliteRuntimeStorageOptions;
+export type WorkspaceWorkerStoreCodec = (typeof STATE_STORAGE_BINDING_)['codec'];
+
+export function workspaceIdentityDigest(workspace: KiteWorkspaceIdentity): string {
+  const material = JSON.stringify({
+    canonicalPath: workspace.canonicalPath,
+    projectId: workspace.projectId,
+    workspaceDigest: workspace.workspaceDigest,
+  });
+  return `sha256:${createHash('sha256').update(`kite.workspace-identity.v1\0${material}`).digest('hex')}`;
+}
+
+export function canonicalWorkspaceIdentity(
+  workspace: KiteWorkspaceIdentity,
+): KiteWorkspaceIdentity {
+  if (!workspace.canonicalPath || !isAbsolute(workspace.canonicalPath)) {
+    throw new TypeError('Workspace canonical path must be absolute.');
+  }
+  const canonicalPath = realpathSync.native(resolve(workspace.canonicalPath));
+  const expectedDigest = `sha256:${createHash('sha256').update(canonicalPath).digest('hex')}`;
+  const expectedProjectId = `project_${expectedDigest.slice('sha256:'.length)}`;
+  if (
+    canonicalPath !== workspace.canonicalPath ||
+    workspace.workspaceDigest !== expectedDigest ||
+    workspace.projectId !== expectedProjectId
+  ) {
+    throw new TypeError('Workspace identity is not the exact canonical project identity.');
+  }
+  return Object.freeze({
+    canonicalPath,
+    projectId: workspace.projectId,
+    workspaceDigest: workspace.workspaceDigest,
+  });
+}
+
+export function createWorkspaceWorkerStoreContext(input: {
+  readonly home: import('@kite-ai/kite-local-runtime/service').KiteHomeIdentity;
+  readonly workspace: KiteWorkspaceIdentity;
+  readonly workerScopeId: string;
+  readonly layoutGeneration: string;
+}): WorkspaceWorkerStoreContext {
+  assertWorkspaceWorkerStoreProfile(WORKSPACE_WORKER_STORE_PROFILE);
+  const home = ensureKiteProfileHome(input.home);
+  const canonicalWorkspace = canonicalWorkspaceIdentity(input.workspace);
+  assertSafeWorkspaceWorkerIdentity(input.workerScopeId, 'Worker scope');
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/u.test(input.layoutGeneration)) {
+    throw new TypeError('Workspace Worker layout generation is invalid.');
+  }
+  const layout = resolveSqliteRuntimeLayoutPaths(home.root);
+  const binding: SqliteRuntimeWorkspaceBinding = Object.freeze({
+    layoutGeneration: input.layoutGeneration,
+    workerScopeId: input.workerScopeId,
+    workspaceIdentityDigest: workspaceIdentityDigest(canonicalWorkspace),
+  });
+  const databasePath = resolveSqliteWorkspaceStorePath(
+    layout,
+    binding.layoutGeneration,
+    binding.workerScopeId,
+  );
+  assertSqliteRuntimeRunStoreActive(layout, binding, databasePath);
+  return Object.freeze({
+    home,
+    layout,
+    binding,
+    databasePath,
+    profile: WORKSPACE_WORKER_STORE_PROFILE,
+  });
+}
+
+export function openWorkspaceWorkerStore(
+  context: WorkspaceWorkerStoreContext,
+  options: {
+    readonly codec?: WorkspaceWorkerStoreCodec;
+    readonly storageOptions?: WorkspaceWorkerStoreStorageOptions;
+  } = {},
+): WorkspaceWorkerStoreOwner {
+  assertSqliteRuntimeRunStoreActive(context.layout, context.binding, context.databasePath);
+  const storage = createSqliteRuntimeStorage<RuntimeEvent, RuntimeState>({
+    databasePath: context.databasePath,
+    codec: options.codec ?? STATE_STORAGE_BINDING_.codec,
+    workspaceBinding: context.binding,
+    workspaceLayout: context.layout,
+    targetStore: 'run',
+    ...(options.storageOptions ? { options: options.storageOptions } : {}),
+  });
+  if (!storage.workspaceAuthority || !storage.workspaceSessionCreation || !storage.runs) {
+    storage.close();
+    throw new Error('Workspace Worker Store 8 authority/session creation is unavailable.');
+  }
+  return storage as WorkspaceWorkerStoreOwner;
+}
+
+export function assertWorkspaceWorkerStoreProfile(value: WorkspaceWorkerStoreProfile): void {
+  if (
+    value.stateSchemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+    value.storeSchemaVersion !== SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION ||
+    value.formatEpoch !== SQLITE_RUNTIME_RUN_FORMAT_EPOCH
+  ) {
+    throw new TypeError('Workspace Worker Store profile is incompatible.');
+  }
+}
+
+function assertSafeWorkspaceWorkerIdentity(value: string, label: string): void {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 512 ||
+    value.includes('\0') ||
+    [...value].some((character) => /\p{Cc}/u.test(character))
+  ) {
+    throw new TypeError(`${label} identity is invalid.`);
+  }
 }
 
 export function compatibilitySourcePaths(checkpointPath: string): readonly string[] {
@@ -473,6 +872,14 @@ export function suppressCompatibleKiteSession(checkpointPath: string, sessionId:
 
 export interface KiteRuntimeStorageOwner {
   readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  /** Store 9-only dedicated Artifact tables; legacy owners omit this port. */
+  readonly artifactStore?: KiteHomeArtifactStore;
+  /** Store 9 durable Controller/effect/resource authority for one admitted Workspace. */
+  readonly authorityForWorkspace?: (
+    workspace: AdmittedWorkspace,
+  ) => import('@kite-ai/runtime-storage-sqlite').SqliteWorkspaceAuthority;
+  /** Store 9 owner admits canonical Workspace identity before a new Session transaction. */
+  readonly admitWorkspace?: (workspace: AdmittedWorkspace) => void;
   /** Current-format index path; unlike `storage.sessions`, it never imports a legacy session. */
   listCurrentSessions(
     query?: string,
@@ -483,6 +890,41 @@ export interface KiteRuntimeStorageOwner {
   getCurrentSessionModelRoute(
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
+  /** KASD App Server Session generation scope. */
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly readSnapshot?: <Result>(operation: () => Result) => Result;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly ownedSessionIds?: () => readonly string[];
+  readonly releaseExecutions?: (cleanupConfirmed: boolean) => void;
+  readonly disposeStorage?: () => void;
+}
+
+/** KASD exact multi-connection Store owner; it never opens kite.sqlite or a Workspace lock. */
+export function createKiteSessionAppServerStorageComposition(input: {
+  readonly databasePath: string;
+  readonly hostInstanceId: string;
+  readonly clientId?: string;
+  readonly connectionGeneration?: number;
+  readonly executionLeaseMs?: number;
+  readonly renewIntervalMs?: number;
+  readonly now?: () => number;
+}): KiteSessionAppServerStorageOwner {
+  const target = openKiteSessionRuntimeStorage<RuntimeEvent, RuntimeState>({
+    databasePath: input.databasePath,
+    codec: STATE_STORAGE_BINDING_.codec,
+    stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    ...(input.now ? { now: input.now } : {}),
+  });
+  try {
+    return createKiteSessionAppServerStorage({
+      ...input,
+      target,
+    });
+  } catch (error) {
+    target.close();
+    throw error;
+  }
 }
 
 /**
@@ -502,6 +944,133 @@ export function createKiteRuntimeHistory(checkpointPath: string): RuntimeHistory
       importSession: (sessionId) => importCompatibleKiteSession(checkpointPath, sessionId),
     },
   );
+}
+
+const MAX_INJECTED_STORE_SESSION_SCAN = 100_000;
+
+/**
+ * Query-only History over an already-open Runtime Store.
+ *
+ * The Worker owns the Store connection, so opening a SQLite log reader here would create a
+ * second connection with an independently resolved path.  This adapter only consumes the
+ * injected SessionStore read methods and therefore cannot discover or import a legacy Session.
+ */
+export function createKiteRuntimeObserverHistoryFromStorage(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+): RuntimeHistoryClient {
+  return createKiteRuntimeHistoryClient(() => createInjectedStoreLogQueryPort(storage));
+}
+
+function createInjectedStoreLogQueryPort(
+  storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+): RuntimeLogQueryPort<RuntimeEvent> {
+  let closed = false;
+  const currentEventTypes = new Set(runtimeHostCurrentStateEventTypes());
+  const assertOpen = (): void => {
+    if (closed) throw new Error('Runtime observer Store query is closed.');
+  };
+  const readSessionRows = (query: string): ReturnType<typeof storage.sessions.listSessions> => {
+    const rows = storage.sessions.listSessions(query, MAX_INJECTED_STORE_SESSION_SCAN);
+    if (rows.length >= MAX_INJECTED_STORE_SESSION_SCAN) {
+      throw new Error('Runtime observer Session directory exceeds its bounded query limit.');
+    }
+    return rows;
+  };
+  const sessionExists = (sessionId: string): boolean => {
+    if (storage.sessions.loadSnapshotRecord(sessionId) !== null) return true;
+    return readSessionRows('').some((entry) => entry.threadId === sessionId);
+  };
+
+  return Object.freeze({
+    listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionReadPage {
+      assertOpen();
+      assertListRuntimeLogSessionsRequest(request);
+      const candidates = readSessionRows(request.query ?? '')
+        .map((entry) => {
+          const model = storage.sessions.getSessionModelRoute(entry.threadId);
+          return {
+            sessionId: entry.threadId,
+            name: entry.name,
+            updatedAt: entry.updatedAt,
+            lastSequence: storage.sessions.getLastEventPosition(entry.threadId),
+            ...(model === null ? {} : { model }),
+          };
+        })
+        .filter(
+          (entry) =>
+            request.cursor === undefined ||
+            entry.updatedAt < request.cursor.updatedAt ||
+            (entry.updatedAt === request.cursor.updatedAt &&
+              entry.sessionId.localeCompare(request.cursor.sessionId) < 0),
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt - left.updatedAt || right.sessionId.localeCompare(left.sessionId),
+        );
+      const selected = candidates.slice(0, request.limit);
+      const hasMore = candidates.length > selected.length;
+      const last = selected.at(-1);
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && last
+          ? {
+              nextCursor: {
+                updatedAt: last.updatedAt,
+                sessionId: last.sessionId,
+              },
+            }
+          : {}),
+      };
+    },
+
+    listEvents(request: ListRuntimeLogEventsRequest): RuntimeLogEventReadPage<RuntimeEvent> {
+      assertOpen();
+      assertListRuntimeLogEventsRequest(request);
+      const requestedTypes = request.eventTypes ? new Set(request.eventTypes) : undefined;
+      if (requestedTypes && [...requestedTypes].some((type) => !currentEventTypes.has(type))) {
+        throw new Error('Runtime observer event filter contains an unknown current event type.');
+      }
+      const stored = storage.sessions.loadEventsStrict(request.sessionId);
+      if (stored.length === 0 && !sessionExists(request.sessionId)) {
+        throw new Error(`Runtime session was not found: ${request.sessionId}`);
+      }
+      const candidates = stored
+        .map((record) => ({
+          sessionId: request.sessionId,
+          sequence: record.id,
+          eventId: record.event_id ?? `${request.sessionId}:${record.id}`,
+          ...(record.causation_id === undefined ? {} : { causationId: record.causation_id }),
+          ...(record.occurred_at === undefined ? {} : { occurredAt: record.occurred_at }),
+          createdAt: record.created_at,
+          event: record.event,
+        }))
+        .filter(
+          (record) =>
+            (request.afterSequence === undefined || record.sequence > request.afterSequence) &&
+            (request.beforeSequence === undefined || record.sequence < request.beforeSequence) &&
+            (requestedTypes === undefined || requestedTypes.has(record.event.type)),
+        )
+        .sort((left, right) => left.sequence - right.sequence);
+      const hasMore = candidates.length > request.limit;
+      const selected =
+        request.direction === 'backward'
+          ? candidates.slice(Math.max(0, candidates.length - request.limit))
+          : candidates.slice(0, request.limit);
+      const cursor =
+        request.direction === 'backward' ? selected.at(0)?.sequence : selected.at(-1)?.sequence;
+      return {
+        entries: selected,
+        hasMore,
+        ...(hasMore && cursor !== undefined ? { nextCursor: cursor } : {}),
+        observedLastSequence: storage.sessions.getLastEventPosition(request.sessionId),
+      };
+    },
+
+    close(): void {
+      closed = true;
+    },
+  });
 }
 
 export function createKiteRuntimeStorageOwner(checkpointPath: string): KiteRuntimeStorageOwner {
@@ -647,6 +1216,8 @@ function createKiteRuntimeHost(
     context: RuntimeHostExecutionAdapterContext<RuntimeEvent, RuntimeState>,
     builtinToolCatalog: BuiltinToolCatalogProjection,
   ) => RuntimeHostExecutionBridge,
+  ownsSessionExecution?: (sessionId: string) => boolean,
+  runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
   return createRuntimeHost({
     storage,
@@ -654,6 +1225,8 @@ function createKiteRuntimeHost(
       createBridge(context, createBuiltinToolCatalogProjection(context.capabilityRegistrySnapshot)),
     ),
     contextCompiler: createBuiltinContextCompilerPort(),
+    ...(ownsSessionExecution ? { ownsSessionExecution } : {}),
+    ...(runWithSessionExecution ? { runWithSessionExecution } : {}),
   });
 }
 
@@ -700,40 +1273,56 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
 function createKiteCliRuntimeHost(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const owner = createKiteSessionAppServerStorageComposition({
+    databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
+    hostInstanceId: `cli_${randomBytes(16).toString('hex')}`,
+  });
+  const storage: RuntimeStorage<RuntimeEvent, RuntimeState> = Object.freeze({
+    ...owner.storage,
+    close: () => {
+      owner.storage.close();
+      owner.releaseExecutions(true);
+      owner.disposeStorage();
+    },
+  });
   const projectIdentity = resolveProjectIdentity(input.workspace);
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
-  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
-    const { services, capabilities, capabilityRegistrySnapshot } = context;
-    const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
-    const modelOperationExecution = createKiteModelOperationExecutionPort(
-      capabilities,
-      builtinToolCatalog,
-    );
-    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
-    const modelInvocationRuntimeFactory = (workspace: string) => ({
-      ...modelRuntime(workspace),
-      builtinToolCatalog,
-      toolPipelineComposition,
-    });
-    const runtimeStorageView = createRuntimeStorageAccess(services);
-    runtimeCoordinatorBinding.bind({
-      services,
-      capabilities,
-      capabilityRegistrySnapshot,
-      builtinToolCatalog,
-      toolPipelineComposition,
-      modelRuntimeFactory: modelRuntime,
-      store: runtimeStorageView,
-    });
-    return createCliRuntimeBridge(
-      { ...input, projectIdentity },
-      capabilities,
-      modelInvocationRuntimeFactory,
-      (sessionId) => resolveKiteRecoveryIdentity(services, sessionId),
-      runtimeCoordinatorBinding.access(),
-    );
-  });
+  const host = createKiteRuntimeHost(
+    storage,
+    (context, builtinToolCatalog) => {
+      const { services, capabilities, capabilityRegistrySnapshot } = context;
+      const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
+      const modelOperationExecution = createKiteModelOperationExecutionPort(
+        capabilities,
+        builtinToolCatalog,
+      );
+      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
+      const modelInvocationRuntimeFactory = (workspace: string) => ({
+        ...modelRuntime(workspace),
+        builtinToolCatalog,
+        toolPipelineComposition,
+      });
+      const runtimeStorageView = createRuntimeStorageAccess(services);
+      runtimeCoordinatorBinding.bind({
+        services,
+        capabilities,
+        capabilityRegistrySnapshot,
+        builtinToolCatalog,
+        toolPipelineComposition,
+        modelRuntimeFactory: modelRuntime,
+        store: runtimeStorageView,
+      });
+      return createCliRuntimeBridge(
+        { ...input, projectIdentity },
+        capabilities,
+        modelInvocationRuntimeFactory,
+        (sessionId) => resolveKiteRecoveryIdentity(services, sessionId),
+        runtimeCoordinatorBinding.access(),
+      );
+    },
+    owner.ownsSessionExecution,
+    owner.runWithSessionExecution,
+  );
   return host;
 }
 
@@ -764,6 +1353,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
       projectId: projectIdentity.projectId,
       workspaceDigest: projectIdentity.workspaceDigest,
     });
+    input.storageOwner?.admitWorkspace?.(admission);
     const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
     if (byWorkspace.has(key)) {
       throw new TypeError(`Duplicate Runtime Workspace identity: ${canonicalPath}`);
@@ -781,7 +1371,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
     );
   }
 
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  // Worker composition injects the already-admitted Store 8 owner here.  The legacy Service path
+  // remains lazy only when no owner is supplied; no compatibility wrapper is ever introduced for
+  // an injected Store.
+  const owner =
+    input.storageOwner ??
+    createKiteSessionAppServerStorageComposition({
+      databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
+      hostInstanceId: `service_${randomBytes(16).toString('hex')}`,
+    });
+  const artifactBackends = owner.artifactStore
+    ? createKiteHomeBuiltinArtifactBackends(owner.artifactStore)
+    : undefined;
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
   const interactionBroker = createRuntimeInteractionBroker<CliRuntimeInteractionResolution>();
   const connectionWorkspaces = new Map<string, AdmittedWorkspace>();
@@ -831,259 +1432,414 @@ export function createKiteMultiWorkspaceRuntimeServer(
     bySession.delete(sessionId);
     return undefined;
   };
-  const bridges = new Map<string, RuntimeHostExecutionBridge>();
-  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
-    const { services, capabilities, capabilityRegistrySnapshot } = context;
-    const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
-    const modelOperationExecution = createKiteModelOperationExecutionPort(
-      capabilities,
-      builtinToolCatalog,
-    );
-    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
-    const modelInvocationRuntimeFactory = (workspace: string) => ({
-      ...modelRuntime(workspace),
-      builtinToolCatalog,
-      toolPipelineComposition,
+  const projectStoredSession = (threadId: string): RuntimeSessionProjection | undefined => {
+    const snapshot = owner.loadCurrentSnapshot(threadId);
+    if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
+    const model = owner.getCurrentSessionModelRoute(threadId);
+    const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
+      sessionRevision: snapshot.revision,
     });
-    runtimeCoordinatorBinding.bind({
-      services,
-      capabilities,
-      capabilityRegistrySnapshot,
-      builtinToolCatalog,
-      toolPipelineComposition,
-      modelRuntimeFactory: modelRuntime,
-      store: createRuntimeStorageAccess(services),
-    });
-    const contexts = createRuntimeWorkspaceContextFactory({
-      create: async (admission) => {
-        const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
-        const registered =
-          byWorkspace.get(key) ??
-          (input.workspaceTemplateFor
-            ? Object.freeze({
-                admission,
-                input: {
-                  ...(await input.workspaceTemplateFor(admission)),
-                  workspace: admission.canonicalPath,
-                  checkpointPath: input.checkpointPath,
-                },
-              })
-            : undefined);
-        if (!registered) throw new Error('Runtime Workspace is not registered for execution.');
-        byWorkspace.set(key, registered);
-        const sessionBridges = new Map<string, RuntimeHostExecutionBridge>();
-        const pendingSessionBridges = new Map<string, Promise<RuntimeHostExecutionBridge>>();
-        const bridgeForSession = async (sessionId: string): Promise<RuntimeHostExecutionBridge> => {
-          const current = sessionBridges.get(sessionId);
-          if (current) return current;
-          const pending = pendingSessionBridges.get(sessionId);
-          if (pending) return pending;
-          const creation = (async (): Promise<RuntimeHostExecutionBridge> => {
-            const persisted = persistedAdmissionForSession(sessionId);
-            if (persisted && !sameAdmission(persisted, admission)) {
-              throw new Error('Runtime Session belongs to a different Workspace.');
-            }
-            bySession.set(sessionId, admission);
-            const bridge = createCliRuntimeBridge(
-              {
-                ...registered.input,
-                sessionId,
-                projectIdentity: resolveProjectIdentity(admission.canonicalPath),
-              },
-              capabilities,
-              modelInvocationRuntimeFactory,
-              (resolvedSessionId) => resolveKiteRecoveryIdentity(services, resolvedSessionId),
-              runtimeCoordinatorBinding.access(),
-              interactionBroker,
-              (resolvedSessionId) => {
-                const resolved = persistedAdmissionForSession(resolvedSessionId);
-                if (!resolved) return [];
-                return [...connectionWorkspaces.entries()]
-                  .filter(([, workspace]) => sameAdmission(workspace, resolved))
-                  .map(([connectionId]) => connectionId);
-              },
-            );
-            if (owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId)) {
-              await bridge.recoverSession(sessionId, () => undefined);
-            }
-            sessionBridges.set(sessionId, bridge);
-            return bridge;
-          })();
-          pendingSessionBridges.set(sessionId, creation);
-          try {
-            return await creation;
-          } finally {
-            if (pendingSessionBridges.get(sessionId) === creation) {
-              pendingSessionBridges.delete(sessionId);
-            }
-          }
-        };
-        const bridge: RuntimeHostExecutionBridge = Object.freeze({
-          recoverSession: async (
-            sessionId: string,
-            publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
-          ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
-          inspectCommand: async (
-            command: RuntimeCommand,
-            context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
-          ) =>
-            (
-              await bridgeForSession(
-                command.type === 'fork_session' ? command.sourceSessionId : context.targetSessionId,
-              )
-            ).inspectCommand(command, context),
-          query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
-            if (query.type === 'list_sessions') {
-              const results = await Promise.all(
-                [...sessionBridges.values()].map((sessionBridge) => sessionBridge.query(query)),
-              );
-              return {
-                status: 'ok' as const,
-                queryType: 'list_sessions' as const,
-                sessions: results.flatMap((result) =>
-                  result.status === 'ok' ? (result.sessions ?? []) : [],
-                ),
-              };
-            }
-            return (await bridgeForSession(query.sessionId)).query(query);
-          },
-          shutdownSession: async (
-            sessionId: string,
-            reason: string,
-            publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
-          ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
-          close: async () => {
-            await Promise.allSettled(pendingSessionBridges.values());
-            pendingSessionBridges.clear();
-            sessionBridges.clear();
-          },
-        });
-        bridges.set(key, bridge);
-        return {
-          admission,
-          bridge,
-          close: async () => {
-            bridges.delete(key);
-          },
-        };
-      },
-      resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
-    });
-    const admission = createRuntimeWorkspaceAdmission({
-      admitForCreate: async (workspace) => {
-        const registered = [...byWorkspace.values()].find(
-          (candidate) => candidate.admission.canonicalPath === workspace,
-        );
-        if (registered) return registered.admission;
-        if (input.workspaceTemplateFor) {
-          const canonicalPath = realpathSync.native(workspace);
-          const project = resolveProjectIdentity(canonicalPath);
-          return Object.freeze({
-            canonicalPath,
-            projectId: project.projectId,
-            workspaceDigest: project.workspaceDigest,
-          });
-        }
-        throw new Error('Runtime Workspace is not admitted for creation.');
-      },
-      resolveForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
-    });
-    const router = createRuntimeExecutionBridgeRouter({
-      contexts,
-      admission,
-      queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
-        if (query.type !== 'list_sessions') {
-          return { status: 'rejected', queryType: query.type, code: 'unsupported' };
-        }
-        // The process-wide index is Store authority. Reading it must never
-        // instantiate a Workspace context (which can load project config,
-        // start MCP, or scan Skills for a Workspace the caller did not admit).
-        const projections = owner
-          .listCurrentSessions('', 1_000)
-          .map(({ threadId }): RuntimeSessionProjection | undefined => {
-            const snapshot = owner.loadCurrentSnapshot(threadId);
-            if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
-            const model = owner.getCurrentSessionModelRoute(threadId);
-            const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
-              sessionRevision: snapshot.revision,
-            });
-            const activeInteraction =
-              interactionQueue.activeInteractionId === undefined
-                ? undefined
-                : interactionQueue.interactions.find(
-                    (interaction) =>
-                      interaction.interactionId === interactionQueue.activeInteractionId,
-                  );
-            const activeTask = snapshot.activeTaskId
-              ? snapshot.tasks[snapshot.activeTaskId]
-              : undefined;
-            return Object.freeze({
-              schema: RUNTIME_PROJECTION_SCHEMA_,
-              sessionId: threadId,
-              revision: snapshot.revision,
-              workspace: snapshot.session.workspace,
-              lifecycle: 'open' as const,
-              interactionQueue,
+    const activeInteraction =
+      interactionQueue.activeInteractionId === undefined
+        ? undefined
+        : interactionQueue.interactions.find(
+            (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
+          );
+    const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
+    const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
+    const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
+    return Object.freeze({
+      schema: RUNTIME_PROJECTION_SCHEMA_,
+      sessionId: threadId,
+      revision: snapshot.revision,
+      workspace: snapshot.session.workspace,
+      lifecycle: 'open' as const,
+      interactionQueue,
+      ...(activeTask === undefined
+        ? {}
+        : {
+            activeTask: {
+              taskId: activeTask.taskId,
+              phase:
+                activeTask.planning.kind === 'executing'
+                  ? ('building' as const)
+                  : ('planning' as const),
+            },
+          }),
+      ...(storedRun === null || storedRun === undefined
+        ? {}
+        : {
+            currentRun: {
+              runId: storedRun.runId,
+              initialTurnId: storedRun.runId,
+              activeTurnId: snapshot.turn.turnId,
+              ...(activeTask === undefined ? {} : { taskId: activeTask.taskId }),
+              status: ownsExecution
+                ? storedRun.status === 'unknown'
+                  ? ('recovery_required' as const)
+                  : storedRun.status
+                : ('recovery_required' as const),
+              revision: storedRun.lastRevision,
               ...(activeInteraction === undefined
                 ? {}
+                : { activeInteractionId: activeInteraction.interactionId }),
+              ...(ownsExecution
+                ? storedRun.terminal === undefined
+                  ? {}
+                  : { outcome: { ...storedRun.terminal } }
                 : {
-                    activeWork: {
-                      workId: activeTask?.taskId ?? snapshot.turn.turnId,
-                      phase:
-                        activeTask?.planning.kind === 'executing'
-                          ? ('building' as const)
-                          : ('planning' as const),
-                      status: 'waiting' as const,
-                      activeTurn: {
-                        turnId: snapshot.turn.turnId,
-                        status: 'waiting' as const,
-                        interaction: activeInteraction,
-                      },
+                    outcome: {
+                      reasonCode: 'recovery_required',
+                      safeRetry: false,
+                      recoveryEntry: 'reconcile' as const,
                     },
                   }),
-              ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
-            });
+            },
+          }),
+      ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
+    });
+  };
+  const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
+  const desiredConfigs = new Map<string, AgentConfig>();
+  const host = createKiteRuntimeHost(
+    owner.storage,
+    (context, builtinToolCatalog) => {
+      const { services, capabilities, capabilityRegistrySnapshot } = context;
+      const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
+      const modelOperationExecution = createKiteModelOperationExecutionPort(
+        capabilities,
+        builtinToolCatalog,
+      );
+      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
+        modelOperationExecution,
+        artifactBackends,
+      );
+      const modelInvocationRuntimeFactory = (workspace: string) => ({
+        ...modelRuntime(workspace),
+        builtinToolCatalog,
+        toolPipelineComposition,
+      });
+      runtimeCoordinatorBinding.bind({
+        services,
+        capabilities,
+        capabilityRegistrySnapshot,
+        builtinToolCatalog,
+        toolPipelineComposition,
+        modelRuntimeFactory: modelRuntime,
+        store: createRuntimeStorageAccess(services),
+      });
+      const contexts = createRuntimeWorkspaceContextFactory({
+        create: async (admission) => {
+          input.storageOwner?.admitWorkspace?.(admission);
+          const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
+          const registered =
+            byWorkspace.get(key) ??
+            (input.workspaceTemplateFor
+              ? Object.freeze({
+                  admission,
+                  input: {
+                    ...(await input.workspaceTemplateFor(admission)),
+                    workspace: admission.canonicalPath,
+                    checkpointPath: input.checkpointPath,
+                  },
+                })
+              : undefined);
+          if (!registered) throw new Error('Runtime Workspace is not registered for execution.');
+          byWorkspace.set(key, registered);
+          const sessionBridges = new Map<string, ConfigurableCliRuntimeBridge>();
+          const pendingSessionBridges = new Map<string, Promise<ConfigurableCliRuntimeBridge>>();
+          const bridgeForSession = async (
+            sessionId: string,
+          ): Promise<ConfigurableCliRuntimeBridge> => {
+            const current = sessionBridges.get(sessionId);
+            if (current) return current;
+            const pending = pendingSessionBridges.get(sessionId);
+            if (pending) return pending;
+            const creation = (async (): Promise<ConfigurableCliRuntimeBridge> => {
+              const persisted = persistedAdmissionForSession(sessionId);
+              if (persisted && !sameAdmission(persisted, admission)) {
+                throw new Error('Runtime Session belongs to a different Workspace.');
+              }
+              bySession.set(sessionId, admission);
+              const bridge = createCliRuntimeBridge(
+                {
+                  ...registered.input,
+                  config: desiredConfigs.get(key) ?? registered.input.config,
+                  sessionId,
+                  projectIdentity: resolveProjectIdentity(admission.canonicalPath),
+                },
+                capabilities,
+                modelInvocationRuntimeFactory,
+                (resolvedSessionId) => resolveKiteRecoveryIdentity(services, resolvedSessionId),
+                runtimeCoordinatorBinding.access(),
+                interactionBroker,
+                (resolvedSessionId) => {
+                  const resolved = persistedAdmissionForSession(resolvedSessionId);
+                  if (!resolved) return [];
+                  return [...connectionWorkspaces.entries()]
+                    .filter(([, workspace]) => sameAdmission(workspace, resolved))
+                    .map(([connectionId]) => connectionId);
+                },
+              );
+              if (owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId)) {
+                await bridge.recoverSession(sessionId, () => undefined);
+              }
+              sessionBridges.set(sessionId, bridge);
+              return bridge;
+            })();
+            pendingSessionBridges.set(sessionId, creation);
+            try {
+              return await creation;
+            } finally {
+              if (pendingSessionBridges.get(sessionId) === creation) {
+                pendingSessionBridges.delete(sessionId);
+              }
+            }
+          };
+          const bridge: ConfigurableCliRuntimeBridge = Object.freeze({
+            applySelectedConfig: (config: AgentConfig) => {
+              desiredConfigs.set(key, config);
+              for (const sessionBridge of sessionBridges.values()) {
+                sessionBridge.applySelectedConfig(config);
+              }
+              for (const pendingBridge of pendingSessionBridges.values()) {
+                void pendingBridge.then((sessionBridge) =>
+                  sessionBridge.applySelectedConfig(config),
+                );
+              }
+            },
+            recoverSession: async (
+              sessionId: string,
+              publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
+            ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
+            inspectCommand: async (
+              command: RuntimeCommand,
+              context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
+            ) =>
+              (
+                await bridgeForSession(
+                  command.type === 'fork_session'
+                    ? command.sourceSessionId
+                    : context.targetSessionId,
+                )
+              ).inspectCommand(command, context),
+            query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+              if (query.type === 'list_sessions') {
+                const results = await Promise.all(
+                  [...sessionBridges.values()].map((sessionBridge) => sessionBridge.query(query)),
+                );
+                return {
+                  status: 'ok' as const,
+                  queryType: 'list_sessions' as const,
+                  sessions: results.flatMap((result) =>
+                    result.status === 'ok' ? (result.sessions ?? []) : [],
+                  ),
+                };
+              }
+              return (await bridgeForSession(query.sessionId)).query(query);
+            },
+            shutdownSession: async (
+              sessionId: string,
+              reason: string,
+              publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
+            ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
+            close: async () => {
+              await Promise.allSettled(pendingSessionBridges.values());
+              pendingSessionBridges.clear();
+              sessionBridges.clear();
+            },
           });
-        return {
-          status: 'ok',
-          queryType: 'list_sessions',
-          sessions: projections.filter((projection) => projection !== undefined),
-        };
-      },
-    });
-    return Object.freeze({
-      recoverSession: router.recoverSession.bind(router),
-      inspectCommand: router.inspectCommand.bind(router),
-      query: router.query.bind(router),
-      shutdownSession: router.shutdownSession.bind(router),
-      close: async () => {
-        interactionBroker.close('Runtime owner closed.');
-        try {
-          await router.close();
-        } finally {
-          await runtimeCoordinatorBinding.access().close();
-        }
-      },
-    });
-  });
+          bridges.set(key, bridge);
+          return {
+            admission,
+            bridge,
+            close: async () => {
+              bridges.delete(key);
+            },
+          };
+        },
+        resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+      });
+      const admission = createRuntimeWorkspaceAdmission({
+        admitForCreate: async (workspace) => {
+          const registered = [...byWorkspace.values()].find(
+            (candidate) => candidate.admission.canonicalPath === workspace,
+          );
+          if (registered) return registered.admission;
+          if (input.workspaceTemplateFor) {
+            const canonicalPath = realpathSync.native(workspace);
+            const project = resolveProjectIdentity(canonicalPath);
+            return Object.freeze({
+              canonicalPath,
+              projectId: project.projectId,
+              workspaceDigest: project.workspaceDigest,
+            });
+          }
+          throw new Error('Runtime Workspace is not admitted for creation.');
+        },
+        resolveForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+      });
+      const router = createRuntimeExecutionBridgeRouter({
+        contexts,
+        admission,
+        queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
+          if (query.type !== 'list_sessions') {
+            return {
+              status: 'rejected',
+              queryType: query.type,
+              code: 'unsupported',
+            };
+          }
+          // The process-wide index is Store authority. Reading it must never
+          // instantiate a Workspace context (which can load project config,
+          // start MCP, or scan Skills for a Workspace the caller did not admit).
+          const projections = owner
+            .listCurrentSessions('', 1_000)
+            .map(({ threadId }) => projectStoredSession(threadId));
+          return {
+            status: 'ok',
+            queryType: 'list_sessions',
+            sessions: projections.filter((projection) => projection !== undefined),
+          };
+        },
+      });
+      return Object.freeze({
+        recoverSession: router.recoverSession.bind(router),
+        inspectCommand: router.inspectCommand.bind(router),
+        query: router.query.bind(router),
+        shutdownSession: router.shutdownSession.bind(router),
+        close: async () => {
+          interactionBroker.close('Runtime owner closed.');
+          try {
+            await router.close();
+          } finally {
+            await runtimeCoordinatorBinding.access().close();
+          }
+        },
+      });
+    },
+    owner.ownsSessionExecution,
+    owner.runWithSessionExecution,
+  );
   const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
-    authorize: async () => ({ allowed: false as const, reason: 'unauthorized' as const }),
+    authorize: async () => ({
+      allowed: false as const,
+      reason: 'unauthorized' as const,
+    }),
   });
+  const runHostCommand = (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) => {
+    try {
+      return Promise.resolve(host.command(command, context)).catch((error) =>
+        appServerCommandFailure(command, error),
+      );
+    } catch (error) {
+      return Promise.resolve(appServerCommandFailure(command, error));
+    }
+  };
+  const runHostQuery = (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+    if (!owner.readSnapshot) return host.query(query);
+    const direct = owner.readSnapshot(() => {
+      if (query.type === 'list_sessions') {
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          sessions: owner
+            .listCurrentSessions('', 1_000)
+            .map(({ threadId }) => projectStoredSession(threadId))
+            .filter((projection) => projection !== undefined),
+        };
+      }
+      if (query.type === 'get_session_projection') {
+        const projection = projectStoredSession(query.sessionId);
+        return projection
+          ? {
+              status: 'ok' as const,
+              queryType: query.type,
+              revision: projection.revision,
+              session: projection,
+            }
+          : {
+              status: 'not_found' as const,
+              queryType: query.type,
+              code: 'session_not_found' as const,
+            };
+      }
+      if (query.type === 'list_checkpoints') {
+        const snapshot = owner.loadCurrentSnapshot(query.sessionId);
+        if (!snapshot) {
+          return {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'session_not_found' as const,
+          };
+        }
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          revision: snapshot.revision,
+          checkpoints: owner.storage.checkpoints
+            .listNamedSnapshots(query.sessionId)
+            .map((entry) => {
+              const state = owner.storage.checkpoints.loadNamedSnapshot<RuntimeState>(
+                query.sessionId,
+                entry.snapshotId,
+              );
+              return {
+                checkpointId: entry.snapshotId,
+                sessionId: query.sessionId,
+                revision: state?.revision ?? 0,
+                eventPosition: entry.eventPosition,
+                createdAt: entry.createdAt,
+                ...(entry.targetMessage === undefined
+                  ? {}
+                  : { targetMessage: entry.targetMessage.slice(0, 8_192) }),
+                ...(entry.targetMessageCreatedAt === undefined
+                  ? {}
+                  : { targetMessageCreatedAt: entry.targetMessageCreatedAt }),
+                affectedFileCount: entry.affectedFileCount ?? 0,
+              };
+            }),
+        };
+      }
+      return undefined;
+    });
+    return direct === undefined ? host.query(query) : Promise.resolve(direct);
+  };
+  const cancelAllSessions = async (reason: string): Promise<void> => {
+    if (!owner.runWithSessionExecution || !owner.ownedSessionIds) {
+      await host.cancelAllSessions(reason);
+      return;
+    }
+    await Promise.all(
+      owner
+        .ownedSessionIds()
+        .filter((sessionId) => owner.storage.sessions.loadSnapshotRecord(sessionId) !== null)
+        .map((sessionId) =>
+          owner.runWithSessionExecution!(sessionId, () => host.cancelSession(sessionId, reason)),
+        ),
+    );
+  };
   const runtime: RuntimeAccess = input.operationGate
     ? Object.freeze({
-        command: (command: RuntimeCommand) =>
-          input.operationGate!.runMutation(() => host.command(command)),
-        query: (query: RuntimeQuery) => host.query(query),
+        command: (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) =>
+          input.operationGate!.runMutation(() => runHostCommand(command, context)),
+        query: runHostQuery,
         subscribe: (subscription: RuntimeSubscription) => host.subscribe(subscription),
       })
-    : host;
+    : Object.freeze({
+        command: runHostCommand,
+        query: runHostQuery,
+        subscribe: (subscription: RuntimeSubscription) => host.subscribe(subscription),
+      });
   const hub = createRuntimeServerInProcessHub(
     { runtime, admission: denyByDefault },
     {
       serverInfo: {
-        version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+        version: input.serverVersion ?? `protocol-${RUNTIME_PROTOCOL_VERSION}`,
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
+      ...(input.appServerProtocol ? { historyMethods: true, appMethods: true } : {}),
+      ...(input.appServerDaemonProtocol ? { serverControlMethods: true } : {}),
     },
   );
   let disposePromise: Promise<void> | undefined;
@@ -1092,13 +1848,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
     host,
     runtime,
     storage: owner.storage,
-    cancelAllSessions: (reason: string) => host.cancelAllSessions(reason),
+    cancelAllSessions,
     bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => {
       connectionWorkspaces.set(connectionId, workspace);
     },
     releaseConnection: (connectionId: string) => {
       connectionWorkspaces.delete(connectionId);
       interactionBroker.disconnect(connectionId);
+    },
+    applySelectedConfig: (workspace: AdmittedWorkspace, config: AgentConfig) => {
+      const key = `${workspace.workspaceDigest}\0${workspace.projectId}\0${workspace.canonicalPath}`;
+      desiredConfigs.set(key, config);
+      bridges.get(key)?.applySelectedConfig(config);
     },
     open: (options?: RuntimeServerInProcessOpenOptions) => {
       const requestedAdmission = options?.admission ?? denyByDefault;
@@ -1135,7 +1896,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 : undefined;
             const isFreshCreate = command?.type === 'create_session' && persisted === undefined;
             if (!isFreshCreate && (!persisted || !sameAdmission(persisted, admitted))) {
-              return { allowed: false as const, reason: 'unauthorized' as const };
+              return {
+                allowed: false as const,
+                reason: 'unauthorized' as const,
+              };
             }
           }
           connectionWorkspaces.set(request.connectionId, admitted);
@@ -1154,15 +1918,53 @@ export function createKiteMultiWorkspaceRuntimeServer(
     },
     [Symbol.asyncDispose]: () => {
       disposePromise ??= (async () => {
+        const failures: unknown[] = [];
+        let cleanupConfirmed = true;
         try {
           await hub.server.beginDraining();
-        } finally {
+        } catch (error) {
+          failures.push(error);
+        }
+        try {
+          await cancelAllSessions('Runtime App Server disposed.');
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
           await host[Symbol.asyncDispose]();
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
+          owner.releaseExecutions?.(cleanupConfirmed);
+        } catch (error) {
+          failures.push(error);
+        } finally {
+          try {
+            owner.disposeStorage?.();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'Runtime Server owner disposal failed.');
         }
       })();
       return disposePromise;
     },
   });
+}
+
+function appServerCommandFailure(command: RuntimeCommand, error: unknown) {
+  if (!(error instanceof KiteAppServerSessionError)) throw error;
+  return {
+    status: 'rejected' as const,
+    commandId: command.commandId,
+    code:
+      error.code === 'session_busy' ? ('runtime_busy' as const) : ('session_unavailable' as const),
+  };
 }
 
 export function createKiteCliRuntimeServer(

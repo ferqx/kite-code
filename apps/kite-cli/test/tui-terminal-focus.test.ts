@@ -3,12 +3,21 @@ import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { createElement } from 'react';
 import {
+  isTerminalFocusReport,
   type TerminalFocusOutput,
   TerminalFocusStore,
 } from '#kite-cli/tui/hooks/terminal-focus-store';
 import { useTerminalFocus } from '#kite-cli/tui/hooks/useTerminalFocus';
 
 describe('TerminalFocusStore', () => {
+  test('identifies complete and Ink-stripped DEC focus reports only', () => {
+    expect(isTerminalFocusReport('\x1b[I')).toBe(true);
+    expect(isTerminalFocusReport('[I')).toBe(true);
+    expect(isTerminalFocusReport('\x1b[O')).toBe(true);
+    expect(isTerminalFocusReport('[O')).toBe(true);
+    expect(isTerminalFocusReport('ordinary input')).toBe(false);
+  });
+
   test('multiplexes subscribers without attaching a competing stdin data listener', () => {
     const writes: string[] = [];
     const output: TerminalFocusOutput = { write: (value) => writes.push(value) };

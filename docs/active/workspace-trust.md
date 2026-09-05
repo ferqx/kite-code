@@ -32,6 +32,14 @@ identity不产生外部授权，也不读取repository正文、config、objects�
 decision/connect body、cwd、clientInfo与display name本身都不提升authority。`apps/kite-cli`没有trust repository或
 fallback writer，只保存语言、theme等UI-local preference。
 
+Agent API exchange也是同一门禁的consumer：Native peer mint的Workspace-bound one-shot capability本身不替代当前Trust。Worker在消费
+`Kite-Connection` capability前再次调用canonical Workspace admission；`untrusted`固定403，Trust/store unavailable固定503，二者都不
+消费capability、不创建context。成功context只绑定已验证Workspace digest，不接受request body/path改绑。Browser/Gateway credential不能
+进入该exchange。除logout外的后续Bearer request再次调用同一canonical admission；Trust变为untrusted时返回403、撤销context并关闭private
+read logical connection，Trust/store暂时不可用时返回503且不把旧Trust缓存为放行。Session/History/Checkpoint path/query都不能改绑Workspace。
+并发read在进入异步admission前占用context有界slot；admission返回后还要复核context未被logout/generation/Worker drain撤销。撤销先移除context
+并等待这些in-flight检查收敛再关闭private connection，因此迟到的`admitted`不能越过更新后的Trust或replacement事实。
+
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. canonicalize Workspace并解析关联external-read roots，形成`externalReadScopeDigest`。
@@ -91,7 +99,9 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 - `workspacePath` 仅供审计，不参与判定；目录移动或改名后 key 变化，信任自然失效。
 - `externalReadScopeDigest`绑定批准时展示的exact roots；缺少该字段的legacy record只对空external scope有效，scope
   新增或漂移必须重新确认。roots本身由每次query重新canonicalize，不从store反向恢复authority。
-- 写入使用 fsync + 原子 rename，文件权限 0o600，与 MCP 项目批准存储同一模式。`trustWorkspace()` 在读取-合并-写入前获取 `.lock` 文件（排他创建 + 指数退避重试，5s 过期清理残留锁），并在持锁后重新读取存储，避免多进程并发信任不同目录时发生记录覆盖。
+- 写入使用fsync + 原子rename，文件权限0o600，与MCP项目批准存储同一模式。`trustWorkspace()`在读取-合并-写入前获取
+  owner-specific `.kite-lock`并在持锁后重新读取expected revision。锁绑定PID、process-start identity、随机nonce与inode；不再按固定wall-clock
+  年龄删除，只有能证明exact owner已死亡才回收，alive/uncertain/malformed全部fail closed。多进程并发信任不同目录不会覆盖已有记录。
 - `source` 当前取值：`user`（TUI 确认）、`config`（CLI `--trust-workspace` 显式背书）、`test`（测试 harness 预写）。
 
 ## 测试边界
@@ -104,8 +114,8 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 
 ## 边界与现状
 
-- TUI与CLI`run/resume`都通过managed Native Service执行two-phase门禁。Service-owned internal stdio只给拥有child
-  lifecycle的Desktop/test父进程，不是terminal fallback；development/reference loopback WebSocket也不能绕过Trust，
+- TUI与CLI`run/resume`都通过parent-owned stdio或显式daemon App Server执行two-phase门禁。default child与daemon复用同一App Control owner；
+  development/reference loopback WebSocket也不能绕过Trust，
   但不是production Web/Desktop入口。
 - workspace 信任是canonical目录及其exact external-read scope的一次性决定，不是逐命令或逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。

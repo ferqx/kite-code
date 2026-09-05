@@ -11,6 +11,7 @@ import {
 
 import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
+// biome-ignore lint/suspicious/noExplicitAny: deliberate structural test helper for private state assertions
 type JsonRecord = Record<string, any>;
 
 function record(value: unknown): JsonRecord {
@@ -24,7 +25,7 @@ function commandIdentity(
     sessionId: 'session-host-recovery',
     threadId: 'session-host-recovery',
     workspace: '/workspace/project',
-    canonicalWorkspaceIdentity: 'sha256:' + 'a'.repeat(64),
+    canonicalWorkspaceIdentity: `sha256:${'a'.repeat(64)}`,
     cwd: '/workspace/project',
     executor: 'shell',
     environment: 'env-digest-1',
@@ -74,6 +75,7 @@ function approvalRequested(interactionId: string, toolCallId: string): KernelEve
     commandIdentity: commandIdentity(),
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: false,
+    owner: { kind: 'root_tool', toolCallId },
     createdAt: '2026-08-25T00:00:00.000Z',
   } as KernelEvent;
 }
@@ -89,9 +91,22 @@ function batchReleaseEvent(): KernelEvent {
     sessionRevision: 0,
     generation: 0,
     commandIdentity: identity,
+    owner: { kind: 'root_tool', toolCallId: 'call-a' },
     matches: [
-      { interactionId: 'approval-a', toolCallId: 'call-a', receiptId: 'receipt-a', generation: 0 },
-      { interactionId: 'approval-b', toolCallId: 'call-b', receiptId: 'receipt-b', generation: 0 },
+      {
+        interactionId: 'approval-a',
+        toolCallId: 'call-a',
+        receiptId: 'receipt-a',
+        generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'call-a' },
+      },
+      {
+        interactionId: 'approval-b',
+        toolCallId: 'call-b',
+        receiptId: 'receipt-b',
+        generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'call-b' },
+      },
     ],
     createdAt: '2026-08-25T00:10:00.000Z',
   } as KernelEvent;

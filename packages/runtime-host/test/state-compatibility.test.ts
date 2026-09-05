@@ -11,6 +11,7 @@ const LEGACY_FORMAT = {
   schemaVersion: 26,
   formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
 } as const;
+const LEGACY_STATE27_EPOCH = 'kite-runtime-saq-v1-2026-08-25';
 
 function legacyStateJson(): string {
   const current = createInitialAgentState({
@@ -108,5 +109,55 @@ describe('Runtime Host State compatibility codec', () => {
         mode: 'full_access',
       } as never),
     ).toThrow();
+  });
+
+  test('reads the immediately preceding State 27 epoch from the current Store generation', () => {
+    const codec = createRuntimeHostStateStorageBinding().codec;
+    const current = createInitialAgentState({
+      threadId: 'legacy-state27-session',
+      userId: 'user',
+      workspace: '/workspace',
+      projectId: 'project',
+      canonicalWorkspaceDigest: `sha256:${'b'.repeat(64)}`,
+      turnId: 'legacy-state27-turn',
+      recoveryIdentityKey: RECOVERY_KEY,
+      interactionMode: 'full',
+    });
+    const legacy = JSON.parse(encodeCurrentAgentStateJson(current)) as Record<string, unknown>;
+    legacy.formatEpoch = LEGACY_STATE27_EPOCH;
+
+    const migrated = codec.decodeState<AgentState>(JSON.stringify(legacy));
+
+    expect(migrated.formatEpoch).not.toBe(LEGACY_STATE27_EPOCH);
+    expect(migrated.session.threadId).toBe('legacy-state27-session');
+    expect(migrated.pendingApprovals).toBeInstanceOf(Map);
+    expect(() => codec.encodeState(legacy as unknown as AgentState)).toThrow();
+  });
+
+  test('reads preceding-epoch events with persistence-order identity but rejects unknown events', () => {
+    const codec = createRuntimeHostStateStorageBinding().codec;
+    expect(
+      codec.decodeEvent(
+        JSON.stringify({
+          type: 'subagent.tool_result',
+          subagent: { id: 'child-1', toolName: 'read_file', ok: true },
+        }),
+        { sequence: 41 },
+      ),
+    ).toMatchObject({
+      type: 'subagent.tool_result',
+      subagent: {
+        stepId: 'legacy:child-1:41',
+        toolCallId: 'legacy:child-1:41',
+        status: 'completed',
+      },
+    });
+    expect(
+      codec.decodeEvent(JSON.stringify({ type: 'approval.requested', interactionId: 'old' })),
+    ).toEqual({
+      type: 'runtime.action_ignored',
+      reason: 'legacy_authorization_compatibility',
+    });
+    expect(() => codec.decodeEvent(JSON.stringify({ type: 'future.event' }))).toThrow();
   });
 });

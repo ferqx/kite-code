@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { resolve } from 'node:path';
 import {
   type KiteAppControlClient,
@@ -6,34 +6,134 @@ import {
   WORKSPACE_TRUST_DECISION_RESPONSE_SCHEMA_,
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import type { LocalKiteConnection } from '@kite-ai/kite-local-runtime/client';
+import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
-import { formatServiceLifecycleResult, main, parseArgs } from '../src/cli/index';
+import { main, parseArgs } from '../src/cli/index';
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
 describe('cli argument parsing', () => {
-  test('recognizes the public managed Service lifecycle surface', () => {
-    expect(parseArgs(['service', 'ensure']).command).toBe('service-ensure');
-    expect(parseArgs(['service', 'status']).command).toBe('service-status');
-    expect(parseArgs(['service', 'status', '--json']).serviceJson).toBe(true);
-    expect(parseArgs(['service', 'stop']).command).toBe('service-stop');
-    expect(parseArgs(['service', 'restart']).command).toBe('service-restart');
+  test('does not register the retired Service lifecycle surface', () => {
+    expect(parseArgs(['service', 'ensure']).command).toBe('help');
+    expect(parseArgs(['service', 'status']).command).toBe('help');
+    expect(parseArgs(['service', 'stop']).command).toBe('help');
+    expect(parseArgs(['service', 'restart']).command).toBe('help');
   });
 
-  test('keeps service run private and renders lifecycle results without secrets', () => {
-    expect(parseArgs(['service', 'run']).command).toBe('help');
-    const result = {
-      schema: 'kite.local-runtime-lifecycle-result.v1' as const,
-      requestId: 'status-1',
-      operation: 'status' as const,
-      outcome: 'applied' as const,
-      state: 'ready' as const,
-      diagnostic: 'build_mismatch' as const,
-    };
-    expect(formatServiceLifecycleResult(result)).toBe(
-      'Service status: applied [ready] (build_mismatch)',
+  test('recognizes only explicit App Server daemon lifecycle and endpoint selection', async () => {
+    expect(parseArgs(['server', 'start'])).toMatchObject({
+      command: 'server-start',
+      serverJson: false,
+    });
+    expect(parseArgs(['server', 'status', '--server', '/tmp/kite.sock', '--json'])).toMatchObject({
+      command: 'server-status',
+      serverEndpoint: '/tmp/kite.sock',
+      serverJson: true,
+    });
+    expect(parseArgs(['server', 'stop']).command).toBe('server-stop');
+    expect(parseArgs(['run', '--server', '/tmp/kite.sock', 'hello']).serverEndpoint).toBe(
+      '/tmp/kite.sock',
     );
-    expect(JSON.parse(formatServiceLifecycleResult(result, true))).toEqual(result);
+    expect(() => parseArgs(['run', '--server'])).toThrow('--server requires');
+
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      process.argv = ['bun', 'kite', 'server', 'status', '--json'];
+      await main({
+        appServerDaemon: {
+          start: async () => ({ state: 'ready' }),
+          status: async () => ({ state: 'ready', endpoint: '/tmp/kite.sock' }),
+          stop: async () => ({ state: 'absent' }),
+        },
+      });
+      expect(output.mock.calls.at(-1)).toEqual([
+        JSON.stringify({ state: 'ready', endpoint: '/tmp/kite.sock' }),
+      ]);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
+  test('explains how to recover from an incompatible explicit App Server daemon', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      process.argv = ['bun', 'kite', 'server', 'status'];
+      await expect(
+        main({
+          appServerDaemon: {
+            start: async () => ({ state: 'incompatible' }),
+            status: async () => ({ state: 'incompatible', endpoint: '/tmp/kite.sock' }),
+            stop: async () => ({ state: 'incompatible' }),
+          },
+        }),
+      ).rejects.toThrow('请更新 Kite Code');
+      expect(output.mock.calls.at(-1)).toEqual(['App Server: incompatible /tmp/kite.sock']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
+  test('recognizes only the explicit App Server daemon Web root command', () => {
+    expect(parseArgs(['web']).command).toBe('web-open');
+    expect(parseArgs(['web', '--json'])).toMatchObject({
+      command: 'web-open',
+      webJson: true,
+    });
+    expect(parseArgs(['web', 'status']).command).toBe('help');
+    expect(parseArgs(['web', 'stop']).command).toBe('help');
+    expect(parseArgs(['web', 'recover']).command).toBe('help');
+    expect(parseArgs(['web', 'stop', 'now']).command).toBe('help');
+    expect(parseArgs(['web', 'status', 'verbose']).command).toBe('help');
+    expect(parseArgs(['web', 'prompt']).command).toBe('help');
+    expect(parseArgs(['web', 'create']).command).toBe('help');
+    expect(parseArgs(['web', '--kite-home', '/tmp/kite-home']).command).toBe('web-open');
+    expect(parseArgs(['web', '--server', '/tmp/app-server.sock']).command).toBe('web-open');
+  });
+
+  test('prints the stable explicit App Server daemon Web root', async () => {
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const calls: string[] = [];
+    const discover = async () => {
+      calls.push('discover');
+      return 'http://127.0.0.1:43125/';
+    };
+    try {
+      process.argv = ['bun', 'kite', 'web'];
+      await main({
+        appServerWeb: { discover },
+      });
+      expect(output.mock.calls.at(-1)).toEqual(['http://127.0.0.1:43125/']);
+      expect(calls).toEqual(['discover']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
+  test('does not start a daemon when Web discovery reports it absent', async () => {
+    const originalArgv = process.argv;
+    try {
+      process.argv = ['bun', 'kite', 'web'];
+      await expect(
+        main({
+          appServerWeb: {
+            discover: async () => {
+              throw new Error('App Server daemon is unavailable; run `kite server start` first.');
+            },
+          },
+        }),
+      ).rejects.toThrow('kite server start');
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
+
+  test('keeps every Service lifecycle invocation retired', () => {
+    expect(parseArgs(['service', 'run']).command).toBe('help');
   });
 
   test('recognizes explicit Windows sandbox control-plane commands', () => {
@@ -163,7 +263,7 @@ describe('cli argument parsing', () => {
       'Interaction mode flags are supported only by run and resume',
     );
     expect(() => parseArgs(['service', 'stop', '--json'])).toThrow(
-      'The --json option is supported only by service status',
+      'The --json option is unsupported for this command',
     );
   });
 
@@ -180,7 +280,7 @@ describe('cli argument parsing', () => {
     try {
       await expect(
         main({
-          serviceConnector: {
+          runtimeConnector: {
             connect: async () =>
               createCliConnection({
                 calls,
@@ -211,7 +311,7 @@ describe('cli argument parsing', () => {
     ];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
             createCliConnection({
               calls,
@@ -248,7 +348,7 @@ describe('cli argument parsing', () => {
     ];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
             createCliConnection({
               calls,
@@ -275,9 +375,13 @@ describe('cli argument parsing', () => {
     process.argv = ['bun', 'kite', 'run', '--workspace', '/tmp/workspace-alias', '--task', 'hello'];
     try {
       await main({
-        serviceConnector: {
+        runtimeConnector: {
           connect: async () =>
-            createCliConnection({ calls, commandWorkspaces, queryStatus: 'trusted' }),
+            createCliConnection({
+              calls,
+              commandWorkspaces,
+              queryStatus: 'trusted',
+            }),
         },
       });
     } finally {
@@ -310,7 +414,7 @@ function createCliConnection(input: {
   commandWorkspaces?: string[];
   queryStatus: 'trusted' | 'unknown';
   externalReadRoots?: readonly string[];
-}): LocalKiteConnection {
+}): KiteAppServerConnection {
   const workspace: KiteWorkspaceIdentity = {
     canonicalPath: '/tmp/trusted',
     projectId: 'cli-test-project',
@@ -378,10 +482,9 @@ function createCliConnection(input: {
         throw new Error('credential is not used by CLI test');
       },
     },
-    service: {} as LocalKiteConnection['service'],
     status: 'disconnected',
     generation: 0,
-    snapshotStore: {} as LocalKiteConnection['snapshotStore'],
+    snapshotStore: {} as KiteAppServerConnection['snapshotStore'],
     subscribe: () => () => undefined,
     prepareAppControl: async () => {
       input.calls.push('prepare-app-control');

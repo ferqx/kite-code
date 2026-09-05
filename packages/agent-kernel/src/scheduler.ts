@@ -20,8 +20,7 @@ export interface SchedulerFacts {
   >;
 }
 
-/** Bounded concurrency ceilings shared with the public scheduling policy snapshot. */
-export const MAX_PARALLEL_READ_TOOLS = 4;
+/** Subagent concurrency remains bounded independently from ordinary Tool batches. */
 export const MAX_PARALLEL_SUBAGENTS = 4;
 
 const EXECUTION_SCOPE_KINDS = new Set([
@@ -275,7 +274,7 @@ function authorizedBatch(
   if (!firstCall || !firstTraits) return [first];
   const ceiling =
     firstTraits.access === 'read' && firstTraits.isolation === 'shared'
-      ? MAX_PARALLEL_READ_TOOLS
+      ? Math.max(1, authorizedQueuedToolIds(state).length)
       : 1;
   if (ceiling === 1) return [first];
   const candidates: Array<{ effectId: string; traits: ExecutionTraits }> = [
@@ -500,7 +499,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
     )
       return {
         type: 'run_tools',
-        toolCallIds: parallelBatch(state, first, 'parallel-read', MAX_PARALLEL_READ_TOOLS, facts),
+        toolCallIds: parallelBatch(state, first, 'parallel-read', runnable.length, facts),
       };
     return { type: 'run_tools', toolCallIds: [first] };
   }

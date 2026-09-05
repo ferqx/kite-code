@@ -3,22 +3,18 @@ import {
   WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
-import {
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  type LocalRuntimeLifecycleResult,
-} from '@kite-ai/kite-local-runtime/client';
-import type { KiteServiceManager } from '@kite-ai/kite-local-runtime/manager';
 import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccessNotification,
+  type RuntimeClientEvent,
   type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeInteractionResponse,
-  type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
+import { formatAppServerMismatch } from '#kite-cli/app-server-diagnostic';
 import { defaultClientCheckpointPath } from '#kite-cli/preferences';
-import { connectKiteServiceMode, type KiteServiceModeConnector } from '#kite-cli/service-mode';
+import { connectKiteRuntimeMode, type KiteRuntimeModeConnector } from '#kite-cli/service-mode';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#kite-cli/trace/replay';
 
 interface RuntimeCommandIdAllocator {
@@ -31,10 +27,17 @@ function createRuntimeCommandIdAllocator(): RuntimeCommandIdAllocator {
 }
 
 export interface CliMainDependencies {
-  /** Managed companion connector; failures are surfaced and never fall back InProcess. */
-  readonly serviceConnector?: KiteServiceModeConnector;
-  /** Narrow lifecycle control supplied by the release composition; never discovered by the CLI. */
-  readonly serviceManager?: KiteServiceManager;
+  /** Parent-owned local Runtime connector; failures are surfaced without a Service fallback. */
+  readonly runtimeConnector?: KiteRuntimeModeConnector;
+  readonly appServerDaemon?: {
+    start(workspace: string): Promise<Readonly<Record<string, unknown>>>;
+    status(): Promise<Readonly<Record<string, unknown>>>;
+    stop(): Promise<Readonly<Record<string, unknown>>>;
+  };
+  /** Reads the already-running explicit App Server daemon's stable Web root URL. */
+  readonly appServerWeb?: {
+    readonly discover: () => Promise<string>;
+  };
   readonly commandIds?: RuntimeCommandIdAllocator;
 }
 
@@ -47,16 +50,17 @@ export interface ParsedArgs {
     | 'sandbox-setup'
     | 'sandbox-status'
     | 'server-stdio'
-    | 'service-ensure'
-    | 'service-status'
-    | 'service-stop'
-    | 'service-restart';
+    | 'server-start'
+    | 'server-status'
+    | 'server-stop'
+    | 'web-open';
   task?: string;
   threadId: string;
   userId: string;
   workspace: string;
   /** Explicit managed Service home forwarded to release composition; the CLI never reads it. */
   kiteHome?: string;
+  serverEndpoint?: string;
   checkpointPath: string;
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
@@ -74,7 +78,8 @@ export interface ParsedArgs {
   executionStatus: boolean;
   releaseStatus: boolean;
   telemetryStatus: boolean;
-  serviceJson: boolean;
+  webJson: boolean;
+  serverJson: boolean;
 }
 
 export async function main(dependencies: CliMainDependencies): Promise<void> {
@@ -102,28 +107,57 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   if (args.command === 'server-stdio') {
     throw new Error('Runtime stdio is a Service-owned internal entrypoint.');
   }
-  if (isServiceLifecycleCommand(args.command)) {
-    await runServiceLifecycleCommand(dependencies.serviceManager, args.command, args.serviceJson);
+  if (
+    args.command === 'server-start' ||
+    args.command === 'server-status' ||
+    args.command === 'server-stop'
+  ) {
+    const daemon = dependencies.appServerDaemon;
+    if (!daemon) throw new Error('Explicit App Server daemon control is unavailable.');
+    const result =
+      args.command === 'server-start'
+        ? await daemon.start(args.workspace)
+        : args.command === 'server-status'
+          ? await daemon.status()
+          : await daemon.stop();
+    console.log(args.serverJson ? JSON.stringify(result) : formatAppServerDaemonResult(result));
+    if (result.state === 'incompatible') {
+      throw new Error(formatAppServerMismatch('exact_protocol'));
+    }
+    if (result.state === 'unavailable') {
+      throw new Error(`App Server daemon is ${String(result.state)}.`);
+    }
+    if (args.command === 'server-start' && result.state !== 'ready') {
+      throw new Error(`App Server daemon did not start: ${String(result.state)}.`);
+    }
+    return;
+  }
+  if (args.command === 'web-open') {
+    if (!dependencies.appServerWeb) {
+      throw new Error('Kite Web App Server daemon client is unavailable.');
+    }
+    await runAppServerWebCommand(dependencies.appServerWeb.discover, args.webJson);
     return;
   }
   if (args.command === 'resume' && !args.task?.trim()) {
     throw new Error('resume requires --task (or positional task text) to continue the session.');
   }
-  if (!dependencies.serviceConnector) {
-    throw new Error('Managed Local Runtime Service connector is unavailable.');
+  if (!dependencies.runtimeConnector) {
+    throw new Error('Managed local App Server connector is unavailable.');
   }
 
-  const service = await connectKiteServiceMode(dependencies.serviceConnector, {
+  const runtimeMode = await connectKiteRuntimeMode(dependencies.runtimeConnector, {
     workspace: args.workspace,
   });
   let iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
+  let primaryError: unknown;
   const commandIds = dependencies.commandIds ?? createRuntimeCommandIdAllocator();
   try {
     // Native connectors may intentionally return a prepared connection before
     // the trust gate. Preparation authenticates only the safe App Control
     // routes; Runtime initialize must wait until the Workspace is trusted.
-    await service.connection.prepareAppControl();
-    const trust = await service.appControl.queryWorkspaceTrust({
+    await runtimeMode.connection.prepareAppControl();
+    const trust = await runtimeMode.appControl.queryWorkspaceTrust({
       schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
       workspace: args.workspace,
     });
@@ -136,7 +170,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
             formatExternalReadScope(trust.externalReadScope.roots),
         );
       }
-      const decision = await service.appControl.decideWorkspaceTrust({
+      const decision = await runtimeMode.appControl.decideWorkspaceTrust({
         schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
         workspace,
         observedStatus: trust.status,
@@ -145,17 +179,17 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         externalReadScopeDigest: trust.externalReadScope.digest,
       });
       if (decision.status !== 'trusted') {
-        throw new Error('Workspace trust could not be recorded by the Local Runtime Service.');
+        throw new Error('Workspace trust could not be recorded by the local App Server.');
       }
       workspace = decision.workspace;
     }
-    // Never issue Runtime commands for an untrusted Workspace. The Service
-    // connection is opened only after the authoritative trust query/decision.
-    await service.connection.connect();
+    // Never issue Runtime commands for an untrusted Workspace. App Server protocol
+    // initialization permits App Control only; Runtime mutation waits for this decision.
+    await runtimeMode.connection.connect();
     if (args.executionStatus) {
       console.log(
         JSON.stringify(
-          await service.appControl.getExecutionStatus({
+          await runtimeMode.appControl.getExecutionStatus({
             schema: 'kite.app.execution-status.request.v1',
             workspace,
           }),
@@ -168,7 +202,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     if (args.releaseStatus) {
       console.log(
         JSON.stringify(
-          await service.appControl.getReleaseStatus({
+          await runtimeMode.appControl.getReleaseStatus({
             schema: 'kite.app.release-status.request.v1',
           }),
           null,
@@ -178,14 +212,14 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       return;
     }
     if (args.telemetryStatus) {
-      const release = await service.appControl.getReleaseStatus({
+      const release = await runtimeMode.appControl.getReleaseStatus({
         schema: 'kite.app.release-status.request.v1',
       });
       console.log(JSON.stringify({ telemetry: release.telemetry ?? { allowed: false } }, null, 2));
       return;
     }
 
-    const access = service.runtime;
+    const access = runtimeMode.runtime;
     const sessionId = args.threadId;
     let expectedRevision = 0;
     if (args.command === 'resume') {
@@ -265,9 +299,11 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         if (!('durability' in notification)) continue;
         const status =
           notification.durability === 'durable'
-            ? notification.projection.session.activeWork?.status
+            ? notification.projection.session.currentRun?.status
             : undefined;
-        if (status && ['completed', 'cancelled', 'failed'].includes(status)) break;
+        if (status && ['completed', 'cancelled', 'failed'].includes(status)) {
+          break;
+        }
         continue;
       }
       console.log(JSON.stringify(projectCliRuntimeEvent(event)));
@@ -282,10 +318,26 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         }
       }
     }
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await iterator?.return?.();
-    await service.close('cli_client_closed');
+    const cleanupFailures: unknown[] = [];
+    await iterator?.return?.().catch((error: unknown) => cleanupFailures.push(error));
+    await runtimeMode
+      .close('cli_client_closed')
+      .catch((error: unknown) => cleanupFailures.push(error));
+    await settleCliCleanup(primaryError, cleanupFailures);
   }
+}
+
+async function settleCliCleanup(
+  primaryError: unknown,
+  failures: readonly unknown[],
+): Promise<void> {
+  if (primaryError !== undefined || failures.length === 0) return;
+  if (failures.length === 1) throw failures[0];
+  throw new AggregateError(failures, 'CLI Controller and connection cleanup failed.');
 }
 
 function formatExternalReadScope(roots: readonly string[]): string {
@@ -295,7 +347,7 @@ function formatExternalReadScope(roots: readonly string[]): string {
 }
 
 function interactionFromRuntimeNotificationEvent(
-  event: RuntimeNotificationEvent,
+  event: RuntimeClientEvent,
 ): RuntimeClientInteraction | undefined {
   switch (event.type) {
     case 'interaction.available':
@@ -321,9 +373,15 @@ async function promptForRuntimeInteraction(
         `\n[APPROVAL REQUIRED] ${interaction.command ?? interaction.title ?? 'Runtime operation'}`,
       );
       console.error(
-        interaction.grants.includes('same_command')
-          ? 'Type y/yes to approve once, s/same to approve matching commands, or n to reject:'
-          : 'Type y/yes to approve once, or n to reject:',
+        [
+          interaction.grants.includes('approve_once') ? 'y/yes to approve once' : '',
+          interaction.grants.includes('same_command') ? 's/same to approve matching commands' : '',
+          'n to reject',
+        ]
+          .filter(Boolean)
+          .join(', ')
+          .replace(/^/u, 'Type ')
+          .concat(':'),
       );
       const value = (await readCliStdin()).toLowerCase();
       return {
@@ -357,7 +415,11 @@ async function promptForRuntimeInteraction(
       }
       if (value === 'f' || value === 'feedback') {
         console.error('Enter your feedback:');
-        return { kind: 'plan_review', decision: 'feedback', feedback: await readCliStdin() };
+        return {
+          kind: 'plan_review',
+          decision: 'feedback',
+          feedback: await readCliStdin(),
+        };
       }
       return { kind: 'plan_review', decision: 'cancel' };
     }
@@ -448,18 +510,18 @@ function readCliStdin(): Promise<string> {
 
 function projectRuntimeNotificationForCli(
   notification: RuntimeAccessNotification,
-): RuntimeNotificationEvent | undefined {
+): RuntimeClientEvent | undefined {
   if (!('durability' in notification)) return undefined;
   if (notification.durability === 'durable') return notification.projection.event;
   return notification.event;
 }
 
 export function projectCliRuntimeEvent(
-  event: RuntimeNotificationEvent,
+  event: RuntimeClientEvent,
   terminalOutcomeEnabled = true,
 ):
-  | RuntimeNotificationEvent
-  | (RuntimeNotificationEvent & {
+  | RuntimeClientEvent
+  | (RuntimeClientEvent & {
       terminalPresentation: ClientTerminalOutcomePresentation;
     }) {
   if (terminalOutcomeEnabled && event.type === 'run.terminal' && event.outcome) {
@@ -511,100 +573,46 @@ function projectTerminalOutcome(outcome: ClientTerminalOutcome): ClientTerminalO
   };
 }
 
-type ServiceLifecycleCommand =
-  | 'service-ensure'
-  | 'service-status'
-  | 'service-stop'
-  | 'service-restart';
-
-function isServiceLifecycleCommand(
-  command: ParsedArgs['command'],
-): command is ServiceLifecycleCommand {
-  return (
-    command === 'service-ensure' ||
-    command === 'service-status' ||
-    command === 'service-stop' ||
-    command === 'service-restart'
-  );
-}
-
-function serviceOperation(command: ServiceLifecycleCommand): keyof KiteServiceManager {
-  switch (command) {
-    case 'service-ensure':
-      return 'ensure';
-    case 'service-status':
-      return 'status';
-    case 'service-stop':
-      return 'stop';
-    case 'service-restart':
-      return 'restart';
-  }
-}
-
-/**
- * Render the manager's already validated lifecycle DTO without exposing descriptor/token data in
- * the human-readable form. `--json` is reserved for `service status` and emits one compact JSON
- * object so scripts can consume the exact contract without scraping human text.
- */
-export function formatServiceLifecycleResult(
-  result: LocalRuntimeLifecycleResult,
-  json = false,
-): string {
-  if (json) return JSON.stringify(result);
-  const diagnostic = result.diagnostic === undefined ? '' : ` (${result.diagnostic})`;
-  return `Service ${result.operation}: ${result.outcome} [${result.state}]${diagnostic}`;
-}
-
-function serviceLifecycleSucceeded(result: LocalRuntimeLifecycleResult): boolean {
-  // `status` reports an absent service as an applied observation with `not_running`; every other
-  // non-applied result is an operational failure and must produce a non-zero CLI exit.
-  return result.outcome === 'applied';
-}
-
-async function runServiceLifecycleCommand(
-  manager: KiteServiceManager | undefined,
-  command: ServiceLifecycleCommand,
+async function runAppServerWebCommand(
+  discoverWeb: () => Promise<string>,
   json: boolean,
 ): Promise<void> {
-  if (!manager) {
-    throw new Error('Managed Local Runtime Service lifecycle manager is unavailable.');
-  }
-  const operation = serviceOperation(command);
-  const result = await manager[operation]({
-    clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  });
-  console.log(formatServiceLifecycleResult(result, command === 'service-status' && json));
-  if (result.diagnostic !== undefined) {
-    console.error(`Service ${result.operation}: ${result.diagnostic}.`);
-  }
-  if (!serviceLifecycleSucceeded(result)) {
-    throw new Error(`Service ${result.operation} failed: ${result.outcome}.`);
-  }
+  const url = await discoverWeb();
+  console.log(json ? JSON.stringify({ state: 'ready', url }) : url);
+}
+
+function formatAppServerDaemonResult(result: Readonly<Record<string, unknown>>): string {
+  const state = typeof result.state === 'string' ? result.state : 'unavailable';
+  const endpoint = typeof result.endpoint === 'string' ? ` ${result.endpoint}` : '';
+  const build = typeof result.buildId === 'string' ? ` build=${result.buildId}` : '';
+  return `App Server: ${state}${endpoint}${build}`;
 }
 
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command =
-    argv[0] === 'service' && argv[1] === 'ensure'
-      ? 'service-ensure'
-      : argv[0] === 'service' && argv[1] === 'status'
-        ? 'service-status'
-        : argv[0] === 'service' && argv[1] === 'stop'
-          ? 'service-stop'
-          : argv[0] === 'service' && argv[1] === 'restart'
-            ? 'service-restart'
-            : argv[0] === 'sandbox' && argv[1] === 'setup'
+  const commandArgv = withoutGlobalEndpointOptions(argv);
+  const command: ParsedArgs['command'] =
+    commandArgv[0] === 'web' &&
+    (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
+      ? 'web-open'
+      : commandArgv[0] === 'server' && commandArgv[1] === 'start'
+        ? 'server-start'
+        : commandArgv[0] === 'server' && commandArgv[1] === 'status'
+          ? 'server-status'
+          : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
+            ? 'server-stop'
+            : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
               ? 'sandbox-setup'
-              : argv[0] === 'sandbox' && argv[1] === 'status'
+              : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
                 ? 'sandbox-status'
-                : argv[0] === 'server' && argv[1] === '--stdio'
+                : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
                   ? 'server-stdio'
-                  : argv[0] === 'resume'
+                  : commandArgv[0] === 'resume'
                     ? 'resume'
-                    : argv[0] === 'run'
+                    : commandArgv[0] === 'run'
                       ? 'run'
-                      : argv[0] === 'trace'
+                      : commandArgv[0] === 'trace'
                         ? 'trace'
                         : 'help';
   rejectUnsupportedOptions(argv, command);
@@ -690,6 +698,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
     kiteHome: optionalValue('--kite-home'),
+    serverEndpoint: optionalValue('--server'),
     checkpointPath: resolve(value('--checkpoints', defaultClientCheckpointPath())),
     approve: approvalGrant !== undefined,
     approvalGrant,
@@ -707,8 +716,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
     executionStatus: argv.includes('--execution-status'),
     releaseStatus: argv.includes('--release-status'),
     telemetryStatus: argv.includes('--telemetry-status'),
-    serviceJson: command === 'service-status' && argv.includes('--json'),
+    webJson: command === 'web-open' && argv.includes('--json'),
+    serverJson: command === 'server-status' && argv.includes('--json'),
   };
+}
+
+function withoutGlobalEndpointOptions(argv: readonly string[]): string[] {
+  const output: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--kite-home' || argv[index] === '--server') {
+      index += 1;
+      continue;
+    }
+    output.push(argv[index]!);
+  }
+  return output;
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
@@ -718,6 +740,9 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['command']): void {
+  if (argv.includes('--target-generation')) {
+    throw new Error("Unsupported CLI option '--target-generation'.");
+  }
   const unsupported = [
     '--checkpoints',
     '--no-sandbox',
@@ -742,8 +767,23 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
       throw new Error('Interaction mode flags are supported only by run and resume.');
     }
   }
-  if (argv.includes('--json') && command !== 'service-status') {
-    throw new Error('The --json option is supported only by service status.');
+  const serverFlags = argv.flatMap((value, index) => (value === '--server' ? [index] : []));
+  if (serverFlags.length > 1 || (serverFlags.length === 1 && !argv[serverFlags[0]! + 1])) {
+    throw new Error('--server requires exactly one explicit endpoint.');
+  }
+  if (
+    serverFlags.length === 1 &&
+    command !== 'run' &&
+    command !== 'resume' &&
+    command !== 'server-start' &&
+    command !== 'server-status' &&
+    command !== 'server-stop' &&
+    command !== 'web-open'
+  ) {
+    throw new Error('--server is supported only by Runtime, Web, and server lifecycle commands.');
+  }
+  if (argv.includes('--json') && command !== 'server-status' && command !== 'web-open') {
+    throw new Error('The --json option is unsupported for this command.');
   }
 }
 
@@ -761,6 +801,7 @@ function positionalTask(argv: string[]): string {
     '--replace-command',
     '--skill',
     '--feature',
+    '--server',
   ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -784,10 +825,10 @@ function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt"
   bun run agent resume --thread default-thread --task "Continue the task"
-  bun run agent service ensure
-  bun run agent service status [--json]
-  bun run agent service stop
-  bun run agent service restart
+  bun run agent server start [--server <endpoint>]
+  bun run agent server status [--server <endpoint>] [--json]
+  bun run agent server stop [--server <endpoint>]
+  bun run agent web [--server <endpoint>] [--json]
   bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup
@@ -797,12 +838,13 @@ Options:
   trace <events.jsonl>   Replay a runtime trace
   --thread <id>          LangGraph thread id
   --workspace <path>     Tool workspace
-  --kite-home <path>     Advanced: explicit managed Service home (validated by release composition)
+  --kite-home <path>     Advanced: explicit Kite profile home (validated by release composition)
+  --server <endpoint>    Explicit App Server Unix socket or Windows named pipe; never auto-discovered
   --skill <name>         Activate a skill (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit
   --telemetry-status     Print redacted telemetry consent/export status and exit
-  --json                 Emit the exact lifecycle result (service status only)
+  --json                 Emit a closed JSON result for server status or Web discovery
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --trust-workspace      Record trust for --workspace and continue (source=config)

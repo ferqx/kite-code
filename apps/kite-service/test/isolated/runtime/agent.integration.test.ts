@@ -1220,7 +1220,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
   ]);
 
   try {
-    const events: RuntimeEvent['type'][] = [];
+    const events: RuntimeEvent[] = [];
     for await (const event of runTestRuntimeAgent(
       {
         task: 'Ask for a name',
@@ -1246,12 +1246,20 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         }),
       },
     ))
-      events.push(event.type);
+      events.push(event);
 
-    expect(events).toContain('user_input.requested');
-    expect(events).toContain('user_input.answered');
-    expect(events).toContain('tool.finished');
-    expect(events.at(-1)).toBe('turn.completed');
+    expect(events.map((event) => event.type)).toContain('user_input.requested');
+    expect(events.map((event) => event.type)).toContain('user_input.answered');
+    expect(events.map((event) => event.type)).toContain('tool.finished');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.queued',
+        toolCallId: 'ask-name',
+        name: 'ask_user',
+        presentation: 'standalone',
+      }),
+    );
+    expect(events.at(-1)?.type).toBe('turn.completed');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

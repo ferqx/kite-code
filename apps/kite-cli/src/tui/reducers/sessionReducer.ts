@@ -1,7 +1,12 @@
-// ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
+// ── 会话管理（登录/切换/删除）、本地命令回显、模型选择 ──
 import type { OutputBlock, SessionSnapshot, TuiState } from '../types';
 import type { Action } from './actions';
-import { appendUserMessage, maxBlockIdInTurns, reconstructTurns } from './helpers';
+import {
+  appendBlock,
+  maxBlockIdInTurns,
+  normalizeLoadedPresentationBlock,
+  reconstructTurns,
+} from './helpers';
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
@@ -14,7 +19,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               turns: state.turns,
               status: state.status,
               interrupt: state.interrupt,
-              running: state.running,
+              runtimeAuthority: state.runtimeAuthority,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               pendingApprovals: state.pendingApprovals,
@@ -49,7 +54,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         workspace:
           state.sessions.find((s) => s.threadId === state.activeSessionId)?.workspace ?? '',
         active: true,
-        running: false,
+        runtimeAuthority: undefined,
+        runPromptPresented: true,
+        cancelRequestedRunId: undefined,
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
@@ -68,12 +75,23 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessions: [...newSessions, newSnapshot],
         activeSessionId: action.threadId,
         turns: [],
-        nextBlockId: 0,
+        // Block identities are process-wide presentation identities. The new
+        // Session gets a fresh viewport but never reuses an id from the prior
+        // Session's Static ledger.
+        nextBlockId: state.nextBlockId,
         toolStartTimes: undefined,
         pendingToolCalls: {},
+        presentationGroupSummaryIds: {},
+        pendingSubagentTerminals: new Map(),
+        acceptedSessionId: action.threadId,
+        acceptedConnectionGeneration: undefined,
+        acceptedDurableRevision: undefined,
+        acceptedEphemeralSequences: new Map(),
+        closedRunIds: new Set(),
         interrupt: null,
         exited: false,
-        running: false,
+        runtimeAuthority: undefined,
+        cancelRequestedRunId: undefined,
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
@@ -90,14 +108,15 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         showMcp: false,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
+        settledModelRequestIds: new Set(),
         sessionKey: state.sessionKey + 1,
         status: newStatus,
         interactionMode: state.interactionMode,
@@ -117,7 +136,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               turns: state.turns,
               status: state.status,
               interrupt: state.interrupt,
-              running: state.running,
+              runtimeAuthority: state.runtimeAuthority,
+              runPromptPresented: state.runPromptPresented,
+              cancelRequestedRunId: state.cancelRequestedRunId,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               pendingApprovals: state.pendingApprovals,
@@ -146,7 +167,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           : {}),
       }));
       const target = sessions.find((s) => s.threadId === action.threadId);
-      const loadedTurns = reconstructTurns(action.blocks);
+      const loadedTurns = reconstructTurns(action.blocks.map(normalizeLoadedPresentationBlock));
       const nextId = Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1);
       return {
         ...state,
@@ -156,6 +177,13 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         nextBlockId: nextId,
         toolStartTimes: undefined,
         pendingToolCalls: action.pendingToolCalls ?? target?.pendingToolCalls ?? {},
+        presentationGroupSummaryIds: {},
+        pendingSubagentTerminals: new Map(),
+        acceptedSessionId: action.threadId,
+        acceptedConnectionGeneration: undefined,
+        acceptedDurableRevision: undefined,
+        acceptedEphemeralSequences: new Map(),
+        closedRunIds: new Set(),
         pendingApprovals: target?.pendingApprovals ?? new Map(),
         activeApprovalId: target?.activeApprovalId ?? null,
         sessionCommandGrants: target?.sessionCommandGrants ?? new Map(),
@@ -173,17 +201,18 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         showRewind: false,
         checkpoints: [],
         exited: false,
-        running: false,
+        runtimeAuthority: target?.runtimeAuthority,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
+        settledModelRequestIds: new Set(),
         // Compaction progress is an ephemeral projection owned by the session
         // that emitted it. Never carry it across a durable session reload: a
         // stale progress value would keep the restored prompt disabled.
@@ -193,6 +222,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         interactionMode: action.interactionMode ?? target?.interactionMode ?? state.interactionMode,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
+        cancelRequestedRunId: undefined,
         ctrlCPressed: false,
         exitRequested: false,
         status: {
@@ -221,7 +251,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               turns: state.turns,
               status: state.status,
               interrupt: state.interrupt,
-              running: state.running,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               pendingApprovals: state.pendingApprovals,
@@ -246,24 +275,34 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         interrupt: target?.interrupt ?? null,
         toolStartTimes: undefined,
         pendingToolCalls: target?.pendingToolCalls ?? {},
+        presentationGroupSummaryIds: {},
+        pendingSubagentTerminals: new Map(),
+        acceptedSessionId: action.threadId,
+        acceptedConnectionGeneration: undefined,
+        acceptedDurableRevision: undefined,
+        acceptedEphemeralSequences: new Map(),
+        closedRunIds: new Set(),
         pendingApprovals: target?.pendingApprovals ?? new Map(),
         activeApprovalId: target?.activeApprovalId ?? null,
         sessionCommandGrants: target?.sessionCommandGrants ?? new Map(),
         sessionCommandGrantGeneration: target?.sessionCommandGrantGeneration ?? 0,
         sessionCommandGrantRevision: target?.sessionCommandGrantRevision ?? 0,
         exited: false,
-        running: target?.running ?? false,
+        runtimeAuthority: target?.runtimeAuthority,
+        runPromptPresented: target?.runPromptPresented,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
+        currentModelTextSource: undefined,
         toolBearingModelRequestId: undefined,
         toolBearingPresentationGroupId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
+        settledModelRequestIds: new Set(),
         sessionKey: state.sessionKey + 1,
+        cancelRequestedRunId: target?.cancelRequestedRunId,
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
@@ -339,7 +378,13 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       return { ...state, sessions };
     }
     case 'DELETE_SESSION':
-      return { ...state, showSessions: false };
+      return {
+        ...state,
+        showSessions: false,
+        queuedPrompts: (state.queuedPrompts ?? []).filter(
+          (prompt) => prompt.sessionId !== action.threadId,
+        ),
+      };
     case 'SET_THINKING_LEVEL':
       return {
         ...state,
@@ -358,13 +403,17 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         },
       };
     }
-    case 'USER_MESSAGE': {
+    case 'LOCAL_COMMAND': {
       const block: OutputBlock = {
         id: state.nextBlockId,
         kind: 'user',
         content: action.text,
+        presentationState: 'live',
       };
-      return appendUserMessage(state, block);
+      // Slash commands are presentation-only echoes, not Runtime user turns.
+      // Keep them in the current mutable tail so an idle answer is not promoted
+      // into Ink Static and written to terminal scrollback a second time.
+      return appendBlock(state, block);
     }
     default:
       return null;

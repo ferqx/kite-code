@@ -107,7 +107,7 @@ test('CLI Runtime Server owner composes one trusted session through an InProcess
     expect(started).toMatchObject({ status: 'applied', sessionId });
 
     const terminal = await terminalNotification(iterator, sessionId);
-    expect(terminal.projection.session.activeWork?.status).toBe('completed');
+    expect(terminal.projection.session.currentRun?.status).toBe('completed');
     expect(JSON.stringify(terminal)).not.toContain(workspace);
     expect(JSON.stringify(terminal)).not.toContain('/untrusted-wire-workspace');
     expect(model.getRequestCount()).toBe(1);
@@ -175,7 +175,7 @@ async function terminalNotification(
       );
       if (
         notification.sessionId === sessionId &&
-        notification.projection.session.activeWork?.status === 'completed'
+        notification.projection.session.currentRun?.status === 'completed'
       ) {
         return notification;
       }

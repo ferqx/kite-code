@@ -52,8 +52,14 @@ jobs:
           bun run scripts/release/windows-runner-evidence.ts
           git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
-        name: Verify Windows Service state ACL and reparse boundary
-        run: bun test packages/kite-local-runtime/test/isolated/service-state.test.ts
+        name: Verify Windows App Server endpoint and Session Store fencing
+        run: >-
+          bun test
+          packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
+          packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts
+          packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts
+          packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
+          tests/release/app-server-daemon.test.ts
       - name: Release contract tests
         run: >-
           bun test

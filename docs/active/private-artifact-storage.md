@@ -6,11 +6,13 @@
 
 验证：`bun test packages/builtin-runtime/test/isolated/private-immutable-artifacts.test.ts tests/integration/model-artifacts.test.ts tests/isolated/runtime/capability-artifacts.test.ts packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts apps/kite-service/test/subagent-artifacts.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0056、ADR-0109/0110/0114/0115、ADR-0127、`model-provider-boundary.md`。
+相关：ADR-0056、ADR-0109/0110/0114/0115、ADR-0127、ADR-0152、ADR-0153、`model-provider-boundary.md`。
 
 ## 当前存储模型
 
-`packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。各领域保留独立 root、partition、kind、schema 与强类型 reader：
+`packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。每个实例必须在App注入的durable
+backend与filesystem root之间二选一；不能同时写两者或运行时fallback。当前default与daemon App Server production注入Session Store专用表且不fallback；
+下面的root只保留给Builtin owner-local测试：
 
 ```text
 model-artifacts/{surfaces,responses,provider-options}/
@@ -22,6 +24,15 @@ subagent-continuations/continuations/
 subagent-lifecycles/handles/
 ```
 
+Store 9对应`model_artifacts`、`plan_artifacts`、`capability_artifacts`、`filesystem_preimage_artifacts`、
+`sandbox_preparation_artifacts`、`subagent_task_artifacts`、`subagent_lifecycle_artifacts`与`subagent_continuation_artifacts`。
+`filesystem_preimage_artifacts`是mutation ready-before-commit evidence；它与Session checkpoint用的`runtime_file_preimages`不是同一领域，
+不得合表或相互fallback，见ADR-0153。
+
+`capability_artifacts`以`(invocation_id, evidence_digest)`作为同一invocation内的不可变结果身份；resumable subagent可以先提交partial结果、
+再以不同evidence digest提交terminal结果。相同tuple的exact retry幂等，换ref或正文则冲突；不得恢复为`invocation_id`单列唯一，否则会把
+合法continuation误判为Artifact冲突。
+
 Host `ArtifactPort` 只提供 type-erased namespace registry；它不统一 ref/schema，不读取正文，也不把 Notification 或 Mailbox fact 当成 Artifact receipt。Builtin 是每种正文 schema 与交叉绑定的唯一 owner，App 只注入 access object。
 
 ## Ref 与完整性
@@ -32,11 +43,19 @@ Runtime 不创建或加载 `model-artifacts.key`、installation integrity key �
 
 所有 reader 都重新验证 exact ref shape、kind、byte length、canonical JSON、domain schema 和 Runtime receipt/expected owner identity。missing、tamper、unknown field、cross-kind/cross-attempt/cross-child splice 或 digest drift 都 fail closed。Artifact 不能自证其 Runtime owner。
 
-## 文件系统边界
+## Legacy文件系统边界
 
 受管 root 必须是 owner-only、非 link、非 broad root 的 canonical directory。POSIX 目录/文件分别为 `0700`/`0600`；Windows 应用 owner-only、禁继承 ACL。root、partition 与操作期间的 ancestry 固定 dev/inode；symlink、hardlink、祖先替换、owner/permission 漂移或未知条目全部拒绝。
 
 发布使用同目录 `O_EXCL` no-follow 临时文件、file fsync、atomic rename、严格回读与目录 fsync。同内容并发发布收敛到同一 ref；发布前失败没有可读取 Artifact，发布后目录 fsync 前失败留下完整内容但本次仍返回 typed failure。读取使用 no-follow descriptor 并在前后重验文件和目录 identity。
+
+Store 9 backend不解析root/path或创建Artifact目录；它按领域调用同一writer connection上的typed table port，并在返回ref前用同一Builtin
+reader重新readback canonical bytes。Plan的既有path字段在DB backend中只是`kite.sqlite#...`逻辑位置，不能交给filesystem API。
+
+KASD Session Store复用相同typed table/ref contract，每次Artifact mutation必须位于一个active Session execution scope并
+通过该Session的generation/revision transaction。Artifact正文仍是内容寻址的独立CAS事实，不建立第二份Session ownership registry。由于当前
+Artifact表没有可证明完整的跨Session reachability snapshot，多App Server owner显式禁用全部Artifact GC；首次真实GC需求必须另行设计
+maintenance barrier，不能由任一App Server自行扫描后删除。
 
 单个 Model/Capability Artifact 默认上限为 16 MiB。具体领域可以更严格，但不能扩大到无界 payload。
 
@@ -47,6 +66,11 @@ Runtime 不创建或加载 `model-artifacts.key`、installation integrity key �
 - Filesystem mutation 在零写入 prepare 后保存完整 preimage，ready ack 成功后才可签发 commit grant。
 - Sandbox allocating prepare 保存 exact plan/cleanup recovery payload，ready ack 前不得 spawn；restore 先严格回读并绑定外层 invocation facts。
 - Subagent request/task/continuation/lifecycle handle 只以 private ref 进入 Runtime；正文、child message 与完整 continuation 不进入 Event、Session Logger 或遥测。
+
+Browser Model Context Inspector是`model_surface`的额外read-only生产消费者，但不成为Artifact reader：Service先从可见Session的exact
+`model.invocation_prepared` event取得ref，继续使用Builtin `ModelArtifactStore.readSurface`验证ref、canonical JSON与schema，再交叉绑定integrity、
+route fingerprint和purpose，最后投影有界Public DTO。Browser不取得ref、Artifact body通用读取能力、path或GC authority；response/Provider-options
+Artifact也不由该入口读取。
 
 ## Reachability 与 GC
 

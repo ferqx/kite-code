@@ -195,6 +195,7 @@ describe('ACORE-GIT hardened broker', () => {
         GIT_OPTIONAL_LOCKS: '0',
       });
       expect(requests[0]?.env).not.toHaveProperty('PATH');
+      expect(requests[0]?.env).not.toHaveProperty('GIT_EXTERNAL_DIFF');
       expect(result.receipt).toMatchObject({
         featureRevision: BROKERED_GIT_FEATURE_REVISION_,
         operation: 'status',

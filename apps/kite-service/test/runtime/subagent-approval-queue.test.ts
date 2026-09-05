@@ -11,9 +11,10 @@ type QueueRecord = {
   interactionId: string;
   parentToolCallId: string;
   childSubagentId: string;
+  childToolCallId: string;
   toolCallId: string;
   route: 'auto' | 'user';
-  state: string;
+  status: string;
   generation: number;
   sequence: number;
   approvalHash: string;
@@ -83,6 +84,10 @@ function approvalEvent(input: {
   approvalHash?: string;
 }): RuntimeEvent {
   const command = input.command ?? 'printf saq';
+  const parentToolCallId = input.parentToolCallId ?? 'parent-task';
+  const childSubagentId = input.childSubagentId ?? `child-${input.toolCallId}`;
+  const childToolCallId = `child-tool-${input.toolCallId}`;
+  const runtimeToolCallId = `runtime-${input.toolCallId}`;
   return {
     type: 'approval.requested',
     interactionId: input.interactionId,
@@ -101,9 +106,17 @@ function approvalEvent(input: {
       grantOptions: ['approve_once', 'same_command'],
       recommendedGrant: 'approve_once',
     },
-    // These fields are the durable queue contract; current State drops them.
-    parentToolCallId: input.parentToolCallId ?? 'parent-task',
-    childSubagentId: input.childSubagentId ?? `child-${input.toolCallId}`,
+    // These fields are the durable queue contract, including the stable child
+    // owner that is independent from the namespaced Runtime execution id.
+    parentToolCallId,
+    childSubagentId,
+    runtimeToolCallId,
+    owner: {
+      kind: 'subagent_tool',
+      toolCallId: childToolCallId,
+      subagentId: childSubagentId,
+      parentToolCallId,
+    },
     approvalRoute: input.route ?? 'user',
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: true,
@@ -168,6 +181,7 @@ describe('SAQ-13/14/15 — durable subagent approval queue', () => {
       interactionId: 'approval-a',
       parentToolCallId: 'parent-1',
       childSubagentId: 'child-a',
+      childToolCallId: 'child-tool-task-a',
       toolCallId: 'task-a',
       route: 'auto',
       generation: 7,
@@ -200,8 +214,8 @@ describe('SAQ-13/14/15 — durable subagent approval queue', () => {
     );
 
     expect(queue(state)).toHaveProperty('size', 2);
-    expect(queue(state).get('approval-a')?.state).toBe('awaiting_user');
-    expect(queue(state).get('approval-b')?.state).toBe('awaiting_user');
+    expect(queue(state).get('approval-a')?.status).toBe('awaiting_user');
+    expect(queue(state).get('approval-b')?.status).toBe('awaiting_user');
 
     state = reduce(state, {
       type: 'approval.granted',
@@ -210,9 +224,15 @@ describe('SAQ-13/14/15 — durable subagent approval queue', () => {
       grant: 'approve_once',
       receiptId: 'receipt-a',
       generation: 1,
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'parent-task',
+      },
     } as RuntimeEvent);
-    expect(queue(state).get('approval-a')?.state).toBe('authorized_queued');
-    expect(queue(state).get('approval-b')?.state).toBe('awaiting_user');
+    expect(queue(state).get('approval-a')?.status).toBe('authorized_queued');
+    expect(queue(state).get('approval-b')?.status).toBe('awaiting_user');
     expect(state.tools.calls['task-b']?.status).not.toBe('failed');
   });
 
@@ -224,8 +244,8 @@ describe('SAQ-13/14/15 — durable subagent approval queue', () => {
     state = reduce(state, approvalEvent({ interactionId: 'approval-b', toolCallId: 'task-b' }));
 
     const restored = structuredClone(state) as RuntimeState;
-    expect(queue(restored).get('approval-a')?.state).toBe('awaiting_user');
-    expect(queue(restored).get('approval-b')?.state).toBe('awaiting_user');
+    expect(queue(restored).get('approval-a')?.status).toBe('awaiting_user');
+    expect(queue(restored).get('approval-b')?.status).toBe('awaiting_user');
     expect((restored as unknown as Partial<ApprovalQueueState>).activeApprovalId).toBe(
       'approval-a',
     );
@@ -238,6 +258,12 @@ describe('SAQ-13/14/15 — durable subagent approval queue', () => {
       grant: 'approve_once',
       receiptId: 'late-receipt',
       generation: 1,
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'parent-task',
+      },
     } as RuntimeEvent);
     expect(stale).toEqual(before);
   });

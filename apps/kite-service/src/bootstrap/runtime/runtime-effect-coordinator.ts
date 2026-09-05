@@ -24,6 +24,7 @@ import {
   type ContextCompactor,
   executeContextCompaction as runContextCompaction,
 } from './context-compaction-effect';
+import { runtimeInteractionOwnerForPending } from './interaction-owner';
 import { projectPrimaryModelEffect } from './model-effect';
 import {
   type RuntimeExecutorDependencies,
@@ -325,6 +326,7 @@ async function projectAutoReviewEffect(
     return [];
   }
   const pendingGeneration = pending.generation;
+  const owner = runtimeInteractionOwnerForPending(pending);
   const suspended = state.suspendedSubagents[effect.toolCallId];
   const subagentId = pending.approval.subagentId;
   if (subagentId && (!suspended || suspended.subagentId !== subagentId)) {
@@ -334,6 +336,7 @@ async function projectAutoReviewEffect(
         type: 'auto_review.completed',
         reviewId: effect.reviewId,
         toolCallId: effect.toolCallId,
+        owner,
         result: {
           ok: true,
           approved: false,
@@ -366,6 +369,7 @@ async function projectAutoReviewEffect(
           type: 'auto_review.completed',
           reviewId: effect.reviewId,
           toolCallId: effect.toolCallId,
+          owner,
           result: {
             ok: true,
             approved: false,
@@ -397,6 +401,7 @@ async function projectAutoReviewEffect(
         type: 'auto_review.completed',
         reviewId: effect.reviewId,
         toolCallId: effect.toolCallId,
+        owner,
         result: {
           // An invalid/unsupported tool is an explicit policy decision, not a
           // reviewer transport failure. It must not be escalated to a user
@@ -478,6 +483,7 @@ async function projectAutoReviewEffect(
       type: 'auto_review.completed',
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
+      owner,
       ...(result.modelInvocationId ? { modelInvocationId: result.modelInvocationId } : {}),
       result: result.ok
         ? {
@@ -546,6 +552,7 @@ async function projectAutoReviewEffect(
         type: 'auto_review.completed',
         reviewId: effect.reviewId,
         toolCallId: effect.toolCallId,
+        owner: runtimeInteractionOwnerForPending(currentPending),
         result: {
           ok: false,
           approved: false,

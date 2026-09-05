@@ -106,7 +106,11 @@ export default function InputLine({
 }: InputLineProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
-  const hasWindowFocus = useTerminalFocus();
+  // Keep the shared DEC focus-reporting lifecycle active, but do not let
+  // window focus toggle the synthetic input cursor. Scrollbar interaction can
+  // emit FocusOut/FocusIn; changing the rendered frame for those reports makes
+  // real terminals follow the live cursor back to the bottom.
+  useTerminalFocus();
   const fileMaxHeight = useOverlayHeight(7);
   // Keep the cursor hidden until CtrlSafeTextInput confirms that Ink registered
   // its keyboard listener, without deferring readiness to a later timer turn.
@@ -537,7 +541,7 @@ export default function InputLine({
           onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder={placeholder}
-          focus={!overlayActive && hasWindowFocus}
+          focus={!overlayActive}
           showCursor={inputReady}
           onInputReady={handleInputReady}
           atomicBlock={atomicBlock}

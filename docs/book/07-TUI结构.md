@@ -34,7 +34,7 @@ InProcess 也经过 Protocol V1 codec、initialize、admission 与订阅顺序�
 Kernel bridge，也不拥有 mailbox、receipt、lifecycle 或 recovery。
 
 终端 focus reporting 由进程级 store 复用：首订阅开启 DEC 1004，最后退订关闭该模式；
-focus report 统一经 Ink `useInput` 通道转发给 store，不得再给 `process.stdin` 添加 `data` listener，避免 session/mount 切换时
+focus report 统一经 Ink `useInput` 通道转发给 store，不得再给 `process.stdin` 添加 `data` listener，也不得投影为全局Escape或驱动InputLine合成光标重绘，避免原生滚动条交互把视口带回底部，并避免 session/mount 切换时
 输入流在 flowing 与 readable 模式间竞争，导致提示词输入和全局快捷键同时失效。
 
 MCP 是相同边界的 control-plane 示例：TUI 只接收 `McpController`，通过稳定订阅读取 Builtin Runtime 的

@@ -35,4 +35,19 @@ describe('local shell preparation', () => {
     }
     expect(env.TMPDIR).toBe(join(realpathSync.native(runtime), 'tmp'));
   });
+
+  test('preserves the neutral user configuration root for policy-proven reads', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-readonly-shell-preparation-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const runtime = join(root, 'runtime');
+    mkdirSync(workspace);
+    mkdirSync(runtime);
+
+    const env = buildHardenedEnv(workspace, runtime, { policyProvenReadOnly: true });
+
+    expect(env.HOME).toBe('/nonexistent');
+    expect(env.XDG_CONFIG_HOME).toBe('/nonexistent');
+    expect(env).not.toHaveProperty('GIT_EXTERNAL_DIFF');
+  });
 });

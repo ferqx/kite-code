@@ -16,10 +16,11 @@ function recoveryJournal(): Record<string, unknown> {
 
 function step(): Record<string, unknown> {
   return {
+    stepId: 'step-1',
+    toolCallId: 'child-read',
     toolName: 'read_file',
     toolArgs: { path: 'README.md' },
     status: 'success',
-    ok: true,
     totalLines: 3,
   };
 }
@@ -119,10 +120,11 @@ describe('RM-14 Builtin subagent result projection', () => {
         terminalStatus: 'completed',
         steps: [
           {
+            stepId: 'step-1',
+            toolCallId: 'child-read',
             toolName: 'read_file',
             toolArgs: { path: 'README.md' },
             status: 'success',
-            ok: true,
             totalLines: 3,
           },
         ],
@@ -142,6 +144,39 @@ describe('RM-14 Builtin subagent result projection', () => {
     });
     expect(Object.isFrozen(projected.subagentResult)).toBe(true);
     expect(JSON.parse(JSON.stringify(projected.subagentResult))).toEqual(projected.subagentResult);
+  });
+
+  test('retains stable step and tool identities across every private step status', () => {
+    const result = completedResult();
+    result.steps = [
+      step(),
+      {
+        ...step(),
+        stepId: 'step-cancelled',
+        toolCallId: 'child-cancelled',
+        status: 'cancelled',
+      },
+    ];
+    const projected = project(result);
+    expect(projected.subagentResult).toMatchObject({
+      steps: [
+        { stepId: 'step-1', toolCallId: 'child-read', status: 'success' },
+        {
+          stepId: 'step-cancelled',
+          toolCallId: 'child-cancelled',
+          status: 'cancelled',
+        },
+      ],
+    });
+  });
+
+  test.each(['stepId', 'toolCallId'] as const)('fails closed when %s is missing', (field) => {
+    const invalidStep = { ...step() };
+    delete invalidStep[field];
+    const projected = project({ ...completedResult(), steps: [invalidStep] });
+    expect(projected.ok).toBe(false);
+    expect(projected.subagentResult).toBeUndefined();
+    expect(projected.stderr).toContain('failed closed');
   });
 
   test('projects blocked identity and continuation facts without private payloads', () => {

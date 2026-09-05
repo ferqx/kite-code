@@ -27,6 +27,22 @@
       ]
     },
     {
+      "id": "agent-api-contract",
+      "sources": [
+        "packages/agent-api-contract/src/**",
+        "packages/agent-api-contract/package.json",
+        "packages/agent-api-contract/scripts/**",
+        "packages/agent-api-contract/generated/**",
+        "scripts/check-agent-api-packages.ts"
+      ],
+      "authorities": ["packages/agent-api-contract/README.md", "docs/active/agent-api-contract.md"]
+    },
+    {
+      "id": "agent-api-client",
+      "sources": ["packages/agent-api-client/src/**", "packages/agent-api-client/package.json"],
+      "authorities": ["packages/agent-api-client/README.md", "docs/active/agent-api-contract.md"]
+    },
+    {
       "id": "runtime-contract",
       "sources": ["packages/runtime-contract/src/**", "packages/runtime-contract/package.json"],
       "authorities": [
@@ -65,32 +81,45 @@
       "sources": ["packages/kite-app-contract/src/**", "packages/kite-app-contract/package.json"],
       "authorities": [
         "packages/kite-app-contract/README.md",
-        "docs/active/six-concept-runtime-architecture.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/coordinator-workspace-worker-web.md"
+      ]
+    },
+    {
+      "id": "kite-web",
+      "sources": ["apps/kite-web/src/**", "apps/kite-web/package.json"],
+      "authorities": [
+        "apps/kite-web/README.md",
+        "docs/README.md",
+        "tests/README.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
       "id": "kite-local-runtime-client",
       "sources": ["packages/kite-local-runtime/src/**", "packages/kite-local-runtime/package.json"],
       "excludeSources": [
-        "packages/kite-local-runtime/src/service/**",
-        "packages/kite-local-runtime/src/client/native-connector.ts",
-        "packages/kite-local-runtime/src/manager/**"
+        "packages/kite-local-runtime/src/config/**",
+        "packages/kite-local-runtime/src/service/**"
       ],
       "authorities": [
         "packages/kite-local-runtime/README.md",
         "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/coordinator-workspace-worker-web.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
-      "id": "kite-local-runtime-connector",
-      "sources": ["packages/kite-local-runtime/src/client/native-connector.ts"],
+      "id": "kite-local-runtime-config",
+      "sources": ["packages/kite-local-runtime/src/config/**"],
       "authorities": [
         "packages/kite-local-runtime/README.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/execution-platform-support.md"
+        "apps/kite-cli/README.md",
+        "apps/kite-service/README.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
@@ -99,33 +128,33 @@
       "authorities": [
         "packages/kite-local-runtime/README.md",
         "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
-      "id": "kite-local-runtime-manager",
-      "sources": ["packages/kite-local-runtime/src/manager/**"],
+      "id": "kite-service-agent-api",
+      "sources": ["apps/kite-service/src/agent-api/**"],
       "authorities": [
-        "packages/kite-local-runtime/README.md",
-        "apps/kite-service/docs/service-state.md",
-        "apps/kite-service/docs/service-resilience.md",
+        "apps/kite-service/README.md",
+        "apps/kite-service/docs/agent-api.md",
+        "docs/active/agent-api-contract.md",
         "docs/active/runtime-authority-boundary.md",
         "docs/active/runtime-resilience-qualification.md",
-        "docs/active/execution-platform-support.md"
+        "docs/active/workspace-trust.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
       "id": "kite-service-application",
       "sources": [
         "apps/kite-service/package.json",
+        "apps/kite-service/src/app-server.ts",
+        "apps/kite-service/src/app-server-daemon.ts",
         "apps/kite-service/src/index.ts",
         "apps/kite-service/src/executable.ts",
         "apps/kite-service/src/composition.ts",
-        "apps/kite-service/src/native-infrastructure.ts",
-        "apps/kite-service/src/ports.ts",
-        "apps/kite-service/src/readiness.ts",
-        "apps/kite-service/src/shell.ts",
-        "apps/kite-service/src/signals.ts"
+        "apps/kite-service/src/native-endpoint.ts"
       ],
       "authorities": [
         "apps/kite-service/README.md",
@@ -133,7 +162,8 @@
         "apps/kite-service/docs/service-resilience.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
@@ -143,6 +173,7 @@
         "apps/kite-service/src/bootstrap/**",
         "apps/kite-service/src/app-control/**",
         "apps/kite-service/src/config/**",
+        "apps/kite-service/src/coordinator/**",
         "apps/kite-service/src/git/**",
         "apps/kite-service/src/logs/**",
         "apps/kite-service/src/observability/**",
@@ -152,7 +183,9 @@
         "apps/kite-service/src/runtime-client/**",
         "apps/kite-service/src/sandbox/**",
         "apps/kite-service/src/session-logger/**",
-        "apps/kite-service/src/workspace/**"
+        "apps/kite-service/src/workspace/**",
+        "apps/kite-service/src/web-gateway/**",
+        "apps/kite-service/src/workspace-worker/**"
       ],
       "excludeSources": [
         "apps/kite-service/src/runtime-client/**",
@@ -173,7 +206,10 @@
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/workspace-trust.md",
         "docs/active/mcp-control-plane.md",
-        "docs/active/sqlite-runtime-log-query.md"
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/coordinator-workspace-worker-web.md",
+        "docs/active/app-server-local-runtime.md",
+        "docs/active/private-artifact-storage.md"
       ]
     },
     {
@@ -187,18 +223,8 @@
         "docs/active/runtime-authority-boundary.md",
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/workspace-trust.md",
-        "docs/active/sqlite-runtime-log-query.md"
-      ]
-    },
-    {
-      "id": "kite-service-process-harness",
-      "sources": ["apps/kite-service/src/process-harness/**"],
-      "authorities": [
-        "apps/kite-service/README.md",
-        "apps/kite-service/docs/process-harness.md",
-        "apps/kite-service/docs/service-resilience.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/execution-platform-support.md"
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
@@ -266,7 +292,10 @@
         "packages/runtime-storage-sqlite/README.md",
         "docs/active/runtime-authority-boundary.md",
         "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/runtime-resilience-qualification.md"
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/coordinator-workspace-worker-web.md",
+        "docs/active/app-server-local-runtime.md",
+        "docs/active/private-artifact-storage.md"
       ]
     },
     {
@@ -278,7 +307,11 @@
         "packages/builtin-runtime/src/mcp/**",
         "packages/builtin-runtime/src/sandbox/**"
       ],
-      "authorities": ["packages/builtin-runtime/README.md", "docs/active/tool-gated-autonomy.md"]
+      "authorities": [
+        "packages/builtin-runtime/README.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/private-artifact-storage.md"
+      ]
     },
     {
       "id": "builtin-model",
@@ -286,7 +319,10 @@
         "packages/builtin-runtime/src/model/**",
         "packages/builtin-runtime/src/model-context.ts"
       ],
-      "authorities": ["docs/active/model-provider-boundary.md"]
+      "authorities": [
+        "docs/active/model-provider-boundary.md",
+        "docs/active/private-artifact-storage.md"
+      ]
     },
     {
       "id": "builtin-mcp",
@@ -327,7 +363,8 @@
         "docs/active/runtime-authority-boundary.md",
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/workspace-trust.md",
-        "docs/active/execution-platform-support.md"
+        "docs/active/execution-platform-support.md",
+        "docs/active/app-server-local-runtime.md"
       ]
     },
     {
@@ -341,7 +378,8 @@
         "apps/kite-service/docs/runtime-application.md",
         "apps/kite-cli/docs/tui-interaction.md",
         "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/runtime-authority-boundary.md"
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/coordinator-workspace-worker-web.md"
       ]
     },
     {
@@ -400,7 +438,11 @@
         "scripts/runtime-packages/**",
         "scripts/run-runtime-workspace-script.ts"
       ],
-      "authorities": ["docs/active/six-concept-runtime-architecture.md"]
+      "authorities": [
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/README.md",
+        "tests/README.md"
+      ]
     },
     {
       "id": "test-system",
@@ -472,7 +514,11 @@
         "scripts/release/verify-platform-capability-evidence.ts",
         "scripts/release/windows-runner-evidence.ts"
       ],
-      "authorities": ["docs/active/release-control.md", "docs/active/open-source-first-release.md"]
+      "authorities": [
+        "docs/active/release-control.md",
+        "docs/active/open-source-first-release.md",
+        "docs/active/app-server-local-runtime.md"
+      ]
     },
     {
       "id": "platform-qualification",
@@ -489,7 +535,8 @@
       ],
       "authorities": [
         "docs/active/execution-platform-support.md",
-        "docs/active/execution-boundary.md"
+        "docs/active/execution-boundary.md",
+        "docs/active/windows-shell-sandbox.md"
       ]
     },
     {
@@ -517,7 +564,9 @@
       ],
       "authorities": [
         "docs/active/execution-boundary.md",
-        "docs/active/runtime-authority-boundary.md"
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/windows-shell-sandbox.md",
+        "docs/active/private-artifact-storage.md"
       ]
     },
     {

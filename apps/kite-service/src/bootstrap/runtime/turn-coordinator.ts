@@ -14,7 +14,7 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite-ai/builtin-runtime/skills';
-import type { InteractionMode } from '@kite-ai/runtime-contract';
+import type { InteractionMode, RuntimeCommandContext } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -24,6 +24,7 @@ import {
   type StateRuntimeEffectExecutor,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
+  type AppWorkspaceEffectCompositionFactory,
   prepareRuntimeEffectForBudget,
   type RuntimeExecutorDependencies,
 } from '#kite-service/bootstrap/runtime/runtime-effect-dependencies';
@@ -195,6 +196,9 @@ export interface RuntimeTurnInput {
       persistence: Parameters<
         typeof import('./subagent-provider-recovery').reconcilePendingSubagentProvidersAfterCrash
       >[0]['persistence'],
+      options?: Readonly<{
+        terminalDisposition?: 'unknown' | 'preserve_user_cancellation';
+      }>,
     ) => Promise<boolean>;
     subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
     subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
@@ -205,6 +209,10 @@ export interface RuntimeTurnInput {
   thinkingLevel?: string | null;
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
+  /** Admission-time command identity; never recovered from Session state. */
+  commandContext?: Readonly<RuntimeCommandContext>;
+  /** Optional Worker-owned effect composition factory bound to that context. */
+  workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
   /** Exact State 27 session owned by the App/Host session coordinator. */
@@ -272,6 +280,39 @@ export async function* executeRuntimeTurn(
       onDiagnostic: (diagnostic) => input.onSessionLoggingDiagnostic?.(diagnostic.message),
     },
   );
+  const reconcilePendingSubagentProviders = async (
+    terminalDisposition: 'unknown' | 'preserve_user_cancellation' = 'unknown',
+  ): Promise<{
+    readonly recovered: boolean;
+    readonly events: RuntimeEvent[];
+  }> => {
+    if (!hasPendingSubagentProviderRecovery(kernel.getState())) {
+      return { recovered: true, events: [] };
+    }
+    const reconcilePendingSubagents =
+      'reconcilePendingSubagents' in modelInvocationRuntime
+        ? modelInvocationRuntime.reconcilePendingSubagents
+        : undefined;
+    const events: RuntimeEvent[] = [];
+    const recovered = reconcilePendingSubagents
+      ? await reconcilePendingSubagents(
+          {
+            getState: () => kernel.getState(),
+            persistEvents: async (pendingEvents) => {
+              try {
+                kernel.processEvents(pendingEvents);
+                events.push(...pendingEvents);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          },
+          { terminalDisposition },
+        )
+      : false;
+    return { recovered, events };
+  };
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   let runCancelled = false;
   let runDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -420,30 +461,12 @@ export async function* executeRuntimeTurn(
     const activeBudget = kernel.getState().resourceBudget;
     if (activeBudget.status === 'active') scheduleRunDeadline(activeBudget.deadlineAt);
     if (hasPendingSubagentProviderRecovery(kernel.getState())) {
-      const reconcilePendingSubagents =
-        'reconcilePendingSubagents' in modelInvocationRuntime
-          ? modelInvocationRuntime.reconcilePendingSubagents
-          : undefined;
-      const recoveryEvents: RuntimeEvent[] = [];
-      const recovered = reconcilePendingSubagents
-        ? await reconcilePendingSubagents({
-            getState: () => kernel.getState(),
-            persistEvents: async (events) => {
-              try {
-                kernel.processEvents(events);
-                recoveryEvents.push(...events);
-                return true;
-              } catch {
-                return false;
-              }
-            },
-          })
-        : false;
-      for (const event of recoveryEvents) {
+      const recovery = await reconcilePendingSubagentProviders();
+      for (const event of recovery.events) {
         collector.recordRuntime(event);
         yield event;
       }
-      if (!recovered) {
+      if (!recovery.recovered) {
         const event: RuntimeEvent = {
           type: 'run.error',
           message: 'Subagent Provider crash recovery could not be confirmed.',
@@ -653,6 +676,10 @@ export async function* executeRuntimeTurn(
       skills: input.skills,
       skillOptions: input.skillOptions,
       signal: executionSignal,
+      ...(input.commandContext === undefined ? {} : { commandContext: input.commandContext }),
+      ...(input.workspaceEffectCompositionFactory === undefined
+        ? {}
+        : { workspaceEffectCompositionFactory: input.workspaceEffectCompositionFactory }),
       onCompactionProgress: input.onCompactionProgress,
       compactionReporter: input.config.compaction?.localDebug?.enabled
         ? createLocalCompactionDebugReporter({
@@ -736,6 +763,35 @@ export async function* executeRuntimeTurn(
       // post-abort events while accidentally hiding the rejection itself.
       if (abortReasonAfterProjection) abortExecution(abortReasonAfterProjection);
     }
+    // A cancelled concurrent tool batch can exhaust the generic effect
+    // cleanup grace while its Subagent Provider handles are still durable.
+    // Reconcile those handles before this generator releases the Session turn
+    // owner; otherwise a queued successor can commit a new Turn and inherit
+    // the predecessor's recovery events as a fatal run.error.
+    if (hasPendingSubagentProviderRecovery(kernel.getState())) {
+      const recovery = await reconcilePendingSubagentProviders(
+        kernel.getState().turn.abortCause === 'user' ? 'preserve_user_cancellation' : 'unknown',
+      );
+      for (const event of recovery.events) {
+        collector.recordRuntime(event);
+        yield event;
+      }
+      if (!recovery.recovered) {
+        const event: RuntimeEvent = {
+          type: 'run.error',
+          message: 'Subagent Provider cancellation cleanup could not be confirmed.',
+          recoverable: false,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        return;
+      }
+    }
+    if (!executionSignal.aborted && kernel.getState().turn.status === 'active') {
+      throw new Error('Runtime State runner exited without a durable Turn terminal.');
+    }
     if (executionSignal.aborted) exitStatus = 'aborted';
     if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
       externalCancellationEventsYielded = true;
@@ -799,19 +855,17 @@ export async function* executeRuntimeTurn(
         modelFailureResolution?.terminalOutcome ??
         failedTerminalOutcome(failure.failure, { knownExternalEffects }),
     };
-    kernel.processEvent(errorEvent);
-    collector.recordRuntime(errorEvent);
-    yield errorEvent;
-
     const aborted: RuntimeEvent = {
       type: 'turn.aborted',
-      turnId: kernel.getState().turn.turnId,
+      turnId: failure.turnId,
       reason: errorEvent.message,
       cause: 'error',
     };
-    kernel.processEvent(aborted);
-    collector.recordRuntime(aborted);
-    yield aborted;
+    const terminalEvents = kernel.processEventBatch([errorEvent, aborted]);
+    for (const event of terminalEvents) {
+      collector.recordRuntime(event);
+      yield event;
+    }
   } finally {
     if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
     input.signal?.removeEventListener('abort', forwardExternalAbort);

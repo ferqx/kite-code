@@ -1,4 +1,44 @@
-export const RUNTIME_PROJECTION_SCHEMA_ = 'kite.runtime-projection.v1' as const;
+export const RUNTIME_PROJECTION_SCHEMA_ = 'kite.runtime-projection.v2' as const;
+export const RUNTIME_RUN_PROJECTION_SCHEMA_ = 'kite.runtime-run.v1' as const;
+
+export type RuntimeRunPhase = 'planning' | 'building';
+export type RuntimeRunStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'unknown';
+
+export interface RuntimeRunTerminalProjection {
+  readonly reasonCode: string;
+  readonly safeRetry: boolean;
+  readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
+  readonly outcomeId?: string;
+}
+
+/** Client-safe projection of the Store 8 canonical Run row. */
+export interface RuntimeRunProjection {
+  readonly schema: typeof RUNTIME_RUN_PROJECTION_SCHEMA_;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly originSessionId?: string;
+  readonly originRunId?: string;
+  readonly phase: RuntimeRunPhase;
+  readonly status: RuntimeRunStatus;
+  readonly createdRevision: number;
+  readonly lastRevision: number;
+  readonly createdAtMs: number;
+  readonly startedAtMs?: number;
+  readonly finishedAtMs?: number;
+  readonly terminal?: RuntimeRunTerminalProjection;
+}
+
+export interface RuntimeRunPageCursor {
+  readonly createdRevision: number;
+  readonly runId: string;
+}
 
 export interface RuntimeEvidenceSummary {
   readonly kind: string;
@@ -14,11 +54,22 @@ export interface RuntimeInteractionBase {
   readonly summary?: string;
 }
 
+/** Client-safe binding between an approval interaction and its tool owner. */
+export type InteractionOwner =
+  | { readonly kind: 'root_tool'; readonly toolCallId: string }
+  | {
+      readonly kind: 'subagent_tool';
+      readonly toolCallId: string;
+      readonly subagentId: string;
+      readonly parentToolCallId: string;
+    };
+
 export interface RuntimeApprovalInteraction extends RuntimeInteractionBase {
   readonly kind: 'approval';
   /** State 27 queue generation; a response for another generation is invalid. */
   readonly generation: number;
   readonly grants: readonly ('approve_once' | 'same_command')[];
+  readonly owner: InteractionOwner;
   /** Bounded original command shown for an informed approval decision. */
   readonly command?: string;
 }
@@ -93,6 +144,7 @@ export function sameRuntimeClientInteractionIdentity(
         right.kind === 'approval' &&
         left.generation === right.generation &&
         sameStrings(left.grants, right.grants) &&
+        sameInteractionOwner(left.owner, right.owner) &&
         left.command === right.command
       );
     case 'input':
@@ -145,8 +197,15 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-/** @deprecated Use RuntimeClientInteraction. */
-export type RuntimeInteractionProjection = RuntimeClientInteraction;
+function sameInteractionOwner(left: InteractionOwner, right: InteractionOwner): boolean {
+  if (left.kind !== right.kind || left.toolCallId !== right.toolCallId) return false;
+  return (
+    left.kind !== 'subagent_tool' ||
+    (right.kind === 'subagent_tool' &&
+      left.subagentId === right.subagentId &&
+      left.parentToolCallId === right.parentToolCallId)
+  );
+}
 
 /** Complete, ordered client-safe interaction state at one Session revision. */
 export interface RuntimeInteractionQueueProjection {
@@ -155,20 +214,27 @@ export interface RuntimeInteractionQueueProjection {
   readonly interactions: readonly RuntimeClientInteraction[];
 }
 
-export interface RuntimeTurnProjection {
-  readonly turnId: string;
-  readonly status: 'queued' | 'running' | 'waiting' | 'completed' | 'cancelled' | 'failed';
-  readonly summary?: string;
-  readonly interaction?: RuntimeInteractionProjection;
-  readonly evidence?: readonly RuntimeEvidenceSummary[];
+export interface RuntimeSessionTaskProjection {
+  readonly taskId: string;
+  readonly phase: 'planning' | 'building';
 }
 
-export interface RuntimeWorkProjection {
-  readonly workId: string;
-  readonly phase: 'planning' | 'building';
-  readonly status: 'queued' | 'running' | 'waiting' | 'completed' | 'cancelled' | 'failed';
-  readonly title?: string;
-  readonly activeTurn?: RuntimeTurnProjection;
+export interface RuntimeSessionRunProjection {
+  readonly runId: string;
+  readonly initialTurnId: string;
+  readonly activeTurnId?: string;
+  readonly taskId?: string;
+  readonly status:
+    | 'queued'
+    | 'running'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'recovery_required';
+  readonly revision: number;
+  readonly activeInteractionId?: string;
+  readonly outcome?: RuntimeRunTerminalProjection;
 }
 
 export interface RuntimeSessionProjection {
@@ -189,7 +255,9 @@ export interface RuntimeSessionProjection {
   readonly sessionCommandGrantCount?: number;
   /** Authoritative replacement set; array order is the pending interaction order. */
   readonly interactionQueue: RuntimeInteractionQueueProjection;
-  readonly activeWork?: RuntimeWorkProjection;
+  readonly activeTask?: RuntimeSessionTaskProjection;
+  /** Current or most recently settled accepted execution resource. */
+  readonly currentRun?: RuntimeSessionRunProjection;
 }
 
 export interface RuntimeCheckpointProjection {

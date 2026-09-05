@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import { authorizeEffect } from '@kite-ai/agent-kernel';
 import {
   assertRuntimeCommand,
+  freezeRuntimeCommandContext,
+  RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeCommandReceipt,
   type RuntimeQuery,
   type RuntimeQueryResult,
@@ -34,8 +37,11 @@ import { EffectSupervisor } from '../lifecycle/effect-supervisor';
 import { SessionLifecycleSupervisor } from '../lifecycle/session-lifecycle-supervisor';
 import {
   createRuntimeStoredCommandReceipt,
+  type RuntimeRunPage,
+  type RuntimeRunStorePort,
   type RuntimeStorage,
   type RuntimeStoredCommandReceipt,
+  type RuntimeStoredRun,
 } from '../storage';
 import {
   createRuntimeCommandCommitEvidence,
@@ -43,6 +49,7 @@ import {
   resolveRuntimeCommandReceipt,
 } from './command-receipt';
 import { NotificationProjector } from './notification-projector';
+import { parseRuntimeStoredCommandResource, projectRuntimeStoredRun } from './run-projection';
 import { SessionRegistry } from './session-registry';
 
 /**
@@ -56,6 +63,8 @@ export interface RuntimeHostCoordinatorPort extends RuntimeAccess, AsyncDisposab
   removeSessionProjection(sessionId: string): boolean;
   waitForSessionIdle(sessionId: string): Promise<void>;
   isSessionOperationActive(sessionId: string): boolean;
+  /** Service lifecycle reads this aggregate after mutation admission is quiesced. */
+  hasActiveSessionOperations(): boolean;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -93,6 +102,11 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   /** Durable deletion tombstones prevent bridge queries from rehydrating State. */
   readonly #deletedSessions = new Set<string>();
   readonly #activeAccesses = new Set<Promise<unknown>>();
+  readonly #ownsSessionExecution: (sessionId: string) => boolean;
+  readonly #runWithSessionExecution?: <Result>(
+    sessionId: string,
+    operation: () => Result,
+  ) => Result;
   #startPromise: Promise<void> | undefined;
   #disposePromise: Promise<void> | undefined;
   #closing = false;
@@ -103,8 +117,15 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     readonly moduleRegistry: RuntimeModuleRegistry;
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
     readonly contextCompiler?: ContextCompilerPort;
+    readonly ownsSessionExecution?: (sessionId: string) => boolean;
+    readonly runWithSessionExecution?: <Result>(
+      sessionId: string,
+      operation: () => Result,
+    ) => Result;
   }) {
     this.storage = input.storage;
+    this.#ownsSessionExecution = input.ownsSessionExecution ?? (() => true);
+    this.#runWithSessionExecution = input.runWithSessionExecution;
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
     assertRuntimeHostRegistrySnapshot(input.moduleRegistry, input.capabilityRegistrySnapshot);
@@ -144,12 +165,22 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     return this.#startPromise;
   }
 
-  command(command: RuntimeCommand): Promise<RuntimeCommandReceipt> {
-    return this.#beginAccess(() => this.#executeCommand(command));
+  command(
+    command: RuntimeCommand,
+    context?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeCommandReceipt> {
+    const execute = () => this.#beginAccess(() => this.#executeCommand(command, context));
+    return command.type === 'create_session'
+      ? execute()
+      : this.#withSessionExecution(runtimeCommandSessionId(command), execute);
   }
 
-  async #executeCommand(command: RuntimeCommand): Promise<RuntimeCommandReceipt> {
+  async #executeCommand(
+    command: RuntimeCommand,
+    context?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeCommandReceipt> {
     assertRuntimeCommand(command);
+    const pinnedContext = context === undefined ? undefined : freezeRuntimeCommandContext(context);
     await this.start();
     const evidence = createRuntimeCommandCommitEvidence({
       command,
@@ -184,9 +215,13 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       const conflict = await this.#revisionConflict(command);
       if (conflict) return conflict;
       if (command.type === 'delete_session') return this.#deleteSession(command, evidence);
+      const allowQueuedSuccessor =
+        command.type === 'start_turn' &&
+        isTerminalRunProjection(this.#registry.projection(command.sessionId));
       if (
         (command.type === 'start_turn' || command.type === 'compact_session') &&
-        !this.#lifecycle.canSchedule(command.sessionId)
+        !this.#lifecycle.canSchedule(command.sessionId) &&
+        !allowQueuedSuccessor
       ) {
         return {
           status: 'rejected',
@@ -203,7 +238,11 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         await this.#recoverSession(command.sessionId);
       }
 
-      const inspected = await this.#inspectCommand(command, targetSessionIdFor(command));
+      const inspected = await this.#inspectCommand(
+        command,
+        targetSessionIdFor(command),
+        pinnedContext,
+      );
       if (inspected.kind === 'terminal') return assertTerminalReceipt(command, inspected);
       const expectedTarget = targetSessionIdFor(command);
       if (inspected.decision.targetSessionId !== expectedTarget) {
@@ -224,13 +263,13 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       await this.#refreshReceiptSession(committed.receipt);
       const prepared = committed.preparedExecution;
       if (prepared?.execution)
-        this.#schedulePreparedExecution(command, committed.receipt, prepared);
+        this.#schedulePreparedExecution(command, committed.receipt, prepared, allowQueuedSuccessor);
       if (command.type === 'cancel_turn') {
         this.#lifecycle.abort(committed.receipt.sessionId, 'Runtime turn cancelled.');
       } else if (command.type === 'close_session') {
         this.#lifecycle.close(committed.receipt.sessionId, 'Runtime session closed.');
       }
-      return committed.receipt;
+      return receiptFromStoredReceipt(stored);
     });
     this.#pendingCommands.set(identity, { digest: evidence.requestDigest, promise: execution });
     try {
@@ -271,7 +310,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     }
     // A delete receipt intentionally outlives its target Session. Replaying it
     // must never call App recovery or recreate a snapshot/Runtime owner.
-    if (command.type === 'delete_session') return receipt;
+    if (command.type === 'delete_session' || command.type === 'start_turn') return receipt;
     await this.#recoverSession(receipt.sessionId);
     return receipt;
   }
@@ -317,14 +356,22 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   async #inspectCommand(
     command: RuntimeCommand,
     targetSessionId: string,
+    context?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeHostCommandInspection> {
-    return this.#bridge.inspectCommand(command, Object.freeze({ targetSessionId }));
+    return this.#bridge.inspectCommand(
+      command,
+      Object.freeze({
+        targetSessionId,
+        ...(context === undefined ? {} : { commandContext: context }),
+      }),
+    );
   }
 
   #schedulePreparedExecution(
     command: RuntimeCommand,
     receipt: Extract<RuntimeCommandReceipt, { readonly status: 'applied' }>,
     prepared: RuntimeHostPreparedExecution,
+    allowQueuedSuccessor = false,
   ): void {
     const execution = prepared.execution;
     if (!execution) return;
@@ -335,10 +382,17 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       operation: execution.operation,
       execute: run,
       onSkipped: execution.cancel,
+      ...(allowQueuedSuccessor ? { allowQueuedSuccessor: true } : {}),
     });
     if (!scheduled) {
       throw new Error(`Runtime session operation could not be scheduled: ${receipt.sessionId}`);
     }
+  }
+
+  #withSessionExecution<Result>(sessionId: string, operation: () => Result): Result {
+    return this.#runWithSessionExecution
+      ? this.#runWithSessionExecution(sessionId, operation)
+      : operation();
   }
 
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
@@ -370,6 +424,63 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
             code: 'session_not_found',
           };
     }
+    if (query.type === 'get_run' || query.type === 'list_runs') {
+      const runs = this.storage.runs;
+      if (!runs) {
+        return {
+          status: 'unavailable',
+          queryType: query.type,
+          code: 'unsupported',
+        };
+      }
+      if (!this.storage.sessions.loadSnapshotRecord(query.sessionId)) {
+        return {
+          status: 'not_found',
+          queryType: query.type,
+          code: 'session_not_found',
+        };
+      }
+      if (query.type === 'get_run') {
+        const run = runs.get(query.sessionId, query.runId);
+        return run
+          ? {
+              status: 'ok',
+              queryType: query.type,
+              revision: run.lastRevision,
+              run: projectRuntimeStoredRun(run, {
+                recoveryRequired: !this.#recoveredSessions.has(query.sessionId),
+              }),
+            }
+          : {
+              status: 'not_found',
+              queryType: query.type,
+              code: 'run_not_found',
+            };
+      }
+      const recoveryRequired = !this.#recoveredSessions.has(query.sessionId);
+      const page =
+        recoveryRequired && query.status === 'unknown'
+          ? listRecoveryRequiredUnknownRuns(runs, query)
+          : runs.list({
+              sessionId: query.sessionId,
+              limit: query.limit,
+              ...(query.status === undefined ? {} : { status: query.status }),
+              ...(query.phase === undefined ? {} : { phase: query.phase }),
+              ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+            });
+      return {
+        status: 'ok',
+        queryType: query.type,
+        runs: page.entries
+          .map((run) =>
+            projectRuntimeStoredRun(run, {
+              recoveryRequired,
+            }),
+          )
+          .filter((run) => query.status === undefined || run.status === query.status),
+        ...(page.nextCursor === undefined ? {} : { nextRunCursor: page.nextCursor }),
+      };
+    }
     const result = await this.#bridge.query(query);
     this.#commitQueryProjection(result);
     return result;
@@ -377,7 +488,19 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   subscribe(subscription: RuntimeSubscription) {
     this.#assertOpen();
-    return this.#notifications.subscribe(subscription);
+    // Register the subscriber before hydrating a Session that may have been
+    // admitted through an external Store owner. The query path can be
+    // read-only/direct in that composition, so relying on its return value to
+    // seed this Host's local projector would otherwise leave the subscriber
+    // waiting forever for the initial durable snapshot.
+    const iterable = this.#notifications.subscribe(subscription);
+    if (
+      subscription.spec.scope === 'session' &&
+      this.#registry.projection(subscription.spec.sessionId) === undefined
+    ) {
+      void this.#loadProjection(subscription.spec.sessionId).catch(() => undefined);
+    }
+    return iterable;
   }
 
   removeSessionProjection(sessionId: string): boolean {
@@ -405,7 +528,11 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
-    await Promise.all([...sessionIds].map((sessionId) => this.#cancelSession(sessionId, reason)));
+    await Promise.all(
+      [...sessionIds]
+        .filter((sessionId) => this.#ownsSessionExecution(sessionId))
+        .map((sessionId) => this.#cancelSession(sessionId, reason)),
+    );
   }
 
   waitForSessionIdle(sessionId: string): Promise<void> {
@@ -414,6 +541,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   isSessionOperationActive(sessionId: string): boolean {
     return this.#lifecycle.isActive(sessionId);
+  }
+
+  hasActiveSessionOperations(): boolean {
+    return this.#lifecycle.sessionIds().some((sessionId) => this.#lifecycle.isActive(sessionId));
   }
 
   [Symbol.asyncDispose](): Promise<void> {
@@ -430,6 +561,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
+    for (const sessionId of [...sessionIds]) {
+      if (!this.#ownsSessionExecution(sessionId)) sessionIds.delete(sessionId);
+    }
     const failures: unknown[] = [];
     for (const sessionId of sessionIds) {
       try {
@@ -489,7 +623,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     });
     if (result.status !== 'ok') return;
     for (const projection of result.sessions ?? []) {
-      this.#registry.commitProjection(projection);
+      if (this.#ownsSessionExecution(projection.sessionId)) {
+        this.#registry.commitProjection(projection);
+      }
     }
   }
 
@@ -543,8 +679,21 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   #commitQueryProjection(result: RuntimeQueryResult): void {
     if (result.status !== 'ok') return;
-    if (result.session) this.#registry.commitProjection(result.session);
-    for (const projection of result.sessions ?? []) this.#registry.commitProjection(projection);
+    const publish = (projection: RuntimeSessionProjection): void => {
+      // Query hydration is an observer projection, not execution ownership.
+      // A Host must seed an explicitly subscribed historical Session even
+      // when another generation (or no live generation) owns its mutations.
+      // Command admission continues to enforce #ownsSessionExecution.
+      this.#notifications.publish({
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
+        durability: 'durable',
+        sessionId: projection.sessionId,
+        revision: projection.revision,
+        projection: { kind: 'snapshot', session: projection },
+      });
+    };
+    if (result.session) publish(result.session);
+    for (const projection of result.sessions ?? []) publish(projection);
   }
 
   #assertOpen(): void {
@@ -742,6 +891,67 @@ function assertRuntimeHostExecutionBridge(
   }
 }
 
+function listRecoveryRequiredUnknownRuns(
+  runs: RuntimeRunStorePort,
+  query: Extract<RuntimeQuery, { readonly type: 'list_runs' }>,
+): RuntimeRunPage {
+  const stored = runs.list({
+    sessionId: query.sessionId,
+    status: 'unknown',
+    limit: query.limit,
+    ...(query.phase === undefined ? {} : { phase: query.phase }),
+    ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+  });
+  const active = runs.getActive(query.sessionId);
+  const candidates: RuntimeStoredRun[] = [...stored.entries];
+  if (
+    active &&
+    (query.phase === undefined || active.phase === query.phase) &&
+    runIsAfterCursor(active, query.cursor)
+  ) {
+    candidates.push(active);
+  }
+  candidates.sort(
+    (left, right) =>
+      left.createdRevision - right.createdRevision ||
+      compareSqliteBinaryText(left.runId, right.runId),
+  );
+  const entries = candidates.slice(0, query.limit);
+  const hasMore = stored.hasMore || candidates.length > query.limit;
+  const last = entries.at(-1);
+  return {
+    entries,
+    hasMore,
+    ...(hasMore && last
+      ? { nextCursor: { createdRevision: last.createdRevision, runId: last.runId } }
+      : {}),
+  };
+}
+
+function runIsAfterCursor(
+  run: RuntimeStoredRun,
+  cursor: Extract<RuntimeQuery, { readonly type: 'list_runs' }>['cursor'],
+): boolean {
+  return (
+    cursor === undefined ||
+    run.createdRevision > cursor.createdRevision ||
+    (run.createdRevision === cursor.createdRevision &&
+      compareSqliteBinaryText(run.runId, cursor.runId) > 0)
+  );
+}
+
+function compareSqliteBinaryText(left: string, right: string): number {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftBytes[index]! - rightBytes[index]!;
+    if (difference !== 0) return difference;
+  }
+  return leftBytes.length - rightBytes.length;
+}
+
 function targetSessionIdFor(command: RuntimeCommand): string {
   switch (command.type) {
     case 'create_session':
@@ -814,13 +1024,20 @@ function sameAppliedReceipt(
   );
 }
 
+function isTerminalRunProjection(projection: RuntimeSessionProjection | undefined): boolean {
+  const status = projection?.currentRun?.status;
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
 function receiptFromStoredReceipt(
   receipt: RuntimeStoredCommandReceipt,
 ): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
+  const resource = parseRuntimeStoredCommandResource(receipt.resourceResult, receipt.commandId);
   return {
     status: 'applied',
     commandId: receipt.commandId,
     sessionId: receipt.targetSessionId,
     revision: receipt.committedRevision,
+    ...(resource === undefined ? {} : { resource }),
   };
 }

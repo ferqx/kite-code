@@ -42,7 +42,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0038](0038-streaming-markdown-paragraph-components.md)  | accepted   | 流式 Markdown 普通文本按逻辑段落组件更新，空行和结构块封闭段落                    |
 | [0039](0039-streaming-markdown-structural-child-components.md) | accepted | 表格、代码块、列表与引用按稳定子行组件更新                                  |
 | [0040](0040-streaming-markdown-progressive-static-freeze.md) | accepted | 流式 Markdown 在安全组件边界渐进冻结，只保留动态尾段                         |
-| [0041](0041-inspect-ls-thought-aggregation.md)        | accepted   | inspect 模式的单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡          |
+| [0041](0041-inspect-ls-thought-aggregation.md) | superseded by ADR-0163 | TUI命令前缀分类已删除；探索展示改由Service投影 |
 | [0042](0042-file-tool-semantics-and-write-safety.md)   | accepted   | 对齐 Claude Code：edit_file 强制先读后改，write_file 移除 append 自由覆写，checkpoint 兜底 |
 | [0043](0043-tool-spec-registry-and-strict-edit.md)     | accepted   | 工具单一事实源（ToolSpec Registry）：模型表面全部 schema-only，shell 治理参数收敛，Edit 严格化 |
 | [0044](0044-tool-spec-registry-single-path-cutover.md) | accepted   | 六个计算原语以 Registry 单路径收尾，删除从未接线的迁移 flag                         |
@@ -54,7 +54,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0050](0050-client-specific-session-navigation.md)     | accepted   | TUI 切换会话映射为取消；支持后台运行的客户端切换视图时保留 Runtime 状态             |
 | [0051](0051-release-profile-monotonic-composition.md)  | accepted   | Release Profile 使用正交 maturity/rollout 与按字段单调组合                         |
 | [0052](0052-release-evidence-and-behavior-identity.md) | accepted   | Manifest、Evidence 与 Gate 绑定同一行为身份                                        |
-| [0053](0053-local-single-user-first-topology.md)       | partially superseded by ADR-0144 | 保留单本地用户与 hosted/Web No-Go；单 trusted Workspace cardinality 由 Local Service 多 Workspace admission 取代 |
+| [0053](0053-local-single-user-first-topology.md)       | partially superseded by ADR-0144/0147/0149 | 保留单本地用户与 hosted/remote No-Go；本地 Web Observer由ADR-0147、stable local Agent API consumer由ADR-0149局部扩展 |
 | [0054](0054-production-execution-isolation.md)         | accepted   | 生产执行统一采用 sandbox、网络、受保护路径与 worktree 隔离                         |
 | [0055](0055-cumulative-runtime-resource-governance.md) | accepted   | 父子 Agent 使用累计预算、原子并发许可与统一终态                                    |
 | [0056](0056-metadata-first-data-boundaries.md)         | accepted   | 本地日志 metadata-first，telemetry 无正文，远程接收方独立治理                      |
@@ -98,7 +98,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0094](0094-prompt-contract-v2-default-migration.md) | superseded by ADR-0098 | 取消固定十四日等待，并因当时最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
 | [0095](0095-runtime-completion-truth.md) | accepted | Runtime CompletionGuard 统一任务与计划完成真值，拒绝 final 文本绕过 canonical lifecycle |
 | [0096](0096-tool-outcome-recovery-and-journey-evaluation.md) | accepted | Runtime 统一 typed outcome/recovery 权威，并以完整 Journey 评测工具质量 |
-| [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |
+| [0097](0097-brokered-git-capability.md) | partially superseded by ADR-0134/0160 | internal Git broker保留；模型Git命令恢复为统一Shell治理入口 |
 | [0098](0098-prompt-contract-v2-default-enabled.md) | accepted | 修正后的真实 A/B、项目规则 effect 与 Runtime 纠错 Journey 通过，Prompt Contract V2 默认启用并保留 legacy 回滚 |
 | [0099](0099-phase-stable-tool-disclosure.md) | accepted | V2 builtin/MCP 声明跨 Planning/Building 稳定，提示词引导只读行为，Runtime Policy 返回 phase 错误并阻止副作用 |
 | [0100](0100-user-approved-external-filesystem-capability.md) | accepted | 用户审批的逐 invocation 外部文件系统能力由原生 sandbox 执行 |
@@ -130,21 +130,49 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0126](0126-remove-runtime-installation-authority-key.md) | superseded by ADR-0127 | 删除长期 Runtime installation key；其保留的 ProjectHandle/child material/authority ledger 后续继续删除 |
 | [0127](0127-remove-rav1-speculative-authority.md) | accepted | 删除 ProjectHandle/single-Host lock、内部密钥/HMAC、伪 provenance/egress ledger 与固定 Provider policy，仅保留真实边界 |
 | [0128](0128-pre-release-clean-cutover-module-boundaries.md) | accepted | 未发布阶段采用无版本命名 clean cutover、领域 subpath 与唯一 composition root；版本只作为 metadata |
-| [0129](0129-sqlite-runtime-log-query-boundary.md) | accepted | SQLite Runtime Log 的只读查询边界 |
+| [0129](0129-sqlite-runtime-log-query-boundary.md) | partially superseded by ADR-0147 | 保留 SQLite/query-only/safe projector 边界；本地只读 Gateway 由 ADR-0147 冻结 |
 | [0130](0130-source-based-architecture-gates.md) | accepted | 架构门禁直接验证源码，不提交生成快照或迁移清单 |
 | [0131](0131-whole-workspace-sandbox-admission.md) | accepted | Sandbox 将 canonical Workspace 作为完整授权身份，不再按内部路径名称拒绝 |
 | [0132](0132-sensitive-external-paths-use-exact-approval.md) | accepted | Workspace 外敏感路径进入 exact approval；批准后 native sandbox 不再二次拒绝 |
 | [0133](0133-mode-aware-sensitive-external-authorization.md) | accepted | 外部敏感访问按 Full、Auto 与普通模式分别直接授权、模型三态审查或请求用户审批 |
-| [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136 | status/log grammar 只保留已批准执行的 hardening 用途，不再产生免审授权 |
+| [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136/0160 | status/log grammar恢复可证明只读免审；typed Git不再进入模型工具面 |
 | [0135](0135-mode-aware-workspace-authorization-boundary.md) | partially superseded by ADR-0136 | 文件工具边界保留；Shell/Git 的 Workspace grammar 直通已取消 |
 | [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
-| [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
+| [0137](0137-shell-sandbox-durable-approval-queue.md) | partially superseded by ADR-0160/0170 | durable queue/sandbox保留；未知Shell baseline改为exact真人审批；focused-only拒绝被取消 |
 | [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
 | [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
 | [0141](0141-test-ownership-and-layered-execution-v2.md) | accepted | 测试按 package、App、integration、qualification 与 isolated 归属，并采用分层并行执行 |
-| [0142](0142-runtime-server-client-protocol-boundary.md) | partially superseded by ADR-0144 | 保留 Protocol/Server/Client/receipt 边界；单 Workspace Server 与 App composition root 由 Local Service 决策取代 |
+| [0142](0142-runtime-server-client-protocol-boundary.md) | partially superseded by ADR-0144/0147/0149 | 保留private Protocol/Server/Client/receipt边界；Worker/Web拓扑与独立stable local Agent API façade由后续ADR冻结 |
 | [0143](0143-local-runtime-presentation-fidelity.md) | accepted | 本地 Client DTO 保留 reasoning、工具参数与结果；完整历史与 live 使用同一 reducer |
-| [0144](0144-local-runtime-service-and-multi-workspace-admission.md) | accepted | 默认 Runtime Store 由本机 Service 单一拥有；App admission 让一个 Host 隔离多个 trusted Workspace |
+| [0144](0144-local-runtime-service-and-multi-workspace-admission.md) | partially superseded by ADR-0147 | 保留 single-user/Trust/capability/recovery 约束；全局 Service/Host/Store topology 由 Coordinator/Worker 分片取代 |
 | [0145](0145-workspace-trust-binds-external-read-scope.md) | accepted | Workspace Trust 在 Runtime 连接前绑定并显示关联 external-read roots；授权不依赖命令名 |
 | [0146](0146-workspace-scope-reauthorization-convergence.md) | accepted | Workspace scope不匹配时刷新并重新授权，不升级App/Service/manager跨层兼容门禁 |
+| [0147](0147-kite-coordinator-workspace-worker-read-only-web.md) | partially superseded by ADR-0152/0155 | 历史Coordinator/Worker拓扑由single-Service取代；Browser保持只读，但独立companion data plane由Web REST client取代 |
+| [0148](0148-workspace-store-layout-generation-migration.md) | accepted | Store 7/新 epoch 采用 Workspace binding、deleted-session tombstone 与 offline copy-and-switch；unknown/corrupt/unowned 整体阻断 |
+| [0149](0149-stable-local-agent-api-facade.md) | partially superseded by ADR-0155 | Stable local REST/SSE façade与no remote/mutation保留；Browser可通过独立cookie principal消费只读`/v1` |
+| [0150](0150-store-8-canonical-runtime-run-index.md) | accepted | Store 8以canonical Run index、receipt resource result与coverage boundary支撑first-class Run；Store 7历史不推断回填 |
+| [0151](0151-web-gateway-preflight-and-exact-launch-recovery.md) | accepted | Web Gateway在state/spawn前验证asset，并以PID/start-token绑定launch intent与显式recover |
+| [0152](0152-single-service-single-sqlite-kite-home.md) | partially superseded by ADR-0153/0154/0159/0166 | 单SQLite/typed Artifact成果保留；全局单Service/Host ownership由ADR-0166替代为per-Session execution fencing |
+| [0153](0153-filesystem-preimage-remains-a-private-artifact-domain.md) | accepted | Filesystem mutation preimage保持独立typed Artifact表，不与Runtime checkpoint preimage或Capability result混用 |
+| [0154](0154-pre-release-store9-clean-cutover.md) | accepted | 未发布Store 9采用clean cutover；正式路径不迁移或清理旧布局，Web status保持只读 |
+| [0155](0155-single-service-web-rest-client-convergence.md) | partially superseded by ADR-0156/0159/0166 | Browser只读`/v1`与principal保留；default Service Web ownership由ADR-0166取消 |
+| [0156](0156-service-owned-web-root.md) | partially superseded by ADR-0157/0166 | root/static配对只保留给显式daemon；default local不再拥有Web listener |
+| [0157](0157-canonical-web-root-direct-bootstrap.md) | partially superseded by ADR-0158/0166 | daemon `GET /`与cookie语义保留；default local Web root取消 |
+| [0158](0158-local-web-root-session-without-launch-token.md) | partially superseded by ADR-0166 | read-only root cookie保留给显式daemon；不再由每个local App Server提供 |
+| [0159](0159-compatible-clients-share-single-service.md) | superseded by ADR-0166 | 历史build discovery与共享Service规则已无production caller；default local改为同build App Server |
+| [0160](0160-uncertain-shell-requires-exact-approval.md) | accepted | 未知Shell effects请求exact用户审批；模型脚本统一走Shell；执行前拒绝不再折叠为失败 |
+| [0161](0161-versioned-shell-semantics-and-read-only-trial.md) | partially superseded by ADR-0162 | 保留revision-bound Shell语义注册表；严格只读试跑grant由ADR-0162删除 |
+| [0162](0162-remove-read-only-trial-grant.md) | accepted | 删除严格只读试跑grant；unknown Shell恢复正常exact审批，registry继续演进 |
+| [0163](0163-service-owned-exploration-presentation.md) | accepted | Service唯一投影探索展示分类；TUI删除Shell前缀解析与历史重聚合路径 |
+| [0164](0164-active-candidate-service-build-convergence.md) | superseded by ADR-0166 | active-candidate/previous-build换代控制面已删除；release切换只影响后续App Server启动 |
+| [0165](0165-source-tui-standalone-service-topology.md) | superseded by ADR-0166 | 临时进程隔离保留为参考；临时Store/History与source/installed拓扑差异被取消 |
+| [0166](0166-decouple-app-server-process-from-durable-session-authority.md) | accepted | Client启动同build App Server；Session独立持久并按Session writer fencing；daemon/Web显式化 |
+| [0167](0167-separate-block-completion-from-terminal-static-ownership.md) | accepted | Block按自身生命周期完成；已绘制live tail只在后继Turn或清屏重挂载后进入Static |
+| [0168](0168-result-owned-tool-summary-static-promotion.md) | accepted | 聚合封口、terminal协调与整体result共同控制`tool_summary`的连续前缀Static提升 |
+| [0169](0169-thought-latest-activity-window.md) | accepted | active Thought在最新completed reasoning与探索工具步骤之间交替，settle后只保留聚合标题 |
+| [0170](0170-approval-rejection-terminates-tool-batch.md) | accepted | 人工工具审批拒绝原子拒绝目标、取消同批sibling并中止turn；TUI保留被拒绝工具上下文 |
+| [0171](0171-completed-response-components-use-immediate-static-ownership.md) | accepted | 最终回复的普通完成组件立即进入Static；只有仍增长的表格/代码容器留在dynamic，并保持完成后原生滚动稳定 |
+| [0172](0172-terminal-presentation-blocks-use-static-ownership.md) | accepted | standalone工具、终态Subagent组、resolved交互与不可变展示块立即进入Static，不再阻塞后续最终组件 |
+| [0173](0173-server-run-and-tui-presentation-lifecycle-authority.md) | accepted | Server Run、Client command、Presentation 与 Render 使用分层生命周期权威 |
+| [0174](0174-tui-message-projection-event-format-epoch.md) | accepted | Subagent step稳定identity、accepted presentation envelope、Timeline唯一sealed权威与完整candidate格式升级 |

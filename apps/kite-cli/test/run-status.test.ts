@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import type {
+  RuntimeClientEvent,
+  RuntimeToolDisplayName,
+  RuntimeToolPresentation,
+} from '@kite-ai/runtime-contract';
 import type { Action } from '../src/tui/App';
 import {
   createInitialState,
@@ -7,18 +12,36 @@ import {
   shouldShowRunStatus,
 } from '../src/tui/App';
 import { formatElapsed, formatToolResultForDisplay } from '../src/tui/components/render-utils';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
 import { handleClientEventAction } from '../src/tui/reducers/handleClientEvent';
-import { handleEventAction, type RenderEvent } from '../src/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/tui/run-status';
 import { deriveRunStatusSnapshot, formatRunStatusLine, phaseBaseTone } from '../src/tui/run-status';
 import type { OutputBlock, TuiState } from '../src/tui/types';
+import { acceptedEnvelope } from './helpers/accepted-envelope';
 
-type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
-type TestAction = Action | LegacyRenderAction;
+function projectRuntimeEvent(state: TuiState, event: RuntimeClientEvent): TuiState {
+  return handleClientEventAction(state, acceptedEnvelope(event));
+}
 
-function dispatch(s: TuiState, a: TestAction): TuiState {
-  if (a.type === 'EVENT') return handleEventAction(s, a.event);
-  return eventReducer(s, a);
+function dispatch(s: TuiState, a: Action | readonly Action[]): TuiState {
+  const actions = Array.isArray(a) ? a : [a];
+  return actions.reduce((state, action) => eventReducer(state, action), s);
+}
+
+function presentationFor(name: string): RuntimeToolPresentation {
+  return name === 'read_file' ||
+    name === 'search_content' ||
+    name === 'search_files' ||
+    name === 'read_mcp_resource'
+    ? 'exploration'
+    : 'standalone';
+}
+
+function accepted(event: RuntimeClientEvent): Action {
+  return {
+    type: 'ACCEPT_PRESENTATION_ENVELOPE',
+    event: acceptedEnvelope(event),
+  };
 }
 
 function toolCall(
@@ -26,28 +49,33 @@ function toolCall(
   name: string,
   args: Record<string, unknown> = {},
   status?: 'queued' | 'running',
-): LegacyRenderAction {
-  return {
-    type: 'EVENT',
-    event: {
-      type: 'tool_call',
-      data: { call_id: callId, name, args, status: status ?? 'running' },
-    },
-  };
+): Action | readonly Action[] {
+  const queuedEvent: Action = accepted({
+    type: 'tool.queued',
+    toolId: callId,
+    toolName: name as RuntimeToolDisplayName,
+    presentation: presentationFor(name),
+    arguments: args,
+    summary: 'Queued.',
+  });
+  return status === 'queued'
+    ? queuedEvent
+    : [queuedEvent, accepted({ type: 'tool.started', toolId: callId })];
 }
 
-function toolStarted(callId: string): LegacyRenderAction {
-  return {
-    type: 'EVENT',
-    event: { type: 'tool_started', data: { call_id: callId } },
-  };
+function toolStarted(callId: string): Action {
+  return accepted({ type: 'tool.started', toolId: callId, summary: 'Running tool.' });
 }
 
-function toolDone(callId: string, name: string, summary = 'ok'): LegacyRenderAction {
-  return {
-    type: 'EVENT',
-    event: { type: 'tool_done', data: { call_id: callId, name, ok: true, summary } },
-  };
+function toolDone(callId: string, name: string, summary = 'ok'): Action {
+  return accepted({
+    type: 'tool.finished',
+    toolId: callId,
+    toolName: name as RuntimeToolDisplayName,
+    presentation: presentationFor(name),
+    result: { ok: true, exitCode: 0, stdout: '', stderr: '' },
+    summary,
+  });
 }
 
 // ── phase progression ──
@@ -69,8 +97,41 @@ describe('run phase progression', () => {
     expect(shouldDisablePromptInput(createInitialState())).toBe(false);
   });
 
+  test('shows Working as soon as an idle prompt enters the submission path', () => {
+    let state: TuiState = {
+      ...createInitialState(),
+      activeSessionId: 'session-1',
+      runtimeAuthority: {
+        revision: 7,
+        interactionQueue: { revision: 7, interactions: [] },
+        currentRun: {
+          runId: 'settled-predecessor',
+          initialTurnId: 'settled-turn',
+          status: 'completed' as const,
+          revision: 7,
+        },
+      },
+    };
+    state = dispatch(state, { type: 'SET_RUNNING' });
+    expect(shouldShowRunStatus(state)).toBe(false);
+
+    state = dispatch(state, { type: 'LOCAL_USER_PROMPT', text: 'Inspect the project.' });
+    expect(shouldShowRunStatus(state)).toBe(true);
+    expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
+      kind: 'user',
+      content: 'Inspect the project.',
+      pendingEcho: true,
+    });
+  });
+
   test('keeps the active agent run status during automatic compaction', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = projectRuntimeEvent(state, {
+      type: 'user.message',
+      messageId: 'message-1',
+      kind: 'task',
+      text: 'Continue.',
+    });
     state = dispatch(state, {
       type: 'SET_COMPACTION_PROGRESS',
       phase: 'summarizing',
@@ -81,26 +142,140 @@ describe('run phase progression', () => {
     expect(shouldShowRunStatus(state)).toBe(true);
   });
 
-  test('hides agent run status during manual compaction', () => {
+  test('keeps the active agent run status during manual compaction', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = projectRuntimeEvent(state, {
+      type: 'user.message',
+      messageId: 'message-1',
+      kind: 'task',
+      text: 'Continue.',
+    });
     state = dispatch(state, {
       type: 'SET_COMPACTION_PROGRESS',
       phase: 'preparing',
       source: 'manual',
     });
     expect(state.compactionProgress).toEqual({ phase: 'preparing', source: 'manual' });
-    expect(shouldShowRunStatus(state)).toBe(false);
+    expect(shouldShowRunStatus(state)).toBe(true);
     state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS' });
     expect(state.compactionProgress).toBeUndefined();
     expect(shouldShowRunStatus(state)).toBe(true);
   });
 
-  test('starts in thinking phase', () => {
+  test('keeps the animated run status until the final response becomes terminal', () => {
+    const state = {
+      ...dispatch(createInitialState(), { type: 'SET_RUNNING' }),
+      runPromptPresented: true,
+    };
+
+    expect(shouldShowRunStatus(state)).toBe(true);
+    expect(
+      shouldShowRunStatus({
+        ...state,
+        status: {
+          ...state.status,
+          retryState: { attempt: 2, maxAttempts: 3, error: 'temporary', delayMs: 500 },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('acknowledges cancellation immediately and clears it only at a terminal boundary', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'step_begin', data: { node: 'agent', spanId: 's1' } },
+    state = {
+      ...state,
+      runtimeAuthority: {
+        revision: 1,
+        interactionQueue: { revision: 1, interactions: [] },
+        currentRun: {
+          runId: 'run-cancelled',
+          initialTurnId: 'turn-cancelled',
+          activeTurnId: 'turn-cancelled',
+          status: 'running',
+          revision: 1,
+        },
+      },
+    };
+    state = dispatch(state, { type: 'ESCAPE' });
+
+    expect(isTuiRunActive(state)).toBe(true);
+    expect(state.cancelRequestedRunId).toBe('run-cancelled');
+    expect(deriveRunStatusSnapshot(state).verb).toBe('Cancelling');
+
+    state = projectRuntimeEvent(state, {
+      type: 'turn.terminal',
+      turnId: 'turn-cancelled',
+      status: 'cancelled',
+      cause: 'user',
     });
+    expect(isTuiRunActive(state)).toBe(true);
+    expect(state.cancelRequestedRunId).toBeUndefined();
+    state = projectRuntimeEvent(state, {
+      type: 'run.terminal',
+      runId: 'run-cancelled',
+      status: 'cancelled',
+    });
+    state = eventReducer(state, {
+      type: 'RECONCILE_RUNTIME_PROJECTION',
+      projection: {
+        revision: 2,
+        interactionQueue: { revision: 2, interactions: [] },
+        currentRun: {
+          runId: 'run-cancelled',
+          initialTurnId: 'turn-cancelled',
+          status: 'cancelled',
+          revision: 2,
+        },
+      },
+    });
+    expect(isTuiRunActive(state)).toBe(false);
+  });
+
+  test('enters finishing after a completed model answer while the Run remains active', () => {
+    const state = {
+      ...createInitialState(),
+      runPromptPresented: false,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text' as const,
+              content: 'Done.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(deriveRunStatusSnapshot(state).phase).toBe('finishing');
+  });
+
+  test('does not finish completed narration that owns a pending tool batch', () => {
+    const state = {
+      ...createInitialState(),
+      runPromptPresented: false,
+      toolBearingModelRequestId: 'request-tools',
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text' as const,
+              content: 'I will inspect that next.',
+              modelRequestId: 'request-tools',
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(deriveRunStatusSnapshot(state).phase).not.toBe('finishing');
+  });
+
+  test('starts in thinking phase', () => {
+    const state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
 
     const snap = deriveRunStatusSnapshot(state, state.runStartTime! + 2_000);
     expect(snap.phase).toBe('thinking');
@@ -113,11 +288,7 @@ describe('run phase progression', () => {
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'bun test' }));
     expect(deriveRunStatusSnapshot(state).phase).toBe('working');
 
-    // Agent thinks again between tools — still working
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'step_begin', data: { node: 'agent', spanId: 's2' } },
-    });
+    // Agent thinks again between tools — still working.
     expect(deriveRunStatusSnapshot(state).phase).toBe('working');
 
     // Another tool — still working
@@ -127,10 +298,10 @@ describe('run phase progression', () => {
 
   test('stays in working while tools node is active before visible tool blocks arrive', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'step_begin', data: { node: 'tools', spanId: 's-tools' } },
-    });
+    state = {
+      ...state,
+      status: { ...state.status, currentNode: 'tools' },
+    };
 
     const snap = deriveRunStatusSnapshot(state);
     expect(snap.phase).toBe('working');
@@ -141,10 +312,14 @@ describe('run phase progression', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'bun test' }));
     state = dispatch(state, toolDone('c1', 'shell_execute', 'created'));
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'text', data: { text: 'All tests passed.' } },
-    });
+    state = dispatch(
+      state,
+      accepted({
+        type: 'model.text_delta',
+        requestId: 'status-after-tool',
+        text: 'All tests passed.',
+      }),
+    );
 
     const snap = deriveRunStatusSnapshot(state);
     expect(snap.phase).toBe('working');
@@ -153,11 +328,20 @@ describe('run phase progression', () => {
 
   test('skips working phase when run uses no tools', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    // thinking → text directly (no tools)
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'text', data: { text: 'Hello!' } },
-    });
+    // Admit and complete a model request directly (no tools). The model
+    // terminal marks the answer as finishing while the Run terminal is still
+    // pending.
+    state = dispatch(state, [
+      accepted({ type: 'model.requested', requestId: 'status-no-tool' }),
+      accepted({ type: 'model.text_delta', requestId: 'status-no-tool', text: 'Hello!' }),
+      accepted({
+        type: 'model.responded',
+        requestId: 'status-no-tool',
+        messageId: 'status-no-tool-message',
+        toolCallCount: 0,
+        summary: 'Hello!',
+      }),
+    ]);
 
     const snap = deriveRunStatusSnapshot(state);
     expect(snap.phase).toBe('finishing');
@@ -167,14 +351,13 @@ describe('run phase progression', () => {
 // ── verb within phases ──
 
 describe('verb within working phase', () => {
-  test('shows queued verb before a queued tool starts running', () => {
+  test('keeps queued tool metadata hidden until the tool starts running', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'ls' }, 'queued'));
 
     let snap = deriveRunStatusSnapshot(state, state.runStartTime! + 2_000);
-    expect(snap.phase).toBe('working');
-    expect(snap.verb).toBe('Queued');
-    expect(snap.tone).toBe('muted');
+    expect(snap.phase).toBe('thinking');
+    expect(snap.verb).toBe('Thinking');
 
     state = dispatch(state, toolStarted('c1'));
     snap = deriveRunStatusSnapshot(state, state.runStartTime! + 3_000);
@@ -194,10 +377,6 @@ describe('verb within working phase', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'ls' }));
     state = dispatch(state, toolDone('c1', 'shell_execute', 'ok'));
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'step_begin', data: { node: 'agent', spanId: 's2' } },
-    });
 
     const snap = deriveRunStatusSnapshot(state, state.runStartTime! + 15_000);
     expect(snap.phase).toBe('working');
@@ -231,7 +410,7 @@ describe('verb within working phase', () => {
 
   test('shows Delegating when a subagent is running', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = handleClientEventAction(state, {
+    state = projectRuntimeEvent(state, {
       type: 'subagent.started',
       subagentId: 'sub-1',
       role: 'explore',
@@ -252,7 +431,7 @@ describe('verb within working phase', () => {
     ['awaiting_user', 'Awaiting approval', 'warning'],
   ] as const)('shows %s child approval state without implying every child needs a user', (approvalState, verb, tone) => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = handleClientEventAction(state, {
+    state = projectRuntimeEvent(state, {
       type: 'subagent.started',
       subagentId: 'sub-1',
       role: 'review',
@@ -430,7 +609,7 @@ describe('formatRunStatusLine', () => {
     expect(line).toBe('Thinking… (3s · thinking with max effort)');
   });
 
-  test('finishing phase shows verb without prefix', () => {
+  test('finishing phase keeps the same visible Working label', () => {
     const line = formatRunStatusLine(
       {
         phase: 'finishing',
@@ -443,7 +622,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Finishing… (30s)');
+    expect(line).toBe('Working');
   });
 
   test('working phase remains minimal on narrow terminals', () => {
@@ -533,37 +712,27 @@ describe('phaseBaseTone', () => {
 // ── reducer integration: tool_progress → liveOutput ──
 
 describe('tool_progress liveOutput', () => {
-  test('sets liveOutput on running tool_card via EVENT dispatch', () => {
+  test('sets liveOutput on running tool_card via accepted event dispatch', () => {
     const initial = createInitialState();
-    const runStart = { type: 'RUN_START', agentId: 'a1', name: '' };
-    let state = eventReducer(initial, runStart as unknown as Action);
+    let state = eventReducer(initial, { type: 'SET_RUNNING' });
 
     const callId = 'call-123';
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: {
-        type: 'tool_call',
-        data: {
-          call_id: callId,
-          name: 'shell_execute',
-          args: { command: 'echo hello' },
-          status: 'running',
-        },
-      } satisfies RenderEvent,
-    });
+    state = dispatch(state, toolCall(callId, 'shell_execute', { command: 'echo hello' }));
 
     const last = state.turns.at(-1)?.blocks.at(-1);
     expect(last?.kind).toBe('tool_card');
     expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe('running');
     expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).liveOutput).toBeUndefined();
 
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: {
-        type: 'tool_progress',
-        data: { call_id: callId, name: 'shell_execute', chunk: 'hello', stream: 'stdout' },
-      } satisfies RenderEvent,
-    });
+    state = dispatch(
+      state,
+      accepted({
+        type: 'tool.progress',
+        toolId: callId,
+        summary: 'hello',
+        stream: 'stdout',
+      }),
+    );
 
     const updated = state.turns.at(-1)?.blocks.at(-1);
     expect(updated?.kind).toBe('tool_card');

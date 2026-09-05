@@ -1,8 +1,9 @@
+import type { SubAgentFailureDiagnostic } from './presentation';
 import {
+  type InteractionOwner,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeClientInteraction,
   type RuntimeSessionProjection,
-  sameRuntimeClientInteractionIdentity,
 } from './projections';
 import {
   hasExactKeys,
@@ -75,18 +76,13 @@ export interface RuntimeClientToolResult {
   readonly terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
 }
 
-/** Closed child-tool terminal fact; child output remains summarized. */
-export interface RuntimeClientSubagentToolResult {
-  readonly ok: boolean;
-}
-
-export const RUNTIME_NOTIFICATION_SCHEMA_ = 'kite.runtime-notification.v1' as const;
+export const RUNTIME_NOTIFICATION_SCHEMA_ = 'kite.runtime-notification.v2' as const;
 
 export interface RuntimeProjectionDelta {
   readonly kind: 'snapshot' | 'session' | 'work' | 'turn' | 'interaction' | 'evidence';
   readonly session: RuntimeSessionProjection;
   /** Neutral client notification projected by the App-owned adapter. */
-  readonly event?: RuntimeNotificationEvent;
+  readonly event?: RuntimeClientEvent;
 }
 
 export interface RuntimeClientTerminalOutcome {
@@ -189,9 +185,24 @@ export type RuntimeClientEvent =
       readonly result: RuntimeClientToolResult;
       readonly summary: string;
     }
-  | { readonly type: 'tool.failed'; readonly toolId: string; readonly summary: string }
-  | { readonly type: 'tool.rejected'; readonly toolId: string; readonly summary: string }
-  | { readonly type: 'tool.cancelled'; readonly toolId: string; readonly summary?: string }
+  | {
+      readonly type: 'tool.failed';
+      readonly toolId: string;
+      readonly presentation: RuntimeToolPresentation;
+      readonly summary: string;
+    }
+  | {
+      readonly type: 'tool.rejected';
+      readonly toolId: string;
+      readonly presentation: RuntimeToolPresentation;
+      readonly summary: string;
+    }
+  | {
+      readonly type: 'tool.cancelled';
+      readonly toolId: string;
+      readonly presentation: RuntimeToolPresentation;
+      readonly summary?: string;
+    }
   | {
       readonly type: 'tool.file_changed';
       readonly toolId: string;
@@ -214,11 +225,13 @@ export type RuntimeClientEvent =
       readonly type: 'approval.granted';
       readonly interactionId: string;
       readonly generation: number;
+      readonly owner: InteractionOwner;
     }
   | {
       readonly type: 'approval.rejected';
       readonly interactionId: string;
       readonly generation: number;
+      readonly owner: InteractionOwner;
       readonly summary?: string;
     }
   | {
@@ -275,21 +288,60 @@ export type RuntimeClientEvent =
       readonly subagentId: string;
       readonly role: 'explore' | 'plan' | 'code' | 'review';
       readonly name: string;
+      /** Opaque Runtime dispatch identity shared by concurrently admitted siblings. */
+      readonly concurrencyGroupId?: string;
+    }
+  | {
+      readonly type: 'subagent.phase';
+      readonly subagentId: string;
+      readonly parentToolCallId: string;
+      readonly status: 'running' | 'suspended';
+      readonly approvalState?:
+        | 'queued_auto_review'
+        | 'auto_reviewing'
+        | 'queued_user_approval'
+        | 'awaiting_user'
+        | 'authorized_queued';
+      readonly interactionId?: string;
+      readonly reviewId?: string;
     }
   | {
       readonly type: 'subagent.step';
       readonly subagentId: string;
+      readonly stepId: string;
+      readonly toolCallId: string;
       readonly toolName: string;
-      readonly status: 'started' | 'completed' | 'failed';
+      readonly status: 'started' | 'completed' | 'failed' | 'cancelled';
       readonly displayLabel?: string;
       readonly arguments?: Readonly<Record<string, unknown>>;
-      readonly result?: RuntimeClientSubagentToolResult;
       readonly totalLines?: number;
       readonly durationMs?: number;
       readonly summary?: string;
     }
-  | { readonly type: 'subagent.completed'; readonly subagentId: string; readonly summary: string }
-  | { readonly type: 'subagent.failed'; readonly subagentId: string; readonly summary: string }
+  | {
+      readonly type: 'subagent.review';
+      readonly subagentId: string;
+      readonly parentToolCallId: string;
+      readonly reviewId: string;
+      readonly toolCallId: string;
+      readonly status: 'queued' | 'reviewing' | 'approved' | 'rejected' | 'failed';
+      readonly summary?: string;
+    }
+  | {
+      readonly type: 'subagent.completed';
+      readonly subagentId: string;
+      readonly summary: string;
+      readonly toolCallCount: number;
+      readonly durationMs: number;
+    }
+  | {
+      readonly type: 'subagent.failed';
+      readonly subagentId: string;
+      readonly summary: string;
+      readonly toolCallCount?: number;
+      readonly durationMs?: number;
+      readonly diagnostic?: Pick<SubAgentFailureDiagnostic, 'code' | 'stage'>;
+    }
   | {
       readonly type: 'context.compaction';
       readonly status: 'requested' | 'completed' | 'failed' | 'reset';
@@ -318,14 +370,6 @@ export type RuntimeClientEvent =
       readonly outcome?: RuntimeClientTerminalOutcome;
     }
   | {
-      /** Content-free failure fact used by recovery UI before any next action. */
-      readonly type: 'run.failure';
-      readonly runId: string;
-      readonly code: string;
-      readonly retryable: boolean;
-      readonly recoveryEntry: RuntimeClientTerminalOutcome['recoveryEntry'];
-    }
-  | {
       readonly type: 'rewind.terminal';
       readonly rewindId: string;
       readonly commandId: string;
@@ -345,8 +389,171 @@ export type RuntimeClientEvent =
       readonly reason: 'unknown_event' | 'redacted' | 'unsupported_version';
     };
 
-/** @deprecated Use RuntimeClientEvent. */
-export type RuntimeNotificationEvent = RuntimeClientEvent;
+/**
+ * Event envelope accepted by a presentation projector.  The connection and
+ * stream fences are captured at receipt time and are never inferred by Ink.
+ */
+export interface AcceptedPresentationEnvelope {
+  readonly sessionId: string;
+  readonly connectionGeneration: number;
+  readonly durability: 'durable' | 'ephemeral';
+  readonly revision?: number;
+  readonly runId?: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
+  readonly event: RuntimeClientEvent;
+  readonly stream?: {
+    readonly actorId: string;
+    readonly attemptId: string;
+    readonly compositionRevision: string;
+    readonly streamId: string;
+    readonly sequence: number;
+  };
+}
+
+/**
+ * Minimum lifecycle authority carried by one client event.  The event itself
+ * stays deliberately small; the envelope supplies the matching identity from
+ * the Runtime projection/stream.  Keeping this table next to the acceptance
+ * predicate makes additions fail closed instead of silently becoming
+ * session-scoped by omission.
+ */
+export type RuntimeClientEventIdentityScope = 'session' | 'task' | 'turn' | 'run';
+
+const RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_ = {
+  'user.message': 'turn',
+  'model.requested': 'turn',
+  'reasoning.activity': 'turn',
+  'model.text_delta': 'turn',
+  'model.responded': 'turn',
+  'model.retry': 'turn',
+  'model.cache': 'turn',
+  'tool.queued': 'turn',
+  'tool.started': 'turn',
+  'tool.progress': 'turn',
+  'tool.finished': 'turn',
+  'tool.failed': 'turn',
+  'tool.rejected': 'turn',
+  'tool.cancelled': 'turn',
+  'tool.file_changed': 'turn',
+  'interaction.available': 'turn',
+  'interaction.settled': 'turn',
+  'approval.queued': 'turn',
+  'approval.granted': 'turn',
+  'approval.rejected': 'turn',
+  'input.requested': 'turn',
+  'input.answered': 'turn',
+  'input.cancelled': 'turn',
+  'plan.review_requested': 'turn',
+  'plan.progress': 'turn',
+  'plan.completed': 'turn',
+  'plan.approved': 'turn',
+  'planning.entered': 'task',
+  'planning.exited': 'task',
+  'provider.action': 'turn',
+  'verification.status': 'turn',
+  'subagent.started': 'turn',
+  'subagent.phase': 'turn',
+  'subagent.step': 'turn',
+  'subagent.review': 'turn',
+  'subagent.completed': 'turn',
+  'subagent.failed': 'turn',
+  'context.compaction': 'session',
+  'task.terminal': 'task',
+  'turn.terminal': 'turn',
+  'run.terminal': 'run',
+  'rewind.terminal': 'session',
+  'session.notice': 'session',
+  'interaction_mode.changed': 'session',
+  unavailable: 'session',
+} as const satisfies Readonly<Record<RuntimeClientEvent['type'], RuntimeClientEventIdentityScope>>;
+
+export function runtimeClientEventIdentityScope(
+  event: RuntimeClientEvent,
+): RuntimeClientEventIdentityScope {
+  return RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_[event.type];
+}
+
+/**
+ * Validate the envelope identity required by the event's authority scope.
+ * Terminal event identities are repeated in the event payload and must agree
+ * exactly with the envelope so a predecessor cannot settle a successor.
+ */
+export function isRuntimeClientEventIdentitySatisfied(
+  event: RuntimeClientEvent,
+  identity: Readonly<{ runId?: unknown; taskId?: unknown; turnId?: unknown }>,
+): boolean {
+  const hasIdentity = (value: unknown): value is string => isIdentifier(value);
+  const scope = runtimeClientEventIdentityScope(event);
+  if (
+    (scope === 'run' && !hasIdentity(identity.runId)) ||
+    (scope === 'task' && !hasIdentity(identity.taskId)) ||
+    (scope === 'turn' && !hasIdentity(identity.turnId))
+  ) {
+    return false;
+  }
+  switch (event.type) {
+    case 'task.terminal':
+    case 'planning.entered':
+    case 'planning.exited':
+      return identity.taskId === event.taskId;
+    case 'turn.terminal':
+      return identity.turnId === event.turnId;
+    case 'run.terminal':
+      return identity.runId === event.runId;
+    default:
+      return true;
+  }
+}
+
+export function isAcceptedPresentationEnvelope(
+  value: unknown,
+): value is AcceptedPresentationEnvelope {
+  if (!isRecord(value)) return false;
+  const optional = ['revision', 'runId', 'taskId', 'turnId', 'stream'];
+  if (
+    !hasExactKeys(value, [
+      'sessionId',
+      'connectionGeneration',
+      'durability',
+      'event',
+      ...optional.filter((key) => Object.hasOwn(value, key)),
+    ]) ||
+    !isIdentifier(value.sessionId) ||
+    !isNonNegativeSafeInteger(value.connectionGeneration) ||
+    value.connectionGeneration < 1 ||
+    (value.durability !== 'durable' && value.durability !== 'ephemeral') ||
+    (Object.hasOwn(value, 'revision') && !isNonNegativeSafeInteger(value.revision)) ||
+    (Object.hasOwn(value, 'runId') && !isIdentifier(value.runId)) ||
+    (Object.hasOwn(value, 'taskId') && !isIdentifier(value.taskId)) ||
+    (Object.hasOwn(value, 'turnId') && !isIdentifier(value.turnId)) ||
+    !isRuntimeClientEvent(value.event)
+  ) {
+    return false;
+  }
+  if (!isRuntimeClientEventIdentitySatisfied(value.event, value)) return false;
+  if (value.durability === 'durable') {
+    return Object.hasOwn(value, 'revision') && !Object.hasOwn(value, 'stream');
+  }
+  const stream = value.stream;
+  return (
+    isRecord(stream) &&
+    hasExactKeys(stream, ['actorId', 'attemptId', 'compositionRevision', 'streamId', 'sequence']) &&
+    isIdentifier(stream.actorId) &&
+    isIdentifier(stream.attemptId) &&
+    isIdentifier(stream.compositionRevision) &&
+    isIdentifier(stream.streamId) &&
+    isNonNegativeSafeInteger(stream.sequence)
+  );
+}
+
+export function assertAcceptedPresentationEnvelope(
+  value: unknown,
+): asserts value is AcceptedPresentationEnvelope {
+  if (!isAcceptedPresentationEnvelope(value)) {
+    throw new TypeError('Invalid AcceptedPresentationEnvelope');
+  }
+}
 
 export type RuntimeNotification =
   | {
@@ -354,6 +561,15 @@ export type RuntimeNotification =
       readonly durability: 'durable';
       readonly sessionId: string;
       readonly revision: number;
+      /**
+       * Optional exact lifecycle identity captured by the Server for this
+       * source record.  Most durable records can derive identity from the
+       * accompanying projection; start-turn records carry this explicitly
+       * because the prompt is committed before `turn.started` is reduced.
+       */
+      readonly runId?: string;
+      readonly taskId?: string;
+      readonly turnId?: string;
       readonly projection: RuntimeProjectionDelta;
     }
   | {
@@ -361,6 +577,8 @@ export type RuntimeNotification =
       readonly durability: 'ephemeral';
       readonly sessionId: string;
       readonly workId: string;
+      readonly runId?: string;
+      readonly taskId?: string;
       readonly turnId: string;
       readonly actorId: string;
       readonly attemptId: string;
@@ -458,6 +676,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
       'summary',
       'generation',
       'grants',
+      'owner',
       'command',
       'question',
       'allowFreeText',
@@ -479,7 +698,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           value,
           presentKeys(
             value,
-            ['kind', 'interactionId', 'sessionRevision', 'generation', 'grants'],
+            ['kind', 'interactionId', 'sessionRevision', 'generation', 'grants', 'owner'],
             ['title', 'summary', 'command'],
           ),
         ) &&
@@ -489,7 +708,8 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
         value.grants.length > 0 &&
         value.grants.length <= 2 &&
         value.grants.every((grant) => grant === 'approve_once' || grant === 'same_command') &&
-        new Set(value.grants).size === value.grants.length
+        new Set(value.grants).size === value.grants.length &&
+        isRuntimeInteractionOwner(value.owner)
       );
     case 'input':
       return (
@@ -549,6 +769,28 @@ export function assertRuntimeClientInteraction(
   value: unknown,
 ): asserts value is RuntimeClientInteraction {
   if (!isRuntimeClientInteraction(value)) throw new TypeError('Invalid RuntimeClientInteraction');
+}
+
+function isRuntimeClientSubagentDiagnostic(
+  value: unknown,
+): value is Pick<SubAgentFailureDiagnostic, 'code' | 'stage'> {
+  if (!isRecord(value) || !hasExactKeys(value, ['code', 'stage'])) return false;
+  const validCode =
+    value.code === 'aborted' ||
+    value.code === 'timed_out' ||
+    value.code === 'invalid_input' ||
+    value.code === 'consumer_protocol' ||
+    value.code === 'model_step_failed' ||
+    value.code === 'internal_error';
+  const validStage =
+    value.stage === 'initialization' ||
+    value.stage === 'next_round_preparation' ||
+    value.stage === 'model_step' ||
+    value.stage === 'model_response_validation' ||
+    value.stage === 'tool_consumption' ||
+    value.stage === 'transcript_validation' ||
+    value.stage === 'terminal_projection';
+  return validCode && validStage;
 }
 
 export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEvent {
@@ -639,9 +881,17 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
     case 'tool.failed':
     case 'tool.rejected':
       return (
-        hasExactKeys(value, ['type', 'toolId', 'summary']) &&
+        hasExactKeys(value, ['type', 'toolId', 'presentation', 'summary']) &&
         isIdentifier(value.toolId) &&
+        isRuntimeToolPresentation(value.presentation) &&
         isBoundedString(value.summary)
+      );
+    case 'tool.cancelled':
+      return (
+        hasExactKeys(value, presentKeys(value, ['type', 'toolId', 'presentation'], ['summary'])) &&
+        isIdentifier(value.toolId) &&
+        isRuntimeToolPresentation(value.presentation) &&
+        (!Object.hasOwn(value, 'summary') || isBoundedString(value.summary))
       );
     case 'tool.finished':
       return (
@@ -661,7 +911,6 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
         (!Object.hasOwn(value, 'displayLabel') || isBoundedUserText(value.displayLabel, 512))
       );
     case 'tool.started':
-    case 'tool.cancelled':
       return (
         hasExactKeys(value, presentKeys(value, ['type', 'toolId'], ['summary'])) &&
         isIdentifier(value.toolId) &&
@@ -674,7 +923,7 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(value, ['type', 'toolId', 'summary'], ['stream', 'lineCount']),
         ) &&
         isIdentifier(value.toolId) &&
-        isBoundedString(value.summary) &&
+        isBoundedUserText(value.summary) &&
         (!Object.hasOwn(value, 'stream') ||
           value.stream === 'stdout' ||
           value.stream === 'stderr') &&
@@ -710,15 +959,16 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
         isNonNegativeSafeInteger(value.queueSequence)
       );
     case 'approval.granted':
-      return exactInteractionGeneration(value);
+      return exactInteractionGeneration(value) && isRuntimeInteractionOwner(value.owner);
     case 'approval.rejected':
       return (
         hasExactKeys(
           value,
-          presentKeys(value, ['type', 'interactionId', 'generation'], ['summary']),
+          presentKeys(value, ['type', 'interactionId', 'generation', 'owner'], ['summary']),
         ) &&
         isIdentifier(value.interactionId) &&
         isNonNegativeSafeInteger(value.generation) &&
+        isRuntimeInteractionOwner(value.owner) &&
         optionalSummary(value)
       );
     case 'input.requested':
@@ -786,13 +1036,39 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'subagent.started':
       return (
-        hasExactKeys(value, ['type', 'subagentId', 'role', 'name']) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'subagentId', 'role', 'name'], ['concurrencyGroupId']),
+        ) &&
         isIdentifier(value.subagentId) &&
+        (!Object.hasOwn(value, 'concurrencyGroupId') || isIdentifier(value.concurrencyGroupId)) &&
         (value.role === 'explore' ||
           value.role === 'plan' ||
           value.role === 'code' ||
           value.role === 'review') &&
         isBoundedString(value.name)
+      );
+    case 'subagent.phase':
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'subagentId', 'parentToolCallId', 'status'],
+            ['approvalState', 'interactionId', 'reviewId'],
+          ),
+        ) &&
+        isIdentifier(value.subagentId) &&
+        isIdentifier(value.parentToolCallId) &&
+        (value.status === 'running' || value.status === 'suspended') &&
+        (!Object.hasOwn(value, 'approvalState') ||
+          value.approvalState === 'queued_auto_review' ||
+          value.approvalState === 'auto_reviewing' ||
+          value.approvalState === 'queued_user_approval' ||
+          value.approvalState === 'awaiting_user' ||
+          value.approvalState === 'authorized_queued') &&
+        (!Object.hasOwn(value, 'interactionId') || isIdentifier(value.interactionId)) &&
+        (!Object.hasOwn(value, 'reviewId') || isIdentifier(value.reviewId))
       );
     case 'subagent.step':
       return (
@@ -800,27 +1076,69 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value,
           presentKeys(
             value,
-            ['type', 'subagentId', 'toolName', 'status'],
-            ['displayLabel', 'arguments', 'result', 'summary', 'totalLines', 'durationMs'],
+            ['type', 'subagentId', 'stepId', 'toolCallId', 'toolName', 'status'],
+            ['displayLabel', 'arguments', 'summary', 'totalLines', 'durationMs'],
           ),
         ) &&
         isIdentifier(value.subagentId) &&
+        isIdentifier(value.stepId) &&
+        isIdentifier(value.toolCallId) &&
         isBoundedString(value.toolName) &&
-        (value.status === 'started' || value.status === 'completed' || value.status === 'failed') &&
+        (value.status === 'started' ||
+          value.status === 'completed' ||
+          value.status === 'failed' ||
+          value.status === 'cancelled') &&
         optionalSummary(value) &&
         (!Object.hasOwn(value, 'displayLabel') || isBoundedUserText(value.displayLabel, 512)) &&
         (!Object.hasOwn(value, 'arguments') ||
           (isRecord(value.arguments) && isJsonSafeValue(value.arguments))) &&
-        (!Object.hasOwn(value, 'result') || isRuntimeClientSubagentToolResult(value.result)) &&
         (!Object.hasOwn(value, 'totalLines') || isNonNegativeSafeInteger(value.totalLines)) &&
         (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs))
       );
+    case 'subagent.review':
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'subagentId', 'parentToolCallId', 'reviewId', 'toolCallId', 'status'],
+            ['summary'],
+          ),
+        ) &&
+        isIdentifier(value.subagentId) &&
+        isIdentifier(value.parentToolCallId) &&
+        isIdentifier(value.reviewId) &&
+        isIdentifier(value.toolCallId) &&
+        (value.status === 'queued' ||
+          value.status === 'reviewing' ||
+          value.status === 'approved' ||
+          value.status === 'rejected' ||
+          value.status === 'failed') &&
+        optionalSummary(value)
+      );
     case 'subagent.completed':
+      return (
+        hasExactKeys(value, ['type', 'subagentId', 'summary', 'toolCallCount', 'durationMs']) &&
+        isIdentifier(value.subagentId) &&
+        isBoundedString(value.summary) &&
+        isNonNegativeSafeInteger(value.toolCallCount) &&
+        isNonNegativeSafeInteger(value.durationMs)
+      );
     case 'subagent.failed':
       return (
-        hasExactKeys(value, ['type', 'subagentId', 'summary']) &&
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'subagentId', 'summary'],
+            ['toolCallCount', 'durationMs', 'diagnostic'],
+          ),
+        ) &&
         isIdentifier(value.subagentId) &&
-        isBoundedString(value.summary)
+        isBoundedString(value.summary) &&
+        (!Object.hasOwn(value, 'toolCallCount') || isNonNegativeSafeInteger(value.toolCallCount)) &&
+        (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs)) &&
+        (!Object.hasOwn(value, 'diagnostic') || isRuntimeClientSubagentDiagnostic(value.diagnostic))
       );
     case 'context.compaction':
       return (
@@ -851,18 +1169,6 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       return (
         isTerminalEvent(value, 'runId', ['completed', 'failed', 'cancelled'], ['outcome']) &&
         (!Object.hasOwn(value, 'outcome') || isRuntimeClientTerminalOutcome(value.outcome))
-      );
-    case 'run.failure':
-      return (
-        hasExactKeys(value, ['type', 'runId', 'code', 'retryable', 'recoveryEntry']) &&
-        isIdentifier(value.runId) &&
-        isIdentifier(value.code) &&
-        typeof value.retryable === 'boolean' &&
-        (value.recoveryEntry === 'none' ||
-          value.recoveryEntry === 'retry' ||
-          value.recoveryEntry === 'reconcile' ||
-          value.recoveryEntry === 'new_run' ||
-          value.recoveryEntry === 'operator_action')
       );
     case 'rewind.terminal':
       return (
@@ -1005,12 +1311,6 @@ function isRuntimeClientToolResult(value: unknown): value is RuntimeClientToolRe
   );
 }
 
-function isRuntimeClientSubagentToolResult(
-  value: unknown,
-): value is RuntimeClientSubagentToolResult {
-  return isRecord(value) && hasExactKeys(value, ['ok']) && typeof value.ok === 'boolean';
-}
-
 function isBoundedOutputText(value: unknown): value is string {
   return value === '' || isBoundedUserText(value);
 }
@@ -1021,9 +1321,23 @@ function nonNegativeFields(value: Record<string, unknown>, fields: readonly stri
   );
 }
 
+function isRuntimeInteractionOwner(value: unknown): value is InteractionOwner {
+  if (!isRecord(value) || typeof value.kind !== 'string') return false;
+  if (value.kind === 'root_tool') {
+    return hasExactKeys(value, ['kind', 'toolCallId']) && isIdentifier(value.toolCallId);
+  }
+  return (
+    value.kind === 'subagent_tool' &&
+    hasExactKeys(value, ['kind', 'toolCallId', 'subagentId', 'parentToolCallId']) &&
+    isIdentifier(value.toolCallId) &&
+    isIdentifier(value.subagentId) &&
+    isIdentifier(value.parentToolCallId)
+  );
+}
+
 function exactInteractionGeneration(value: Record<string, unknown>): boolean {
   return (
-    hasExactKeys(value, ['type', 'interactionId', 'generation']) &&
+    hasExactKeys(value, ['type', 'interactionId', 'generation', 'owner']) &&
     isIdentifier(value.interactionId) &&
     isNonNegativeSafeInteger(value.generation)
   );
@@ -1123,7 +1437,14 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       presentKeys(
         value,
         ['schema', 'sessionId', 'revision', 'lifecycle', 'interactionQueue'],
-        ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork', 'model'],
+        [
+          'displayName',
+          'updatedAt',
+          'sessionCommandGrantCount',
+          'activeTask',
+          'currentRun',
+          'model',
+        ],
       ),
     ) &&
     value.schema === RUNTIME_PROJECTION_SCHEMA_ &&
@@ -1148,7 +1469,8 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
           typeof value.model.reasoningEnabled === 'boolean'))) &&
     isRuntimeInteractionQueueProjection(value.interactionQueue) &&
     (value.interactionQueue as { readonly revision: unknown }).revision === value.revision &&
-    (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork)) &&
+    (!Object.hasOwn(value, 'activeTask') || isRuntimeSessionTaskProjection(value.activeTask)) &&
+    (!Object.hasOwn(value, 'currentRun') || isRuntimeSessionRunProjection(value.currentRun)) &&
     activeInteractionMatchesQueue(value)
   );
 }
@@ -1158,10 +1480,7 @@ function activeInteractionMatchesQueue(value: Record<string, unknown>): boolean 
     readonly activeInteractionId?: string;
     readonly interactions: readonly RuntimeClientInteraction[];
   };
-  const work = value.activeWork as
-    | { readonly activeTurn?: { readonly interaction?: RuntimeClientInteraction } }
-    | undefined;
-  const interaction = work?.activeTurn?.interaction;
+  const currentRun = value.currentRun as { readonly activeInteractionId?: string } | undefined;
   const queuedInteraction =
     queue.activeInteractionId === undefined
       ? undefined
@@ -1169,12 +1488,63 @@ function activeInteractionMatchesQueue(value: Record<string, unknown>): boolean 
           (candidate) => candidate.interactionId === queue.activeInteractionId,
         );
   return (
-    queue.activeInteractionId === interaction?.interactionId &&
-    (interaction === undefined ||
-      (queuedInteraction !== undefined &&
-        interaction.sessionRevision === value.revision &&
-        queuedInteraction.sessionRevision === interaction.sessionRevision &&
-        sameRuntimeClientInteractionIdentity(queuedInteraction, interaction)))
+    (currentRun === undefined || queue.activeInteractionId === currentRun.activeInteractionId) &&
+    (queue.activeInteractionId === undefined || queuedInteraction !== undefined)
+  );
+}
+
+function isRuntimeSessionTaskProjection(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['taskId', 'phase']) &&
+    isIdentifier(value.taskId) &&
+    (value.phase === 'planning' || value.phase === 'building')
+  );
+}
+
+function isRuntimeSessionRunProjection(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const status = value.status;
+  const active = status === 'queued' || status === 'running' || status === 'waiting';
+  const recovery = status === 'recovery_required';
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+  return (
+    hasExactKeys(
+      value,
+      presentKeys(
+        value,
+        ['runId', 'initialTurnId', 'status', 'revision'],
+        ['activeTurnId', 'taskId', 'activeInteractionId', 'outcome'],
+      ),
+    ) &&
+    isIdentifier(value.runId) &&
+    isIdentifier(value.initialTurnId) &&
+    (!Object.hasOwn(value, 'activeTurnId') || isIdentifier(value.activeTurnId)) &&
+    (!Object.hasOwn(value, 'taskId') || isIdentifier(value.taskId)) &&
+    (!Object.hasOwn(value, 'activeInteractionId') || isIdentifier(value.activeInteractionId)) &&
+    isNonNegativeSafeInteger(value.revision) &&
+    (active || recovery || terminal) &&
+    (!Object.hasOwn(value, 'outcome') || isRuntimeRunTerminalProjection(value.outcome)) &&
+    (!active || Object.hasOwn(value, 'activeTurnId')) &&
+    (!recovery || Object.hasOwn(value, 'outcome'))
+  );
+}
+
+function isRuntimeRunTerminalProjection(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(
+      value,
+      presentKeys(value, ['reasonCode', 'safeRetry', 'recoveryEntry'], ['outcomeId']),
+    ) &&
+    isBoundedString(value.reasonCode) &&
+    typeof value.safeRetry === 'boolean' &&
+    (value.recoveryEntry === 'none' ||
+      value.recoveryEntry === 'retry' ||
+      value.recoveryEntry === 'reconcile' ||
+      value.recoveryEntry === 'new_run' ||
+      value.recoveryEntry === 'operator_action') &&
+    (!Object.hasOwn(value, 'outcomeId') || isBoundedString(value.outcomeId))
   );
 }
 
@@ -1199,65 +1569,6 @@ function isRuntimeInteractionQueueProjection(value: unknown): boolean {
     value.interactions.every((interaction) => interaction.sessionRevision === value.revision) &&
     (!Object.hasOwn(value, 'activeInteractionId') ||
       ids.includes(value.activeInteractionId as string))
-  );
-}
-
-function isRuntimeWorkProjection(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return (
-    hasExactKeys(
-      value,
-      presentKeys(value, ['workId', 'phase', 'status'], ['title', 'activeTurn']),
-    ) &&
-    isIdentifier(value.workId) &&
-    (value.phase === 'planning' || value.phase === 'building') &&
-    isTerminalStatus(value.status) &&
-    (!Object.hasOwn(value, 'title') || isBoundedString(value.title)) &&
-    (!Object.hasOwn(value, 'activeTurn') || isRuntimeTurnProjection(value.activeTurn))
-  );
-}
-
-function isRuntimeTurnProjection(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return (
-    hasExactKeys(
-      value,
-      presentKeys(value, ['turnId', 'status'], ['summary', 'interaction', 'evidence']),
-    ) &&
-    isIdentifier(value.turnId) &&
-    isTerminalStatus(value.status) &&
-    (!Object.hasOwn(value, 'summary') || isBoundedString(value.summary)) &&
-    (!Object.hasOwn(value, 'interaction') || isRuntimeClientInteraction(value.interaction)) &&
-    (!Object.hasOwn(value, 'evidence') || isEvidenceSummaries(value.evidence))
-  );
-}
-
-function isTerminalStatus(value: unknown): boolean {
-  return (
-    value === 'queued' ||
-    value === 'running' ||
-    value === 'waiting' ||
-    value === 'completed' ||
-    value === 'cancelled' ||
-    value === 'failed'
-  );
-}
-
-function isEvidenceSummaries(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.length <= 256 &&
-    value.every(
-      (entry) =>
-        isRecord(entry) &&
-        hasExactKeys(entry, presentKeys(entry, ['kind', 'status'], ['digest'])) &&
-        isIdentifier(entry.kind) &&
-        (entry.status === 'pending' ||
-          entry.status === 'accepted' ||
-          entry.status === 'rejected' ||
-          entry.status === 'unavailable') &&
-        (!Object.hasOwn(entry, 'digest') || isIdentifier(entry.digest)),
-    )
   );
 }
 

@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import React from 'react';
+import { projectOutputBlockTimelineItem, type TimelineItem } from '../presentation/timeline';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
@@ -91,7 +92,10 @@ function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
 }
 
 interface BlockRendererProps {
-  block: OutputBlock;
+  /** Canonical production input. Rendering receives state/digest through the item. */
+  item?: TimelineItem;
+  /** Transitional test/compatibility input; production OutputArea always passes item. */
+  block?: OutputBlock;
   isFocused: boolean;
   index: number;
   columns: number;
@@ -105,7 +109,8 @@ interface BlockRendererProps {
 }
 
 const BlockRenderer = React.memo(function BlockRenderer({
-  block,
+  item,
+  block: legacyBlock,
   isFocused: _isFocused,
   columns,
   index: _i,
@@ -115,6 +120,10 @@ const BlockRenderer = React.memo(function BlockRenderer({
   maxVisibleSubagentSteps,
 }: BlockRendererProps) {
   const dt = useTheme();
+  const renderItem =
+    item ?? (legacyBlock ? projectOutputBlockTimelineItem(legacyBlock) : undefined);
+  if (!renderItem) return null;
+  const block = renderItem.renderModel.block;
 
   switch (block.kind) {
     case 'user': {

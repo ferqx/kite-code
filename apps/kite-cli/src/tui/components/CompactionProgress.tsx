@@ -1,7 +1,7 @@
 import type { ContextCompactionProgressPhase } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { useTheme } from '../theme';
-import { useBlinkDot } from './use-blink-dot';
+import { activityDot } from './activity-dot';
 
 const LABELS: Record<ContextCompactionProgressPhase, string> = {
   preparing: 'Preparing context',
@@ -11,7 +11,7 @@ const LABELS: Record<ContextCompactionProgressPhase, string> = {
 
 export default function CompactionProgress({ phase }: { phase: ContextCompactionProgressPhase }) {
   const theme = useTheme();
-  const frame = useBlinkDot(true);
+  const frame = activityDot(true);
 
   return (
     <Box>

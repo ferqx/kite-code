@@ -1,4 +1,5 @@
 import {
+  assertCurrentRuntimeEvent,
   assertCurrentRuntimeEventForWrite,
   CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
   type RuntimeEvent,
@@ -20,6 +21,13 @@ export function runtimeHostStateAssertCurrentRuntimeEvent(
   value: unknown,
 ): asserts value is RuntimeEvent {
   assertCurrentRuntimeEventForWrite(value);
+}
+
+/** Validate a decoded current or explicitly migrated event for read-only projection. */
+export function runtimeHostStateAssertReadableRuntimeEvent(
+  value: unknown,
+): asserts value is RuntimeEvent {
+  assertCurrentRuntimeEvent(value);
 }
 
 /** Admit an untyped JSON value without intersecting its transport type with the event union. */

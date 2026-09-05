@@ -17,6 +17,7 @@ import {
 import { projectionDigest, truncateProjectedStreams } from '../filesystem/projection';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
 import { createBuiltinPolicyCompiler, shellBuiltinPolicyRule } from '../policy-compiler';
+import { SHELL_SEMANTICS_REVISION_ } from '../shell-semantics';
 import { builtinToolDescription } from '../tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from '../tool-schemas';
 
@@ -37,6 +38,7 @@ export const PLANNING_CAPABILITY_REVISION_ = digestCapabilityBindingValue({
   operationId: PLANNING_OPERATION_ID_,
   inputSchema: SHELL_EXECUTE_INPUT_SCHEMA_,
   effects: SHELL_EFFECTS_,
+  shellSemanticsRevision: SHELL_SEMANTICS_REVISION_,
 });
 
 export const PLANNING_EXECUTOR_REVISION_ = digestCapabilityBindingValue({
@@ -249,6 +251,14 @@ function projectShellResult(output: BuiltinShellExecutionResult): BuiltinOperati
     throw new BuiltinShellExecutionUnknownError(output.stderr);
   }
   const streams = truncateProjectedStreams(output.stdout, output.stderr);
+  const failureDetailCode =
+    output.terminationReason === 'timed_out'
+      ? 'timed_out'
+      : output.terminationReason === 'cancelled'
+        ? 'cancelled_by_user'
+        : output.terminationReason === 'sandbox_denied'
+          ? 'sandbox_denied'
+          : 'tool_reported_failure';
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: output.ok,
@@ -266,6 +276,17 @@ function projectShellResult(output: BuiltinShellExecutionResult): BuiltinOperati
       ...(output.sandboxFailure ? { sandboxFailure: output.sandboxFailure } : {}),
       ...(output.processCleanup ? { processCleanup: output.processCleanup } : {}),
     }),
+    ...(!output.ok
+      ? {
+          classifierAdvice: Object.freeze({
+            detailCode: failureDetailCode,
+            disposition: 'never',
+            maximumAdditionalCalls: 0,
+            requiresNewModelResponse: false,
+            safeAutomaticRetry: false,
+          }),
+        }
+      : {}),
     ...(output.terminationReason ? { terminationReason: output.terminationReason } : {}),
   }) as BuiltinOperationExecutionValue;
 }

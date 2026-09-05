@@ -1,9 +1,11 @@
 import type {
   RuntimeAccess,
   RuntimeAccessNotification,
+  RuntimeCommandContext,
   RuntimeNotification,
   RuntimeSubscriptionSpec,
 } from '@kite-ai/runtime-contract';
+import { freezeRuntimeCommandContext } from '@kite-ai/runtime-contract';
 import {
   type InitializeResult,
   mapProtocolCommandToRuntimeCommand,
@@ -47,7 +49,12 @@ export interface RuntimeServerAdmissionInput {
 }
 
 export type RuntimeServerAdmissionDecision =
-  | { readonly allowed: true; readonly workspace: string }
+  | {
+      readonly allowed: true;
+      readonly workspace: string;
+      /** Opaque App-owned reference to the authenticated connection binding. */
+      readonly bindingReference?: string;
+    }
   | { readonly allowed: false; readonly reason?: 'unauthorized' | 'unavailable' };
 
 /** App-owned authority for transport, role and its one already-trusted Workspace. */
@@ -103,6 +110,9 @@ export interface RuntimeServerOptions {
   readonly serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
+  readonly historyMethods?: boolean;
+  readonly appMethods?: boolean;
+  readonly serverControlMethods?: boolean;
 }
 
 export interface RuntimeServerConnection {
@@ -148,6 +158,9 @@ export class RuntimeServer {
       options?.admission ?? this.#backend.admission,
       connection,
       this.#options.serverInfo,
+      this.#options.historyMethods === true,
+      this.#options.appMethods === true,
+      this.#options.serverControlMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
       () => this.#reserveSubscription(),
@@ -201,6 +214,9 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #backend: RuntimeServerBackend;
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
+  readonly #historyMethods: boolean;
+  readonly #appMethods: boolean;
+  readonly #serverControlMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
   readonly #reserveSubscription: () => boolean;
@@ -226,6 +242,9 @@ class ServerConnection implements RuntimeServerConnection {
     admission: RuntimeServerAdmissionPort,
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
+    historyMethods: boolean,
+    appMethods: boolean,
+    serverControlMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
     reserveSubscription: () => boolean,
@@ -238,6 +257,9 @@ class ServerConnection implements RuntimeServerConnection {
     this.#admission = admission;
     this.#connection = connection;
     this.#serverInfo = serverInfo;
+    this.#historyMethods = historyMethods;
+    this.#appMethods = appMethods;
+    this.#serverControlMethods = serverControlMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
     this.#reserveSubscription = reserveSubscription;
@@ -421,6 +443,24 @@ class ServerConnection implements RuntimeServerConnection {
           'runtime/query',
           'runtime/subscribe',
           'runtime/unsubscribe',
+          ...(this.#historyMethods
+            ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
+            : []),
+          ...(this.#appMethods
+            ? ([
+                'app/workspace_trust/query',
+                'app/workspace_trust/decide',
+                'app/provider_model/snapshot',
+                'app/provider_model/select',
+                'app/mcp/snapshot',
+                'app/mcp/action',
+                'app/skills/catalog',
+                'app/execution/status',
+                'app/release/status',
+                'app/provider_credential/write',
+              ] as const)
+            : []),
+          ...(this.#serverControlMethods ? (['server/status', 'server/shutdown'] as const) : []),
           'server/ping',
         ],
         subscriptions: ['session', 'sessions'],
@@ -454,7 +494,18 @@ class ServerConnection implements RuntimeServerConnection {
     });
     await this.#sendResult(
       request.id,
-      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(await this.#backend.runtime.command(command)),
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(
+        await this.#backend.runtime.command(
+          command,
+          freezeRuntimeCommandContext({
+            schema: 'kite.runtime-command-context.v1',
+            connectionId: this.connectionId,
+            requestId: request.id,
+            bindingReference: decision.bindingReference ?? null,
+            ...(this.#clientInfo === undefined ? {} : { clientInfo: this.#clientInfo }),
+          } satisfies RuntimeCommandContext),
+        ),
+      ),
       releasePermit,
     );
   }

@@ -1,4 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  type KiteAppControlClient,
+  RELEASE_STATUS_REQUEST_SCHEMA_,
+  RELEASE_STATUS_RESPONSE_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
+import {
+  LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+  LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+  type NativeProviderCredentialClient,
+} from '@kite-ai/kite-local-runtime/client';
 import type {
   RuntimeAccess,
   RuntimeAccessNotification,
@@ -6,6 +16,7 @@ import type {
   RuntimeQuery,
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
 import {
   createNodeRuntimeStdioOutput,
@@ -47,13 +58,13 @@ describe('Runtime stdio carrier', () => {
 
     input.pushText('{"jsonrpc":"2.0","id":"init","method":"initial');
     input.pushText(
-      'ize","params":{"protocolVersion":1,"clientInfo":{"name":"test","version":"1","instanceId":"a"}}}\r\n',
+      `ize","params":{"protocolVersion":${RUNTIME_PROTOCOL_VERSION},"clientInfo":{"name":"test","version":"1","instanceId":"a"}}}\r\n`,
     );
     input.pushText('{"jsonrpc":"2.0","id":"ping","method":"server/ping","params":{}}\n');
 
     await eventually(() => protocolFrames(output).length === 2);
     expect(protocolFrames(output)).toMatchObject([
-      { id: 'init', result: { protocolVersion: 1 } },
+      { id: 'init', result: { protocolVersion: RUNTIME_PROTOCOL_VERSION } },
       { id: 'ping', result: { status: 'ok' } },
     ]);
     expect(output.text()).toMatch(/^\{.*\}\n\{.*\}\n$/s);
@@ -75,8 +86,158 @@ describe('Runtime stdio carrier', () => {
       id: null,
       error: { code: -32700, data: { code: 'parse_error' } },
     });
-    expect(protocolFrames(output)[1]).toMatchObject({ id: 'init', result: { protocolVersion: 1 } });
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'init',
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
+    });
 
+    input.close();
+    await carrier.done;
+  });
+
+  test('keeps History on the initialized App connection and fails closed without its owner', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const carrier = createCarrier({ input, output });
+    const history = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'history-1',
+      method: 'history/list_sessions',
+      params: { request: { limit: 10 } },
+    });
+    input.pushText(`${history}\n${initializeLine()}`);
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'history-1',
+          error: expect.objectContaining({ data: { code: 'not_initialized' } }),
+        }),
+        expect.objectContaining({
+          id: 'init',
+          result: expect.objectContaining({ protocolVersion: RUNTIME_PROTOCOL_VERSION }),
+        }),
+      ]),
+    );
+    input.pushText(`${history.replace('history-1', 'history-2')}\n`);
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'history-2',
+      error: { data: { code: 'method_not_found' } },
+    });
+    input.close();
+    await carrier.done;
+  });
+
+  test('routes exact App Control after initialize and rejects malformed payloads', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const unavailable = async (): Promise<never> => {
+      throw new Error('unexpected App Control method');
+    };
+    const appControl: KiteAppControlClient = {
+      queryWorkspaceTrust: unavailable,
+      decideWorkspaceTrust: unavailable,
+      getProviderModelSnapshot: unavailable,
+      selectProviderModel: unavailable,
+      getMcpSnapshot: unavailable,
+      applyMcpAction: unavailable,
+      getSkillCatalog: unavailable,
+      getExecutionStatus: unavailable,
+      getReleaseStatus: async () => ({
+        schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+        revision: 'release-1',
+        active: true,
+        production: false,
+        capabilities: [],
+        execution: { admitted: false },
+      }),
+    };
+    const carrier = createCarrier({ input, output, appControl });
+    input.pushText(initializeLine());
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'release',
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+      })}\n`,
+    );
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'malformed',
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_, extra: true } },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[0]).toMatchObject({
+      result: { capabilities: { methods: expect.arrayContaining(['app/release/status']) } },
+    });
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'release',
+      result: {
+        method: 'app/release/status',
+        response: { schema: RELEASE_STATUS_RESPONSE_SCHEMA_, revision: 'release-1' },
+      },
+    });
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'malformed',
+      error: { data: { code: 'invalid_params' } },
+    });
+    input.close();
+    await carrier.done;
+  });
+
+  test('routes only provider credential writes and never echoes secret material', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const credential: NativeProviderCredentialClient = Object.freeze({
+      writeProviderCredential: async (
+        request: Parameters<NativeProviderCredentialClient['writeProviderCredential']>[0],
+      ) =>
+        ({
+          schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+          mutationId: request.mutationId,
+          operation: 'write_provider_api_key',
+          outcome: 'applied',
+          credentialPresent: true,
+          revision: 'credential-1',
+        }) as const,
+    });
+    const carrier = createCarrier({ input, output, credential });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'credential',
+        method: 'app/provider_credential/write',
+        params: {
+          request: {
+            schema: LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+            mutationId: 'credential-1',
+            operation: 'write_provider_api_key',
+            providerId: 'openai',
+            apiKey: 'must-not-echo',
+          },
+        },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'credential',
+      result: {
+        method: 'app/provider_credential/write',
+        response: {
+          schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+          outcome: 'applied',
+          credentialPresent: true,
+        },
+      },
+    });
+    expect(output.text()).not.toContain('must-not-echo');
     input.close();
     await carrier.done;
   });
@@ -252,10 +413,15 @@ function createCarrier(options: {
   readonly maxLineBytes?: number;
   readonly drainDeadlineMs?: number;
   readonly shutdownComposition?: () => void | Promise<void>;
+  readonly appControl?: KiteAppControlClient;
+  readonly credential?: NativeProviderCredentialClient;
 }) {
   const server = new RuntimeServer(
     { runtime: new FakeRuntime(), admission: allowAdmission },
-    { serverInfo: { version: 'test', instanceId: 'server-1' } },
+    {
+      serverInfo: { version: 'test', instanceId: 'server-1' },
+      ...(options.appControl || options.credential ? { appMethods: true } : {}),
+    },
   );
   const carrier = createRuntimeStdioCarrier({
     server,
@@ -266,6 +432,8 @@ function createCarrier(options: {
     maxLineBytes: options.maxLineBytes,
     drainDeadlineMs: options.drainDeadlineMs,
     shutdownComposition: options.shutdownComposition,
+    appControl: options.appControl,
+    credential: options.credential,
   });
   return { ...carrier, server };
 }
@@ -280,7 +448,7 @@ function initializeLine(): string {
     id: 'init',
     method: 'initialize',
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: { name: 'test', version: '1', instanceId: 'a' },
     },
   })}\n`;

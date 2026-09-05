@@ -6,7 +6,46 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、ADR-0165、ADR-0166、Task 1C.7。
+
+## KASD-01局部资格
+
+KASD-01 Store前置已取得局部资格：两个真实Bun进程可在同一空`kite-session.sqlite`上并发首次open并收敛到唯一exact epoch；同Workspace两个
+真实进程可分别写不同Session，争用同一Session只有一个generation writer。旧epoch、partial与corrupt target均fail closed为
+`store_upgrade_required`，现有`kite.sqlite`保持不变。全部Session write port进入统一mutation scope；并发open的深验固定单一read snapshot；
+fork source fence、target generation 1与全部target事实同事务并覆盖后段fault rollback。
+
+effect matrix证明prepare/dispatch/renew、State receipt settle、late terminal与unknown generation binding。真实SIGKILL fixture在prepared effect后杀死
+owner；successor等待lease失效只能得到durable `recovery_required`，显式reconciliation把遗留effect改为unknown并与cleanup confirmation同事务，
+随后才可取得更高generation，不能自动重放。该证据仍不覆盖KASD-02 App Server的Provider/child cancellation、stdio EOF/signal、完整response-loss
+Host恢复或TUI lifecycle，因此不是release qualification。验证：`bun test packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts`。
+
+global config局部资格以真实process证明同一文件互斥、不同文件无global lock、两个TUI并发保留不同preference字段，以及TUI与模拟App Server并发
+保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整
+App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/isolated/config-file-mutation-lock.test.ts apps/kite-cli/test/isolated/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
+
+KASD-02真实process局部资格覆盖：stdio initialize/list/History/App Control只写protocol stdout且不创建global endpoint；History/App Control在
+initialize前拒绝，未组合owner时fail closed，组合owner后可从同一SQLite read snapshot加载已创建Session的完整closed transcript；active model收到parent EOF后cancel并在
+cleanup confirmed时释放generation；active model dispatch后SIGKILL会在短lease失效后阻断successor，显式reconciliation后resume只消费durable
+attempt事实，mock Provider请求保持一次；第二App Server的list/get/checkpoint与退出不取得或取消第一Server的active Session。同build typed
+client还验证exact server version/capability并在mismatch时关闭连接；真实child的provider credential write使用manual model避免网络并证明
+response不回显secret。source resolver真实启动checked-in App Server，installed fixture验证immutable candidate path/build pairing；真实
+App Server SIGKILL会经POSIX watchdog杀死已批准且已dispatch的host-shell child，lease到期后successor必须显式reconcile，resume不会再次启动
+该command。local stdio MCP当前没有release-approved process port，因此本阶段不注入测试旁路；首次真实启用必须在对应execution qualification
+中补parent-crash child证据。该证据尚不替代三平台qualification。验证：
+`bun test apps/kite-service/test/isolated/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
+
+KASD-03本机client资格覆盖default source TUI startup、退出后重启/History恢复、两个并存TUI通过各自App Server读取同一profile，以及普通
+历史打开的observer-only边界；首次mutation惰性resume，rewind continuation在交给UI前完成写准入与subscription readiness，连续两次
+rewind产生独立durable目标且不依赖旧single-Service Controller。
+`/status`无Service PID、Web URL或build drift；模拟client以两个真实child争用同Session mutation并证明只允许一个writer。严格stdio发送前
+校验还暴露并修复了TUI首屏History请求携带`cursor: undefined`的非JSON对象，现仅在cursor真实存在时编码。macOS arm64 candidate已通过
+build/verify/install和installed TUI PTY startup；Ubuntu/Windows与完整TUI矩阵仍须在后续qualification收敛。
+
+KASD-04本机资格增加真实Unix socket daemon：start幂等、status只读、普通disconnect保留owner、双client共享History、active Turn stop时先
+cancel再drain并清理endpoint；模拟旧build但相同exact protocol可连接，要求未知capability的client fail closed且不能触发replace/stop。
+当前证据不声称Windows named-pipe或三平台通过，daemon也不提供自动upgrade、background watcher或remote transport。KASD-05另加入
+loopback Web listener及Browser/Native Store共享证据。
 
 ## 两级运行契约
 
@@ -14,9 +53,67 @@
 
 Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
 
+Model lease并发资格还必须覆盖运行中user control revision：durable attempt-start之后切换interaction mode，原exact invocation的stream继续投影，response/retry/terminal evidence仍原子提交且Run继续；同一变化发生在attempt-start之前必须拒绝旧Surface dispatch。Turn abort、不同invocation ID、已terminal invocation或夹带非Model批次事件必须拒绝迟到结果。该测试证明无关revision不会产生`Model invocation evidence acknowledgement was rejected`，不放宽跨Turn、跨identity或pre-dispatch revision fence。
+
+Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
+untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
+初始化失败也不恢复或重放该secret，Client必须重新mint。context TTL、logout、generation supersede、Native connection close或Worker restart只释放
+HTTP admission并关闭其private read logical connection，不取消Run/Session、不触发recovery、不写Store。每次read request重验Trust；Trust撤销会
+撤销context，Trust暂时不可用返回503。History cursor把first-page through sequence与boundary event digest固定；boundary被rewind/delete替换时409
+invalidated，不把新History拼到旧watermark。response loss后Client必须重新mint/exchange，不从descriptor或旧token恢复。
+每context最多16个in-flight request；第17个返回retryable 429。logout、Trust撤销、generation fence、drain与replacement先阻止新admission，
+等待已认证read（包括pending Trust重验）收敛后关闭一次private connection；迟到admission复核closed/revoked事实并返回503/401，不能进入owner。
+History response达到1 MiB encoded上限时以last public ordinal提前分页，不能用oversize 503丢弃已安全投影的前缀。KASAPI-02D reference client
+覆盖Worker close/replacement、capability replay、body/response limit及non-disclosure；当前Web static/auth surface随显式daemon lifecycle
+重建，由同listener carrier与真实child suite证明且不代理`/v1`。
+
+KRSRUN-01B已关闭unpublished Store 8 Host transaction与private transport Gate：start atomically提交State/event/snapshot、queued Run和
+digest-bound original resource receipt；Run/receipt任一fault完整rollback。activation、waiting/running与terminal/cancel由deterministic
+commit clock推进，Store writer拒绝同Session第二个active Run。response loss/restart retry从persistent lookup直接返回同一original
+queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
+Run keyset page，SQLite query plan命中专用index且不扫event journal。
+
+LFC exact lifecycle qualification在相同Store 8边界上增加：V2创建仍令runId等于initial Turn，但Provider Action continuation
+transaction推进唯一active Run row，terminal与History继续使用original runId；无法唯一恢复时保持recovery_required。Session projection
+schema v2与start receipt derived messageId作为同一candidate切换，不双发旧词汇、不修改receipt resource JSON。RuntimeClient只有在
+generation/revision store返回applied后才dispatch；durable或ephemeral gap把Session置为not-ready并重新订阅，截断packet不进入presentation。
+
+KRSRUN-02A focused matrix现已证明unpublished Store 8 owner上的delete FK cascade/retained receipt、rewind partial-boundary refusal与fault
+rollback、fork settled-terminal copy/origin/coverage/no-source-receipt、reopen及cross-Workspace binding isolation。Host GET/list在resume前只做
+`unknown/recovery_required`投影且不recover，resume只运行一次existing recovery；unknown refinement保留原finish clock，既有recovery suite继续
+证明不重复external dispatch。late retry与current Run missing是两个独立事实，retained receipt revision可高于rewound Session head。
+
+KRSRUN-02B focused matrix已证明Store 7→Store 8 whole-generation copy、per-Session coverage、不回填历史Run、Catalog完整fact copy、
+安全WAL隔离snapshot、source immutability、active/corrupt/unowned/partial/Catalog/copy fault整体阻断，以及pointer/journal/fence与旧Store 7
+writer fence。迁移会用authority owner codec校验Controller/recovery/effect/resource与recovery identity，拒绝活动、损坏或无归属记录，并验证
+合法记录只把LayoutGeneration重绑到target；Store 8 writer在journal `committed`前仍fail closed。manager orchestration只有在exact完整
+maintenance barrier后才建立source-bound fence；Catalog存在`in_progress`operation或未登记Worker scope时不创建target。
+
+KRSRUN-03A focused与Service owner suite已证明production Worker只打开committed Store 8、reopen仍保留Controller/read/Run façade、fresh layout与
+new Workspace直接物化Store 8、Catalog first-write fence、idle History source不变、Store 7 active profile无fallback，以及private `list_runs`
+不再返回unsupported。Service 1525、SQLite 90、Runtime fault 36与CI soak 7/7通过；本机dirty-source macOS arm64 candidate完成
+build/verify/install/upgrade/rollback/uninstall smoke。Public Run route/ServerInfo capability继续关闭，GitHub-hosted三平台candidate evidence仍不能由本机结果替代。
+
+KRSRUN-03B focused evidence增加formal maintenance CLI parser/blocked exit、Coordinator v2 authenticated stop/draining、manager exact-exit确认、
+empty process-chain Store 7→8 end-to-end command、持锁后Coordinator absence复核及State convergence negatives。正式入口不接收caller-supplied zero barrier；Gateway/Worker
+state残留、busy activity、PID/start-token/control uncertainty、unknown external effect或source deep-validation失败均保持blocked。当前本机结果仍只
+是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
+`sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 211、最终focused 38及
+candidate `af43f919f756c276fb945834`已通过；完整边界见
+[03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
+macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
+
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active work到达Host cleanup idle，再逐条取得reservation；
-远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。
+远端active但本地没有run Promise不能被当作idle，reservation拒绝或command失败也不能静默清空消息。terminal先于idle projection时，
+每轮remote-idle waiter必须绑定该轮completion callback；前轮waiter的迟到finally不能遮蔽后继轮terminal/query或其presentation flush。
+只有applied receipt后才能登记current accepted completion；每轮2秒后、至多每2秒一次的bounded query fallback只在projection满足
+current revision floor且权威idle时收敛它，使terminal/idle notification gap不依赖下一条subscription event。
+Ink flush是非权威展示屏障，正常等待真实commit但最多1秒；迟到/失败不能停止subscription消费answer/terminal，也不能阻塞后继prompt。
+模型terminal可以省略optional summary；qualification必须覆盖无换行ordinary delta由request-scoped cumulative buffer收口，不能丢失尾段。
+run promise只接受跨过current command floor且匹配canonical receipt `runId`的`run.terminal`；失败由同一事件的
+`status=failed`与terminal outcome表达；`turn.terminal`、`task.terminal`
+与previous Run的迟到终态不能结束successor。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，
 失败时保留可见interaction与可重试identity，且不得把失败提交加入永久local dedupe。Protocol qualification必须证明approval的bounded command在live
@@ -26,25 +123,33 @@ gap/reset snapshot还必须携带完整、同revision的interaction queue替换�
 InProcess logical-message必须得到同一Client state；共享对象引用不能被误判为cycle或静默关闭subscription。Service
 启动/index hydration从纯持久State生成该完整queue，不得提交伪空替换集。pending interaction的公开`sessionRevision`
 随当前CAS前进，稳定kind-specific identity不变；Host inspect接受后结算CAS固定，inspect→commit间revision前进必须失败，
+Native client必须消费eventful durable notification中的完整queue；revision conflict后重新查询权威projection，并以相等的
+`interaction.sessionRevision/expectedRevision`重建同command ID请求。Protocol codec必须在Server路由前拒绝二者不等的请求。
 旧generation/digest或被修改的input/command字段仍拒绝。activeTurn/queue同ID但完整身份漂移也拒绝。双Client相同response
-只有一个applied，另一个只可idempotent replay。真实process-death资格还必须覆盖pending approval从Store恢复、response receipt、
+只有一个applied，另一个只可idempotent replay。审批response receipt与后续`tool.started`之间的展示窗口不能产生
+synthetic cancellation：TUI的本地`runTask` Promise收尾不得生成idle/cancelled投影或清理tool metadata；query fallback必须先消费
+authoritative Session projection再释放run waiter。Esc/Ctrl+C只提交取消请求，queued/running Tool、Thought及Subagent只能由durable
+取消terminal进入cancelled状态，渲染层也不得从空summary/缺失answer推断取消。真实process-death资格还必须覆盖pending approval从Store恢复、response receipt、
 原Turn continuation与Tool一次dispatch；进程内broker/waiter不能作为恢复证据。batch中每个notification必须携带自身revision的
 exact post-event queue，无法读取时unavailable而不是空queue。
 
-Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
-重放。当前唯一production composition位于`apps/kite-service`：它在同一process拥有真实Host、State 27 / Store 6、Builtin、
-History与App Control；CLI/TUI只消费Native client且没有embedded fallback或第二default Store。focused local tests覆盖
-多connection/Workspace、persisted restart、Trust、History、App Control、operation gate、disconnect后Runtime继续、20-way
-ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与frame/queue limits。
+App Server qualification只覆盖当前production路径。默认TUI/CLI通过parent-owned stdio连接same-build child；显式daemon通过owner-only
+socket/pipe提供多个client与一个stable Web origin。旧descriptor/token/manager/build replacement测试已经随production删除，不得为了历史矩阵
+保留实现。
 
-manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access`、exact`{}`body调用
-`POST /_kite/instance`。response的content type、4 KiB上限、closed keys及
-`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
-identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`；descriptor/expected build mismatch返回
-`incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
-与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
+daemon focused tests覆盖explicit start/status/stop、absent无副作用、两个client、fixed protocol/capability、不同Workspace拒绝、stable Web、
+Browser读取Native刚写入的Session、普通disconnect保活以及PID/start/socket exact dead cleanup。alive、identity uncertain或reservation drift
+必须保持endpoint且不spawn。default stdio tests覆盖EOF/signal cleanup、active model/Shell child tree、durable resume与无HTTP listener。
 
-Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
+Store qualification覆盖两个真实进程首次open、同Workspace不同Session并发、同Session writer竞争、stale generation、revision CAS、
+lease renewal/takeover、effect response loss、SIGKILL recovery_required与explicit reconciliation。release upgrade/rollback只切换pointer，
+不运行任何process discovery/stop；测试以candidate invocation log保持absent证明。
+
+Native TUI client的Esc/Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
+若重连后的替换controller尚未恢复该Session而明确拒绝`session_unavailable`，client先恢复同一Session的mutation authority，
+再核对active Run identity并以刷新revision重试一次；该未提交拒绝不得让同一Esc不断追加失败诊断，也不得跨Run取消successor。
+取消事务及后续Provider cleanup发布的每条turn-scoped notification必须携带已接纳的`runId + turnId`；即使其post-event Session snapshot已settled，迟到Subagent/Tool事实仍能构造合法`AcceptedPresentationEnvelope`，不得把投影缺失冒充成用户取消被拒绝。
+mutation admission必须绑定Runtime connection generation，重连后的任何写命令都不能复用旧generation的本地admitted标记。
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
 Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
 conversation rewind使用Service返回的target Session加载safe History，file outcome只含bounded path/error/conflict投影，
@@ -54,7 +159,7 @@ release matrix及正式hosted qualification仍pending。Windows state primitive�
 owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Windows candidate job，但必须等待当前实现head
 的远端结果，不能用POSIX或本机测试替代。
 
-当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
+当前local evidence为manager 37/135、carrier 23/129、Service shell 23/97、Runtime transport 3/852、Runtime fault
 36/106、CI-profile soak 7/7 cases、Service owner 1365 parallel tests / 6795 expects加34个isolated files、CLI owner
 757 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
@@ -115,6 +220,10 @@ sealed handle publish → low-information handle-ready ack → activate。Provid
 cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
 或 cleanup timeout 必须进入 `capability.execution_unknown`，不得提交普通失败 receipt 或自动重放。
 
+Subagent正常执行还必须独立于共享`resourceBudget`证明模型工具循环有界：12轮成功工具响应后只允许一次空工具面的总结请求，
+正常总结继续闭合parent Run，伪造工具调用则child失败且模型请求数不再增长。owner单元测试固定上限、失败关闭与continuation ordinal；
+Service集成测试显式关闭`resourceBudget`并执行12个真实只读步骤；串行PTY再证明child总结、parent最终回复与`Working`共同收敛。
+
 current schema v25 以五类 `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
 dispatch intent、observation 与 cleanup ordinal；event codec、reducer 和 snapshot invariant 都拒绝额外字段、非法
 digest、字段组或 lifecycle 倒退。startup 在任何新模型/Driver dispatch 前以同一 installation-private handle
@@ -129,6 +238,14 @@ legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 D
 不能随进程寿命无界增长：grant tombstone 按 sealed expiry 回收，其他 recovery hint 按短 TTL/固定总容量回收；
 expiry clock 必须是 finite safe integer 的非递减 high-water，wall-clock 回拨后不能让旧 grant/hint 重新有效；
 丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。
+effect consumer关闭或cleanup grace耗尽时必须同步关闭该effect的事件确认通道；non-cooperative executor的late
+`persistEvent(s)`只得到`applied=false`，不得创建无人消费的pending waiter或在sealed/terminal边界后提交事件。
+
+same-process user cancel的资格证据还必须覆盖多个并发Subagent、重复Esc与queued successor：UI在1秒内进入`Cancelling`，
+只发送一个取消command，全部Provider cleanup receipt早于successor user/turn事实，已waived capability不出现unknown，
+后继最终进入模型并完成。该PTY必须先让至少一个child完成空结果read/search并进入下一次模型请求，证明可选空summary被省略且
+subscription仍存活，再执行Esc；不能只用停留在首次Provider请求、尚无child工具结果的fixture替代。真实crash restore仍须以unknown
+闭合，不能借用户取消特例放宽恢复路径。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与
@@ -237,7 +354,8 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都只属于 explicit readonly historical source profile，不能进入当前执行路径。
+strict mismatch 与 no-fallback contract。production缺省仍使用加密随机identity与系统时钟；当前writer只打开exact
+`kite-session.sqlite` epoch并受Session generation约束。旧Store只属于不可见历史数据，不能进入当前执行、maintenance或fallback路径。
 
 RM-04 production Store 由 Service 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
@@ -266,6 +384,10 @@ mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 sou
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于
 `apps/kite-service/test/state-store-project-identity-compatibility.test.ts`。
 
+Store-only Session可能在subscriber先注册后才由query加载；qualification要求query projection经NotificationProjector唤醒该pending
+subscriber且仍保持Store read non-mutating。TUI shutdown另以权威projection区分idle release与active/pending/unknown detach；重启后已完成
+Session必须可重新取得Controller，未完成Turn不得被clean exit误释放。
+
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault
 suite 证明 attempt ack 失败为零 dispatch、stale/renew-lost lease 不能 dispatch/commit、lease loss 中止 lifecycle、
@@ -273,11 +395,13 @@ cancel 在 signal 前提交、successor 等待 cleanup、dispose 等待 drain，
 失败关闭。`bun run test:runtime:soak` 仍只是 7-case CI profile smoke；它可以形成 RM-06 stage evidence，但不能
 升级为正式 release qualification。当前单-Store lease 没有被解释为 cross-Host Project fence。
 
-focused approval rejection 也必须穿过同一 durable terminal boundary。无未终结 sibling 时，一个 action transaction
-按序提交 `approval.rejected`、`tool.rejected` 与 `turn.aborted(cause=user)`；存在 sibling 时先只终结 exact target，
-等 sibling 自身收敛后由 scheduler `stop` 边界 exactly-once 追加 `turn.aborted`。恢复后重复进入 runner 不得再次追加
-abort，也不得产生新的 `model.requested` 或重放已拒绝 invocation。fault/PTY cleanup 只有观察到该 terminal fact 才能
-结束 fixture；仅看到输入提示符或本地 TUI idle 投影不构成持久化完成证据。
+focused approval rejection也必须穿过同一durable terminal boundary。一个action transaction按序提交
+`approval.rejected`、exact target的`tool.rejected`、全部未终结sibling的`tool.cancelled`、必要reconciliation与
+`turn.aborted(cause=user)`；提交后才传播AbortSignal。恢复后重复进入runner不得再次追加abort，也不得产生新的
+`tool.started`、`model.requested`或重放已拒绝invocation。fault/PTY cleanup只有观察到该terminal fact才能结束fixture；
+仅看到输入提示符或本地TUI idle投影不构成持久化完成证据。
+TUI不把`approval.rejected`投影成匿名普通文本；配对pre-dispatch Tool rejection复用queued时的安全工具名称和参数，形成一张
+保留原命令/目标且明确未执行的rejected工具卡。Esc提交失败仍只是在Footer显示的瞬态，不能进入持久消息流。
 
 当前链路将 Runtime State input 经纯 `@kite-ai/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
 commit 成功后推进。Required Kernel/reducer 与 scheduling/completion suite 证明 snapshot/terminal/revision 行为

@@ -23,6 +23,7 @@ export type SlashAction =
   | { type: 'rewind' }
   | { type: 'export' }
   | { type: 'context' }
+  | { type: 'status' }
   | { type: 'compact'; customInstructions?: string }
   | { type: 'compact_reset' }
   | { type: 'unknown'; raw: string };
@@ -69,6 +70,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'export' };
     case 'context':
       return { type: 'context' };
+    case 'status':
+      return args.length === 0 ? { type: 'status' } : { type: 'unknown', raw: input };
     case 'compact':
       // PR 9: /compact reset is a distinct action, not a compaction with customInstructions="reset"
       if (args[0] === 'reset' && args.length === 1) {
@@ -103,6 +106,7 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
+  onStatus?: () => void,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -185,6 +189,9 @@ export function useSlashCommand(
         case 'context':
           onContext?.();
           break;
+        case 'status':
+          onStatus?.();
+          break;
         case 'exit':
           // Process teardown is owned by the single injected TUI exit coordinator.  Keeping the
           // optional callback as a no-op in isolated hook tests avoids a second direct exit path.
@@ -234,6 +241,7 @@ export function useSlashCommand(
       onCompact,
       onContext,
       onCompactReset,
+      onStatus,
     ],
   );
 }

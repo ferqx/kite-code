@@ -1,31 +1,27 @@
-# Service Native auth boundary
+# App Server local auth boundary
 
-本页定义same-OS-user Native listener边界，不声称对抗拥有同一用户filesystem权限的恶意进程。
+本页定义same-OS-user本机边界，不声称对抗已经拥有同一用户filesystem与进程权限的恶意程序。
 
-| Surface | Credential | 额外要求 |
+| Surface | Credential / identity | 约束 |
 | --- | --- | --- |
-| health/ready | 无 | loopback peer/exact Host；Origin absent或exact；无credential header |
-| instance handshake | `Kite-Local-Access` | exact `POST` + JSON `{}`；无query/cookie；strict process-owned identity response |
-| connect | `Kite-Local-Access` | 无cookie；exact JSON；Workspace由Trust/Project port重新验证 |
-| Runtime WebSocket | one-shot `Kite-Local-Ticket` | 无cookie/subprotocol；Origin absent或exact；instance+Workspace bound |
-| History/App | `Kite-Local-Access` | 无cookie；Origin absent或exact；exact route codec |
-| control stop | `Kite-Local-Control` | Origin/cookie缺失；body exact `{}` |
+| default stdio App Server | parent-owned pipe + exact initialize | child executable/profile/build由release resolver固定；无ambient discovery |
+| daemon Runtime/control | owner-only Unix socket或current-user named pipe | exact daemon protocol/capabilities；首请求initialize；另一Workspace拒绝 |
+| daemon Browser | HttpOnly SameSite cookie | loopback exact Host与same-origin Fetch Metadata；只读`/v1` |
+| Agent API exchange | one-shot `Kite-Connection` | Native-only purpose、Workspace Trust、generation与strict body |
+| Agent API shell | hash-only bearer context | absolute TTL、Workspace/client/generation/role bound；Browser拒绝 |
 
-access/control token采用constant-time compare且不能相等。ticket只保存hash，不写descriptor、Store、history、log或
-observability；replay、expiry、wrong instance与unknown ticket统一unauthorized。control拒绝access token，普通connector
-不读取control token。
+default parent-child build mismatch在initialize时关闭连接，不查找或替换其他进程。daemon build只作status诊断；protocol/capability
+mismatch返回incompatible，不触发stop、spawn或upgrade。PID/start identity只用于dead endpoint cleanup，不能授权Runtime mutation。
 
-manager不能只信PID、`/readyz`或磁盘descriptor。它必须用access token请求`POST /_kite/instance`，严格解码schema、
-instance、Protocol、client-contract、server version与build identity；response缺失content-type、unknown key、超限、
-malformed以及instance/server/build identity mismatch均fail closed `identity_uncertain`。Protocol/client-contract不兼容
-被拒绝，expected build drift返回`incompatible + build_mismatch`。以上结果都不授权cleanup alive/uncertain state、
-spawn replacement或把caller descriptor回显成握手成功。
+Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime mutation前使用同一connection，但只有Server返回trusted
+canonical identity后才允许执行。request path、cwd、clientInfo、socket存在或Web URL都不产生Trust/Session authority。
 
-Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime WebSocket前使用access token，但只有
-Service返回trusted canonical identity后connect route才签发ticket。request path/cwd/clientInfo不产生Trust authority。
+Browser cookie与Runtime connection不能互换。Browser只读取可见Workspace、Session、History、Model Context和Checkpoint；不能进入
+credential、controller、server shutdown或Runtime mutation。Agent API capability与Browser cookie也不互换。
 
-response设置`no-store`、CSP、nosniff、frame与referrer限制，不提供宽松CORS。错误使用固定低信息值，不带body、token、
-credential、Workspace content或raw exception。Native credential只进入secret-bearing exact codec；App Contract保持
-browser-safe/no-secret。
+响应采用no-store、CSP、nosniff、frame与referrer限制，不提供宽松CORS。错误使用固定低信息值，不包含credential、Workspace内容、
+absolute path或raw exception。
 
-验证：`bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts packages/kite-local-runtime/test/manager/composition.test.ts`。
+旧access/control token、Native describe/service_stop、descriptor handshake与跨build Service replacement已从production入口删除。
+
+验证：`bun test tests/release/app-server-client.test.ts tests/release/app-server-daemon.test.ts apps/kite-service/test/isolated/carrier/runtime-stdio-child.test.ts`。

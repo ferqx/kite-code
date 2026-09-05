@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/runtime/completion-guard.test.ts apps/kite-service/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite-service/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite-service/test/subagent-runner.test.ts apps/kite-service/test/isolated/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/runtime/completion-guard.test.ts apps/kite-service/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite-service/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite-service/test/subagent-runner.test.ts apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、ADR-0137、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
@@ -131,6 +131,6 @@ State 27 的 `pendingApprovals` 与 `activeApprovalId` 独立于 Plan Artifact�
 Plan、切换 phase 或跳过 review/completion。只有同一 model message/turn 的并发 Explore children（parent 非 Full）派生 Auto；single
 Explore、plan/code/review 继承 parent。
 
-Approval overlay 的 Enter 提交 exact interactionId+generation+grant；Esc 只 focused reject，Plan/Input Esc 保留各自语义；Ctrl+C
-才取消 whole turn。`/permissions` 的 mode 与 `session_grants_cleared` event 不改变 Plan phase；Session switch/restart 恢复各自
+Approval overlay的Enter提交exact interactionId+generation+grant；Esc拒绝focused target并取消同turn sibling、结束turn，
+Plan/Input Esc保留各自语义；Ctrl+C仍是独立整轮取消输入。`/permissions` 的 mode 与 `session_grants_cleared` event 不改变 Plan phase；Session switch/restart 恢复各自
 queue、mode revision、Plan identity 和 grants，旧 generation/session event no-op。

@@ -34,13 +34,18 @@ export interface KiteRuntimeApplicationDependencies {
   readonly appControl: KiteAppControlService;
   readonly operationGate?: RuntimeOperationGate;
   readonly start?: () => Promise<void>;
+  /** Host-owned long-lived Session operation fact; queried only after mutation admission closes. */
+  readonly hasActiveOperations?: () => boolean;
   readonly cancelAll: (reason: string) => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
 
-function leaseFromGate(lease: RuntimeOperationQuiesceLease): RuntimeApplicationQuiesceLease {
+function leaseFromGate(
+  lease: RuntimeOperationQuiesceLease,
+  activeOperations = lease.activeOperations,
+): RuntimeApplicationQuiesceLease {
   return Object.freeze({
-    activeOperations: lease.activeOperations,
+    activeOperations,
     resume: lease.resume,
     commitDrain: lease.commitDrain,
   });
@@ -80,7 +85,11 @@ export function createKiteRuntimeApplication(
 
     async quiesceMutations(): Promise<RuntimeApplicationQuiesceLease> {
       if (disposed) throw new Error('Runtime application is disposed.');
-      return leaseFromGate(await operationGate.quiesce());
+      const lease = await operationGate.quiesce();
+      return leaseFromGate(
+        lease,
+        lease.activeOperations || dependencies.hasActiveOperations?.() === true,
+      );
     },
 
     cancelAll(reason: string): Promise<void> {

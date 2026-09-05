@@ -18,6 +18,7 @@ export function createSqliteRecoveryIdentityLedger(
   db: Database,
   assertOpen: () => void,
   withImmediateTransaction: <T>(work: () => T) => T,
+  beforeWrite?: () => void,
 ): SqliteRecoveryIdentityLedger {
   const select = db.query<{ value: string }, [string]>(
     'SELECT value FROM runtime_store_meta WHERE key = ?',
@@ -47,6 +48,7 @@ export function createSqliteRecoveryIdentityLedger(
           'Runtime recovery identity requires a Host allocator.',
         );
       }
+      beforeWrite?.();
       return withImmediateTransaction(() => {
         const existing = readValue(sessionId);
         if (existing !== undefined) {
@@ -60,6 +62,7 @@ export function createSqliteRecoveryIdentityLedger(
       });
     },
     remove: (sessionId: string): void => {
+      beforeWrite?.();
       withImmediateTransaction(() => deleteValue(sessionId));
     },
   });

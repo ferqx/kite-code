@@ -3,7 +3,7 @@ import { memo, useMemo } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
-import MarkdownBlock from './MarkdownBlock';
+import { activityDot } from './activity-dot';
 import {
   actionName,
   formatElapsed,
@@ -11,35 +11,26 @@ import {
   writeFileActionName,
 } from './render-utils';
 import { wrapDisplayLines } from './soft-wrap';
-import { useBlinkDot } from './use-blink-dot';
 
 // ══════════════════════════════════════════════════════════════════
-// BlinkDot — 独立组件，隔离闪烁圆点状态更新
+// BlinkDot — 活动状态标记
 //
-// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁：
-// 隐藏帧渲染为两个空格，符号位置、宽度（2 字符）不变，无行位移。
-// settle 后变为纯思考白点（muted）——"运行中暗灰闪烁、完成后白色静止"。
-// 思考链与非思考链聚合共用此组件。
+// 进行中圆点为主题暗（dim，不抢眼）实心 ●。它保持静态，
+// 只在 Runtime 事件导致真实重绘时更新，以免活动 Run 的墙钟动画持续写
+// stdout，并打断原生终端的文本选择或强制 scrollback 回到底部。
 //
-// 把圆点抽离为独立组件是最关键的渲染性能优化。
-// 父组件 ToolSummaryBlock 的 props（block, columns）在闪烁之间不变
-// → React 跳过父组件重渲染 → Ink 只输出变化的圆点字符，
-// 不触发整个 Thought 树（15+ Yoga 布局节点）的 diff/layout/write。
-//
-// BlinkDot isolates the blink state so tick updates don't cascade
-// into the parent ToolSummaryBlock re-render. When parent props are
-// stable, React skips the parent tree entirely — Ink only writes the
-// single changed dot glyph, not the full Thought tree.
+// The small adapter keeps activity-dot semantics consistent across Thought,
+// tool, and subagent views without owning a presentation timer.
 // ══════════════════════════════════════════════════════════════════
 
 function BlinkDot({ active }: { active: boolean }) {
   const dt = useTheme();
-  const frame = useBlinkDot(active);
+  const frame = activityDot(active);
   return <Text color={dt.dim}>{frame}</Text>;
 }
 
-/** 工具步骤折叠阈值：超过此行数的 Thought 只展示最后 N 步，其余折叠。
- *  同时作用于 running 和 settled 状态——避免 settled 后在 scrollback 中刷屏。 */
+/** 活动窗口正文预算：工具活动最多展示最后 N 步，reasoning 最多展示 N 行。
+ *  settled Thought 只保留聚合标题，不再渲染活动窗口。 */
 const MAX_VISIBLE_STEPS = 5;
 
 /** 提取工具参数的可读标签，对齐 SubAgentBlock.toolArgsLabel */
@@ -197,7 +188,8 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
 });
 
 // ══════════════════════════════════════════════════════════════════
-// 运行中的 Thought 展示已完整到达的 reasoning 段；settle 后正文消失。
+// 活动 Thought 只展示最新的完整 reasoning；工具开始后由工具步骤替换，
+// 后续 reasoning 再替换工具步骤。settle 后活动窗口消失。
 // ══════════════════════════════════════════════════════════════════
 
 function ThinkingWindow({ lines }: { lines: string[] }) {
@@ -224,7 +216,13 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
 
   const isRunning = block.active;
 
-  const elapsedMs = block.totalElapsedMs;
+  // Snapshot elapsed time only on event-driven renders. Do not create a clock
+  // that repaints an unchanged active Thought while the user reads scrollback.
+  const liveNow = Date.now();
+  const elapsedMs =
+    block.liveModelStartedAt === undefined
+      ? block.totalElapsedMs
+      : block.totalElapsedMs + Math.max(0, liveNow - block.liveModelStartedAt);
   const elapsedStr = formatElapsed(elapsedMs);
   const summaryLine = block.summaryLine;
 
@@ -241,10 +239,6 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     isRunning && block.latestActivity?.kind === 'thinking' ? block.latestActivity.text : undefined;
   const thinkingLines = useMemo(() => {
     if (!thinkingText?.trim()) return [];
-    // Reasoning payloads commonly contain paragraph separators and trailing
-    // newlines. They should not consume slots in the compact activity window.
-    // Normalize each source line before wrapping, then keep the visual head
-    // with an explicit truncation marker.
     const compactText = thinkingText
       .split(/\r?\n/u)
       .map((line) => line.trim())
@@ -284,37 +278,16 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     return i === 0 && !hasSkipped ? '└─ ' : '   ';
   };
 
-  // ── ADR-0030 / 规则 24：块顶旁白字幕 ──
-  // 已确认字幕（captions，被随后只读工具确认）按时间顺序累积；待确认字幕
-  // （pendingCaption，运行态等待工具确认 / 脱离）实时附在其后。两者以
-  // Markdown 渲染于标题行之下、步骤树之上，缩进与标题文字列对齐。
-  // Confirmed narrations (captions) accumulate chronologically; the pending
-  // caption (awaiting tool confirmation / detachment) trails them live.
-  // Hook 必须置于所有早退之前（rules-of-hooks）。
-  const captionContent = useMemo(() => {
-    const parts = [
-      ...(block.captions ?? []),
-      ...(block.pendingCaption ? [block.pendingCaption] : []),
-    ]
-      .map((part) => part.replace(/^(?:\r?\n)+/u, '').replace(/(?:\r?\n)+$/u, ''))
-      .filter((part) => /\S/u.test(part));
-    // Distinct model narrations are compact sibling lines. A caption's own
-    // internal Markdown paragraph breaks remain untouched.
-    return parts.length > 0 ? parts.join('\n') : '';
-  }, [block.captions, block.pendingCaption]);
-
   // ── settle 后只保留 Thought 摘要，不展示 reasoning 正文 ──
   // 聚合摘要的圆点只表示“阶段正在进行”，因此 Thought 与非 Thought
   // 聚合块完成后都不保留圆点。独立工具卡使用自己的结果状态语义。
   // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
   // ── Pure-thinking block settled: single line, no dot — ● is reserved for
-  // stateful rows (running blink / tool outcome colors); a settled pure
+  // stateful rows (running activity / tool outcome colors); a settled pure
   // thought carries no status. Two leading spaces keep the label aligned
   // with tool-block names. Placed after all hooks (rules-of-hooks).
-  // `responsePending` keeps the block mutable until the terminal model event,
-  // but it is not a visual expansion state. The first visible text event has
-  // already ended the Thought from the user's perspective, so collapse its
-  // reasoning/tool details immediately while retaining terminal ownership.
+  // A sealed summary is not a visual expansion state. The first visible text
+  // event has already ended the Thought from the user's perspective.
   if (!isRunning) {
     return (
       <Box flexDirection="column">
@@ -322,11 +295,6 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
           {/* 两个空格列位 = 圆点列宽（"● "），避免 settle 时标题横向跳动 */}
           <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
         </Box>
-        {captionContent !== '' && (
-          <Box marginTop={1} paddingLeft={2}>
-            <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
-          </Box>
-        )}
       </Box>
     );
   }
@@ -340,11 +308,6 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
         {isRunning ? <BlinkDot active /> : <Text>{'  '}</Text>}
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
-      {captionContent !== '' && (
-        <Box marginTop={1} paddingLeft={2}>
-          <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
-        </Box>
-      )}
       {!showsThinking && hasSkipped && (
         <Box paddingLeft={3}>
           <Text color={dt.dim}>└─ ... 以上 {skipped} 步已折叠</Text>

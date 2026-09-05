@@ -1,10 +1,274 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
-import { eventReducer } from '../src/tui/reducers';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
+import type { Action } from '../src/tui/reducers';
+import { eventReducer as reduceEvent } from '../src/tui/reducers';
 import { sessionDataToUI } from '../src/tui/replay-blocks';
+import type { OutputBlock, TuiState } from '../src/tui/types';
+import { acceptedEnvelope, acceptedEnvelopeForState } from './helpers/accepted-envelope';
+
+type AcceptedEnvelopeAction = { type: 'ACCEPT_PRESENTATION_ENVELOPE'; event: RuntimeClientEvent };
+
+/** Test-only adapter: production eventReducer accepts envelopes exclusively. */
+function eventReducer(state: TuiState, action: Action | AcceptedEnvelopeAction): TuiState {
+  if (action.type !== 'ACCEPT_PRESENTATION_ENVELOPE') return reduceEvent(state, action);
+  const event =
+    typeof action.event === 'object' && action.event !== null && 'event' in action.event
+      ? action.event
+      : acceptedEnvelopeForState(action.event, state);
+  return reduceEvent(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+}
+
+function runtimeAuthority(
+  runId: string,
+  turnId = `turn-for-${runId}`,
+): NonNullable<TuiState['runtimeAuthority']> {
+  return {
+    revision: 1,
+    currentRun: {
+      runId,
+      initialTurnId: turnId,
+      activeTurnId: turnId,
+      status: 'running',
+      revision: 1,
+    },
+    interactionQueue: { revision: 1, interactions: [] },
+  };
+}
 
 describe('closed RuntimeClientEvent reducer', () => {
+  test('fails closed when the bounded request assembly set overflows', () => {
+    let state = createInitialState();
+    for (let index = 0; index < 65; index += 1) {
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: { type: 'model.requested', requestId: `request-${index}` },
+      });
+    }
+    expect(state.requestAssemblies?.size).toBe(64);
+    expect(state.requestAssemblyOverflow).toBe(true);
+
+    const beforeTerminal = state;
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'model.responded',
+        requestId: 'request-64',
+        messageId: 'message-overflow',
+        toolCallCount: 0,
+        summary: 'must not seal',
+      },
+    });
+    expect(state).toBe(beforeTerminal);
+  });
+
+  test('shows a local prompt immediately and upgrades only its marked durable echo', () => {
+    let state = eventReducer(createInitialState(), { type: 'SET_RUNNING' });
+    state = eventReducer(state, { type: 'LOCAL_USER_PROMPT', text: 'Same prompt' });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({ kind: 'user', content: 'Same prompt', pendingEcho: true }),
+    ]);
+
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'user.message',
+        messageId: 'message-1',
+        kind: 'task',
+        text: 'Same prompt',
+      },
+    });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        content: 'Same prompt',
+        messageId: 'message-1',
+        pendingEcho: undefined,
+      }),
+    ]);
+
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'user.message',
+        messageId: 'message-2',
+        kind: 'task',
+        text: 'Same prompt',
+      },
+    });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(2);
+  });
+
+  test('renders an accepted queued prompt once when the receipt arrives before its message', () => {
+    let state: ReturnType<typeof createInitialState> = {
+      ...createInitialState(),
+      activeSessionId: 'session-1',
+    };
+    state = eventReducer(state, {
+      type: 'QUEUE_LOCAL_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Queued prompt',
+    });
+    state = eventReducer(state, {
+      type: 'ACCEPT_QUEUED_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Queued prompt',
+      messageId: 'queued-message-1',
+    });
+    expect(state.queuedPrompts).toEqual([]);
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({ kind: 'user', content: 'Queued prompt', pendingEcho: true }),
+    ]);
+
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'user.message',
+        messageId: 'queued-message-1',
+        kind: 'task',
+        text: 'Queued prompt',
+      },
+    });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        content: 'Queued prompt',
+        messageId: 'queued-message-1',
+        pendingEcho: undefined,
+      }),
+    ]);
+  });
+
+  test('renders an accepted queued prompt once when its message arrives before the receipt', () => {
+    let state: ReturnType<typeof createInitialState> = {
+      ...createInitialState(),
+      activeSessionId: 'session-1',
+    };
+    state = eventReducer(state, {
+      type: 'QUEUE_LOCAL_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Queued prompt',
+    });
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'user.message',
+        messageId: 'queued-message-1',
+        kind: 'task',
+        text: 'Queued prompt',
+      },
+    });
+    expect(state.queuedPrompts).toEqual([]);
+
+    state = eventReducer(state, {
+      type: 'ACCEPT_QUEUED_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Queued prompt',
+      messageId: 'queued-message-1',
+    });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        content: 'Queued prompt',
+        messageId: 'queued-message-1',
+      }),
+    ]);
+    expect(
+      state.turns
+        .flatMap((turn) => turn.blocks)
+        .some((block) => block.kind === 'user' && block.pendingEcho === true),
+    ).toBe(false);
+    expect(state.runPromptPresented).toBe(true);
+  });
+
+  test('does not consume an identical queued successor when acknowledging an earlier local echo', () => {
+    let state: ReturnType<typeof createInitialState> = {
+      ...createInitialState(),
+      activeSessionId: 'session-1',
+    };
+    state = eventReducer(state, { type: 'LOCAL_USER_PROMPT', text: 'Same prompt' });
+    state = eventReducer(state, {
+      type: 'QUEUE_LOCAL_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Same prompt',
+    });
+    state = eventReducer(state, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'user.message',
+        messageId: 'earlier-message',
+        kind: 'task',
+        text: 'Same prompt',
+      },
+    });
+
+    expect(state.queuedPrompts).toEqual([{ id: 1, sessionId: 'session-1', text: 'Same prompt' }]);
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        content: 'Same prompt',
+        messageId: 'earlier-message',
+      }),
+    ]);
+  });
+
+  test('queueing a prompt preserves the active Thought projection by identity', () => {
+    const initial = createInitialState();
+    const turns = [
+      {
+        blocks: [
+          {
+            id: 1,
+            kind: 'tool_summary' as const,
+            tools: [],
+            totalElapsedMs: 2_000,
+            createdAt: Date.now() - 2_000,
+            summaryLine: '',
+            active: true,
+            hasThought: true,
+            hasThinking: true,
+          },
+        ],
+      },
+    ];
+    const state = {
+      ...initial,
+      activeSessionId: 'session-1',
+      runPromptPresented: false,
+      turns,
+      currentThoughtSummaryId: 1,
+      currentModelRequestId: 'active-request',
+    };
+
+    const queued = eventReducer(state, {
+      type: 'QUEUE_LOCAL_PROMPT',
+      id: 1,
+      sessionId: 'session-1',
+      text: 'Queued prompt',
+    });
+
+    expect(queued.turns).toBe(turns);
+    expect(queued.currentThoughtSummaryId).toBe(1);
+    expect(queued.currentModelRequestId).toBe('active-request');
+  });
+
+  test('removes only an unacknowledged local prompt when submission fails', () => {
+    let state = eventReducer(createInitialState(), { type: 'SET_RUNNING' });
+    state = eventReducer(state, { type: 'LOCAL_USER_PROMPT', text: 'Not accepted' });
+    expect(isTuiRunActive(state)).toBe(true);
+    expect(state.runPromptPresented).toBe(true);
+    state = eventReducer(state, { type: 'DROP_LOCAL_USER_PROMPT', text: 'Not accepted' });
+    expect(state.turns).toEqual([]);
+    expect(isTuiRunActive(state)).toBe(false);
+    expect(state.runPromptPresented).toBe(false);
+  });
+
   test('renders a durable user prompt once by message identity across replay', () => {
     const first = {
       type: 'user.message' as const,
@@ -16,10 +280,13 @@ describe('closed RuntimeClientEvent reducer', () => {
     // identical text under another durable identity remains another turn.
     const sameTextNewMessage = { ...first, messageId: 'message-identity-2' };
 
-    let state = eventReducer(createInitialState(), { type: 'RUNTIME_EVENT', event: first });
-    state = eventReducer(state, { type: 'RUNTIME_EVENT', event: first });
+    let state = eventReducer(createInitialState(), {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: first,
+    });
+    state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event: first });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: sameTextNewMessage,
     });
 
@@ -42,7 +309,7 @@ describe('closed RuntimeClientEvent reducer', () => {
   test('renders safe user/model/tool facts without raw tool arguments or paths', () => {
     let state = createInitialState();
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'user.message',
         messageId: 'message-1',
@@ -51,11 +318,11 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'model.requested', requestId: 'request-safe-facts' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-safe-facts',
@@ -63,7 +330,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'request-safe-facts',
@@ -73,7 +340,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'tool-1',
@@ -84,7 +351,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'tool-1', summary: 'Running tool.' },
     });
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -133,7 +400,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     let state = createInitialState();
-    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 
     const toolEntries = state.turns.flatMap((turn) =>
       turn.blocks.flatMap((block) =>
@@ -150,6 +418,187 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
     expect(JSON.stringify(toolEntries)).not.toContain('/private/workspace');
     expect(JSON.stringify(toolEntries)).not.toContain('super-secret');
+  });
+
+  test('aggregates a proven read-only Shell command into the owning Thought', () => {
+    const events: readonly RuntimeClientEvent[] = [
+      { type: 'model.requested', requestId: 'request-explore' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-explore',
+        state: 'completed',
+        segmentId: 'reasoning-explore',
+        text: 'Inspecting the project.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-explore',
+        messageId: 'message-explore',
+        durationMs: 1_000,
+        toolCallCount: 3,
+      },
+      ...(['read-a', 'read-b'] as const).flatMap((toolId, index): RuntimeClientEvent[] => [
+        {
+          type: 'tool.queued',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          presentationGroupId: 'message-explore',
+          arguments: { path: `file-${index}.ts` },
+          summary: 'Queued.',
+        },
+        { type: 'tool.started', toolId },
+        {
+          type: 'tool.finished',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          result: { ok: true, exitCode: 0, stdout: 'content', stderr: '' },
+          summary: 'Completed.',
+        },
+      ]),
+      {
+        type: 'tool.queued',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'exploration',
+        presentationGroupId: 'message-explore',
+        arguments: { command: 'ls -1 && echo done' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'shell-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        result: { ok: true, exitCode: 0, stdout: 'src\ndone', stderr: '' },
+        summary: 'Completed.',
+      },
+    ];
+    let state = createInitialState();
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_summary',
+        hasThought: true,
+        hasThinking: true,
+        modelMs: 1_000,
+        summaryLine: 'read 2 files, ran 1 shell command',
+        tools: [
+          expect.objectContaining({ callId: 'read-a', status: 'done' }),
+          expect.objectContaining({ callId: 'read-b', status: 'done' }),
+          expect.objectContaining({ callId: 'shell-read', status: 'done' }),
+        ],
+      }),
+    );
+    expect(
+      blocks.some((block) => block.kind === 'tool_card' && block.callId === 'shell-read'),
+    ).toBe(false);
+  });
+
+  test('keeps terminal exploration and the following model reasoning in one Thought', () => {
+    const events: readonly RuntimeClientEvent[] = [
+      { type: 'model.requested', requestId: 'request-tools' },
+      {
+        type: 'model.responded',
+        requestId: 'request-tools',
+        messageId: 'message-tools',
+        durationMs: 2_000,
+        toolCallCount: 3,
+      },
+      ...(['read-a', 'read-b'] as const).flatMap((toolId, index): RuntimeClientEvent[] => [
+        {
+          type: 'tool.queued',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          presentationGroupId: 'message-tools',
+          arguments: { path: `file-${index}.ts` },
+          summary: 'Queued.',
+        },
+        { type: 'tool.started', toolId },
+        {
+          type: 'tool.finished',
+          toolId,
+          toolName: 'read_file',
+          presentation: 'exploration',
+          result: { ok: true, exitCode: 0, stdout: 'content', stderr: '' },
+          summary: 'Completed.',
+        },
+      ]),
+      {
+        type: 'tool.queued',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'exploration',
+        presentationGroupId: 'message-tools',
+        arguments: { command: 'ls -1' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'shell-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'shell-read',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        result: { ok: true, exitCode: 0, stdout: 'src', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'request-reasoning' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-reasoning',
+        state: 'completed',
+        segmentId: 'reasoning-after-tools',
+        text: 'Summarizing the inspected project.',
+      },
+      {
+        type: 'model.text_delta',
+        requestId: 'request-reasoning',
+        text: 'Project overview.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-reasoning',
+        messageId: 'message-reasoning',
+        durationMs: 12_000,
+        toolCallCount: 0,
+        summary: 'Project overview.',
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      createInitialState(),
+    );
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_summary');
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        active: false,
+        hasThinking: true,
+        modelMs: 12_000,
+        summaryLine: 'read 2 files, ran 1 shell command',
+        timeline: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'thinking',
+            text: 'Summarizing the inspected project.',
+          }),
+        ]),
+      }),
+    );
+    const answer = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'text' && block.content === 'Project overview.');
+    expect(answer).toBeDefined();
+    expect(answer?.kind === 'text' ? answer.thoughtContent : undefined).toBeUndefined();
+    expect(answer?.kind === 'text' ? answer.thoughtElapsedMs : undefined).toBeUndefined();
   });
 
   test('merges adjacent terminal file searches while retaining bounded local arguments', () => {
@@ -188,7 +637,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     ];
     let state = createInitialState();
-    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    for (const event of events)
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
 
     const summaries = state.turns
       .flatMap((turn) => turn.blocks)
@@ -250,7 +700,10 @@ describe('closed RuntimeClientEvent reducer', () => {
       ['find-2', 'search_files', { pattern: 'private-second-pattern' }],
       ['read-3', 'read_file', { path: '/private/three.ts' }],
     ] as const) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: queue(toolCallId, name, args) });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: queue(toolCallId, name, args),
+      });
     }
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(0);
@@ -263,8 +716,14 @@ describe('closed RuntimeClientEvent reducer', () => {
       ['read-3', 'read_file'],
       ['find-2', 'search_files'],
     ] as const) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: started(toolCallId) });
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: finished(toolCallId, name) });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: started(toolCallId),
+      });
+      state = eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: finished(toolCallId, name),
+      });
     }
 
     const summaries = state.turns
@@ -311,6 +770,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         ]),
       }),
     );
+    expect(summaries[0]?.result).toBeUndefined();
     expect(
       state.turns.flatMap((turn) => turn.blocks).some((block) => block.kind === 'tool_card'),
     ).toBe(false);
@@ -350,7 +810,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'Running tool.',
       },
     ]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
@@ -359,12 +819,17 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('does not invent a generic card for an unpaired started/cancelled lifecycle', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'missing-queued', summary: 'Running tool.' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'tool.cancelled', toolId: 'missing-queued', summary: 'Cancelled.' },
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'tool.cancelled',
+        toolId: 'missing-queued',
+        presentation: 'standalone',
+        summary: 'Cancelled.',
+      },
     });
 
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
@@ -372,11 +837,11 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('deduplicates a late cumulative text delta after its durable model terminal', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'model.requested', requestId: 'request-late-delta' },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.responded',
         requestId: 'request-late-delta',
@@ -386,7 +851,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-late-delta',
@@ -402,12 +867,15 @@ describe('closed RuntimeClientEvent reducer', () => {
   });
 
   test('detaches a pending final caption once when a run terminal wins delivery order', () => {
-    let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'model.requested', requestId: 'request-terminal-race' },
-    });
+    let state = eventReducer(
+      { ...createInitialState(), runtimeAuthority: runtimeAuthority('run-terminal-race') },
+      {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: { type: 'model.requested', requestId: 'request-terminal-race' },
+      },
+    );
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-terminal-race',
@@ -417,7 +885,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'model.text_delta',
         requestId: 'request-terminal-race',
@@ -425,7 +893,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'run.terminal',
         runId: 'run-terminal-race',
@@ -449,7 +917,10 @@ describe('closed RuntimeClientEvent reducer', () => {
   test('binds text-first reasoning and model terminal facts to one answer block', () => {
     const requestId = 'request-text-first';
     const answer = '你好！我是 Kite，可以帮你处理编码任务。';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-text-first'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -475,7 +946,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: answer,
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -491,10 +962,13 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('enriches the same answer when responded and reasoning arrive after run terminal', () => {
+  test('keeps the sealed answer immutable when model and reasoning packets arrive after run terminal', () => {
     const requestId = 'request-terminal-first';
     const answer = 'One terminal-first answer.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-terminal-first'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -520,7 +994,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: answer,
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -528,17 +1002,20 @@ describe('closed RuntimeClientEvent reducer', () => {
       expect.objectContaining({
         kind: 'text',
         modelRequestId: requestId,
-        thoughtElapsedMs: 1_400,
-        thoughtContent: 'Late but correlated reasoning.',
+        presentationState: 'sealed',
       }),
     ]);
+    expect(blocks[0]).not.toHaveProperty('thoughtContent');
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('keeps late reasoning owned by its answer after a later notice block', () => {
+  test('keeps a sealed answer unchanged when reasoning arrives after a later notice block', () => {
     const requestId = 'request-reasoning-after-notice';
     const answer = 'The original answer.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-reasoning-last'),
+    };
     for (const event of [
       { type: 'model.requested', requestId },
       { type: 'model.text_delta', requestId, text: answer },
@@ -563,7 +1040,7 @@ describe('closed RuntimeClientEvent reducer', () => {
         text: 'Late correlated reasoning.',
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -572,20 +1049,24 @@ describe('closed RuntimeClientEvent reducer', () => {
         kind: 'text',
         content: answer,
         modelRequestId: requestId,
-        thoughtContent: 'Late correlated reasoning.',
+        presentationState: 'sealed',
       }),
       expect.objectContaining({ kind: 'text', content: 'Runtime reconnected.' }),
     ]);
+    expect(blocks[0]).not.toHaveProperty('thoughtContent');
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('detaches a pure Thought when content interleaves between reasoning packets', () => {
+  test('keeps one live pure Thought until an incomplete answer reaches its terminal', () => {
     const requestId = 'request-reasoning-last';
     const answer = 'One reasoning-last answer.';
     const trailingReasoning = 'Inspecting the curl result before answering.';
-    let state = createInitialState();
+    let state: TuiState = {
+      ...createInitialState(),
+      runtimeAuthority: runtimeAuthority('run-reasoning-last'),
+    };
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     for (const event of [
@@ -602,18 +1083,9 @@ describe('closed RuntimeClientEvent reducer', () => {
       dispatch(event);
     }
 
-    // The first delta closes the visible Thought immediately, but the
-    // incomplete paragraph remains hidden until another component boundary
-    // or the terminal response proves it complete.
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
-      expect.objectContaining({
-        kind: 'tool_summary',
-        active: false,
-        responsePending: true,
-        modelRequestId: requestId,
-      }),
+      expect.objectContaining({ kind: 'tool_summary', active: true, tools: [] }),
     ]);
-    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
 
     for (const event of [
       {
@@ -634,19 +1106,13 @@ describe('closed RuntimeClientEvent reducer', () => {
       dispatch(event);
     }
 
-    // A completed trailing segment enriches the text block off-screen; it
-    // cannot recreate the active Thought whose preview would leak the raw
-    // reasoning below the visible answer.
+    // The incomplete answer is still hidden, but the single status-only
+    // Thought remains live. Its provider reasoning is never message text.
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
-      expect.objectContaining({
-        kind: 'tool_summary',
-        active: false,
-        responsePending: true,
-        modelRequestId: requestId,
-      }),
+      expect.objectContaining({ kind: 'tool_summary', active: true, tools: [] }),
     ]);
     expect(state.turns.flatMap((turn) => turn.blocks)).not.toContainEqual(
-      expect.objectContaining({ kind: 'tool_summary', active: true }),
+      expect.objectContaining({ kind: 'text', content: trailingReasoning }),
     );
 
     for (const event of [
@@ -686,7 +1152,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     const requestId = 'request-component-commit';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -743,11 +1209,40 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(textBlocks.every((block) => block.streaming !== true)).toBe(true);
   });
 
+  test('commits a buffered ordinary paragraph when terminal summary is omitted', () => {
+    const requestId = 'request-terminal-without-summary';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    };
+
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({ type: 'model.text_delta', requestId, text: 'Queued turn completed.' });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(0);
+
+    dispatch({
+      type: 'model.responded',
+      requestId,
+      messageId: 'message-terminal-without-summary',
+      toolCallCount: 0,
+    });
+
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: 'Queued turn completed.',
+        streaming: false,
+        modelRequestId: requestId,
+      }),
+    ]);
+    expect(state.currentModelTextSource).toBeUndefined();
+  });
+
   test('keeps one mutable structural component and commits it only when closed', () => {
     const requestId = 'request-structural-commit';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
 
     dispatch({ type: 'model.requested', requestId });
@@ -786,11 +1281,283 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(textBlocks[0]?.streamingSource).toBeUndefined();
   });
 
+  test('keeps a structural answer classification-pending until the model terminal', () => {
+    const requestId = 'request-visible-code-freezes-thought';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    };
+
+    dispatch({ type: 'model.requested', requestId });
+    dispatch({
+      type: 'reasoning.activity',
+      requestId,
+      state: 'completed',
+      segmentId: 'visible-code-reasoning',
+      text: 'Preparing the example.',
+    });
+    dispatch({
+      type: 'model.text_delta',
+      requestId,
+      text: '```ts\nconst visible = true;\nconst pending',
+    });
+
+    const visibleSummary = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(visibleSummary).toEqual(
+      expect.objectContaining({ active: true, modelRequestId: requestId }),
+    );
+    expect(
+      state.turns
+        .flatMap((turn) => turn.blocks)
+        .some((block) => block.kind === 'text' && block.modelRequestId === requestId),
+    ).toBe(false);
+
+    dispatch({
+      type: 'model.responded',
+      requestId,
+      messageId: 'message-visible-code-freezes-thought',
+      durationMs: 8_000,
+      toolCallCount: 0,
+      summary: '```ts\nconst visible = true;\nconst pending = false;\n```',
+    });
+
+    const answer = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'text');
+    expect(answer).toEqual(expect.objectContaining({ thoughtElapsedMs: 8_000 }));
+    expect(state.turns.flatMap((turn) => turn.blocks)).not.toContainEqual(
+      expect.objectContaining({ kind: 'tool_summary' }),
+    );
+  });
+
+  test('keeps complete final-response components mutable until the model terminal', () => {
+    const events = [
+      { type: 'model.requested', requestId: 'freeze-tools-request' },
+      {
+        type: 'model.responded',
+        requestId: 'freeze-tools-request',
+        messageId: 'freeze-tools-message',
+        durationMs: 4_000,
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'freeze-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        presentationGroupId: 'freeze-tools-message',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'freeze-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'freeze-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'done', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'freeze-answer-request' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'freeze-answer-request',
+        state: 'completed',
+        segmentId: 'freeze-answer-reasoning',
+        text: 'Preparing the answer.',
+      },
+      {
+        type: 'model.text_delta',
+        requestId: 'freeze-answer-request',
+        text: 'Visible answer paragraph.\n\nTail',
+      },
+    ] satisfies RuntimeClientEvent[];
+    const visible = events.reduce<TuiState>(
+      (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      {
+        ...createInitialState(),
+        runtimeAuthority: runtimeAuthority('freeze-answer-run'),
+      },
+    );
+    const visibleSummary = visible.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(visibleSummary).toEqual(
+      expect.objectContaining({
+        active: true,
+        modelRequestId: 'freeze-answer-request',
+      }),
+    );
+    expect(visibleSummary?.result).toBeUndefined();
+    const visibleText = visible.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(visibleText).toEqual([]);
+    expect(visible.turns.flatMap((turn) => turn.blocks)).not.toContainEqual(
+      expect.objectContaining({ kind: 'text', content: expect.stringContaining('Tail') }),
+    );
+
+    const terminal = eventReducer(visible, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'model.responded',
+        requestId: 'freeze-answer-request',
+        messageId: 'freeze-answer-message',
+        durationMs: 15_000,
+        toolCallCount: 0,
+        summary: 'Visible answer paragraph.\n\nTail complete.',
+      },
+    });
+    const terminalSummary = terminal.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(terminalSummary).toEqual(expect.objectContaining({ result: 'done' }));
+    expect(terminalSummary?.pendingCaption).toBeUndefined();
+    const terminalText = terminal.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text');
+    expect(terminalText.map((block) => block.content).join('')).toBe(
+      'Visible answer paragraph.\n\nTail complete.',
+    );
+
+    const completed = eventReducer(terminal, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'run.terminal',
+        runId: 'freeze-answer-run',
+        status: 'completed',
+        summary: 'Visible answer paragraph.\n\nTail complete.',
+        outcome: {
+          status: 'completed',
+          reasonCode: 'completed',
+          safeRetry: false,
+          recoveryEntry: 'none',
+        },
+      },
+    });
+    const completedText = completed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text');
+    expect(completedText.map((block) => block.content).join('')).toBe(
+      'Visible answer paragraph.\n\nTail complete.',
+    );
+  });
+
+  test('removes classification-pending progress and continues one tool-bearing Thought', () => {
+    const events = [
+      { type: 'model.requested', requestId: 'rollback-tools-request' },
+      {
+        type: 'model.responded',
+        requestId: 'rollback-tools-request',
+        messageId: 'rollback-tools-message',
+        durationMs: 4_000,
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'rollback-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        presentationGroupId: 'rollback-tools-message',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'rollback-read' },
+      {
+        type: 'tool.finished',
+        toolId: 'rollback-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'done', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'rollback-narration-request' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'rollback-narration-request',
+        state: 'completed',
+        segmentId: 'rollback-narration-reasoning',
+        text: 'Choosing another file.',
+      },
+      {
+        type: 'model.text_delta',
+        requestId: 'rollback-narration-request',
+        text: 'I will inspect one more file.\n\nNext step',
+      },
+    ] satisfies RuntimeClientEvent[];
+    const pending = events.reduce(
+      (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      createInitialState(),
+    );
+    const pendingSummary = pending.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(pendingSummary).toEqual(
+      expect.objectContaining({
+        active: true,
+        modelRequestId: 'rollback-narration-request',
+      }),
+    );
+    const pendingText = pending.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'text');
+    expect(pendingText).toEqual([]);
+
+    let toolBearing = eventReducer(pending, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'model.responded',
+        requestId: 'rollback-narration-request',
+        messageId: 'rollback-narration-message',
+        durationMs: 7_000,
+        toolCallCount: 1,
+        summary: 'I will inspect one more file.\n\nNext step',
+      },
+    });
+    toolBearing = eventReducer(toolBearing, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'tool.queued',
+        toolId: 'rollback-search',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        presentationGroupId: 'rollback-narration-message',
+        arguments: { pattern: 'package.json' },
+        summary: 'Queued.',
+      },
+    });
+    toolBearing = eventReducer(toolBearing, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: { type: 'tool.started', toolId: 'rollback-search' },
+    });
+    const blocks = toolBearing.turns.flatMap((turn) => turn.blocks);
+    const summaries = blocks.filter((block) => block.kind === 'tool_summary');
+    // A new model presentation group can continue the same live exploration
+    // Thought after the preceding group's tools have all reached terminal.
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        id: pendingSummary?.id,
+        active: true,
+        presentationGroupId: 'rollback-narration-message',
+        tools: [
+          expect.objectContaining({ callId: 'rollback-read', status: 'done' }),
+          expect.objectContaining({ callId: 'rollback-search', status: 'running' }),
+        ],
+      }),
+    );
+    // A tool-bearing response is progress metadata, not a standalone answer.
+    expect(blocks.filter((block) => block.kind === 'text')).toEqual([]);
+    expect(blocks.map((block) => block.kind)).toEqual(['tool_summary']);
+  });
+
   test('commits streaming lists one complete item at a time', () => {
     const requestId = 'request-list-items';
     let state = createInitialState();
     const dispatch = (event: RuntimeClientEvent) => {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     };
     dispatch({ type: 'model.requested', requestId });
     dispatch({ type: 'model.text_delta', requestId, text: '- first item\n- second' });
@@ -817,7 +1584,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     ]);
   });
 
-  test('keeps streamed narration outside Thought when its terminal declares tools', () => {
+  test('keeps streamed narration separate when the tool lacks presentation identity', () => {
     const requestId = 'request-content-before-tool-terminal';
     const caption = 'Checking the matching files now.';
     let state = createInitialState();
@@ -850,34 +1617,31 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
       { type: 'tool.started', toolId: 'content-before-tool-terminal-search' },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
     expect(blocks).toEqual([
       expect.objectContaining({
-        kind: 'tool_summary',
-        active: false,
-        responsePending: false,
-        modelRequestId: requestId,
-        tools: [],
-      }),
-      expect.objectContaining({
         kind: 'text',
         content: caption,
         modelRequestId: requestId,
+        thoughtContent: 'Selecting the next search.',
+        thoughtElapsedMs: 1_200,
       }),
       expect.objectContaining({
         kind: 'tool_summary',
         active: true,
+        hasThought: false,
         summaryLine: 'searched 1 file pattern',
+        tools: [expect.objectContaining({ callId: 'content-before-tool-terminal-search' })],
       }),
     ]);
   });
 
   test('keeps standalone tools hidden until started, then closes the active Thought before its named card', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-write-reason',
@@ -887,7 +1651,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-1',
@@ -897,10 +1661,12 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'Queued.',
       },
     });
-    expect(state.turns.flatMap((turn) => turn.blocks)).toHaveLength(1);
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({ kind: 'tool_summary', active: true, tools: [] }),
+    ]);
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: { type: 'tool.started', toolId: 'write-1', summary: 'Running tool.' },
     });
     const blocks = state.turns.flatMap((turn) => turn.blocks);
@@ -921,7 +1687,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('drops an unstarted standalone cancellation without creating a card', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-cancelled',
@@ -932,16 +1698,16 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
-      event: { type: 'tool.cancelled', toolId: 'write-cancelled' },
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: { type: 'tool.cancelled', toolId: 'write-cancelled', presentation: 'standalone' },
     });
     expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
     expect(state.pendingToolCalls).toEqual({});
   });
 
-  test('drops an approval-rejected tool that never started without inventing a card', () => {
+  test('retains an unstarted rejection as a terminal diagnostic without claiming execution', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.queued',
         toolId: 'write-rejected',
@@ -952,21 +1718,31 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.rejected',
         toolId: 'write-rejected',
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       },
     });
-    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([]);
+    expect(state.turns.flatMap((turn) => turn.blocks)).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_card',
+        callId: 'write-rejected',
+        name: 'write_file',
+        status: 'rejected',
+        summary: 'Tool execution rejected.',
+      }),
+    );
     expect(state.pendingToolCalls).toEqual({});
 
     const gapState = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.rejected',
         toolId: 'write-rejected-after-gap',
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       },
     });
@@ -1001,18 +1777,30 @@ describe('closed RuntimeClientEvent reducer', () => {
         arguments: { path: 'src/future.ts' },
         summary: 'Queued.',
       },
-      { type: 'tool.cancelled' as const, toolId: 'write-running' },
+      {
+        type: 'tool.cancelled' as const,
+        toolId: 'write-running',
+        presentation: 'standalone' as const,
+      },
       {
         type: 'turn.terminal' as const,
         turnId: 'turn-user-cancelled',
         status: 'cancelled' as const,
         cause: 'user' as const,
       },
+      {
+        type: 'run.terminal' as const,
+        runId: 'run-user-cancelled',
+        status: 'cancelled' as const,
+      },
     ];
     const reduce = () =>
-      events.reduce(
-        (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
-        createInitialState(),
+      events.reduce<TuiState>(
+        (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+        {
+          ...createInitialState(),
+          runtimeAuthority: runtimeAuthority('run-user-cancelled', 'turn-user-cancelled'),
+        },
       );
     const live = reduce();
     const replay = reduce();
@@ -1034,7 +1822,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
     expect(visible(live)).toEqual(visible(replay));
     expect(live.pendingToolCalls).toEqual({});
-    expect(live.running).toBe(false);
+    expect(isTuiRunActive(live)).toBe(false);
     expect(visible(live)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1051,7 +1839,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('updates subagent steps in their owning block without emitting a text fragment', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.started',
         subagentId: 'child-1',
@@ -1060,10 +1848,12 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.step',
         subagentId: 'child-1',
+        stepId: 'child-1-step-1',
+        toolCallId: 'child-1-tool-1',
         toolName: 'read_file',
         status: 'started',
         arguments: { path: 'src/child.ts' },
@@ -1071,13 +1861,14 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'subagent.step',
         subagentId: 'child-1',
+        stepId: 'child-1-step-1',
+        toolCallId: 'child-1-tool-1',
         toolName: 'read_file',
         status: 'completed',
-        result: { ok: true },
         totalLines: 42,
         durationMs: 18,
         summary: 'Read complete.',
@@ -1104,10 +1895,127 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
-  test('keeps streamed narration between the completed Thought and later exploration', () => {
+  test('retains authoritative subagent duration, count, and bounded failure diagnostics', () => {
+    let completed = eventReducer(createInitialState(), {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'subagent.started',
+        subagentId: 'completed-child',
+        role: 'explore',
+        name: 'Inspect runtime',
+      },
+    });
+    const started = completed.turns[0]?.blocks[0];
+    expect(typeof (started?.kind === 'subagent' ? started.startedAt : undefined)).toBe('number');
+    completed = eventReducer(completed, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'subagent.completed',
+        subagentId: 'completed-child',
+        summary: 'Inspection complete.',
+        toolCallCount: 3,
+        durationMs: 12_345,
+      },
+    });
+    expect(completed.turns[0]?.blocks[0]).toEqual(
+      expect.objectContaining({
+        kind: 'subagent',
+        status: 'done',
+        toolCallCount: 3,
+        durationMs: 12_345,
+      }),
+    );
+
+    let failed = eventReducer(createInitialState(), {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'subagent.started',
+        subagentId: 'failed-child',
+        role: 'review',
+        name: 'Review runtime',
+      },
+    });
+    failed = eventReducer(failed, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'subagent.failed',
+        subagentId: 'failed-child',
+        summary: 'Model step failed.',
+        toolCallCount: 2,
+        durationMs: 9_000,
+        diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+      },
+    });
+    expect(failed.turns[0]?.blocks[0]).toEqual(
+      expect.objectContaining({
+        kind: 'subagent',
+        status: 'error',
+        toolCallCount: 2,
+        durationMs: 9_000,
+        failureDiagnostic: { code: 'model_step_failed', stage: 'model_step' },
+      }),
+    );
+  });
+
+  test('keeps boundary text and concurrent subagents on unique block ids', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = dispatch(createInitialState(), {
+      type: 'model.requested',
+      requestId: 'delegate-request',
+    });
+    state = dispatch(state, {
+      type: 'reasoning.activity',
+      requestId: 'delegate-request',
+      state: 'completed',
+      segmentId: 'delegate-reasoning',
+      text: 'Choosing independent areas.',
+    });
+    state = dispatch(state, {
+      type: 'model.responded',
+      requestId: 'delegate-request',
+      messageId: 'delegate-message',
+      toolCallCount: 2,
+      summary: 'I will delegate two independent inspections.',
+    });
+    for (const [subagentId, name] of [
+      ['delegate-child-1', 'Inspect the runtime'],
+      ['delegate-child-2', 'Inspect the tests'],
+    ] as const) {
+      state = dispatch(state, {
+        type: 'subagent.started',
+        subagentId,
+        role: 'explore',
+        name,
+        concurrencyGroupId: 'delegate-batch',
+      });
+    }
+
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(new Set(blocks.map((block) => block.id)).size).toBe(blocks.length);
+    expect(blocks.filter((block) => block.kind === 'text')).toEqual([
+      expect.objectContaining({ content: 'I will delegate two independent inspections.' }),
+    ]);
+    expect(blocks.filter((block) => block.kind === 'subagent')).toEqual([
+      expect.objectContaining({
+        subagentId: 'delegate-child-1',
+        concurrencyGroupId: 'delegate-batch',
+      }),
+      expect.objectContaining({
+        subagentId: 'delegate-child-2',
+        concurrencyGroupId: 'delegate-batch',
+      }),
+    ]);
+  });
+
+  test('keeps incomplete tool-bearing narration inside the active Thought', () => {
+    const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    let state = dispatch(createInitialState(), {
+      type: 'model.requested',
+      requestId: 'request-1',
+    });
+    state = dispatch(state, {
       type: 'reasoning.activity',
       requestId: 'request-1',
       state: 'streaming',
@@ -1117,7 +2025,14 @@ describe('closed RuntimeClientEvent reducer', () => {
     const summary = state.turns
       .flatMap((turn) => turn.blocks)
       .find((block) => block.kind === 'tool_summary');
-    expect(summary?.kind === 'tool_summary' ? summary.latestActivity : undefined).toBeUndefined();
+    expect(summary).toEqual(
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: true,
+        hasThinking: true,
+      }),
+    );
+    expect(summary?.latestActivity).toBeUndefined();
 
     state = dispatch(state, {
       type: 'reasoning.activity',
@@ -1126,15 +2041,13 @@ describe('closed RuntimeClientEvent reducer', () => {
       segmentId: 'reasoning-1',
       text: 'Inspecting the relevant files.',
     });
-    state = dispatch(state, {
-      type: 'tool.queued',
-      toolId: 'read-1',
-      toolName: 'read_file',
-      presentation: 'exploration',
-      arguments: { path: 'src/one.ts' },
-      summary: 'Queued.',
+    const completedReasoningSummary = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(completedReasoningSummary?.latestActivity).toEqual({
+      kind: 'thinking',
+      text: 'Inspecting the relevant files.',
     });
-    state = dispatch(state, { type: 'tool.started', toolId: 'read-1' });
     state = dispatch(state, {
       type: 'model.text_delta',
       requestId: 'request-1',
@@ -1152,105 +2065,98 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks).toEqual([
       expect.objectContaining({
         kind: 'tool_summary',
-        active: false,
-        responsePending: false,
+        active: true,
         modelRequestId: 'request-1',
+        pendingCaption: 'I found the first part; checking one more file.',
         tools: [],
-      }),
-      expect.objectContaining({
-        kind: 'tool_summary',
-        active: false,
-        tools: [expect.objectContaining({ callId: 'read-1' })],
-      }),
-      expect.objectContaining({
-        kind: 'text',
-        content: 'I found the first part; checking one more file.',
-        streaming: false,
-        modelRequestId: 'request-1',
       }),
     ]);
 
     state = dispatch(state, {
       type: 'tool.queued',
-      toolId: 'read-2',
+      toolId: 'read-1',
+      presentationGroupId: 'message-1',
       toolName: 'read_file',
       presentation: 'exploration',
-      arguments: { path: 'src/two.ts' },
+      arguments: { path: 'src/one.ts' },
       summary: 'Queued.',
     });
-    state = dispatch(state, { type: 'tool.started', toolId: 'read-2' });
-    state = dispatch(state, {
-      type: 'reasoning.activity',
-      requestId: 'request-2',
-      state: 'streaming',
-      segmentId: 'reasoning-2',
-      text: 'Comparing',
-    });
-    state = dispatch(state, {
-      type: 'reasoning.activity',
-      requestId: 'request-2',
-      state: 'completed',
-      segmentId: 'reasoning-2',
-      text: 'Comparing both files.',
+    state = dispatch(state, { type: 'tool.started', toolId: 'read-1' });
+    blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: true,
+        captions: ['I found the first part; checking one more file.'],
+        tools: [expect.objectContaining({ callId: 'read-1' })],
+      }),
+    ]);
+  });
+
+  test('publishes the aggregate result when the last tool settles after a soft close', () => {
+    const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    let state = dispatch(createInitialState(), {
+      type: 'model.requested',
+      requestId: 'soft-close-request',
     });
     state = dispatch(state, {
       type: 'model.responded',
-      requestId: 'request-2',
-      messageId: 'message-2',
-      durationMs: 31,
-      toolCallCount: 0,
-      summary: 'Final answer.',
+      requestId: 'soft-close-request',
+      messageId: 'soft-close-message',
+      toolCallCount: 1,
     });
+    state = dispatch(state, {
+      type: 'tool.queued',
+      toolId: 'soft-close-read',
+      presentationGroupId: 'soft-close-message',
+      toolName: 'read_file',
+      presentation: 'exploration',
+      arguments: { path: 'README.md' },
+      summary: 'Queued.',
+    });
+    state = dispatch(state, { type: 'tool.started', toolId: 'soft-close-read' });
+    state = dispatch(state, {
+      type: 'tool.queued',
+      toolId: 'soft-close-write',
+      toolName: 'write_file',
+      presentation: 'standalone',
+      arguments: { path: 'notes.md', content: 'done' },
+      summary: 'Queued.',
+    });
+    state = dispatch(state, { type: 'tool.started', toolId: 'soft-close-write' });
 
-    blocks = state.turns.flatMap((turn) => turn.blocks);
-    const summaries = blocks.filter(
-      (
-        block,
-      ): block is Extract<
-        (typeof state.turns)[number]['blocks'][number],
-        { kind: 'tool_summary' }
-      > => block.kind === 'tool_summary',
+    let summary = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(summary).toEqual(expect.objectContaining({ active: false, tools: [expect.anything()] }));
+    expect(summary?.result).toBeUndefined();
+
+    state = dispatch(state, {
+      type: 'tool.finished',
+      toolId: 'soft-close-read',
+      toolName: 'read_file',
+      presentation: 'exploration',
+      result: { ok: true, exitCode: 0, stdout: '# README', stderr: '' },
+      summary: 'Read complete.',
+    });
+    summary = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(summary).toEqual(
+      expect.objectContaining({ active: false, result: 'done', tools: [expect.anything()] }),
     );
-    expect(summaries).toHaveLength(3);
-    expect(summaries[0]).toEqual(
-      expect.objectContaining({
-        active: false,
-        modelMs: 73,
-        tools: [],
-      }),
-    );
-    expect(summaries[1]).toEqual(
-      expect.objectContaining({
-        active: false,
-        tools: [expect.objectContaining({ callId: 'read-1', args: { path: 'src/one.ts' } })],
-      }),
-    );
-    expect(summaries[2]).toEqual(
-      expect.objectContaining({
-        active: false,
-        tools: [expect.objectContaining({ callId: 'read-2', args: { path: 'src/two.ts' } })],
-      }),
-    );
-    expect(blocks).toContainEqual(
-      expect.objectContaining({
-        kind: 'text',
-        content: 'Final answer.',
-        thoughtContent: 'Comparing both files.',
-      }),
-    );
-    expect(
-      blocks.filter(
-        (block) =>
-          block.kind === 'text' &&
-          block.content === 'I found the first part; checking one more file.',
-      ),
-    ).toHaveLength(1);
-    expect(state.currentThoughtSummaryId).toBeUndefined();
   });
 
-  test('settles post-Bash searches before a later model request owns reasoning', () => {
+  test('continues terminal exploration into the following model reasoning', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     const events = [
       {
@@ -1356,20 +2262,21 @@ describe('closed RuntimeClientEvent reducer', () => {
         ]),
       }),
     );
-    expect(summaries[0]?.hasThinking).not.toBe(true);
+    expect(summaries[0]?.hasThinking).toBe(true);
+    expect(summaries[0]?.timeline).toContainEqual(
+      expect.objectContaining({ kind: 'thinking', text: 'Summarizing the project.' }),
+    );
     expect(blocks).toContainEqual(
       expect.objectContaining({
         kind: 'text',
         content: 'Project overview.',
-        thoughtElapsedMs: 10_000,
-        thoughtContent: 'Summarizing the project.',
       }),
     );
   });
 
-  test('groups exploration tools only through their exact model presentation identity', () => {
+  test('keeps one exploration phase across adjacent model presentation identities', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId: 'group-request-1' },
@@ -1407,17 +2314,196 @@ describe('closed RuntimeClientEvent reducer', () => {
       segmentId: 'group-reasoning-2',
       text: 'A distinct step.',
     });
-    expect(
-      state.turns
-        .flatMap((turn) => turn.blocks)
-        .filter((block) => block.kind === 'tool_summary')
-        .map((block) => block.modelRequestId),
-    ).toEqual(['group-request-1', 'group-request-2']);
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        modelRequestId: 'group-request-2',
+        summaryLine: 'read 1 file',
+        tools: [expect.objectContaining({ callId: 'group-read-1', status: 'running' })],
+        timeline: expect.arrayContaining([
+          expect.objectContaining({ kind: 'thinking', text: 'A distinct step.' }),
+        ]),
+      }),
+    );
+  });
+
+  test('keeps later exploration groups in the same continuous Thought', () => {
+    const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    let state = createInitialState();
+    const events = [
+      { type: 'model.requested', requestId: 'request-group-a' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-group-a',
+        state: 'completed',
+        segmentId: 'reasoning-group-a',
+        text: 'Inspect the entry points.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-group-a',
+        messageId: 'message-group-a',
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'read-group-a',
+        presentationGroupId: 'message-group-a',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'read-group-a' },
+      {
+        type: 'tool.finished',
+        toolId: 'read-group-a',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'README', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'request-group-b' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-group-b',
+        state: 'completed',
+        segmentId: 'reasoning-group-b',
+        text: 'Inspect the implementation.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-group-b',
+        messageId: 'message-group-b',
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'search-group-b',
+        presentationGroupId: 'message-group-b',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: '*.ts' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'search-group-b' },
+    ] satisfies RuntimeClientEvent[];
+    for (const event of events) state = reduce(state, event);
+
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        active: true,
+        presentationGroupId: 'message-group-b',
+        modelRequestId: 'request-group-b',
+        summaryLine: 'read 1 file, searched 1 file pattern',
+        tools: [
+          expect.objectContaining({ callId: 'read-group-a', status: 'done' }),
+          expect.objectContaining({ callId: 'search-group-b', status: 'running' }),
+        ],
+      }),
+    );
+    expect(state.presentationGroupSummaryIds).toMatchObject({
+      'message-group-a': summaries[0]!.id,
+      'message-group-b': summaries[0]!.id,
+    });
+  });
+
+  test('keeps terminal exploration when next reasoning overtakes model.requested', () => {
+    const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    let state = createInitialState();
+    for (const event of [
+      { type: 'model.requested', requestId: 'race-request-1' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'race-request-1',
+        state: 'completed',
+        segmentId: 'race-reasoning-1',
+        text: 'Inspect the project entry points.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'race-request-1',
+        messageId: 'race-message-1',
+        durationMs: 2_000,
+        toolCallCount: 1,
+        summary: '先查看项目入口。',
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'race-read-1',
+        presentationGroupId: 'race-message-1',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'race-read-1' },
+      {
+        type: 'tool.finished',
+        toolId: 'race-read-1',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: '# Project', stderr: '' },
+        summary: 'Completed.',
+      },
+    ] satisfies RuntimeClientEvent[]) {
+      state = reduce(state, event);
+    }
+
+    const original = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(original).toEqual(expect.objectContaining({ active: true, summaryLine: 'read 1 file' }));
+
+    // The ephemeral lane can overtake the durable requested notification.
+    state = reduce(state, {
+      type: 'reasoning.activity',
+      requestId: 'race-request-2',
+      state: 'completed',
+      segmentId: 'race-reasoning-2',
+      text: 'Continue with the package structure.',
+    });
+    state = reduce(state, { type: 'model.requested', requestId: 'race-request-2' });
+
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        id: original?.id,
+        active: true,
+        modelRequestId: 'race-request-2',
+        summaryLine: 'read 1 file',
+        latestActivity: {
+          kind: 'thinking',
+          text: 'Continue with the package structure.',
+        },
+      }),
+    );
   });
 
   test('keeps missing and mismatched tool identities outside the active Thought', () => {
     const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId: 'identity-request-1' },
@@ -1462,9 +2548,8 @@ describe('closed RuntimeClientEvent reducer', () => {
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.kind === 'tool_summary');
     const activeThought = summaries.find((block) => block.modelRequestId === 'identity-request-2');
-    expect(activeThought?.tools).toHaveLength(0);
-    expect(activeThought?.timeline).toContainEqual(
-      expect.objectContaining({ kind: 'thinking', text: 'New reasoning.' }),
+    expect(activeThought).toEqual(
+      expect.objectContaining({ active: false, hasThinking: true, tools: [] }),
     );
     expect(
       summaries
@@ -1474,7 +2559,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(summaries.filter((block) => block.active)).toHaveLength(1);
   });
 
-  test('keeps late final reasoning with its answer instead of the preceding search step', () => {
+  test('keeps adjacent final reasoning with the preceding terminal exploration step', () => {
     const events = [
       {
         type: 'user.message',
@@ -1559,12 +2644,21 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'POST_BASH_RESUME_DONE',
       },
     ] satisfies RuntimeClientEvent[];
-    const reduce = (runtimeEvents: readonly RuntimeClientEvent[], initial = createInitialState()) =>
-      runtimeEvents.reduce(
-        (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
+    const reduce = (
+      runtimeEvents: readonly RuntimeClientEvent[],
+      initial: TuiState = {
+        ...createInitialState(),
+        runtimeAuthority: runtimeAuthority('post-bash-resume-run'),
+      },
+    ) =>
+      runtimeEvents.reduce<TuiState>(
+        (state, event) => eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
         initial,
       );
-    const assertProjection = (blocks: ReturnType<typeof reduce>['turns'][number]['blocks']) => {
+    const assertProjection = (
+      blocks: ReturnType<typeof reduce>['turns'][number]['blocks'],
+      expectThinking = true,
+    ) => {
       const summaries = blocks.filter(
         (block): block is Extract<(typeof blocks)[number], { kind: 'tool_summary' }> =>
           block.kind === 'tool_summary',
@@ -1575,16 +2669,21 @@ describe('closed RuntimeClientEvent reducer', () => {
           summaryLine: 'searched 2 file patterns',
         }),
       );
-      expect(summaries[0]?.hasThinking).not.toBe(true);
-      expect(summaries[0]?.timeline ?? []).not.toContainEqual(
-        expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
-      );
+      if (expectThinking) {
+        expect(summaries[0]?.hasThinking).toBe(true);
+        expect(summaries[0]?.timeline ?? []).toContainEqual(
+          expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
+        );
+      } else {
+        expect(summaries[0]?.hasThinking).toBeUndefined();
+        expect(summaries[0]?.timeline ?? []).not.toContainEqual(
+          expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
+        );
+      }
       expect(blocks).toContainEqual(
         expect.objectContaining({
           kind: 'text',
           content: 'POST_BASH_RESUME_DONE',
-          thoughtElapsedMs: 14_000,
-          thoughtContent: 'Synthesizing the search results.',
         }),
       );
     };
@@ -1606,13 +2705,14 @@ describe('closed RuntimeClientEvent reducer', () => {
     const replay = sessionDataToUI({
       threadId: 'post-bash-resume-session',
       messages: [],
-      runtimeEvents: events,
+      runtimeEvents: events.map((event) => acceptedEnvelope(event)),
       interrupt: null,
       modelProvider: 'test',
       modelName: 'test',
       thinkingLevel: null,
       plan: null,
       interactionMode: 'accept_edits',
+      recovery: 'normal',
     });
     assertProjection(replay.blocks);
 
@@ -1629,12 +2729,15 @@ describe('closed RuntimeClientEvent reducer', () => {
       events[reasoningIndex]!,
       ...events.slice(modelRespondedIndex + 1),
     ];
-    assertProjection(reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks));
+    assertProjection(
+      reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks),
+      false,
+    );
   });
 
   test('keeps late narration as text before the following tool-bearing summary', () => {
     const dispatch = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
-      eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
     const caption = 'I found the first result; checking the remaining files.';
     let state = createInitialState();
     const events = [
@@ -1691,23 +2794,15 @@ describe('closed RuntimeClientEvent reducer', () => {
           { kind: 'tool_summary' }
         > => block.kind === 'tool_summary',
       );
-    expect(summaries).toHaveLength(2);
+    expect(summaries).toHaveLength(1);
     expect(summaries[0]).toEqual(
-      expect.objectContaining({
-        active: false,
-        hasThinking: true,
-        modelMs: 14_000,
-        tools: [],
-      }),
-    );
-    expect(summaries[1]).toEqual(
       expect.objectContaining({
         active: true,
         hasThought: false,
         summaryLine: 'searched 2 file patterns',
       }),
     );
-    expect(summaries[1]!.tools).toHaveLength(2);
+    expect(summaries[0]!.tools).toHaveLength(2);
     expect(
       state.turns
         .flatMap((turn) => turn.blocks)
@@ -1717,7 +2812,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('settles an active Thought at an approval boundary and falls back from a missing terminal queue', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-approval-reason',
@@ -1727,7 +2822,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'approval.queued',
         queueSequence: 0,
@@ -1737,6 +2832,7 @@ describe('closed RuntimeClientEvent reducer', () => {
           sessionRevision: 1,
           generation: 0,
           grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: 'approval-boundary-tool' },
         },
       },
     });
@@ -1746,7 +2842,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.finished',
         toolId: 'missing-queue',
@@ -1768,9 +2864,149 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
-  test('caches a streaming reasoning segment without exposing it before completion', () => {
+  test('keeps ask_user outside the Thinking tool aggregate', () => {
+    const events = [
+      { type: 'model.requested', requestId: 'ask-request' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'ask-request',
+        state: 'completed',
+        segmentId: 'ask-reasoning',
+        text: 'I need the user to choose.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'ask-request',
+        messageId: 'ask-message',
+        durationMs: 4_000,
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'ask-tool',
+        presentationGroupId: 'ask-message',
+        toolName: 'ask_user',
+        presentation: 'standalone',
+        arguments: { question: 'Continue?' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'ask-tool' },
+      {
+        type: 'input.requested',
+        interaction: {
+          kind: 'input',
+          interactionId: 'ask-interaction',
+          sessionRevision: 5,
+          question: 'Continue?',
+          allowFreeText: true,
+          options: [],
+        },
+      },
+    ] satisfies RuntimeClientEvent[];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      createInitialState(),
+    );
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    const summaries = blocks.filter(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({ active: false, tools: [], summaryLine: '' }),
+    );
+    expect(blocks).toContainEqual(
+      expect.objectContaining({ kind: 'tool_card', callId: 'ask-tool', name: 'ask_user' }),
+    );
+    expect(blocks).toContainEqual(
+      expect.objectContaining({ kind: 'question', interactionId: 'ask-interaction' }),
+    );
+  });
+
+  test('consumes reasoning once across repeated approval and standalone-tool boundaries', () => {
+    const approval = (interactionId: string, sessionRevision: number) =>
+      ({
+        type: 'approval.queued',
+        queueSequence: sessionRevision,
+        interaction: {
+          kind: 'approval',
+          interactionId,
+          sessionRevision,
+          generation: 0,
+          grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: interactionId },
+        },
+      }) satisfies RuntimeClientEvent;
+    const events = [
+      { type: 'model.requested', requestId: 'approval-batch-request' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'approval-batch-request',
+        state: 'completed',
+        segmentId: 'approval-batch-reasoning',
+        text: 'Inspecting two independent commands.',
+      },
+      {
+        type: 'model.text_delta',
+        requestId: 'approval-batch-request',
+        text: 'I checked the repository; next I will run two commands.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'approval-batch-request',
+        messageId: 'approval-batch-message',
+        durationMs: 4_012,
+        toolCallCount: 2,
+        summary: 'I checked the repository; next I will run two commands.',
+      },
+      ...(['approval-shell-1', 'approval-shell-2'] as const).map(
+        (toolId) =>
+          ({
+            type: 'tool.queued',
+            toolId,
+            presentationGroupId: 'approval-batch-message',
+            toolName: 'shell_execute',
+            presentation: 'standalone',
+            arguments: { command: 'git status --short' },
+            summary: 'Queued.',
+          }) satisfies RuntimeClientEvent,
+      ),
+      approval('approval-boundary-1', 1),
+      {
+        type: 'approval.granted',
+        interactionId: 'approval-boundary-1',
+        generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'approval-boundary-1' },
+      },
+      { type: 'tool.started', toolId: 'approval-shell-1' },
+      approval('approval-boundary-2', 2),
+    ] satisfies RuntimeClientEvent[];
+
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      createInitialState(),
+    );
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks.filter((block) => block.kind === 'tool_summary')).toEqual([]);
+    expect(blocks.filter((block) => block.kind === 'text')).toEqual([
+      expect.objectContaining({
+        content: 'I checked the repository; next I will run two commands.',
+        thoughtContent: 'Inspecting two independent commands.',
+        thoughtElapsedMs: 4_012,
+      }),
+    ]);
+    expect(blocks.filter((block) => block.kind === 'tool_card')).toEqual([
+      expect.objectContaining({ callId: 'approval-shell-1', status: 'running' }),
+    ]);
+    expect(state.currentModelReasoningRequestId).toBeUndefined();
+    expect(state.currentModelReasoningText).toBeUndefined();
+  });
+
+  test('projects a live Thinking owner without exposing its reasoning as message text', () => {
     const state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'reasoning.activity',
         requestId: 'request-cached-reason',
@@ -1779,22 +3015,21 @@ describe('closed RuntimeClientEvent reducer', () => {
         text: 'Not committed yet.',
       },
     });
-    const summary = state.turns.flatMap((turn) => turn.blocks).at(-1);
-    expect(summary).toEqual(
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
       expect.objectContaining({
         kind: 'tool_summary',
         active: true,
-        hasThought: true,
         hasThinking: true,
         tools: [],
       }),
-    );
-    expect(summary?.kind === 'tool_summary' ? summary.latestActivity : undefined).toBeUndefined();
+    ]);
+    expect(state.currentModelReasoningText).toBe('Not committed yet.');
+    expect(state.currentModelReasoningStreamed).toBe(true);
   });
 
   test('turns closed provider and verification facts into actionable safe interactions', () => {
     let state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'provider.action',
         status: 'required',
@@ -1822,7 +3057,7 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
 
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'interaction.settled',
         interactionId: 'provider-1',
@@ -1831,7 +3066,7 @@ describe('closed RuntimeClientEvent reducer', () => {
       },
     });
     state = eventReducer(state, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'verification.status',
         status: 'pending',
@@ -1850,7 +3085,7 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('preserves approval generation and interaction identity without a raw approval payload', () => {
     const state = eventReducer(createInitialState(), {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'approval.queued',
         queueSequence: 4,
@@ -1860,6 +3095,7 @@ describe('closed RuntimeClientEvent reducer', () => {
           sessionRevision: 8,
           generation: 3,
           grants: ['approve_once'],
+          owner: { kind: 'root_tool', toolCallId: 'approval-1' },
         },
       },
     });

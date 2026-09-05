@@ -4,16 +4,21 @@ import type {
   ListRuntimeLogEventsRequest,
   ListRuntimeLogSessionsRequest,
   RuntimeClientEvent,
+  RuntimeHistoryRecordIdentity,
   RuntimeHistorySessionTranscript,
   RuntimeLogSessionEntry,
   RuntimeLogSessionPage,
 } from '@kite-ai/runtime-contract';
-import { assertListRuntimeLogSessionsRequest } from '@kite-ai/runtime-contract';
+import {
+  assertListRuntimeLogSessionsRequest,
+  isRuntimeClientEventIdentitySatisfied,
+} from '@kite-ai/runtime-contract';
+import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
 import { projectRuntimeClientEvent, projectRuntimeModelResponseRequestId } from './event-projector';
-import { projectRuntimeClientText } from './safe-text';
+import { projectRuntimeClientText, projectRuntimeSessionTitle } from './safe-text';
 
 type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
@@ -112,7 +117,7 @@ function allCurrentSessions(
             eventTypes: ['user.message_appended'],
           }).entries[0]?.event;
           if (first?.type !== 'user.message_appended') return projected;
-          const displayName = projectRuntimeClientText(first.content, 80).trim();
+          const displayName = projectRuntimeSessionTitle(first.content);
           return displayName.length === 0
             ? projected
             : { ...projected, displayName, needsSmartName: false };
@@ -235,13 +240,18 @@ function stableReasoningSegmentId(
  * its authoritative full summary so the reducer can finalize the preceding
  * cumulative delta without appending a duplicate block.
  */
-function projectRuntimeHistoryEvents(
+export function projectRuntimeHistoryEvents(
   event: RuntimeEvent,
   sessionRevision: number,
+  options: { readonly stableRunId?: string } = {},
 ): readonly RuntimeClientEvent[] {
   if (event.type !== 'model.responded') {
     const projected = projectRuntimeClientEvent(event, { sessionRevision });
-    return projected ? [projected] : [];
+    if (!projected) return [];
+    if (options.stableRunId && projected.type === 'run.terminal') {
+      return [{ ...projected, runId: options.stableRunId }];
+    }
+    return [projected];
   }
   const projected: RuntimeClientEvent[] = [];
   const requestId = projectRuntimeModelResponseRequestId(event);
@@ -291,9 +301,19 @@ export function createKiteRuntimeHistoryClient(
         session = findCurrentSession(logs, sessionId);
       }
       if (!session) throw new Error(`Runtime session was not found: ${sessionId}`);
-      const events = withLogs(logs, (reader) => {
-        const all: RuntimeClientEvent[] = [];
+      const records = withLogs(logs, (reader) => {
+        const all: Array<{
+          sequence: number;
+          events: readonly RuntimeClientEvent[];
+          identity?: RuntimeHistoryRecordIdentity;
+        }> = [];
+        const pendingIdentityRecords: number[] = [];
         let afterSequence: number | undefined;
+        let stableRunId: string | undefined;
+        let activeTaskId: string | undefined;
+        let activeTurnId: string | undefined;
+        let previousEventType: RuntimeEvent['type'] | undefined;
+        const openTurnIds = new Set<string>();
         for (;;) {
           const page = reader.listEvents({
             sessionId,
@@ -306,20 +326,155 @@ export function createKiteRuntimeHistoryClient(
               throw new Error('Runtime history pagination did not advance.');
             }
             afterSequence = record.sequence;
-            all.push(...projectRuntimeHistoryEvents(record.event, record.sequence));
+            if (record.event.type === 'task.started') {
+              activeTaskId = record.event.taskId;
+              // `task.started.turnId` identifies the State turn which admitted
+              // the task.  For a planning Start Turn it is intentionally the
+              // predecessor State turn: the new user message and canonical
+              // `turn.started` fact are committed later in the same batch.
+              // Do not use it as the presentation Turn for records before
+              // that canonical turn fact arrives; live delivery already uses
+              // the admitted descriptor identity for the whole batch.
+            } else if (record.event.type === 'turn.started') {
+              openTurnIds.add(record.event.turnId);
+              activeTurnId = record.event.turnId;
+              if (previousEventType !== 'provider.action_completed' || stableRunId === undefined) {
+                stableRunId = record.event.turnId;
+              }
+            }
+            if (activeTurnId !== undefined && pendingIdentityRecords.length > 0) {
+              const joinedIdentity: RuntimeHistoryRecordIdentity = {
+                ...(stableRunId === undefined ? {} : { runId: stableRunId }),
+                ...(activeTaskId === undefined ? {} : { taskId: activeTaskId }),
+                turnId: activeTurnId,
+              };
+              for (const index of pendingIdentityRecords.splice(0)) {
+                all[index]!.identity = joinedIdentity;
+              }
+            }
+            // A user message is the admission fact for the next Turn.  The
+            // prior Turn remains in `activeTurnId` until its successor
+            // `turn.started` reducer fact arrives, so never inherit that
+            // predecessor for a prompt record.
+            const recordTurnId =
+              record.event.type === 'user.message_appended'
+                ? undefined
+                : 'turnId' in record.event && typeof record.event.turnId === 'string'
+                  ? record.event.turnId
+                  : activeTurnId;
+            const recordTaskId =
+              'taskId' in record.event && typeof record.event.taskId === 'string'
+                ? record.event.taskId
+                : activeTaskId;
+            const identity: RuntimeHistoryRecordIdentity = {
+              ...(stableRunId === undefined ? {} : { runId: stableRunId }),
+              ...(recordTaskId === undefined ? {} : { taskId: recordTaskId }),
+              ...(recordTurnId === undefined ? {} : { turnId: recordTurnId }),
+            };
+            const events = projectRuntimeHistoryEvents(record.event, record.sequence, {
+              ...(stableRunId === undefined ? {} : { stableRunId }),
+            });
+            all.push({
+              sequence: record.sequence,
+              events,
+              ...(Object.keys(identity).length === 0 ? {} : { identity }),
+            });
+            if (events.some((event) => !isRuntimeClientEventIdentitySatisfied(event, identity))) {
+              pendingIdentityRecords.push(all.length - 1);
+            }
+            if (
+              record.event.type === 'turn.completed' ||
+              record.event.type === 'turn.aborted' ||
+              record.event.type === 'run.completed'
+            ) {
+              openTurnIds.delete(record.event.turnId);
+            } else if (record.event.type === 'run.error' && record.event.turnId) {
+              openTurnIds.delete(record.event.turnId);
+            }
+            if (record.event.type === 'task.completed' || record.event.type === 'task.cancelled') {
+              activeTaskId = undefined;
+            }
+            previousEventType = record.event.type;
           }
-          if (!page.hasMore) return all;
+          if (!page.hasMore) {
+            for (const index of pendingIdentityRecords) {
+              const pending = all[index]!;
+              // Keep each unresolved record independently addressable. A
+              // single fallback identity would merge unrelated legacy turns
+              // and make replay attach their messages/tools to one timeline.
+              const identitySequence = pending.sequence;
+              pending.identity = {
+                runId: `legacy-run-${identitySequence}`,
+                taskId: `legacy-task-${identitySequence}`,
+                turnId: `legacy-turn-${identitySequence}`,
+              };
+            }
+            return { records: all, restartRequired: openTurnIds.size > 0 };
+          }
           if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
             throw new Error('Runtime history pagination cursor is invalid.');
           }
         }
       });
+      const events = records.records.flatMap((record) => record.events);
       return {
         session,
+        records: records.records,
         events,
         interactionMode: interactionModeFor(events),
-        recovery: pendingHistoricalInteraction(events) ? 'pending_interaction' : 'normal',
+        recovery: records.restartRequired
+          ? 'restart_required'
+          : pendingHistoricalInteraction(events)
+            ? 'pending_interaction'
+            : 'normal',
       };
     },
   });
+}
+
+/**
+ * Bounded current-format page façade for consumers that must never materialize a complete
+ * Workspace directory or transcript. The injected log port remains the source of keyset and
+ * sequence pagination; no compatibility discovery or smart-name scan is performed.
+ */
+export function createKiteRuntimePagedHistoryClient(
+  logs: RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return Object.freeze({
+    async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
+      assertListRuntimeLogSessionsRequest(request);
+      return withLogs(logs, (reader) => {
+        const page = reader.listSessions(request);
+        return Object.freeze({
+          entries: Object.freeze(page.entries.map(mapLogSession)),
+          ...(page.nextCursor ? { nextCursor: Object.freeze(page.nextCursor) } : {}),
+          hasMore: page.hasMore,
+        });
+      });
+    },
+    async listEvents(request: ListRuntimeLogEventsRequest) {
+      return withLogs(logs, (reader) => projectRuntimeLogEventPage(reader.listEvents(request)));
+    },
+  });
+}
+
+/** Select the current Runtime event table inside the Service History owner, not a Worker root. */
+export function createKiteRuntimePagedHistoryFromWorkspaceStore(
+  openLogs: (currentEventTypes: readonly string[]) => RuntimeLogQueryPort<RuntimeEvent>,
+): Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'> {
+  return createKiteRuntimePagedHistoryClient(openLogs(runtimeHostCurrentStateEventTypes()));
+}
+
+/**
+ * Current-format, query-only History surface for observer-only consumers.
+ *
+ * Unlike the terminal History journey, this entry point deliberately has no
+ * compatibility source and therefore cannot discover or import a legacy
+ * Session as a side effect of list/load. A missing legacy-only Session stays
+ * unavailable until an authorized native client performs the explicit import.
+ */
+export function createKiteRuntimeObserverHistoryClient(
+  logs: RuntimeLogQuerySource,
+): RuntimeHistoryClient {
+  return createKiteRuntimeHistoryClient(logs);
 }

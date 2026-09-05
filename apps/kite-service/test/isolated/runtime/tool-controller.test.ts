@@ -231,6 +231,7 @@ function applyExactApprovalFixture(
         reviewerModelName: 'fixture-reviewer',
         durationMs: 0,
       },
+      owner: requested.owner,
     });
   } else {
     next = reduceRuntimeState(next, {
@@ -240,6 +241,7 @@ function applyExactApprovalFixture(
       grant: 'approve_once',
       receiptId: `receipt:${requested.interactionId}:${pending.generation}`,
       generation: pending.generation,
+      owner: requested.owner,
     });
   }
   Object.assign(state, next);
@@ -512,6 +514,7 @@ async function createExactTaskResumeJourney(input: {
         grant: 'approve_once',
         receiptId: 'receipt-task',
         generation: 0,
+        owner: review.owner,
       }),
       liveState,
       new Date().toISOString(),
@@ -902,7 +905,7 @@ describe('executeTestRuntimeTools', () => {
         expect.objectContaining({
           type: 'subagent.tool_result',
           subagent: expect.objectContaining({
-            ok: true,
+            status: 'completed',
           }),
         }),
       );
@@ -1285,6 +1288,7 @@ describe('executeTestRuntimeTools', () => {
         toolCallId,
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId },
         approval: {
           scope: 'once',
           cwd: state.session.workspace,
@@ -1406,6 +1410,7 @@ describe('executeTestRuntimeTools', () => {
             toolCallId: 'current-task',
             fullModeBypassEligible: false,
             fullModePolicyBypassAllowed: false,
+            owner: { kind: 'root_tool', toolCallId: 'current-task' },
             approval: {} as never,
           } as const)
         : ({
@@ -1416,6 +1421,7 @@ describe('executeTestRuntimeTools', () => {
             reason: 'review',
             fullModeBypassEligible: false,
             fullModePolicyBypassAllowed: false,
+            owner: { kind: 'root_tool', toolCallId: 'current-task' },
             approval: {} as never,
           } as const);
 
@@ -1765,6 +1771,15 @@ describe('executeTestRuntimeTools', () => {
       reason: 'review child command',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-shell',
+        subagentId: 'expected-child',
+        parentToolCallId: 'task',
+      },
+      parentToolCallId: 'task',
+      childSubagentId: 'expected-child',
+      runtimeToolCallId: 'child-shell',
       approval,
     });
     const model = createMockModel([]);
@@ -3376,7 +3391,7 @@ describe('executeTestRuntimeTools', () => {
         expect.objectContaining({
           type: 'subagent.tool_result',
           subagent: expect.objectContaining({
-            ok: false,
+            status: 'failed',
             summary: expect.stringContaining('read-only command'),
           }),
         }),
@@ -5497,6 +5512,18 @@ describe('executeTestRuntimeTools', () => {
       filesystemMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['filesystemMode'];
     }> = [];
 
+    for (const toolCallId of ['first', 'second']) {
+      const approvalEvents = await executeTestRuntimeTools({
+        state,
+        toolCallIds: [toolCallId],
+        sandboxAvailable: true,
+        shellExecutor: async () => {
+          throw new Error('Unapproved uncertain Shell must not dispatch.');
+        },
+      });
+      applyExactApprovalFixture(state, toolCallId, approvalEvents);
+    }
+
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['first', 'second'],
@@ -5530,7 +5557,7 @@ describe('executeTestRuntimeTools', () => {
       {
         command: 'node -e "console.log(1)"',
         fullAccess: true,
-        requiresApproval: false,
+        requiresApproval: true,
         expected: { networkMode: 'allow_all' as const, filesystemMode: 'allow_all' as const },
       },
       {

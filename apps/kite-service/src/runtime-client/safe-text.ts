@@ -34,6 +34,11 @@ export function projectRuntimeClientText(
   return `${text.slice(0, end)}…`;
 }
 
+/** One presentation policy for unnamed Session titles across Runtime History and Agent API. */
+export function projectRuntimeSessionTitle(value: string): string {
+  return projectRuntimeClientText(value, 80).trim();
+}
+
 /** Approval commands must remain recognizable; only control characters and length are bounded. */
 export function projectRuntimeClientCommand(value: string, maximum = 16_384): string {
   let text = '';

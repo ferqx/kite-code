@@ -4,29 +4,18 @@
  * Each PTY test gets its own:
  * - Temp HOME directory with minimal kite-code.jsonc config
  * - Temp workspace directory (for file operations)
- * - Temp checkpoint database path (isolated SQLite)
+ * - Persistent source-profile `kite-session.sqlite` path inside the isolated Kite Home
  *
  * Reuses the temp-home isolation pattern previously used by the old TUI harness.
  */
 
 import { Database } from 'bun:sqlite';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-} from '@kite-ai/kite-local-runtime/service';
+import { createKiteHomeIdentity, ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
+import { sourceKiteSessionStorePath } from '../../../scripts/release/local-service-client';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -63,19 +52,26 @@ export function requirePersistedRuntimeReady<T>(observation: PersistedRuntimeObs
   throw new Error(`Runtime Store observation is ${observation.status} at ${observation.path}`);
 }
 
-/** Read plan artifacts from the isolated child HOME as durable side-effect evidence. */
+/** Read plan artifacts from the exact source-profile Store without invoking production writers. */
 export function readPersistedPlanArtifacts(
   workspace: Pick<TestWorkspace, 'home'>,
 ): Array<{ path: string; content: string }> {
-  const root = join(workspace.home, '.kite-code', 'plans');
-  if (!existsSync(root)) return [];
-  return readdirSync(root, { recursive: true, encoding: 'utf8' })
-    .filter((path) => path.endsWith('.md'))
-    .sort()
-    .map((relativePath) => {
-      const path = join(root, relativePath);
-      return { path, content: readFileSync(path, 'utf8') };
-    });
+  const databasePath = persistedRuntimePath(workspace);
+  if (!existsSync(databasePath)) return [];
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    return database
+      .query<{ task_id: string; plan_id: string; version: number; markdown: string }, []>(
+        'SELECT task_id, plan_id, version, markdown FROM plan_artifacts ORDER BY task_id, plan_id, version',
+      )
+      .all()
+      .map((row) => ({
+        path: join('kite-session.sqlite#plans', row.task_id, row.plan_id, `v${row.version}.md`),
+        content: row.markdown,
+      }));
+  } finally {
+    database.close();
+  }
 }
 
 function persistedRuntimeObservationFailure(
@@ -108,7 +104,12 @@ function persistedRuntimeObservationFailure(
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  return sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
+  const kiteHome = join(workspace.home, '.kite-code');
+  const appServerStore = sourceKiteSessionStorePath(kiteHome, process.cwd());
+  if (existsSync(appServerStore)) return appServerStore;
+  const legacyKiteHomeStore = join(kiteHome, 'kite.sqlite');
+  if (existsSync(legacyKiteHomeStore)) return legacyKiteHomeStore;
+  return sqliteCurrentRuntimeStorePath(join(kiteHome, 'checkpoints.sqlite'));
 }
 
 /**
@@ -396,7 +397,7 @@ export function createTestWorkspace(opts?: {
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
   const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
-  const kiteCodeDir = ensureLocalRuntimeServiceHome(
+  const kiteCodeDir = ensureKiteProfileHome(
     createKiteHomeIdentity(join(tempHome, '.kite-code'), 'explicit_argument'),
   ).root;
 

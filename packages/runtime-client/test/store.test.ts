@@ -166,6 +166,148 @@ describe('Runtime Snapshot Store', () => {
     expect(store.getSnapshot().streams).toEqual({});
   });
 
+  test('fails closed on an ephemeral sequence gap without accepting the truncated packet', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(projection('session-1', 1)),
+      reset: true,
+      ready: true,
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(1),
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(3),
+      }),
+    ).toBe('resync_required');
+    const snapshot = store.getSnapshot();
+    expect(Object.values(snapshot.streams)[0]?.sequence).toBe(1);
+    expect(snapshot.sessions['session-1']).toMatchObject({
+      ready: false,
+      historyResyncRequired: true,
+    });
+  });
+
+  test('requires sequence one when a stream composition revision changes', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(projection('session-1', 1)),
+      reset: true,
+      ready: true,
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(1),
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: { ...ephemeral(2), compositionRevision: 'composition-2' },
+      }),
+    ).toBe('ignored');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: { ...ephemeral(1), compositionRevision: 'composition-2' },
+      }),
+    ).toBe('applied');
+    expect(Object.values(store.getSnapshot().streams)[0]).toMatchObject({
+      compositionRevision: 'composition-2',
+      sequence: 1,
+    });
+  });
+
+  test('fences late ephemeral packets after a durable Run terminal without fencing a successor', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    const terminalSession: RuntimeSessionProjection = {
+      ...projection('session-1', 2),
+      currentRun: {
+        runId: 'run-1',
+        initialTurnId: 'turn-1',
+        activeTurnId: 'turn-1',
+        taskId: 'work-1',
+        status: 'completed',
+        revision: 2,
+        outcome: {
+          reasonCode: 'completed',
+          safeRetry: false,
+          recoveryEntry: 'none',
+        },
+      },
+    };
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: durable(terminalSession),
+        reset: true,
+        ready: true,
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: {
+          ...ephemeral(1),
+          runId: 'run-1',
+          taskId: 'work-1',
+        },
+      }),
+    ).toBe('ignored');
+
+    const successor: RuntimeSessionProjection = {
+      ...projection('session-1', 3),
+      currentRun: {
+        runId: 'run-2',
+        initialTurnId: 'turn-2',
+        activeTurnId: 'turn-2',
+        taskId: 'work-2',
+        status: 'running',
+        revision: 3,
+      },
+    };
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 2,
+        notification: durable(successor),
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 2,
+        notification: {
+          ...ephemeral(1),
+          runId: 'run-2',
+          taskId: 'work-2',
+          turnId: 'turn-2',
+          workId: 'work-2',
+        },
+      }),
+    ).toBe('applied');
+  });
+
   test('batches notifications and isolates throwing observers', async () => {
     const store = new RuntimeSnapshotStore();
     let observed = 0;
@@ -188,7 +330,7 @@ function projection(
   displayName?: string,
 ): RuntimeSessionProjection {
   return {
-    schema: 'kite.runtime-projection.v1',
+    schema: 'kite.runtime-projection.v2',
     sessionId,
     revision,
     ...(displayName ? { displayName } : {}),
@@ -201,7 +343,7 @@ function durable(
   session: RuntimeSessionProjection,
 ): Extract<RuntimeNotification, { durability: 'durable' }> {
   return {
-    schema: 'kite.runtime-notification.v1',
+    schema: 'kite.runtime-notification.v2',
     durability: 'durable',
     sessionId: session.sessionId,
     revision: session.revision,
@@ -211,7 +353,7 @@ function durable(
 
 function ephemeral(sequence: number): Extract<RuntimeNotification, { durability: 'ephemeral' }> {
   return {
-    schema: 'kite.runtime-notification.v1',
+    schema: 'kite.runtime-notification.v2',
     durability: 'ephemeral',
     sessionId: 'session-1',
     workId: 'work-1',

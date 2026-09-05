@@ -54,7 +54,7 @@ describe('TUI PTY System — model streaming', () => {
   });
 
   test(
-    'commits completed reasoning before streaming answer components',
+    'buffers classification-pending answer components under one stable Thinking owner',
     async () => {
       const responseFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Stream an answer', { timeout: 15_000 });
@@ -72,21 +72,63 @@ describe('TUI PTY System — model streaming', () => {
         .screenFramesSince(responseFrames)
         .findIndex((frame) => screenContains(frame, 'STREAM_FIRST'));
       expect(firstAnswerFrameIndex).toBeGreaterThanOrEqual(0);
-      expect(screenContains(tui.viewport(), 'STREAM_FINAL')).toBe(false);
+      expect(
+        screenContains(
+          tui.screenFramesSince(responseFrames)[firstAnswerFrameIndex]!,
+          'STREAM_FINAL',
+        ),
+      ).toBe(true);
 
       await waitForText(() => tui.viewport(), 'STREAM_FINAL', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.viewport(), 'STREAM_MIDDLE')).toBe(true);
       const clean = stripAnsi(tui.viewport());
       const responseHistory = tui.screenFramesSince(responseFrames).join('\n');
-      // A completed segment gets one live Thought frame before answer deltas;
-      // settled scrollback keeps only the compact Thinking header.
+      // Completed reasoning is visible only in the active Thought window;
+      // once answer components become visible, the settled transcript omits it.
       expect(screenContains(responseHistory, 'Thinking ')).toBe(true);
       expect(screenContains(responseHistory, '└─ STREAM_THINKING')).toBe(true);
       expect(screenContains(responseHistory, 'STREAM_PRIVATE_TAIL')).toBe(true);
+      expect(clean).not.toContain('STREAM_THINKING');
+      expect(clean).not.toContain('STREAM_PRIVATE_TAIL');
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);
+
+      // The same runnable journey now switches to a content-only response and
+      // proves that the first committed frame is genuinely incremental.
+      server.setResponses([
+        {
+          message: {
+            content_chunks: ['CONTENT_FIRST\n\n', 'CONTENT_MIDDLE\n\n', 'CONTENT_FINAL'],
+          },
+          chunk_delay: 250,
+        },
+      ]);
+      const contentFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Stream content first', { timeout: 15_000 });
+      await waitForCondition(
+        () =>
+          tui
+            .screenFramesSince(contentFrames)
+            .some((frame) => screenContains(frame, 'CONTENT_FIRST')),
+        'the first content-first answer frame',
+        10_000,
+      );
+      const firstFrame = tui
+        .screenFramesSince(contentFrames)
+        .find((frame) => screenContains(frame, 'CONTENT_FIRST'));
+      expect(firstFrame).toBeDefined();
+      expect(screenContains(firstFrame!, 'CONTENT_FINAL')).toBe(false);
+      await waitForText(() => tui.viewport(), 'CONTENT_FINAL', 10_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      const contentClean = stripAnsi(tui.viewport());
+      expect(contentClean.lastIndexOf('CONTENT_FIRST')).toBeLessThan(
+        contentClean.lastIndexOf('CONTENT_MIDDLE'),
+      );
+      expect(contentClean.lastIndexOf('CONTENT_MIDDLE')).toBeLessThan(
+        contentClean.lastIndexOf('CONTENT_FINAL'),
+      );
     },
     TIMEOUT,
   );
@@ -134,16 +176,20 @@ describe('TUI PTY System — model delivery races', () => {
   });
 
   test(
-    'renders one answer when visible content arrives before reasoning',
+    'keeps completed answer components Static when reasoning arrives later',
     async () => {
+      const responseFrames = tui.markScreen();
       await submitUserMessage(tui, server, '你好', { timeout: 15_000 });
       await waitForText(() => tui.viewport(), 'GREETING_ANSWER_ONCE', 10_000);
-      await waitForText(() => tui.viewport(), 'Thinking', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const clean = stripAnsi(tui.viewport());
       expect(clean.split('GREETING_ANSWER_ONCE')).toHaveLength(2);
-      expect(clean.indexOf('Thinking ')).toBeLessThan(clean.indexOf('GREETING_ANSWER_ONCE'));
+      const postAnswerFrames = tui
+        .screenFramesSince(responseFrames)
+        .filter((frame) => screenContains(frame, 'GREETING_ANSWER_ONCE'))
+        .join('\n');
+      expect(screenContains(postAnswerFrames, 'Thinking ')).toBe(false);
       expect(server.getRequests()[0]?.body.stream).toBe(true);
     },
     TIMEOUT,
@@ -228,8 +274,8 @@ describe('TUI PTY System — late reasoning after visible content', () => {
       const thinkingFrameIndex = tui
         .screenFramesSince(responseFrames)
         .findIndex((frame) => screenContains(frame, 'Thinking '));
-      // The initial header is created by the reasoning prefix; the answer
-      // then arrives as its pending caption before the suffix/terminal.
+      // Pure reasoning becomes visible first; the answer later consumes the
+      // same presentation owner without creating another scrollback header.
       expect(thinkingFrameIndex).toBeLessThan(answerFrameIndex);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10_000, 750);
 
@@ -241,12 +287,13 @@ describe('TUI PTY System — late reasoning after visible content', () => {
       const thinkingHeader = compactLines.findIndex((line) => /^Thinking \d+s$/.test(line));
 
       expect(clean.match(/Thinking \d+s/g) ?? []).toHaveLength(1);
-      // A prefix may be shown in the existing active Thought before text is
-      // visible. Once the answer arrives, that window must never reappear.
+      // Both completed reasoning fragments may be shown while the answer is
+      // still buffered. Once the answer becomes visible, the window must never
+      // reappear or persist in replay.
       expect(postAnswerFrames).not.toContain('LATE_REASONING_PREFIX_MARKER');
       expect(postAnswerFrames).not.toContain('LATE_REASONING_SUFFIX_MARKER');
       expect(postAnswerFrames).not.toContain('● Thinking');
-      expect(liveFrames).not.toContain('LATE_REASONING_SUFFIX_MARKER');
+      expect(liveFrames).toContain('LATE_REASONING_SUFFIX_MARKER');
       expect(clean).not.toContain('● Thinking');
       expect(clean).not.toContain('LATE_REASONING_PREFIX_MARKER');
       expect(clean).not.toContain('LATE_REASONING_SUFFIX_MARKER');

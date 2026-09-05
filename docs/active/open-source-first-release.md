@@ -32,17 +32,25 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
-首发terminal拓扑已经切到managed Local Runtime Service：本地TUI与用户在场的foreground CLI都是Native client，
-唯一Host/Store/Builtin/History/App Control composition位于`apps/kite-service`。Service-owned internal stdio、development
-loopback WebSocket、browser与Desktop reference只用于internal child/reference/conformance，不交付Web UI或remote access。
+项目采用未发布clean cutover。默认terminal fresh profile直接创建exact `kite-session.sqlite`；正式CLI/candidate不导入旧
+`kite.sqlite`，不提供Store 7/8 migration或启动期source cleanup。旧Store原样保留但不是fallback。App Server reopen与本机candidate smoke
+已通过，但三平台filesystem/process evidence完成前仍不计入G1。
+
+首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
+Host/Builtin/History/App Control composition，多个进程只通过durable Store共享Session facts。普通启动没有HTTP/Web listener；显式
+`kite server start/status/stop`提供fixed exact protocol本机daemon且不参与默认发现；旧Service/Web控制面已经删除。
+App Server internal stdio、development loopback WebSocket、
+browser与Desktop reference不等同于remote/public Web access。
 KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-companion/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、
-CLI/TUI、Service companion、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据。
+App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、显式daemon、
+retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
+Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
 
 ## 制品与安装
 
-`bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与同candidate identity的`kite-service` companion，
-生成 gzip tar、严格 manifest、
+`bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与`kite-service`，并生成`payload/web`静态资产；其中固定
+`api-docs/openapi.json`逐字节来自canonical Agent API OpenAPI，
+是verifier、installer preflight与smoke共同要求且由manifest checksum绑定的必需asset。所有制品共享 candidate identity，另生成 gzip tar、严格 manifest、
 逐文件 SHA-256 和 archive SHA-256。checksum 是完整性信息，不是签名、notarization、provenance 或
 attestation。构建只允许当前 OS/architecture 的 native target；macOS、Linux、Windows 各自由对应
 GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime 下载替代真实平台验证。PR workflow
@@ -50,15 +58,30 @@ GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime
 该 SHA 完全一致；不得把临时 merge ref 登记为最终候选提交。fork PR 只以只读权限构建其自身 head repository。
 归档 writer 会规范化 tar entry 时间戳并重算 header checksum；相同 target、manifest 和文件内容
 必须生成字节一致的 `.tar.gz`，不能让构建墙钟改变候选 SHA-256。
+Standalone build resolver机械覆盖十六个workspace package的全部public export，包括browser-safe `agent-api-contract`与
+`agent-api-client`；resolver直接指向repository source，不能经`node_modules/@kite-ai/*` workspace symlink解析。
 
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
-临时prefix中完成安装、CLI help/version、已安装standalone TUI通过managed Service的真实PTY startup、installed
-companion MCP stdio wrapper、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
-改名到最终目录。upgrade、rollback与uninstall先用当前candidate执行普通Service stop并确认state absent，再取得
-Native lifecycle fence；busy、unknown、残留state或identity不确定时active candidate保持不变。upgrade还拒绝跨
-OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、符号链接或不匹配
-marker时拒绝覆盖、回滚或删除。
+临时prefix中完成安装、CLI help/version、已安装standalone TUI通过parent-owned App Server的真实PTY startup、显式daemon start/status/stop、
+installed Service MCP stdio wrapper、retired companion absence、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
+改名到 immutable 最终目录。v2 managed-install marker 与唯一 `active` pointer 原子绑定当前/previous candidate；
+stable launcher 将启动时的 candidate root pin 给 child process，running process 不重新读取 pointer。首次安装才以
+atomic copy创建`bin/kite`、`bin/kite-tui`与`bin/kite-service` stable launcher；upgrade/rollback只验证既有
+launcher identity，不逐文件替换或停止仍在运行的旧 candidate。只有 destructive uninstall 才执行 ordinary Service
+stop、确认 state absent 并取得 Native lifecycle fence。upgrade/rollback后的首个新candidate managed client会用reservation中的旧build identity
+内部验证并安全换代旧Service，同时每次按marker/active pointer拒绝退役client的反向换代；installer不force-kill，用户也不负责清理旧进程。busy、unknown、残留state或identity不确定时active candidate
+保持不变。upgrade还拒绝跨 OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、
+符号链接或不匹配 marker时拒绝覆盖、回滚或删除。
+
+当前候选manifest的`releaseSlots`绑定CLI、TUI、Service与Web entrypoint/identity；Coordinator、Worker、Gateway slot必须为null且archive
+不得包含对应executable/launcher。这些asset identities不等于三平台process/runtime qualification。Windows resolver只接受v2 marker、唯一`active` regular-file
+pointer、immutable candidate 与 exact identity，并对 runner/marker/pointer/runtime 执行 no-follow 校验。POSIX rename
+后会 flush 父目录；Windows launcher、active pointer与marker统一通过locked-directory ordinary atomic publish落盘。partial publish会因
+marker/pointer/checksum不一致fail closed；installer不把hosted虚拟磁盘高延迟的write-through或`FlushFileBuffers`作为安装正确性前提，
+也不依赖Bun `fsync`；其locked-directory publication、ACL 与
+三平台安装/运行 qualification 仍须 hosted/真实证据，
+不能以本地结果代替。
 
 首发预构建架构为 macOS arm64、Linux x64 与 Windows x64；其他架构可以从源码运行 Bun，但没有首发
 预构建候选包。候选 workflow 不签名、不发布 Release、不上传 secret。它在三个 GitHub-hosted runner 上构建并运行
@@ -73,8 +96,8 @@ marker时拒绝覆盖、回滚或删除。
 - MCP write、effectful Skills、remote telemetry 和其他高风险能力默认关闭，需要本机用户显式开启并
   继续通过运行时 admission。
 - Auto Compaction 首版不受支持并默认关闭；未来若要启用必须重新立项。
-- Web、多租户、托管 runner、服务端 credential custody、无人值守共享 writer 和远程发布控制面明确
-  不受首版支持。
+- remote/LAN Web、多租户、托管 runner、服务端 credential custody、无人值守共享 writer 和远程发布控制面明确不受首版支持；
+  private loopback Web REST client只复用显式daemon的Runtime/Store composition，并仍需hosted qualification闭合后宣称三平台支持。
 
 ## 明确移出路线图
 

@@ -204,6 +204,39 @@ describe('tool safety', () => {
     }
   });
 
+  test('policy-proven Git diff runs without an external diff helper', async () => {
+    if (process.platform === 'win32') return;
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-readonly-git-diff-'));
+    try {
+      expect(
+        Bun.spawnSync(['git', 'init', '-q'], { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
+          .exitCode,
+      ).toBe(0);
+      writeFileSync(join(workspace, 'tracked.txt'), 'before\n');
+      expect(
+        Bun.spawnSync(['git', 'add', 'tracked.txt'], {
+          cwd: workspace,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        }).exitCode,
+      ).toBe(0);
+      writeFileSync(join(workspace, 'tracked.txt'), 'after\n');
+
+      const result = await shellTool({
+        workspace,
+        command: 'git diff -- tracked.txt',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('-before');
+      expect(result.stdout).toContain('+after');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('shell timeout resolution always returns a finite hard limit', () => {
     expect(resolveShellTimeoutMs()).toBe(DEFAULT_SHELL_TIMEOUT_MS);
     expect(resolveShellTimeoutMs(0)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
@@ -504,7 +537,7 @@ describe('tool safety', () => {
     expect(realpathSync(normalizedPwd).toLowerCase()).toBe(realpathSync(workspace).toLowerCase());
   });
 
-  test('shell_execute produces no stderr noise on standard commands', async () => {
+  test('shell_execute filters MSYS2 startup noise on standard commands', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell-clean');
     mkdirSync(workspace, { recursive: true });
 
@@ -512,8 +545,11 @@ describe('tool safety', () => {
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    // MSYS2 bash must not emit /tmp or other spurious warnings to stderr
-    expect(result.stderr).toBe('');
+    // A POSIX login shell may legitimately report errors from the user's profile.
+    // The product guarantee exercised here is the Windows-specific MSYS2 filter.
+    if (process.platform === 'win32') {
+      expect(result.stderr).toBe('');
+    }
   });
 
   test('shellTool aborts child process when signal fires', async () => {

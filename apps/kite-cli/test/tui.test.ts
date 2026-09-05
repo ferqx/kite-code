@@ -2,71 +2,22 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TuiUserInputProvider } from '../src/tui/provider';
-import {
-  shouldAbortStoppedRun,
-  shouldProjectRunExited,
-  shouldSetIdleAfterRun,
-} from '../src/tui/run-lifecycle';
 
 describe('TuiUserInputProvider', () => {
-  test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
+  test('TUI reducer exposes accepted presentation envelopes as its streamed event action', () => {
     const root = join(import.meta.dir, '..', '..', '..');
     const actions = readFileSync(join(root, 'apps/kite-cli/src/tui/reducers/actions.ts'), 'utf8');
     const reducer = readFileSync(join(root, 'apps/kite-cli/src/tui/reducers/index.ts'), 'utf8');
 
     expect(actions).not.toContain("type: 'EVENT'");
     expect(reducer).not.toContain("action.type === 'EVENT'");
+    expect(actions).toContain("type: 'ACCEPT_PRESENTATION_ENVELOPE'");
+    expect(actions).not.toContain("type: 'RUNTIME_EVENT'");
   });
 
   test('does not expose the retired AgentEvent forwarding method', () => {
     const provider = new TuiUserInputProvider();
     expect('onEvent' in provider).toBe(false);
-  });
-
-  test('does not let an older cancelled run clear a successor prompt', () => {
-    expect(shouldSetIdleAfterRun(true, 1, 2)).toBe(false);
-    expect(shouldSetIdleAfterRun(true, 2, 2)).toBe(true);
-    expect(shouldSetIdleAfterRun(false, 1, 1)).toBe(false);
-  });
-  test('does not project terminal exit from a generator closed by cancellation', () => {
-    expect(shouldProjectRunExited({ aborted: false, signalAborted: true, foreground: true })).toBe(
-      false,
-    );
-    expect(shouldProjectRunExited({ aborted: true, signalAborted: false, foreground: true })).toBe(
-      false,
-    );
-    expect(
-      shouldProjectRunExited({ aborted: false, signalAborted: false, foreground: false }),
-    ).toBe(false);
-    expect(shouldProjectRunExited({ aborted: false, signalAborted: false, foreground: true })).toBe(
-      true,
-    );
-  });
-  test('does not abort a run that already emitted its terminal exit state', () => {
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: true,
-        running: false,
-        ctrlCPressed: false,
-        exited: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: true,
-        running: false,
-        ctrlCPressed: false,
-        exited: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldAbortStoppedRun({
-        wasRunning: false,
-        running: false,
-        ctrlCPressed: false,
-        exited: false,
-      }),
-    ).toBe(false);
   });
 
   test('requestAction blocks until submitAction is called', async () => {
@@ -78,6 +29,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 1,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-1' },
       title: 'shell_execute',
       summary: 'run echo',
     });
@@ -132,6 +84,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 1,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-2' },
       title: 'shell_execute',
       summary: 'run echo',
     });
@@ -150,6 +103,7 @@ describe('TuiUserInputProvider', () => {
       sessionRevision: 0,
       generation: 2,
       grants: ['approve_once'],
+      owner: { kind: 'root_tool', toolCallId: 'approval-generation-2' },
       title: 'shell_execute',
       summary: 'run echo',
     });

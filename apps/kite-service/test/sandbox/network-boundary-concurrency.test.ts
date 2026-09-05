@@ -477,15 +477,15 @@ describe('network boundary concurrent invocation isolation', () => {
     );
 
     expect({ shellWasEntered, receiptWasPersisted }).toEqual({
-      shellWasEntered: true,
+      shellWasEntered: false,
       receiptWasPersisted: true,
     });
     expect(providerCalls).toBe(0);
-    expect(observedShellNetworkMode).toBe('allow_all');
-    expect(terminalByToolCallId.size).toBe(toolCallIds.length);
-    expect(capabilityTerminalInvocationIds.size).toBe(2);
+    expect(observedShellNetworkMode).toBeUndefined();
+    expect(terminalByToolCallId.size).toBe(toolCallIds.length - 1);
+    expect(capabilityTerminalInvocationIds.size).toBe(1);
     expect(kernel.getState().tools.calls.web?.status).toBe('failed');
-    expect(kernel.getState().tools.calls.shell?.status).toBe('succeeded');
+    expect(kernel.getState().tools.calls.shell?.status).toBe('awaiting_approval');
     for (const toolCallId of ['inventory', 'resource', 'dynamic']) {
       expect(kernel.getState().tools.calls[toolCallId]?.status).toBe('failed');
     }

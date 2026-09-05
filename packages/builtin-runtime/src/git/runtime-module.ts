@@ -23,7 +23,6 @@ import { digestCapabilityBindingValue } from '../capability-binding';
 import {
   builtinExecutionTraits,
   defineBuiltinCapabilityContract,
-  gitAvailability,
   parserForBuiltinOperation,
   staticEffectsClassifier,
 } from '../catalog-contract';
@@ -39,11 +38,7 @@ import {
   truncateProjectedStreams,
 } from '../filesystem/projection';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
-import {
-  createBuiltinPolicyCompiler,
-  fileBuiltinPolicyRule,
-  readOnlyBuiltinPolicyRule,
-} from '../policy-compiler';
+import { createBuiltinPolicyCompiler, fileBuiltinPolicyRule } from '../policy-compiler';
 import { builtinToolDescription } from '../tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from '../tool-schemas';
 
@@ -193,7 +188,7 @@ function registerGitOperations(registry: RuntimeModuleRegistryWriter): void {
           providerId: GIT_PROVIDER_ID_,
           title: `Builtin Runtime operation ${operationId}`,
           executionMechanism: EXECUTION_MECHANISMS_[operationId],
-          ...(operationId.startsWith('builtin:')
+          ...(operationId.startsWith('builtin:') && operationId !== 'builtin:git_inspect'
             ? {
                 toolName: operationId.slice('builtin:'.length),
                 description: builtinToolDescription(operationId.slice('builtin:'.length)),
@@ -222,40 +217,41 @@ function gitContractOptions(
   revision: string,
   effects: CapabilityEffects,
 ) {
+  const parser = parserForBuiltinOperation(operationId, revision);
+  if (operationId === 'builtin:git_inspect') {
+    return {
+      parser,
+      kind: 'internal_runtime' as const,
+      effectsClassifier: staticEffectsClassifier(
+        'read_only',
+        false,
+        'Internal Git inspection is read-only and broker-bound.',
+        effects,
+      ),
+      execution: { retry: 'safe_read' as const },
+    };
+  }
   const readOnly =
     operationId === 'builtin:read_file' ||
     operationId === 'builtin:search_content' ||
-    operationId === 'builtin:search_files' ||
-    operationId === 'builtin:git_inspect';
+    operationId === 'builtin:search_files';
   const workspaceWrite =
     operationId === 'builtin:write_file' || operationId === 'builtin:edit_file';
   const workspaceRead =
     operationId === 'builtin:read_file' ||
     operationId === 'builtin:search_content' ||
     operationId === 'builtin:search_files';
-  const policyRule =
-    operationId === 'builtin:read_file' ||
-    operationId === 'builtin:search_content' ||
-    operationId === 'builtin:search_files' ||
-    operationId === 'builtin:write_file' ||
-    operationId === 'builtin:edit_file'
-      ? fileBuiltinPolicyRule
-      : readOnlyBuiltinPolicyRule;
-  const parser = parserForBuiltinOperation(operationId, revision);
   return {
     parser,
     kind: 'computer' as const,
     minimumApproval: 'none' as const,
-    ...(operationId === 'builtin:git_inspect' ? { availability: gitAvailability } : {}),
-    ...(operationId === 'builtin:git_inspect'
-      ? { governanceRevision: 'git-inspect-v1' }
-      : operationId === 'builtin:read_file' ||
-          operationId === 'builtin:search_content' ||
-          operationId === 'builtin:search_files' ||
-          operationId === 'builtin:write_file' ||
-          operationId === 'builtin:edit_file'
-        ? { governanceRevision: 'trusted-workspace-file-access-v1' }
-        : {}),
+    ...(operationId === 'builtin:read_file' ||
+    operationId === 'builtin:search_content' ||
+    operationId === 'builtin:search_files' ||
+    operationId === 'builtin:write_file' ||
+    operationId === 'builtin:edit_file'
+      ? { governanceRevision: 'trusted-workspace-file-access-v1' }
+      : {}),
     effectsClassifier: staticEffectsClassifier(
       readOnly ? 'read_only' : workspaceWrite ? 'workspace_write' : 'unknown',
       workspaceWrite,
@@ -265,11 +261,9 @@ function gitContractOptions(
           ? 'search_content is a read-only capability.'
           : operationId === 'builtin:search_files'
             ? 'search_files is a read-only capability.'
-            : operationId === 'builtin:git_inspect'
-              ? 'Typed Git inspect is read-only and broker-bound.'
-              : operationId === 'builtin:write_file'
-                ? 'write_file creates or overwrites workspace files.'
-                : 'edit_file modifies workspace files.',
+            : operationId === 'builtin:write_file'
+              ? 'write_file creates or overwrites workspace files.'
+              : 'edit_file modifies workspace files.',
       effects,
     ),
     policyCompiler: createBuiltinPolicyCompiler({
@@ -278,7 +272,7 @@ function gitContractOptions(
       parserRevision: parser.parserRevision,
       declaredEffects: effects,
       minimumApproval: 'none',
-      rule: policyRule,
+      rule: fileBuiltinPolicyRule,
     }),
     ...(workspaceRead
       ? {

@@ -81,6 +81,95 @@ function validApprovalCommandIdentity(value: unknown): boolean {
   );
 }
 
+function validInteractionOwner(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.kind !== 'string') return false;
+  if (value.kind === 'root_tool') {
+    return (
+      Object.keys(value).length === 2 &&
+      Object.keys(value).every((key) => key === 'kind' || key === 'toolCallId') &&
+      typeof value.toolCallId === 'string' &&
+      value.toolCallId.length > 0
+    );
+  }
+  return (
+    value.kind === 'subagent_tool' &&
+    Object.keys(value).length === 4 &&
+    Object.keys(value).every(
+      (key) =>
+        key === 'kind' ||
+        key === 'toolCallId' ||
+        key === 'subagentId' ||
+        key === 'parentToolCallId',
+    ) &&
+    typeof value.toolCallId === 'string' &&
+    value.toolCallId.length > 0 &&
+    typeof value.subagentId === 'string' &&
+    value.subagentId.length > 0 &&
+    typeof value.parentToolCallId === 'string' &&
+    value.parentToolCallId.length > 0
+  );
+}
+
+function validToolPresentation(value: unknown): boolean {
+  return value === 'exploration' || value === 'standalone' || value === 'hidden';
+}
+
+function validToolDisplayLabel(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) return false;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)) return false;
+  }
+  return true;
+}
+
+function validSubagentStepPayload(value: unknown, allowLegacyIdentity: boolean): boolean {
+  if (!isRecord(value)) return false;
+  const hasStableIdentity =
+    typeof value.stepId === 'string' &&
+    value.stepId.length > 0 &&
+    typeof value.toolCallId === 'string' &&
+    value.toolCallId.length > 0;
+  if (!allowLegacyIdentity && !hasStableIdentity) return false;
+  return (
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    typeof value.toolName === 'string' &&
+    value.toolName.length > 0 &&
+    isRecord(value.toolArgs) &&
+    (value.modelInvocationId === undefined ||
+      (typeof value.modelInvocationId === 'string' && value.modelInvocationId.length > 0)) &&
+    (value.durationMs === undefined ||
+      (Number.isSafeInteger(value.durationMs) && Number(value.durationMs) >= 0))
+  );
+}
+
+function validSubagentToolResultPayload(value: unknown, allowLegacyIdentity: boolean): boolean {
+  if (!isRecord(value)) return false;
+  const hasStableIdentity =
+    typeof value.stepId === 'string' &&
+    value.stepId.length > 0 &&
+    typeof value.toolCallId === 'string' &&
+    value.toolCallId.length > 0;
+  return (
+    (allowLegacyIdentity || hasStableIdentity) &&
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    typeof value.toolName === 'string' &&
+    value.toolName.length > 0 &&
+    (value.status === 'completed' || value.status === 'failed' || value.status === 'cancelled') &&
+    !Object.hasOwn(value, 'ok') &&
+    (value.summary === undefined || typeof value.summary === 'string') &&
+    (value.totalLines === undefined ||
+      (Number.isSafeInteger(value.totalLines) && Number(value.totalLines) >= 0)) &&
+    (value.toolTokenCount === undefined ||
+      (Number.isSafeInteger(value.toolTokenCount) && Number(value.toolTokenCount) >= 0)) &&
+    (value.durationMs === undefined ||
+      (Number.isSafeInteger(value.durationMs) && Number(value.durationMs) >= 0)) &&
+    (value.failureReason === undefined || typeof value.failureReason === 'string')
+  );
+}
+
 function assertPositiveAttempt(event: Record<string, unknown>): void {
   if (!Number.isSafeInteger(event.attempt) || Number(event.attempt) < 1)
     throw new Error(`Runtime event ${String(event.type)} requires a positive attempt.`);
@@ -107,6 +196,20 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
   for (const field of CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[eventType]) {
     if (!Object.hasOwn(value, field)) {
       throw new Error(`Runtime event ${eventType} requires ${String(field)}.`);
+    }
+  }
+  if (
+    value.type === 'tool.queued' ||
+    value.type === 'tool.finished' ||
+    value.type === 'tool.failed' ||
+    value.type === 'tool.rejected' ||
+    value.type === 'tool.cancelled'
+  ) {
+    if (value.presentation !== undefined && !validToolPresentation(value.presentation)) {
+      throw new Error(`${value.type} presentation classification is invalid.`);
+    }
+    if (value.displayLabel !== undefined && !validToolDisplayLabel(value.displayLabel)) {
+      throw new Error(`${value.type} display label is invalid.`);
     }
   }
   switch (value.type) {
@@ -174,6 +277,9 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     case 'approval.rejected':
       requireNonEmptyString(value, 'interactionId');
       requireNonEmptyString(value, 'toolCallId');
+      if (!validInteractionOwner(value.owner)) {
+        throw new Error(`${value.type} owner binding is invalid.`);
+      }
       if (value.type === 'approval.granted' && value.grant !== 'approve_once') {
         throw new Error('approval.granted may only issue approve_once.');
       }
@@ -194,6 +300,8 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       requireNonEmptyString(value, 'interactionId');
       requireNonEmptyString(value, 'toolCallId');
       requireNonEmptyString(value, 'grantKey');
+      if (!validInteractionOwner(value.owner))
+        throw new Error('approval.batch_released owner binding is invalid.');
       if (value.grant !== 'same_command')
         throw new Error('approval.batch_released requires same_command.');
       if (!validApprovalCommandIdentity(value.commandIdentity))
@@ -214,6 +322,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
               'toolCallId',
               'receiptId',
               'generation',
+              'owner',
               ...(match.bindingDigest === undefined ? [] : ['bindingDigest']),
             ]);
             const keys = Object.keys(match);
@@ -228,6 +337,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
           receiptIds.has(match.receiptId) ||
           !Number.isSafeInteger(match.generation) ||
           Number(match.generation) < 0 ||
+          !validInteractionOwner(match.owner) ||
           (match.bindingDigest !== undefined &&
             (typeof match.bindingDigest !== 'string' || match.bindingDigest.length === 0))
         ) {
@@ -262,6 +372,8 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         typeof value.fullModePolicyBypassAllowed !== 'boolean'
       )
         throw new Error(`${value.type} Full-mode eligibility is invalid.`);
+      if (!validInteractionOwner(value.owner))
+        throw new Error(`${value.type} owner binding is invalid.`);
       break;
     case 'approval.session_grants_cleared':
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
@@ -274,9 +386,44 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('approval.session_grants_cleared clearedAt is invalid.');
       break;
     case 'auto_review.completed':
+      if (!validInteractionOwner(value.owner))
+        throw new Error('auto_review.completed owner binding is invalid.');
       if (!isRecord(value.result)) throw new Error('auto_review.completed result is invalid.');
       if (value.result.escalatedToUser !== undefined && value.result.escalatedToUser !== true) {
         throw new Error('auto_review.completed escalation disposition is invalid.');
+      }
+      break;
+    case 'subagent.step':
+      if (!validSubagentStepPayload(value.subagent, true)) {
+        throw new Error('subagent.step payload is invalid.');
+      }
+      break;
+    case 'subagent.tool_result':
+      if (!validSubagentToolResultPayload(value.subagent, true)) {
+        throw new Error('subagent.tool_result payload is invalid.');
+      }
+      break;
+    case 'subagent.approval_deferred':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.interactionId === undefined ? [] : ['interactionId']),
+        ...(value.approvalState === undefined ? [] : ['approvalState']),
+      ]);
+      requireNonEmptyString(value, 'toolCallId');
+      requireNonEmptyString(value, 'subagentId');
+      requireNonEmptyString(value, 'parentToolCallId');
+      if (value.interactionId !== undefined) requireNonEmptyString(value, 'interactionId');
+      if (
+        value.approvalState !== undefined &&
+        ![
+          'queued_auto_review',
+          'auto_reviewing',
+          'queued_user_approval',
+          'awaiting_user',
+          'authorized_queued',
+        ].includes(String(value.approvalState))
+      ) {
+        throw new Error('subagent.approval_deferred approval state is invalid.');
       }
       break;
     case 'capability.execution_succeeded':
@@ -642,6 +789,15 @@ export function assertCurrentRuntimeEventForWrite(value: unknown): asserts value
     ) {
       throw new Error('Retired subagent task titles are read-only compatibility data.');
     }
+  }
+  if (event.type === 'subagent.step' && !validSubagentStepPayload(event.subagent, false)) {
+    throw new Error('Legacy Subagent step identity is read-only compatibility data.');
+  }
+  if (
+    event.type === 'subagent.tool_result' &&
+    !validSubagentToolResultPayload(event.subagent, false)
+  ) {
+    throw new Error('Legacy Subagent tool-result identity is read-only compatibility data.');
   }
 }
 

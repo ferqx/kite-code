@@ -8,6 +8,7 @@ export function createSqliteEventStore<Event>(input: {
   readonly codec: SqliteRuntimeSnapshotCodec<Event, unknown>;
   readonly stateSchemaVersion: number;
   readonly isClosed: () => boolean;
+  readonly beforeWrite?: () => void;
 }) {
   const insertEvent = input.db.query(
     'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, created_at) VALUES (?, ?, ?, ?, ?, unixepoch())',
@@ -50,6 +51,7 @@ export function createSqliteEventStore<Event>(input: {
     metadata?: readonly RuntimeEventMetadata[],
     forkCreatedAt?: readonly number[],
   ): void => {
+    if (events.length > 0) input.beforeWrite?.();
     for (const [index, event] of events.entries()) {
       const entry = eventMetadataAt(metadata, index);
       const implicitSequence = lastEventPosition(sessionId) + 1;
@@ -102,7 +104,7 @@ export function createSqliteEventStore<Event>(input: {
     return rows.map((row) => ({
       id: row.id,
       thread_id: row.thread_id,
-      event: input.codec.decodeEvent(row.event_json),
+      event: input.codec.decodeEvent(row.event_json, { sequence: row.revision }),
       created_at: row.created_at,
       ...(row.event_id ? { event_id: row.event_id } : {}),
       revision: row.revision,
@@ -123,7 +125,9 @@ export function createSqliteEventStore<Event>(input: {
       const rows = selectEventSummaryBatch.all(sessionId, sequence);
       for (const row of rows) {
         sequence = row.sequence;
-        const summary = input.codec.eventSummary(input.codec.decodeEvent(row.event_json));
+        const summary = input.codec.eventSummary(
+          input.codec.decodeEvent(row.event_json, { sequence: row.sequence }),
+        );
         if (summary?.isSessionNameCandidate) return summary;
       }
       if (rows.length < 32) return null;
@@ -137,9 +141,14 @@ export function createSqliteEventStore<Event>(input: {
     lastEventPosition,
     revisionAtOrBefore: (sessionId: string, position: number) =>
       selectEventRevisionAtOrBefore.get(sessionId, position)?.revision ?? 0,
-    deleteAll: (sessionId: string) => deleteEvents.run(sessionId),
-    deleteAfter: (sessionId: string, position: number) =>
-      deleteEventsAfter.run(sessionId, position),
+    deleteAll: (sessionId: string) => {
+      input.beforeWrite?.();
+      return deleteEvents.run(sessionId);
+    },
+    deleteAfter: (sessionId: string, position: number) => {
+      input.beforeWrite?.();
+      return deleteEventsAfter.run(sessionId, position);
+    },
     insertSerializedForkEvent: (record: {
       readonly sessionId: string;
       readonly eventJson: string;
@@ -148,8 +157,9 @@ export function createSqliteEventStore<Event>(input: {
       readonly causationId: string | null;
       readonly occurredAt: string | null;
       readonly createdAt: number;
-    }) =>
-      insertForkEvent.run(
+    }) => {
+      input.beforeWrite?.();
+      return insertForkEvent.run(
         record.sessionId,
         record.eventJson,
         record.eventId,
@@ -158,6 +168,7 @@ export function createSqliteEventStore<Event>(input: {
         record.causationId,
         record.occurredAt,
         record.createdAt,
-      ),
+      );
+    },
   });
 }

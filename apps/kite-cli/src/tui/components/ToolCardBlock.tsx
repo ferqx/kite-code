@@ -1,15 +1,15 @@
 import type { UserInputResult } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import SyntaxHighlight from 'ink-syntax-highlight';
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo } from 'react';
 import stringWidth from 'string-width';
 import { type I18n, useI18n } from '../i18n';
 import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
+import { activityDot } from './activity-dot';
 import MarkdownBlock from './MarkdownBlock';
 import { ACTION_NAMES, formatElapsed, toolColor, writeFileActionName } from './render-utils';
-import { useBlinkDot } from './use-blink-dot';
 
 export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '└─ ';
@@ -141,7 +141,6 @@ function parseAskUserAnswers(
 ): {
   answer: string;
   answerMap: Record<string, string> | undefined;
-  isCancelled: boolean;
 } {
   const questions = args.questions as AskQuestionItem[] | undefined;
   if (userInput) {
@@ -152,7 +151,7 @@ function parseAskUserAnswers(
     const rawAnswer = userInput.answer || '(no answer)';
     const answer =
       !questions || questions.length <= 1 ? withoutSingleQuestionKey(rawAnswer) : rawAnswer;
-    return { answer, answerMap, isCancelled: answer === 'Cancelled' };
+    return { answer, answerMap };
   }
 
   let answer: string | undefined;
@@ -182,9 +181,8 @@ function parseAskUserAnswers(
       }
     }
   }
-  const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
   const normalizedAnswer = !questions?.length && answer ? withoutSingleQuestionKey(answer) : answer;
-  return { answer: normalizedAnswer ?? '(no answer)', answerMap, isCancelled };
+  return { answer: normalizedAnswer ?? '(no answer)', answerMap };
 }
 
 /** ask_user 紧凑答案：单题仅显示 User 回答；多题以一条入口分支列出「问题: 回答」。
@@ -193,17 +191,18 @@ function parseAskUserAnswers(
 function renderAskUserSummary(
   args: Record<string, unknown>,
   summary: string,
+  status: Extract<OutputBlock, { kind: 'tool_card' }>['status'],
   dt: Theme,
   maxLine: number,
   translate: I18n['t'],
   userInput?: UserInputResult,
 ): React.ReactNode {
   const questions = askQuestions(args);
-  const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary, userInput);
+  const { answer, answerMap } = parseAskUserAnswers(args, summary, userInput);
 
-  // 已取消（结构化答案为 Cancelled，或无结构化答案且 summary 为空/Cancelled）→ 展示所有问题 + Cancelled 标记
-  // Cancelled (structured answer is Cancelled, or no structured result and summary is empty/Cancelled)
-  const cancelled = isCancelled || (!userInput && (!summary || summary.trim().length === 0));
+  // Cancellation is a structured terminal fact. Missing answer data can occur
+  // while projections are catching up and must not be rendered as cancelled.
+  const cancelled = status === 'cancelled';
   if (cancelled) {
     if (questions.length > 0) {
       return (
@@ -516,9 +515,9 @@ interface ToolCardBlockProps {
 }
 
 /**
- * Keep the running-card clock and blink state below the card boundary. A tool
- * can have a live-output tail below this header; updating the clock every
- * 200ms must not make Ink re-layout that unchanged tail.
+ * The running-card clock is an event-driven snapshot. Wall-clock-only updates
+ * would continuously write stdout while a tool is idle and make native
+ * terminal selection and scrollback unusable.
  */
 const RunningToolHeader = memo(function RunningToolHeader({
   block,
@@ -528,30 +527,17 @@ const RunningToolHeader = memo(function RunningToolHeader({
   const dt = useTheme();
   const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
-  const spinnerActive =
+  const activityActive =
     block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
-  const spinnerFrame = useBlinkDot(spinnerActive);
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    block.startedAt ? Date.now() - block.startedAt : 0,
-  );
-  const startedAtRef = useRef(block.startedAt);
-  startedAtRef.current = block.startedAt;
-
-  useEffect(() => {
-    if (!showElapsed || block.status !== 'running' || awaitingApproval) return;
-    const timer = setInterval(() => {
-      const at = startedAtRef.current;
-      if (at != null) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => clearInterval(timer);
-  }, [showElapsed, block.status, awaitingApproval]);
+  const activityFrame = activityDot(activityActive);
+  const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
   const isWaiting = awaitingApproval || block.name === 'ask_user';
   const askQuestionCount = block.name === 'ask_user' ? askQuestions(block.args).length : 0;
   const isMultiQuestionAsk = askQuestionCount > 1;
   const preview =
     block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
-  const spinner = isWaiting ? '○ ' : spinnerFrame;
+  const icon = isWaiting ? '○ ' : activityFrame;
   const displayName = isMultiQuestionAsk
     ? translate('tool.askUserCount', { count: askQuestionCount })
     : block.name === 'ask_user'
@@ -567,7 +553,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
               : mcpToolDisplayName(block.name);
   return (
     <Box>
-      <Text>{spinner}</Text>
+      <Text>{icon}</Text>
       <Text>{displayName}</Text>
       {!isMultiQuestionAsk && preview ? (
         <Text color={dt.muted}>{block.name === 'ask_user' ? ` · ${preview}` : ` ${preview}`}</Text>
@@ -670,6 +656,7 @@ export default function ToolCardBlock({
   const isExpanded =
     block.expanded ??
     (block.status === 'error' ||
+      block.status === 'rejected' ||
       block.status === 'cancelled' ||
       block.status === 'timeout' ||
       block.status === 'exhausted' ||
@@ -782,6 +769,7 @@ export default function ToolCardBlock({
             renderAskUserSummary(
               block.args,
               block.summary ?? '',
+              block.status,
               dt,
               columns - 2,
               translate,
@@ -802,7 +790,13 @@ export default function ToolCardBlock({
           ) : (
             <>
               {isExpanded &&
-                (block.status === 'cancelled' && !hasShellOutput ? null : hasShellOutput ? (
+                (block.status === 'cancelled' && !hasShellOutput ? null : block.status ===
+                  'rejected' ? (
+                  <Text color={dt.warning}>
+                    {SHELL_PREFIX}
+                    {block.summary || 'Rejected before execution.'}
+                  </Text>
+                ) : hasShellOutput ? (
                   renderShellLines(
                     shellOutput!,
                     dt.dim,
@@ -821,23 +815,23 @@ export default function ToolCardBlock({
                   : SHELL_PREFIX}
                 {block.status === 'exhausted'
                   ? 'blocked (too many repeated failures)'
-                  : isWebFetch
-                    ? block.status === 'cancelled'
-                      ? 'cancelled'
-                      : block.status === 'error'
-                        ? 'fetch failed'
+                  : block.status === 'rejected'
+                    ? 'rejected before execution'
+                    : isWebFetch
+                      ? block.status === 'cancelled'
+                        ? 'cancelled'
+                        : block.status === 'error'
+                          ? 'fetch failed'
+                          : block.status === 'timeout'
+                            ? `timed out after ${block.timeoutMs ?? 15000}ms`
+                            : 'fetched'
+                      : block.status === 'cancelled'
+                        ? 'cancelled'
                         : block.status === 'timeout'
-                          ? `timed out after ${block.timeoutMs ?? 15000}ms`
-                          : 'fetched'
-                    : block.status === 'cancelled' ||
-                        block.summary?.startsWith('Command cancelled') ||
-                        block.summary?.includes('"cancelled":true')
-                      ? 'cancelled'
-                      : block.status === 'timeout'
-                        ? block.timeoutMs != null
-                          ? `timed out after ${block.timeoutMs}ms`
-                          : 'timed out'
-                        : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+                          ? block.timeoutMs != null
+                            ? `timed out after ${block.timeoutMs}ms`
+                            : 'timed out'
+                          : `exit: ${block.status === 'error' ? 'error' : '0'}`}
               </Text>
               {'reviewFailure' in block && block.reviewFailure ? (
                 <Text color={dt.error}>

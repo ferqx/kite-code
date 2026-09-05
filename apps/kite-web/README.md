@@ -1,0 +1,79 @@
+# Kite Web
+
+`@kite-ai/kite-web`是本地、private、只读的Browser presentation workspace。它使用React、strict
+TypeScript与Vite，只显示path-free Workspace、既有Session、History、诊断Log和Checkpoint；不提供prompt、Session create、
+Interaction/approval reply、cancel、rewind、fork、配置或Controller操作。
+
+## 唯一业务通道
+
+`src/transport/client.ts`是唯一生产Browser adapter。访问显式App Server daemon `/`时，index响应已经建立HttpOnly/SameSite Browser session，
+client直接验证`GET /v1`；Browser JavaScript不捕获或兑换启动token。此后业务数据只来自同一daemon listener的typed REST：
+
+- `GET /v1`验证当前Browser principal的`workspaces/sessions/history/checkpoints`capability；
+- `GET /v1/workspaces`读取独立、path-free Workspace page；只预取首个Workspace的Session，其余在展开时读取；
+- `GET /v1/workspaces/{workspace_id}/sessions`读取该Workspace的bounded Session page；
+- 选择Session后默认读取`History`与Checkpoint metadata；用户切换到Runtime logs Tab时读取安全的durable Log snapshot；
+- History中的`tool.lifecycle`按`tool_call_id`折叠成一个稳定展示项：queued/started更新当前态，completed/failed/rejected/cancelled替换前态；
+  terminal到达后不得残留loading卡片，缺少具体label的started/terminal事件沿用同一调用较早的真实工具名；
+- `rejected`表示工具从未dispatch，使用独立提示卡显示脱敏原因，不渲染exit code或`No output`，也不与执行后的
+  `failed`混为一类；
+- `GET /v1/sessions/{session_id}/logs`只包含event type、sequence、time、category、status、summary及closed detail fields，
+  Web用可展开的key/value解释展示，不读取raw Store event；
+- 展开`model.invocation_prepared`后可按exact invocation打开Model Context Inspector；Inspector调用Browser-only
+  `GET /v1/sessions/{session_id}/model-invocations/{invocation_id}/context`，分区展示Overview、System prompt、Messages、Tools与Request settings；
+- 只有选中Session为`running/waiting`且页面可见时，按2秒单飞读取`after_sequence`增量History并重新读取Session projection；
+- 页面生命周期结束时，transport调用`DELETE /v1/auth/browser/session`自动清理Browser session；页面不提供无意义的手动Disconnect动作。
+
+Web不调用`/_kite/web/bootstrap|tabs|directory|history|client`，不建立业务WebSocket，也没有BFF fallback、SSE、offline cache、后台同步
+engine或持久client state。迟到结果以connection generation和Session identity隔离；轮询失败保留最后REST snapshot并停止把错误伪装成空数据。
+Runtime logs按需读取并由用户显式刷新，不增加第二个后台poll scheduler。
+
+## 视觉与可操控性
+
+Web采用“Quiet Technical Workspace”设计语言：目录紧凑、正文舒适、状态明确，Light/Dark共用semantic token；品牌标记与无长内容竞争的
+空状态使用低对比度Wind Trails表达Kite的空气与方向感。关键交互具备稳定role与
+accessible name，loading/empty/error/selected/connected均保留可读文本，不把关键能力藏在hover或Canvas中。完整规范见
+[`UI Design System`](docs/ui-design-system.md)。
+
+## 依赖与安全边界
+
+组件只消费本地presentation type。transport只依赖browser-safe `@kite-ai/agent-api-client`，该client只依赖
+`@kite-ai/agent-api-contract`；Web不得导入Service、CLI/TUI、Native local-runtime、Runtime Protocol/Host、Store、SQLite、Node或Bun I/O。
+Browser JavaScript不持有Agent bearer、Native access token、canonical Workspace path或Store path。
+Model Context是敏感本机诊断内容；Inspector不展示Artifact identity、Provider options/response、endpoint或Credential，关闭后不缓存或持久化内容。
+
+固定`/api-docs`入口展示release-bundled canonical OpenAPI；renderer没有form、Try it或execute control，规范使用same-origin、
+no-credential、`no-store`读取。页面存在不表示当前principal拥有尚未ready的mutation/SSE operation。
+
+`src/main.tsx`使用React Router Declarative Mode提供Browser SPA；目录`/`、规范会话`/sessions/:sessionId`与`/api-docs`通过History API
+切换，不触发document reload。Session选择push只包含opaque Session identity的短URL；从Docs执行Browser back时通过现有Browser direct Session read
+恢复摘要与History，不暴露Workspace digest，也不扫描Workspace Session page。
+所有index shell入口都可由daemon建立同一种短期HttpOnly Browser session，因此直接打开深链接后无刷新进入Observer仍能读取`/v1`；
+SPA持有一个production transport，route unmount只停止对应页面工作，不撤销Browser session，document `pagehide`才清理session。精确OpenAPI
+JSON与hashed asset请求不创建session。
+
+## 启动与release
+
+默认TUI/CLI不启动或发现Web。Browser打开URL不能启动本机进程，`kite web`也只读取已经显式启动的daemon；absent时提示先执行
+`kite server start`，不会隐式spawn。`bun run --cwd apps/kite-web dev`只是Vite资源服务器。源码开发使用根命令`bun run server`：它先build
+assets、显式启动daemon，再打印稳定`origin/`；`bun run tui`始终保持stdio-only。`GET /`与`GET /api-docs`直接返回同一个index而不暴露
+物理文件名。Browser关闭或logout不停止daemon。
+
+release candidate把同一Vite产物放入`payload/web`。显式daemon的一个loopback listener同时提供static assets、`/api-docs`与`/v1`；Web
+不拥有第二listener、Runtime、Store、数据库或独立lifecycle。
+
+## 验证
+
+```text
+bun run --cwd apps/kite-web typecheck
+bun run --cwd apps/kite-web test
+bun run --cwd apps/kite-web build
+cmp apps/kite-web/dist/api-docs/openapi.json packages/agent-api-contract/generated/openapi.json
+rg '_kite/web/(bootstrap|tabs|directory|history|client)' apps/kite-web/dist
+```
+
+最后一条必须无匹配。
+
+## 本地文档
+
+- [UI Design System](docs/ui-design-system.md)

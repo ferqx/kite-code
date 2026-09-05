@@ -25,7 +25,7 @@ function config(): AgentConfig {
 }
 
 describe('ACORE-GIT Controller and Kernel integration', () => {
-  test('Registry failure persists one strict typed outcome with stable Git detail and no replay', async () => {
+  test('does not dispatch internal typed Git from a model tool call', async () => {
     let inspectDispatches = 0;
     const broker: GitBroker = {
       featureRevision: 'brokered-git-r1',
@@ -67,15 +67,14 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         gitBroker: broker,
         taskConfig: config(),
       });
-      expect(inspectDispatches).toBe(1);
-      expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(1);
+      expect(inspectDispatches).toBe(0);
+      expect(events.some((event) => event.type === 'tool.failed')).toBe(true);
       kernel.processEventBatch(events);
       expect(kernel.getState().tools.calls['git-inspect']?.outcome).toMatchObject({
         status: 'failed',
-        failure: { kind: 'tool_runtime_error', detailCode: 'protected_path_denied' },
-        dispatchState: 'started',
+        failure: { kind: 'tool_not_found' },
+        dispatchState: 'not_started',
         externalEffects: 'none',
-        recovery: { disposition: 'never', maximumAdditionalCalls: 0 },
       });
     } finally {
       kernel.close();

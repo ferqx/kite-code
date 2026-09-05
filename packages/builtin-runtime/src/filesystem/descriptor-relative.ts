@@ -86,7 +86,11 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
   readonly directorySegments: readonly string[];
   readonly targetName: string;
   readonly temporaryName: string;
-  readonly content: string;
+  readonly content: string | Uint8Array;
+  readonly replaceExisting?: boolean;
+  readonly flushFileBuffers?: boolean;
+  readonly writeThroughFile?: boolean;
+  readonly writeThroughMove?: boolean;
   readonly beforePublish: () => void;
 }): void {
   if (process.platform !== 'win32') {
@@ -110,9 +114,13 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
     }
     temporaryPath = join(directoryPath, input.temporaryName);
     const targetPath = join(directoryPath, input.targetName);
-    temporaryHandle = createWindowsTemporaryFile(api, temporaryPath);
+    temporaryHandle = createWindowsTemporaryFile(
+      api,
+      temporaryPath,
+      input.writeThroughFile !== false,
+    );
     writeWindowsFile(api, temporaryHandle, input.content);
-    if (!api.FlushFileBuffers(temporaryHandle))
+    if (input.flushFileBuffers !== false && !api.FlushFileBuffers(temporaryHandle))
       throw windowsFilesystemError(api, 'flush temporary file');
     closeWindowsHandle(api, temporaryHandle);
     temporaryHandle = undefined;
@@ -121,7 +129,8 @@ export function atomicReplaceInLockedWindowsDirectory(input: {
       !api.MoveFileExW(
         widePointer(temporaryPath),
         widePointer(targetPath),
-        WINDOWS_MOVEFILE_REPLACE_EXISTING | WINDOWS_MOVEFILE_WRITE_THROUGH,
+        (input.replaceExisting === false ? 0 : WINDOWS_MOVEFILE_REPLACE_EXISTING) |
+          (input.writeThroughMove === false ? 0 : WINDOWS_MOVEFILE_WRITE_THROUGH),
       )
     ) {
       throw windowsFilesystemError(api, 'publish temporary file');
@@ -328,14 +337,18 @@ function openLockedWindowsDirectory(api: WindowsFilesystemApi, path: string): nu
   }
 }
 
-function createWindowsTemporaryFile(api: WindowsFilesystemApi, path: string): number | bigint {
+function createWindowsTemporaryFile(
+  api: WindowsFilesystemApi,
+  path: string,
+  writeThrough: boolean,
+): number | bigint {
   const handle = api.CreateFileW(
     widePointer(path),
     WINDOWS_GENERIC_WRITE,
     WINDOWS_FILE_SHARE_READ | WINDOWS_FILE_SHARE_WRITE,
     null,
     WINDOWS_CREATE_NEW,
-    WINDOWS_FILE_ATTRIBUTE_NORMAL | WINDOWS_FILE_FLAG_WRITE_THROUGH,
+    WINDOWS_FILE_ATTRIBUTE_NORMAL | (writeThrough ? WINDOWS_FILE_FLAG_WRITE_THROUGH : 0),
     0,
   );
   if (invalidWindowsHandle(handle)) {
@@ -347,9 +360,9 @@ function createWindowsTemporaryFile(api: WindowsFilesystemApi, path: string): nu
 function writeWindowsFile(
   api: WindowsFilesystemApi,
   handle: number | bigint,
-  content: string,
+  content: string | Uint8Array,
 ): void {
-  const bytes = Buffer.from(content, 'utf8');
+  const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
   let offset = 0;
   while (offset < bytes.length) {
     const remaining = bytes.subarray(offset);

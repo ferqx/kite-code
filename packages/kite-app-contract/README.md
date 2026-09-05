@@ -46,8 +46,14 @@ manager lifecycle或整个App Contract不兼容。scope/revision不匹配由quer
 
 ## 公开入口
 
-只导出 `src/index.ts`。根出口导出各 exact DTO、codec 和 closed `KiteAppControlClient` method
-surface；没有 generic `call(method, payload)`。
+根出口 `src/index.ts` 导出各 exact DTO、codec 和 closed `KiteAppControlClient` method surface；没有
+generic `call(method, payload)`。Browser Workspace/Session/History/Checkpoint contract已经归一到
+`@kite-ai/agent-api-contract`，本package不再提供`./web` entry或Web Observer DTO。
+
+`@kite-ai/kite-app-contract/worker-controller` 是独立的 native-only Controller subpath；它不从
+根出口或 Web entry 导出。其 exact request/response codec 不携带 Worker endpoint、Store path、
+credential 或 raw Runtime payload，Service 只接受经过 authenticated Worker capability 绑定的
+client/generation。Browser永远不能导入或调用该surface。
 
 ## 依赖与验证
 

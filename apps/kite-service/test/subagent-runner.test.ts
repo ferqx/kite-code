@@ -11,7 +11,7 @@ import {
   BuiltinModelEffectCoordinator,
   resolveProjectInstructionSnapshot,
 } from '@kite-ai/builtin-runtime/model';
-import { getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
+import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS, getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
@@ -310,7 +310,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(result.steps?.find((step) => step.toolName === 'read_file')).toMatchObject({
-        ok: false,
         status: 'error',
       });
       const readResult = events.find(
@@ -356,6 +355,61 @@ describe('SubAgentRunner integration', () => {
       expect(events.find((event) => event.type === 'done')?.data).toMatchObject({
         modelInvocationId: invocation?.invocationId,
       });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('finalizes a successful tool loop even when the shared resource budget is disabled', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-bounded-finalization-'));
+    const { events, sink } = mockEventSink();
+    const toolResponses = Array.from({ length: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }, (_, index) => {
+      const filename = `evidence-${index + 1}.txt`;
+      writeFileSync(join(workspace, filename), `evidence ${index + 1}\n`, 'utf8');
+      return {
+        message: aiMessage({
+          tool_calls: [
+            { id: `bounded-read-${index + 1}`, name: 'read_file', args: { path: filename } },
+          ],
+        }),
+      };
+    });
+    const input: TestSubAgentRunnerInput = {
+      config: {
+        providerName: 'fixture',
+        modelName: 'fixture',
+        features: { resourceBudget: false },
+      } as AgentConfig,
+      workspace,
+      role: getRoleConfig('explore'),
+      task: 'Collect bounded evidence and then finalize.',
+      interactionMode: 'accept_edits',
+      timeoutMs: 5_000,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: new StreamingMockModel({
+        responses: [
+          ...toolResponses,
+          { message: aiMessage({ content: 'Bounded evidence summary.' }) },
+        ],
+      }),
+    };
+
+    try {
+      const result = await runSubAgent(input);
+
+      expect(result).toMatchObject({
+        ok: true,
+        terminalStatus: 'completed',
+        summary: 'Bounded evidence summary.',
+        toolCallCount: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
+      });
+      expect(result.steps).toHaveLength(DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS);
+      expect(events.filter((event) => event.type === 'done')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'error')).toHaveLength(0);
+      expect(Object.keys(modelInvocationHarness(input).getState().modelInvocations)).toHaveLength(
+        DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS + 1,
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -471,7 +525,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('code child receives the same typed Git availability and broker route as its parent', async () => {
+  test('keeps typed Git internal when a code child attempts to call it', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
     let brokerCalls = 0;
     let modelCalls = 0;
@@ -543,7 +597,7 @@ describe('SubAgentRunner integration', () => {
         },
       });
       expect(result).toMatchObject({ ok: true });
-      expect(brokerCalls).toBe(1);
+      expect(brokerCalls).toBe(0);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -589,9 +643,9 @@ describe('SubAgentRunner integration', () => {
       expect(result.ok).toBe(true);
       expect(result.terminalStatus).toBe('completed');
       expect(
-        result.steps?.map((step) => step.ok),
+        result.steps?.map((step) => step.status),
         JSON.stringify(result.steps),
-      ).toEqual([false, true, true]);
+      ).toEqual(['error', 'success', 'success']);
       expect(result.toolRecovery?.order).toHaveLength(1);
       const recoveredFailureId = result.toolRecovery?.order[0];
       expect(
@@ -970,7 +1024,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(child.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
-        ok: false,
         status: 'error',
       });
       expect(readFileSync(join(ws, 'owned.ts'), 'utf8')).toBe('export const owner = "parent";\n');
@@ -1049,7 +1102,6 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(resumed.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
-        ok: true,
         status: 'success',
       });
       expect(readFileSync(join(ws, 'continued.ts'), 'utf8')).toBe('export const value = 2;\n');
@@ -1250,7 +1302,7 @@ describe('SubAgentRunner integration', () => {
       const writeResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',
       );
-      expect(writeResult?.data.ok).toBe(true);
+      expect(writeResult?.data.status).toBe('completed');
       expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -1294,7 +1346,7 @@ describe('SubAgentRunner integration', () => {
       const readResult = events.find(
         (e) => e.type === 'tool_result' && e.data.toolName === 'read_file',
       );
-      expect(readResult?.data.ok).toBe(true);
+      expect(readResult?.data.status).toBe('completed');
       expect(String(readResult?.data.summary)).toContain('"name":"fixture"');
       expect(String(readResult?.data.summary)).not.toContain('"command"');
     } finally {
@@ -1302,7 +1354,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('inherits full interaction mode for uncertain sub-agent verification', async () => {
+  test('keeps uncertain sub-agent verification behind exact approval even in Full', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-verify-'));
     try {
       const { events, sink } = mockEventSink();
@@ -1350,13 +1402,15 @@ describe('SubAgentRunner integration', () => {
         },
       });
 
-      expect(result.ok).toBe(true);
-      expect(shellExecutions).toBe(1);
-      const shellResult = events.find(
-        (event) => event.type === 'tool_result' && event.data.toolName === 'shell_execute',
-      );
-      expect(shellResult?.data.ok).toBe(true);
-      expect(String(shellResult?.data.summary)).toContain('typecheck ok');
+      expect(result.ok).toBe(false);
+      expect(result.blocked).toMatchObject({
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        toolName: 'shell_execute',
+        toolCallId: 'tc-verify',
+        command: 'bun run typecheck',
+      });
+      expect(shellExecutions).toBe(0);
+      expect(events.find((event) => event.type === 'error')).toBeUndefined();
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

@@ -11,6 +11,8 @@ import {
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+  SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
   SqliteRuntimeStorageOpenError,
 } from './preflight';
 import { initializeSqliteRuntimeSchema, type SqliteRuntimeFormatProfile } from './schema';
@@ -40,6 +42,16 @@ export const SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES: readonly SqliteRuntim
       allowMissingSnapshotChecksum: false,
     }),
   ]);
+
+/**
+ * Exact Store 7 source accepted only by the future offline generation migration.
+ * It is intentionally excluded from the ordinary per-Session compatibility importer.
+ */
+export const SQLITE_RUNTIME_RUN_MIGRATION_SOURCE_PROFILE = Object.freeze({
+  stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+  storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+  formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+});
 
 const REQUIRED_TABLE_COLUMNS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   runtime_store_meta: ['key', 'value'],

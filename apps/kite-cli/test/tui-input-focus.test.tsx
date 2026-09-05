@@ -24,4 +24,19 @@ describe('InputLine startup focus', () => {
     expect(view.lastFrame()).toContain('x');
     view.unmount();
   });
+
+  test('does not repaint the synthetic cursor for terminal focus reports', async () => {
+    const view = render(<InputLine mode="prompt" onSubmit={() => {}} workspace={process.cwd()} />);
+    await Bun.sleep(10);
+    const focused = view.lastFrame();
+
+    view.stdin.write('\x1b[O');
+    await Bun.sleep(10);
+    expect(view.lastFrame()).toBe(focused);
+
+    view.stdin.write('\x1b[I');
+    await Bun.sleep(10);
+    expect(view.lastFrame()).toBe(focused);
+    view.unmount();
+  });
 });

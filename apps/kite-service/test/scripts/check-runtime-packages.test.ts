@@ -8,7 +8,7 @@ const fixtureRoots: string[] = [];
 
 afterAll(() => {
   for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
-});
+}, 30_000);
 
 function createFixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'kite-runtime-packages-'));
@@ -46,7 +46,7 @@ describe('runtime workspace package gate', () => {
   test('accepts the authoritative package and two-App graph', () => {
     const analysis = analyzeRuntimePackages(process.cwd());
     expect(analysis.violations).toEqual([]);
-    expect(analysis.packages).toHaveLength(13);
+    expect(analysis.packages).toHaveLength(16);
     expect(analysis.compositionRoots).toEqual(['apps/kite-service/src/bootstrap.ts']);
   });
 

@@ -79,7 +79,6 @@ export {
   defineBuiltinCapabilityContract,
   formatBuiltinToolParseError,
   formatBuiltinToolSchemaHint,
-  gitAvailability,
   isDestructiveShellCommand,
   isNetworkShellCommand,
   isReadOnlyShellCommand,
@@ -88,7 +87,9 @@ export {
   parserForBuiltinOperation,
   projectBuiltinExecutionTraits,
   readSkillAvailability,
+  type ShellReadOnlyUncertaintyCode,
   shellEffectsClassifier,
+  shellReadOnlyUncertaintyCode,
   staticEffectsClassifier,
   taskAvailability,
   taskEffectsClassifier,
@@ -292,6 +293,20 @@ export {
 } from './policy-compiler';
 export type { BuiltinRuntimeToolPipelineCallbacks } from './runtime-tool-pipeline-callbacks';
 export { createBuiltinRuntimeToolPipelineCallbacks } from './runtime-tool-pipeline-callbacks';
+export {
+  isDeclaredGitMutation,
+  isDeclaredGitRemoteMutation,
+  isDeclaredReadOnlyGitBranch,
+  isDeclaredReadOnlyGitRemote,
+  SHELL_SEMANTICS_REGISTRY_,
+  SHELL_SEMANTICS_REGISTRY_SCHEMA_,
+  SHELL_SEMANTICS_REVISION_,
+  type ShellGitSemanticDescriptor,
+  type ShellProgramSemanticDescriptor,
+  type ShellSemanticInspector,
+  type ShellSemanticsRegistry,
+  shellSemanticInspector,
+} from './shell-semantics';
 export type {
   BuiltinInternalOperationCatalogEntry,
   BuiltinModelToolCatalogEntry,
@@ -322,7 +337,6 @@ export {
   buildDescription,
   builtinToolDescription,
   EDIT_FILE_CONTRACT,
-  GIT_INSPECT_CONTRACT,
   getToolContract,
   KNOWN_TOOL_NAMES,
   LIST_MCP_RESOURCES_CONTRACT,

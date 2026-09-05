@@ -13,11 +13,14 @@ import {
   mapRuntimeClientEventToProtocol,
   mapRuntimeCommandToProtocol,
   mapRuntimeNotificationToSubscriptionMessage,
+  mapRuntimeQueryResultToProtocol,
+  mapRuntimeQueryToProtocol,
   mapSubscriptionMessageToClientUpdate,
   RUNTIME_PROTOCOL_EVENT_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_MESSAGE_SCHEMA_,
   RUNTIME_PROTOCOL_RESPONSE_SCHEMA_,
+  RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_,
   safeDecodeRuntimeProtocolMessage,
@@ -28,7 +31,7 @@ const initializeRequest = {
   id: 'rpc-1',
   method: 'initialize',
   params: {
-    protocolVersion: 1,
+    protocolVersion: 2,
     clientInfo: { name: 'test', version: '1.0.0', instanceId: 'client-1' },
   },
 };
@@ -54,7 +57,7 @@ describe('Runtime Protocol', () => {
     expect(
       safeDecodeRuntimeProtocolMessage({
         ...initializeRequest,
-        params: { ...initializeRequest.params, protocolVersion: 2 },
+        params: { ...initializeRequest.params, protocolVersion: 3 },
       }).success,
     ).toBeFalse();
   });
@@ -124,6 +127,19 @@ describe('Runtime Protocol', () => {
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
+        id: 'rpc-input-stale-revision',
+        method: 'runtime/command',
+        params: {
+          command: {
+            ...inputCancelCommand,
+            expectedRevision: inputCancelCommand.expectedRevision + 1,
+          },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
         id: 'rpc-input-cancel-mismatch',
         method: 'runtime/command',
         params: {
@@ -183,6 +199,7 @@ describe('Runtime Protocol', () => {
         sessionRevision: 7,
         generation: 2,
         grants: ['approve_once'],
+        owner: { kind: 'root_tool', toolCallId: 'interaction-1' },
         command: 'git status --short --branch',
       },
       response: { kind: 'approval', decision: 'approve_once' },
@@ -290,6 +307,78 @@ describe('Runtime Protocol', () => {
     ).toBeFalse();
   });
 
+  test('encodes bounded private Run get/page and original resource receipts', () => {
+    const run = {
+      schema: 'kite.runtime-run.v1' as const,
+      sessionId: 'session-1',
+      runId: 'run-1',
+      phase: 'building' as const,
+      status: 'queued' as const,
+      createdRevision: 4,
+      lastRevision: 4,
+      createdAtMs: 1_700_000_000_000,
+    };
+    const listQuery = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_runs' as const,
+      sessionId: 'session-1',
+      cursor: { createdRevision: 3, runId: 'run-0' },
+      limit: 200,
+    };
+    expect(mapRuntimeQueryToProtocol(listQuery)).toEqual(listQuery);
+    expect(
+      RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
+        jsonrpc: '2.0',
+        id: 'run-query',
+        method: 'runtime/query',
+        params: { query: { ...listQuery, limit: 201 } },
+      }).success,
+    ).toBeFalse();
+    expect(
+      mapRuntimeQueryResultToProtocol({
+        status: 'ok',
+        queryType: 'list_runs',
+        runs: [run],
+        nextRunCursor: { createdRevision: 4, runId: 'run-1' },
+      }),
+    ).toEqual({
+      status: 'ok',
+      queryType: 'list_runs',
+      runs: [run],
+      nextRunCursor: { createdRevision: 4, runId: 'run-1' },
+    });
+    const receipt = {
+      status: 'idempotent_replay' as const,
+      commandId: 'command-1',
+      sessionId: 'session-1',
+      originalRevision: 4,
+      resource: { kind: 'run' as const, run, messageId: 'message-1' },
+    };
+    expect(RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(receipt).success).toBeTrue();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        ...receipt,
+        resource: { ...receipt.resource, privateCommand: 'hidden' },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        ...receipt,
+        resource: {
+          kind: 'run',
+          run: { ...run, status: 'running', startedAtMs: 1_700_000_000_001 },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        status: 'ok',
+        queryType: 'get_run',
+        run: { ...run, status: 'failed', finishedAtMs: 1_700_000_000_002 },
+      }).success,
+    ).toBeFalse();
+  });
+
   test('only maps explicit browser-safe event variants', () => {
     expect(
       mapRuntimeClientEventToProtocol({
@@ -313,6 +402,62 @@ describe('Runtime Protocol', () => {
     expect(
       mapRuntimeClientEventToProtocol({ type: 'model.text_delta', text: 'visible' } as never),
     ).toBeUndefined();
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: 'subagent-batch:tool-1',
+      }),
+    ).toEqual({
+      type: 'subagent.started',
+      subagentId: 'subagent-1',
+      role: 'explore',
+      name: 'Inspect the runtime',
+      concurrencyGroupId: 'subagent-batch:tool-1',
+    });
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        concurrencyGroupId: '',
+      }).success,
+    ).toBeFalse();
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.completed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection complete.',
+        toolCallCount: 3,
+        durationMs: 12_345,
+      }),
+    ).toEqual({
+      type: 'subagent.completed',
+      subagentId: 'subagent-1',
+      summary: 'Inspection complete.',
+      toolCallCount: 3,
+      durationMs: 12_345,
+    });
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection failed.',
+        toolCallCount: 2,
+        durationMs: 9_000,
+        diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+      }),
+    ).toEqual({
+      type: 'subagent.failed',
+      subagentId: 'subagent-1',
+      summary: 'Inspection failed.',
+      toolCallCount: 2,
+      durationMs: 9_000,
+      diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+    });
     expect(
       mapRuntimeClientEventToProtocol({
         type: 'tool.queued',
@@ -369,6 +514,7 @@ describe('Runtime Protocol', () => {
         sessionRevision: 8,
         generation: 0,
         grants: ['approve_once'] as ('approve_once' | 'same_command')[],
+        owner: { kind: 'root_tool' as const, toolCallId: 'tool-1' },
         command: 'git status --short --branch',
         title: 'shell_execute',
         summary: 'Approve a shell command',
@@ -497,18 +643,26 @@ describe('Runtime Protocol', () => {
     });
     expect(
       mapRuntimeClientEventToProtocol({
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: 'run-1',
-        code: 'provider_unavailable',
-        retryable: true,
-        recoveryEntry: 'retry',
+        status: 'failed',
+        outcome: {
+          status: 'unknown',
+          reasonCode: 'provider_unavailable',
+          safeRetry: true,
+          recoveryEntry: 'retry',
+        },
       }),
     ).toEqual({
-      type: 'run.failure',
+      type: 'run.terminal',
       runId: 'run-1',
-      code: 'provider_unavailable',
-      retryable: true,
-      recoveryEntry: 'retry',
+      status: 'failed',
+      outcome: {
+        status: 'unknown',
+        reasonCode: 'provider_unavailable',
+        safeRetry: true,
+        recoveryEntry: 'retry',
+      },
     });
     expect(
       mapRuntimeClientEventToProtocol({
@@ -532,14 +686,14 @@ describe('Runtime Protocol', () => {
     expect(mapRuntimeClientEventToProtocol({ type: 'future_event' } as never)).toBeUndefined();
     expect(
       mapRuntimeNotificationToSubscriptionMessage({
-        schema: 'kite.runtime-notification.v1',
+        schema: 'kite.runtime-notification.v2',
         durability: 'durable',
         sessionId: 'session-1',
         revision: 4,
         projection: {
           kind: 'snapshot',
           session: {
-            schema: 'kite.runtime-projection.v1',
+            schema: 'kite.runtime-projection.v2',
             sessionId: 'session-1',
             revision: 4,
             workspace: '/private/workspace',
@@ -555,7 +709,7 @@ describe('Runtime Protocol', () => {
       sessionId: 'session-1',
       revision: 4,
       session: {
-        schema: 'kite.runtime-projection.v1',
+        schema: 'kite.runtime-projection.v2',
         sessionId: 'session-1',
         revision: 4,
         lifecycle: 'open',
@@ -572,7 +726,7 @@ describe('Runtime Protocol', () => {
       generation: 2,
       indexRevision: 4,
       session: {
-        schema: 'kite.runtime-projection.v1',
+        schema: 'kite.runtime-projection.v2',
         sessionId: 'session-1',
         revision: 4,
         workspace: '/private/workspace',
@@ -587,7 +741,7 @@ describe('Runtime Protocol', () => {
       generation: 2,
       indexRevision: 4,
       session: {
-        schema: 'kite.runtime-projection.v1',
+        schema: 'kite.runtime-projection.v2',
         sessionId: 'session-1',
         revision: 4,
         lifecycle: 'open',
@@ -600,7 +754,7 @@ describe('Runtime Protocol', () => {
 
   test('preserves ephemeral stream identity and rejects unknown fields', () => {
     const message = mapRuntimeNotificationToSubscriptionMessage({
-      schema: 'kite.runtime-notification.v1',
+      schema: 'kite.runtime-notification.v2',
       durability: 'ephemeral',
       sessionId: 'session-1',
       workId: 'work-1',
@@ -642,7 +796,7 @@ describe('Runtime Protocol', () => {
     ).toBeFalse();
   });
 
-  test('preserves terminal taxonomy and active work while removing workspace', () => {
+  test('preserves terminal taxonomy and canonical Run identity while removing workspace', () => {
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
@@ -667,7 +821,7 @@ describe('Runtime Protocol', () => {
               },
             },
             session: {
-              schema: 'kite.runtime-projection.v1',
+              schema: 'kite.runtime-projection.v2',
               sessionId: 'session-1',
               revision: 3,
               lifecycle: 'open',
@@ -685,22 +839,13 @@ describe('Runtime Protocol', () => {
                   },
                 ],
               },
-              activeWork: {
-                workId: 'work-1',
-                phase: 'building',
+              currentRun: {
+                runId: 'run-1',
+                initialTurnId: 'turn-1',
+                activeTurnId: 'turn-1',
+                activeInteractionId: 'interaction-1',
                 status: 'running',
-                activeTurn: {
-                  turnId: 'turn-1',
-                  status: 'waiting',
-                  interaction: {
-                    kind: 'input',
-                    interactionId: 'interaction-1',
-                    sessionRevision: 3,
-                    question: 'Continue?',
-                    allowFreeText: true,
-                  },
-                  evidence: [{ kind: 'test', status: 'pending' }],
-                },
+                revision: 3,
               },
             },
           },
@@ -709,7 +854,28 @@ describe('Runtime Protocol', () => {
     ).toBeTrue();
   });
 
-  test('rejects same-revision active approval fields with different command identity', () => {
+  test('rejects an explicit predecessor identity on a terminal presentation event', () => {
+    expect(
+      RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_.safeParse({
+        type: 'notification',
+        durability: 'durable',
+        sessionId: 'session-1',
+        revision: 4,
+        runId: 'run-predecessor',
+        event: { type: 'run.terminal', runId: 'run-successor', status: 'completed' },
+        session: {
+          schema: 'kite.runtime-projection.v2',
+          sessionId: 'session-1',
+          revision: 4,
+          lifecycle: 'open',
+          sessionCommandGrantCount: 0,
+          interactionQueue: { revision: 4, interactions: [] },
+        },
+      }).success,
+    ).toBeFalse();
+  });
+
+  test('rejects a current Run interaction identity absent from the canonical queue', () => {
     const approval = {
       kind: 'approval' as const,
       interactionId: 'approval-full-identity',
@@ -719,7 +885,7 @@ describe('Runtime Protocol', () => {
       grants: ['approve_once' as const],
     };
     const session = {
-      schema: 'kite.runtime-projection.v1' as const,
+      schema: 'kite.runtime-projection.v2' as const,
       sessionId: 'session-1',
       revision: 3,
       lifecycle: 'open' as const,
@@ -729,15 +895,13 @@ describe('Runtime Protocol', () => {
         activeInteractionId: approval.interactionId,
         interactions: [approval],
       },
-      activeWork: {
-        workId: 'work-1',
-        phase: 'building' as const,
+      currentRun: {
+        runId: 'run-1',
+        initialTurnId: 'turn-1',
+        activeTurnId: 'turn-1',
         status: 'waiting' as const,
-        activeTurn: {
-          turnId: 'turn-1',
-          status: 'waiting' as const,
-          interaction: { ...approval, grants: ['same_command' as const] },
-        },
+        revision: 3,
+        activeInteractionId: 'different-interaction',
       },
     };
 
@@ -746,13 +910,16 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '499d39ab:731d86b4';
-    expect(generated.schema).toBe('kite.runtime-protocol.v1');
+    const expectedDigest = 'c0f23e63:b5c751b5';
+    expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
     expect(generated.typeScript).not.toContain('RuntimeCommandParams');
     expect(generated.typeScript).toContain("method: 'initialize'");
     expect(generated.typeScript).toContain("method: 'runtime/command'");
+    expect(generated.typeScript).toContain("method: 'history/list_sessions'");
+    expect(generated.typeScript).toContain("method: 'app/workspace_trust/query'");
+    expect(generated.typeScript).toContain("method: 'app/provider_credential/write'");
     expect(generated.typeScript).toContain("method: 'server/ping'");
     expect(generated.typeScript).toContain('RuntimeProtocolToolPresentation');
     expect(generated.typeScript).toContain('RuntimeProtocolToolQueuedEvent');
@@ -777,7 +944,7 @@ const initialize: RuntimeProtocolRequest = {
   id: 'initialize-1',
   method: 'initialize',
   params: {
-    protocolVersion: 1,
+    protocolVersion: 2,
     clientInfo: { name: 'test', version: '1', instanceId: 'client-1' },
   },
 };

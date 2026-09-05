@@ -5,6 +5,10 @@ import { type MutableRefObject, useEffect, useState } from 'react';
 import type { TuiUserInputProvider } from '#kite-cli/tui/provider';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useI18n } from '../i18n';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from '../interaction-submission-diagnostic';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -85,7 +89,7 @@ function SingleQuestion({
   const [freeText, setFreeText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionFailed, setSubmissionFailed] = useState(false);
+  const [submissionFailure, setSubmissionFailure] = useState<InteractionSubmissionFailure>();
   const moveSelection = (next: number) => {
     setSelected(next);
     if (hasCustom && next === totalSlots - 1) {
@@ -126,7 +130,7 @@ function SingleQuestion({
   async function submit(value: string, optionId?: string) {
     if (submitting) return;
     setSubmitting(true);
-    setSubmissionFailed(false);
+    setSubmissionFailure(undefined);
     try {
       const accepted = await provider.submitActionAsync({
         type: 'input',
@@ -136,8 +140,8 @@ function SingleQuestion({
       });
       if (!accepted) throw new Error('Input submission was not accepted.');
       onResolved(value);
-    } catch {
-      setSubmissionFailed(true);
+    } catch (error) {
+      setSubmissionFailure(classifyInteractionSubmissionFailure(error));
     } finally {
       setSubmitting(false);
     }
@@ -210,9 +214,11 @@ function SingleQuestion({
       }
     >
       {question.context && <Text color={t.dim}>{question.context}</Text>}
-      {(submitting || submissionFailed) && (
-        <Text color={submissionFailed ? t.error : t.dim}>
-          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+      {(submitting || submissionFailure) && (
+        <Text color={submissionFailure ? t.error : t.dim}>
+          {submissionFailure
+            ? translate(`approval.submissionFailed.${submissionFailure}`)
+            : translate('approval.submitting')}
         </Text>
       )}
 
@@ -275,7 +281,7 @@ function MultiQuestionWizard({
   const [freeText, setFreeText] = useState('');
   const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionFailed, setSubmissionFailed] = useState(false);
+  const [submissionFailure, setSubmissionFailure] = useState<InteractionSubmissionFailure>();
 
   // 同步 step 到 ref，供全局 ESC handler 判断是否应回退而非取消
   // Sync step to ref so global ESC handler knows to skip (back vs cancel)
@@ -358,7 +364,7 @@ function MultiQuestionWizard({
         .join('; ');
       if (submitting) return;
       setSubmitting(true);
-      setSubmissionFailed(false);
+      setSubmissionFailure(undefined);
       void provider
         .submitActionAsync({
           type: 'input',
@@ -371,7 +377,9 @@ function MultiQuestionWizard({
           setDone(true);
           onResolved(summary, currentAnswers);
         })
-        .catch(() => setSubmissionFailed(true))
+        .catch((error: unknown) =>
+          setSubmissionFailure(classifyInteractionSubmissionFailure(error)),
+        )
         .finally(() => setSubmitting(false));
     }
   }
@@ -485,9 +493,11 @@ function MultiQuestionWizard({
     >
       {/* 上下文 / Context */}
       {isSingle && question.context && <Text color={t.dim}>{question.context}</Text>}
-      {(submitting || submissionFailed) && (
-        <Text color={submissionFailed ? t.error : t.dim}>
-          {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+      {(submitting || submissionFailure) && (
+        <Text color={submissionFailure ? t.error : t.dim}>
+          {submissionFailure
+            ? translate(`approval.submissionFailed.${submissionFailure}`)
+            : translate('approval.submitting')}
         </Text>
       )}
 

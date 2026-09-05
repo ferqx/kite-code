@@ -9,6 +9,10 @@
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
 
+Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-runtime/config`共享primitive，原有Linux boot-id/start-ticks、macOS
+current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变
+日志lease、heartbeat或retention语义。
+
 GitHub Session log ACL smoke 使用正式 CI 基线 Bun `1.4.0`；版本变化必须与 Required CI 和 smoke
 验证共同收敛。
 
@@ -35,7 +39,7 @@ logger 不能制造 UI-only approval 事实。
 ## 模式与组合
 
 RM-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite-ai/runtime-storage-sqlite` 的显式
-`SessionMetadataPort`；SessionManager 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
+`SessionMetadataPort`；Runtime/CLI composition 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
 token stats 仍是 App session metadata，不是 Session Logger、Runtime State/Event 或 remote telemetry，既有
 `session_stats` 布局、journal 策略和隐私边界均未改变。
 

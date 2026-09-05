@@ -1,10 +1,3 @@
-export const SPINNER = ['● ', '  '];
-export const SPINNER_INTERVAL_MS = 1000;
-
-export function spinnerIndexForElapsed(elapsedMs: number): number {
-  return Math.floor(Math.max(0, elapsedMs) / SPINNER_INTERVAL_MS) % SPINNER.length;
-}
-
 /** 工具名 → 用户界面友好名称映射 / Tool name → user-friendly display name mapping */
 export const ACTION_NAMES: Record<string, string> = {
   read_file: 'Read',
@@ -83,6 +76,7 @@ export function toolColor(status: string, t: ThemeColors): string {
       return t.success;
     case 'error':
       return t.error;
+    case 'rejected':
     case 'cancelled':
     case 'timeout':
     case 'exhausted':

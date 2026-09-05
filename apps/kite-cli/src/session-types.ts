@@ -1,5 +1,9 @@
-import type { AgentPlan, InteractionMode, PlanArtifactRef } from '@kite-ai/runtime-contract';
-import type { RuntimePresentationEvent } from '#kite-cli/tui/runtime-presentation';
+import type {
+  AcceptedPresentationEnvelope,
+  AgentPlan,
+  InteractionMode,
+  PlanArtifactRef,
+} from '@kite-ai/runtime-contract';
 
 export interface SessionInfo {
   readonly threadId: string;
@@ -18,11 +22,13 @@ export interface ReplayInterrupt {
 export interface SessionData {
   readonly threadId: string;
   readonly messages: readonly unknown[];
-  readonly runtimeEvents: readonly RuntimePresentationEvent[];
+  /** Current-format history events are already accepted presentation envelopes. */
+  readonly runtimeEvents: readonly AcceptedPresentationEnvelope[];
   readonly interrupt: ReplayInterrupt | null;
   readonly modelProvider: string;
   readonly modelName: string;
   readonly thinkingLevel: string | null;
   readonly plan: AgentPlan | null;
   readonly interactionMode: InteractionMode;
+  readonly recovery: 'normal' | 'pending_interaction' | 'restart_required';
 }

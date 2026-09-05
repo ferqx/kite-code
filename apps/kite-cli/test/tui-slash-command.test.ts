@@ -86,6 +86,8 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/rewind')).toEqual({ type: 'rewind' });
     expect(parseSlashCommand('/export')).toEqual({ type: 'export' });
     expect(parseSlashCommand('/context')).toEqual({ type: 'context' });
+    expect(parseSlashCommand('/status')).toEqual({ type: 'status' });
+    expect(parseSlashCommand('/status extra')).toEqual({ type: 'unknown', raw: '/status extra' });
   });
 
   // ── /clear ──
@@ -100,6 +102,11 @@ describe('parseSlashCommand', () => {
   // ── /help ──
   test('parses /help', () => {
     expect(parseSlashCommand('/help')).toEqual({ type: 'help' });
+  });
+
+  test('does not retain /web after it is merged into /status', () => {
+    expect(parseSlashCommand('/web')).toEqual({ type: 'unknown', raw: '/web' });
+    expect(parseSlashCommand('/web start')).toEqual({ type: 'unknown', raw: '/web start' });
   });
 
   test('parses command names case-insensitively like the suggestion matcher', () => {

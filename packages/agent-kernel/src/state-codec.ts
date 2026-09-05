@@ -5,7 +5,7 @@ import { eventRecord, recordField, stringField } from './reducer-utils';
 import { type AgentState, RUNTIME_STATE_FORMAT_EPOCH, RUNTIME_STATE_SCHEMA_VERSION } from './state';
 import {
   classifyStateFormat,
-  migrateState26To27,
+  migrateCompatibleAgentState,
   type StateMigrationResult,
 } from './state-migration';
 
@@ -56,7 +56,7 @@ export function decodeCompatibleAgentStateJson(serialized: string): StateMigrati
       return { status: 'unsupported' };
     }
   }
-  return migrateState26To27(value);
+  return migrateCompatibleAgentState(value);
 }
 
 export const decodeAgentStateWithCompatibility = decodeCompatibleAgentStateJson;

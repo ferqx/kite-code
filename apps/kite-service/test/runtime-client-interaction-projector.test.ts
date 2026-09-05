@@ -157,6 +157,17 @@ describe('Runtime client interaction projector', () => {
         response: { kind: 'approval', decision: 'approve_once' },
       }),
     ).toBeNull();
+    expect(
+      mapRuntimeInteractionResponseToUserAction({
+        state: approval,
+        effect,
+        interaction: {
+          ...interaction,
+          owner: { kind: 'root_tool', toolCallId: 'different-tool' },
+        },
+        response: { kind: 'approval', decision: 'approve_once' },
+      }),
+    ).toBeNull();
 
     const input = state({
       interactions: {
@@ -405,7 +416,6 @@ function pendingApproval(
     generation,
     createdAt: '2026-08-26T00:00:00.000Z',
     status: 'awaiting_user',
-    state: 'awaiting_user',
   };
 }
 

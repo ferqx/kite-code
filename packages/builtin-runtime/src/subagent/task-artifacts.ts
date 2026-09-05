@@ -4,6 +4,7 @@ import {
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPoint,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from '../model';
 import { subagentTaskArtifactRoot } from './artifact-paths';
 import { subagentTaskDigest } from './continuation-codec';
@@ -29,6 +30,9 @@ export interface SubagentTaskArtifactPayload {
 
 export interface SubagentTaskArtifactStoreOptions {
   readonly root?: string;
+  readonly backend?: PrivateImmutableArtifactStorageBackend<
+    'subagent_task_request' | 'subagent_task'
+  >;
   readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
   readonly secureWindowsPath?: (path: string) => void;
@@ -42,7 +46,9 @@ export interface SubagentTaskArtifactAccess {
   };
   read(
     ref: SubagentTaskArtifact,
-    expected: Readonly<SubagentTaskArtifactOwner> & { readonly taskDigest: string },
+    expected: Readonly<SubagentTaskArtifactOwner> & {
+      readonly taskDigest: string;
+    },
   ): Readonly<SubagentTaskArtifactPayload>;
 }
 
@@ -57,19 +63,39 @@ export interface SubagentTaskRequestArtifactAccess {
   read(
     ref: SubagentTaskRequestArtifact,
     expected: { parentModelInvocationId: string; parentToolCallId: string },
-  ): Readonly<{ name: string; role: 'explore' | 'plan' | 'code' | 'review'; task: string }>;
+  ): Readonly<{
+    name: string;
+    role: 'explore' | 'plan' | 'code' | 'review';
+    task: string;
+  }>;
 }
 
 /** Queue-time private request storage; Runtime tool facts retain only its opaque ref. */
 export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArtifactAccess {
   readonly #storage: PrivateImmutableArtifactStorage<'subagent_task_request'>;
 
-  constructor(options: { root?: string } = {}) {
+  constructor(
+    options: {
+      root?: string;
+      backend?: PrivateImmutableArtifactStorageBackend<'subagent_task_request' | 'subagent_task'>;
+    } = {},
+  ) {
     try {
       this.#storage = new PrivateImmutableArtifactStorage({
-        root: options.root ?? subagentTaskArtifactRoot(),
+        ...(options.backend
+          ? {
+              backend:
+                options.backend as PrivateImmutableArtifactStorageBackend<'subagent_task_request'>,
+            }
+          : { root: options.root ?? subagentTaskArtifactRoot() }),
         namespace: 'subagent-tasks',
-        partitions: [{ kind: 'subagent_task_request', directory: 'requests', extension: '.json' }],
+        partitions: [
+          {
+            kind: 'subagent_task_request',
+            directory: 'requests',
+            extension: '.json',
+          },
+        ],
         maxArtifactBytes: DEFAULT_MAX_BYTES,
       });
     } catch (error) {
@@ -106,7 +132,11 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
   read(
     ref: SubagentTaskRequestArtifact,
     expected: { parentModelInvocationId: string; parentToolCallId: string },
-  ): Readonly<{ name: string; role: 'explore' | 'plan' | 'code' | 'review'; task: string }> {
+  ): Readonly<{
+    name: string;
+    role: 'explore' | 'plan' | 'code' | 'review';
+    task: string;
+  }> {
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const parsed: unknown = JSON.parse(text);
@@ -118,7 +148,11 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
       ) {
         corrupt();
       }
-      return Object.freeze({ name: payload.name, role: payload.role, task: payload.task });
+      return Object.freeze({
+        name: payload.name,
+        role: payload.role,
+        task: payload.task,
+      });
     } catch (error) {
       if (error instanceof SubagentTaskArtifactError) {
         if (error.code === 'invalid_task') corrupt();
@@ -179,7 +213,9 @@ export class SubagentTaskArtifactStore implements SubagentTaskArtifactAccess {
 
   read(
     ref: SubagentTaskArtifact,
-    expected: Readonly<SubagentTaskArtifactOwner> & { readonly taskDigest: string },
+    expected: Readonly<SubagentTaskArtifactOwner> & {
+      readonly taskDigest: string;
+    },
   ): Readonly<SubagentTaskArtifactPayload> {
     try {
       const bytes = this.#resolveStorage().read(ref);
@@ -210,7 +246,12 @@ export class SubagentTaskArtifactStore implements SubagentTaskArtifactAccess {
     if (this.#storage) return this.#storage;
     try {
       this.#storage = new PrivateImmutableArtifactStorage({
-        root: this.#options.root ?? subagentTaskArtifactRoot(),
+        ...(this.#options.backend
+          ? {
+              backend: this.#options
+                .backend as PrivateImmutableArtifactStorageBackend<'subagent_task'>,
+            }
+          : { root: this.#options.root ?? subagentTaskArtifactRoot() }),
         namespace: 'subagent-tasks',
         partitions: [{ kind: 'subagent_task', directory: 'tasks', extension: '.json' }],
         maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,

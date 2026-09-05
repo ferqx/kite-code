@@ -1,19 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, resolve } from 'node:path';
+  acquireConfigFileMutationLock,
+  replaceConfigFileAtomically,
+} from '@kite-ai/kite-local-runtime/config';
 import { type ParseError, parse } from 'jsonc-parser';
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
 import { workspaceTrustPath } from './paths';
@@ -22,52 +13,9 @@ import {
   type WorkspaceExternalReadScope,
 } from './workspace-external-read-scope';
 
-const LOCK_RETRY_MS = 50;
-const LOCK_MAX_RETRIES = 20;
-const LOCK_STALE_MS = 5000;
-
-function lockPath(storePath: string) {
-  return `${storePath}.lock`;
-}
-
 function acquireLock(path: string): () => void {
-  const lock = lockPath(path);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < LOCK_MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const delay = LOCK_RETRY_MS * 2 ** Math.min(attempt - 1, 4);
-      Bun.sleepSync(delay);
-    }
-    try {
-      const fd = openSync(lock, 'wx', 0o600);
-      writeFileSync(fd, String(process.pid), 'utf8');
-      fsyncSync(fd);
-      closeSync(fd);
-      return () => {
-        try {
-          if (existsSync(lock)) unlinkSync(lock);
-        } catch {
-          /* best-effort */
-        }
-      };
-    } catch {
-      if (existsSync(lock)) {
-        try {
-          const age = Date.now() - statSync(lock).mtimeMs;
-          if (age > LOCK_STALE_MS) {
-            try {
-              unlinkSync(lock);
-            } catch {
-              /* another process grabbed it */
-            }
-          }
-        } catch {
-          /* lock disappeared */
-        }
-      }
-    }
-  }
-  throw new Error('Could not acquire workspace trust store lock after retries.');
+  const lock = acquireConfigFileMutationLock(path);
+  return () => lock.release();
 }
 
 /**
@@ -173,21 +121,7 @@ export function readWorkspaceTrustStore(path = workspaceTrustPath()): WorkspaceT
 }
 
 function writeStore(path: string, file: WorkspaceTrustFile): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let fd: number | undefined;
-  try {
-    fd = openSync(temporary, 'wx', 0o600);
-    writeFileSync(fd, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    renameSync(temporary, path);
-    chmodSync(path, 0o600);
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    if (existsSync(temporary)) unlinkSync(temporary);
-  }
+  replaceConfigFileAtomically(path, `${JSON.stringify(file, null, 2)}\n`, 0o600);
 }
 
 /** Current trust status of one workspace directory. */
@@ -333,7 +267,7 @@ export function trustWorkspace(input: {
     }
     writeStore(path, { version: 1, records: { ...locked.records, [workspaceKey]: record } });
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('Could not acquire')) {
+    if (err instanceof Error && err.name === 'ConfigFileMutationLockError') {
       return { status: 'store_unavailable', message: err.message };
     }
     return { status: 'store_unavailable', message: 'Workspace trust store could not be written.' };

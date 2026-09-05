@@ -5,25 +5,40 @@ import BlockRenderer from './components/BlockRenderer';
 import CompactionProgress from './components/CompactionProgress';
 import ConcurrentSubAgentBlock from './components/ConcurrentSubAgentBlock';
 import { MAX_RUNNING_STEPS } from './components/SubAgentBlock';
-import { blockFingerprint } from './render/useStaticContent';
+import {
+  projectApprovalViewport,
+  projectOutputBlockTimelineItem,
+  type TimelineItem,
+} from './presentation/timeline';
+import { blockRenderCacheKey } from './render/useStaticContent';
 import type { OutputBlock } from './types';
 
 export { changePrefix } from './components/BlockRenderer';
 export { toolColor } from './components/render-utils';
 export type { StaticContentResult } from './render/useStaticContent';
-export { blockFingerprint, useStaticContent } from './render/useStaticContent';
+export { blockRenderCacheKey, useStaticContent } from './render/useStaticContent';
 
 interface OutputAreaProps {
   staticItems?: unknown[];
   staticKey?: string;
   staticHeader?: ReactNode;
+  /** Current physical render epoch. Child keys must not be reused across a
+   * screen/session reset because Ink keeps component-local layout state. */
+  renderEpoch?: number;
   /** All static blocks (immutable, rendered by <Static>) */
   mergedStaticBlocks: OutputBlock[];
   /** Blocks kept in the dynamic tree — may still mutate (tool running, streaming text, etc.) */
   activeDynamicBlocks: OutputBlock[];
+  /** Canonical Timeline items for Static ownership. Production passes these
+   * from useStaticContent; block arrays remain a test/compatibility adapter. */
+  mergedStaticTimeline?: readonly TimelineItem[];
+  /** Canonical live/dynamic Timeline items after projector-owned visibility. */
+  activeDynamicTimeline?: readonly TimelineItem[];
   onToggleReason: (id: number) => void;
   onToggleToolExpand?: (id: number) => void;
   onToggleSubagentExpand?: (id: number) => void;
+  /** Current prompt owns Enter whenever it contains a submission candidate. */
+  canToggleLastBlock?: () => boolean;
   overlayActive?: boolean;
   /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
   awaitingApproval?: boolean;
@@ -44,6 +59,15 @@ const SUBAGENT_CARD_OVERHEAD_ROWS = 3;
 
 type SubagentBlock = Extract<OutputBlock, { kind: 'subagent' }>;
 type RenderItem =
+  | TimelineItem
+  | {
+      kind: 'concurrent_subagents';
+      id: string;
+      items: TimelineItem[];
+      blocks: SubagentBlock[];
+    };
+
+type AdaptedRenderItem =
   | OutputBlock
   | {
       kind: 'concurrent_subagents';
@@ -51,42 +75,69 @@ type RenderItem =
       blocks: SubagentBlock[];
     };
 
+function timelineBlock(item: TimelineItem): OutputBlock {
+  return item.renderModel.block;
+}
+
 /** Preserve block order while replacing an identified concurrent sibling run
  * with one presentation item. Sequential children never receive a group id. */
-export function aggregateConcurrentSubagents(blocks: OutputBlock[]): RenderItem[] {
-  const items: RenderItem[] = [];
-  for (let index = 0; index < blocks.length; ) {
-    const block = blocks[index]!;
+function aggregateConcurrentTimelineItems(items: readonly TimelineItem[]): RenderItem[] {
+  const renderItems: RenderItem[] = [];
+  for (let index = 0; index < items.length; ) {
+    const item = items[index]!;
+    const block = timelineBlock(item);
     if (block.kind !== 'subagent' || block.concurrencyGroupId == null) {
-      items.push(block);
+      renderItems.push(item);
       index++;
       continue;
     }
+    const groupId = block.concurrencyGroupId;
+    const siblingItems: TimelineItem[] = [];
     const siblings: SubagentBlock[] = [];
     let cursor = index;
-    while (cursor < blocks.length) {
-      const candidate = blocks[cursor]!;
-      if (
-        candidate.kind !== 'subagent' ||
-        candidate.concurrencyGroupId !== block.concurrencyGroupId
-      ) {
+    while (cursor < items.length) {
+      const candidateItem = items[cursor]!;
+      const candidate = timelineBlock(candidateItem);
+      if (candidate.kind !== 'subagent' || candidate.concurrencyGroupId !== groupId) {
         break;
       }
+      siblingItems.push(candidateItem);
       siblings.push(candidate);
       cursor++;
     }
     if (siblings.length > 1) {
-      items.push({ kind: 'concurrent_subagents', id: block.concurrencyGroupId, blocks: siblings });
+      renderItems.push({
+        kind: 'concurrent_subagents',
+        id: groupId,
+        items: siblingItems,
+        blocks: siblings,
+      });
     } else {
-      items.push(block);
+      renderItems.push(item);
     }
     index = cursor;
   }
-  return items;
+  return renderItems;
 }
 
-function lastOutputBlock(item: RenderItem | undefined): OutputBlock | undefined {
-  return item?.kind === 'concurrent_subagents' ? item.blocks.at(-1) : item;
+/** Compatibility adapter for callers that still provide raw OutputBlocks. */
+export function aggregateConcurrentSubagents(blocks: OutputBlock[]): AdaptedRenderItem[] {
+  return aggregateConcurrentTimelineItems(blocks.map(projectOutputBlockTimelineItem)).map((item) =>
+    item.kind === 'concurrent_subagents'
+      ? { kind: item.kind, id: item.id, blocks: item.blocks }
+      : item.renderModel.block,
+  );
+}
+
+function lastOutputBlock(
+  item: RenderItem | AdaptedRenderItem | undefined,
+): OutputBlock | undefined {
+  if (!item) return undefined;
+  return item.kind === 'concurrent_subagents'
+    ? item.blocks.at(-1)
+    : 'renderModel' in item
+      ? timelineBlock(item)
+      : item;
 }
 
 /**
@@ -111,46 +162,24 @@ export function concurrentSubagentStepLimit(blocks: OutputBlock[], terminalRows 
   return Math.min(MAX_RUNNING_STEPS, Math.floor(availableStepRows / subagentCount));
 }
 
-function visibleDynamicBlocksForApproval(
-  blocks: OutputBlock[],
-  awaitingApproval?: boolean,
-): OutputBlock[] {
-  if (!awaitingApproval) return blocks;
-
-  const pendingApprovalIndex = blocks.findIndex(
-    (block) => block.kind === 'approval' && block.resolved === undefined,
-  );
-  if (pendingApprovalIndex >= 0) {
-    for (let i = pendingApprovalIndex - 1; i >= 0; i--) {
-      const block = blocks[i]!;
-      if (block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running')) {
-        return blocks.slice(0, i + 1);
-      }
-    }
-    return blocks.slice(0, pendingApprovalIndex);
-  }
-
-  const approvalToolIndex = blocks.findIndex(
-    (block) =>
-      block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running'),
-  );
-  return approvalToolIndex >= 0 ? blocks.slice(0, approvalToolIndex + 1) : blocks;
-}
-
 /**
  * OutputArea renders <Static> (immutable settled blocks + header) inline,
  * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
  * once they become truly immutable (tool done, text complete, etc.).
  */
-export default function OutputArea({
+function OutputArea({
   staticItems,
   staticKey,
   staticHeader,
+  renderEpoch = 0,
   activeDynamicBlocks,
   mergedStaticBlocks,
+  mergedStaticTimeline,
+  activeDynamicTimeline,
   onToggleReason,
   onToggleToolExpand,
   onToggleSubagentExpand,
+  canToggleLastBlock,
   overlayActive,
   awaitingApproval,
   awaitingInput,
@@ -164,21 +193,41 @@ export default function OutputArea({
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
+  const canToggleLastBlockRef = useRef(canToggleLastBlock);
+  canToggleLastBlockRef.current = canToggleLastBlock;
+  const staticTimeline = useMemo(
+    () => mergedStaticTimeline ?? mergedStaticBlocks.map(projectOutputBlockTimelineItem),
+    [mergedStaticBlocks, mergedStaticTimeline],
+  );
+  const dynamicTimeline = useMemo(
+    () => activeDynamicTimeline ?? activeDynamicBlocks.map(projectOutputBlockTimelineItem),
+    [activeDynamicBlocks, activeDynamicTimeline],
+  );
+  // The projector is the only owner of approval visibility. Applying it here
+  // is idempotent for the already-projected production input and keeps the
+  // compatibility block-array path on the same canonical code path.
+  const visibleDynamicTimeline = useMemo(
+    () =>
+      activeDynamicTimeline
+        ? dynamicTimeline
+        : projectApprovalViewport(dynamicTimeline, awaitingApproval).visibleItems,
+    [activeDynamicTimeline, awaitingApproval, dynamicTimeline],
+  );
   const visibleDynamicBlocks = useMemo(
-    () => visibleDynamicBlocksForApproval(activeDynamicBlocks, awaitingApproval),
-    [activeDynamicBlocks, awaitingApproval],
+    () => visibleDynamicTimeline.map(timelineBlock),
+    [visibleDynamicTimeline],
   );
   const staticRenderItems = useMemo(
-    () => aggregateConcurrentSubagents(mergedStaticBlocks),
-    [mergedStaticBlocks],
+    () => aggregateConcurrentTimelineItems(staticTimeline),
+    [staticTimeline],
   );
   const staticPresentationItems = useMemo(
     () => (staticItems ? [staticItems[0], ...staticRenderItems] : undefined),
     [staticItems, staticRenderItems],
   );
   const dynamicRenderItems = useMemo(
-    () => aggregateConcurrentSubagents(visibleDynamicBlocks),
-    [visibleDynamicBlocks],
+    () => aggregateConcurrentTimelineItems(visibleDynamicTimeline),
+    [visibleDynamicTimeline],
   );
   const maxVisibleSubagentSteps = concurrentSubagentStepLimit(visibleDynamicBlocks, rows);
   const dynamicBlocksRef = useRef(visibleDynamicBlocks);
@@ -191,6 +240,7 @@ export default function OutputArea({
       const last = blocks[blocks.length - 1];
       if (!last) return;
       if (key.return) {
+        if (canToggleLastBlockRef.current?.() === false) return;
         if (last.kind === 'reason') {
           onToggleReasonRef.current?.(last.id);
         } else if (last.kind === 'tool_card') {
@@ -230,15 +280,18 @@ export default function OutputArea({
               );
               if (item.kind === 'concurrent_subagents') {
                 return (
-                  <Box key={`subagent-group-${item.id}`} marginTop={prevBlock ? 1 : 0}>
+                  <Box
+                    key={`${renderEpoch}:subagent-group-${item.id}`}
+                    marginTop={prevBlock ? 1 : 0}
+                  >
                     <ConcurrentSubAgentBlock blocks={item.blocks} columns={Math.max(1, columns)} />
                   </Box>
                 );
               }
               return (
                 <BlockRenderer
-                  key={blockFingerprint(item)}
-                  block={item}
+                  key={`${renderEpoch}:${blockRenderCacheKey(timelineBlock(item))}`}
+                  item={item}
                   isFocused={false}
                   index={index - 1}
                   prevBlock={prevBlock}
@@ -261,7 +314,7 @@ export default function OutputArea({
             const topMarginRows = prevBlock ? 1 : 0;
             return (
               <Box
-                key={`subagent-group-${item.id}`}
+                key={`${renderEpoch}:subagent-group-${item.id}`}
                 flexDirection="column"
                 marginTop={prevBlock ? 1 : 0}
               >
@@ -269,16 +322,12 @@ export default function OutputArea({
                   blocks={item.blocks}
                   columns={Math.max(1, columns)}
                   maxVisibleSteps={maxVisibleSubagentSteps}
-                  maxVisibleChildren={
-                    dynamicRenderItems.length === 1
-                      ? Math.max(
-                          0,
-                          Math.floor(
-                            (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
-                          ),
-                        )
-                      : 0
-                  }
+                  maxVisibleChildren={Math.max(
+                    0,
+                    Math.floor(
+                      (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
+                    ),
+                  )}
                   allowExpanded={
                     dynamicRenderItems.length === 1 &&
                     1 +
@@ -296,15 +345,17 @@ export default function OutputArea({
           }
           return (
             <BlockRenderer
-              key={item.id}
-              block={item}
+              key={`${renderEpoch}:${item.id}`}
+              item={item}
               isFocused={false}
               index={i}
               prevBlock={prevBlock}
               awaitingApproval={awaitingApproval}
               awaitingInput={awaitingInput}
               columns={innerColumns}
-              maxVisibleSubagentSteps={maxVisibleSubagentSteps}
+              maxVisibleSubagentSteps={
+                timelineBlock(item).kind === 'subagent' ? maxVisibleSubagentSteps : undefined
+              }
             />
           );
         })}
@@ -313,3 +364,5 @@ export default function OutputArea({
     </Box>
   );
 }
+
+export default React.memo(OutputArea);

@@ -254,6 +254,7 @@ function autoReviewState(
     reason: 'Requires App review.',
     fullModeBypassEligible: false,
     fullModePolicyBypassAllowed: false,
+    owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
     approval: {
       scope: 'once',
       cwd: retainedWorkspace,
@@ -710,6 +711,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision,
             turnId: 'other-turn',
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_wrong_turn'),
         ),
@@ -723,6 +725,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision + 1,
             turnId: started.descriptor.turnId,
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_wrong_revision'),
         ),
@@ -736,6 +739,7 @@ describe('retained TUI session coordinator', () => {
           sessionId,
           expectedRevision: revision,
           turnId: started.descriptor.turnId,
+          runId: started.descriptor.turnId,
         },
         commandEvidence(sessionId, 'command_cancel_fixture'),
       );
@@ -775,6 +779,7 @@ describe('retained TUI session coordinator', () => {
             sessionId,
             expectedRevision: revision,
             turnId: started.descriptor.turnId,
+            runId: started.descriptor.turnId,
           },
           commandEvidence(sessionId, 'command_cancel_rollback'),
         ),
@@ -828,6 +833,7 @@ describe('retained TUI session coordinator', () => {
           sessionId,
           expectedRevision: coordinator.getState().revision,
           turnId: coordinator.getState().turn.turnId,
+          runId: coordinator.getState().turn.turnId,
         },
         commandEvidence(sessionId, 'command_prepare_idle_close'),
       );
@@ -1133,6 +1139,65 @@ describe('retained TUI session coordinator', () => {
     } finally {
       modelEffects.createContextCompactor = originalCreateContextCompactor;
       gateway.invoke = originalInvoke;
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('persists an explicit failure when the State runner exits with an active Turn', async () => {
+    const sessionId = 'retained-active-runner-exit';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure(identity(sessionId));
+    if (fixture.runtime.status !== 'available') {
+      throw new Error('test model runtime unavailable');
+    }
+    const modelEffects = fixture.runtime.modelEffects as unknown as {
+      executePrimaryModelEffect: (...args: never[]) => Promise<unknown>;
+    };
+    const originalPrimaryEffect = modelEffects.executePrimaryModelEffect;
+    modelEffects.executePrimaryModelEffect = async () => ({ kind: 'completed', value: [] });
+    try {
+      const events: RuntimeEvent[] = [];
+      for await (const event of coordinator.executeTurn(
+        {
+          task: 'Exercise a runner that returns without a terminal fact.',
+          userId: 'tui-user',
+          threadId: sessionId,
+          workspace: retainedWorkspace,
+          recoveryIdentityKey: 'a'.repeat(64),
+          config: config(),
+          model: createChatModel(config()),
+          modelInvocationRuntime: { ...fixture.runtime, builtinToolCatalog },
+          capabilityExecution,
+          interactionMode: 'accept_edits',
+          phase: 'building',
+          sandboxBackend: 'none',
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'run.error',
+          message: 'Runtime State runner exited without a durable Turn terminal.',
+        }),
+      );
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
+      );
+      expect(coordinator.getState().turn.status).toBe('aborted');
+      expect(
+        fixture.store.sessions
+          .loadEventsStrict(sessionId)
+          .slice(-2)
+          .map(({ event }) => event.type),
+      ).toEqual(['run.error', 'turn.aborted']);
+    } finally {
+      modelEffects.executePrimaryModelEffect = originalPrimaryEffect;
       await access.close();
       fixture.storage.close();
       rmSync(fixture.root, { recursive: true, force: true });

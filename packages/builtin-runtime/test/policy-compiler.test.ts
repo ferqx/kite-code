@@ -6,6 +6,7 @@ import {
   compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
+  isDestructiveShellCommand,
   isReadOnlyShellCommand,
   isVcsMutationShellCommand,
 } from '@kite-ai/builtin-runtime';
@@ -142,13 +143,13 @@ describe('Builtin dynamic MCP policy compiler', () => {
 });
 
 describe('Builtin operation policy compiler', () => {
-  test('projects one compiler for each of 20 model operations and none for internals', () => {
+  test('projects one compiler for each model operation and none for internals', () => {
     const result = projection();
     const model = result.entries.filter((entry) => entry.visibility === 'model');
     const internal = result.entries.filter((entry) => entry.visibility === 'internal');
     expect(result.entries).toHaveLength(28);
-    expect(model).toHaveLength(20);
-    expect(internal).toHaveLength(8);
+    expect(model).toHaveLength(19);
+    expect(internal).toHaveLength(9);
     expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
     expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);
     expect(internal.find((entry) => entry.operationId === 'mcp:dynamic_tool')).toBeDefined();
@@ -177,20 +178,31 @@ describe('Builtin operation policy compiler', () => {
   test('runs workspace Shell commands in the baseline and reviews only known scope expansion', () => {
     for (const command of [
       'cat package.json',
-      'bun test',
-      'custom-build-tool --deploy candidate',
+      'git remote -v; git status --short',
       'touch local.txt',
       'mkdir build',
       'echo hi > local.txt',
-      'rm -rf .',
-      'rm -rf build',
-      'rm -rf $TARGET',
     ]) {
       expect(compile('shell_execute', { command })).toMatchObject({
         decision: 'allow',
         allowed: true,
         requiresApproval: false,
         requiresSandbox: true,
+        fullAccessMayBypassApproval: false,
+        sameCommandMayBypassApproval: false,
+        sandboxScope: {
+          kind: 'baseline',
+          filesystem: 'workspace_write',
+          network: 'disabled',
+        },
+      });
+    }
+    for (const command of ['bun test', 'custom-build-tool --deploy candidate', 'rm -rf $TARGET']) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'ask',
+        allowed: true,
+        requiresApproval: true,
+        effects: { uncertainEffects: true },
         fullAccessMayBypassApproval: false,
         sameCommandMayBypassApproval: false,
         sandboxScope: {
@@ -248,10 +260,46 @@ describe('Builtin operation policy compiler', () => {
     expect(
       compile('shell_execute', { command: 'bun test' }, { ...CONTEXT, phase: 'planning' }),
     ).toMatchObject({
-      decision: 'allow',
-      requiresApproval: false,
+      decision: 'ask',
+      requiresApproval: true,
+      effects: { uncertainEffects: true },
       sandboxScope: { kind: 'baseline', filesystem: 'read_only', network: 'disabled' },
     });
+  });
+
+  test('matches destructive programs only in executable position', () => {
+    for (const command of [
+      'git log --format="%H %s"',
+      'echo format',
+      'echo "; format C:"',
+      'printf "format"',
+      'printf "| diskpart"',
+      'rg "diskpart" src',
+    ]) {
+      expect(isDestructiveShellCommand(command)).toBe(false);
+    }
+    for (const command of [
+      'format C:',
+      'format.com C:',
+      'C:\\Windows\\System32\\format.com C:',
+      'diskpart /s wipe.txt',
+      'sudo rm -rf /',
+      'FOO=bar rm -rf /',
+      'env FOO=bar rm -rf /',
+      'env -i FOO=bar rm -rf /',
+      'env --unset HOME rm -rf /',
+      'env -- command rm -rf /',
+      'command -p rm -rf /',
+      'nohup rm -rf /',
+    ]) {
+      expect(isDestructiveShellCommand(command)).toBe(true);
+    }
+    for (const command of ['FOO=bar rm -rf /', 'env FOO=bar rm -rf /', 'command rm -rf /']) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'deny',
+        risk: 'destructive',
+      });
+    }
   });
 
   test('proves only bounded workspace inventory loops read-only', () => {
@@ -277,27 +325,56 @@ describe('Builtin operation policy compiler', () => {
     }
   });
 
-  test('treats only exact current-branch inspection as read-only Git', () => {
+  test('treats closed branch and remote listing shapes as read-only Git', () => {
     const inspection =
       'git status && echo "---BRANCH---" && git branch --show-current && echo "---LOG---" && git log --oneline -10';
     expect(isReadOnlyShellCommand(inspection)).toBe(true);
     expect(isVcsMutationShellCommand(inspection)).toBe(false);
+    const graphedInspection =
+      'git branch --show-current && git log --oneline -3 --all --graph | head -20';
+    expect(isReadOnlyShellCommand(graphedInspection)).toBe(true);
+    expect(isVcsMutationShellCommand(graphedInspection)).toBe(false);
+    expect(isReadOnlyShellCommand('git log -1 --stat 412f8bf7')).toBe(true);
+    expect(
+      isReadOnlyShellCommand("git log --oneline -30 --date=short --pretty=format:'%h %ad %an %s'"),
+    ).toBe(true);
     expect(isReadOnlyShellCommand('git branch --show-current 2>/dev/null')).toBe(true);
     expect(isVcsMutationShellCommand('git branch --show-current 2>/dev/null')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch -a --no-color | head -20')).toBe(true);
+    expect(isReadOnlyShellCommand('git branch -a --contains HEAD | head -5')).toBe(true);
+    expect(isVcsMutationShellCommand('git branch -a --contains HEAD | head -5')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch --merged')).toBe(true);
+    expect(isReadOnlyShellCommand('git branch --points-at HEAD')).toBe(true);
+    expect(isVcsMutationShellCommand('git branch -a --no-color | head -20')).toBe(false);
+    expect(isReadOnlyShellCommand('git remote -v | head -4')).toBe(true);
+    expect(isVcsMutationShellCommand('git remote -v | head -4')).toBe(false);
     expect(compile('shell_execute', { command: inspection })).toMatchObject({
       decision: 'allow',
       requiresApproval: false,
       effectiveEffects: { filesystem: 'read' },
     });
     for (const command of [
-      'git branch -a',
       'git branch feature/new',
       'git branch -d old',
+      'git branch -a feature/new',
       'git branch --show-current feature/new',
+      'git branch --points-at',
       'git branch --show-current && git branch feature/new',
+      'git remote add origin https://example.invalid/repo',
+      'git remote set-url origin https://example.invalid/repo',
     ]) {
       expect(isReadOnlyShellCommand(command)).toBe(false);
       expect(isVcsMutationShellCommand(command)).toBe(true);
+    }
+    expect(isReadOnlyShellCommand('git branch --show-current && unknown-command')).toBe(false);
+    expect(isVcsMutationShellCommand('git branch --show-current && unknown-command')).toBe(false);
+    for (const command of [
+      'git status --porcelain=v2 -z',
+      'git log --follow --name-status --decorate=short --author=ferqx --grep=runtime',
+      'git diff --color=never --word-diff --ignore-space-change --exit-code',
+    ]) {
+      expect(isReadOnlyShellCommand(command)).toBe(true);
+      expect(isVcsMutationShellCommand(command)).toBe(false);
     }
   });
 
@@ -305,10 +382,21 @@ describe('Builtin operation policy compiler', () => {
     for (const command of [
       'git status --short',
       'git log --oneline -10',
-      '/usr/bin/git status --short',
       'git diff -- safe.txt',
       'git add safe.txt',
       'git commit -m update',
+    ]) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'allow',
+        allowed: true,
+        requiresApproval: false,
+        fullAccessMayBypassApproval: false,
+        sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
+      });
+      expect(compile('shell_execute', { command }).recovery).toBeUndefined();
+    }
+    for (const command of [
+      '/usr/bin/git status --short',
       'git -C . status --short',
       'git --git-dir=.git status --short',
       'sh -c "git diff -- safe.txt"',
@@ -318,9 +406,10 @@ describe('Builtin operation policy compiler', () => {
       'git workspace-alias',
     ]) {
       expect(compile('shell_execute', { command })).toMatchObject({
-        decision: 'allow',
+        decision: 'ask',
         allowed: true,
-        requiresApproval: false,
+        requiresApproval: true,
+        effects: { uncertainEffects: true },
         fullAccessMayBypassApproval: false,
         sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
       });
@@ -431,7 +520,8 @@ describe('Builtin operation policy compiler', () => {
       {
         input: { command: 'node script.js' },
         expected: {
-          decision: 'allow',
+          decision: 'ask',
+          requiresApproval: true,
           risk: 'unknown',
           effects: { uncertainEffects: true },
           sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
@@ -439,6 +529,14 @@ describe('Builtin operation policy compiler', () => {
       },
       {
         input: { command: 'rg -f /tmp/kite-patterns src' },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+      },
+      {
+        input: { command: 'file --magic-file=/tmp/kite-magic input.txt' },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+      },
+      {
+        input: { command: 'git ls-files --exclude-from=/tmp/kite-excludes' },
         expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
       },
       {

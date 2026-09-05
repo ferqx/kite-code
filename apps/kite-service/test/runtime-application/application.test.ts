@@ -7,8 +7,77 @@ import {
   createKiteRuntimeApplication,
   type KiteRuntimeApplicationDependencies,
 } from '../../src/runtime-application/application';
+import { createRuntimeOperationGate } from '../../src/runtime-application/operation-gate';
 
 describe('KiteRuntimeApplication', () => {
+  test('reports a Host-owned active Session only after mutation admission is quiesced', async () => {
+    const operationGate = createRuntimeOperationGate();
+    const observedPhases: string[] = [];
+    let activeSession = true;
+    const application = createKiteRuntimeApplication({
+      runtime: {} as RuntimeAccess,
+      server: {} as RuntimeServer,
+      history: {} as RuntimeHistoryClient,
+      appControl: {} as KiteAppControlClient,
+      operationGate,
+      hasActiveOperations: () => {
+        observedPhases.push(operationGate.phase);
+        return activeSession;
+      },
+      cancelAll: async () => undefined,
+      dispose: async () => undefined,
+    });
+
+    const busy = await application.quiesceMutations();
+    expect(busy.activeOperations).toBe(true);
+    expect(observedPhases).toEqual(['quiescing']);
+    busy.resume();
+
+    activeSession = false;
+    const idle = await application.quiesceMutations();
+    expect(idle.activeOperations).toBe(false);
+    await idle.commitDrain();
+    await application[Symbol.asyncDispose]();
+  });
+
+  test('treats a concurrent interaction settlement mutation as busy after Session work terminalizes', async () => {
+    const operationGate = createRuntimeOperationGate();
+    let releaseSettlement!: () => void;
+    const settlementGate = new Promise<void>((resolve) => {
+      releaseSettlement = resolve;
+    });
+    let settlementEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      settlementEntered = resolve;
+    });
+    const application = createKiteRuntimeApplication({
+      runtime: {} as RuntimeAccess,
+      server: {} as RuntimeServer,
+      history: {} as RuntimeHistoryClient,
+      appControl: {} as KiteAppControlClient,
+      operationGate,
+      hasActiveOperations: () => false,
+      cancelAll: async () => undefined,
+      dispose: async () => undefined,
+    });
+    const settling = operationGate.runMutation(async () => {
+      settlementEntered();
+      await settlementGate;
+    });
+    await entered;
+
+    const busy = await application.quiesceMutations();
+    expect(busy.activeOperations).toBe(true);
+    busy.resume();
+    releaseSettlement();
+    await settling;
+
+    const idle = await application.quiesceMutations();
+    expect(idle.activeOperations).toBe(false);
+    await idle.commitDrain();
+    await application[Symbol.asyncDispose]();
+  });
+
   test('keeps lifecycle ownership injected and exposes the quiesce gate', async () => {
     const calls: string[] = [];
     const dependencies: KiteRuntimeApplicationDependencies = {

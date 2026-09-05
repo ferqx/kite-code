@@ -1,6 +1,12 @@
+/**
+ * Canonical cancellation projection helpers. This module is intentionally
+ * imported only by handleClientEvent.ts; local Agent/UI reducers must never
+ * derive tool terminality from child fields or seal blocks themselves.
+ */
 import { getToolDetail } from '../components/render-utils';
 import type { ConsolidatedToolEntry, OutputBlock, TuiState } from '../types';
 import { buildToolSummaryLine } from './consolidateTools';
+import { deriveToolSummaryResult } from './tool-summary-result';
 
 type ToolCardBlock = Extract<OutputBlock, { kind: 'tool_card' }>;
 type ToolSummaryBlock = Extract<OutputBlock, { kind: 'tool_summary' }>;
@@ -15,7 +21,7 @@ type CancellationClock = {
  *
  * Terminal states are monotonic: a late cancellation fact must never overwrite
  * done/error/timeout/exhausted. The function is intentionally idempotent so the
- * local optimistic path and the later durable event can share it safely.
+ * per-tool and whole-turn durable cancellation projections can share it safely.
  */
 export function settleCancelledToolCard(
   block: ToolCardBlock,
@@ -32,6 +38,7 @@ export function settleCancelledToolCard(
   return {
     ...block,
     status: 'cancelled',
+    presentationState: 'sealed',
     summary: 'Cancelled',
     detail: block.detail ?? getToolDetail(block.name, block.args),
     expanded: true,
@@ -50,25 +57,6 @@ function cancelledEntry(entry: ConsolidatedToolEntry): ConsolidatedToolEntry | n
   };
 }
 
-function resultForTools(tools: ConsolidatedToolEntry[]): ToolSummaryBlock['result'] {
-  if (
-    tools.some(
-      (tool) => tool.status === 'error' || tool.status === 'timeout' || tool.status === 'exhausted',
-    )
-  ) {
-    return 'error';
-  }
-  if (
-    tools.some(
-      (tool) =>
-        tool.status === 'cancelled' || tool.status === 'queued' || tool.status === 'running',
-    )
-  ) {
-    return 'cancelled';
-  }
-  return 'done';
-}
-
 function narrationBlocks(
   block: ToolSummaryBlock,
   nextBlockId: number,
@@ -79,7 +67,7 @@ function narrationBlocks(
   ].join('\n');
   if (!narration) return { blocks: [], nextBlockId };
   return {
-    blocks: [{ id: block.id, kind: 'text', content: narration }],
+    blocks: [{ id: block.id, kind: 'text', content: narration, presentationState: 'sealed' }],
     nextBlockId,
   };
 }
@@ -108,16 +96,25 @@ function settleCancelledSummaryForTurn(
     tools,
     summaryLine: buildToolSummaryLine(tools),
     active: false,
+    presentationState: 'sealed',
     latestActivity: undefined,
     totalElapsedMs: block.modelMs ?? now - block.createdAt,
     pendingCaption: undefined,
-    result: resultForTools(tools),
+    result: deriveToolSummaryResult(tools),
   };
   if (block.pendingCaption == null) {
     return { blocks: [settled], nextBlockId, changed: true };
   }
   return {
-    blocks: [settled, { id: nextBlockId, kind: 'text', content: block.pendingCaption }],
+    blocks: [
+      settled,
+      {
+        id: nextBlockId,
+        kind: 'text',
+        content: block.pendingCaption,
+        presentationState: 'sealed',
+      },
+    ],
     nextBlockId: nextBlockId + 1,
     changed: true,
   };
@@ -148,7 +145,8 @@ function projectCancelledSummaryEntry(
         ...block,
         tools,
         summaryLine: buildToolSummaryLine(tools),
-        ...(allSettled ? { result: resultForTools(tools) } : {}),
+        presentationState: allSettled && !block.active ? 'sealed' : 'live',
+        ...(allSettled ? { result: deriveToolSummaryResult(tools) } : {}),
       },
     ],
     changed: true,
@@ -197,10 +195,10 @@ export function projectToolCancelled(
 }
 
 /**
- * Shared whole-turn user cancellation projection used by local input and
- * durable turn.aborted replay. It owns visual normalization, not Runtime facts.
+ * Project one durable whole-turn user cancellation into visual terminal state.
+ * Keyboard input must not call this before Runtime confirms the cancellation.
  */
-export function projectUserCancelledTurn(
+export function projectDurableUserCancelledTurn(
   state: TuiState,
   options: { now?: number; clearPendingToolCalls?: boolean } = {},
 ): TuiState {
@@ -225,6 +223,7 @@ export function projectUserCancelledTurn(
         {
           ...block,
           status: 'cancelled',
+          presentationState: 'sealed',
           summary: 'Cancelled',
           error: 'Cancelled',
           toolCallCount: block.steps.length,
@@ -274,8 +273,7 @@ export function projectUserCancelledTurn(
     nextBlockId !== state.nextBlockId ||
     toolStartTimes !== state.toolStartTimes ||
     pendingToolCalls !== state.pendingToolCalls ||
-    state.currentThoughtSummaryId != null ||
-    state.thoughtPhaseStatus != null;
+    state.currentThoughtSummaryId != null;
   if (!globalChanged) return state;
 
   return {
@@ -285,6 +283,5 @@ export function projectUserCancelledTurn(
     toolStartTimes,
     pendingToolCalls,
     currentThoughtSummaryId: undefined,
-    thoughtPhaseStatus: undefined,
   };
 }

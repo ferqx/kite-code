@@ -437,8 +437,13 @@ function authorizeValidToolGovernanceFacts(
     facts.nestedSkill?.minimumApproval === 'auto_review';
   const dynamicMcpRequiresManual = facts.dynamicMcp?.minimumApproval === 'user';
   const dynamicMcpRequiresAutoReview = facts.dynamicMcp?.minimumApproval === 'auto_review';
+  const uncertainShellRequiresManual =
+    context.executionMechanism === 'shell' && policy.effects?.uncertainEffects === true;
   const forceManualApproval =
-    activationRequiresManual || nestedSkillRequiresManual || dynamicMcpRequiresManual;
+    activationRequiresManual ||
+    nestedSkillRequiresManual ||
+    dynamicMcpRequiresManual ||
+    uncertainShellRequiresManual;
   const forceAutoReview = dynamicMcpRequiresAutoReview || nestedSkillRequiresAutoReview;
 
   // Full interaction mode may bypass an ordinary approval only when the

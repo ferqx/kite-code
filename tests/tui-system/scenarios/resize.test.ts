@@ -16,9 +16,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, typeText } from '../harness/input-helpers';
+import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -77,6 +83,62 @@ describe('TUI PTY System — Terminal Resize', () => {
       await expectInteractiveAfterResize();
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 80x24→120x40 — alive');
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'reflows a completed long transcript in both directions without duplicate scrollback',
+    async () => {
+      const longTranscript = Array.from(
+        { length: 90 },
+        (_, index) => `RESIZE_LONG_LINE_${String(index + 1).padStart(3, '0')}: stable content.`,
+      ).join('\n');
+      server.setResponses([{ message: { content: `${longTranscript}\nRESIZE_FINAL_MARKER` } }]);
+      await submitUserMessage(tui, server, 'render a long resize transcript', { timeout: 15_000 });
+      await waitForText(() => tui.scrollback(), 'RESIZE_FINAL_MARKER', 15_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10_000, 500);
+      await tui.settleScreen();
+
+      const widePosition = tui.viewportPosition();
+      const wideScrollback = stripAnsi(tui.scrollback());
+      expect(wideScrollback.split('RESIZE_FINAL_MARKER')).toHaveLength(2);
+
+      const narrowResizeOutput = tui.markOutput();
+      tui.resize(48, 24);
+      if (process.platform !== 'win32') {
+        await waitForOutputQuiescence(() => tui.outputSince(narrowResizeOutput), 5_000, 250);
+      }
+      await waitForCondition(
+        () => screenContains(tui.scrollback(), 'RESIZE_FINAL_MARKER'),
+        'long transcript to survive narrow reflow',
+        5_000,
+      );
+      const narrowPosition = tui.viewportPosition();
+      const narrowScrollback = stripAnsi(tui.scrollback());
+      expect(narrowScrollback.split('RESIZE_FINAL_MARKER')).toHaveLength(2);
+      if (process.platform !== 'win32') {
+        expect(narrowPosition.baseY).toBeGreaterThan(widePosition.baseY);
+      }
+      await expectInteractiveAfterResize();
+
+      const wideResizeOutput = tui.markOutput();
+      tui.resize(120, 40);
+      if (process.platform !== 'win32') {
+        await waitForOutputQuiescence(() => tui.outputSince(wideResizeOutput), 5_000, 250);
+      }
+      await waitForCondition(
+        () => screenContains(tui.scrollback(), 'RESIZE_FINAL_MARKER'),
+        'long transcript to survive wide reflow',
+        5_000,
+      );
+      const restoredPosition = tui.viewportPosition();
+      const restoredScrollback = stripAnsi(tui.scrollback());
+      expect(restoredScrollback.split('RESIZE_FINAL_MARKER')).toHaveLength(2);
+      if (process.platform !== 'win32') {
+        expect(restoredPosition.baseY).toBeLessThan(narrowPosition.baseY);
+      }
+      await expectInteractiveAfterResize();
     },
     TIMEOUT,
   );

@@ -1,23 +1,18 @@
-import { randomUUID } from 'node:crypto';
 import {
-  chmodSync,
-  closeSync,
   existsSync,
   type FSWatcher,
-  fsyncSync,
-  mkdirSync,
-  openSync,
   readFileSync,
-  renameSync,
   statSync,
-  unlinkSync,
   unwatchFile,
   watchFile,
   watch as watchFs,
-  writeFileSync,
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { McpServerConfig } from '@kite-ai/builtin-runtime/mcp';
+import {
+  acquireConfigFileMutationLock,
+  replaceConfigFileAtomically,
+} from '@kite-ai/kite-local-runtime/config';
 import { applyEdits, modify, type ParseError, parse } from 'jsonc-parser';
 import {
   loadMcpConfigCatalog,
@@ -142,55 +137,65 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
 
   async mutate(command: McpConfigCommand): Promise<McpConfigCatalog> {
     const workspace = this.requireWorkspace();
-    const catalog = this.loadCatalog({ workspace });
-
-    switch (command.type) {
-      case 'add': {
-        validateMcpServerName(command.name);
-        if (catalog.sourceRevisions[command.scope] !== command.expectedRevision) {
-          conflict();
-        }
-        if (
-          catalog.entries.some(
-            (entry) => entry.name === command.name && entry.source.kind === command.scope,
-          )
-        ) {
-          throw new McpConfigMutationError(
-            'config_conflict',
-            `MCP server '${command.name}' already exists in ${command.scope} scope.`,
-          );
-        }
-        writeServer(
-          sourcePath(workspace, command.scope, this.userConfigPath),
-          command.name,
-          command.config,
-        );
-        break;
-      }
-      case 'update': {
-        const entry = requireEntry(catalog, command.key, command.expectedRevision);
-        assertWritable(entry.source.kind);
-        writeServer(entry.source.path, entry.name, { ...entry.rawConfig, ...command.patch });
-        break;
-      }
-      case 'remove': {
-        const entry = requireEntry(catalog, command.key, command.expectedRevision);
-        assertWritable(entry.source.kind);
-        removeServer(entry.source.path, entry.name);
-        break;
-      }
-      case 'set_enabled': {
-        const entry = requireEntry(catalog, command.key, command.expectedRevision);
-        assertWritable(entry.source.kind);
-        writeServer(entry.source.path, entry.name, {
-          ...entry.rawConfig,
-          enabled: command.enabled,
-        });
-        break;
-      }
+    const mutationPath = commandSourcePath(command, workspace, this.userConfigPath);
+    let lock: ReturnType<typeof acquireConfigFileMutationLock>;
+    try {
+      lock = acquireConfigFileMutationLock(mutationPath);
+    } catch {
+      throw new McpConfigMutationError(
+        'write_failed',
+        'MCP configuration mutation lock is unavailable.',
+      );
     }
+    try {
+      // The revision used for the decision is always re-read after this process owns the file.
+      const catalog = this.loadCatalog({ workspace });
 
-    return this.loadCatalog({ workspace });
+      switch (command.type) {
+        case 'add': {
+          validateMcpServerName(command.name);
+          if (catalog.sourceRevisions[command.scope] !== command.expectedRevision) {
+            conflict();
+          }
+          if (
+            catalog.entries.some(
+              (entry) => entry.name === command.name && entry.source.kind === command.scope,
+            )
+          ) {
+            throw new McpConfigMutationError(
+              'config_conflict',
+              `MCP server '${command.name}' already exists in ${command.scope} scope.`,
+            );
+          }
+          writeServer(mutationPath, command.name, command.config);
+          break;
+        }
+        case 'update': {
+          const entry = requireEntry(catalog, command.key, command.expectedRevision);
+          assertWritable(entry.source.kind);
+          writeServer(mutationPath, entry.name, { ...entry.rawConfig, ...command.patch });
+          break;
+        }
+        case 'remove': {
+          const entry = requireEntry(catalog, command.key, command.expectedRevision);
+          assertWritable(entry.source.kind);
+          removeServer(mutationPath, entry.name);
+          break;
+        }
+        case 'set_enabled': {
+          const entry = requireEntry(catalog, command.key, command.expectedRevision);
+          assertWritable(entry.source.kind);
+          writeServer(mutationPath, entry.name, {
+            ...entry.rawConfig,
+            enabled: command.enabled,
+          });
+          break;
+        }
+      }
+      return this.loadCatalog({ workspace });
+    } finally {
+      lock.release();
+    }
   }
 
   watch(workspace: string, listener: () => void): () => void {
@@ -248,6 +253,16 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
     }
     return this.workspace;
   }
+}
+
+function commandSourcePath(
+  command: McpConfigCommand,
+  workspace: string,
+  explicitUserConfigPath?: string,
+): string {
+  const scope = command.type === 'add' ? command.scope : command.key.source;
+  assertWritable(scope);
+  return sourcePath(workspace, scope, explicitUserConfigPath);
 }
 
 function requireEntry(
@@ -348,43 +363,17 @@ function stripInternalFields(
 }
 
 function atomicWrite(path: string, text: string): void {
-  const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const existingMode = existsSync(path) ? statSync(path).mode & 0o777 : defaultMode(path);
-  let fd: number | undefined;
   try {
-    fd = openSync(temporary, 'wx', existingMode);
-    writeFileSync(fd, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    renameSync(temporary, path);
-    chmodSync(path, existingMode);
-    syncDirectory(directory);
+    replaceConfigFileAtomically(path, text.endsWith('\n') ? text : `${text}\n`, existingMode);
   } catch (error) {
     throw new McpConfigMutationError(
       'write_failed',
       error instanceof Error ? error.message : 'MCP configuration could not be written.',
     );
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
 function defaultMode(path: string): number {
   return path.endsWith('.kite-code/mcp.json') ? 0o644 : 0o600;
-}
-
-function syncDirectory(directory: string): void {
-  let fd: number | undefined;
-  try {
-    fd = openSync(directory, 'r');
-    fsyncSync(fd);
-  } catch {
-    // Some platforms do not allow fsync on directories; file fsync + rename still applies.
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
 }

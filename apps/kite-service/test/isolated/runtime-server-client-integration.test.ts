@@ -105,19 +105,41 @@ test('App CLI access routes one Host through InProcess Protocol with fixed admis
     if (started.status !== 'applied') throw new Error('Expected the turn to be committed.');
     expect(started.revision).toBeGreaterThan(0);
 
-    const terminal = await terminalNotification(iterator, sessionId);
+    const eventfulNotifications: Extract<
+      RuntimeNotification,
+      { readonly durability: 'durable' }
+    >[] = [];
+    const terminal = await terminalNotification(iterator, sessionId, (notification) => {
+      if (
+        'durability' in notification &&
+        notification.durability === 'durable' &&
+        notification.projection.event
+      ) {
+        eventfulNotifications.push(notification);
+      }
+    });
     expect(terminal.durability).toBe('durable');
     expect(terminal.projection.session.sessionId).toBe(sessionId);
     expect(terminal.projection.session.workspace).toBeUndefined();
     expect(JSON.stringify(terminal)).not.toContain('test-key');
     expect(JSON.stringify(terminal)).not.toContain(workspace);
     expect(model.getRequestCount()).toBe(1);
+    expect(eventfulNotifications.length).toBeGreaterThan(0);
+    for (const notification of eventfulNotifications) {
+      expect(notification.runId).toBeString();
+      expect(notification.turnId).toBeString();
+      if (notification.projection.event?.type === 'task.terminal') {
+        expect(notification.taskId).toBe(notification.projection.event.taskId);
+      }
+    }
 
     await expect(
       access.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'get_session_projection', sessionId }),
     ).resolves.toMatchObject({
       status: 'ok',
-      session: { activeWork: { status: 'completed', activeTurn: { status: 'completed' } } },
+      session: {
+        currentRun: { status: 'completed' },
+      },
     });
 
     await iterator.return?.();
@@ -159,6 +181,7 @@ async function nextNotification(
 async function terminalNotification(
   iterator: AsyncIterator<RuntimeAccessNotification>,
   sessionId: string,
+  observe: (notification: RuntimeAccessNotification) => void = () => undefined,
 ): Promise<Extract<RuntimeNotification, { readonly durability: 'durable' }>> {
   const observed: string[] = [];
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -170,6 +193,7 @@ async function terminalNotification(
         cause: error,
       });
     }
+    observe(notification);
     observed.push(
       'durability' in notification && notification.durability === 'durable'
         ? `${notification.revision}:${notification.projection.event?.type ?? notification.projection.kind}`
@@ -181,9 +205,9 @@ async function terminalNotification(
       'durability' in notification &&
       notification.durability === 'durable' &&
       notification.sessionId === sessionId &&
-      ((notification.projection.session.activeWork !== undefined &&
-        notification.projection.session.activeWork.status !== 'running' &&
-        notification.projection.session.activeWork.status !== 'waiting') ||
+      ((notification.projection.session.currentRun !== undefined &&
+        notification.projection.session.currentRun.status !== 'running' &&
+        notification.projection.session.currentRun.status !== 'waiting') ||
         notification.projection.event?.type === 'run.terminal' ||
         notification.projection.event?.type === 'turn.terminal' ||
         notification.projection.event?.type === 'task.terminal')

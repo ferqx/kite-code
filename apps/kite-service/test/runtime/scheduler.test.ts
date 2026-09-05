@@ -5,11 +5,7 @@ import {
   type RuntimeState,
   type ToolCallRecord,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import {
-  decideNextEffect as decideKernelNextEffect,
-  MAX_PARALLEL_READ_TOOLS,
-  MAX_PARALLEL_SUBAGENTS,
-} from '#agent-kernel';
+import { decideNextEffect as decideKernelNextEffect, MAX_PARALLEL_SUBAGENTS } from '#agent-kernel';
 import { classifyFailure } from '#kite-service/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFacts } from '#kite-service/bootstrap/runtime/scheduler-facts';
 import { eventsForRuntimeAction } from '#kite-service/bootstrap/runtime/state-actions';
@@ -56,6 +52,7 @@ function privateSuspensionRecord(parentToolCallId: string) {
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' as const,
       toolCallId: `child-tool-${parentToolCallId}`,
+      runtimeToolCallId: `child-tool-${parentToolCallId}`,
       toolName: 'shell_execute',
     },
   };
@@ -817,14 +814,14 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('caps one parallel read batch', () => {
+  test('schedules every compatible read in one model batch', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-reads',
       userId: 'u',
       workspace: '/workspace',
     });
-    for (let index = 0; index < MAX_PARALLEL_READ_TOOLS + 2; index++) {
+    for (let index = 0; index < 6; index++) {
       queueCall(state, `read-${index}`, {
         name: 'read_file',
         args: { path: `${index}.ts` },
@@ -835,7 +832,7 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: Array.from({ length: MAX_PARALLEL_READ_TOOLS }, (_, index) => `read-${index}`),
+      toolCallIds: Array.from({ length: 6 }, (_, index) => `read-${index}`),
     });
   });
 
@@ -1035,13 +1032,24 @@ describe('decideNextEffect', () => {
       toolCallId: 'task-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      parentToolCallId: 'task-a',
+      childSubagentId: 'child-task-a',
+      runtimeToolCallId: 'child-tool-task-a',
       toolName: 'shell_execute',
       reason: 'Review child command.',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'task-a',
+      },
       approval: {} as never,
     });
     state = reduceRuntimeState(state, {
       type: 'subagent.approval_deferred',
       toolCallId: 'task-b',
+      subagentId: 'child-task-b',
+      parentToolCallId: 'task-b',
     });
     state = reduceRuntimeState(state, {
       type: 'auto_review.completed',
@@ -1054,6 +1062,12 @@ describe('decideNextEffect', () => {
         reason: 'safe',
         reviewerModelName: 'fixture',
         durationMs: 1,
+      },
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'task-a',
       },
     });
 
@@ -1157,11 +1171,22 @@ describe('decideNextEffect', () => {
       toolCallId: 'task-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      parentToolCallId: 'task-a',
+      childSubagentId: 'child-task-a',
+      runtimeToolCallId: 'child-tool-task-a',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'task-a',
+      },
       approval: {} as never,
     });
     state = reduceRuntimeState(state, {
       type: 'subagent.approval_deferred',
       toolCallId: 'task-b',
+      subagentId: 'child-task-b',
+      parentToolCallId: 'task-b',
     });
     state = reduceRuntimeState(
       state,
@@ -1199,6 +1224,12 @@ describe('decideNextEffect', () => {
       grant: 'approve_once',
       receiptId: 'receipt-task-a',
       generation: 0,
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-a',
+        subagentId: 'child-task-a',
+        parentToolCallId: 'task-a',
+      },
     });
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
 
@@ -1226,6 +1257,15 @@ describe('decideNextEffect', () => {
       toolCallId: 'task-b',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      parentToolCallId: 'task-b',
+      childSubagentId: 'child-task-b',
+      runtimeToolCallId: 'child-tool-task-b',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-task-b',
+        subagentId: 'child-task-b',
+        parentToolCallId: 'task-b',
+      },
       approval: {} as never,
     });
     expect(decideNextEffect(state)).toEqual({
@@ -1269,6 +1309,7 @@ describe('decideNextEffect', () => {
       fullModePolicyBypassAllowed: false,
       toolName: 'shell_execute',
       reason: 'Needs review',
+      owner: { kind: 'root_tool', toolCallId: 'shell-tool' },
       approval: approval as never,
     });
     const approved = reduceRuntimeState(awaiting, {
@@ -1282,6 +1323,7 @@ describe('decideNextEffect', () => {
         reviewerModelName: 'test',
         durationMs: 1,
       },
+      owner: { kind: 'root_tool', toolCallId: 'shell-tool' },
     });
 
     expect(approved.interactions.kind).toBe('idle');
@@ -1327,6 +1369,7 @@ describe('decideNextEffect', () => {
       toolCallId: 'shell-1',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-1' },
       approval: approval as never,
     });
     state = reduceRuntimeState(state, {
@@ -1336,6 +1379,7 @@ describe('decideNextEffect', () => {
       grant: 'approve_once',
       receiptId: 'receipt-shell-1',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'shell-1' },
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
@@ -1352,6 +1396,7 @@ describe('decideNextEffect', () => {
       toolCallId: 'shell-2',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-2' },
       approval: approval as never,
     });
     state = reduceRuntimeState(
@@ -1363,6 +1408,7 @@ describe('decideNextEffect', () => {
           toolCallId: 'shell-2',
           generation: 0,
           reason: 'Rejected by user.',
+          owner: { kind: 'root_tool', toolCallId: 'shell-2' },
         },
         state,
         '2026-08-11T00:00:00.000Z',
@@ -1379,6 +1425,7 @@ describe('decideNextEffect', () => {
       toolCallId: 'shell-3',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-3' },
       approval: approval as never,
     });
     state = reduceRuntimeState(state, {
@@ -1388,6 +1435,7 @@ describe('decideNextEffect', () => {
       grant: 'approve_once',
       receiptId: 'receipt-shell-3',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'shell-3' },
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',

@@ -17,6 +17,7 @@ import { useState } from 'react';
 import stringWidth from 'string-width';
 import App from '../src/tui/App';
 import ApprovalBlock from '../src/tui/components/ApprovalBlock';
+import { activityDot } from '../src/tui/components/activity-dot';
 import BlockRenderer, {
   MAX_USER_MESSAGE_LINES,
   visibleUserMessageLines,
@@ -30,7 +31,6 @@ import MarkdownBlock, {
 } from '../src/tui/components/MarkdownBlock';
 import ModelSelector, { modelOptionId } from '../src/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/tui/components/PlanReviewBlock';
-import { SPINNER, spinnerIndexForElapsed } from '../src/tui/components/render-utils';
 import StartupScreen from '../src/tui/components/StartupScreen';
 import SubAgentBlock from '../src/tui/components/SubAgentBlock';
 import TaskProgressBlock from '../src/tui/components/TaskProgressBlock';
@@ -44,6 +44,8 @@ import OutputArea, {
   concurrentSubagentStepLimit,
   useStaticContent,
 } from '../src/tui/OutputArea';
+import { isTuiRunActive } from '../src/tui/presentation/selectors';
+import { projectOutputBlockTimeline } from '../src/tui/presentation/timeline';
 import { TuiUserInputProvider } from '../src/tui/provider';
 import { type Action, eventReducer as canonicalEventReducer } from '../src/tui/reducers';
 import type { RunStatusSnapshot } from '../src/tui/run-status';
@@ -57,22 +59,57 @@ import type {
   TuiState,
   Turn,
 } from '../src/tui/types';
+import { acceptedEnvelope } from './helpers/accepted-envelope';
 
 // ── Shared helpers ──
 
 type LayoutTestAction =
-  | Exclude<Action, { type: 'RUNTIME_EVENT' }>
+  | Exclude<Action, { type: 'ACCEPT_PRESENTATION_ENVELOPE' }>
   | {
-      type: 'RUNTIME_EVENT';
+      type: 'ACCEPT_PRESENTATION_ENVELOPE';
       event: RuntimeEvent | RuntimeClientEvent;
     };
 
 function eventReducer(state: TuiState, action: LayoutTestAction): TuiState {
-  if (action.type !== 'RUNTIME_EVENT') return canonicalEventReducer(state, action);
+  if (action.type !== 'ACCEPT_PRESENTATION_ENVELOPE') return canonicalEventReducer(state, action);
   const event = toClientEvent(action.event);
+  const currentRun = state.runtimeAuthority?.currentRun;
+  const currentTaskId = state.runtimeAuthority?.activeTask?.taskId ?? currentRun?.taskId;
+  const currentTurnId = currentRun?.activeTurnId ?? currentRun?.initialTurnId;
   return event === undefined
     ? state
-    : canonicalEventReducer(state, { type: 'RUNTIME_EVENT', event });
+    : canonicalEventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event: acceptedEnvelope(event, {
+          ...(event.type === 'run.terminal' || currentRun?.runId === undefined
+            ? {}
+            : { runId: currentRun.runId }),
+          ...(event.type === 'task.terminal' || currentTaskId === undefined
+            ? {}
+            : { taskId: currentTaskId }),
+          ...(event.type === 'turn.terminal' || currentTurnId === undefined
+            ? {}
+            : { turnId: currentTurnId }),
+        }),
+      });
+}
+
+function activeRuntimeAuthority(
+  revision = 1,
+  runId = 'run-layout',
+  turnId = 'turn-layout',
+): NonNullable<TuiState['runtimeAuthority']> {
+  return {
+    revision,
+    interactionQueue: { revision, interactions: [] },
+    currentRun: {
+      runId,
+      initialTurnId: turnId,
+      activeTurnId: turnId,
+      status: 'running',
+      revision,
+    },
+  };
 }
 
 /**
@@ -167,17 +204,24 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         summary: event.result.ok ? 'Completed.' : 'Failed.',
       };
     case 'tool.failed':
-      return { type: 'tool.failed', toolId: event.toolCallId, summary: 'Tool execution failed.' };
+      return {
+        type: 'tool.failed',
+        toolId: event.toolCallId,
+        presentation: 'standalone',
+        summary: 'Tool execution failed.',
+      };
     case 'tool.rejected':
       return {
         type: 'tool.rejected',
         toolId: event.toolCallId,
+        presentation: 'standalone',
         summary: 'Tool execution rejected.',
       };
     case 'tool.cancelled':
       return {
         type: 'tool.cancelled',
         toolId: event.toolCallId,
+        presentation: 'standalone',
         summary: 'Tool execution cancelled.',
       };
     case 'tool.file_change':
@@ -193,11 +237,16 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         subagentId: event.subagent.id,
         role: event.subagent.role,
         name: 'name' in event.subagent ? event.subagent.name : event.subagent.task,
+        ...(event.subagent.concurrencyGroupId === undefined
+          ? {}
+          : { concurrencyGroupId: event.subagent.concurrencyGroupId }),
       };
     case 'subagent.step':
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: event.subagent.toolName,
         status: 'started',
         arguments: event.subagent.toolArgs,
@@ -209,9 +258,10 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
+        stepId: event.subagent.stepId,
+        toolCallId: event.subagent.toolCallId,
         toolName: event.subagent.toolName,
-        status: event.subagent.ok ? 'completed' : 'failed',
-        result: { ok: event.subagent.ok },
+        status: event.subagent.status,
         ...(event.subagent.summary === undefined ? {} : { summary: event.subagent.summary }),
         ...(event.subagent.totalLines === undefined
           ? {}
@@ -225,12 +275,28 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
         type: 'subagent.completed',
         subagentId: event.subagent.id,
         summary: event.subagent.summary,
+        toolCallCount: event.subagent.toolCallCount,
+        durationMs: event.subagent.durationMs,
       };
     case 'subagent.failed':
       return {
         type: 'subagent.failed',
         subagentId: event.subagent.id,
         summary: event.subagent.summary ?? event.subagent.error,
+        ...(event.subagent.toolCallCount === undefined
+          ? {}
+          : { toolCallCount: event.subagent.toolCallCount }),
+        ...(event.subagent.durationMs === undefined
+          ? {}
+          : { durationMs: event.subagent.durationMs }),
+        ...(event.subagent.diagnostic === undefined
+          ? {}
+          : {
+              diagnostic: {
+                code: event.subagent.diagnostic.code,
+                stage: event.subagent.diagnostic.stage,
+              },
+            }),
       };
     case 'run.completed':
       return {
@@ -241,11 +307,15 @@ function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientE
       };
     case 'run.error':
       return {
-        type: 'run.failure',
+        type: 'run.terminal',
         runId: event.turnId ?? 'runtime-run',
-        code: event.failure?.kind ?? event.outcome?.reasonCode ?? 'runtime_error',
-        retryable: event.failure?.retryable ?? event.recoverable,
-        recoveryEntry: event.outcome?.recoveryEntry ?? (event.recoverable ? 'retry' : 'new_run'),
+        status: 'failed',
+        outcome: {
+          status: event.outcome?.status ?? 'unknown',
+          reasonCode: event.failure?.kind ?? event.outcome?.reasonCode ?? 'runtime_error',
+          safeRetry: event.failure?.retryable ?? event.recoverable,
+          recoveryEntry: event.outcome?.recoveryEntry ?? (event.recoverable ? 'retry' : 'new_run'),
+        },
       };
     default:
       return undefined;
@@ -328,11 +398,10 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
   };
 }
 
-describe('spinner timing', () => {
-  test('derives frames deterministically from elapsed time', () => {
-    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('● ');
-    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('● ');
-    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 1000)]).toBe('● ');
+describe('activity marker', () => {
+  test('uses a stable visible frame while active', () => {
+    expect(activityDot(true)).toBe('● ');
+    expect(activityDot(false)).toBe('  ');
   });
 });
 
@@ -363,6 +432,7 @@ function fakeClientApproval(
     sessionRevision: 1,
     generation: 1,
     grants: ['approve_once', 'same_command'],
+    owner: { kind: 'root_tool', toolCallId: 'approval-client-test' },
     command: 'npm test',
     summary: 'Runtime requests your decision.',
     ...overrides,
@@ -376,6 +446,7 @@ function fakeClientPendingApproval(
   return {
     interactionId: interaction.interactionId,
     toolCallId: interaction.interactionId,
+    owner: interaction.owner,
     route: 'user',
     status: 'awaiting_user',
     sequence: 1,
@@ -406,6 +477,19 @@ function fakeProvider(): TuiUserInputProvider {
 const onResolved = () => {};
 const noop = () => {};
 
+async function waitForFrameText(
+  lastFrame: () => string | undefined,
+  text: string,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (lastFrame()?.includes(text)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(lastFrame()).toContain(text);
+}
+
 // ── Footer ──
 
 describe('Footer', () => {
@@ -413,7 +497,6 @@ describe('Footer', () => {
     status: fakeStatus(),
     running: false,
     thinkingVisible: true,
-    timerKey: 0,
   };
 
   test('renders Footer with child content', () => {
@@ -431,15 +514,16 @@ describe('Footer', () => {
     expect(typeof lastFrame()).toBe('string');
   });
 
-  test('hides global status while keeping blocking interaction content', () => {
+  test('keeps Working while hiding stats behind blocking interaction content', () => {
     const { lastFrame } = render(
-      <Footer {...footerProps} interactionMode="accept_edits" hideGlobalStatus>
+      <Footer {...footerProps} running interactionMode="accept_edits" hideGlobalStatus>
         <Text>blocking interaction</Text>
       </Footer>,
     );
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('blocking interaction');
+    expect(frame).toContain('Working');
     expect(frame).not.toContain('claude-opus');
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -526,12 +610,7 @@ describe('Header', () => {
 describe('StatusBar', () => {
   test('shows only Working during the working phase', () => {
     const { lastFrame } = render(
-      <StatusBar
-        status={fakeStatus({ phase: 'building' })}
-        runStatus={fakeRunStatus({ phase: 'working', verb: 'Running' })}
-        timerKey={0}
-        running
-      />,
+      <StatusBar runStatus={fakeRunStatus({ phase: 'working', verb: 'Running' })} running />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Working');
@@ -542,14 +621,12 @@ describe('StatusBar', () => {
   test('does not expose tool details or elapsed time during the working phase', () => {
     const { lastFrame } = render(
       <StatusBar
-        status={fakeStatus()}
         runStatus={fakeRunStatus({
           phase: 'working',
           verb: 'Locating',
           elapsedMs: 28_000,
           runTokenDelta: 189,
         })}
-        timerKey={0}
         running
       />,
     );
@@ -562,12 +639,9 @@ describe('StatusBar', () => {
   });
 
   test('status bar hides when idle and not planning', () => {
-    const status = fakeStatus({ phase: 'building' });
     const { lastFrame } = render(
       <StatusBar
-        status={status}
         runStatus={fakeRunStatus({ phase: 'thinking', verb: 'Planning' })}
-        timerKey={0}
         running={false}
       />,
     );
@@ -578,12 +652,27 @@ describe('StatusBar', () => {
   });
 
   test('status bar is single row', () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(
-      <StatusBar status={status} runStatus={fakeRunStatus()} timerKey={0} running />,
-    );
+    const { lastFrame } = render(<StatusBar runStatus={fakeRunStatus()} running />);
     const lines = lastFrame()?.split('\n').filter(Boolean);
     expect(lines?.length).toBe(1);
+  });
+
+  test('shows Cancelling while a durable cancel command is pending', () => {
+    const { lastFrame } = render(
+      <StatusBar
+        runStatus={{
+          phase: 'working',
+          verb: 'Cancelling',
+          tone: 'warning',
+          elapsedMs: 0,
+          runTokenDelta: 0,
+          retry: null,
+          waiting: null,
+        }}
+        running={true}
+      />,
+    );
+    expect(lastFrame()).toContain('Cancelling');
   });
 });
 
@@ -1262,7 +1351,9 @@ describe('ModelSelector', () => {
         currentModel="model-0"
         currentProvider="provider-0"
         models={models}
-        onSelect={(model) => selected.push(model.name)}
+        onSelect={(model) => {
+          selected.push(model.name);
+        }}
         onClose={noop}
       />,
     );
@@ -1271,6 +1362,7 @@ describe('ModelSelector', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(lastFrame()).toContain('model-19');
     stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(selected).toEqual(['model-19']);
 
     const secondSelection: string[] = [];
@@ -1279,7 +1371,9 @@ describe('ModelSelector', () => {
         currentModel="model-0"
         currentProvider="provider-0"
         models={models}
-        onSelect={(model) => secondSelection.push(model.name)}
+        onSelect={(model) => {
+          secondSelection.push(model.name);
+        }}
         onClose={noop}
       />,
     );
@@ -1288,6 +1382,7 @@ describe('ModelSelector', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(secondRender.lastFrame()).toContain('provider-0');
     secondRender.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(secondSelection).toEqual(['model-0']);
   });
@@ -1382,7 +1477,6 @@ describe('ApprovalBlock', () => {
         queueEntry={fakeClientPendingApproval(approval, {
           sequence: 7,
           route: 'auto',
-          matchCount: 2,
         })}
       />,
     );
@@ -1391,7 +1485,6 @@ describe('ApprovalBlock', () => {
     expect(frame).not.toContain('Queue #7');
     expect(frame).not.toContain('Generation 3');
     expect(frame).not.toContain('approval-queue-7');
-    expect(frame).toContain('2 matching requests');
     expect(frame).not.toContain('workspace_write');
   });
 
@@ -1426,6 +1519,34 @@ describe('ApprovalBlock', () => {
     });
   });
 
+  test('shows confirmation feedback immediately while the Runtime receipt is pending', async () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-slow', generation: 2 });
+    const provider = fakeProvider();
+    let accept!: () => void;
+    provider.setActionSink(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const view = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={provider}
+        onResolved={() => undefined}
+        queueEntry={fakeClientPendingApproval(approval)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(view.lastFrame()).toContain('Sending confirmation…');
+    expect(view.lastFrame()).not.toContain('Allow once');
+    accept();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
   test('keeps a failed confirmation visible and retries the same choice', async () => {
     const resolved: string[] = [];
     const approval = fakeClientApproval({ interactionId: 'approval-retry', generation: 4 });
@@ -1446,12 +1567,12 @@ describe('ApprovalBlock', () => {
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
     expect(resolved).toEqual([]);
 
     view.stdin.write('\r');
@@ -1460,6 +1581,23 @@ describe('ApprovalBlock', () => {
     }
     expect(resolved).toEqual(['approve']);
     expect(attempts).toBe(2);
+  });
+
+  test('renders an external Escape failure inside the approval footer', () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-escape-retry', generation: 5 });
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={fakeProvider()}
+        onResolved={() => undefined}
+        queueEntry={fakeClientPendingApproval(approval)}
+        externalSubmissionFailure="state_changed"
+      />,
+    );
+
+    expect(lastFrame()).toContain(
+      'The session changed while confirming. The latest interaction state could not be applied.',
+    );
   });
 });
 
@@ -1572,13 +1710,13 @@ describe('InputBlock', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(resolved).toBeUndefined();
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50 && resolved === undefined; attempt += 1) {
@@ -1940,13 +2078,13 @@ describe('PlanReviewBlock', () => {
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (view.lastFrame()?.includes('Confirmation was not accepted. Press Enter to retry.')) {
+      if (view.lastFrame()?.includes('Confirmation was not accepted. Retry the confirmation.')) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(resolved).toEqual([]);
-    expect(view.lastFrame()).toContain('Confirmation was not accepted. Press Enter to retry.');
+    expect(view.lastFrame()).toContain('Confirmation was not accepted. Retry the confirmation.');
 
     view.stdin.write('\r');
     for (let attempt = 0; attempt < 50 && resolved.length === 0; attempt += 1) {
@@ -2191,6 +2329,8 @@ describe('concurrent subagent dynamic height', () => {
       startedAt: Date.now(),
       concurrencyGroupId: 'batch-1',
       steps: Array.from({ length: 10 }, (_, stepIndex) => ({
+        stepId: `child-${childIndex + 1}-step-${stepIndex + 1}`,
+        toolCallId: `child-${childIndex + 1}-tool-${stepIndex + 1}`,
         toolName: `child_${childIndex + 1}_step_${String(stepIndex + 1).padStart(2, '0')}`,
         toolArgs: {},
         status: 'success' as const,
@@ -2208,6 +2348,26 @@ describe('concurrent subagent dynamic height', () => {
       { id: 99, kind: 'text', content: 'mutable response', streaming: true },
     ];
     expect(concurrentSubagentStepLimit(mixedBlocks, 24)).toBe(0);
+  });
+
+  test('keeps child identities visible when Delegating shares the mutable tail', () => {
+    const mixedBlocks: OutputBlock[] = [
+      { id: 99, kind: 'text', content: 'mutable response', streaming: true },
+      ...childBlocks,
+    ];
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={mixedBlocks}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Delegating · 4 agents');
+    expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
   });
 
   test('renders concurrent children as one compact Thought-like activity block', () => {
@@ -2239,6 +2399,26 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame.split('\n').length + 4).toBeLessThan(24);
   });
 
+  test('does not repaint an idle concurrent group on wall-clock time alone', async () => {
+    const view = render(
+      <OutputArea
+        activeDynamicBlocks={childBlocks}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const initialFrame = view.lastFrame();
+    const initialWriteCount = view.frames.length;
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(view.lastFrame()).toBe(initialFrame);
+    expect(view.frames).toHaveLength(initialWriteCount);
+    view.unmount();
+  });
+
   test('shows Working for a newly started child without tool output', () => {
     const newlyStarted = childBlocks.map((block) =>
       block.kind === 'subagent' ? { ...block, steps: [] } : block,
@@ -2263,6 +2443,8 @@ describe('concurrent subagent dynamic height', () => {
         ...block,
         steps: [
           {
+            stepId: `child-${index + 1}-step-1`,
+            toolCallId: `child-${index + 1}-tool-1`,
             toolName: 'read_file',
             toolArgs: { path: `/workspace/child-${index + 1}.ts` },
             status: 'pending' as const,
@@ -2650,6 +2832,24 @@ describe('BlockRenderer', () => {
     expect(frame.split('Tool approval cancelled by user.')).toHaveLength(2);
   });
 
+  test('does not infer shell cancellation from terminal output text', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-error-containing-cancelled-text',
+      name: 'shell_execute',
+      args: { command: 'external-command' },
+      status: 'error',
+      summary: 'Command cancelled by the external program.',
+    };
+    const frame =
+      render(
+        <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('exit: error');
+  });
+
   test('limits a large user message to thirty content lines while keeping both ends', () => {
     const content = Array.from({ length: 40 }, (_, index) => `line-${index}`).join('\n');
     const block: OutputBlock = { id: 1, kind: 'user', content };
@@ -2721,7 +2921,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('⠋');
   });
 
-  test('running tool_card renders the initial spinner frame', () => {
+  test('running tool_card renders a static activity marker', () => {
     const block: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -2919,6 +3119,27 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('Cancelled');
   });
 
+  test('does not infer ask_user cancellation from a missing answer payload', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-missing-answer',
+      name: 'ask_user',
+      args: { questions: [{ id: 'scope', question: 'Scope?' }] },
+      status: 'done',
+      summary: '',
+      expanded: true,
+    };
+
+    const frame =
+      render(
+        <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('User:');
+    expect(frame).not.toContain('Cancelled');
+  });
+
   test('renders a single structured ask_user answer without a step prefix', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3064,6 +3285,29 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('exit: error');
   });
 
+  test('rejected shell tool_card states that execution never started', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-rejected',
+      name: 'shell_execute',
+      args: { command: 'custom-project-script' },
+      status: 'rejected',
+      summary: 'The shell command requires exact user approval.',
+      detail: 'Run: custom-project-script',
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('custom-project-script');
+    expect(frame).toContain('The shell command requires exact user approval.');
+    expect(frame).toContain('rejected before execution');
+    expect(frame).not.toContain('(No output)');
+    expect(frame).not.toContain('exit: error');
+  });
+
   test('cancelled shell tool_card keeps its command and renders only a cancelled footer', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3132,7 +3376,7 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('cancelled');
   });
 
-  test('live and replay cancellation render the same collapsed shell outcome', () => {
+  test('cancel request waits for durable facts and then matches replay rendering', () => {
     const activeCard: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -3147,14 +3391,35 @@ describe('BlockRenderer', () => {
     };
     const initial: TuiState = {
       ...createInitialState(),
-      running: true,
+      runtimeAuthority: activeRuntimeAuthority(),
       turns: [{ blocks: [activeCard] }],
       nextBlockId: 2,
     };
 
-    const live = eventReducer(initial, { type: 'ESCAPE' });
+    let live = eventReducer(initial, { type: 'ESCAPE' });
+    expect(isTuiRunActive(live)).toBe(true);
+    expect(live.turns[0]!.blocks[0]).toEqual(
+      expect.objectContaining({ status: 'running', summary: '' }),
+    );
+    live = eventReducer(live, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'tool.cancelled',
+        toolCallId: 'shell-1',
+        reason: 'Cancelled by user.',
+      },
+    });
+    live = eventReducer(live, {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
+      event: {
+        type: 'turn.aborted',
+        turnId: 'turn-1',
+        reason: 'Cancelled by user.',
+        cause: 'user',
+      },
+    });
     let replay = eventReducer(initial, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'tool.cancelled',
         toolCallId: 'shell-1',
@@ -3162,7 +3427,7 @@ describe('BlockRenderer', () => {
       },
     });
     replay = eventReducer(replay, {
-      type: 'RUNTIME_EVENT',
+      type: 'ACCEPT_PRESENTATION_ENVELOPE',
       event: {
         type: 'turn.aborted',
         turnId: 'turn-1',
@@ -3237,6 +3502,31 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('find files');
   });
 
+  test('does not repaint a running Thinking duration without a Runtime event', async () => {
+    const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 900,
+      liveModelStartedAt: Date.now() - 900,
+      totalElapsedMs: 0,
+      summaryLine: '',
+      active: true,
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    };
+    const view = render(<BlockRenderer columns={80} block={block} isFocused={false} index={0} />);
+    const initialFrame = view.lastFrame();
+    const initialWriteCount = view.frames.length;
+    expect(initialFrame).toContain('Thinking 1s');
+
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+    expect(view.lastFrame()).toBe(initialFrame);
+    expect(view.frames).toHaveLength(initialWriteCount);
+    view.unmount();
+  });
+
   test('collapses settled tool_summary errors to the summary line', () => {
     const block: OutputBlock = {
       id: 1,
@@ -3266,7 +3556,52 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).not.toContain('search command failed');
   });
 
-  test('phase block renders confirmed captions and pending caption at the top (ADR-0030)', () => {
+  test('includes proven read-only Shell commands in the Thinking summary', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 1_000,
+      totalElapsedMs: 1_000,
+      modelMs: 1_000,
+      summaryLine: 'read 2 files, ran 1 shell command',
+      active: false,
+      hasThought: true,
+      hasThinking: true,
+      tools: [
+        {
+          callId: 'read-a',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'read-b',
+          name: 'read_file',
+          args: { path: 'package.json' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'shell-read',
+          name: 'shell_execute',
+          args: { command: 'ls -1' },
+          ok: true,
+          summary: 'src',
+          status: 'done',
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('Thinking 1s · read 2 files, ran 1 shell command');
+  });
+
+  test('phase block does not render accumulated tool-bearing narration', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3303,37 +3638,26 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 标题行 = 累加时长 + 合并统计；旁白与标题之间保留一行，随后位于步骤树之上
+    // 工具响应中的普通 text 只参与归属判断，不成为永久活动历史。
     expect(frame).toContain('Thinking 13s · read 2 files');
-    expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
-    expect(frame).toContain('继续检查运行时边界。');
-    expect(frame).toContain('Now the remaining pieces.');
-    const compactLines = frame.split('\n').map((line) => line.trim());
-    const headerLine = compactLines.findIndex((line) => line.includes('Thinking 13s'));
-    const firstCaptionLine = compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。');
-    expect(firstCaptionLine).toBe(headerLine + 2);
-    expect(compactLines[headerLine + 1]).toBe('');
-    expect(compactLines.indexOf('继续检查运行时边界。')).toBe(firstCaptionLine + 1);
-    expect(compactLines.indexOf('Now the remaining pieces.')).toBe(
-      compactLines.indexOf('继续检查运行时边界。') + 1,
-    );
-    const captionIdx = frame.indexOf('让我系统地阅读');
-    const headerIdx = frame.indexOf('Thinking 13s');
-    const stepsIdx = frame.indexOf('Read App.tsx');
-    expect(captionIdx).toBeGreaterThan(headerIdx);
-    expect(captionIdx).toBeLessThan(stepsIdx);
+    expect(frame).not.toContain('让我系统地阅读 TUI 模块的核心文件。');
+    expect(frame).not.toContain('继续检查运行时边界。');
+    expect(frame).not.toContain('Now the remaining pieces.');
+    expect(frame).toContain('└─ Read App.tsx');
+    expect(frame).toContain('Read types.ts');
   });
 
-  test('phase captions normalize only boundary newlines', () => {
+  test('settled phase keeps stored narration out of the archived summary', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
-      active: true,
+      active: false,
       createdAt: Date.now() - 1_000,
       totalElapsedMs: 1_000,
       summaryLine: 'read 1 file',
       hasThought: true,
       hasThinking: true,
+      result: 'done',
       captions: ['first caption\n', '\nsecond paragraph one\n\nsecond paragraph two\n'],
       tools: [
         {
@@ -3349,13 +3673,16 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
-    const lines = (lastFrame() ?? '').split('\n').map((line) => line.trim());
+    const frame = lastFrame() ?? '';
 
-    expect(lines.indexOf('second paragraph one')).toBe(lines.indexOf('first caption') + 1);
-    expect(lines.indexOf('second paragraph two')).toBe(lines.indexOf('second paragraph one') + 2);
+    expect(frame).toContain('Thinking 1s · read 1 file');
+    expect(frame).not.toContain('first caption');
+    expect(frame).not.toContain('second paragraph one');
+    expect(frame).not.toContain('second paragraph two');
+    expect(frame).not.toContain('Read README.md');
   });
 
-  test('Thinking phase shows the active reasoning preview', () => {
+  test('Thinking phase renders the latest completed reasoning in its activity window', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3380,12 +3707,84 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('├─ Read');
   });
 
+  test('one Thought alternates reasoning and tool activity before archiving its summary', () => {
+    const tool = {
+      callId: 'sequence-read',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      ok: false,
+      summary: '',
+      status: 'running' as const,
+    };
+    const base = {
+      id: 1,
+      kind: 'tool_summary' as const,
+      active: true,
+      createdAt: Date.now() - 13_000,
+      totalElapsedMs: 13_000,
+      summaryLine: 'read 1 file',
+      hasThought: true,
+      hasThinking: true,
+      tools: [tool],
+    };
+    const { lastFrame, rerender } = render(
+      <BlockRenderer
+        columns={100}
+        block={{
+          ...base,
+          latestActivity: { kind: 'thinking', text: 'first reasoning' },
+        }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('└─ first reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{ ...base, latestActivity: { kind: 'tool', callId: tool.callId } }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).not.toContain('first reasoning');
+    expect(lastFrame()).toContain('└─ Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{
+          ...base,
+          latestActivity: { kind: 'thinking', text: 'second reasoning' },
+        }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('└─ second reasoning');
+    expect(lastFrame()).not.toContain('first reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
+
+    rerender(
+      <BlockRenderer
+        columns={100}
+        block={{ ...base, active: false, result: 'done' }}
+        isFocused={false}
+        index={0}
+      />,
+    );
+    expect(lastFrame()).toContain('Thinking 13s · read 1 file');
+    expect(lastFrame()).not.toContain('second reasoning');
+    expect(lastFrame()).not.toContain('Read README.md');
+  });
+
   test('awaiting-terminal Thought collapses details as soon as answer text starts', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
       active: false,
-      responsePending: true,
       latestActivity: {
         kind: 'thinking',
         text: 'the complete reasoning stream appears atomically',
@@ -3417,35 +3816,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('●');
   });
 
-  test('Thought activity window shows the first five reasoning lines and an ellipsis', () => {
-    const block = {
-      id: 1,
-      kind: 'tool_summary',
-      active: true,
-      latestActivity: {
-        kind: 'thinking',
-        text: 'reason one\nreason two\nreason three\nreason four\nreason five\nreason six',
-      },
-      createdAt: Date.now() - 1000,
-      totalElapsedMs: 1000,
-      summaryLine: 'thinking',
-      hasThought: true,
-      hasThinking: true,
-      tools: [],
-    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
-    const frame =
-      render(
-        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
-      ).lastFrame() ?? '';
-
-    for (const line of ['one', 'two', 'three', 'four', 'five']) {
-      expect(frame).toContain(`reason ${line}`);
-    }
-    expect(frame).not.toContain('reason six');
-    expect(frame).toMatch(/\.\.\.|…/u);
-  });
-
-  test('Thought activity window removes blank lines before taking the head', () => {
+  test('Thinking phase renders multiline reasoning in a bounded activity window', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3453,17 +3824,9 @@ describe('BlockRenderer', () => {
       latestActivity: {
         kind: 'thinking',
         text: [
-          'kept first line',
-          '',
-          '   ',
-          'kept second line   ',
-          '',
-          'kept third line',
-          'kept fourth line',
-          '',
-          'kept fifth line',
-          'discarded sixth line',
-          '',
+          'The user asked to understand the current project.',
+          'This is an informational/exploration request.',
+          'I gathered README.md and CLAUDE.md.',
         ].join('\n'),
       },
       createdAt: Date.now() - 1000,
@@ -3478,12 +3841,10 @@ describe('BlockRenderer', () => {
         <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
       ).lastFrame() ?? '';
 
-    for (const line of ['first', 'second', 'third', 'fourth', 'fifth']) {
-      expect(frame).toContain(`kept ${line} line`);
-    }
-    expect(frame).not.toContain('discarded sixth line');
-    expect(frame).toMatch(/…|\.\.\./u);
-    expect(frame).not.toMatch(/\n\s*\n/u);
+    expect(frame).toContain('Thinking 1s');
+    expect(frame).toContain('The user asked');
+    expect(frame).toContain('informational/exploration');
+    expect(frame).toContain('README.md and CLAUDE.md');
   });
 
   test('latest tool activity replaces the reasoning window', () => {
@@ -3518,7 +3879,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('reasoning must be hidden');
   });
 
-  test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
+  test('latest reasoning replaces prior tool detail under the running Thought header', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3564,7 +3925,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('reviewing the project conventions');
+    expect(frame).toContain('└─ reviewing the project conventions');
     expect(frame).not.toContain('Read README.md');
     // 思考块标题 = "Thinking Xs · <工具统计>"（· 分隔，规则 22）
     expect(frame).toContain('Thinking 1s · read 3 files');
@@ -3677,7 +4038,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('├─');
   });
 
-  test('latest reasoning activity hides tool steps and uses the full activity window', () => {
+  test('latest reasoning activity is bounded and hides prior tool steps', () => {
     const longThought =
       'this is a very long thinking preview that should not spill across the entire terminal width';
     const block = {
@@ -3706,12 +4067,13 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
+    expect(frame).toContain('Thinking 1s');
     expect(frame).toContain('this is a very long thinking');
     expect(frame).not.toContain('运行中');
     expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('shows active reasoning while the cycle continues', () => {
+  test('shows the latest reasoning while the exploration cycle continues', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3741,6 +4103,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
+    expect(frame).toContain('Thinking 1s · read 1 file');
     expect(frame).toContain('still thinking after tools done');
     expect(frame).not.toContain('Read App.tsx');
   });
@@ -3879,7 +4242,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame() ?? '').not.toContain('Thinking');
   });
 
-  test('running pure-thinking Thought starts with the blink dot and no running footer', () => {
+  test('running pure-thinking Thought starts with the activity dot and no running footer', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3899,7 +4262,7 @@ describe('BlockRenderer', () => {
     // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
     // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
     expect(lastFrame()).toContain('● Thinking 1s');
-    expect(lastFrame()).toContain('reviewing the layout rules');
+    expect(lastFrame()).toContain('└─ reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
   });
@@ -4464,8 +4827,8 @@ describe('OutputArea', () => {
         },
       },
     ];
-    const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+    const state = events.reduce<TuiState>(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4505,7 +4868,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4549,7 +4912,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4585,7 +4948,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4610,7 +4973,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4659,7 +5022,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const { lastFrame } = render(
@@ -4711,9 +5074,12 @@ describe('OutputArea', () => {
         recoverable: true,
       },
     ];
-    const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
-      createInitialState(),
+    const state = events.reduce<TuiState>(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      {
+        ...createInitialState(),
+        runtimeAuthority: activeRuntimeAuthority(1, 'runtime-run'),
+      },
     );
 
     const { lastFrame } = render(
@@ -4746,6 +5112,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'subagent-1',
+          stepId: 'subagent-1-step-1',
+          toolCallId: 'subagent-1-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'apps/kite-cli/src/tui/session-manager.ts' },
         },
@@ -4754,8 +5122,10 @@ describe('OutputArea', () => {
         type: 'subagent.tool_result',
         subagent: {
           id: 'subagent-1',
+          stepId: 'subagent-1-step-1',
+          toolCallId: 'subagent-1-tool-1',
           toolName: 'read_file',
-          ok: true,
+          status: 'completed',
           summary: 'found route',
         },
       },
@@ -4770,7 +5140,7 @@ describe('OutputArea', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
 
@@ -4808,6 +5178,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'interleaved-explore',
+          stepId: 'interleaved-explore-step-1',
+          toolCallId: 'interleaved-explore-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'ls -la' },
         },
@@ -4823,6 +5195,8 @@ describe('OutputArea', () => {
         type: 'subagent.step',
         subagent: {
           id: 'interleaved-review',
+          stepId: 'interleaved-review-step-1',
+          toolCallId: 'interleaved-review-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'README.md' },
         },
@@ -4850,14 +5224,16 @@ describe('OutputArea', () => {
         type: 'subagent.tool_result',
         subagent: {
           id: 'interleaved-explore',
+          stepId: 'interleaved-explore-step-1',
+          toolCallId: 'interleaved-explore-tool-1',
           toolName: 'shell_execute',
-          ok: true,
+          status: 'completed',
           summary: 'listed workspace',
         },
       },
     ];
     const state = events.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
 
@@ -4871,7 +5247,7 @@ describe('OutputArea', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).not.toContain('Delegating · 2 agents');
+    expect(frame).toContain('Delegating · 2 agents');
     expect(frame).toContain('Explore · Inspect runtime files');
     expect(frame).toContain('Review · Review runtime behavior');
     expect(frame).not.toContain('● tool');
@@ -4900,7 +5276,7 @@ describe('OutputArea', () => {
       },
     ];
     const groupedState = groupedEvents.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const groupedRender = render(
@@ -4908,7 +5284,7 @@ describe('OutputArea', () => {
     );
     const groupedFrame = groupedRender.lastFrame() ?? '';
 
-    expect(groupedFrame).not.toContain('Delegating · 2 agents');
+    expect(groupedFrame).toContain('Delegating · 2 agents');
     expect(groupedFrame).toContain('Explore · Inspect the runtime');
     expect(groupedFrame).toContain('Review · Review the tests');
     groupedRender.unmount();
@@ -4919,7 +5295,7 @@ describe('OutputArea', () => {
       return { type: 'subagent.started', subagent: { ...subagent, id: `sequential-${index}` } };
     });
     const sequentialState = sequentialEvents.reduce(
-      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
       createInitialState(),
     );
     const sequentialRender = render(
@@ -5331,8 +5707,9 @@ describe('OutputArea', () => {
 // ── App (main layout) ──
 
 describe('App', () => {
-  function fakeState(overrides: Partial<TuiState> = {}): TuiState {
-    return {
+  function fakeState(overrides: Partial<TuiState> & { readonly running?: boolean } = {}): TuiState {
+    const { running, presentationTimeline, ...stateOverrides } = overrides;
+    const state: TuiState = {
       sessions: [],
       activeSessionId: null,
       turns: [],
@@ -5340,7 +5717,6 @@ describe('App', () => {
       interrupt: null,
       status: fakeStatus(),
       exited: false,
-      running: false,
       runCount: 0,
       showHelp: false,
       showModelSelector: false,
@@ -5361,8 +5737,21 @@ describe('App', () => {
       sessionServiceUnavailable: false,
       explorationSummaryIds: {},
       pendingToolCalls: {},
+      presentationTimeline: { renderEpoch: 0, items: [] },
       interactionMode: 'accept_edits',
-      ...overrides,
+      ...stateOverrides,
+      ...(running === true && stateOverrides.runtimeAuthority === undefined
+        ? { runtimeAuthority: activeRuntimeAuthority() }
+        : {}),
+    };
+    return {
+      ...state,
+      presentationTimeline:
+        presentationTimeline ??
+        projectOutputBlockTimeline(
+          state.turns.flatMap((turn) => turn.blocks),
+          state.sessionKey,
+        ),
     };
   }
 
@@ -5375,6 +5764,372 @@ describe('App', () => {
     // Header (Kite Code) should appear before ActivityBar (since it renders first in layout)
     const headerIdx = frame?.indexOf('Kite Code');
     expect(headerIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  test('renders queued successor prompts after active output without changing the current turn', () => {
+    const state = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'subagent',
+              subagentId: 'child-1',
+              task: 'Inspect events',
+              role: 'explore',
+              status: 'running',
+              summary: '',
+              toolCallCount: 0,
+              durationMs: 0,
+              steps: [],
+            },
+          ],
+        },
+      ],
+      queuedPrompts: [
+        { id: 1, sessionId: 'session-a', text: '补充检查事件顺序' },
+        { id: 2, sessionId: 'session-a', text: '检查第二个候选' },
+        {
+          id: 3,
+          sessionId: 'session-a',
+          text: `检查第三个候选-${'长'.repeat(60)}-不应换行`,
+        },
+        { id: 4, sessionId: 'session-b', text: 'other session' },
+      ],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Explore · Inspect events');
+    expect(frame).toContain('↵ 补充检查事件顺序');
+    expect(frame).toContain('↵ 检查第二个候选');
+    expect(frame).toContain('↵ 检查第三个候选');
+    expect(frame).not.toContain('不应换行');
+    expect(frame).not.toContain('Queued — waiting for the current turn to finish');
+    expect(frame).not.toContain('more queued');
+    expect(frame).not.toContain('other session');
+    expect(frame).toContain('Working');
+    expect(frame.indexOf('Explore · Inspect events')).toBeLessThan(
+      frame.indexOf('↵ 补充检查事件顺序'),
+    );
+    const lines = frame.split('\n');
+    const firstQueuedLine = lines.findIndex((line) => line.includes('↵ 补充检查事件顺序'));
+    const secondQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第二个候选'));
+    const thirdQueuedLine = lines.findIndex((line) => line.includes('↵ 检查第三个候选'));
+    expect(secondQueuedLine).toBe(firstQueuedLine + 2);
+    expect(thirdQueuedLine).toBe(secondQueuedLine + 2);
+    expect(lines[firstQueuedLine - 1]?.trim()).toBe('');
+    expect(lines[firstQueuedLine + 1]?.trim()).toBe('');
+    expect(lines[secondQueuedLine + 1]?.trim()).toBe('');
+  });
+
+  test('keeps the Working status when a queued prompt appears', async () => {
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'tool_summary',
+              tools: [
+                {
+                  callId: 'read-before-queue',
+                  name: 'read_file',
+                  args: { path: 'README.md' },
+                  ok: true,
+                  status: 'done',
+                  summary: 'Read README.md',
+                },
+              ],
+              totalElapsedMs: 1_000,
+              createdAt: Date.now() - 1_000,
+              liveModelStartedAt: Date.now(),
+              summaryLine: 'read 1 file',
+              active: true,
+              hasThought: true,
+              hasThinking: true,
+            },
+          ],
+        },
+      ],
+    });
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    await waitForFrameText(view.lastFrame, '⋄ Working');
+    expect(view.lastFrame()?.match(/Thinking /g)).toHaveLength(1);
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          queuedPrompts: [{ id: 1, sessionId: 'session-a', text: 'queued while working' }],
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const queuedFrame = view.lastFrame() ?? '';
+    expect(queuedFrame).toContain('↵ queued while working');
+    expect(queuedFrame).toContain('Working');
+    expect(queuedFrame.match(/Thinking /g)).toHaveLength(1);
+    expect(queuedFrame.match(/read 1 file/g)).toHaveLength(1);
+
+    view.rerender(
+      <App
+        state={{
+          ...initial,
+          queuedPrompts: [{ id: 1, sessionId: 'session-a', text: 'queued while cancelling' }],
+          cancelRequestedRunId: 'run-layout',
+        }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const cancellingFrame = view.lastFrame() ?? '';
+    expect(cancellingFrame).toContain('↵ queued while cancelling');
+    expect(cancellingFrame).toContain('Cancelling');
+  });
+
+  test('keeps the Delegating projection identical when queued prompts change', () => {
+    const subagents = Array.from(
+      { length: 3 },
+      (_, index): OutputBlock => ({
+        id: index + 1,
+        kind: 'subagent',
+        subagentId: `queue-child-${index + 1}`,
+        task: `explore-area-${index + 1}`,
+        role: 'explore',
+        status: 'running',
+        summary: '',
+        toolCallCount: 4,
+        durationMs: 11_000,
+        concurrencyGroupId: 'queue-concurrency-group',
+        steps: Array.from({ length: 4 }, (_, stepIndex) => ({
+          stepId: `queue-child-${index + 1}-step-${stepIndex + 1}`,
+          toolCallId: `queue-child-${index + 1}-tool-${stepIndex + 1}`,
+          toolName: `step_${index + 1}_${stepIndex + 1}`,
+          toolArgs: {},
+          status: stepIndex < 3 ? ('success' as const) : ('pending' as const),
+        })),
+      }),
+    );
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [{ blocks: subagents }],
+    });
+    const updateInitial = (overrides: Partial<TuiState>): TuiState => {
+      const state = { ...initial, ...overrides };
+      return {
+        ...state,
+        presentationTimeline: projectOutputBlockTimeline(
+          state.turns.flatMap((turn) => turn.blocks),
+          state.sessionKey,
+        ),
+      };
+    };
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const before = view.lastFrame() ?? '';
+    const delegationProjection = (frame: string): string => {
+      const start = frame.indexOf('Delegating');
+      const queued = frame.indexOf('↵ ', start);
+      const stats = frame.indexOf('claude-opus', start);
+      const working = frame.indexOf('Working', start);
+      const workingStart = working >= 0 ? frame.lastIndexOf('\n', working) + 1 : working;
+      const boundaries = [queued, stats, workingStart].filter((index) => index >= 0);
+      const end = boundaries.length > 0 ? Math.min(...boundaries) : frame.length;
+      return frame.slice(start, end).trimEnd();
+    };
+    const delegatingBefore = delegationProjection(before);
+
+    view.rerender(
+      <App
+        state={updateInitial({
+          queuedPrompts: [
+            { id: 1, sessionId: 'session-a', text: '额' },
+            { id: 2, sessionId: 'session-a', text: '第二条' },
+          ],
+        })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const after = view.lastFrame() ?? '';
+    const delegatingAfter = delegationProjection(after);
+
+    expect(delegatingAfter).toBe(delegatingBefore);
+    expect(after.match(/Delegating · 3 agents/g)).toHaveLength(1);
+    expect(after).toContain('↵ 额');
+    expect(after).toContain('↵ 第二条');
+
+    const completedSubagents = subagents.map((block) =>
+      block.kind === 'subagent'
+        ? { ...block, status: 'done' as const, summary: `${block.task} complete` }
+        : block,
+    );
+    const queuedPrompts = [
+      { id: 1, sessionId: 'session-a', text: '额' },
+      { id: 2, sessionId: 'session-a', text: '第二条' },
+    ];
+    view.rerender(
+      <App
+        state={updateInitial({ turns: [{ blocks: completedSubagents }], queuedPrompts })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const childrenDone = view.lastFrame() ?? '';
+    expect(childrenDone.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(childrenDone).toContain('↵ 额');
+
+    view.rerender(
+      <App
+        state={updateInitial({
+          turns: [{ blocks: completedSubagents }],
+          queuedPrompts,
+        })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const predecessorTerminal = view.lastFrame() ?? '';
+    expect(predecessorTerminal.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(predecessorTerminal).toContain('↵ 额');
+
+    view.rerender(
+      <App
+        state={updateInitial({
+          turns: [
+            { blocks: completedSubagents },
+            {
+              blocks: [
+                {
+                  id: 4,
+                  kind: 'user',
+                  content: '额',
+                  pendingEcho: true,
+                },
+              ],
+            },
+          ],
+          queuedPrompts: [{ id: 2, sessionId: 'session-a', text: '第二条' }],
+        })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const successorAccepted = view.lastFrame() ?? '';
+    expect(successorAccepted.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(successorAccepted.match(/❯ 额/g)).toHaveLength(1);
+    expect(successorAccepted).toContain('↵ 第二条');
+  });
+
+  test('gives a non-empty prompt sole ownership of Enter while Delegating is active', async () => {
+    const actions: Action[] = [];
+    let promptValue = '';
+    const subagents = Array.from(
+      { length: 3 },
+      (_, index): OutputBlock => ({
+        id: index + 1,
+        kind: 'subagent',
+        subagentId: `enter-owner-child-${index + 1}`,
+        task: `inspect enter owner ${index + 1}`,
+        role: 'explore',
+        status: 'running',
+        summary: '',
+        toolCallCount: 2,
+        durationMs: 1_000,
+        concurrencyGroupId: 'enter-owner-group',
+        steps: [
+          {
+            stepId: `enter-owner-child-${index + 1}-step-1`,
+            toolCallId: `enter-owner-child-${index + 1}-tool-1`,
+            toolName: `read_${index + 1}`,
+            toolArgs: {},
+            status: 'pending',
+          },
+        ],
+      }),
+    );
+    const initial = fakeState({
+      activeSessionId: 'session-a',
+      running: true,
+      runPromptPresented: true,
+      turns: [{ blocks: subagents }],
+    });
+
+    function Harness() {
+      const [state, setState] = useState(initial);
+      return (
+        <App
+          state={state}
+          dispatch={(action) => {
+            actions.push(action);
+            setState((current) => canonicalEventReducer(current, action));
+          }}
+          onToggleReason={noop}
+          provider={fakeProvider()}
+          canToggleLastOutputBlock={() => promptValue.trim().length === 0}
+        >
+          <InputLine
+            mode="prompt"
+            workspace={process.cwd()}
+            onValueChange={(value) => {
+              promptValue = value;
+            }}
+            onSubmit={(text) => {
+              setState((current) => ({
+                ...current,
+                queuedPrompts: [{ id: 1, sessionId: 'session-a', text }],
+              }));
+            }}
+          />
+        </App>
+      );
+    }
+
+    const view = render(<Harness />);
+    view.stdin.write('嗯');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(promptValue).toBe('嗯');
+    const before = view.lastFrame() ?? '';
+    const delegationProjection = (frame: string): string => {
+      const start = frame.indexOf('Delegating');
+      const queued = frame.indexOf('↵ ', start);
+      const stats = frame.indexOf('claude-opus', start);
+      const working = frame.indexOf('Working', start);
+      const workingStart = working >= 0 ? frame.lastIndexOf('\n', working) + 1 : working;
+      const boundaries = [queued, stats, workingStart].filter((index) => index >= 0);
+      const end = boundaries.length > 0 ? Math.min(...boundaries) : frame.length;
+      return frame.slice(start, end).trimEnd();
+    };
+    const delegatingBefore = delegationProjection(before);
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const after = view.lastFrame() ?? '';
+    const delegatingAfter = delegationProjection(after);
+
+    expect(after).toContain('↵ 嗯');
+    expect(delegatingAfter).toBe(delegatingBefore);
+    expect(actions.some((action) => action.type === 'TOGGLE_SUBAGENT_EXPAND')).toBe(false);
   });
 
   test('shows HelpPanel when showHelp is true', () => {
@@ -5413,6 +6168,23 @@ describe('App', () => {
     expect(lastFrame()).toContain('Auto');
     expect(lastFrame()).not.toContain('permission-input-marker');
     expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
+  });
+
+  test('does not publish a redundant interaction-mode command for the selected mode', async () => {
+    const selected: string[] = [];
+    const view = render(
+      <App
+        state={fakeState({ showPermissionSelector: true, interactionMode: 'accept_edits' })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onInteractionModeChange={(mode) => selected.push(mode)}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(selected).toEqual([]);
   });
 
   test('keeps Full orthogonal to sandbox availability and exposes session grants', async () => {
@@ -5466,7 +6238,7 @@ describe('App', () => {
     expect(view.lastFrame()?.match(/high/g) ?? []).toHaveLength(2);
   });
 
-  test('hides the Footer for every slash-command Overlay', () => {
+  test('hides Footer input but keeps Working for every slash-command Overlay', () => {
     for (const overlay of [
       { showHelp: true },
       { showModelSelector: true },
@@ -5479,7 +6251,7 @@ describe('App', () => {
     ]) {
       const { lastFrame, unmount } = render(
         <App
-          state={fakeState(overlay)}
+          state={fakeState({ ...overlay, running: true, runPromptPresented: true })}
           dispatch={noop}
           onToggleReason={noop}
           provider={fakeProvider()}
@@ -5488,8 +6260,35 @@ describe('App', () => {
         </App>,
       );
       expect(lastFrame()).not.toContain('footer-input-marker');
+      expect(lastFrame()).toContain('Working');
       unmount();
     }
+  });
+
+  test('keeps the mounted Working status when a slash-command Overlay opens', async () => {
+    const initial = fakeState({ running: true, runPromptPresented: true });
+    const view = render(
+      <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
+        <Text>footer-input-marker</Text>
+      </App>,
+    );
+    await waitForFrameText(view.lastFrame, '⋄ Working');
+
+    view.rerender(
+      <App
+        state={{ ...initial, showHelp: true }}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      >
+        <Text>footer-input-marker</Text>
+      </App>,
+    );
+
+    const overlayFrame = view.lastFrame() ?? '';
+    expect(overlayFrame).toContain('⋄ Working');
+    expect(overlayFrame).not.toContain('footer-input-marker');
+    expect(overlayFrame).toContain('Help');
   });
 
   test('hides slash suggestions while PermissionSelector is open', () => {
@@ -5628,6 +6427,7 @@ describe('App', () => {
     expect(frame).toContain('Tool approval');
     expect(frame).toContain('Allow once');
     expect(frame).not.toContain('Waiting...');
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -5689,6 +6489,8 @@ describe('App', () => {
       approvalState: 'awaiting_user',
       steps: [
         {
+          stepId: 'approval-child-no-key-leak-step-1',
+          toolCallId: 'approval-child-no-key-leak-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'find apps/kite-cli/src -type f' },
           status: 'awaiting_approval',
@@ -5884,13 +6686,19 @@ describe('App', () => {
     expect(aborts).toBe(0);
   });
 
-  test('hides run status once final assistant text is visible', () => {
+  test('keeps the fixed Working status visible while final text awaits terminal ownership', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 2_000,
       turns: [
         {
-          blocks: [{ id: 1, kind: 'text', content: 'Done. Here is the result.' }],
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Done. Here is the result.',
+            },
+          ],
         },
       ],
     });
@@ -5898,9 +6706,94 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Done. Here is the result.');
-    expect(frame).not.toContain('Thinking...');
-    expect(frame).not.toContain('Running...');
+    expect(frame).toContain('Working');
+  });
+
+  test('keeps showing Working after the final model response while awaiting Run terminal', () => {
+    const state = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Done. Here is the result.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Finishing');
+  });
+
+  test('hides the run status after either authoritative failure projection', () => {
+    const active = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      nextBlockId: 2,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: 'Final text before terminal persistence failed.',
+              modelRequestId: 'request-final',
+            },
+          ],
+        },
+      ],
+    });
+    const failures: Array<Extract<RuntimeClientEvent, { type: 'run.terminal' }>> = [
+      {
+        type: 'run.terminal',
+        runId: 'run-failed',
+        status: 'failed',
+        outcome: {
+          status: 'unknown',
+          reasonCode: 'persistence_unavailable',
+          safeRetry: false,
+          recoveryEntry: 'reconcile',
+        },
+      },
+      {
+        type: 'run.terminal',
+        runId: 'run-terminal-failed',
+        status: 'failed',
+      },
+    ];
+
+    for (const failure of failures) {
+      const failed = eventReducer(
+        {
+          ...active,
+          runtimeAuthority: {
+            ...active.runtimeAuthority!,
+            currentRun: {
+              ...active.runtimeAuthority!.currentRun!,
+              runId: failure.runId,
+            },
+          },
+        },
+        { type: 'ACCEPT_PRESENTATION_ENVELOPE', event: failure },
+      );
+      expect(isTuiRunActive(failed)).toBe(false);
+      const view = render(
+        <App state={failed} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+      );
+      const frame = view.lastFrame() ?? '';
+      expect(frame).not.toContain('Working');
+      expect(frame).not.toContain('Finishing');
+      view.unmount();
+    }
   });
 
   test('keeps run status visible while interstitial text is streaming after tools', () => {
@@ -5942,19 +6835,24 @@ describe('App', () => {
     const state = fakeState({
       turns: [{ blocks: [{ id: 1, kind: 'question', question }] }],
       interrupt: { kind: 'input', blockId: 1 },
+      running: true,
+      runPromptPresented: true,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain(question.question);
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
-  test('hides global status while reviewing a plan', () => {
+  test('hides the run status while reviewing a plan', () => {
     const state = fakeState({
       interrupt: { kind: 'plan_review', plan: fakePlan() },
+      running: true,
+      runPromptPresented: true,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -5962,6 +6860,7 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('Plan review');
+    expect(frame).not.toContain('Working');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
@@ -6020,12 +6919,16 @@ describe('SubAgentBlock rendering', () => {
       durationMs: 0,
       steps: [
         {
+          stepId: 'sub-1-read-step-1',
+          toolCallId: 'sub-1-read-tool-1',
           toolName: 'read_file',
           toolArgs: { path: 'auth.ts' },
           status: 'success' as const,
           ok: true,
         },
         {
+          stepId: 'sub-1-edit-step-1',
+          toolCallId: 'sub-1-edit-tool-1',
           toolName: 'edit_file',
           toolArgs: { path: 'auth.ts' },
           status: 'success' as const,
@@ -6041,7 +6944,7 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).not.toContain('✓');
   });
 
-  test('running subagent renders the initial spinner frame', () => {
+  test('running subagent renders a static activity marker', () => {
     const block = {
       id: 1,
       kind: 'subagent' as const,
@@ -6091,6 +6994,7 @@ describe('SubAgentBlock rendering', () => {
     ['queued_auto_review', '等待自动审查'],
     ['queued_user_approval', '人工审批排队中'],
     ['auto_reviewing', '自动审查中'],
+    ['authorized_queued', '已授权 · 等待执行'],
     ['awaiting_user', '等待你的批准'],
   ] as const)('renders a suspended subagent in the %s approval phase', (approvalState, label) => {
     const block = {
@@ -6107,6 +7011,8 @@ describe('SubAgentBlock rendering', () => {
       approvalState,
       steps: [
         {
+          stepId: 'sub-waiting-step-1',
+          toolCallId: 'sub-waiting-tool-1',
           toolName: 'shell_execute',
           toolArgs: { command: 'pwd' },
           status: 'awaiting_approval' as const,
@@ -6217,7 +7123,15 @@ describe('SubAgentBlock rendering', () => {
       summary: longSummary,
       toolCallCount: 3,
       durationMs: 1200,
-      steps: [{ toolName: 'read_file', toolArgs: {}, status: 'success' as const }],
+      steps: [
+        {
+          stepId: 'sub-1-read-step-1',
+          toolCallId: 'sub-1-read-tool-1',
+          toolName: 'read_file',
+          toolArgs: {},
+          status: 'success' as const,
+        },
+      ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
@@ -6231,6 +7145,8 @@ describe('SubAgentBlock rendering', () => {
   test('running block limits visible steps', () => {
     const steps = Array.from({ length: 15 }, (_, i) => ({
       status: 'pending' as const,
+      stepId: `sub-1-step-${i + 1}`,
+      toolCallId: `sub-1-tool-${i + 1}`,
       toolName: `step_${String(i + 1).padStart(2, '0')}`,
       toolArgs: {},
     }));
@@ -6266,8 +7182,20 @@ describe('SubAgentBlock rendering', () => {
       toolCallCount: 2,
       durationMs: 0,
       steps: [
-        { toolName: 'read_file', toolArgs: { path: 'one.ts' }, status: 'success' as const },
-        { toolName: 'read_file', toolArgs: { path: 'two.ts' }, status: 'success' as const },
+        {
+          stepId: 'sub-compact-step-1',
+          toolCallId: 'sub-compact-tool-1',
+          toolName: 'read_file',
+          toolArgs: { path: 'one.ts' },
+          status: 'success' as const,
+        },
+        {
+          stepId: 'sub-compact-step-2',
+          toolCallId: 'sub-compact-tool-2',
+          toolName: 'read_file',
+          toolArgs: { path: 'two.ts' },
+          status: 'success' as const,
+        },
       ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} maxVisibleSteps={0} />);

@@ -70,6 +70,114 @@ describe('Runtime Client event projector', () => {
     });
   });
 
+  test('uses the admission descriptor label for hashed dynamic MCP bindings', () => {
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'tool.queued',
+          toolCallId: 'tool-3',
+          name: 'mcp__docs__search_documentation_latest_123456789abc',
+          displayLabel: 'search documentation / latest',
+          args: { query: 'runtime binding' },
+          presentation: 'exploration',
+        } as RuntimeEvent,
+        { sessionRevision: 4 },
+      ),
+    ).toEqual({
+      type: 'tool.queued',
+      toolId: 'tool-3',
+      toolName: 'mcp_tool',
+      displayLabel: 'search documentation / latest',
+      presentation: 'exploration',
+      arguments: { query: 'runtime binding' },
+      summary: 'Queued.',
+    });
+  });
+
+  test('consumes canonical terminal presentation facts without id-prefix inference', () => {
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'tool.failed',
+          toolCallId: 'child-tool-step',
+          presentation: 'hidden',
+          failure: {
+            kind: 'tool_runtime_error',
+            message: 'failed',
+            retryable: false,
+            modelFixable: false,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: false,
+          },
+        },
+        { sessionRevision: 4 },
+      ),
+    ).toEqual({
+      type: 'tool.failed',
+      toolId: 'child-tool-step',
+      presentation: 'hidden',
+      summary: 'Tool execution failed.',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'tool.rejected',
+          toolCallId: 'shell-1',
+          presentation: 'standalone',
+          reason: 'not approved',
+          failure: {
+            kind: 'approval_rejected',
+            message: 'not approved',
+            retryable: false,
+            modelFixable: false,
+            needsUserIntervention: true,
+            terminatesTurn: true,
+            journal: false,
+          },
+        },
+        { sessionRevision: 4 },
+      ),
+    ).toEqual({
+      type: 'tool.rejected',
+      toolId: 'shell-1',
+      presentation: 'standalone',
+      summary: 'not approved',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'tool.rejected',
+          toolCallId: 'write-1',
+          presentation: 'hidden',
+          reason: 'planning policy denied',
+        },
+        { sessionRevision: 4 },
+      ),
+    ).toEqual({
+      type: 'tool.rejected',
+      toolId: 'write-1',
+      presentation: 'hidden',
+      summary: 'planning policy denied',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'tool.cancelled',
+          toolCallId: 'shell-2',
+          presentation: 'standalone',
+          reason: 'user cancelled',
+        },
+        { sessionRevision: 4 },
+      ),
+    ).toEqual({
+      type: 'tool.cancelled',
+      toolId: 'shell-2',
+      presentation: 'standalone',
+      summary: 'Tool execution cancelled.',
+    });
+  });
+
   test('projects bounded local reasoning activity and credential-shaped user text', () => {
     const longReasoning = `local detail ${'x'.repeat(5_000)}`;
     expect(
@@ -104,7 +212,7 @@ describe('Runtime Client event projector', () => {
         },
         { sessionRevision: 1 },
       ),
-    ).toBeUndefined();
+    ).toEqual({ type: 'unavailable', reason: 'redacted' });
     expect(
       projectRuntimeClientEvent(
         {
@@ -147,9 +255,31 @@ describe('Runtime Client event projector', () => {
     expect(
       projectRuntimeClientEvent(
         {
+          type: 'subagent.started',
+          subagent: {
+            id: 'child-1',
+            role: 'explore',
+            name: 'Inspect runtime files',
+            concurrencyGroupId: 'subagent-batch:tool-1',
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.started',
+      subagentId: 'child-1',
+      role: 'explore',
+      name: 'Inspect runtime files',
+      concurrencyGroupId: 'subagent-batch:tool-1',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
           type: 'subagent.step',
           subagent: {
             id: 'child-1',
+            stepId: 'step-1',
+            toolCallId: 'child-tool-1',
             toolName: 'mcp__github__search',
             toolArgs: { path: '/workspace', token: 'secret' },
             durationMs: 12,
@@ -160,6 +290,8 @@ describe('Runtime Client event projector', () => {
     ).toEqual({
       type: 'subagent.step',
       subagentId: 'child-1',
+      stepId: 'step-1',
+      toolCallId: 'child-tool-1',
       toolName: 'mcp__github__search',
       displayLabel: 'mcp:dynamic_tool',
       status: 'started',
@@ -172,8 +304,10 @@ describe('Runtime Client event projector', () => {
           type: 'subagent.tool_result',
           subagent: {
             id: 'child-1',
+            stepId: 'step-1',
+            toolCallId: 'child-tool-1',
             toolName: 'mcp__github__search',
-            ok: false,
+            status: 'failed',
             failureReason: 'token=secret',
             totalLines: 3,
             durationMs: 20,
@@ -184,13 +318,86 @@ describe('Runtime Client event projector', () => {
     ).toEqual({
       type: 'subagent.step',
       subagentId: 'child-1',
+      stepId: 'step-1',
+      toolCallId: 'child-tool-1',
       toolName: 'mcp__github__search',
       displayLabel: 'mcp:dynamic_tool',
       status: 'failed',
-      result: { ok: false },
       summary: '[redacted]',
       totalLines: 3,
       durationMs: 20,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.tool_result',
+          subagent: {
+            id: 'child-1',
+            stepId: 'step-empty-search',
+            toolCallId: 'child-tool-empty-search',
+            toolName: 'search_content',
+            status: 'completed',
+            summary: '',
+            durationMs: 5,
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.step',
+      subagentId: 'child-1',
+      stepId: 'step-empty-search',
+      toolCallId: 'child-tool-empty-search',
+      toolName: 'search_content',
+      status: 'completed',
+      durationMs: 5,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.completed',
+          subagent: {
+            id: 'child-1',
+            summary: 'Inspection complete.',
+            toolCallCount: 3,
+            durationMs: 12_345,
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.completed',
+      subagentId: 'child-1',
+      summary: 'Inspection complete.',
+      toolCallCount: 3,
+      durationMs: 12_345,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.failed',
+          subagent: {
+            id: 'child-2',
+            error: 'provider body must stay private',
+            summary: 'Inspection failed.',
+            toolCallCount: 2,
+            durationMs: 9_000,
+            diagnostic: {
+              code: 'model_step_failed',
+              stage: 'model_step',
+              modelInvocationId: 'private-correlation',
+            },
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.failed',
+      subagentId: 'child-2',
+      summary: 'Inspection failed.',
+      toolCallCount: 2,
+      durationMs: 9_000,
+      diagnostic: { code: 'model_step_failed', stage: 'model_step' },
     });
   });
 
@@ -215,48 +422,50 @@ describe('Runtime Client event projector', () => {
     });
   });
 
-  test('projects only closed tool presentation facts from raw tool metadata', () => {
+  test('consumes closed tool presentation facts from Kernel admission', () => {
     const context = { sessionRevision: 1 };
-    const queued = (toolCallId: string, name: string, args: unknown) =>
+    const queued = (
+      toolCallId: string,
+      name: string,
+      args: unknown,
+      presentation: 'exploration' | 'standalone' | 'hidden',
+    ) =>
       projectRuntimeClientEvent(
-        { type: 'tool.queued', toolCallId, name, args } as RuntimeEvent,
+        { type: 'tool.queued', toolCallId, name, args, presentation } as RuntimeEvent,
         context,
       );
 
-    expect(queued('read-1', 'read_file', { path: '/private/secret' })).toMatchObject({
-      presentation: 'exploration',
-    });
-    expect(queued('search-1', 'search_content', { query: 'private' })).toMatchObject({
-      presentation: 'exploration',
-    });
+    expect(queued('read-1', 'read_file', { path: '/private/secret' }, 'exploration')).toMatchObject(
+      {
+        presentation: 'exploration',
+      },
+    );
     expect(
-      queued('shell-1', 'shell_execute', { intent: 'inspect', command: 'rg token .' }),
+      queued('mcp-read-1', 'mcp__github__read_private_issue', { issue: 1 }, 'exploration'),
     ).toMatchObject({
       presentation: 'exploration',
+      displayLabel: 'mcp:dynamic_tool',
     });
     expect(
-      queued('ls-1', 'shell_execute', { intent: 'inspect', command: 'ls -la src' }),
+      queued('same-name-standalone', 'read_file', { path: '/private/secret' }, 'standalone'),
     ).toMatchObject({
-      presentation: 'exploration',
+      presentation: 'standalone',
     });
     expect(
-      queued('compound-1', 'shell_execute', { intent: 'inspect', command: 'ls | tee output' }),
-    ).toMatchObject({ presentation: 'standalone' });
-    expect(
-      queued('write-1', 'shell_execute', { intent: 'inspect', command: 'printf private > out' }),
-    ).toMatchObject({ presentation: 'standalone' });
-    expect(queued('task-1', 'task', { prompt: 'private' })).toMatchObject({
+      queued('child-tool-1', 'read_file', { path: '/private/secret' }, 'hidden'),
+    ).toMatchObject({
       presentation: 'hidden',
     });
-    expect(queued('subagent-tool:1', 'read_file', { path: '/private/secret' })).toMatchObject({
-      presentation: 'hidden',
-    });
-    const projected = queued('secret-1', 'shell_execute', {
-      intent: 'inspect',
-      command: 'rg secret /private/workspace',
-    });
+    const projected = queued(
+      'secret-1',
+      'shell_execute',
+      {
+        command: 'rg secret /private/workspace',
+      },
+      'exploration',
+    );
     expect(projected).toMatchObject({
-      arguments: { intent: 'inspect', command: 'rg secret /private/workspace' },
+      arguments: { command: 'rg secret /private/workspace' },
     });
   });
 
@@ -394,12 +603,22 @@ describe('Runtime Client event projector', () => {
         { sessionRevision: 1 },
       ),
     ).toEqual({
-      type: 'run.failure',
+      type: 'run.terminal',
       runId: 'turn-1',
-      code: 'provider_unavailable',
-      retryable: true,
-      recoveryEntry: 'retry',
+      status: 'failed',
+      outcome: {
+        status: 'unknown',
+        reasonCode: 'provider_unavailable',
+        safeRetry: true,
+        recoveryEntry: 'retry',
+      },
     });
+    expect(
+      projectRuntimeClientEvent(
+        { type: 'run.error', message: 'unattributed failure', recoverable: false },
+        { sessionRevision: 1 },
+      ),
+    ).toEqual({ type: 'unavailable', reason: 'redacted' });
     expect(
       projectRuntimeClientEvent(
         { type: 'runtime.action_ignored', reason: 'private' },
@@ -430,6 +649,7 @@ describe('Runtime Client event projector', () => {
         },
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: 'tool-1' },
         queueGeneration: 7,
         queueSequence: 3,
       },
@@ -447,5 +667,24 @@ describe('Runtime Client event projector', () => {
       },
     });
     expect(JSON.stringify(event)).not.toContain('/private/workspace');
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'approval.rejected',
+          interactionId: 'interaction-1',
+          toolCallId: 'tool-1',
+          generation: 7,
+          reason: 'Tool approval rejected by user.',
+          owner: { kind: 'root_tool', toolCallId: 'tool-1' },
+        },
+        { sessionRevision: 13 },
+      ),
+    ).toEqual({
+      type: 'approval.rejected',
+      interactionId: 'interaction-1',
+      generation: 7,
+      owner: { kind: 'root_tool', toolCallId: 'tool-1' },
+      summary: 'Tool approval rejected by user.',
+    });
   });
 });

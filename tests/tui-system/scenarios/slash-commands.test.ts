@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SLASH_COMMAND_DEFS } from '#kite-cli/tui/hooks/useSlashSuggestions';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
@@ -24,7 +25,7 @@ import {
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30_000;
-const BUILTIN_COMMAND_COUNT = 16;
+const BUILTIN_COMMAND_COUNT = SLASH_COMMAND_DEFS.length;
 
 describe('TUI PTY System — Slash Commands', () => {
   let tui: PtyProcess;

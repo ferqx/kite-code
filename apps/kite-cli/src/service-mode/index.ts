@@ -1,12 +1,9 @@
 export {
-  connectKiteServiceMode,
-  createKiteServiceModeAdapter,
-  createKiteServiceModeClient,
-  createNativeKiteServiceModeConnector,
-  type KiteServiceModeAdapter,
-  type KiteServiceModeAdapterOptions,
-  type KiteServiceModeConnector,
-  type NativeKiteServiceModeConnectorOptions,
+  connectKiteRuntimeMode,
+  createKiteRuntimeModeAdapter,
+  type KiteRuntimeModeAdapter,
+  type KiteRuntimeModeConnection,
+  type KiteRuntimeModeConnector,
 } from './adapter';
 export {
   createNativeTuiRuntimeClient,

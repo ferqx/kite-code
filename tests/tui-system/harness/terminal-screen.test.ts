@@ -119,6 +119,18 @@ describe('headless terminal screen', () => {
     screen.dispose();
   });
 
+  test('models native viewport scrolling independently from the scrollback bottom', async () => {
+    const screen = createHeadlessTerminalScreen(20, 2);
+    screen.append(new TextEncoder().encode('first\r\nsecond\r\nthird'));
+    await screen.settled();
+
+    expect(screen.viewportPosition()).toEqual({ viewportY: 1, baseY: 1 });
+    await screen.scrollLines(-1);
+    expect(screen.viewportPosition()).toEqual({ viewportY: 0, baseY: 1 });
+    expect(screen.viewport()).toContain('first');
+    screen.dispose();
+  });
+
   test('excludes queued pre-mark writes from frames captured after the mark', async () => {
     const screen = createHeadlessTerminalScreen(20, 2);
     screen.append(new TextEncoder().encode('before'));

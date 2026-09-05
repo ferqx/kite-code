@@ -9,7 +9,13 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
 
 - 管理 connection 的 `uninitialized → active → draining → closed` 状态机。
 - 路由 initialize、command、query、subscribe、unsubscribe 与 ping。
+- 可按App composition的精确布尔开关在initialize capability中声明三个History与十个App方法；Runtime Server不路由这些
+  App-owned请求，声明与实际carrier handler必须由同一composition配对。普通Service/Worker不会从Store能力推断或误报它们。
+- 显式daemon可用独立开关声明`server/status|server/shutdown`；parent-owned stdio、legacy Service和Worker不声明。方法正文仍由
+  App carrier在logical message进入Server前处理，Server只拥有capability事实。
 - 管理 subscription pump、ack-before-notification、iterator cleanup、同 subscription FIFO 与 connection/global bounded outbound queue。
+- 将 App admission 返回的 opaque `bindingReference` 与 connection/request/client identity 组合成 strict、frozen 的进程内
+  `RuntimeCommandContext`，仅传给 `RuntimeAccess.command()`；该 context 不进入 Protocol frame、request body、History 或 Browser。
 - 提供不包含 socket/stream/process 的 InProcess logical-message endpoint。
 
 ## 不拥有职责
@@ -18,6 +24,8 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
   storage 或 App composition。
 - 不折叠 domain projection，不保存 Runtime receipt，不成为第二 Session/Store authority。
 - 不拥有 Web static UI、process signal、stdio JSONL、WebSocket、HTTP 或 transport framing。
+- 不拥有、读取或路由durable History；App carrier必须在logical message进入Server前处理History，并复用App-owned
+  read snapshot与closed result codec。
 
 ## 允许依赖
 
@@ -42,6 +50,8 @@ App 可同时提供 `onClose(connectionId)` 清理自身 connection-to-interacti
 - backend 是 `RuntimeAccess + RuntimeServerAdmissionPort`；admission只裁定已冻结operation的connection/role，并注入
   Service-owned Workspace facts。每个connection可使用自己的admission port；Server不取得额外Runtime authority，也不从
   request body、cwd或client metadata提升authority。Native Trust query/decision与ticket auth留在Service carrier/App Control。
+- `runtime/command` 只有在 admission 允许后才把 `connectionId`、protocol `requestId`、client info 与 admission 的 opaque
+  binding reference 组成 `RuntimeCommandContext`；Server 不解释或缓存 Worker capability，旧 caller 未提供 binding 时只传 null。
 - 输入和 InProcess message 一律通过同一 Protocol codec/limits；未知、超限或未初始化请求 fail closed。
 - subscribe 先取得 Host iterator 并缓冲，再写 ack；顺序是 ack、replay/reset、initial item、ready/end、live。
   `afterRevision` 超过 Host watermark 时，ack 后立即发送 authoritative current snapshot/reset 与 ready，不能等待

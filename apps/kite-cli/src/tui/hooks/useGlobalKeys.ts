@@ -2,6 +2,7 @@ import { useInput } from 'ink';
 import type { Dispatch, MutableRefObject } from 'react';
 import { useRef } from 'react';
 import type { Action } from '../reducers';
+import { isTerminalFocusReport } from './terminal-focus-store';
 
 /**
  * 全局快捷键 hook。
@@ -40,6 +41,10 @@ export function useGlobalKeys(
         tab?: boolean;
       },
     ) => {
+      // Focus reports belong exclusively to TerminalFocusStore. FocusOut is
+      // otherwise parsed as Escape, which repaints the footer while the user
+      // drags the native scrollbar and forces real terminals to the bottom.
+      if (isTerminalFocusReport(input)) return;
       // Shift+Tab: 切换 plan mode（全局，任何时候都生效，无 overlay 限制）
       if (key.shift && key.tab) {
         onTogglePlanMode ? onTogglePlanMode() : dispatch({ type: 'TOGGLE_PLAN_MODE' });
@@ -51,8 +56,10 @@ export function useGlobalKeys(
         // while an approval overlay is focused.  It must never be translated
         // into the overlay's focused-reject action; that would leave queued,
         // authorized, or running siblings alive.
-        onAbort?.();
         dispatch({ type: 'CTRL_C' });
+        // Paint the presentation-only cancellation receipt before the async
+        // Runtime command can synchronously deliver its terminal projection.
+        onAbort?.();
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         ctrlCTimerRef.current = setTimeout(() => {
           dispatch({ type: 'RESET_CTRL_C' });
@@ -68,8 +75,10 @@ export function useGlobalKeys(
         if (wizardEscBackRef?.current) return;
         if (layeredOverlayEscRef?.current) return;
         if (overlayActiveRef.current && onCancelInterrupt?.() === true) return;
-        if (!overlayActiveRef.current) onAbort?.();
         dispatch({ type: 'ESCAPE' });
+        // The local action owns only acknowledgement/keyboard coalescing; the
+        // Server terminal remains the lifecycle authority.
+        if (!overlayActiveRef.current) onAbort?.();
         return;
       }
       // 在任何其他键按下时重置 ctrlCPressed

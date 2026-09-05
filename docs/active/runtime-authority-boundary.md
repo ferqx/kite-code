@@ -6,23 +6,80 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164、ADR-0165、ADR-0166。
+
+## KASD-01 authority substrate
+
+新的`kite-session.sqlite`具有独立exact epoch与Host-owned Session execution authority，并已由默认TUI/CLI App Server消费。
+该authority复用`controllerGeneration`作为唯一Session writer fence，并以独立authority revision执行SQLite CAS；`connectionGeneration`仍只是
+client binding，不能单独renew或提交。read不落盘也不取得lease；acquire/renew/detach/release才写authority record。active/detached lease失效且
+cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
+`controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
+fresh Session的generation 1不经过第二个transaction：Session事实插入后只能调用already-held writer中的initial acquire seam，后续callback/fault会
+同时回滚Session与authority。checkpoint fork同样先以source generation进入唯一mutation transaction，再让target facts、recovery identity、
+Run/receipt与target generation 1共同提交；copy fault不会留下target Session或authority。
+
+目标Store的`sessionMutation`在SQLite writer transaction取得后重读execution binding、authority revision、lease deadline与Session revision，
+检查和写入之间不存在另一个SQLite writer commit窗口。目标effect record同时保存Session generation、Host/client/connection tuple和正交的effect
+lease revision；prepare、renew、terminal与unknown只能通过`sessionMutation`。dispatch前必须再次重读authority与effect tuple；late terminal
+exact拒绝。response loss或cleanup无法确认时，effect `unknown/uncertain`与Session `recovery_required`同事务提交，后续prepare、dispatch与terminal
+均不可用，直到显式cleanup reconciliation产生更大的Session generation。SIGKILL遗留的prepared effect由successor在lease失效后只读列出；
+reconciliation把上一generation全部prepared事实改为unknown，并与cleanup confirmation同事务提交。prepared仍存在时clean release fail closed。
+
+`openKiteSessionRuntimeStorage`以每App Server一条WAL connection组合所有Session write port；read/list不取得execution lease，启动深验使用一个
+SQLite read snapshot。name/model、event/snapshot、checkpoint/rewind/fork、Run、recovery、delete与typed Artifact mutation都经当前Session
+scope；无Session归属的Artifact GC仍关闭。App Server owner不取得Workspace process lock；旧lock不再有production caller。
+
+State 27 的 `saq-v1 → saq-v2` 只读过渡不改变 Store generation，因此现有 `kite-session.sqlite` 可以同时包含旧
+snapshot/event bytes 与新 writer。Store codec 在读侧仅接受这个精确前代 State epoch，并在内存中迁移；旧 Subagent event identity
+按持久 sequence 合成，旧 approval/review authority 投影为 inert history。写侧仍只接纳当前 State/event，未知或损坏事件继续 fail closed。
+History/日志 projector 使用独立的 readable-event validator，不能把兼容事件重新送回 writer admission。
+
+KASD-02当前已把该owner接到内部`app-server run-stdio`的真实Host：App进程按Session command显式acquire/renew execution handle，并让整条异步
+Turn继承scope；首次create/fork使用原子首代入口，底层write缺scope继续拒绝。Host只把App predicate确认已持有generation的Session放入本地
+execution projection并在cancel/dispose处理；Store list/get/checkpoint在一个read snapshot完成，不会因另一个App Server读取或退出而取得/释放
+writer。默认TUI/CLI现使用该入口；三个durable History read由stdio carrier在同一条已initialize connection上处理，并逐次使用App-owned
+SQLite read snapshot。九个no-secret App Control方法也由同一carrier调用既有逐方法codec与共享OperationGate；Protocol只拥有closed method/
+outer envelope，Runtime Server只条件声明这些capability，不路由History/App Control或取得对应authority。typed parent client要求由同一
+build ID导出的exact server version与完整App capability，mismatch会关闭child。第十个App方法只用Native credential codec调用既有
+Service credential owner，secret不进入response/diagnostic。
+
+KASD-02的POSIX host-shell crash边界由Runtime Host generic process port拥有：实际命令位于parent-owned watchdog的独立process group，
+argv/cwd/env只经bounded stdin传入且pipe保持到terminal；App Server正常关闭调用既有process-tree cleanup，SIGKILL则由stdin EOF触发watchdog
+kill整个组。successor仍必须等Session lease并显式reconcile，不能因为child已退出就推断其副作用未发生或自动重放。Windows沿用Job guard；
+当前未获release admission的local stdio MCP不为本阶段创建测试专用启用旁路。
+
+这一substrate没有第二张authority表、第二套writer generation、Storage daemon、migration、repair、dual write或Store fallback。KASD-01前置已
+完成，KASD-02 App Server与KASD-03默认client均已接入该owner。真实双TUI同时读同一History，两个模拟client争用同Session mutation时只有
+一个成功；client close只收掉parent-owned child，不删除durable facts。验证：
+`bun test packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts packages/runtime-storage-sqlite/test/kite-session-effects.test.ts packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts`。
+
+KASD-04的显式daemon只新增process/endpoint lifecycle与logical-message carrier，不新增Session或Store authority。owner-only Unix socket/
+Windows named pipe可承载多个connection；每个connection仍经同一Runtime Server admission，disconnect只释放自身资源。`server/status`与
+`server/shutdown`是固定daemon exact capability；KASD-05的v2 status增加strict loopback `webOrigin`，因此v1 client明确mismatch。
+status只读且不创建endpoint/credential/Session，shutdown由daemon owner先关闭Web admission，再取消active Turn并bounded drain。
+daemon build ID不参与compatibility，Store generation/revision仍是唯一writer裁决。
 
 ## 当前可信域
 
 Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
 当前不建立持久 Project authority。Project identity 是 Runtime Host 从 native canonical Workspace realpath
-确定性派生的标识；Session 创建只接受 Workspace/Session facts。Coordinator 必须复用 Host 的同一
+确定性派生的标识；Session 创建只接受 Workspace/Session facts。当前Service Workspace admission必须复用Host的同一
 `resolveProjectIdentity()` 结果校验 durable digest，不能把 Builtin sandbox 用于边界比较的 Windows
 case-folded path 再次哈希成第二个 Project identity。二者仍指向同一真实 Workspace，但只有前者拥有
 持久 Project digest，后者只拥有 path containment/equality 语义。不存在 `ProjectIdentityStore`、
 `ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。Service App是
 唯一 composition root，Host/Store operation 仍各有一个 production owner。
 
+当前默认App Server/Store/daemon discovery边界见[`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。本文后续
+出现的Coordinator/Worker/Store 8 generation只约束legacy offline migration source，不是普通run/resume/Web的第二authority。
+
 ## Runtime Server / Client authority boundary
 
 `RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
+
+Effect lease在Model dispatch前仍绑定exact global revision：旧Surface的prepare/attempt-start不得跨revision执行。Provider已经取得durable attempt acknowledgement后，同一active Turn内的`interaction_mode.changed`等无关user control事实不撤销该exact invocation；Host只允许仍为prepared/dispatching的同一invocation继续投影stream，并提交封闭的retry或terminal批次，逐项限制为Model response、由该response排队的Tool及该invocation reservation终结。Turn aborted/completed、invocation已terminal、identity不匹配或批次混入其他事件时继续fail closed。该窄并发准入不移动lease、不建立第二套revision authority，也不允许stale attempt-start。
 
 App 为Server提供backend default admission，并可为每个logical connection绑定不同的canonical trusted Workspace。
 admission可以authorize frozen operation，但绝不从`clientInfo`、display name或request body派生authority，也不command、
@@ -33,7 +90,8 @@ Workspace。connection close释放admission/subscription/interaction binding，�
 
 `RuntimeWorkspaceContextFactory`按完整identity缓存per-Workspace config/model/MCP/Skill/shell context，Router按Session
 identity选择context；同digest不同canonical facts、跨Workspace改绑和fork均fail closed。Runtime Application的
-operation gate统一Runtime与App Control mutation，quiesce阻止新admission并等待active临界区。App Control mutation
+operation gate统一Runtime与App Control mutation；普通stop先线性化关闭新admission，再合并gate临界区与Host唯一
+`SessionLifecycleSupervisor`的active Session operation事实，任一active都resume并返回`service_busy`。App Control mutation
 保留exact revision CAS，lost response/`outcome_unknown`只允许query state后显式决定，不能自动重放。
 只有`apps/kite-service/src/composition.ts`组合Host、Server、Store、Builtin、carrier与local auth。它还拥有raw History
 projector/SQLite readonly reader、Workspace-scoped App Control与default Store lifecycle。TUI与foreground CLI只有Native
@@ -44,10 +102,16 @@ readonly reader`。`apps/kite-cli`不依赖Host、Server、Builtin、SQLite或Ru
 
 Native connector只读取exact descriptor与access token，先准备authenticated no-secret App Control，再在Trust通过后取得
 Workspace-bound one-shot ticket并组合Runtime WebSocket、三个History HTTP route与exact App Control/credential client；
+Trust是用户在场的两阶段barrier，不能要求用户在Worker capability TTL内决定。Runtime尚未连接时若carrier以pre-dispatch
+401拒绝App Control request，connector只重新ensure/discover exact Worker identity并重发同一request一次；401在body decode/
+mutation gate前返回，因此不是mutation replay。response丢失、5xx、第二次401、identity drift或Runtime active后仍不自动重发。
 connection从不取得control token。每个HTTP请求绑定发起时的Service instance与connector identity generation，旧instance
 迟到响应在reconnect后拒绝；Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History
 transcript逐条复用closed`RuntimeClientEvent`validator，unknown或带额外字段的event不能跨Native边界。client close只
 释放本connection、subscription与snapshot state，不取消Session/Turn或dispose Host。
+Native presentation adapter消费event-free snapshot时也必须保留每条notification入队时的connection generation；重连后排队的
+旧事件不得用当前generation重新盖章。进入TUI的model/tool/subagent/interaction事件必须携带Turn identity，Task/Turn/Run
+terminal的envelope identity必须与事件字段精确相等；History record通过持久顺序join或显式`legacy-*`迁移identity构造同一边界。
 Trust identity除canonical Workspace三元组外还绑定Service发现的exact external-read roots digest；query在Runtime连接前
 向TUI/CLI投影canonical paths，decision经revision/scope CAS后才允许Sandbox只读挂载。scope drift重新阻断connection，
 generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust record自行提升这一authority。
@@ -63,24 +127,80 @@ Service-owned presentation frame在closed projector前统一合并累计reasonin
 legacy Session seam与concrete Service bridge共享该实现，
 因此carrier或数据源切换不得改变client event顺序、粒度或TUI聚合结果。interaction/cancel/close/shutdown等旁路durable
 publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
-后续client event，不能让terminal先结算后再补一个独立Thought。
+后续client event，不能让terminal先结算后再补一个独立Thought。该presentation-only等待最多1秒；正常路径仍以真实commit为准，
+但UI promise迟到或失败不能取得subscription、Runtime terminal或prompt FIFO authority。
+Native run completion只由跨过current command revision floor且匹配receipt canonical `runId`的`run.terminal`拥有；失败使用
+`status=failed`与同一事件中的terminal outcome；
+Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
+Session projection使用exact v2 vocabulary：`activeTask`与stable `currentRun`分别来自committed State和Store Run row；
+Provider continuation只推进同一Run的activeTurn与revision。accepted receipt的`messageId`由持久commandId确定性派生，resource JSON与
+State/event format不增加字段。已接纳Run的全部公开presentation事件在notification metadata中复用同一accepted run/task/turn identity，首条prompt
+不得继承predecessor Turn；Turn终态后迟到的Tool/Subagent cleanup事实仍使用该admission identity，不得因settled snapshot已无active Run而构造失败。无active/unknown Run时只读hydrate最近settled Run。Native/Protocol要求已建立Run的cancel同时携带
+runId与activeTurnId。
+RuntimeClient必须先取得snapshot store `applied`再分发durable/ephemeral notification；revision或sequence gap触发同connection
+resubscribe并把Session置为not-ready，旧packet不得进入TUI reducer。
 
-Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
+Protocol V2 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V2 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
-Local Service infrastructure 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
-raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
-instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
-Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
-restart-scoped material，connection interface不取得 control token。`kite-local-runtime/service`拥有POSIX
-no-follow/owner-only primitive，以及Windows current-user SID、protected owner-only DACL、non-reparse verifier；两者都在
-敏感访问时重新验证identity/permission drift并fail closed。`apps/kite-service`拥有production loopback carrier、required-port shell与唯一default
-Runtime composition，`kite-local-runtime/manager`拥有terminal/release共用的dead-only stale manager。manager先用
-`GET /readyz`检查liveness，再用access token、exact`{}`body调用`POST /_kite/instance`；response必须严格等于closed
-`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`shape并与descriptor的instance/
-Protocol/client-contract/serverVersion/build identity一致。server identity drift、malformed或无关listener返回
-`unavailable/identity_uncertain`；descriptor/expected build mismatch返回`incompatible/build_mismatch`。两类都保留state、
-`spawn=0`且绝不kill。handshake拒绝query、cookie、wrong Origin/Host、non-JSON content type、非POST和非exact body；
-该instance proof也不创建persisted Project authority或跨Host Store fence。
+Public Agent API Browser route当前只在显式daemon listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
+hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
+initialize/query-only in-process Runtime Client/Server logical connection。Service的根与API Docs SPA shell另建HttpOnly cookie与service-scoped read-only
+principal。ServerInfo按principal发布`checkpoints/history/sessions/workspaces`；Workspace、Workspace Session、Session get、History page与
+Checkpoint list/preview经同一个Store 9 Directory/Runtime/History authority可达，其他resource/mutation仍404。History的`after_sequence`只做
+bounded增量读取且与cursor互斥。两类principal都不开放SQLite/State concrete或新connection/DDL；context/session close不取消Runtime work，
+controller role不绕过Store 9 Controller lease或binding authority。
+App Server connection只认证Workspace、Client与connection generation；每条command用目标Session重新读取当前execution authority，
+并将Workspace/connection/request/Session/Controller generation摘要为in-process binding reference。该reference不持久化、不成为credential或
+第二registry；旧connection generation和非当前Controller仍在Host之前拒绝。
+每context的16-request admission与drain只约束Public HTTP资源；它不成为domain mailbox。已认证read在异步Trust重验后还必须复核context current，
+revoke/Worker replacement会等待其收敛再关闭private connection。KASAPI-02D static/conformance Gate同时证明adapter没有direct
+`RuntimeAccess`或Agent Kernel/Runtime Host/SQLite concrete import；1 MiB History response提前分页仍只消费同一safe page port。
+static Web carrier的API Docs与受限Session shell返回SPA index并可建立与根shell相同的短期Browser session；精确OpenAPI JSON仍只读取candidate内固定
+资产，不建立Agent context、Runtime logical connection或Store query，也不提供execute control；Browser业务数据只经cookie-authenticated
+`/v1`，不是Controller surface。
+
+KRSRUN-01B已把unpublished Store 8 capability接入Host transaction机制：start的State/event/snapshot/revision、queued Run与original
+resource receipt同一commit；activation在publish/schedule前通过现有`attempt_start` transaction推进running，不得在Store writer transaction
+之外直接调用Run transition；interaction/terminal/cancel/recovery State batch同步推进waiting/running/terminal。Private Runtime Contract/Protocol只新增closed Run receipt与bounded get/page；Host query直接消费neutral port且不触发
+recovery。Start receipt replay在lookup命中后直接返回original queued resource，不recover、inspect、activate、prepare或schedule。
+
+KRSRUN-02A已把delete/rewind/fork与restart语义接到同一owner：`adapter.ts`只有在显式unpublished`targetStore: 'run'`时组合Store 8
+Run/receipt transaction，且该target拒绝Store 7 active-layout evidence、不暴露Store 7 Controller/read façade。delete在原transaction内级联删除Run并
+保留tombstone/receipt；rewind只接受coverage内between-turn边界并删除较新Run，partial/active/unknown retained边界整笔拒绝；fork只复制
+checkpoint前完整`completed|failed|cancelled`行、记录直接origin并继承coverage，不复制source receipt。rewind/delete后的original receipt仍可
+replay，即使current Run已不存在或其committed revision高于rewound Session head。任一Run、snapshot、receipt或SQLite fault回滚全部target事实。
+
+Worker restart后、Session尚未admit/recover时，private Run GET/list不调用Host recovery；nonterminal只读投影为
+`unknown/recovery_required`，并以最后durable Run clock作为确定projection boundary。显式resume执行existing Host recovery一次，recovery event与
+Run transition仍在canonical State transaction；persisted unknown只允许细化为更精确terminal并保留原finish clock，不自动重放external effect。
+
+KRSRUN-02B已实现显式offline whole-generation迁移mechanism：manager必须先提供Coordinator/Worker/Gateway停止及
+Turn/Interaction/effect/external process全收敛的closed barrier；storage再绑定active Store 7 generation的pointer/manifest/journal/fence、
+Catalog和每个Workspace snapshot identity/digest。Coordinator-owned port精确保留Catalog Session/outbox/terminal operation facts；Store owner
+把每个Session coverage设为source head、receipt result设空、Run表保持空，不从event补造历史；Controller/recovery/effect/resource authority
+必须由其owner codec确认终态并只重绑target generation，recovery identity也必须有canonical且owned的Session/tombstone。全部logical digest/
+binding/Store 8 preflight通过后才原子切pointer；active/corrupt/unowned/partial/WAL drift或copy fault整体blocked，新fence写入后旧Store 7 writer
+立即fail closed。
+
+KRSRUN-03A已把production Coordinator/Workspace Worker/idle History切到Store 8-only：fresh layout直接创建Store 8，既有Store 7必须先走显式
+02B maintenance；Coordinator Catalog、新Workspace materialize/admit、Worker readiness、Controller/effect、same-connection read façade与private
+Host Run query都验证同一committed active-layout/manifest/journal/fence。Store 8 mutation先永久标记`targetWriteState=written`，restart重新验证
+profile/binding且不读取Store 7 fallback。start decision原子提交queued Run后，调度前的same-phase activation在同一revision改为running；其余
+Run transition仍必须随State revision前进；该activation仍由Host的`attempt_start` transaction持有single writer，不能退化为裸Run port mutation。
+ServerInfo/Public handler仍无`runs`，所以production Store authority已切换不等于Public Run API开放。
+
+Host query命中Store-authoritative Session projection时，经同一NotificationProjector发布event-free durable snapshot以hydrate process-local
+registry/history和已等待subscriber；该动作不写Store。这样订阅先注册、query后加载且Session未出现在本进程notification history时仍能
+完成ready。
+
+Store 7/8 migration与旧Coordinator/Worker/Gateway control plane属于未发布历史机制。ADR-0154 clean cutover后，正式CLI/release不再组合
+这些entrypoint、barrier或descriptor recovery；current Runtime authority只从单Service与Store 9建立，普通startup也不扫描或删除旧source。
+
+App Server infrastructure不改变上述可信域。`kite-app-contract`只允许no-secret exact projection/action；Provider API key与MCP OAuth
+只经过fixed credential方法。default stdio连接由parent pipe和exact initialize绑定，source/installed都要求client-child same build。
+显式daemon使用owner-only Unix socket/current-user named pipe与fixed protocol/capabilities；build只作诊断。mismatch不授权stop、spawn或
+replacement。`kite-local-runtime/service`仅保留profile/private-directory校验、PID/start probe与dead-only endpoint cleanup；reservation
+不保存credential、Store或Session generation。alive、identity uncertain或inode drift全部保留证据并fail closed。
 
 ## Authority sequence
 
@@ -140,21 +260,37 @@ executable argv不能因`slice(2)`为空而落入普通Service命令解析或静
 
 ## SQLite Store 与 Artifact
 
-新 Session 只使用 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26` 与 epoch 派生的 `.runtime-state-store-{generation}.db` current target。SQLite Store 当前 exact schema 是 **8 tables / 2 non-primary-key indexes**；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。历史 source 只要存在 WAL/SHM sidecar 就必须在隔离副本中读取；`SQLITE_OPEN_READONLY` 不足以保证 SHM 不被更新，真实 source 的 identity、mtime 与字节不得变化。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
+新production Session只使用exact `kite-session.sqlite` epoch与active Workspace generation target。旧`kite.sqlite`原样保留但不可见，
+不作为maintenance owner、migration source或fallback。不存在persisted
+authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event是strict canonical JSON，Snapshot以SHA-256
+checksum检测损坏。写入/恢复Store时会校验目标会话的当前Event/Snapshot；SessionStore的会话发现只按序解码到第一条命名候选后停止，不以全日志
+解码阻塞TUI启动，具体会话恢复仍走session-scoped完整校验。历史source只要存在WAL/SHM sidecar就必须在隔离副本中读取；
+`SQLITE_OPEN_READONLY`不足以保证SHM不被更新，真实source的identity、mtime与字节不得变化。只读日志reader打开时只校验数据库marker与表结构，
+并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
 
-`runtime_command_receipts` 是第八张表。它的唯一 key 是 `(scope_session_id, command_id)`；存储的 request digest、target Session、canonical original applied receipt 与 committed revision/time 把 replay 绑定到一个 exact command decision。同 scope/key 的不同 digest fail closed。State/event/snapshot/revision decision 与 receipt 在同一 Store transaction 提交；所以 commit 后、response 前的 crash 只能让同 ID retry 返回原事实，绝不再次 prepare 或 dispatch effect。parse/codec/auth/overload/transport failure 不创建 receipt。receipt retention 是刻意的：close、Session delete、target delete 保留 receipt；fork 绝不复制 source receipt；不设 TTL 或 capacity pruning；只有删除整个 Store 才会移除 metadata。
+`runtime_command_receipts`的唯一key是`(scope_session_id, command_id)`；Store 8还保存digest-bound original resource result。存储的request
+digest、target Session、canonical original applied receipt与committed revision/time把replay绑定到一个exact command decision。同scope/key的不同
+digest fail closed。State/event/snapshot/revision decision与receipt在同一Store transaction提交；所以commit后、response前的crash只能让同ID
+retry返回原事实，绝不再次prepare或dispatch effect。parse/codec/auth/overload/transport failure不创建receipt。receipt retention是刻意的：
+close、Session delete、target delete保留receipt；fork绝不复制source receipt；不设TTL或capacity pruning；只有删除整个Store才会移除metadata。
 
 Session delete 同样是显式 Runtime command，不是 App/TUI 的 SQLite helper。Host 在 Session mailbox/lifecycle
 边界串行化删除，Store 在一个 `BEGIN IMMEDIATE` 中写入 scoped applied receipt 并删除该 Session 的 durable
 facts，但保留 receipt；Host 随后移除 registry projection，且不会再以 close snapshot 重建已删 Session。
 
-State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都是 explicit source-only compatibility profile，不是 writer。用户选中的 exact session 可以经 no-follow isolated copy atomic import 到 Store 6；unknown source 静默忽略，corrupt source 只隔离该 session。source bytes 永不写回、checkpoint、rename 或作为 fallback 执行。
+State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都是
+explicit source-only compatibility profile，不是writer。用户选中的exact session只能经no-follow isolated copy atomic import到显式legacy
+Store 6；unknown source静默忽略，corrupt source只隔离该session。source bytes永不写回、checkpoint、rename或作为fallback执行。
+默认Coordinator/Workspace Worker不发现、列出或lazy import这些Store 5 source；即使Workspace identity匹配也保持隔离。
 
 不匹配 current marker 的 database 直接 fail closed。production package 不导出 old constructor/path，也不存在 Store 5 current writer、sidecar receipt database、hidden DDL drift、ignored receipt table、try-new-catch-old、dual write 或 mixed-format normalization。
 
 ## Carrier scope
 
-stdio是Service-owned internal child I/O：bounded UTF-8 JSONL从stdin输入，stdout只承载protocol，diagnostics使用stderr；EOF只释放connection，不会创建新的Runtime owner，只有parent capability可以请求composition shutdown。默认terminal入口使用Service-ownedNative loopback carrier：只bind loopback，经restart-scoped token/ticket认证，并接受exact Host/Origin/CSP/no-CORS/frame/heartbeat checks。另有development/reference WebSocket carrier只用于conformance。两者都不改变ADR-0053：不能据此发布`kite server --web`、production Web UI或remote support claim。
+stdio是App Server parent-owned child I/O：bounded UTF-8 JSONL从stdin输入，stdout只承载protocol，diagnostics使用stderr；EOF只释放connection并由
+parent关闭该composition。显式daemon的owner-only socket承载相同logical protocol，另有独立loopback HTTP carrier承载private Browser Web；
+Browser cookie只取得read façade，不能进入Runtime control。legacy Native loopback carrier继续用restart-scoped token/ticket承载旧Runtime，
+但不再挂载static/Browser `/v1`。development/reference WebSocket carrier只用于conformance；remote/LAN support仍未批准。
 
 Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free ref。文件权限、no-follow、atomic rename、fsync、schema readback 与 Runtime receipt identity 共同检测损坏和混淆；不存在 `model-artifacts.key`、key loss 终态或无 Artifact dispatch fallback。
 
