@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-09-03（App Server进程与Durable Session解耦KASD-00～06完成并通过三平台qualification）
+最后更新：2026-09-04（新增Server Run与TUI展示生命周期收敛draft计划）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-09-04-server-tui-lifecycle-convergence.md`](2026-09-04-server-tui-lifecycle-convergence.md) | draft | P0 | 当前Runtime Kernel、Run-resource-enabled App Server Store、Runtime Contract/Protocol V1、TUI live/history与PTY基线 | 不替代当前authority；先分离Server Task/Turn/Run与Client RunView/command/presentation；持久事件改名另立后续format计划 | LFC-00～08：基线/ADR、Server view与terminal closure、Client fencing、Contract、TUI projection、Render owner与客户端兼容层清理 |
 | [`2026-09-02-app-server-session-decoupling.md`](2026-09-02-app-server-session-decoupling.md) | archived | P0 | ADR-0166、Store 9、Runtime Server/Client、Controller/effect receipt current authority | 接管Kite Home单Service计划的未完成与后续演进；保留durable Store成果，替代global Service/Runtime/Store/Web共生命周期 | KASD-00～06完成；Session writer fencing、同build local App Server、TUI/CLI cutover、显式daemon、Web client解耦与旧控制面删除；[完成记录](../execution/completed/2026-09-03-app-server-session-decoupling.md) |
 | [`2026-08-31-web-ui-design-system.md`](2026-08-31-web-ui-design-system.md) | completed | P1 | single-Service Web REST client、Kite Web current authority | 只收敛视觉系统与Agent-operable view，不新增数据面或控制能力 | semantic token、Light/Dark、Sidebar/Header/Timeline视觉与3 viewport真实Browser验收 |
 | [`2026-08-31-web-rest-client-convergence.md`](2026-08-31-web-rest-client-convergence.md) | completed | P0 | ADR-0155、single-Service/Store 9、Agent API read与Web Observer current authority | 局部替代KASAPI的static-docs-only Browser边界；保留TUI Native client，本阶段不做SSE/WebSocket/mutation/multi-Server | Browser auth + Workspace/Session/History/Checkpoint REST read、Web cutover、旧BFF/WebSocket删除、TUI-first/Web-first/concurrent ensure qualification |
