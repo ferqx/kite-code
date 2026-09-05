@@ -64,8 +64,8 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 Store8 capability存在时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
 resource receipt和State decision共同提交。bridge activation先调用Coordinator的queued→running transition，再发布notification或交给
 Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
-Start Turn整批presentation notification还携带admission确认的`runId/taskId/turnId`；首条`user.message_appended`不从
-`turn.started`之前的predecessor snapshot取Turn。无active/unknown Run的启动hydration分页读取最近settled Run，保持重启后的
+Start Turn整批presentation notification以及该accepted Run后续的model/tool/subagent/interaction/terminal通知都携带admission确认的`runId/taskId/turnId`；首条`user.message_appended`不从
+`turn.started`之前的predecessor snapshot取Turn，取消事务或Turn终态后的迟到Subagent/Tool cleanup也不从settled snapshot反推Turn。无active/unknown Run的启动hydration分页读取最近settled Run，保持重启后的
 `currentRun`与late-stream fence；该读取不写Store或触发recovery。
 current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
 

@@ -596,7 +596,15 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
               if (command.type === 'cancel_turn') {
                 this.#rejectPendingInteraction(new Error('Runtime interaction cancelled.'));
               }
-              this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
+              this.#publishCommittedEvents(
+                committed.events,
+                receipt.revision,
+                publish,
+                'turn',
+                command.type === 'cancel_turn'
+                  ? { runId: command.runId, turnId: command.turnId }
+                  : {},
+              );
             },
           };
         },
@@ -986,20 +994,28 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     this.#activePresentationFrame = presentation;
     const executionState = coordinator.getState();
     const lifecycle = coordinator.session.getLifecycleProjection();
-    const presentationWorkId =
-      lifecycle.activeTask?.taskId ?? lifecycle.currentRun?.runId ?? execution.operationId;
+    const presentationRunId = lifecycle.currentRun?.runId ?? execution.precommittedStart?.turnId;
+    if (!presentationRunId) {
+      throw new Error('Runtime turn execution has no accepted Run identity.');
+    }
+    const presentationTaskId =
+      lifecycle.activeTask?.taskId ??
+      lifecycle.currentRun?.taskId ??
+      execution.precommittedStart?.taskId;
+    const presentationWorkId = presentationTaskId ?? presentationRunId;
     const presentationTurnId =
-      lifecycle.currentRun?.activeTurnId ?? executionState.turn.turnId ?? execution.operationId;
+      lifecycle.currentRun?.activeTurnId ??
+      executionState.turn.turnId ??
+      execution.precommittedStart?.turnId;
+    if (!presentationTurnId) {
+      throw new Error('Runtime turn execution has no accepted Turn identity.');
+    }
     const publishPresentation = (event: RuntimeEvent): void => {
       const notification = projectRuntimeEphemeralNotification(event, {
         sessionId: this.#input.sessionId,
         workId: presentationWorkId,
-        ...(lifecycle.currentRun?.runId === undefined ? {} : { runId: lifecycle.currentRun.runId }),
-        ...(lifecycle.activeTask?.taskId === undefined && lifecycle.currentRun?.taskId === undefined
-          ? {}
-          : {
-              taskId: lifecycle.activeTask?.taskId ?? lifecycle.currentRun?.taskId,
-            }),
+        runId: presentationRunId,
+        ...(presentationTaskId === undefined ? {} : { taskId: presentationTaskId }),
         turnId: presentationTurnId,
         actorId: 'runtime-agent',
         attemptId: execution.operationId,
@@ -1091,6 +1107,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           durability: 'durable',
           sessionId: this.#input.sessionId,
           revision: this.#revision,
+          runId: presentationRunId,
+          ...(presentationTaskId === undefined ? {} : { taskId: presentationTaskId }),
+          turnId: presentationTurnId,
           projection: {
             kind: 'turn',
             session: this.#projection(eventRevision, eventState),
@@ -1280,6 +1299,10 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   ): void {
     this.#flushActivePresentation();
     const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+    const lifecycle = coordinator?.session.getLifecycleProjection();
+    const runId = lifecycle?.currentRun?.runId;
+    const taskId = lifecycle?.activeTask?.taskId ?? lifecycle?.currentRun?.taskId;
+    const turnId = lifecycle?.currentRun?.activeTurnId ?? coordinator?.getState().turn.turnId;
     const events = coordinator?.control.cancelRun(reason) ?? [];
     for (const event of events) {
       const revision = coordinator?.revisionForEvent?.(event);
@@ -1293,6 +1316,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         durability: 'durable',
         sessionId: this.#input.sessionId,
         revision,
+        ...(runId === undefined ? {} : { runId }),
+        ...(taskId === undefined ? {} : { taskId }),
+        ...(turnId === undefined ? {} : { turnId }),
         projection: {
           kind: 'turn',
           session: this.#projection(revision, eventState),

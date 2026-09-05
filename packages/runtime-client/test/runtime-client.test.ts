@@ -22,6 +22,37 @@ describe('Runtime Client boundary', () => {
 });
 
 describe('RuntimeClient protocol state machine', () => {
+  test('accepts a late turn event from explicit admission identity after the snapshot settles', () => {
+    const envelope = toAcceptedPresentationEnvelope(
+      {
+        schema: 'kite.runtime-notification.v2',
+        durability: 'durable',
+        sessionId: 'session-1',
+        revision: 5,
+        runId: 'run-1',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+        projection: {
+          kind: 'turn',
+          session: session('session-1', 5),
+          event: {
+            type: 'subagent.failed',
+            subagentId: 'subagent-1',
+            summary: 'Cancelled during provider cleanup.',
+          },
+        },
+      },
+      1,
+    );
+
+    expect(envelope).toMatchObject({
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      event: { type: 'subagent.failed', subagentId: 'subagent-1' },
+    });
+  });
+
   test('rejects a predecessor envelope identity when the terminal event names a successor Run', () => {
     expect(() =>
       toAcceptedPresentationEnvelope(

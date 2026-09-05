@@ -822,6 +822,8 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
 
       const output = stripAnsi(tui.scrollback());
       expect(output).not.toContain('Message was not sent: Internal error');
+      expect(output).not.toContain('Cancellation was not accepted');
+      expect(output).not.toContain('Invalid AcceptedPresentationEnvelope');
       const successorPromptCount = output.split('Run after cancellation cleanup').length - 1;
       if (successorPromptCount !== 1) {
         throw new Error(

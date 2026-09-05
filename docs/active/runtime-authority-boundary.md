@@ -134,8 +134,8 @@ Native run completion只由跨过current command revision floor且匹配receipt 
 Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
 Session projection使用exact v2 vocabulary：`activeTask`与stable `currentRun`分别来自committed State和Store Run row；
 Provider continuation只推进同一Run的activeTurn与revision。accepted receipt的`messageId`由持久commandId确定性派生，resource JSON与
-State/event format不增加字段。Start Turn的公开事件在notification metadata中复用同一accepted run/task/turn identity，首条prompt
-不得继承predecessor Turn；无active/unknown Run时只读hydrate最近settled Run。Native/Protocol要求已建立Run的cancel同时携带
+State/event format不增加字段。已接纳Run的全部公开presentation事件在notification metadata中复用同一accepted run/task/turn identity，首条prompt
+不得继承predecessor Turn；Turn终态后迟到的Tool/Subagent cleanup事实仍使用该admission identity，不得因settled snapshot已无active Run而构造失败。无active/unknown Run时只读hydrate最近settled Run。Native/Protocol要求已建立Run的cancel同时携带
 runId与activeTurnId。
 RuntimeClient必须先取得snapshot store `applied`再分发durable/ephemeral notification；revision或sequence gap触发同connection
 resubscribe并把Session置为not-ready，旧packet不得进入TUI reducer。

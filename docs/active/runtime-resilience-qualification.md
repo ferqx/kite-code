@@ -148,6 +148,7 @@ lease renewal/takeover、effect response loss、SIGKILL recovery_required与expl
 Native TUI client的Esc/Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 若重连后的替换controller尚未恢复该Session而明确拒绝`session_unavailable`，client先恢复同一Session的mutation authority，
 再核对active Run identity并以刷新revision重试一次；该未提交拒绝不得让同一Esc不断追加失败诊断，也不得跨Run取消successor。
+取消事务及后续Provider cleanup发布的每条turn-scoped notification必须携带已接纳的`runId + turnId`；即使其post-event Session snapshot已settled，迟到Subagent/Tool事实仍能构造合法`AcceptedPresentationEnvelope`，不得把投影缺失冒充成用户取消被拒绝。
 mutation admission必须绑定Runtime connection generation，重连后的任何写命令都不能复用旧generation的本地admitted标记。
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
 Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
