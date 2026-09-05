@@ -1534,27 +1534,23 @@ describe('closed RuntimeClientEvent reducer', () => {
     });
     const blocks = toolBearing.turns.flatMap((turn) => turn.blocks);
     const summaries = blocks.filter((block) => block.kind === 'tool_summary');
-    // Distinct Server presentation groups are distinct Thought items even
-    // when their events are adjacent in the same model continuation.
-    expect(summaries).toHaveLength(2);
+    // A new model presentation group can continue the same live exploration
+    // Thought after the preceding group's tools have all reached terminal.
+    expect(summaries).toHaveLength(1);
     expect(summaries[0]).toEqual(
       expect.objectContaining({
         id: pendingSummary?.id,
-        active: false,
-        presentationGroupId: 'rollback-tools-message',
-        tools: [expect.objectContaining({ callId: 'rollback-read', status: 'done' })],
-      }),
-    );
-    expect(summaries[1]).toEqual(
-      expect.objectContaining({
         active: true,
         presentationGroupId: 'rollback-narration-message',
-        tools: [expect.objectContaining({ callId: 'rollback-search', status: 'running' })],
+        tools: [
+          expect.objectContaining({ callId: 'rollback-read', status: 'done' }),
+          expect.objectContaining({ callId: 'rollback-search', status: 'running' }),
+        ],
       }),
     );
     // A tool-bearing response is progress metadata, not a standalone answer.
     expect(blocks.filter((block) => block.kind === 'text')).toEqual([]);
-    expect(blocks.map((block) => block.kind)).toEqual(['tool_summary', 'tool_summary']);
+    expect(blocks.map((block) => block.kind)).toEqual(['tool_summary']);
   });
 
   test('commits streaming lists one complete item at a time', () => {
@@ -2332,6 +2328,95 @@ describe('closed RuntimeClientEvent reducer', () => {
         ]),
       }),
     );
+  });
+
+  test('keeps later exploration groups in the same continuous Thought', () => {
+    const reduce = (state: ReturnType<typeof createInitialState>, event: RuntimeClientEvent) =>
+      eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    let state = createInitialState();
+    const events = [
+      { type: 'model.requested', requestId: 'request-group-a' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-group-a',
+        state: 'completed',
+        segmentId: 'reasoning-group-a',
+        text: 'Inspect the entry points.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-group-a',
+        messageId: 'message-group-a',
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'read-group-a',
+        presentationGroupId: 'message-group-a',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: 'README.md' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'read-group-a' },
+      {
+        type: 'tool.finished',
+        toolId: 'read-group-a',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'README', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'request-group-b' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-group-b',
+        state: 'completed',
+        segmentId: 'reasoning-group-b',
+        text: 'Inspect the implementation.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'request-group-b',
+        messageId: 'message-group-b',
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'search-group-b',
+        presentationGroupId: 'message-group-b',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: '*.ts' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'search-group-b' },
+    ] satisfies RuntimeClientEvent[];
+    for (const event of events) state = reduce(state, event);
+
+    const summaries = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({
+        active: true,
+        presentationGroupId: 'message-group-b',
+        modelRequestId: 'request-group-b',
+        summaryLine: 'read 1 file, searched 1 file pattern',
+        tools: [
+          expect.objectContaining({ callId: 'read-group-a', status: 'done' }),
+          expect.objectContaining({ callId: 'search-group-b', status: 'running' }),
+        ],
+      }),
+    );
+    expect(state.presentationGroupSummaryIds).toMatchObject({
+      'message-group-a': summaries[0]!.id,
+      'message-group-b': summaries[0]!.id,
+    });
   });
 
   test('keeps terminal exploration when next reasoning overtakes model.requested', () => {

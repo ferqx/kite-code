@@ -721,6 +721,7 @@ function continueActiveThought(state: TuiState, requestId: string): TuiState {
   return replaceBlockById(state, summary.id, {
     ...summary,
     modelRequestId: requestId,
+    modelTerminal: undefined,
     liveModelStartedAt: Date.now(),
   });
 }
@@ -2260,11 +2261,21 @@ function materializeSafeClientTool(
   }
 
   let active = findSummaryById(withoutPending, withoutPending.currentThoughtSummaryId);
+  const adoptsNextPresentationGroup =
+    active?.active === true &&
+    modelRequestId !== undefined &&
+    active.modelRequestId === modelRequestId &&
+    presentationGroupId !== undefined &&
+    active.presentationGroupId !== undefined &&
+    active.presentationGroupId !== presentationGroupId &&
+    active.tools.length > 0 &&
+    active.tools.every((tool) => tool.status !== 'queued' && tool.status !== 'running');
   if (
     active?.active === true &&
     presentationGroupId !== undefined &&
     active.presentationGroupId !== undefined &&
-    active.presentationGroupId !== presentationGroupId
+    active.presentationGroupId !== presentationGroupId &&
+    !adoptsNextPresentationGroup
   ) {
     // Explicit Server group boundaries are stronger than arrival adjacency.
     // Close the previous read-only group before opening this one. A buffered
@@ -2288,7 +2299,8 @@ function materializeSafeClientTool(
       : active?.modelRequestId === modelRequestId &&
         (presentationGroupId === undefined ||
           active?.presentationGroupId === undefined ||
-          active?.presentationGroupId === presentationGroupId);
+          active?.presentationGroupId === presentationGroupId ||
+          adoptsNextPresentationGroup);
   if (active?.active && activeOwnsRequest) {
     const pendingCaption = active.pendingCaption;
     const tools = [
@@ -2306,9 +2318,11 @@ function materializeSafeClientTool(
     return {
       ...replaceBlockById(withoutPending, active.id, {
         ...active,
-        ...(presentationGroupId === undefined || active.presentationGroupId !== undefined
+        ...(presentationGroupId === undefined
           ? {}
-          : { presentationGroupId }),
+          : active.presentationGroupId === undefined || adoptsNextPresentationGroup
+            ? { presentationGroupId }
+            : {}),
         tools,
         summaryLine: buildToolSummaryLine(tools),
         latestActivity: { kind: 'tool', callId: toolId },

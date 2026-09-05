@@ -160,7 +160,9 @@
 - 新tool queue event用`presentationGroupId == model.responded.messageId`把closed tool batch解析到对应`requestId`；
   reducer只有精确匹配才写入summary的model request identity，不能按相邻文本或当前block猜测。旧History缺少该可选
   identity或identity不匹配时只能进入独立neutral tool summary，绝不能并入当前或后续Thought；新live/replay
-  projector必须提供并验证该identity。
+  projector必须提供并验证该identity。同一live Thought在前一group的全部工具terminal后接管下一次`model.requested`时，
+  必须清除上一request的`modelTerminal`标记；随后精确绑定的新presentation group复用同一summary，并保留旧group→summary
+  映射供迟到terminal幂等结算。前一group仍有活动工具、缺少新request绑定、standalone/mutation或interaction boundary时不得跨group聚合。
 - reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
   两者不得同时显示 `Thinking`。
 - 带工具响应在active Thought下属于待分类过程旁白：完整前缀与未完成尾段都留在request-scoped assembly；
