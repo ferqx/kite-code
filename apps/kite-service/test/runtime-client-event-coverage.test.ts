@@ -561,7 +561,10 @@ function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], 
     ],
     [
       'subagent.tool_result',
-      event({ type: 'subagent.tool_result', subagent: { ...SUBAGENT, status: 'completed' } }),
+      event({
+        type: 'subagent.tool_result',
+        subagent: { ...SUBAGENT, status: 'completed', summary: '' },
+      }),
     ],
     ['task.cancelled', event({ type: 'task.cancelled', taskId: 'task-1', reason: 'Cancelled.' })],
     ['task.completed', event({ type: 'task.completed', taskId: 'task-1', turnId: 'turn-1' })],

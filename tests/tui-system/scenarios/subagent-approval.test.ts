@@ -829,10 +829,26 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
           })),
         },
       },
-      ...Array.from({ length: 4 }, (_, index) => ({
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'call_cancel_empty_search',
+              name: 'search_content',
+              args: { pattern: 'KITE_EMPTY_SUBAGENT_CANCEL_SENTINEL_7D7C', path: '.' },
+            },
+          ],
+        },
+      },
+      ...Array.from({ length: 3 }, (_, index) => ({
         delay: 5_000,
-        message: { content: `Cancellation area ${index + 1} inspection complete.` },
+        message: { content: `Cancellation area ${index + 2} inspection complete.` },
       })),
+      {
+        expectedRequest: { toolResults: [{ toolCallId: 'call_cancel_empty_search' }] },
+        delay: 5_000,
+        message: { content: 'Cancellation area 1 inspection complete.' },
+      },
       { message: { content: 'Queued successor completed after child cleanup.' } },
     ]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -851,6 +867,12 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       for (let index = 1; index <= 4; index += 1) {
         expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
       }
+      await waitForCondition(
+        () => server.getRequestCount() === 6,
+        'an empty child search result to reach the next model request',
+        TIMEOUT,
+      );
+      expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 3_000, 300, false);
       const idleConcurrentFrames = tui.markScreen();
       await new Promise((resolve) => setTimeout(resolve, 500));

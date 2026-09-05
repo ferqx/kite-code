@@ -64,7 +64,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
   下一Run才解析desired config。Runtime投影在active期间保持该Run的model identity，不能让Header先于Provider request切换。
 - Kernel event到Runtime Client的投影使用穷尽coverage表；每个event必须明确归类为client-visible、internal-only、
   client-unavailable或由canonical event规范化。新增event不得通过`default: undefined`静默消失，无法安全投影时只发布有界
-  `unavailable`。
+  `unavailable`。可选client-safe文本字段为空时必须省略；尤其无匹配内容的Subagent工具结果不得投影`summary: ""`并破坏
+  notification消费与后续取消。
 - `user_input.answered`投影必须保留经过client-safe长度限制的answer summary；不得只发送interaction identity而让TUI在Footer
   关闭后丢失用户选择，也不得把完整内部Tool Result作为答案恢复来源。
 - 用户取消并发Subagent后，当前execution owner必须在释放Session单飞权之前完成全部Provider lifecycle cleanup；cleanup pending时

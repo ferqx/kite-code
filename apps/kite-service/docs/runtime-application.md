@@ -111,6 +111,8 @@ Runtime已在`subagent.started` payload签发的`concurrencyGroupId`必须由Cli
 同一closed Contract与Protocol codec服务live订阅和History回放；不得丢弃该字段后让TUI按相邻child、名称或时间窗口猜测并发组。
 `subagent.completed`的Runtime实测`toolCallCount/durationMs`同样必须保留；failed事件可保留这两个计量与
 content-free `diagnostic.code/stage`，但必须删除`modelInvocationId`和raw provider/error correlation。
+`subagent.tool_result`的可选summary只有非空时才进入closed Client Event；成功但无匹配内容的read/search结果省略该字段，不能
+生成Contract拒绝的`summary: ""`、中断subscription，再让后续Esc误报`Invalid AcceptedPresentationEnvelope`。
 Service的Subagent adapter必须显式向Builtin模型循环传入12轮工具响应上限。达到上限后下一次Provider请求使用空工具面并要求基于
 已收集证据总结；返回正文则按正常child terminal继续父Run，若Provider仍伪造工具调用则按现有失败分类闭合child且不再调用模型。
 该边界不依赖可选共享`resourceBudget`，并以continuation保存的`modelInvocationOrdinal`延续，审批暂停/恢复不得重新获得12轮。

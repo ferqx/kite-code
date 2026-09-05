@@ -243,7 +243,9 @@ effect consumer关闭或cleanup grace耗尽时必须同步关闭该effect的事�
 
 same-process user cancel的资格证据还必须覆盖多个并发Subagent、重复Esc与queued successor：UI在1秒内进入`Cancelling`，
 只发送一个取消command，全部Provider cleanup receipt早于successor user/turn事实，已waived capability不出现unknown，
-后继最终进入模型并完成。真实crash restore仍须以unknown闭合，不能借用户取消特例放宽恢复路径。
+后继最终进入模型并完成。该PTY必须先让至少一个child完成空结果read/search并进入下一次模型请求，证明可选空summary被省略且
+subscription仍存活，再执行Esc；不能只用停留在首次Provider请求、尚无child工具结果的fixture替代。真实crash restore仍须以unknown
+闭合，不能借用户取消特例放宽恢复路径。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与

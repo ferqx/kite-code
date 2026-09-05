@@ -330,6 +330,31 @@ describe('Runtime Client event projector', () => {
     expect(
       projectRuntimeClientEvent(
         {
+          type: 'subagent.tool_result',
+          subagent: {
+            id: 'child-1',
+            stepId: 'step-empty-search',
+            toolCallId: 'child-tool-empty-search',
+            toolName: 'search_content',
+            status: 'completed',
+            summary: '',
+            durationMs: 5,
+          },
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.step',
+      subagentId: 'child-1',
+      stepId: 'step-empty-search',
+      toolCallId: 'child-tool-empty-search',
+      toolName: 'search_content',
+      status: 'completed',
+      durationMs: 5,
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
           type: 'subagent.completed',
           subagent: {
             id: 'child-1',

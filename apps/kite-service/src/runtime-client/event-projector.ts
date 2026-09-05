@@ -354,7 +354,8 @@ export function projectRuntimeClientEvent(
           ? {}
           : { durationMs: event.subagent.durationMs }),
       };
-    case 'subagent.tool_result':
+    case 'subagent.tool_result': {
+      const summary = event.subagent.summary || event.subagent.failureReason;
       return {
         type: 'subagent.step',
         subagentId: event.subagent.id,
@@ -363,11 +364,7 @@ export function projectRuntimeClientEvent(
         toolName: projectRuntimeClientText(event.subagent.toolName, 8_192),
         status: event.subagent.status,
         ...toolDisplayLabelField(event.subagent.toolName),
-        ...(event.subagent.summary === undefined
-          ? event.subagent.failureReason === undefined
-            ? {}
-            : { summary: projectRuntimeClientText(event.subagent.failureReason, 8_192) }
-          : { summary: projectRuntimeClientText(event.subagent.summary, 8_192) }),
+        ...(summary ? { summary: projectRuntimeClientText(summary, 8_192) } : {}),
         ...(event.subagent.totalLines === undefined
           ? {}
           : { totalLines: event.subagent.totalLines }),
@@ -375,6 +372,7 @@ export function projectRuntimeClientEvent(
           ? {}
           : { durationMs: event.subagent.durationMs }),
       };
+    }
     case 'subagent.suspended':
       return {
         type: 'subagent.phase',
