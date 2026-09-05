@@ -298,7 +298,7 @@ child tool/model terminal event，不能复活 turn、permit 或后继调用。
 
 ## 交互终态与 TUI 回放（ADR-0071）
 
-所有人工交互（`ask_user`、工具审批、Plan review、Provider action、Provider admission、子 Agent 工具审批）都必须先持久化用户终态，再清除 TUI。用户回答 `ask_user` 写入 `user_input.answered`；用户取消写入同时携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，随后写入对应的 `tool.finished`。工具审批的批准/拒绝、Plan review 的批准/修订/取消以及 Provider 终态必须校验当前交互身份；Plan review 还校验 `planId`、`version` 和 `structuralDigest`。迟到或重复的旧交互事件不得清除新的交互。
+所有人工交互（`ask_user`、工具审批、Plan review、Provider action、Provider admission、子 Agent 工具审批）都必须先持久化用户终态，再清除 TUI。用户回答 `ask_user` 写入 `user_input.answered`；其client-safe投影必须保留有界answer summary，使TUI按interaction identity封存提问并在live/History/reconnect中显示同一份用户选择，不能依赖Footer本地状态或完整Tool Result恢复。用户取消写入同时携带`interactionId`与`toolCallId`的`user_input.cancelled`，随后写入对应的`tool.finished`。工具审批的批准/拒绝、Plan review的批准/修订/取消以及Provider终态必须校验当前交互身份；Plan review还校验`planId`、`version`和`structuralDigest`。迟到或重复的旧交互事件不得清除新的交互或重复追加答案。
 
 Runtime canonical event store 只记录真实用户操作。TUI 从事件日志回放时，如果发现 `awaiting_user_input`、`awaiting_tool_approval`、`awaiting_review`、`awaiting_provider_action` 或 `awaiting_provider_admission` 仍未形成终态，只在 TUI 本地投影 `用户取消执行（会话恢复时交互未完成）`，清除 Footer interrupt、pending tool、Plan `pendingPlan` 和子 Agent `awaitingApproval`；不得伪造 `approval.rejected`、`plan.rejected` 或其他用户操作事件写回 Runtime。回放后的 TUI 不得显示 pending interaction。
 

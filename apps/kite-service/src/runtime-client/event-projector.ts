@@ -190,7 +190,11 @@ export function projectRuntimeClientEvent(
         },
       };
     case 'user_input.answered':
-      return { type: 'input.answered', interactionId: event.interactionId };
+      return {
+        type: 'input.answered',
+        interactionId: event.interactionId,
+        summary: projectRuntimeClientText(event.answer, 8_192),
+      };
     case 'user_input.cancelled':
       return { type: 'input.cancelled', interactionId: event.interactionId };
     case 'plan.review_requested':

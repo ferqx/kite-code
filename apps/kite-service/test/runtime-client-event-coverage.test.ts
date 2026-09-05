@@ -68,6 +68,24 @@ test('projects every client-visible Kernel event into a valid accepted presentat
   }
 });
 
+test('projects the selected ask-user answer into the safe settlement event', () => {
+  expect(
+    projectRuntimeClientEvent(
+      {
+        type: 'user_input.answered',
+        interactionId: 'interaction-1',
+        toolCallId: 'tool-1',
+        answer: '代码结构与工具链',
+      },
+      { sessionRevision: 2 },
+    ),
+  ).toEqual({
+    type: 'input.answered',
+    interactionId: 'interaction-1',
+    summary: '代码结构与工具链',
+  });
+});
+
 const ROOT_OWNER = { kind: 'root_tool', toolCallId: 'tool-1' } as const;
 const CHILD_OWNER = {
   kind: 'subagent_tool',

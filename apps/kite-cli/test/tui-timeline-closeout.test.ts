@@ -279,6 +279,9 @@ describe('TUI Timeline closeout invariants', () => {
     expect(answeredQuestion).toEqual(
       expect.objectContaining({ resolved: 'a.ts', presentationState: 'sealed' }),
     );
+    expect(
+      allBlocks(answered).some((block) => block.kind === 'text' && block.content === 'a.ts'),
+    ).toBe(true);
     const answeredSettled = answered;
     answered = dispatch(answered, {
       type: 'input.cancelled',

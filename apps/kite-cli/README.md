@@ -58,6 +58,8 @@
   cleanup全部确认后才可取得`start_turn` receipt，用户取消已经写入的waived capability终态不得在同进程cleanup中被改写为unknown。
 - Session mutation admission与Runtime connection generation绑定；重连后的projection只恢复展示事实，不继承旧连接的写权限。
   下一次cancel、interaction response、preference control或其他mutation必须先通过`resume_session`重新取得当前generation authority。
+- `input.answered`携带Service已裁剪的用户答案摘要；reducer以interaction identity封存提问并追加一次可见答案，live、History与
+  reconnect replay不得依赖Footer本地回调补写选择内容，重复或迟到settlement不得再次显示。
 - 普通模型正文仍按完整Markdown组件提交；没有待判定Thought归属时，完成的段落、列表项和已闭合结构组件立即进入Static，
   只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，待分类正文只保存在有界`RequestAssembly`，
   不创建隐藏OutputBlock；`model.responded(toolCallCount=0)`才补齐并发布最终正文，`toolCallCount>0`丢弃待分类正文、把过程旁白

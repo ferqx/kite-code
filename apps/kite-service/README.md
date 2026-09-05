@@ -65,6 +65,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 - Kernel event到Runtime Client的投影使用穷尽coverage表；每个event必须明确归类为client-visible、internal-only、
   client-unavailable或由canonical event规范化。新增event不得通过`default: undefined`静默消失，无法安全投影时只发布有界
   `unavailable`。
+- `user_input.answered`投影必须保留经过client-safe长度限制的answer summary；不得只发送interaction identity而让TUI在Footer
+  关闭后丢失用户选择，也不得把完整内部Tool Result作为答案恢复来源。
 - 用户取消并发Subagent后，当前execution owner必须在释放Session单飞权之前完成全部Provider lifecycle cleanup；cleanup pending时
   后继`start_turn`只返回`runtime_busy`。同进程cleanup保留取消事务已写入的waived capability终态，只有真正的restore/crash恢复才收敛unknown。
 - Effect stream因取消、presentation/bridge关闭或consumer退出而结束时，必须先关闭该stream的事件确认通道；非协作executor的
