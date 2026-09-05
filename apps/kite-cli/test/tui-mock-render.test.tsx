@@ -7,25 +7,6 @@ import { I18nProvider } from '../src/tui/i18n';
 import type { RunStatusSnapshot } from '../src/tui/run-status';
 import StatusBar from '../src/tui/StatusBar';
 
-function fakeStatus() {
-  return {
-    phase: 'building' as const,
-    plan: null,
-    pendingPlan: null,
-    authorization: 'default' as const,
-    workspaceAccess: 'write' as const,
-    cacheHitTokens: 420,
-    cacheMissTokens: 580,
-    cacheHitRate: 0.42,
-    totalTokens: 123456,
-    currentNode: null,
-    modelProvider: 'deepseek' as const,
-    modelName: 'deepseek-v4',
-    thinkingMode: 'max',
-    retryState: null,
-  };
-}
-
 function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSnapshot {
   return {
     phase: 'working',
@@ -68,27 +49,22 @@ describe('Header', () => {
 });
 
 describe('StatusBar', () => {
-  test('shows fixed Working text and spinner when running', () => {
+  test('shows fixed Working text and a static activity marker when running', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
-        status: fakeStatus(),
         runStatus: fakeRunStatus(),
-        timerKey: 0,
         running: true,
       }),
     );
     const output = lastFrame();
     expect(output).toContain('Working');
-    // Cosmic dot spinner appears when running
-    expect(output).toMatch(/[·⋆✦✧★]/);
+    expect(output).toContain('⋄ Working');
   });
 
   test('does not show cumulative metrics in StatusBar', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
-        status: fakeStatus(),
         runStatus: fakeRunStatus(),
-        timerKey: 0,
         running: true,
       }),
     );
@@ -99,27 +75,25 @@ describe('StatusBar', () => {
   });
 
   test('keeps Working free of elapsed time between parent updates', async () => {
-    const { lastFrame } = render(
+    const view = render(
       React.createElement(StatusBar, {
-        status: fakeStatus(),
         runStatus: fakeRunStatus({ elapsedMs: 0, runTokenDelta: 0 }),
-        timerKey: 0,
         running: true,
       }),
     );
 
+    const initialWriteCount = view.frames.length;
     await Bun.sleep(1_250);
 
-    expect(lastFrame()).toContain('Working');
-    expect(lastFrame()).not.toContain('(1s)');
+    expect(view.lastFrame()).toContain('Working');
+    expect(view.lastFrame()).not.toContain('(1s)');
+    expect(view.frames).toHaveLength(initialWriteCount);
   });
 
   test('working phase shows Working prefix in status line', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
-        status: fakeStatus(),
         runStatus: fakeRunStatus({ phase: 'working', verb: 'Running' }),
-        timerKey: 0,
         running: true,
       }),
     );
@@ -132,9 +106,7 @@ describe('StatusBar', () => {
         I18nProvider,
         { language: 'zh-CN' },
         React.createElement(StatusBar, {
-          status: fakeStatus(),
           runStatus: fakeRunStatus({ phase: 'thinking', verb: 'Thinking' }),
-          timerKey: 0,
           running: true,
         }),
       ),
@@ -149,9 +121,7 @@ describe('StatusBar', () => {
   test('keeps showing Working after the final answer while awaiting the Run terminal', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
-        status: fakeStatus(),
         runStatus: fakeRunStatus({ phase: 'finishing', verb: 'Finishing' }),
-        timerKey: 0,
         running: true,
       }),
     );
@@ -162,7 +132,7 @@ describe('StatusBar', () => {
 });
 
 describe('CompactionProgress', () => {
-  test('renders an animated compaction phase as inline command output', () => {
+  test('renders a compaction phase as inline command output', () => {
     const { lastFrame } = render(
       React.createElement(CompactionProgress, {
         phase: 'summarizing',

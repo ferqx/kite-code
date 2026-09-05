@@ -17,7 +17,7 @@
 - active Run期间输入的新prompt先进入按Session绑定的live-only queued展示层，显示有界原文预览，但不追加到当前
   Turn的blocks，因此并发子Agent/工具仍能原位更新。FIFO轮到该prompt时先移除queued展示，再建立新Turn和pending echo。
   活动Session按FIFO逐条显示浅色背景的单行`↵ 消息内容`，不再附加`Queued`解释行或折叠剩余数量；普通prompt队列不隐藏当前Run状态行，`Working`或`Cancelling`与队列同时显示，首项前与相邻队列行之间各留一行。
-  队列由稳定Footer owner持有，queue增减不能重挂载spinner，也不能让OutputArea重算或拆分当前Thought；消息区使用稳定投影引用和浅比较隔离队列专属更新。
+  队列由稳定Footer owner持有，queue增减不能重挂载活动状态，也不能让OutputArea重算或拆分当前Thought；消息区使用稳定投影引用和浅比较隔离队列专属更新。
   queued chrome不进入消息区动态高度预算，不能因为新增或移除队列项改变Tool、Thought或Delegating的展开、折叠与可见步骤。
   非空prompt提交时，InputLine独占该次Enter；OutputArea在key-dispatch时读取prompt ref并禁止同一次Enter切换最后一个
   Tool/Subagent块。只有空prompt的Enter继续作为动态块展开/折叠入口，不能用队列state到达后的重渲染补救按键双消费。
@@ -156,8 +156,9 @@ Runtime identity/pairing，不请求HTTP origin。
 
 - `InputLine` 在首次 Ink effect flush 注册 `useInput` 后立即可编辑；注册前不显示假焦点，不使用固定延时作为门禁。
 - 内部状态阶段仍单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。Footer在所有非取消、非重试的活动阶段统一显示不参与本地化的英文`Working`，包括正文已完成但权威Run终态尚未到达的内部Finishing窗口。任一权威完成或失败终态到达后都立即隐藏状态行。
+- Footer的`Working`/`Cancelling`/`Retrying`图标为静态活动标记，不使用run count、spinner或elapsed计时器驱动重挂载。没有Runtime事件、用户输入或viewport/presentation变更时，活动Run也不得产生终端写入。
 - Retry、Approval、Input、Compaction与slash modal都是覆盖态，不改变底层阶段。Approval、Input与Plan review取得Footer焦点时隐藏
-  active Run状态行；普通slash modal、Retry和自动compaction仍可与底层Run状态并存。手动compaction使用消息区动画。
+  active Run状态行；普通slash modal、Retry和自动compaction仍可与底层Run状态并存。手动compaction使用消息区状态项。
 - 工具卡可乐观显示 running，但执行耗时从 durable `tool.started` 开始；迟到 started 不复活终态卡片。
 - 工具 policy/formatter 只使用封闭 canonical category；动态 MCP/Provider 工具另携带 App 投影的有界
   `displayLabel`，所以本地界面保留具体名称而不把任意字符串提升成 capability。不得用通用 `tool` 占位

@@ -39,11 +39,11 @@
 
 10. **tool_done 状态更新必须使用 `.map()` 创建全新引用**：直接修改 `turns` 数组和 `blocks` 数组的引用链，确保 reducer 返回全新 state，React 能检测到变化。
 
-11. **模型调用实时计时**：reducer 用 `liveModelStartedAt` 标记当前模型调用的本地开始墙钟；活动 `ToolSummaryBlock` 在该字段存在时定时重绘，展示 `totalElapsedMs + (now - liveModelStartedAt)`。`model.responded` 到达后以权威 `durationMs` 累加 `modelMs/totalElapsedMs` 并清除 live 起点，因此后续工具执行、审批、提问及其他等待均不增长。无 `durationMs` 的旧事件日志仍回退 `Date.now() - createdAt`。最终冻结值只由事件事实决定，前端 live timer 不写回 reducer 或持久状态。
+11. **模型调用事件驱动计时**：reducer 用 `liveModelStartedAt` 标记当前模型调用的本地开始墙钟；活动 `ToolSummaryBlock` 只在 Runtime 事件导致的真实重绘时采样 `totalElapsedMs + (now - liveModelStartedAt)`，不为墙钟时间单独定时重绘。`model.responded` 到达后以权威 `durationMs` 累加 `modelMs/totalElapsedMs` 并清除 live 起点，因此后续工具执行、审批、提问及其他等待均不增长。无 `durationMs` 的旧事件日志仍在真实重绘时回退 `Date.now() - createdAt`。最终冻结值只由事件事实决定。
 
 12. **最小显示 1s**：`formatDuration` 和 `buildToolSummaryLine` 中的耗时格式化，秒数最小为 1。
 
-13. **聚合块圆点 = 阶段存活**（ADR-0030 修订）：`active=true`（阶段进行中）→ 暗色闪烁圆点；标题中的 `Thinking Xs` 已表达进行状态与耗时，运行态不再重复渲染 footer「运行中 (Xs)」。即使所有工具已完成，模型调用间隙仍属于阶段内部，圆点持续动画。`active=false`（阶段结束）→ Thought 与非 Thought 工具聚合摘要都移除圆点并保留两个空格列位，折叠为单行摘要，不渲染 footer 或活动明细。独立工具卡仍使用自身的运行及结果状态语义。
+13. **聚合块圆点 = 阶段存活**（ADR-0030 修订）：`active=true`（阶段进行中）→ 暗色静态实心圆点；标题中的 `Thinking Xs` 已表达进行状态与耗时，运行态不再重复渲染 footer「运行中 (Xs)」。即使所有工具已完成，模型调用间隙仍属于阶段内部，但不为动画单独写stdout。`active=false`（阶段结束）→ Thought 与非 Thought 工具聚合摘要都移除圆点并保留两个空格列位，折叠为单行摘要，不渲染 footer 或活动明细。独立工具卡仍使用自身的运行及结果状态语义。
 
 14. **聚合完成与Static边界（ADR-0167）**：`tool_summary`只有同时满足`active=false`、
     `result=done|error|cancelled`才算完成，并在位于active turn的连续settled前缀时进入
@@ -70,9 +70,9 @@
 
 20. **非思考链聚合（纯统计标签的唯一来源）**：阶段内尚未出现 reasoning 时，探索聚合使用纯工具统计标签（如 `read 2 files`，`hasThought=false`），不带 `Thinking` 前缀、无 thinking 条目。阶段内任一次真实 `reason` 到达后，该活动聚合原位升级为 `Thinking Xs · <统计>`（规则 23/24、ADR-0047/0030）。注意：无 reasoning 的调用其 `durationMs` 仍计入阶段 Σ 时长（规则 11），只不影响标签前缀。
 
-21. **model.requested 不关闭 Thought**（ADR-0030 取代 ADR-0025 的 settle 条款）：模型调用为非流式 `generateText`，调用期间不产生任何事件。`model.requested` 在 `await` 模型之前即时发出（ADR-0025 的即时发出机制保留），但 TUI **不再据此关闭 Thought**——模型调用是 kernel 分批喂工具结果的实现细节，不是用户感知的阶段边界：阶段块跨调用保持 `active=true`（圆点持续闪烁、时长累加、后续思考/工具/旁白继续流入，规则 24）。调用间隙块显示"工具全完成 + 圆点闪烁 + 运行中 (Σs)"——这正是"阶段仍在进行"的正确信号（旧版 settle 是为防止"运行中"残留，阶段模型下该残留即语义本身）。ephemeral reasoning与durable通知分属不同投递通道，下一轮reasoning可能先于其`model.requested`到达；若当前active Thought已有探索工具、工具全部terminal且尚无已确认的新模型请求，reducer必须让该reasoning接管同一owner identity，不得先settle再新建卡片。回放兼容：旧日志经同一 reducer 回放，同样聚合为阶段块。
+21. **model.requested 不关闭 Thought**（ADR-0030 取代 ADR-0025 的 settle 条款）：模型调用为非流式 `generateText`，调用期间不产生任何事件。`model.requested` 在 `await` 模型之前即时发出（ADR-0025 的即时发出机制保留），但 TUI **不再据此关闭 Thought**——模型调用是 kernel 分批喂工具结果的实现细节，不是用户感知的阶段边界：阶段块跨调用保持 `active=true`（静态活动圆点、时长在真实事件重绘时累加、后续思考/工具/旁白继续流入，规则 24）。调用间隙块显示"工具全完成 + 活动圆点 + 运行中时长快照"，作为"阶段仍在进行"的信号，但事件空闲期保持零stdout。ephemeral reasoning与durable通知分属不同投递通道，下一轮reasoning可能先于其`model.requested`到达；若当前active Thought已有探索工具、工具全部terminal且尚无已确认的新模型请求，reducer必须让该reasoning接管同一owner identity，不得先settle再新建卡片。回放兼容：旧日志经同一 reducer 回放，同样聚合为阶段块。
 
-22. **标签与计时语义**：思考阶段块（`hasThinking=true`，由本阶段真实 `reason` 设置）标题行为 `Thinking Xs · <工具统计>`——有工具时以 ` · ` 分隔附加 `buildToolSummaryLine` 统计（如 `Thinking 2s · read 3 files`），统计随工具事件实时刷新；无工具的纯思考块保持裸 `Thinking Xs`。统计后缀由渲染层按终端宽度截断（`truncateToFit`），放不下时整体省略后缀、不留孤悬分隔符；工具明细仍在步骤树展示。非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thinking Xs` 的已完成时长 = **阶段内 Σ 各次模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行；无 reasoning 的调用同样计入，规则 11）；当前调用尚未完成时，在该累计值上实时叠加本地墙钟预览，终态再由 `durationMs` 校正并冻结。工具执行期间 elapsed 不增长。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。纯思考块被文本关闭时不产生独立标题行，其时长以文本块题头形式展示（ADR-0026，见规则 19）。最终回答脱离为独立文本块时**不重复出题头**——回答前的思考时长已计入阶段块（ADR-0030）；settled Thinking 摘要与紧随其后的独立回答保持标准消息块间距，不得在回答内部再制造第二个 Thought 分段。
+22. **标签与计时语义**：思考阶段块（`hasThinking=true`，由本阶段真实 `reason` 设置）标题行为 `Thinking Xs · <工具统计>`——有工具时以 ` · ` 分隔附加 `buildToolSummaryLine` 统计（如 `Thinking 2s · read 3 files`），统计随工具事件刷新；无工具的纯思考块保持裸 `Thinking Xs`。统计后缀由渲染层按终端宽度截断（`truncateToFit`），放不下时整体省略后缀、不留孤悬分隔符；工具明细仍在步骤树展示。非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thinking Xs` 的已完成时长 = **阶段内 Σ 各次模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行；无 reasoning 的调用同样计入，规则 11）；当前调用尚未完成时，在该累计值上只于真实事件重绘时叠加本地墙钟快照，终态再由 `durationMs` 校正并冻结。工具执行期间 elapsed 不增长。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。纯思考块被文本关闭时不产生独立标题行，其时长以文本块题头形式展示（ADR-0026，见规则 19）。最终回答脱离为独立文本块时**不重复出题头**——回答前的思考时长已计入阶段块（ADR-0030）；settled Thinking 摘要与紧随其后的独立回答保持标准消息块间距，不得在回答内部再制造第二个 Thought 分段。
 
 23. **思考标签单次消费（ADR-0047/0167，覆盖 ADR-0027）**：Thought 块被非探索工具、人机交互等待或已由`model.responded(toolCallCount=0)`确认的模型可见正文关闭后，其reasoning内容与`Thinking Xs`标签均已完成展示，不向后续块延续。分类前的RequestAssembly正文不是边界；带工具终态必须丢弃它并继续原owner。真正边界后的探索工具仍按执行顺序建立新聚合，初始使用纯工具统计标题；若该聚合仍活跃时收到新的真实reason，原位升级为`Thinking Xs · ...`，不得另建独立Thought。非探索工具继续使用独立富渲染块，Thought树不跨越它们。
 

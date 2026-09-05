@@ -24,6 +24,7 @@ import {
   screenContains,
   stripAnsi,
   waitForCondition,
+  waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
 import {
@@ -752,6 +753,11 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       for (let index = 1; index <= 4; index += 1) {
         expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
       }
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 3_000, 300, false);
+      const idleConcurrentFrames = tui.markScreen();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await tui.settleScreen();
+      expect(tui.screenFramesSince(idleConcurrentFrames)).toEqual([]);
       const activeGroupStart = active.indexOf('Delegating · 4 agents');
       const activeGroupEnd = active.indexOf('\n\n', activeGroupStart);
       const activeGroup = active

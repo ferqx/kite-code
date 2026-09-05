@@ -201,7 +201,7 @@ circuit breaker 转真人审批。
 
 ## startup denial 与 no replay
 
-TUI 静默预热不阻塞首帧、typing、timer 或 Working animation。bootstrap 把 executor
+TUI 静默预热不阻塞首帧、typing 或静态 Working 状态的事件驱动渲染。bootstrap 把 executor
 注册到统一退出协调器。退出或等待 `prepare()` 的当前
 SessionRuntime 被取消时会中止探针，runner 清空 Job 并回收 ephemeral ACL；中止结果不缓存。setup gate
 与预热并行，并在用户确认时 re-check readiness。

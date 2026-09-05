@@ -14,7 +14,7 @@
   可能产生这两个报告；完成后的主界面在报告前后必须保持零stdout，避免真实终端重新跟随底部live cursor。
 - OutputArea 不实现 focused viewport、行数估算或历史裁剪；Overlay 固定高度列表可以使用 VirtualList。
 - 并发 Subagent 使用一个聚合卡片和有界步骤尾；聚合只影响展示，不删除 Runtime/TUI state 中的步骤。
-- Subagent启动时由TUI记录本地`startedAt`驱动活动计时；完成事件使用Runtime投影的`durationMs/toolCallCount`冻结终态，失败事件还可携带去除model invocation correlation后的`code/stage`诊断。
+- Subagent启动时由TUI记录本地`startedAt`；活动耗时只在Runtime事件导致的真实重绘中采样，不为墙钟计时单独写stdout。完成事件使用Runtime投影的`durationMs/toolCallCount`冻结终态，失败事件还可携带去除model invocation correlation后的`code/stage`诊断。
 
 ## DEC 同步与 resize
 
@@ -104,7 +104,7 @@
   `ask_user`等Server已分类为standalone的interaction工具先封口当前Thought，再由独立tool card与Footer问题展示；不得计入
   Thinking的工具数量或摘要。
   同一 Thought 中的只读 Shell 按 `ran N shell command(s)` 计入题头，例如
-  `Thinking 1s · read 2 files, ran 1 shell command`。当前模型调用进行时，标题耗时按本地墙钟持续刷新；
+  `Thinking 1s · read 2 files, ran 1 shell command`。当前模型调用进行时，标题耗时在每次真实事件重绘时按本地墙钟采样；
   `model.responded.durationMs` 到达后校正并冻结最终模型耗时，工具与人机等待不计入。terminal event 即使没有重复分类事实也按 call ID
   更新 queued 时创建的同一条目；缺少 queued fact 时不猜测、不聚合。
 - Block完成语义与Static物理所有权通常按ADR-0167分离；`tool_summary`与已完成的普通text组件是明确例外
@@ -194,9 +194,9 @@
 
 - 减少 Yoga 节点数优先于仅使用 React.memo。
 - Overlay VirtualList 只渲染 visible items，禁止因 selectedIndex 变化预计算全部行。
-- timer lifecycle 只依赖真实 running/focus 状态，不依赖每帧 elapsed 值。
+- 消息区、Tool/Subagent卡片与Footer不持有活动动画或elapsed计时器；活动圆点与`Working`保持静态。无Runtime事件、用户输入、resize或presentation变更时，即使存在运行中的并发Subagent，Ink也必须保持零stdout，以保留原生终端文本框选与向上scrollback。
 - 新Run的本地reservation建立presentation-only Start command时间窗，立即渲染带显式pending标记的prompt并显示`Working`；它不得被旧的settled `currentRun`压住，也不等待Session ready、前序cleanup、receipt或权威`user.message`。durable prompt到达后只原位补齐identity，不追加第二条消息；提交失败则同时撤销pending prompt与本地状态。Server Run identity与终态仍完全由Runtime投影拥有。
-- 首个完整回答组件发布后，只要canonical `currentRun`仍为active，Footer继续显示animated run status；
+- 首个完整回答组件发布后，只要canonical `currentRun`仍为active，Footer继续显示静态run status；
   普通执行文案为不参与本地化的英文`Working`。当最后一个可见块是已完成的model-owned正文、当前模型请求已结束且不存在待续工具批次时，内部阶段仍进入`finishing`，但Footer继续显示`Working`直到权威终态到达；`run.terminal`的completed/failed/cancelled都清除Run selector，不得残留`Working`。该状态不展示工具详情或耗时。interrupt、审批/问答/方案
   Footer中的审批/问答/方案interaction取得焦点时隐藏该状态行，避免与`Working`竞争；slash modal只覆盖输入或统计区域。普通完成组件必须逐个离开
   dynamic tree，避免Footer或焦点重绘反复处理整篇长回答并触发Ink全屏清除、重置原生scroll位置。

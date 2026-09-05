@@ -502,7 +502,6 @@ export default function App({
         status={renderedStatus}
         runStatus={runStatus}
         running={visibleRunStatus}
-        timerKey={state.runCount}
         interactionMode={state.interactionMode}
         hideGlobalStatus={overlayActive || Boolean(state.interrupt) || approvalQueueActive}
       >

@@ -124,7 +124,7 @@ executable、release entrypoint与slot均已删除。
 ## 测试
 
 `bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
-Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前CLI workspace共874 tests；完整TUI system由独立PTY runner验证。
+Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前CLI workspace共875 tests；完整TUI system由独立PTY runner验证。
 
 ## 文档影响
 

@@ -9,7 +9,6 @@ interface FooterProps {
   status: StatusState;
   runStatus?: RunStatusSnapshot;
   running: boolean;
-  timerKey: number;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   hideGlobalStatus?: boolean;
   children?: ReactNode;
@@ -19,14 +18,13 @@ export default function Footer({
   status,
   runStatus,
   running,
-  timerKey,
   interactionMode,
   hideGlobalStatus = false,
   children,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
-      <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
+      <StatusBar runStatus={runStatus} running={running} />
       {children}
       {!hideGlobalStatus && (
         <StatsLine

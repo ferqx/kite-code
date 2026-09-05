@@ -1,8 +1,9 @@
 import { Box, Text } from 'ink';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
+import { activityDot } from './activity-dot';
 import {
   actionName,
   formatElapsed,
@@ -10,30 +11,21 @@ import {
   writeFileActionName,
 } from './render-utils';
 import { wrapDisplayLines } from './soft-wrap';
-import { useBlinkDot } from './use-blink-dot';
 
 // ══════════════════════════════════════════════════════════════════
-// BlinkDot — 独立组件，隔离闪烁圆点状态更新
+// BlinkDot — 活动状态标记
 //
-// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁：
-// 隐藏帧渲染为两个空格，符号位置、宽度（2 字符）不变，无行位移。
-// settle 后变为纯思考白点（muted）——"运行中暗灰闪烁、完成后白色静止"。
-// 思考链与非思考链聚合共用此组件。
+// 进行中圆点为主题暗（dim，不抢眼）实心 ●。它保持静态，
+// 只在 Runtime 事件导致真实重绘时更新，以免活动 Run 的墙钟动画持续写
+// stdout，并打断原生终端的文本选择或强制 scrollback 回到底部。
 //
-// 把圆点抽离为独立组件是最关键的渲染性能优化。
-// 父组件 ToolSummaryBlock 的 props（block, columns）在闪烁之间不变
-// → React 跳过父组件重渲染 → Ink 只输出变化的圆点字符，
-// 不触发整个 Thought 树（15+ Yoga 布局节点）的 diff/layout/write。
-//
-// BlinkDot isolates the blink state so tick updates don't cascade
-// into the parent ToolSummaryBlock re-render. When parent props are
-// stable, React skips the parent tree entirely — Ink only writes the
-// single changed dot glyph, not the full Thought tree.
+// The small adapter keeps activity-dot semantics consistent across Thought,
+// tool, and subagent views without owning a presentation timer.
 // ══════════════════════════════════════════════════════════════════
 
 function BlinkDot({ active }: { active: boolean }) {
   const dt = useTheme();
-  const frame = useBlinkDot(active);
+  const frame = activityDot(active);
   return <Text color={dt.dim}>{frame}</Text>;
 }
 
@@ -224,13 +216,9 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
 
   const isRunning = block.active;
 
-  const [liveNow, setLiveNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!isRunning || block.liveModelStartedAt === undefined) return;
-    setLiveNow(Date.now());
-    const timer = setInterval(() => setLiveNow(Date.now()), 250);
-    return () => clearInterval(timer);
-  }, [block.liveModelStartedAt, isRunning]);
+  // Snapshot elapsed time only on event-driven renders. Do not create a clock
+  // that repaints an unchanged active Thought while the user reads scrollback.
+  const liveNow = Date.now();
   const elapsedMs =
     block.liveModelStartedAt === undefined
       ? block.totalElapsedMs
@@ -295,7 +283,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // 聚合块完成后都不保留圆点。独立工具卡使用自己的结果状态语义。
   // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
   // ── Pure-thinking block settled: single line, no dot — ● is reserved for
-  // stateful rows (running blink / tool outcome colors); a settled pure
+  // stateful rows (running activity / tool outcome colors); a settled pure
   // thought carries no status. Two leading spaces keep the label aligned
   // with tool-block names. Placed after all hooks (rules-of-hooks).
   // A sealed summary is not a visual expansion state. The first visible text

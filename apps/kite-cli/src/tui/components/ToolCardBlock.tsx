@@ -1,15 +1,15 @@
 import type { UserInputResult } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import SyntaxHighlight from 'ink-syntax-highlight';
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo } from 'react';
 import stringWidth from 'string-width';
 import { type I18n, useI18n } from '../i18n';
 import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
+import { activityDot } from './activity-dot';
 import MarkdownBlock from './MarkdownBlock';
 import { ACTION_NAMES, formatElapsed, toolColor, writeFileActionName } from './render-utils';
-import { useBlinkDot } from './use-blink-dot';
 
 export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '└─ ';
@@ -515,9 +515,9 @@ interface ToolCardBlockProps {
 }
 
 /**
- * Keep the running-card clock and blink state below the card boundary. A tool
- * can have a live-output tail below this header; updating the clock every
- * 200ms must not make Ink re-layout that unchanged tail.
+ * The running-card clock is an event-driven snapshot. Wall-clock-only updates
+ * would continuously write stdout while a tool is idle and make native
+ * terminal selection and scrollback unusable.
  */
 const RunningToolHeader = memo(function RunningToolHeader({
   block,
@@ -527,30 +527,17 @@ const RunningToolHeader = memo(function RunningToolHeader({
   const dt = useTheme();
   const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
-  const spinnerActive =
+  const activityActive =
     block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
-  const spinnerFrame = useBlinkDot(spinnerActive);
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    block.startedAt ? Date.now() - block.startedAt : 0,
-  );
-  const startedAtRef = useRef(block.startedAt);
-  startedAtRef.current = block.startedAt;
-
-  useEffect(() => {
-    if (!showElapsed || block.status !== 'running' || awaitingApproval) return;
-    const timer = setInterval(() => {
-      const at = startedAtRef.current;
-      if (at != null) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => clearInterval(timer);
-  }, [showElapsed, block.status, awaitingApproval]);
+  const activityFrame = activityDot(activityActive);
+  const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
   const isWaiting = awaitingApproval || block.name === 'ask_user';
   const askQuestionCount = block.name === 'ask_user' ? askQuestions(block.args).length : 0;
   const isMultiQuestionAsk = askQuestionCount > 1;
   const preview =
     block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
-  const spinner = isWaiting ? '○ ' : spinnerFrame;
+  const icon = isWaiting ? '○ ' : activityFrame;
   const displayName = isMultiQuestionAsk
     ? translate('tool.askUserCount', { count: askQuestionCount })
     : block.name === 'ask_user'
@@ -566,7 +553,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
               : mcpToolDisplayName(block.name);
   return (
     <Box>
-      <Text>{spinner}</Text>
+      <Text>{icon}</Text>
       <Text>{displayName}</Text>
       {!isMultiQuestionAsk && preview ? (
         <Text color={dt.muted}>{block.name === 'ask_user' ? ` · ${preview}` : ` ${preview}`}</Text>

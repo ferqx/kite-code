@@ -17,6 +17,7 @@ import { useState } from 'react';
 import stringWidth from 'string-width';
 import App from '../src/tui/App';
 import ApprovalBlock from '../src/tui/components/ApprovalBlock';
+import { activityDot } from '../src/tui/components/activity-dot';
 import BlockRenderer, {
   MAX_USER_MESSAGE_LINES,
   visibleUserMessageLines,
@@ -30,7 +31,6 @@ import MarkdownBlock, {
 } from '../src/tui/components/MarkdownBlock';
 import ModelSelector, { modelOptionId } from '../src/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/tui/components/PlanReviewBlock';
-import { SPINNER, spinnerIndexForElapsed } from '../src/tui/components/render-utils';
 import StartupScreen from '../src/tui/components/StartupScreen';
 import SubAgentBlock from '../src/tui/components/SubAgentBlock';
 import TaskProgressBlock from '../src/tui/components/TaskProgressBlock';
@@ -398,11 +398,10 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
   };
 }
 
-describe('spinner timing', () => {
-  test('derives frames deterministically from elapsed time', () => {
-    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('● ');
-    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('● ');
-    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 1000)]).toBe('● ');
+describe('activity marker', () => {
+  test('uses a stable visible frame while active', () => {
+    expect(activityDot(true)).toBe('● ');
+    expect(activityDot(false)).toBe('  ');
   });
 });
 
@@ -498,7 +497,6 @@ describe('Footer', () => {
     status: fakeStatus(),
     running: false,
     thinkingVisible: true,
-    timerKey: 0,
   };
 
   test('renders Footer with child content', () => {
@@ -612,12 +610,7 @@ describe('Header', () => {
 describe('StatusBar', () => {
   test('shows only Working during the working phase', () => {
     const { lastFrame } = render(
-      <StatusBar
-        status={fakeStatus({ phase: 'building' })}
-        runStatus={fakeRunStatus({ phase: 'working', verb: 'Running' })}
-        timerKey={0}
-        running
-      />,
+      <StatusBar runStatus={fakeRunStatus({ phase: 'working', verb: 'Running' })} running />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Working');
@@ -628,14 +621,12 @@ describe('StatusBar', () => {
   test('does not expose tool details or elapsed time during the working phase', () => {
     const { lastFrame } = render(
       <StatusBar
-        status={fakeStatus()}
         runStatus={fakeRunStatus({
           phase: 'working',
           verb: 'Locating',
           elapsedMs: 28_000,
           runTokenDelta: 189,
         })}
-        timerKey={0}
         running
       />,
     );
@@ -648,12 +639,9 @@ describe('StatusBar', () => {
   });
 
   test('status bar hides when idle and not planning', () => {
-    const status = fakeStatus({ phase: 'building' });
     const { lastFrame } = render(
       <StatusBar
-        status={status}
         runStatus={fakeRunStatus({ phase: 'thinking', verb: 'Planning' })}
-        timerKey={0}
         running={false}
       />,
     );
@@ -664,10 +652,7 @@ describe('StatusBar', () => {
   });
 
   test('status bar is single row', () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(
-      <StatusBar status={status} runStatus={fakeRunStatus()} timerKey={0} running />,
-    );
+    const { lastFrame } = render(<StatusBar runStatus={fakeRunStatus()} running />);
     const lines = lastFrame()?.split('\n').filter(Boolean);
     expect(lines?.length).toBe(1);
   });
@@ -675,7 +660,6 @@ describe('StatusBar', () => {
   test('shows Cancelling while a durable cancel command is pending', () => {
     const { lastFrame } = render(
       <StatusBar
-        status={fakeStatus()}
         runStatus={{
           phase: 'working',
           verb: 'Cancelling',
@@ -686,7 +670,6 @@ describe('StatusBar', () => {
           waiting: null,
         }}
         running={true}
-        timerKey={1}
       />,
     );
     expect(lastFrame()).toContain('Cancelling');
@@ -2416,6 +2399,26 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame.split('\n').length + 4).toBeLessThan(24);
   });
 
+  test('does not repaint an idle concurrent group on wall-clock time alone', async () => {
+    const view = render(
+      <OutputArea
+        activeDynamicBlocks={childBlocks}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const initialFrame = view.lastFrame();
+    const initialWriteCount = view.frames.length;
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(view.lastFrame()).toBe(initialFrame);
+    expect(view.frames).toHaveLength(initialWriteCount);
+    view.unmount();
+  });
+
   test('shows Working for a newly started child without tool output', () => {
     const newlyStarted = childBlocks.map((block) =>
       block.kind === 'subagent' ? { ...block, steps: [] } : block,
@@ -2918,7 +2921,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('⠋');
   });
 
-  test('running tool_card renders the initial spinner frame', () => {
+  test('running tool_card renders a static activity marker', () => {
     const block: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -3499,7 +3502,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('find files');
   });
 
-  test('updates a running Thinking duration before model.responded arrives', async () => {
+  test('does not repaint a running Thinking duration without a Runtime event', async () => {
     const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
       id: 1,
       kind: 'tool_summary',
@@ -3513,11 +3516,14 @@ describe('BlockRenderer', () => {
       tools: [],
     };
     const view = render(<BlockRenderer columns={80} block={block} isFocused={false} index={0} />);
-    expect(view.lastFrame()).toContain('Thinking 1s');
+    const initialFrame = view.lastFrame();
+    const initialWriteCount = view.frames.length;
+    expect(initialFrame).toContain('Thinking 1s');
 
     await new Promise((resolve) => setTimeout(resolve, 1_200));
 
-    expect(view.lastFrame()).toContain('Thinking 2s');
+    expect(view.lastFrame()).toBe(initialFrame);
+    expect(view.frames).toHaveLength(initialWriteCount);
     view.unmount();
   });
 
@@ -4236,7 +4242,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame() ?? '').not.toContain('Thinking');
   });
 
-  test('running pure-thinking Thought starts with the blink dot and no running footer', () => {
+  test('running pure-thinking Thought starts with the activity dot and no running footer', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -6259,7 +6265,7 @@ describe('App', () => {
     }
   });
 
-  test('keeps the mounted Working spinner when a slash-command Overlay opens', async () => {
+  test('keeps the mounted Working status when a slash-command Overlay opens', async () => {
     const initial = fakeState({ running: true, runPromptPresented: true });
     const view = render(
       <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
@@ -6938,7 +6944,7 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).not.toContain('✓');
   });
 
-  test('running subagent renders the initial spinner frame', () => {
+  test('running subagent renders a static activity marker', () => {
     const block = {
       id: 1,
       kind: 'subagent' as const,

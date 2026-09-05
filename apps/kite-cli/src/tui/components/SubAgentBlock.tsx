@@ -1,11 +1,10 @@
 import type { SubAgentRole } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { OutputBlock, SubAgentStepRecord } from '../types';
-import { actionName, formatElapsed, formatReadFileRange, SPINNER, toolColor } from './render-utils';
-import { useBlinkDot } from './use-blink-dot';
+import { activityDot } from './activity-dot';
+import { actionName, formatElapsed, formatReadFileRange, toolColor } from './render-utils';
 
 export function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -143,28 +142,14 @@ export default function SubAgentBlock({
   const taskSummary = taskLabel(block.task);
   const col = columns ?? process.stdout.columns ?? 80;
 
-  // ── 闪烁圆点：统一 hook ──
-  const spinnerActive = block.status === 'running' && !block.awaitingApproval;
-  const spinnerFrame = useBlinkDot(spinnerActive);
+  // ── 静态活动圆点：统一 adapter ──
+  const activityActive = block.status === 'running' && !block.awaitingApproval;
+  const activityFrame = activityDot(activityActive);
 
-  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
-  );
-  const startedAtRef = useRef(block.startedAt);
-  startedAtRef.current = block.startedAt;
-
-  useEffect(() => {
-    // 只有子 agent 真正执行时才计时。等待审批、done/error/cancelled
-    // 状态下输出不依赖 liveElapsed，继续跑定时器只会每 200ms 触发
-    // 一次组件重渲染，驱动整个 TUI 持续刷新。
-    if (block.status !== 'running' || block.awaitingApproval) return;
-    const timer = setInterval(() => {
-      const at = startedAtRef.current;
-      if (at != null) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => clearInterval(timer);
-  }, [block.status, block.awaitingApproval]);
+  // Elapsed time advances only when a Runtime event causes a real repaint.
+  // A presentation-only timer would continuously write stdout and make native
+  // terminal selection/scrollback unusable while a child is otherwise idle.
+  const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
   // ── Status flags ──
   const isRunning = block.status === 'running';
@@ -192,8 +177,8 @@ export default function SubAgentBlock({
   const skipped = stepCount - visibleSteps.length;
 
   // ── Header ──
-  const icon = isActive ? (isWaiting ? '○ ' : spinnerFrame) : '● ';
-  const headBefore = stringWidth(`${isActive ? SPINNER[0]! : '● '}${label} · `);
+  const icon = isActive ? (isWaiting ? '○ ' : activityFrame) : '● ';
+  const headBefore = stringWidth(`● ${label} · `);
   const fitTask = truncateToFit(taskSummary, Math.max(0, col - headBefore - 2));
 
   // ── Footer ──

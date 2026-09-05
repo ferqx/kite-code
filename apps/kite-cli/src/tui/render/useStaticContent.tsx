@@ -85,7 +85,7 @@ function timelineItemsIdentical(a: readonly TimelineItem[], b: readonly Timeline
 /**
  * `turns.slice(0, -1)` creates a new array on every App render, while the
  * immutable history turns themselves retain their identity.  Recomputing each
- * block fingerprint for that history on a status/spinner tick made typing
+ * block fingerprint for that history on an unrelated presentation update made typing
  * cost proportional to the whole conversation. Cache the expensive per-turn
  * walk by immutable Turn identity instead.
  */
