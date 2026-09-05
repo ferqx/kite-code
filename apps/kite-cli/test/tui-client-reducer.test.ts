@@ -261,8 +261,12 @@ describe('closed RuntimeClientEvent reducer', () => {
   test('removes only an unacknowledged local prompt when submission fails', () => {
     let state = eventReducer(createInitialState(), { type: 'SET_RUNNING' });
     state = eventReducer(state, { type: 'LOCAL_USER_PROMPT', text: 'Not accepted' });
+    expect(isTuiRunActive(state)).toBe(true);
+    expect(state.runPromptPresented).toBe(true);
     state = eventReducer(state, { type: 'DROP_LOCAL_USER_PROMPT', text: 'Not accepted' });
     expect(state.turns).toEqual([]);
+    expect(isTuiRunActive(state)).toBe(false);
+    expect(state.runPromptPresented).toBe(false);
   });
 
   test('renders a durable user prompt once by message identity across replay', () => {

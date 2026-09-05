@@ -15,8 +15,12 @@ export function isRuntimeAuthorityActive(
 export function isTuiRunActive(
   state: Pick<TuiState, 'runtimeAuthority' | 'runStartTime' | 'exited'>,
 ): boolean {
+  // SET_RUNNING is a presentation-only admission marker for an idle prompt.
+  // It intentionally precedes the next authoritative currentRun projection,
+  // which may still describe the settled predecessor during the round trip.
+  if (!state.exited && state.runStartTime !== undefined) return true;
   if (state.runtimeAuthority !== undefined) {
     return !state.exited && isRuntimeAuthorityActive(state.runtimeAuthority);
   }
-  return state.runStartTime !== undefined && !state.exited;
+  return false;
 }

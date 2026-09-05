@@ -191,7 +191,7 @@
 - 减少 Yoga 节点数优先于仅使用 React.memo。
 - Overlay VirtualList 只渲染 visible items，禁止因 selectedIndex 变化预计算全部行。
 - timer lifecycle 只依赖真实 running/focus 状态，不依赖每帧 elapsed 值。
-- 新Run的本地reservation只建立本地Start command时间窗并立即渲染带显式pending标记的prompt；Footer须等RuntimeClient的权威`user.message`完成原位身份升级后才显示`Working`，保证视觉顺序稳定且不制造重复消息。
+- 新Run的本地reservation建立presentation-only Start command时间窗，立即渲染带显式pending标记的prompt并显示`Working`；它不得被旧的settled `currentRun`压住，也不等待Session ready、前序cleanup、receipt或权威`user.message`。durable prompt到达后只原位补齐identity，不追加第二条消息；提交失败则同时撤销pending prompt与本地状态。Server Run identity与终态仍完全由Runtime投影拥有。
 - 首个完整回答组件发布后，只要canonical `currentRun`仍为active，Footer继续显示animated run status；
   普通执行文案为不参与本地化的英文`Working`。当最后一个可见块是已完成的model-owned正文、当前模型请求已结束且不存在待续工具批次时，文案切换为`Finishing`，直到权威终态到达；`run.terminal`的completed/failed/cancelled都清除Run selector，不得残留`Working`或`Finishing`。该状态不展示工具详情或耗时。interrupt、审批/问答/方案
   Footer中的审批/问答/方案interaction取得焦点时隐藏该状态行，避免与`Working`竞争；slash modal只覆盖输入或统计区域。普通完成组件必须逐个离开

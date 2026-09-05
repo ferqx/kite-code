@@ -97,22 +97,31 @@ describe('run phase progression', () => {
     expect(shouldDisablePromptInput(createInitialState())).toBe(false);
   });
 
-  test('shows Working only after the authoritative user prompt is presented', () => {
-    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+  test('shows Working as soon as an idle prompt enters the submission path', () => {
+    let state: TuiState = {
+      ...createInitialState(),
+      activeSessionId: 'session-1',
+      runtimeAuthority: {
+        revision: 7,
+        interactionQueue: { revision: 7, interactions: [] },
+        currentRun: {
+          runId: 'settled-predecessor',
+          initialTurnId: 'settled-turn',
+          status: 'completed' as const,
+          revision: 7,
+        },
+      },
+    };
+    state = dispatch(state, { type: 'SET_RUNNING' });
     expect(shouldShowRunStatus(state)).toBe(false);
 
-    state = projectRuntimeEvent(state, {
-      type: 'user.message',
-      messageId: 'message-1',
-      kind: 'task',
-      text: 'Inspect the project.',
-    });
-
+    state = dispatch(state, { type: 'LOCAL_USER_PROMPT', text: 'Inspect the project.' });
+    expect(shouldShowRunStatus(state)).toBe(true);
     expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
       kind: 'user',
-      messageId: 'message-1',
+      content: 'Inspect the project.',
+      pendingEcho: true,
     });
-    expect(shouldShowRunStatus(state)).toBe(true);
   });
 
   test('keeps the active agent run status during automatic compaction', () => {

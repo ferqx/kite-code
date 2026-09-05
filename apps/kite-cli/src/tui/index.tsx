@@ -1433,12 +1433,6 @@ function TuiApp({
           reasoningEnabled: stateRef.current.status.reasoningEnabled,
         };
       }
-      // Update the local presentation boundary; canonical Run activity comes from Runtime authority.
-      if (startsForeground && queuedPromptId === undefined) {
-        // An idle prompt has no predecessor to disturb, so retain immediate local echo.
-        dispatch({ type: 'SET_RUNNING' });
-        dispatch({ type: 'LOCAL_USER_PROMPT', text: task });
-      }
       sessionManager.onStatusChange(threadId);
       dispatch({
         type: 'SET_SESSIONS',
@@ -1524,11 +1518,18 @@ function TuiApp({
       queuedPromptId?: number,
     ): Promise<void> => {
       const submittedThreadId = threadIdRef.current;
+      if (queuedPromptId === undefined) {
+        // An idle prompt has no predecessor to disturb. Acknowledge it in the
+        // presentation immediately, before Session readiness/cleanup and the
+        // start_turn receipt; authoritative Runtime events join the identity.
+        dispatch({ type: 'SET_RUNNING' });
+        dispatch({ type: 'LOCAL_USER_PROMPT', text: task });
+      }
       return promptSubmissionQueueRef.current!.enqueue(submittedThreadId, (targetThreadId) =>
         runTaskNow(targetThreadId, task, requestedPhase, initialSkillActivations, queuedPromptId),
       );
     },
-    [runTaskNow],
+    [dispatch, runTaskNow],
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;

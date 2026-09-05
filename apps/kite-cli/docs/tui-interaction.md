@@ -13,7 +13,7 @@
 - TUI本地只缓存`model.responded.messageId → requestId`与tool queue的opaque `presentationGroupId`配对；匹配结果只
   决定Presentation step归属，不参与Runtime command、approval或execution identity。新事件不按“当前block/上一条event”
   猜group；identity缺失或不匹配的工具保持独立neutral group，不得把当前Thought当作wildcard owner。
-- 普通prompt在Enter后立即追加带`pendingEcho`标记的live-only本地回显；RuntimeClient的durable `user.message`按内容只匹配这一条显式pending记录，将其原位升级为`messageId`身份，不新增副本。未标记的同文消息不得按文本去重。提交失败只移除仍为pending的本地回显。本地`SET_RUNNING`先建立Run边界，消息列表先渲染prompt，durable echo到达后Footer再显示`Working`。
+- 普通prompt在Enter后立即追加带`pendingEcho`标记的live-only本地回显，并同步显示Footer `Working`；该反馈是presentation-only，不等待Session ready、前序cleanup、`start_turn` receipt或durable echo，也不创建Server Run identity。RuntimeClient的durable `user.message`按内容只匹配这一条显式pending记录，将其原位升级为`messageId`身份，不新增副本。未标记的同文消息不得按文本去重。提交失败只移除仍为pending的本地回显并清除本地状态；Server lifecycle和终态仍只由Runtime投影收敛。
 - active Run期间输入的新prompt先进入按Session绑定的live-only queued展示层，显示有界原文预览，但不追加到当前
   Turn的blocks，因此并发子Agent/工具仍能原位更新。FIFO轮到该prompt时先移除queued展示，再建立新Turn和pending echo。
   活动Session按FIFO逐条显示浅色背景的单行`↵ 消息内容`，不再附加`Queued`解释行或折叠剩余数量；队列非空时隐藏Run状态行（包括`Working`），首项前与相邻队列行之间各留一行。

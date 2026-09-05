@@ -76,13 +76,19 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
     return appendLocalText(state, action.text, action.isError);
   }
   if (action.type === 'LOCAL_USER_PROMPT') {
-    return appendUserMessage(state, {
-      id: state.nextBlockId,
-      kind: 'user',
-      content: action.text,
-      presentationState: 'live',
-      pendingEcho: true,
-    });
+    return {
+      ...appendUserMessage(state, {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: action.text,
+        presentationState: 'live',
+        pendingEcho: true,
+      }),
+      // This is presentation-only acknowledgement that the idle prompt has
+      // entered the submission path. Runtime events still own Run identity
+      // and terminal settlement, but the Footer need not wait for a round trip.
+      runPromptPresented: true,
+    };
   }
   if (action.type === 'QUEUE_LOCAL_PROMPT') {
     return {
@@ -136,6 +142,12 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
     };
   }
   if (action.type === 'DROP_LOCAL_USER_PROMPT') {
+    const hadPendingPrompt = state.turns.some((turn) =>
+      turn.blocks.some(
+        (block) =>
+          block.kind === 'user' && block.pendingEcho === true && block.content === action.text,
+      ),
+    );
     const turns = state.turns
       .map((turn) => ({
         blocks: turn.blocks.filter(
@@ -144,7 +156,15 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
         ),
       }))
       .filter((turn) => turn.blocks.length > 0);
-    return { ...state, turns };
+    return hadPendingPrompt
+      ? {
+          ...state,
+          turns,
+          runPromptPresented: false,
+          runStartTime: undefined,
+          exited: true,
+        }
+      : { ...state, turns };
   }
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断
