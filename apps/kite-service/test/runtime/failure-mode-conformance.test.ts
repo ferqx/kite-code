@@ -319,6 +319,7 @@ describe('RFC failure-mode conformance v1', () => {
         const message = `fixture ${mode}`;
         const event = {
           type: 'run.error' as const,
+          turnId: 'runtime-run',
           message,
           recoverable: false,
           failure: classifyFailure('unknown', message),
@@ -343,11 +344,15 @@ describe('RFC failure-mode conformance v1', () => {
         });
         if (!clientEvent) throw new Error('expected a projected failure lifecycle event');
         expect(clientEvent).toEqual({
-          type: 'run.failure',
+          type: 'run.terminal',
           runId: 'runtime-run',
-          code: resolution.terminalOutcome.reasonCode,
-          retryable: resolution.terminalOutcome.safeRetry,
-          recoveryEntry: resolution.terminalOutcome.recoveryEntry,
+          status: 'failed',
+          outcome: {
+            status: resolution.terminalOutcome.status,
+            reasonCode: resolution.terminalOutcome.reasonCode,
+            safeRetry: resolution.terminalOutcome.safeRetry,
+            recoveryEntry: resolution.terminalOutcome.recoveryEntry,
+          },
         });
       }
     } finally {

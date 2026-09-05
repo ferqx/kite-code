@@ -32,7 +32,7 @@ export interface ModelSelectorProps {
   models?: readonly ProviderModelRoute[];
   selected?: Pick<ProviderModelRoute, 'provider' | 'name'>;
   observedRevision?: string;
-  onSelect: (model: ModelOption) => void;
+  onSelect: (model: ModelOption) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -73,6 +73,8 @@ export default function ModelSelector({
   );
   const selectedRef = useRef(selectedIndex);
   selectedRef.current = selectedIndex;
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   const maxContentHeight = useOverlayHeight(9);
 
@@ -82,16 +84,31 @@ export default function ModelSelector({
       key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean },
     ) => {
       if (key.escape) {
+        if (submittingRef.current) return;
         onClose();
         return;
       }
+      if (submittingRef.current) return;
       if (groupedModels.length === 0) return;
       if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
       if (key.downArrow) setSelected((s) => Math.min(groupedModels.length - 1, s + 1));
       if (key.return) {
         const model = groupedModels[selectedRef.current];
-        if (model) onSelect(model);
-        onClose();
+        if (!model) return;
+        submittingRef.current = true;
+        setSubmitting(true);
+        void Promise.resolve()
+          .then(() => onSelect(model))
+          .catch(() => {
+            // The parent owns the diagnostic. Keeping the selector mounted
+            // here gives it a chance to show the failure and avoids closing a
+            // surface while an App Control request is still unresolved.
+          })
+          .finally(() => {
+            submittingRef.current = false;
+            setSubmitting(false);
+            onClose();
+          });
       }
     },
   );
@@ -121,7 +138,10 @@ export default function ModelSelector({
         <OverlayShortcutBar
           shortcuts={[
             { keys: '↑↓', label: translate('common.navigate') },
-            { keys: 'Enter', label: translate('common.select') },
+            {
+              keys: submitting ? '…' : 'Enter',
+              label: submitting ? 'Saving…' : translate('common.select'),
+            },
             { keys: 'Esc', label: translate('common.close') },
           ]}
         />

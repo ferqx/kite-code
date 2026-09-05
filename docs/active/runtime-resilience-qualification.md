@@ -73,6 +73,11 @@ commit clock推进，Store writer拒绝同Session第二个active Run。response 
 queued resource，且不调用recovery/inspect/prepare/activation/schedule；different digest仍fail closed。Private Client/Server只允许最多200项
 Run keyset page，SQLite query plan命中专用index且不扫event journal。
 
+LFC exact lifecycle qualification在相同Store 8边界上增加：V2创建仍令runId等于initial Turn，但Provider Action continuation
+transaction推进唯一active Run row，terminal与History继续使用original runId；无法唯一恢复时保持recovery_required。Session projection
+schema v2与start receipt derived messageId作为同一candidate切换，不双发旧词汇、不修改receipt resource JSON。RuntimeClient只有在
+generation/revision store返回applied后才dispatch；durable或ephemeral gap把Session置为not-ready并重新订阅，截断packet不进入presentation。
+
 KRSRUN-02A focused matrix现已证明unpublished Store 8 owner上的delete FK cascade/retained receipt、rewind partial-boundary refusal与fault
 rollback、fork settled-terminal copy/origin/coverage/no-source-receipt、reopen及cross-Workspace binding isolation。Host GET/list在resume前只做
 `unknown/recovery_required`投影且不recover，resume只运行一次existing recovery；unknown refinement保留原finish clock，既有recovery suite继续
@@ -106,7 +111,8 @@ TUI普通prompt的client-local FIFO必须等待当前或恢复中的远端active
 current revision floor且权威idle时收敛它，使terminal/idle notification gap不依赖下一条subscription event。
 Ink flush是非权威展示屏障，正常等待真实commit但最多1秒；迟到/失败不能停止subscription消费answer/terminal，也不能阻塞后继prompt。
 模型terminal可以省略optional summary；qualification必须覆盖无换行ordinary delta由request-scoped cumulative buffer收口，不能丢失尾段。
-run promise只接受跨过current command floor且匹配canonical receipt `runId`的`run.terminal|run.failure`；`turn.terminal`、`task.terminal`
+run promise只接受跨过current command floor且匹配canonical receipt `runId`的`run.terminal`；失败由同一事件的
+`status=failed`与terminal outcome表达；`turn.terminal`、`task.terminal`
 与previous Run的迟到终态不能结束successor。
 
 Native TUI interaction不能fire-and-forget：approval、input、plan及其Enter/Esc都必须等待`respond_interaction` receipt，

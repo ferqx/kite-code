@@ -7,6 +7,7 @@ import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
 import { createSqliteRuntimeStorage } from '../src/index';
 
+// biome-ignore lint/suspicious/noExplicitAny: deliberate structural test helper for private state assertions
 type JsonRecord = Record<string, any>;
 
 function record(value: unknown): JsonRecord {
@@ -69,7 +70,6 @@ function state(sessionId: string, revision = 1): AgentState {
           generation: 3,
           createdAt: '2026-08-25T00:00:00.000Z',
           status: 'authorized_queued',
-          state: 'authorized_queued',
           grant: 'same_command',
           receiptId: 'receipt-a',
           dispatchState: 'before_dispatch',
@@ -131,6 +131,7 @@ function batchReleaseEvent(): KernelEvent {
     grantKey: 'grant-key-a',
     generation: 3,
     sessionRevision: 1,
+    owner: { kind: 'root_tool', toolCallId: 'call-a' },
     commandIdentity: {
       sessionId: 'session-sqlite-recovery',
       threadId: 'session-sqlite-recovery',
@@ -145,7 +146,13 @@ function batchReleaseEvent(): KernelEvent {
       commandDigest: 'command-digest-a',
     },
     matches: [
-      { interactionId: 'approval-a', toolCallId: 'call-a', receiptId: 'receipt-a', generation: 3 },
+      {
+        interactionId: 'approval-a',
+        toolCallId: 'call-a',
+        receiptId: 'receipt-a',
+        generation: 3,
+        owner: { kind: 'root_tool', toolCallId: 'call-a' },
+      },
     ],
     createdAt: '2026-08-25T00:20:00.000Z',
   } as KernelEvent;

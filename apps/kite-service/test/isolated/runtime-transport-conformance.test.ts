@@ -368,7 +368,7 @@ class MatrixRuntime implements RuntimeAccess {
         ? (command.bootstrapSessionId ?? 'matrix-session')
         : 'matrix-session';
     this.#session = {
-      schema: 'kite.runtime-projection.v1',
+      schema: 'kite.runtime-projection.v2',
       sessionId,
       revision: 0,
       lifecycle: 'open',

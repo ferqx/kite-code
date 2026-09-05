@@ -7,7 +7,7 @@ durable profile但不共享进程。CLI不导入Service App，也不持有Store 
 adapter把 `KiteAppServerConnection`投影为typed Runtime、History、App Control、credential与
 `RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。App Server mutation直接受Session execution
 generation/revision fence约束。adapter不读取descriptor/access/control
-token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
+token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也不使用legacy session-manager Proxy。
 
 默认parent-child必须exact build；显式daemon只按exact protocol/capability判断兼容。任何mismatch都fail closed，不执行previous-build
 stop、replacement或fallback。默认配套模式的mismatch在TUI启动前提示安装可能不完整并要求更新或重新安装；显式daemon的mismatch
@@ -39,7 +39,7 @@ Native subscription按canonical Server顺序串行消费notification。前台`re
 等待真实commit，不用固定sleep猜顺序；Ink promise迟到或失败时继续消费canonical event，不能让presentation阻断Runtime subscription。
 这个client屏障与Service 50ms framing共同保持旧InProcess可见顺序，不在adapter内按数据源添加渲染分支。
 Server的initial snapshot、reconnect reset与revision gap snapshot在wire上都是event-free durable projection。adapter必须
-把权威`activeWork`及完整`interactionQueue`显式交给presentation reducer：waiting snapshot恢复当前Footer，idle snapshot
+把权威`activeTask/currentRun`及完整`interactionQueue`显式交给presentation reducer：waiting snapshot恢复当前Footer，terminal snapshot
 结束本地run promise与“执行中”。它不得把snapshot解释成approval settlement、用户取消或成功terminal，也不得让低于
 已接受command receipt revision的迟到snapshot结束新run。这样event、history replay与snapshot recovery仍只有一个TUI
 presentation state machine，Runtime Client cache不是第二套UI lifecycle authority。
@@ -61,7 +61,7 @@ completion callback绑定，旧轮waiter的迟到finally不能占用或清除后
 第二轮完成后触发同样有界的Ink presentation flush；flush超时后`SET_IDLE`仍触发后续render，不能出现模型请求已发出但subscription永远停在
 未提交React frame之前的状态。
 run completion只接受跨过当前command revision floor、并在receipt提供resource时exact匹配canonical `runId`的
-`run.terminal|run.failure`。`turn.terminal`与`task.terminal`仍进入presentation reducer，但不能解决run promise；这样前轮迟到的Turn终态
+`run.terminal`。failed Run由该事件的terminal outcome表达；`turn.terminal`与`task.terminal`仍进入presentation reducer，但不能解决run promise；这样前轮迟到的Turn终态
 不会在后继`start_turn`之后把新Run误判完成。
 
 Native interaction提交必须等待`respond_interaction`的applied/idempotent receipt，不能fire-and-forget或吞掉

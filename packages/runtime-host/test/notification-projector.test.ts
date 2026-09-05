@@ -12,6 +12,81 @@ import {
 import { SessionRegistry } from '../src/host/session-registry';
 
 describe('NotificationProjector durable subscriptions', () => {
+  test('seeds a newly registered historical subscriber after query hydration wins the race', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    const iterator = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'historical' } })
+      [Symbol.asyncIterator]();
+    const hydrated = sessionProjection('historical', 7);
+    registry.commitProjection(hydrated);
+    projector.publish({
+      ...durable('historical', 7),
+      projection: { kind: 'snapshot', session: hydrated },
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'durable',
+      revision: 7,
+      projection: { session: { sessionId: 'historical' } },
+    });
+    await iterator.return?.();
+    projector.close();
+  });
+
+  test('accepts the same-revision queued-to-running Run activation', () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    const running = activeProjection('activation', 1);
+    projector.publish({
+      ...durable('activation', 1),
+      projection: {
+        kind: 'work',
+        session: {
+          ...running,
+          currentRun: { ...running.currentRun!, status: 'queued' },
+        },
+      },
+    });
+    projector.publish({
+      ...durable('activation', 1),
+      projection: { kind: 'work', session: running },
+    });
+    expect(registry.projection('activation')?.currentRun?.status).toBe('running');
+    projector.close();
+  });
+
+  test('accepts same-revision Task identity enrichment for the activated Run', () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    const running = activeProjection('task-enrichment', 1);
+    projector.publish({
+      ...durable('task-enrichment', 1),
+      projection: {
+        kind: 'work',
+        session: {
+          ...running,
+          activeTask: undefined,
+          currentRun: { ...running.currentRun!, taskId: undefined },
+        },
+      },
+    });
+    projector.publish({
+      ...durable('task-enrichment', 1),
+      projection: {
+        kind: 'work',
+        session: {
+          ...running,
+          activeTask: { taskId: 'work-1', phase: 'planning' },
+        },
+      },
+    });
+    expect(registry.projection('task-enrichment')).toMatchObject({
+      activeTask: { taskId: 'work-1' },
+      currentRun: { taskId: 'work-1' },
+    });
+    projector.close();
+  });
+
   test('accepts only a same-revision active-to-terminal cleanup enrichment', async () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry);
@@ -25,16 +100,17 @@ describe('NotificationProjector durable subscriptions', () => {
         kind: 'work',
         session: {
           ...sessionProjection('cleanup', 1),
-          activeWork: {
-            workId: 'work-1',
-            phase: 'building',
+          currentRun: {
+            runId: 'run-1',
+            initialTurnId: 'turn-1',
+            activeTurnId: 'turn-1',
             status: 'cancelled',
-            activeTurn: { turnId: 'turn-1', status: 'cancelled' },
+            revision: 1,
           },
         },
       },
     });
-    expect(registry.projection('cleanup')?.activeWork?.status).toBe('cancelled');
+    expect(registry.projection('cleanup')?.currentRun?.status).toBe('cancelled');
     expect(() =>
       projector.publish({
         ...durable('cleanup', 1),
@@ -50,7 +126,7 @@ describe('NotificationProjector durable subscriptions', () => {
       [Symbol.asyncIterator]();
     expect((await iterator.next()).value).toMatchObject({
       revision: 1,
-      projection: { session: { activeWork: { status: 'cancelled' } } },
+      projection: { session: { currentRun: { status: 'cancelled' } } },
     });
     await iterator.return?.();
     projector.close();
@@ -327,6 +403,113 @@ describe('NotificationProjector ephemeral streams', () => {
     await iterator.return?.();
     projector.close();
   });
+
+  test('fences a composition revision change until the replacement stream restarts at sequence one', async () => {
+    const registry = new SessionRegistry();
+    registry.commitProjection(activeProjection('session-1', 0));
+    const projector = new NotificationProjector(registry);
+    const iterator = projector
+      .subscribe({
+        spec: {
+          scope: 'session',
+          sessionId: 'session-1',
+          afterRevision: 0,
+          includeEphemeral: true,
+        },
+      })
+      [Symbol.asyncIterator]();
+
+    projector.publish(ephemeral(1));
+    projector.publish({ ...ephemeral(2), compositionRevision: 'state-store-next' });
+    projector.publish({ ...ephemeral(1), compositionRevision: 'state-store-next' });
+
+    expect((await iterator.next()).value).toMatchObject({
+      compositionRevision: 'state-store-current',
+      sequence: 1,
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      compositionRevision: 'state-store-next',
+      sequence: 1,
+    });
+    await iterator.return?.();
+    projector.close();
+  });
+
+  test('fences late ephemeral packets after a durable terminal and admits the next Run', async () => {
+    const registry = new SessionRegistry();
+    registry.commitProjection(activeProjection('session-1', 0));
+    const projector = new NotificationProjector(registry);
+    const iterator = projector
+      .subscribe({
+        spec: {
+          scope: 'session',
+          sessionId: 'session-1',
+          afterRevision: 0,
+          includeEphemeral: true,
+        },
+      })
+      [Symbol.asyncIterator]();
+
+    const terminal = durable('session-1', 1);
+    const terminalSession = activeProjection('session-1', 1);
+    projector.publish({
+      ...terminal,
+      projection: {
+        ...terminal.projection,
+        session: {
+          ...terminalSession,
+          currentRun: { ...terminalSession.currentRun!, status: 'completed' as const },
+        },
+      },
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'durable',
+      revision: 1,
+      projection: { session: { currentRun: { status: 'completed' } } },
+    });
+
+    const successor = {
+      ...terminal,
+      revision: 2,
+      projection: {
+        ...terminal.projection,
+        session: {
+          ...terminalSession,
+          revision: 2,
+          currentRun: {
+            ...terminalSession.currentRun!,
+            runId: 'run-2',
+            initialTurnId: 'turn-2',
+            activeTurnId: 'turn-2',
+            taskId: 'work-2',
+            status: 'running' as const,
+            revision: 2,
+          },
+        },
+      },
+    };
+    projector.publish(successor);
+    projector.publish({ ...ephemeral(1), runId: 'run-1', taskId: 'work-1' });
+    projector.publish({
+      ...ephemeral(1),
+      runId: 'run-2',
+      taskId: 'work-2',
+      workId: 'work-2',
+      turnId: 'turn-2',
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'durable',
+      revision: 2,
+      projection: { session: { currentRun: { runId: 'run-2' } } },
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'ephemeral',
+      runId: 'run-2',
+      sequence: 1,
+    });
+    await iterator.return?.();
+    projector.close();
+  });
 });
 
 function sessionProjection(sessionId: string, revision: number): RuntimeSessionProjection {
@@ -342,11 +525,13 @@ function sessionProjection(sessionId: string, revision: number): RuntimeSessionP
 function activeProjection(sessionId: string, revision: number): RuntimeSessionProjection {
   return {
     ...sessionProjection(sessionId, revision),
-    activeWork: {
-      workId: 'work-1',
-      phase: 'building',
+    currentRun: {
+      runId: 'run-1',
+      initialTurnId: 'turn-1',
+      activeTurnId: 'turn-1',
+      taskId: 'work-1',
       status: 'running',
-      activeTurn: { turnId: 'turn-1', status: 'running' },
+      revision,
     },
   };
 }

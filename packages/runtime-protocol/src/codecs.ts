@@ -1,7 +1,8 @@
 import {
+  isRuntimeClientEventIdentitySatisfied,
   RUNTIME_TOOL_DISPLAY_NAMES_,
   RUNTIME_TOOL_PRESENTATIONS_,
-  sameRuntimeClientInteractionIdentity,
+  type RuntimeClientEvent,
 } from '@kite-ai/runtime-contract';
 import { z } from 'zod';
 import {
@@ -74,7 +75,17 @@ const toolResult = z
     terminationReason: z.enum(['timed_out', 'cancelled', 'sandbox_denied']).optional(),
   })
   .strict();
-const subagentToolResult = z.object({ ok: z.boolean() }).strict();
+const interactionOwner = z.union([
+  z.object({ kind: z.literal('root_tool'), toolCallId: identifier }).strict(),
+  z
+    .object({
+      kind: z.literal('subagent_tool'),
+      toolCallId: identifier,
+      subagentId: identifier,
+      parentToolCallId: identifier,
+    })
+    .strict(),
+]);
 
 const interactionBase = {
   interactionId: identifier,
@@ -92,6 +103,7 @@ const interaction = z.discriminatedUnion('kind', [
         .array(z.enum(['approve_once', 'same_command']))
         .min(1)
         .max(2),
+      owner: interactionOwner,
       command: approvalCommand.optional(),
     })
     .strict(),
@@ -270,7 +282,7 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
       ...sessionCommandBase,
       type: z.literal('cancel_turn'),
       turnId: identifier,
-      runId: identifier.optional(),
+      runId: identifier,
     })
     .strict(),
   respondInteractionCommands,
@@ -621,29 +633,35 @@ export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
   });
 export type RuntimeProtocolError = z.infer<typeof RUNTIME_PROTOCOL_ERROR_SCHEMA_>;
 
-const evidenceSummary = z
+const sessionTask = z
+  .object({ taskId: identifier, phase: z.enum(['planning', 'building']) })
+  .strict();
+const sessionRunTerminal = z
   .object({
-    kind: shortText,
-    status: z.enum(['pending', 'accepted', 'rejected', 'unavailable']),
-    digest: identifier.optional(),
+    reasonCode: identifier,
+    safeRetry: z.boolean(),
+    recoveryEntry: z.enum(['none', 'retry', 'reconcile', 'new_run', 'operator_action']),
+    outcomeId: identifier.optional(),
   })
   .strict();
-const activeTurn = z
+const sessionRun = z
   .object({
-    turnId: identifier,
-    status: z.enum(['queued', 'running', 'waiting', 'completed', 'cancelled', 'failed']),
-    summary: shortText.optional(),
-    interaction: interaction.optional(),
-    evidence: z.array(evidenceSummary).max(256).optional(),
-  })
-  .strict();
-const activeWork = z
-  .object({
-    workId: identifier,
-    phase: z.enum(['planning', 'building']),
-    status: z.enum(['queued', 'running', 'waiting', 'completed', 'cancelled', 'failed']),
-    title: shortText.optional(),
-    activeTurn: activeTurn.optional(),
+    runId: identifier,
+    initialTurnId: identifier,
+    activeTurnId: identifier.optional(),
+    taskId: identifier.optional(),
+    status: z.enum([
+      'queued',
+      'running',
+      'waiting',
+      'completed',
+      'failed',
+      'cancelled',
+      'recovery_required',
+    ]),
+    revision: safeRevision,
+    activeInteractionId: identifier.optional(),
+    outcome: sessionRunTerminal.optional(),
   })
   .strict();
 const interactionQueue = z
@@ -673,7 +691,7 @@ const interactionQueue = z
   });
 export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
   .object({
-    schema: z.literal('kite.runtime-projection.v1'),
+    schema: z.literal('kite.runtime-projection.v2'),
     sessionId: identifier,
     revision: safeRevision,
     displayName: z.string().max(256).optional(),
@@ -689,7 +707,8 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
       .optional(),
     sessionCommandGrantCount: safeRevision,
     interactionQueue,
-    activeWork: activeWork.optional(),
+    activeTask: sessionTask.optional(),
+    currentRun: sessionRun.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -699,7 +718,7 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
         message: 'interaction queue revision must match the session projection revision',
       });
     }
-    const turnInteraction = value.activeWork?.activeTurn?.interaction;
+    const runInteractionId = value.currentRun?.activeInteractionId;
     const queuedInteraction =
       value.interactionQueue.activeInteractionId === undefined
         ? undefined
@@ -707,12 +726,9 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
             (candidate) => candidate.interactionId === value.interactionQueue.activeInteractionId,
           );
     if (
-      value.interactionQueue.activeInteractionId !== turnInteraction?.interactionId ||
-      (turnInteraction !== undefined &&
-        (queuedInteraction === undefined ||
-          turnInteraction.sessionRevision !== value.revision ||
-          queuedInteraction.sessionRevision !== turnInteraction.sessionRevision ||
-          !sameRuntimeClientInteractionIdentity(queuedInteraction, turnInteraction)))
+      (value.currentRun !== undefined &&
+        value.interactionQueue.activeInteractionId !== runInteractionId) ||
+      (runInteractionId !== undefined && queuedInteraction === undefined)
     ) {
       context.addIssue({
         code: 'custom',
@@ -816,7 +832,7 @@ const runProjection = z
     }
   });
 const runResource = z
-  .object({ kind: z.literal('run'), run: runProjection })
+  .object({ kind: z.literal('run'), run: runProjection, messageId: identifier })
   .strict()
   .superRefine((resource, context) => {
     if (
@@ -1055,13 +1071,21 @@ const historyTranscript = z
           .object({
             sequence: safeRevision,
             events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
+            identity: z
+              .object({
+                runId: identifier.optional(),
+                taskId: identifier.optional(),
+                turnId: identifier.optional(),
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
       .max(RUNTIME_PROTOCOL_LIMITS.maxArrayLength),
     events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
     interactionMode: z.enum(['accept_edits', 'auto', 'full']),
-    recovery: z.enum(['normal', 'pending_interaction']),
+    recovery: z.enum(['normal', 'pending_interaction', 'restart_required']),
   })
   .strict();
 const appControlResult = z
@@ -1167,12 +1191,27 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       summary: shortText,
     })
     .strict(),
-  z.object({ type: z.literal('tool.failed'), toolId: identifier, summary: shortText }).strict(),
-  z.object({ type: z.literal('tool.rejected'), toolId: identifier, summary: shortText }).strict(),
+  z
+    .object({
+      type: z.literal('tool.failed'),
+      toolId: identifier,
+      presentation: runtimeToolPresentation,
+      summary: shortText,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('tool.rejected'),
+      toolId: identifier,
+      presentation: runtimeToolPresentation,
+      summary: shortText,
+    })
+    .strict(),
   z
     .object({
       type: z.literal('tool.cancelled'),
       toolId: identifier,
+      presentation: runtimeToolPresentation,
       summary: shortText.optional(),
     })
     .strict(),
@@ -1219,18 +1258,10 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
-      type: z.literal('run.failure'),
-      runId: identifier,
-      code: identifier,
-      retryable: z.boolean(),
-      recoveryEntry: z.enum(['none', 'retry', 'reconcile', 'new_run', 'operator_action']),
-    })
-    .strict(),
-  z
-    .object({
       type: z.literal('approval.granted'),
       interactionId: identifier,
       generation: safeRevision,
+      owner: interactionOwner,
     })
     .strict(),
   z
@@ -1238,6 +1269,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('approval.rejected'),
       interactionId: identifier,
       generation: safeRevision,
+      owner: interactionOwner,
       summary: shortText.optional(),
     })
     .strict(),
@@ -1307,15 +1339,46 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
+      type: z.literal('subagent.phase'),
+      subagentId: identifier,
+      parentToolCallId: identifier,
+      status: z.enum(['running', 'suspended']),
+      approvalState: z
+        .enum([
+          'queued_auto_review',
+          'auto_reviewing',
+          'queued_user_approval',
+          'awaiting_user',
+          'authorized_queued',
+        ])
+        .optional(),
+      interactionId: identifier.optional(),
+      reviewId: identifier.optional(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal('subagent.step'),
       subagentId: identifier,
+      stepId: identifier,
+      toolCallId: identifier,
       toolName: shortText,
-      status: z.enum(['started', 'completed', 'failed']),
+      status: z.enum(['started', 'completed', 'failed', 'cancelled']),
       displayLabel: displayLabel.optional(),
       arguments: jsonRecord.optional(),
-      result: subagentToolResult.optional(),
       totalLines: safeRevision.optional(),
       durationMs: safeRevision.optional(),
+      summary: shortText.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('subagent.review'),
+      subagentId: identifier,
+      parentToolCallId: identifier,
+      reviewId: identifier,
+      toolCallId: identifier,
+      status: z.enum(['queued', 'reviewing', 'approved', 'rejected', 'failed']),
       summary: shortText.optional(),
     })
     .strict(),
@@ -1453,6 +1516,109 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .strict(),
 ]);
 export type RuntimeProtocolEvent = z.infer<typeof RUNTIME_PROTOCOL_EVENT_SCHEMA_>;
+
+function validateDurablePresentationIdentity(
+  value: Readonly<{
+    readonly event?: RuntimeProtocolEvent;
+    readonly runId?: string;
+    readonly taskId?: string;
+    readonly turnId?: string;
+    readonly session: Readonly<{
+      readonly activeTask?: Readonly<{ readonly taskId: string }>;
+      readonly currentRun?: Readonly<{
+        readonly runId: string;
+        readonly taskId?: string;
+        readonly initialTurnId: string;
+        readonly activeTurnId?: string;
+      }>;
+    }>;
+  }>,
+  context: z.RefinementCtx,
+): void {
+  if (value.event === undefined) return;
+  const event = value.event as RuntimeClientEvent;
+  const currentRun = value.session.currentRun;
+  const identity = {
+    // An explicit notification identity is authoritative for the envelope.
+    // Terminal payload identities are only the fallback when the transport
+    // omitted the repeated field; otherwise a predecessor envelope could be
+    // accepted while its terminal event names a successor Run.
+    runId: value.runId ?? (event.type === 'run.terminal' ? event.runId : currentRun?.runId),
+    taskId:
+      value.taskId ??
+      (event.type === 'task.terminal' ||
+      event.type === 'planning.entered' ||
+      event.type === 'planning.exited'
+        ? event.taskId
+        : (value.session.activeTask?.taskId ?? currentRun?.taskId)),
+    turnId:
+      value.turnId ??
+      (event.type === 'turn.terminal'
+        ? event.turnId
+        : (currentRun?.activeTurnId ?? currentRun?.initialTurnId)),
+  };
+  if (!isRuntimeClientEventIdentitySatisfied(event, identity)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['event'],
+      message: `Event ${event.type} is missing its required Run/Task/Turn identity.`,
+    });
+  }
+}
+
+function validateEphemeralPresentationIdentity(
+  value: Readonly<{
+    readonly event: RuntimeProtocolEvent;
+    readonly runId?: string;
+    readonly taskId?: string;
+    readonly turnId: string;
+  }>,
+  context: z.RefinementCtx,
+): void {
+  const event = value.event as RuntimeClientEvent;
+  if (!isRuntimeClientEventIdentitySatisfied(event, value)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['runId', 'taskId', 'turnId'],
+      message: `Event ${event.type} is missing its required Run/Task/Turn identity.`,
+    });
+  }
+}
+
+const durablePresentationNotification = z
+  .object({
+    type: z.literal('notification'),
+    durability: z.literal('durable'),
+    sessionId: identifier,
+    revision: safeRevision,
+    runId: identifier.optional(),
+    taskId: identifier.optional(),
+    turnId: identifier.optional(),
+    event: RUNTIME_PROTOCOL_EVENT_SCHEMA_.optional(),
+    session: RUNTIME_PROTOCOL_SESSION_SCHEMA_,
+  })
+  .strict()
+  .superRefine(validateDurablePresentationIdentity);
+
+const ephemeralPresentationNotification = z
+  .object({
+    type: z.literal('notification'),
+    durability: z.literal('ephemeral'),
+    sessionId: identifier,
+    workId: identifier,
+    runId: identifier.optional(),
+    taskId: identifier.optional(),
+    turnId: identifier,
+    actorId: identifier,
+    attemptId: identifier,
+    compositionRevision: identifier,
+    streamId: identifier,
+    sequence: safeRevision,
+    event: RUNTIME_PROTOCOL_EVENT_SCHEMA_,
+  })
+  .strict()
+  .superRefine(validateEphemeralPresentationIdentity);
+
 export const RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_ = z.union([
   z.object({ type: z.literal('ready'), scope: z.enum(['session', 'sessions']) }).strict(),
   z
@@ -1461,31 +1627,8 @@ export const RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_ = z.union([
       sessions: z.array(RUNTIME_PROTOCOL_SESSION_SCHEMA_).max(10_000),
     })
     .strict(),
-  z
-    .object({
-      type: z.literal('notification'),
-      durability: z.literal('durable'),
-      sessionId: identifier,
-      revision: safeRevision,
-      event: RUNTIME_PROTOCOL_EVENT_SCHEMA_.optional(),
-      session: RUNTIME_PROTOCOL_SESSION_SCHEMA_,
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('notification'),
-      durability: z.literal('ephemeral'),
-      sessionId: identifier,
-      workId: identifier,
-      turnId: identifier,
-      actorId: identifier,
-      attemptId: identifier,
-      compositionRevision: identifier,
-      streamId: identifier,
-      sequence: safeRevision,
-      event: RUNTIME_PROTOCOL_EVENT_SCHEMA_,
-    })
-    .strict(),
+  durablePresentationNotification,
+  ephemeralPresentationNotification,
   z
     .object({
       type: z.literal('index_reset_begin'),

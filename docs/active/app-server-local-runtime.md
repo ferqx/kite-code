@@ -45,7 +45,8 @@ TUI/CLI 通过 release composition 解析 child：
 - source：当前 Bun、当前 checkout 的 Service entrypoint、checkout-specific profile；
 - installed：launcher-pinned immutable candidate 的 `kite-service`、canonical profile。
 
-两者都使用 `app-server run-stdio` 和同一 exact protocol/capability set。initialize 的 build identity 必须与 client 配对；失败直接暴露，
+两者都使用 `app-server run-stdio` 和同一 exact Runtime Protocol v2/capability set。source与installed配对测试都必须使用当前
+protocol schema/version，旧v1 fixture不能作为兼容路径。initialize 的 build identity 必须与 client 配对；失败直接暴露，
 不回退 embedded、旧 Service 或 daemon。parent EOF/退出会关闭 child，但 durable facts 保留。
 
 client把默认same-build mismatch诊断为安装内容可能不完整，并提示更新或重新安装Kite Code；显式daemon mismatch则提示更新或使用

@@ -198,6 +198,9 @@ export async function createWorkspaceWorkerApplication(
         };
       },
     });
+    const releaseRuntimeControl = appControl.bindRuntimeControl(admittedWorkspace, {
+      applySelectedConfig: (config) => runtimeOwner!.applySelectedConfig(admittedWorkspace, config),
+    });
     const history = createKiteRuntimeObserverHistoryFromStorage(input.storage);
     const agentHistory = createKiteRuntimePagedHistoryFromWorkspaceStore(
       input.storage.openWorkspaceLogQuery,
@@ -214,6 +217,7 @@ export async function createWorkspaceWorkerApplication(
         try {
           await runtimeOwner![Symbol.asyncDispose]();
         } finally {
+          releaseRuntimeControl();
           commandContexts.clear();
           if (ownsAppControl) await appControl[Symbol.asyncDispose]();
         }

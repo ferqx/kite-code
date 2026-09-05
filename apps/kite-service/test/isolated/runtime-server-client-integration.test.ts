@@ -117,7 +117,9 @@ test('App CLI access routes one Host through InProcess Protocol with fixed admis
       access.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'get_session_projection', sessionId }),
     ).resolves.toMatchObject({
       status: 'ok',
-      session: { activeWork: { status: 'completed', activeTurn: { status: 'completed' } } },
+      session: {
+        currentRun: { status: 'completed' },
+      },
     });
 
     await iterator.return?.();
@@ -181,9 +183,9 @@ async function terminalNotification(
       'durability' in notification &&
       notification.durability === 'durable' &&
       notification.sessionId === sessionId &&
-      ((notification.projection.session.activeWork !== undefined &&
-        notification.projection.session.activeWork.status !== 'running' &&
-        notification.projection.session.activeWork.status !== 'waiting') ||
+      ((notification.projection.session.currentRun !== undefined &&
+        notification.projection.session.currentRun.status !== 'running' &&
+        notification.projection.session.currentRun.status !== 'waiting') ||
         notification.projection.event?.type === 'run.terminal' ||
         notification.projection.event?.type === 'turn.terminal' ||
         notification.projection.event?.type === 'task.terminal')

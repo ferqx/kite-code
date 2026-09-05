@@ -14,6 +14,8 @@
   State/event/snapshot放入同一transaction；activation必须通过现有`attempt_start` transaction把queued推进running，不能直接调用Run port绕过
   Store writer；interaction/terminal/cancel/recovery event batch同步推进同一Run。
 - 翻译 Kernel facts，并管理 process supervision、storage port 与 observability。
+- State compatibility decoding accepts only an exact legacy schema/epoch pair; historical Subagent identities are synthesized
+  from the persisted event sequence, while current event/state writers remain State-27-only.
 - POSIX generic process port不再直接把用户命令作为Host子进程：它先启动同进程组watchdog，通过有界stdin一次性传入exact
   argv/cwd/env并保持pipe；Host正常cancel按process group终止，Host被SIGKILL时watchdog从EOF终止自身与命令组。Windows继续使用
   Job/process-tree guard。watchdog不新增daemon、持久registry或业务协议。
@@ -62,6 +64,9 @@
   schema/canonical JSON/SHA-256。Host只在preflighted `storage.runs`存在时创建Run mutation；Store 6/7路径明确拒绝，不做partial fallback。
 - Start receipt lookup发生在recovery/inspect/prepare之前。Store8 response loss或retry返回持久original queued Run resource，不重新recover、
   activate、prepare或schedule；current Run状态另由private `get_run`/bounded `list_runs`读取，query本身不触发recovery。
+- Store 8 V1以accepted initial Turn作为stable Run identity。Provider Action continuation在同一State/Run transaction中推进唯一
+  active Run row的revision/status，process-local execution handle只把当前Turn投影为`activeTurnId`；terminal closure与unknown
+  refinement均从唯一active/unknown row取得原runId，不再按final Turn id查找或创建第二Run。无法唯一证明unknown row时不转移终态。
 - Host restart后、Session尚未admit/recover时，private Run get/list把唯一nonterminal行只读投影为`unknown/recovery_required`；投影复用最后
   一个durable Run clock值，不读取HTTP/Logger wall clock，也不写Store或触发recovery。显式resume完成existing Host recovery后恢复canonical
   active/terminal投影；真实unknown只允许由reconciliation原子细化为更精确terminal，并保留原`finishedAtMs`。

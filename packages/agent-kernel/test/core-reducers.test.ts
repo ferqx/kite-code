@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { decideUnplannedCompletion } from '../src/completion';
 import { reduceAuthorizationState } from '../src/core/authorization/reducer';
-import { reduceCompletionState } from '../src/core/completion/reducer';
+import {
+  normalizeCanonicalTaskCompletionFact,
+  reduceCompletionState,
+} from '../src/core/completion/reducer';
 import { reduceLifecycleState } from '../src/core/lifecycle/reducer';
 import type { KernelEvent } from '../src/events';
 import { sha256Hex } from '../src/hash';
@@ -192,6 +195,7 @@ describe('State core reducers', () => {
       type: 'auto_review.requested',
       reviewId: 'review-1',
       toolCallId: 'call-1',
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
       toolName: 'shell_execute',
       reason: 'review',
       approval: {},
@@ -206,6 +210,145 @@ describe('State core reducers', () => {
     const entries = Object.values(second.doomLoop);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toEqual({ count: 2, lastSeenAt: 1787184000001 });
+  });
+
+  test('binds child approval settlement to the stable child owner identity', () => {
+    const parentToolCallId = 'parent-task-call';
+    const childToolCallId = 'model-child-call';
+    const runtimeToolCallId = 'runtime-child-call';
+    const subagentId = 'subagent-1';
+    const state = {
+      ...initialState(),
+      tools: {
+        calls: {
+          [parentToolCallId]: {
+            toolCallId: parentToolCallId,
+            name: 'task',
+            modelMessageId: 'message-1',
+            args: {},
+            createdAtTurnId: 'turn-1',
+            status: 'queued' as const,
+          },
+        },
+        queue: [parentToolCallId],
+        active: [],
+      },
+    };
+    const owner = {
+      kind: 'subagent_tool' as const,
+      toolCallId: childToolCallId,
+      subagentId,
+      parentToolCallId,
+    };
+    const requested = reduceAuthorizationState(state, {
+      type: 'approval.requested',
+      interactionId: 'child-approval',
+      toolCallId: parentToolCallId,
+      runtimeToolCallId,
+      parentToolCallId,
+      childSubagentId: subagentId,
+      owner,
+      approval: {},
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: true,
+    } as unknown as KernelEvent);
+    expect(requested.pendingApprovals.get('child-approval')).toMatchObject({
+      toolCallId: parentToolCallId,
+      childToolCallId,
+      runtimeToolCallId,
+      childSubagentId: subagentId,
+      parentToolCallId,
+    });
+
+    const forged = reduceAuthorizationState(requested, {
+      type: 'approval.granted',
+      interactionId: 'child-approval',
+      toolCallId: parentToolCallId,
+      runtimeToolCallId,
+      grant: 'approve_once',
+      receiptId: 'receipt-forged',
+      generation: 0,
+      owner: { ...owner, toolCallId: 'wrong-child-call' },
+    } as unknown as KernelEvent);
+    expect(forged).toBe(requested);
+
+    const granted = reduceAuthorizationState(requested, {
+      type: 'approval.granted',
+      interactionId: 'child-approval',
+      toolCallId: parentToolCallId,
+      runtimeToolCallId,
+      grant: 'approve_once',
+      receiptId: 'receipt-child',
+      generation: 0,
+      owner,
+    } as unknown as KernelEvent);
+    expect(granted.pendingApprovals.get('child-approval')).toMatchObject({
+      status: 'authorized_queued',
+      receiptId: 'receipt-child',
+    });
+    expect(granted.tools.calls[parentToolCallId]?.status).toBe('authorized_queued');
+  });
+
+  test('persists the stable child owner before runtime tool admission', () => {
+    const parentToolCallId = 'parent-task-call-no-runtime';
+    const childToolCallId = 'model-child-call-no-runtime';
+    const subagentId = 'subagent-no-runtime';
+    const state = {
+      ...initialState(),
+      tools: {
+        calls: {
+          [parentToolCallId]: {
+            toolCallId: parentToolCallId,
+            name: 'task',
+            modelMessageId: 'message-no-runtime',
+            args: {},
+            createdAtTurnId: 'turn-no-runtime',
+            status: 'queued' as const,
+          },
+        },
+        queue: [parentToolCallId],
+        active: [],
+      },
+    };
+    const owner = {
+      kind: 'subagent_tool' as const,
+      toolCallId: childToolCallId,
+      subagentId,
+      parentToolCallId,
+    };
+    const requested = reduceAuthorizationState(state, {
+      type: 'approval.requested',
+      interactionId: 'child-approval-no-runtime',
+      toolCallId: parentToolCallId,
+      parentToolCallId,
+      childSubagentId: subagentId,
+      owner,
+      approval: { callId: childToolCallId },
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: true,
+    } as unknown as KernelEvent);
+
+    expect(requested.pendingApprovals.get('child-approval-no-runtime')).toMatchObject({
+      toolCallId: parentToolCallId,
+      childToolCallId,
+      childSubagentId: subagentId,
+      parentToolCallId,
+    });
+
+    const granted = reduceAuthorizationState(requested, {
+      type: 'approval.granted',
+      interactionId: 'child-approval-no-runtime',
+      toolCallId: parentToolCallId,
+      grant: 'approve_once',
+      receiptId: 'receipt-child-no-runtime',
+      generation: 0,
+      owner,
+    } as unknown as KernelEvent);
+    expect(granted.pendingApprovals.get('child-approval-no-runtime')).toMatchObject({
+      status: 'authorized_queued',
+      receiptId: 'receipt-child-no-runtime',
+    });
+    expect(granted.tools.calls[parentToolCallId]?.status).toBe('authorized_queued');
   });
 
   test('auto-review completion closes the interaction and enforces both breaker thresholds', () => {
@@ -242,6 +385,7 @@ describe('State core reducers', () => {
       type: 'auto_review.requested',
       reviewId: 'review-1',
       toolCallId: 'call-1',
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
       toolName: 'shell_execute',
       reason: 'review',
       approval: autoReviewApproval,
@@ -251,6 +395,7 @@ describe('State core reducers', () => {
       type: 'auto_review.completed',
       reviewId: 'review-1',
       toolCallId: 'call-1',
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
       createdAt: '2026-08-20T00:00:30.000Z',
       result: { ok: true, approved: false, escalatedToUser: false, reason: 'denied' },
     } as unknown as KernelEvent);
@@ -267,6 +412,7 @@ describe('State core reducers', () => {
       type: 'auto_review.requested',
       reviewId: 'review-1',
       toolCallId: 'call-1',
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
       toolName: 'shell_execute',
       reason: 'review',
       approval: autoReviewApproval,
@@ -276,6 +422,7 @@ describe('State core reducers', () => {
       type: 'auto_review.completed',
       reviewId: 'review-1',
       toolCallId: 'call-1',
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
       createdAt: '2026-08-20T00:01:01.000Z',
       result: { ok: true, approved: true, durationMs: 2 },
     } as KernelEvent);
@@ -565,5 +712,38 @@ describe('State core reducers', () => {
       correctionAttempt: decision.correctionAttempt + 1,
     } as KernelEvent);
     expect(forged).toBe(planned);
+  });
+
+  test('normalizes the legacy completion name without losing payload or stable Host Run identity', () => {
+    const state = taskStarted();
+    const outcome = {
+      version: 1 as const,
+      status: 'completed' as const,
+      reasonCode: 'completed' as const,
+      knownExternalEffects: 'known' as const,
+      safeRetry: false,
+      recoveryEntry: 'none' as const,
+      pendingVerification: false,
+    };
+    expect(
+      normalizeCanonicalTaskCompletionFact(
+        state,
+        {
+          type: 'run.completed',
+          turnId: 'turn-1',
+          output: 'final answer',
+          completionGuardVersion: 'completion_guard_v1',
+          outcome,
+        },
+        'accepted-run-1',
+      ),
+    ).toEqual({
+      taskId: 'task-1',
+      runId: 'accepted-run-1',
+      turnId: 'turn-1',
+      output: 'final answer',
+      completionGuardVersion: 'completion_guard_v1',
+      outcome,
+    });
   });
 });

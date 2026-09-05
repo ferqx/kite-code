@@ -34,6 +34,9 @@
   只读program修改descriptor，参数敏感program由descriptor选择局部inspector，未命中保持unknown。
 - App/Host/catalog/executor 必须使用同一个 snapshot。
 - 任何 terminal uncertainty 不转换为成功或 fallback。
+- Subagent工具在admission时取得稳定`stepId + toolCallId`；started、terminal、private continuation与历史重放保留
+  同一identity。Builtin结果投影以`completed | failed | cancelled` status作为唯一终态，严格拒绝缺失identity、旧`ok`
+  双权威或未知字段的新格式结果；旧格式转换只发生在State migration reader。
 - `PrivateImmutableArtifactStorage`必须在App注入backend与filesystem root之间二选一。single-Service production固定使用typed DB backend且不
   fallback；filesystem root只保留给显式旧owner和owner-local测试。ref derivation、canonical JSON、schema、digest、size与owner验证在两种backend间一致。
 - Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、

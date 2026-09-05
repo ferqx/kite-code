@@ -50,10 +50,13 @@ export type PersistedSubagentMessage =
   | PersistedToolMessage;
 
 export interface PersistedSubagentStep {
+  /** Stable identity allocated at child tool admission and retained on replay. */
+  stepId: string;
+  /** Stable tool-call identity shared by started/result/continuation events. */
+  toolCallId: string;
   toolName: string;
   toolArgs: JsonObject;
-  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
-  ok?: boolean;
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error' | 'cancelled';
   totalLines?: number;
 }
 

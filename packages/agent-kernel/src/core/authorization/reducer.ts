@@ -151,6 +151,11 @@ function pendingFromEvent(
       ? suppliedGeneration
       : state.approvalGeneration;
   const approvalHash = stringOrUndefined(approvalRecord.approvalHash);
+  const owner = recordField(payload, 'owner');
+  const childToolCallId =
+    stringField(owner ?? {}, 'kind') === 'subagent_tool'
+      ? stringOrUndefined(stringField(owner ?? {}, 'toolCallId'))
+      : undefined;
   return {
     interactionId,
     toolCallId,
@@ -163,6 +168,7 @@ function pendingFromEvent(
     ...(stringOrUndefined(payload.runtimeToolCallId)
       ? { runtimeToolCallId: payload.runtimeToolCallId as string }
       : {}),
+    ...(childToolCallId ? { childToolCallId } : {}),
     route,
     fullModeBypassEligible: payload.fullModeBypassEligible as boolean,
     fullModePolicyBypassAllowed: payload.fullModePolicyBypassAllowed as boolean,
@@ -188,8 +194,31 @@ function pendingFromEvent(
     generation,
     createdAt: pendingCreatedAt(payload),
     status,
-    state: status,
   };
+}
+
+function ownerMatchesPending(pending: AgentPendingApproval, owner: unknown): boolean {
+  if (!owner || typeof owner !== 'object' || Array.isArray(owner)) return false;
+  const candidate = owner as Record<string, unknown>;
+  if (candidate.kind === 'root_tool') {
+    return (
+      pending.childSubagentId === undefined &&
+      pending.parentToolCallId === undefined &&
+      candidate.toolCallId === pending.toolCallId
+    );
+  }
+  // A subagent request is only settleable when the canonical child owner was
+  // persisted with the request.  Runtime and presentation call ids are
+  // separate identities; accepting either as a fallback would let a parent
+  // approval settle the wrong child after an admission boundary.
+  const childToolCallId = pending.childToolCallId;
+  if (!childToolCallId) return false;
+  return (
+    candidate.kind === 'subagent_tool' &&
+    candidate.toolCallId === childToolCallId &&
+    candidate.subagentId === pending.childSubagentId &&
+    candidate.parentToolCallId === pending.parentToolCallId
+  );
 }
 
 function approvalQueueState(
@@ -392,6 +421,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
       const route = pendingRoute(payload);
       const status = route === 'auto' ? 'queued_auto' : 'awaiting_user';
       const pending = pendingFromEvent(state, payload, interactionId, toolCallId, route, status);
+      if (!ownerMatchesPending(pending, payload.owner)) return state;
       const pendingApprovals = new Map(state.pendingApprovals);
       pendingApprovals.set(interactionId, pending);
       const activeApprovalId = state.activeApprovalId ?? chooseApprovalFocus(pendingApprovals);
@@ -435,6 +465,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         state.activeApprovalId !== interactionId ||
         !pending ||
         pending.toolCallId !== toolCallId ||
+        !ownerMatchesPending(pending, payload.owner) ||
         pending.generation !== generation ||
         generation < state.approvalGeneration ||
         terminalApprovalStatus(pending.status) ||
@@ -488,6 +519,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         state.activeApprovalId !== interactionId ||
         !pending ||
         pending.toolCallId !== toolCallId ||
+        !ownerMatchesPending(pending, payload.owner) ||
         pending.generation !== generation ||
         generation < state.approvalGeneration ||
         terminalApprovalStatus(pending.status)
@@ -552,6 +584,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         state.activeApprovalId !== interactionId ||
         !focused ||
         focused.toolCallId !== toolCallId ||
+        !ownerMatchesPending(focused, payload.owner) ||
         generation < state.approvalGeneration ||
         terminalApprovalStatus(focused.status)
       )
@@ -605,7 +638,8 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         !focusedMatch ||
         stringOrUndefined(focusedMatch.toolCallId) !== toolCallId ||
         stringOrUndefined(focusedMatch.receiptId) === undefined ||
-        numberField(focusedMatch, 'generation') !== generation
+        numberField(focusedMatch, 'generation') !== generation ||
+        !ownerMatchesPending(focused, focusedMatch.owner)
       )
         return state;
       const eligibleMatches = new Set<string>();
@@ -623,6 +657,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
           pending.status !== 'running' &&
           pending.status !== 'authorized_queued' &&
           stringOrUndefined(match.toolCallId) === pending.toolCallId &&
+          ownerMatchesPending(pending, match.owner) &&
           sameCommandIdentity(pending.commandIdentity, commandIdentity) &&
           (match.bindingDigest === undefined || match.bindingDigest === pending.bindingDigest);
         if (!eligible) continue;
@@ -838,6 +873,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         'auto',
         'auto_reviewing',
       );
+      if (!ownerMatchesPending(pending, payload.owner)) return state;
       const pendingApprovals = new Map(state.pendingApprovals);
       pendingApprovals.set(interactionId, pending);
       const activeApprovalId = state.activeApprovalId ?? chooseApprovalFocus(pendingApprovals);
@@ -885,6 +921,7 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         !reviewId ||
         !pending ||
         pending.toolCallId !== toolCallId ||
+        !ownerMatchesPending(pending, payload.owner) ||
         terminalApprovalStatus(pending.status) ||
         pending.status === 'authorized_queued' ||
         pending.status === 'running'

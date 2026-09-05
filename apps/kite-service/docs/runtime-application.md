@@ -64,6 +64,9 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 Store8 capability存在时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
 resource receipt和State decision共同提交。bridge activation先调用Coordinator的queued→running transition，再发布notification或交给
 Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
+Start Turn整批presentation notification还携带admission确认的`runId/taskId/turnId`；首条`user.message_appended`不从
+`turn.started`之前的predecessor snapshot取Turn。无active/unknown Run的启动hydration分页读取最近settled Run，保持重启后的
+`currentRun`与late-stream fence；该读取不写Store或触发recovery。
 current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；Plan submit必须从
@@ -76,17 +79,24 @@ initialize/query，并继续把persisted Session identity与当前Workspace交�
 IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
 same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
 subscribe或recovery。
+
+History在raw `turn.started`没有匹配`turn.completed/turn.aborted/run terminal`时返回`restart_required`。该标记只触发Client的
+显式`resume_session`恢复尝试；若旧effect lease仍fence mutation，History保持只读，不能把本地展示结算冒充Server terminal。
+History transcript的每个record还携带对应的Run/Task/Turn identity。持久顺序中先出现user message、后出现
+`task.started/turn.started`时，reader只在该后续事实到达后回填此前待关联record；无法关联的旧格式记录使用稳定的
+`legacy-*`迁移identity。Native TUI随后按与live notification相同的Accepted envelope校验消费，不能跳过identity fence。
 显式daemon Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
 `model_surface`；read adapter只消费App-owned Model Context read port，不取得Artifact ref/backend或通用正文读取authority。
 operation gate的quiesce线性化关闭新mutation admission后，Application在同一lease中合并gate临界区与Host
 `SessionLifecycleSupervisor`投影的长生命周期Session operation；普通stop发现任一active都立即resume并返回`service_busy`，不会等待active
 Turn或退化成manager timeout。只有两者均idle才允许commit drain；signal owner shutdown仍通过cancel/drain进入draining。
-动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一投影为
-`mcp:dynamic_tool`，具体工具名只从独立有界safe summary展示。
+动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一保留
+`mcp_tool` category/`mcp:dynamic_tool` fallback label。若 admission 时已有 MCP capability descriptor，则其经过
+bounded safe-text projection 的 `displayLabel` 可作为 card 的具体工具名；hashed/raw model binding name 仍不得进入 card 或 scrollback。
 
 Live presentation在进入closed `RuntimeClientEvent` projector前统一经过Service-owned 50ms presentation frame。累计
 reasoning/text在一帧内只投影最新值并固定按reasoning→text顺序发布，tool progress按`toolCallId + stream`有界合并；
-durable事件、reasoning completion与Turn终结前必须先flush。relocated `SessionRuntime` seam与concrete
+durable事件、reasoning completion与Turn终结前必须先flush。Service-owned presentation frame与concrete
 `CliRuntimeBridge`复用同一实现，因此InProcess/Service或不同carrier只能改变传输，不能改变TUI看到的事件粒度、顺序或
 聚合语义。frame是active Turn owner；interaction、cancel、close与shutdown旁路在发布durable notification前也必须先
 flush，不能让terminal越过仍在buffer中的reasoning/progress。

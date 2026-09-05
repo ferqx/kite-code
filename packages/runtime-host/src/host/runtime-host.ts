@@ -103,6 +103,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   readonly #deletedSessions = new Set<string>();
   readonly #activeAccesses = new Set<Promise<unknown>>();
   readonly #ownsSessionExecution: (sessionId: string) => boolean;
+  readonly #runWithSessionExecution?: <Result>(
+    sessionId: string,
+    operation: () => Result,
+  ) => Result;
   #startPromise: Promise<void> | undefined;
   #disposePromise: Promise<void> | undefined;
   #closing = false;
@@ -114,9 +118,14 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
     readonly contextCompiler?: ContextCompilerPort;
     readonly ownsSessionExecution?: (sessionId: string) => boolean;
+    readonly runWithSessionExecution?: <Result>(
+      sessionId: string,
+      operation: () => Result,
+    ) => Result;
   }) {
     this.storage = input.storage;
     this.#ownsSessionExecution = input.ownsSessionExecution ?? (() => true);
+    this.#runWithSessionExecution = input.runWithSessionExecution;
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
     assertRuntimeHostRegistrySnapshot(input.moduleRegistry, input.capabilityRegistrySnapshot);
@@ -160,7 +169,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     command: RuntimeCommand,
     context?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeCommandReceipt> {
-    return this.#beginAccess(() => this.#executeCommand(command, context));
+    const execute = () => this.#beginAccess(() => this.#executeCommand(command, context));
+    return command.type === 'create_session'
+      ? execute()
+      : this.#withSessionExecution(runtimeCommandSessionId(command), execute);
   }
 
   async #executeCommand(
@@ -203,9 +215,13 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       const conflict = await this.#revisionConflict(command);
       if (conflict) return conflict;
       if (command.type === 'delete_session') return this.#deleteSession(command, evidence);
+      const allowQueuedSuccessor =
+        command.type === 'start_turn' &&
+        isTerminalRunProjection(this.#registry.projection(command.sessionId));
       if (
         (command.type === 'start_turn' || command.type === 'compact_session') &&
-        !this.#lifecycle.canSchedule(command.sessionId)
+        !this.#lifecycle.canSchedule(command.sessionId) &&
+        !allowQueuedSuccessor
       ) {
         return {
           status: 'rejected',
@@ -247,7 +263,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       await this.#refreshReceiptSession(committed.receipt);
       const prepared = committed.preparedExecution;
       if (prepared?.execution)
-        this.#schedulePreparedExecution(command, committed.receipt, prepared);
+        this.#schedulePreparedExecution(command, committed.receipt, prepared, allowQueuedSuccessor);
       if (command.type === 'cancel_turn') {
         this.#lifecycle.abort(committed.receipt.sessionId, 'Runtime turn cancelled.');
       } else if (command.type === 'close_session') {
@@ -355,6 +371,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     command: RuntimeCommand,
     receipt: Extract<RuntimeCommandReceipt, { readonly status: 'applied' }>,
     prepared: RuntimeHostPreparedExecution,
+    allowQueuedSuccessor = false,
   ): void {
     const execution = prepared.execution;
     if (!execution) return;
@@ -365,10 +382,17 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       operation: execution.operation,
       execute: run,
       onSkipped: execution.cancel,
+      ...(allowQueuedSuccessor ? { allowQueuedSuccessor: true } : {}),
     });
     if (!scheduled) {
       throw new Error(`Runtime session operation could not be scheduled: ${receipt.sessionId}`);
     }
+  }
+
+  #withSessionExecution<Result>(sessionId: string, operation: () => Result): Result {
+    return this.#runWithSessionExecution
+      ? this.#runWithSessionExecution(sessionId, operation)
+      : operation();
   }
 
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
@@ -464,7 +488,19 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   subscribe(subscription: RuntimeSubscription) {
     this.#assertOpen();
-    return this.#notifications.subscribe(subscription);
+    // Register the subscriber before hydrating a Session that may have been
+    // admitted through an external Store owner. The query path can be
+    // read-only/direct in that composition, so relying on its return value to
+    // seed this Host's local projector would otherwise leave the subscriber
+    // waiting forever for the initial durable snapshot.
+    const iterable = this.#notifications.subscribe(subscription);
+    if (
+      subscription.spec.scope === 'session' &&
+      this.#registry.projection(subscription.spec.sessionId) === undefined
+    ) {
+      void this.#loadProjection(subscription.spec.sessionId).catch(() => undefined);
+    }
+    return iterable;
   }
 
   removeSessionProjection(sessionId: string): boolean {
@@ -644,7 +680,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   #commitQueryProjection(result: RuntimeQueryResult): void {
     if (result.status !== 'ok') return;
     const publish = (projection: RuntimeSessionProjection): void => {
-      if (!this.#ownsSessionExecution(projection.sessionId)) return;
+      // Query hydration is an observer projection, not execution ownership.
+      // A Host must seed an explicitly subscribed historical Session even
+      // when another generation (or no live generation) owns its mutations.
+      // Command admission continues to enforce #ownsSessionExecution.
       this.#notifications.publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
@@ -985,10 +1024,15 @@ function sameAppliedReceipt(
   );
 }
 
+function isTerminalRunProjection(projection: RuntimeSessionProjection | undefined): boolean {
+  const status = projection?.currentRun?.status;
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
 function receiptFromStoredReceipt(
   receipt: RuntimeStoredCommandReceipt,
 ): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
-  const resource = parseRuntimeStoredCommandResource(receipt.resourceResult);
+  const resource = parseRuntimeStoredCommandResource(receipt.resourceResult, receipt.commandId);
   return {
     status: 'applied',
     commandId: receipt.commandId,

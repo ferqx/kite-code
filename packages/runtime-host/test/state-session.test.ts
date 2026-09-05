@@ -115,10 +115,35 @@ function runStore(records: Map<string, RuntimeStoredRun>): RuntimeRunStorePort {
           run.sessionId === sessionId &&
           (run.status === 'queued' || run.status === 'running' || run.status === 'waiting'),
       ) ?? null,
-    list: (request) => ({
-      entries: [...records.values()].filter((run) => run.sessionId === request.sessionId),
-      hasMore: false,
-    }),
+    list: (request) => {
+      const candidates = [...records.values()]
+        .filter(
+          (run) =>
+            run.sessionId === request.sessionId &&
+            (request.status === undefined || run.status === request.status) &&
+            (request.phase === undefined || run.phase === request.phase),
+        )
+        .sort(
+          (left, right) =>
+            left.createdRevision - right.createdRevision || left.runId.localeCompare(right.runId),
+        )
+        .filter(
+          (run) =>
+            request.cursor === undefined ||
+            run.createdRevision > request.cursor.createdRevision ||
+            (run.createdRevision === request.cursor.createdRevision &&
+              run.runId.localeCompare(request.cursor.runId) > 0),
+        );
+      const entries = candidates.slice(0, request.limit);
+      const last = entries.at(-1);
+      return {
+        entries,
+        hasMore: candidates.length > entries.length,
+        ...(candidates.length > entries.length && last
+          ? { nextCursor: { createdRevision: last.createdRevision, runId: last.runId } }
+          : {}),
+      };
+    },
     insert: (run) => {
       const key = `${run.sessionId}\0${run.runId}`;
       if (records.has(key)) throw new Error('duplicate Run');
@@ -344,6 +369,90 @@ describe('Runtime Host State session', () => {
 
     expect(() => session.activateRun('run-1')).toThrow('commit refused');
     expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
+  });
+
+  test('keeps the accepted Run identity across a continuation Turn and terminal closure', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-initial' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-initial', phase: 'building' },
+    });
+    session.activateRun('run-initial');
+
+    session.processEvent({ type: 'turn.started', turnId: 'turn-continuation' });
+    expect(session.getState().turn).toMatchObject({
+      turnId: 'turn-continuation',
+      status: 'active',
+    });
+    expect(f.writes.at(-1)?.runMutation).toMatchObject({
+      type: 'transition',
+      transition: {
+        runId: 'run-initial',
+        next: { runId: 'run-initial', status: 'running', lastRevision: 2 },
+      },
+    });
+
+    session.processEvent({ type: 'turn.completed', turnId: 'turn-continuation' });
+    expect(f.runs.get('state-session-test\0run-initial')).toMatchObject({
+      runId: 'run-initial',
+      status: 'completed',
+      lastRevision: 3,
+    });
+    expect(f.runs.has('state-session-test\0turn-continuation')).toBe(false);
+    expect(session.getLifecycleProjection()).toEqual({
+      currentRun: {
+        runId: 'run-initial',
+        initialTurnId: 'run-initial',
+        activeTurnId: 'turn-continuation',
+        status: 'completed',
+        revision: 3,
+        outcome: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+      },
+    });
+  });
+
+  test('hydrates the most recently settled Run when no Run remains active', () => {
+    const state = { ...initialState(), revision: 6 } as AgentState;
+    const f = fixture(state, true);
+    f.runs.set('state-session-test\0run-old', {
+      sessionId: 'state-session-test',
+      runId: 'run-old',
+      startCommandId: 'start-old',
+      phase: 'building',
+      status: 'completed',
+      createdRevision: 1,
+      lastRevision: 3,
+      createdAtMs: 100,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+    });
+    f.runs.set('state-session-test\0run-new', {
+      sessionId: 'state-session-test',
+      runId: 'run-new',
+      startCommandId: 'start-new',
+      phase: 'building',
+      status: 'cancelled',
+      createdRevision: 4,
+      lastRevision: 6,
+      createdAtMs: 200,
+      startedAtMs: 210,
+      finishedAtMs: 220,
+      terminal: { reasonCode: 'cancelled', safeRetry: true, recoveryEntry: 'new_run' },
+    });
+    const session = createRuntimeHostStateSession(f.input);
+
+    expect(session.getLifecycleProjection()).toEqual({
+      currentRun: {
+        runId: 'run-new',
+        initialTurnId: 'run-new',
+        activeTurnId: 'turn-1',
+        status: 'cancelled',
+        revision: 6,
+        outcome: { reasonCode: 'cancelled', safeRetry: true, recoveryEntry: 'new_run' },
+      },
+    });
   });
 
   test('refines a recovered unknown Run only to a precise terminal without moving its finish clock', () => {

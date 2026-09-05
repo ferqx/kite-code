@@ -57,7 +57,7 @@
   `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
   原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
 - 最终回复journey必须分别覆盖无Thought归属歧义的组件级流式提交，以及active Thought下的分类等待。前者的首个完整Markdown
-  组件应在最后组件前进入真实VT/scrollback并由Static拥有；后者的完整前缀必须保持隐藏`responsePending`，直到
+  组件应在最后组件前进入真实VT/scrollback并由Static拥有；后者的待分类正文必须留在`RequestAssembly`且不创建OutputBlock，直到
   `model.responded(toolCallCount=0)`才发布，若`toolCallCount>0`则删除buffer并继续同一活动Thought。最终各组件在scrollback中
   各出现一次，工具型多轮项目探索只能留下一个聚合Thinking标题；在最终模型调用期间加入queued successor后，Thinking数量和
   工具统计必须保持不变，且后继prompt仍能正常执行。Headless terminal harness通过
@@ -70,6 +70,10 @@
 - `model.requested`不是可见边界；没有正文、standalone tool或interaction打断时，相邻read/search与服务端判定为read-only的shell继续聚合在
   同一个Thought。TUI只消费Service给出的`presentation`分类，不根据原始command重新推断工具风险或展示类别。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
+- Presentation收尾场景必须覆盖terminal-before-receipt、terminal后的late text/reasoning/tool事件、`/clear`后的marker唯一与零空闲stdout；
+  active-stream场景必须用真实provider request同时证明当前Run模型冻结、下一Run模型生效，以及主题/语言切换不新增Run或重复正文。
+- POSIX resize场景验证长文本窄→宽与宽→窄reflow、scrollback marker唯一和输入恢复；Windows不依赖ConPTY转发SIGWINCH，
+  由可注入columns的组件测试证明相同逻辑reflow规则。
 - 并发Subagent取消回归必须在真实PTY中同时验证child identity、Esc后1秒内`Cancelling`、重复Esc去重、queued successor
   的模型响应、入队前后完全相同的`Delegating`投影，以及durable Provider cleanup全部早于successor message且不产生
   `capability.execution_unknown`。

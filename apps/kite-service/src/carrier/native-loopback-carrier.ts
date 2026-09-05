@@ -49,6 +49,7 @@ import {
 import {
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
   RUNTIME_PROTOCOL_LIMITS,
+  RUNTIME_PROTOCOL_VERSION,
   type RuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
 import type {
@@ -358,7 +359,7 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         origin: binding.origin,
         websocketUrl: `ws://${binding.host}${KITE_SERVICE_RPC_PATH}`,
       },
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
       serverVersion: options.serverVersion,
       buildId: options.buildId,
@@ -471,7 +472,7 @@ function handleInstanceHandshake(
       {
         schema: 'kite.local-runtime.instance-handshake.v1',
         instanceId: options.instanceId,
-        protocolVersion: 1,
+        protocolVersion: RUNTIME_PROTOCOL_VERSION,
         clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
         serverVersion: options.serverVersion,
         buildId: options.buildId,

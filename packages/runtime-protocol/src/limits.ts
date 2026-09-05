@@ -1,6 +1,6 @@
 /** Transport-independent protocol input limits. Carriers may impose stricter limits. */
-export const RUNTIME_PROTOCOL_VERSION = 1 as const;
-export const RUNTIME_PROTOCOL_SCHEMA = 'kite.runtime-protocol.v1' as const;
+export const RUNTIME_PROTOCOL_VERSION = 2 as const;
+export const RUNTIME_PROTOCOL_SCHEMA = 'kite.runtime-protocol.v2' as const;
 
 export const RUNTIME_PROTOCOL_LIMITS = Object.freeze({
   maxMessageBytes: 1_048_576,

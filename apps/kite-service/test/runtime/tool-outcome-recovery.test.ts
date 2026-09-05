@@ -2447,6 +2447,8 @@ describe('ToolOutcome Runtime event integration', () => {
         toolRecovery: child,
         steps: [
           {
+            stepId: 'subagent-step:private-continuation:child-private',
+            toolCallId: 'child-private',
             toolName: 'read_file',
             toolArgs: { path: 'private-path' },
             status: 'awaiting_approval',
@@ -2636,6 +2638,7 @@ describe('ToolOutcome Runtime event integration', () => {
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
       reason: 'redacted',
+      owner: { kind: 'root_tool' as const, toolCallId: 'auto-review-call' },
       approval: {} as never,
     });
     const terminal = {
@@ -2648,6 +2651,7 @@ describe('ToolOutcome Runtime event integration', () => {
         reviewerModelName: 'test',
         durationMs: 1,
       },
+      owner: { kind: 'root_tool' as const, toolCallId: 'auto-review-call' },
       outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('auto_review_rejected', 'redacted'),
@@ -3017,6 +3021,7 @@ describe('ToolOutcome Runtime event integration', () => {
         toolCallId: 'approval-call',
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: 'approval-call' },
         createdAt: '2026-08-10T00:00:00.010Z',
         approval: {
           scope: 'once',
@@ -3041,6 +3046,7 @@ describe('ToolOutcome Runtime event integration', () => {
           generation: 0,
           reason: 'private',
           createdAt: '2026-08-10T00:00:00.035Z',
+          owner: { kind: 'root_tool', toolCallId: 'approval-call' },
         },
       ]);
       expect(rejected[0]).toMatchObject({
@@ -3061,6 +3067,7 @@ describe('ToolOutcome Runtime event integration', () => {
         toolCallId: 'approval-success',
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: 'approval-success' },
         createdAt: '2026-08-10T00:01:00.010Z',
         approval: {
           scope: 'once',
@@ -3084,6 +3091,7 @@ describe('ToolOutcome Runtime event integration', () => {
         grant: 'approve_once',
         receiptId: 'receipt-approval-success',
         generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'approval-success' },
         createdAt: '2026-08-10T00:01:00.035Z',
       } as never);
       kernel.processEvent({
@@ -3128,6 +3136,7 @@ describe('ToolOutcome Runtime event integration', () => {
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
         reason: 'private',
+        owner: { kind: 'root_tool', toolCallId: 'auto-review-success' },
         approval: {
           scope: 'once',
           cwd: '/workspace',
@@ -3153,6 +3162,7 @@ describe('ToolOutcome Runtime event integration', () => {
           reviewerModelName: 'test',
           durationMs: 20,
         },
+        owner: { kind: 'root_tool', toolCallId: 'auto-review-success' },
       });
       kernel.processEvent({
         type: 'tool.started',

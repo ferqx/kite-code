@@ -232,6 +232,8 @@ describe('private Subagent Artifact namespaces', () => {
         modelInvocationOrdinal: 1,
         steps: [
           {
+            stepId: 'step-1',
+            toolCallId: 'blocked-call',
             toolName: 'shell_execute',
             toolArgs: { command: 'private-command-sentinel' },
             status: 'awaiting_approval',

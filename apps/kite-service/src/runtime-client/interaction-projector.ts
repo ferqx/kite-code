@@ -5,6 +5,7 @@ import {
   type RuntimeInteractionResponse,
   sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
+import { runtimeInteractionOwnerForPending } from '#kite-service/bootstrap/runtime/interaction-owner';
 import type { RuntimeUserAction } from '#kite-service/bootstrap/runtime/state-actions';
 import type { RuntimeEffect, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
 import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
@@ -257,12 +258,14 @@ function projectPendingRuntimeApproval(
       grant === 'approve_once' || grant === 'same_command',
   );
   if (grants.length === 0 || new Set(grants).size !== grants.length) return null;
+  const owner = runtimeInteractionOwnerForPending(pending);
   const projected = validInteraction({
     kind: 'approval',
     interactionId: pending.interactionId,
     sessionRevision: revision,
     generation: pending.generation,
     grants,
+    owner,
     command: projectRuntimeClientCommand(pending.approval.command),
     title: projectRuntimeClientText(pending.approval.tool, 256),
     summary: projectRuntimeClientText(pending.approval.summary, 1_024),

@@ -18,9 +18,15 @@
   保留该字段，使展示层能按真实dispatch identity聚合，串行child不携带该字段。
 - `subagent.completed`携带Runtime实测`toolCallCount + durationMs`；`subagent.failed`可携带同类终态计量和仅含
   `code + stage`的低敏感度诊断，App projector不得把`modelInvocationId` correlation带入Client边界。
+- `AcceptedPresentationEnvelope` 是唯一进入消息 projector 的接收边界：每个 envelope 固定 Session、connection
+  generation、durability，以及由事件 coverage scope 要求的 Run/Task/Turn identity 与 ephemeral stream tuple；model/tool/subagent/interaction 事件必须绑定 Turn，Task/Turn/Run terminal 的 envelope identity 必须与事件字段精确相等；Subagent step/review/phase 和审批 owner
+  均使用稳定 child/tool identity，不能由展示层按工具名或到达顺序补全。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
 - 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
   Run resource；这些DTO不代表Public Agent API route已开放。
+- Session projection schema v2把`activeTask`与current-or-last `currentRun`分开；currentRun携带stable
+  `runId/initialTurnId/activeTurnId`、revision、precise terminal或`recovery_required`；不存在第二份Work lifecycle DTO。
+  accepted start receipt另投影由同commandId确定性派生的`messageId`，不增加持久receipt字段。
 - 为已认证的 App admission 定义可选的进程内 `RuntimeCommandContext`（connection/request identity 与 opaque
   Worker binding reference）；它只随 `RuntimeAccess.command()` 在本进程内传递，永不进入 Runtime Protocol、History 或 Browser
   contract。
@@ -44,6 +50,7 @@
 
 - 所有客户端数据保持普通 JSON-safe 数据。
 - command 必须携带唯一 `commandId`；Session mutation 使用 revision fencing。
+- 已建立Run的`cancel_turn`必须同时携带canonical `runId`与active `turnId`；缺失或错配在执行前fail closed。
 - Run query只接受Session-scoped opaque identity和最多200项的ASC keyset cursor；Run resource只出现在创建它的original/replayed
   applied receipt，不允许Client以当前query结果伪造原始command response。
 - `delete_session` 是 Host-owned mutation：按 scoped command identity 删除 Session durable facts并保留
@@ -60,13 +67,17 @@
 - `plan.approved` 是审核 settlement 的封闭 client event，携带 interaction identity、Session revision 与
   execution mode；Client 不从 raw Plan/Kernel event 推断审核已完成。
 - `RuntimeHistorySessionTranscript` 只含同一 `RuntimeClientEvent` union；它是 display/recovery evidence，
-  不携带 callback、Store handle 或历史 interaction settlement authority。
+  并以`restart_required`明确标记没有durable terminal的Turn，使客户端在订阅前尝试显式Server恢复；若恢复被旧effect lease
+  暂时fence，TUI只能只读展示durable transcript并报告本地诊断，不得合成Run terminal。
+  每个durable record同时携带用于构造Accepted envelope的Run/Task/Turn identity；首条用户消息早于lifecycle admission时，
+  Service reader在后续`task.started/turn.started`到达后按持久顺序前向join，无法join的旧记录使用明确的`legacy-*`
+  迁移identity。TUI仍不接受无identity lifecycle event，也不携带callback、Store handle或历史interaction settlement authority。
 - `ListRuntimeLogEventsRequest`允许同时携带exclusive `afterSequence < beforeSequence`，形成有界sequence window；
   单侧cursor仍保持原语义，等于或反向window fail closed。该窗口只约束只读History，不产生snapshot/receipt或Store authority。
 - `RuntimeSessionProjection.interactionQueue` 是同 revision 的完整、有序替换集；`activeInteractionId` 必须属于该集，
   每个interaction的`sessionRevision`是当前 settlement CAS，必须等于queue/session revision；稳定交互身份由
   `interactionId`与kind-specific generation/plan/provider/verification/input/command字段共同组成。Session revision
-  前进时Service以相同稳定身份重新投影当前CAS，identity重复、缺失、内容漂移或activeWork/queue完整身份不一致全部
+  前进时Service以相同稳定身份重新投影当前CAS，identity重复、缺失、内容漂移或currentRun/queue身份不一致全部
   fail closed；同ID/revision但command、grants或其他kind-specific字段不同同样非法。
 - Live notification 与 History transcript 必须通过同一个 exact `RuntimeClientEvent` validator；closed DTO
   新增可选字段时，类型、validator 与 wire codec 必须同步，不能让实时订阅可见而恢复/回放拒绝同一事件。

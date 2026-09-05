@@ -124,6 +124,18 @@ export interface RuntimeLogEventPage {
 }
 
 /**
+ * Runtime lifecycle identity captured for one durable history record. History
+ * does not invent event fields; this metadata lets replay build the same
+ * accepted presentation envelope as live delivery when the closed event
+ * itself predates the envelope identity fields.
+ */
+export interface RuntimeHistoryRecordIdentity {
+  readonly runId?: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
+}
+
+/**
  * A complete, display-only durable transcript for one current-format session.
  * It deliberately carries the same closed RuntimeClientEvent vocabulary as
  * live delivery; it is not an event reducer input or settlement authority.
@@ -134,12 +146,13 @@ export interface RuntimeHistorySessionTranscript {
   readonly records: readonly {
     readonly sequence: number;
     readonly events: readonly RuntimeClientEvent[];
+    readonly identity?: RuntimeHistoryRecordIdentity;
   }[];
   readonly events: readonly RuntimeClientEvent[];
   /** Folded history fallback; an admitted live Host projection remains authoritative. */
   readonly interactionMode: InteractionMode;
   /** Historical interaction facts require fresh Runtime recovery before settlement. */
-  readonly recovery: 'normal' | 'pending_interaction';
+  readonly recovery: 'normal' | 'pending_interaction' | 'restart_required';
 }
 
 export class RuntimeLogRequestValidationError extends Error {

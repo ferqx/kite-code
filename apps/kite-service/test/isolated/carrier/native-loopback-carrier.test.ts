@@ -25,7 +25,11 @@ import {
   type NativeProviderCredentialRequest,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeAccess } from '@kite-ai/runtime-contract';
-import { RUNTIME_PROTOCOL_LIMITS, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import {
+  RUNTIME_PROTOCOL_LIMITS,
+  RUNTIME_PROTOCOL_VERSION,
+  type RuntimeProtocolMessage,
+} from '@kite-ai/runtime-protocol';
 import {
   RuntimeServer,
   type RuntimeServerAdmissionDecision,
@@ -175,7 +179,7 @@ describe('Kite Service Native loopback carrier', () => {
     expect(await handshake.json()).toEqual({
       schema: 'kite.local-runtime.instance-handshake.v1',
       instanceId: 'instance-1',
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
       serverVersion: 'service-test',
       buildId: 'dev:0123456789012345678901234567890123456789',
@@ -213,7 +217,7 @@ describe('Kite Service Native loopback carrier', () => {
     socket.send(JSON.stringify(initializeRequest()));
     expect(await messages.next()).toMatchObject({
       id: 'initialize',
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
     });
     expect(fixture.bound).toHaveLength(1);
     expect(fixture.bound[0]?.workspace).toEqual(workspace);
@@ -1336,7 +1340,7 @@ function initializeRequest() {
     id: 'initialize',
     method: 'initialize' as const,
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: {
         name: 'carrier-test',
         version: '1',

@@ -16,12 +16,18 @@ import {
   isCurrentPendingInteractionRequest,
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
+  LEGACY_STATE27_FORMAT_EPOCH,
+  LEGACY_STATE27_SCHEMA_VERSION,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEvent,
   rebindForkAgentState,
 } from '@kite-ai/agent-kernel';
-import type { RuntimeCompatibleRecordFormat, RuntimeSnapshotCodec } from '../storage';
+import type {
+  RuntimeCompatibleEventContext,
+  RuntimeCompatibleRecordFormat,
+  RuntimeSnapshotCodec,
+} from '../storage';
 
 export interface RuntimeHostStateStorageBinding {
   readonly codec: RuntimeSnapshotCodec<RuntimeEvent, AgentState>;
@@ -102,6 +108,7 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
     decodeCompatibleEvent(
       json: string,
       format: RuntimeCompatibleRecordFormat,
+      context?: RuntimeCompatibleEventContext,
     ): RuntimeEvent | null {
       if (
         format.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
@@ -113,10 +120,14 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
           return null;
         }
       }
-      const converted = convertLegacyRuntimeEventJson(json);
+      const converted = convertLegacyRuntimeEventJson(json, context?.sequence ?? 0);
       if (
-        format.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
-        format.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH ||
+        !(
+          (format.schemaVersion === LEGACY_STATE26_SCHEMA_VERSION &&
+            format.formatEpoch === LEGACY_STATE26_FORMAT_EPOCH) ||
+          (format.schemaVersion === LEGACY_STATE27_SCHEMA_VERSION &&
+            format.formatEpoch === LEGACY_STATE27_FORMAT_EPOCH)
+        ) ||
         converted.status !== 'converted'
       )
         return null;
@@ -152,12 +163,14 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
           return null;
         }
       }
-      if (
-        classification !== 'state26' ||
-        format.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
-        format.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH
-      )
-        return null;
+      const formatMatches =
+        (classification === 'state26' &&
+          format.schemaVersion === LEGACY_STATE26_SCHEMA_VERSION &&
+          format.formatEpoch === LEGACY_STATE26_FORMAT_EPOCH) ||
+        (classification === 'state27' &&
+          format.schemaVersion === LEGACY_STATE27_SCHEMA_VERSION &&
+          format.formatEpoch === LEGACY_STATE27_FORMAT_EPOCH);
+      if (!formatMatches) return null;
       const migrated = decodeAgentStateWithCompatibility(json);
       return migrated.status === 'migrated' ? migrated.state : null;
     },

@@ -164,14 +164,14 @@ Builtin concrete operation modules位于 `git/model/planning/subagent/verificati
 
 ## Session、Context 与 Model
 
-App Session 代码位于 `apps/kite-service/src/runtime/session/`：
+App Session 的执行权威位于 Runtime Host；Service 只保留面向命令的局部适配：
 
-- `session-registry` 只管理运行时身份；
 - `session-lifecycle` 管理列表、加载、删除与命名；
 - `rewind-service` 管理 checkpoint preview/fork/restore；
 - `planning-mode-service` 只通过 live Kernel control 改变 planning；
 - `context-compaction-service` 复用同一 Host control、Model Gateway、effect lease 与 storage ports；
-- `session-projection` 形成 Session/TUI 可消费投影。
+- `runtime-host/src/host/session-registry.ts` 管理每个 Session 的 mailbox、revision fencing、lifecycle 与 recovery；
+- Runtime Client/Service projection 形成 Session/TUI 可消费投影，Service 不再提供独立 legacy session-manager/session-runtime registry。
 
 Context 只有一条 current projection 与 compaction 管线。Manual/auto 使用相同 safe boundary、token estimate、summary validation、checkpoint 与 terminal semantics；不存在旧 estimator、standalone coordinator 或第二 Store writer。Model streaming inactivity timeout 与 structured retry terminal 语义由既有 Gateway 保持，不因模块拆分改变。
 
@@ -218,8 +218,8 @@ navigation。第一次 compatibility/persisted load 只用于注册 admission，
 
 `RuntimeSessionCoordinator` 的 Workspace、Project、user、recovery identity 与 Artifact evidence 是 retained
 Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格校验。`interactionMode` 则是可变的、已持久化
-Session 状态：TUI replay、Plan approval 或权限选择把最新模式投影到 `SessionRuntime` 后，`SessionManager` 必须先将
-该模式对齐到既有 coordinator，再校验其余不可变身份。该对齐只更新 coordinator 的 retained mode 镜像，不写第二份
+Session 状态：TUI replay、Plan approval 或权限选择把最新模式提交给 `RuntimeSessionCoordinator` 后，Coordinator 必须先将
+该模式对齐到既有 Host session，再校验其余不可变身份。该对齐只更新 coordinator 的 retained mode 镜像，不写第二份
 Runtime State，也不得掩盖 Workspace、Project、recovery key、sandbox 或 Artifact evidence 漂移。
 Project digest 的唯一 canonicalizer 是 Runtime Host `resolveProjectIdentity()`：Coordinator admission 复用该
 resolver 验证持久 digest。Builtin `canonicalPathForComparison()` 继续负责 sandbox/Tool 的 Windows

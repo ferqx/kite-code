@@ -15,7 +15,7 @@
   spawn配套child，CLI/TUI App本身不解析executable、descriptor、token或Store。
 - `src/service-mode/` 将parent-owned `KiteAppServerConnection`投影为中性
   Runtime mode facade；每个 surface 都是 typed
-  method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
+  method，不使用 legacy session-manager Proxy、Reflect fallback 或动态 registry。
 - CLI parser/main提供显式`kite server start/status/stop`与`run/resume --server <endpoint>`；它们只连接调用者指定或当前profile的
   owner-only Unix socket/Windows named pipe，不参与默认run/TUI发现。daemon启动时固定一个canonical Workspace；另一Workspace连接会
   fail closed。`kite web [--server <endpoint>] [--json]`只读取已经显式启动的daemon status并打印stable `webOrigin`；absent、incompatible或
@@ -41,21 +41,23 @@
   不显示发送失败。等待期间到达的前序Run terminal按revision隔离，不能污染后继receipt的Run identity。queued展示只有在
   `start_turn` receipt被接受后才移除并建立可见新Turn；后台Session也按prompt identity清理展示。receipt与durable `user.message`
   允许乱序：queued entry与pending echo必须原子交接，message先到时消费对应live-only queue entry，receipt先到时建立pending echo，最终都只保留
-  一个以`messageId`为权威的用户块。活动Session的queued展示按FIFO逐条显示为浅色背景的单行`↵ 消息内容`，`Working`位于队列上方，首项前与相邻项之间各保留一行间距；稳定Footer owner与浅比较隔离的OutputArea保证queue增减不重挂载Working、
+  一个以`messageId`为权威的用户块。活动Session的queued展示按FIFO逐条显示为浅色背景的单行`↵ 消息内容`，队列可见时隐藏`Working`状态行，首项前与相邻项之间各保留一行间距；稳定Footer owner与浅比较隔离的OutputArea保证queue增减不重挂载当前消息、
   不重算或改变当前Thought、Tool及Delegating的折叠形态。非空prompt拥有提交Enter，OutputArea不得用同一个按键展开最后一个动态块；空prompt的Enter才保留既有展开/折叠入口。queued chrome不参与消息区的动态高度预算。Enter后普通idle启动同样先显示带live-only pending标记的本地prompt，durable `user.message`只原位补齐
-  `messageId`，提交失败移除仍未确认的pending echo。terminal通知仍携带active work时，每一轮都建立绑定该轮completion callback的remote-idle waiter。
-  每轮只有applied receipt后才登记accepted completion identity，并启动2秒后、至多每2秒一次的bounded query fallback；它只在projection满足
-  当前revision floor且权威idle时收敛current run，弥补terminal/idle notification gap，迟到waiter/finally不能清除后继轮状态。Ink flush只作展示屏障：
+  `messageId`，提交失败移除仍未确认的pending echo。每轮只有applied receipt后才登记
+  `sessionId/runId/commandId/revisionFloor` accepted identity，并启动2秒后、至多每2秒一次的bounded exact `get_run` fallback；
+  query只接受同runId且不早于revision floor的precise terminal，迟到candidate/waiter/finally不能清除后继轮状态。Ink flush只作展示屏障：
   正常等待真实commit，但最多1秒；UI promise迟到或失败不能停止canonical subscription、后续answer/terminal或下一条prompt。
-- run promise只接受跨过当前command revision floor、且与receipt canonical `runId`一致的`run.terminal|run.failure`；`turn.terminal`
+- run promise只接受跨过当前command revision floor、且与receipt canonical `runId`一致的`run.terminal`；失败由
+  `status=failed`及其terminal outcome表达；`turn.terminal`
   与`task.terminal`只参与展示。上一轮迟到的Turn/Task终态不能结束刚applied的后继Run。本地run Promise收尾不向
-  reducer生成idle/cancelled事实；subscription gap由authoritative Session projection query先收敛UI投影，再释放waiter。
+  reducer生成idle/cancelled事实；Session投影暂缺`currentRun`也不结束Run。subscription gap只查询exact Run resource；
+  `unknown/recovery_required`返回recovery-needed错误并继续阻塞successor，failed拒绝，completed/cancelled按现有facade语义收敛。
 - 活动Turn收到Esc/Ctrl+C时，TUI在同一输入轮先显示`Cancelling`，并把重复按键合并到该Session唯一的in-flight
   `cancel_turn` Promise；receipt失败清除本地pending状态并显示可重试诊断。排队后继只有在前驱Subagent Provider
   cleanup全部确认后才可取得`start_turn` receipt，用户取消已经写入的waived capability终态不得在同进程cleanup中被改写为unknown。
 - 普通模型正文仍按完整Markdown组件提交；没有待判定Thought归属时，完成的段落、列表项和已闭合结构组件立即进入Static，
-  只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，完整前缀进入隐藏`responsePending` ownership buffer，
-  不结算Thought也不进入Static；`model.responded(toolCallCount=0)`才补齐并发布最终正文，`toolCallCount>0`删除该buffer、把过程旁白
+  只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，待分类正文只保存在有界`RequestAssembly`，
+  不创建隐藏OutputBlock；`model.responded(toolCallCount=0)`才补齐并发布最终正文，`toolCallCount>0`丢弃待分类正文、把过程旁白
   留在同一Thought且不渲染，匹配工具和后续模型调用继续原聚合块。未到提交边界的cumulative text继续留在request source。
   `model.responded`可以省略optional summary，reducer必须用已接收buffer收口最后一段，不能把合法回答清成空白。
 

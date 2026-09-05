@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { RUNTIME_PROTOCOL_SCHEMA, RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../..');
 const SERVICE_STDIO_ENTRYPOINT = join(
@@ -33,7 +34,10 @@ test('real stdio child keeps JSONL clean, releases EOF locally, and reopens pers
     );
 
     await expect(first.stdout.response('init')).resolves.toMatchObject({
-      result: { protocolVersion: 1, protocolSchema: 'kite.runtime-protocol.v1' },
+      result: {
+        protocolVersion: RUNTIME_PROTOCOL_VERSION,
+        protocolSchema: RUNTIME_PROTOCOL_SCHEMA,
+      },
     });
     await expect(first.stdout.response('ping')).resolves.toMatchObject({
       result: { status: 'ok' },
@@ -192,7 +196,7 @@ function initializeRequest(id: string): string {
     id,
     method: 'initialize',
     params: {
-      protocolVersion: 1,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       clientInfo: { name: 'runtime-stdio-child-test', version: '1', instanceId: `client-${id}` },
     },
   });

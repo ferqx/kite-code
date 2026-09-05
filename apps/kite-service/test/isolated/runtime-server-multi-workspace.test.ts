@@ -8,6 +8,7 @@ import {
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccessNotification,
 } from '@kite-ai/runtime-contract';
+import { resolveProjectIdentity } from '@kite-ai/runtime-host';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type {
   RuntimeServerAdmissionInput,
@@ -67,6 +68,71 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
   } finally {
     successor.disposeStorage();
     model.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(resolve(root), { recursive: true, force: true });
+  }
+}, 30_000);
+
+test('freezes the active Run model and applies a selected model to the next Run', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-next-run-model-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const modelA = createMockModelServer();
+  const modelB = createMockModelServer();
+  modelA.setResponses([{ delay: 300, message: { content: 'active-model-answer' } }]);
+  modelB.setResponses([{ message: { content: 'next-model-answer' } }]);
+  const inputA = runtimeInput(workspace, modelA.baseURL, 'model-a');
+  const inputB = runtimeInput(workspace, modelB.baseURL, 'model-b');
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: join(root, 'kite-session.sqlite'),
+    workspaces: [inputA],
+  });
+  const runtime = client(owner, admission(workspace), 'next-run-model-client');
+  const sessionId = 'next-run-model-session';
+  try {
+    await createSession(runtime, sessionId, workspace);
+    const stream = runtime.subscribe({ spec: { scope: 'session', sessionId } });
+    const iterator = stream[Symbol.asyncIterator]();
+    await next(iterator);
+
+    const firstReceipt = await runtime.command(start('run-with-model-a', sessionId, 'first run'));
+    if (firstReceipt.status !== 'applied' || firstReceipt.resource?.kind !== 'run') {
+      throw new Error('Expected the first Run to be admitted.');
+    }
+    owner.applySelectedConfig(admissionIdentity(workspace), inputB.config);
+    await waitForTerminal(iterator, sessionId, firstReceipt.resource.run.runId);
+
+    expect(modelA.getRequestCount()).toBe(1);
+    expect(modelB.getRequestCount()).toBe(0);
+    await owner.host.waitForSessionIdle(sessionId);
+    const projection = await runtime.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId,
+    });
+    if (projection.status !== 'ok' || !projection.session) {
+      throw new Error('Expected current Session projection before the successor Run.');
+    }
+    const secondReceipt = await runtime.command(
+      start('run-with-model-b', sessionId, 'second run', projection.session.revision),
+    );
+    if (secondReceipt.status !== 'applied' || secondReceipt.resource?.kind !== 'run') {
+      throw new Error('Expected the successor Run to be admitted.');
+    }
+    for (let attempt = 0; attempt < 100 && modelB.getRequestCount() === 0; attempt += 1) {
+      await Bun.sleep(10);
+    }
+    expect(modelB.getRequestCount()).toBe(1);
+    await waitForTerminal(iterator, sessionId, secondReceipt.resource.run.runId);
+    expect(modelA.getRequestCount()).toBe(1);
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    modelA.stop();
+    modelB.stop();
     if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
     rmSync(resolve(root), { recursive: true, force: true });
@@ -186,8 +252,13 @@ test('two canonical Workspaces execute through one real Host and SQLite Store wi
   modelB.setResponses([{ message: { content: 'workspace-b-terminal' } }]);
   const sessionA = 'real-workspace-a-session';
   const sessionB = 'real-workspace-b-session';
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath: join(root, 'kite-session.sqlite'),
+    hostInstanceId: 'multi-workspace-host',
+  });
   const owner = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath: join(root, 'shared-runtime.sqlite'),
+    storageOwner,
     workspaces: [
       runtimeInput(workspaceA, modelA.baseURL, 'model-a'),
       runtimeInput(workspaceB, modelB.baseURL, 'model-b'),
@@ -277,11 +348,13 @@ test('two canonical Workspaces execute through one real Host and SQLite Store wi
     await owner.host.waitForSessionIdle(sessionA);
     const rewindSnapshot = owner.storage.sessions.loadSnapshot(sessionA);
     if (!rewindSnapshot) throw new Error('Rewind source snapshot is unavailable.');
-    owner.storage.checkpoints.saveNamedSnapshot(
-      sessionA,
-      'service-rewind-checkpoint',
-      rewindSnapshot,
-      owner.storage.sessions.getLastEventPosition(sessionA),
+    storageOwner.runWithSessionExecution(sessionA, () =>
+      owner.storage.checkpoints.saveNamedSnapshot(
+        sessionA,
+        'service-rewind-checkpoint',
+        rewindSnapshot,
+        owner.storage.sessions.getLastEventPosition(sessionA),
+      ),
     );
     const rewindStream = await clientA.subscribeReady({
       spec: { scope: 'session', sessionId: sessionA, includeEphemeral: true },
@@ -542,6 +615,16 @@ function admission(workspace: string): RuntimeServerAdmissionPort {
   });
 }
 
+function admissionIdentity(workspace: string) {
+  const canonicalPath = realpathSync.native(workspace);
+  const project = resolveProjectIdentity(canonicalPath);
+  return {
+    canonicalPath,
+    projectId: project.projectId,
+    workspaceDigest: project.workspaceDigest,
+  };
+}
+
 function client(
   owner: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer>,
   workspaceAdmission: RuntimeServerAdmissionPort,
@@ -579,28 +662,30 @@ async function createSession(
 
 async function waitForRewindTerminal(
   iterator: AsyncIterator<RuntimeAccessNotification>,
-): Promise<NonNullable<Extract<RuntimeAccessNotification, { durability: 'ephemeral' }>['event']>> {
+): Promise<
+  NonNullable<Extract<RuntimeAccessNotification, { durability: 'durable' }>['projection']['event']>
+> {
   for (let count = 0; count < 100; count += 1) {
     const item = await iterator.next();
     if (item.done) throw new Error('Rewind subscription closed before terminal.');
     if (
       'durability' in item.value &&
-      item.value.durability === 'ephemeral' &&
-      item.value.event.type === 'rewind.terminal'
+      item.value.durability === 'durable' &&
+      item.value.projection.event?.type === 'rewind.terminal'
     ) {
-      return item.value.event;
+      return item.value.projection.event;
     }
   }
   throw new Error('Rewind terminal was not observed.');
 }
 
-function start(commandId: string, sessionId: string, input: string) {
+function start(commandId: string, sessionId: string, input: string, expectedRevision = 0) {
   return {
     schema: RUNTIME_COMMAND_SCHEMA_,
     commandId,
     type: 'start_turn' as const,
     sessionId,
-    expectedRevision: 0,
+    expectedRevision,
     input,
   };
 }
@@ -621,6 +706,7 @@ async function next(
 async function waitForTerminal(
   iterator: AsyncIterator<RuntimeAccessNotification>,
   sessionId: string,
+  runId?: string,
 ): Promise<void> {
   for (let index = 0; index < 50; index += 1) {
     const notification = await next(iterator);
@@ -628,7 +714,8 @@ async function waitForTerminal(
       'durability' in notification &&
       notification.durability === 'durable' &&
       notification.sessionId === sessionId &&
-      notification.projection.session.activeWork?.status === 'completed'
+      notification.projection.session.currentRun?.status === 'completed' &&
+      (runId === undefined || notification.projection.session.currentRun.runId === runId)
     ) {
       return;
     }

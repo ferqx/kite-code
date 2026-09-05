@@ -8,7 +8,11 @@ import type {
   RuntimeQuery,
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
-import { RUNTIME_PROTOCOL_LIMITS, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import {
+  RUNTIME_PROTOCOL_LIMITS,
+  RUNTIME_PROTOCOL_VERSION,
+  type RuntimeProtocolMessage,
+} from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
   type DEFAULT_RUNTIME_SERVER_LIMITS,
@@ -23,7 +27,7 @@ const initialize = {
   id: 'initialize-1',
   method: 'initialize',
   params: {
-    protocolVersion: 1,
+    protocolVersion: RUNTIME_PROTOCOL_VERSION,
     clientInfo: { name: 'test', version: '1', instanceId: 'client-1' },
   },
 } as const;
@@ -40,7 +44,7 @@ describe('Runtime Server', () => {
       error: { data: { code: 'not_initialized' } },
     });
 
-    await pair.client.send({ ...initialize, params: { ...initialize.params, protocolVersion: 2 } });
+    await pair.client.send({ ...initialize, params: { ...initialize.params, protocolVersion: 1 } });
     expect(await next(messages)).toMatchObject({
       id: 'initialize-1',
       error: { data: { code: 'protocol_version_mismatch' } },
@@ -99,7 +103,7 @@ describe('Runtime Server', () => {
     gate.resolve();
     expect(await next(messages)).toMatchObject({
       id: 'initialize-1',
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
     });
   });
 
@@ -144,7 +148,7 @@ describe('Runtime Server', () => {
     gate.resolve();
     expect(await next(messages)).toMatchObject({
       id: 'initialize-1',
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
     });
   });
 
@@ -442,7 +446,7 @@ describe('Runtime Server', () => {
   test('retains outbound byte reservations until slow sends settle across connections', async () => {
     const runtime = new FakeRuntime();
     runtime.querySessions = Array.from({ length: 3 }, (_, index) => ({
-      schema: 'kite.runtime-projection.v1' as const,
+      schema: 'kite.runtime-projection.v2' as const,
       sessionId: `session-large-${index}`,
       revision: 1,
       displayName: 'x'.repeat(256),
@@ -545,7 +549,7 @@ describe('Runtime Server', () => {
         generation: 7,
         indexRevision: 4,
         session: {
-          schema: 'kite.runtime-projection.v1',
+          schema: 'kite.runtime-projection.v2',
           sessionId: 'session-1',
           revision: 4,
           lifecycle: 'open',
@@ -611,7 +615,7 @@ describe('Runtime Server', () => {
         generation: 8,
         indexRevision: 1,
         session: {
-          schema: 'kite.runtime-projection.v1' as const,
+          schema: 'kite.runtime-projection.v2' as const,
           sessionId: `session-${index}`,
           revision: index,
           lifecycle: 'open' as const,
@@ -625,7 +629,7 @@ describe('Runtime Server', () => {
         generation: 8,
         indexRevision: 2,
         session: {
-          schema: 'kite.runtime-projection.v1',
+          schema: 'kite.runtime-projection.v2',
           sessionId: 'live-session',
           revision: 2,
           lifecycle: 'open',
@@ -983,7 +987,7 @@ async function initializePair(
   await pair.client.send(initialize);
   expect(await next(messages)).toMatchObject({
     id: 'initialize-1',
-    result: { protocolVersion: 1 },
+    result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
   });
 }
 
@@ -1058,14 +1062,14 @@ function connectionAdmission(workspace: string, persisted: RuntimeServerAdmissio
 
 function durableNotification(revision: number): RuntimeNotification {
   return {
-    schema: 'kite.runtime-notification.v1',
+    schema: 'kite.runtime-notification.v2',
     durability: 'durable',
     sessionId: 'session-1',
     revision,
     projection: {
       kind: 'session',
       session: {
-        schema: 'kite.runtime-projection.v1',
+        schema: 'kite.runtime-projection.v2',
         sessionId: 'session-1',
         revision,
         lifecycle: 'open',
@@ -1091,7 +1095,7 @@ class FakeRuntime implements RuntimeAccess {
   iteratorReturns = 0;
   commandGate: Promise<void> | undefined;
   querySessions: Array<{
-    schema: 'kite.runtime-projection.v1';
+    schema: 'kite.runtime-projection.v2';
     sessionId: string;
     revision: number;
     displayName?: string;
@@ -1128,7 +1132,7 @@ class FakeRuntime implements RuntimeAccess {
             queryType: query.type,
             revision: this.sessionProjectionRevision,
             session: {
-              schema: 'kite.runtime-projection.v1' as const,
+              schema: 'kite.runtime-projection.v2' as const,
               sessionId: query.sessionId,
               revision: this.sessionProjectionRevision,
               lifecycle: 'open' as const,

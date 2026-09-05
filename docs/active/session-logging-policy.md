@@ -39,7 +39,7 @@ logger 不能制造 UI-only approval 事实。
 ## 模式与组合
 
 RM-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite-ai/runtime-storage-sqlite` 的显式
-`SessionMetadataPort`；SessionManager 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
+`SessionMetadataPort`；Runtime/CLI composition 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
 token stats 仍是 App session metadata，不是 Session Logger、Runtime State/Event 或 remote telemetry，既有
 `session_stats` 布局、journal 策略和隐私边界均未改变。
 

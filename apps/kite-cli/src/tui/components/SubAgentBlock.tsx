@@ -203,11 +203,13 @@ export default function SubAgentBlock({
           text:
             approvalState === 'auto_reviewing'
               ? '自动审查中'
-              : approvalState === 'queued_auto_review'
-                ? '等待自动审查'
-                : approvalState === 'queued_user_approval' || approvalState === 'queued'
-                  ? '人工审批排队中'
-                  : '等待你的批准',
+              : approvalState === 'authorized_queued'
+                ? '已授权 · 等待执行'
+                : approvalState === 'queued_auto_review'
+                  ? '等待自动审查'
+                  : approvalState === 'queued_user_approval' || approvalState === 'queued'
+                    ? '人工审批排队中'
+                    : '等待你的批准',
           color: approvalState === 'awaiting_user' ? dt.warning : dt.dim,
         }
       : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
@@ -236,13 +238,13 @@ export default function SubAgentBlock({
           </Text>
         </Box>
       )}
-      {visibleSteps.map((step, i) => {
+      {visibleSteps.map((step) => {
         // 颜色由 step.status 唯一决定，不依赖布尔值排列组合推断
         const lineColor =
           step.status === 'error' ? dt.error : step.status === 'rejected' ? dt.warning : dt.dim;
         const line = `├─ ${subagentStepLabel(step)}`;
         return (
-          <Box key={i} paddingLeft={3}>
+          <Box key={step.stepId} paddingLeft={3}>
             <Text color={lineColor}>{truncateToFit(line, Math.max(0, col - 3))}</Text>
           </Box>
         );

@@ -88,12 +88,26 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
         toolCallId: 'shell-a',
         generation: 0,
         reason: 'focused rejection',
+        owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       },
     ]);
 
     expect(events.map((event) => event.type)).toEqual(['tool.rejected', 'turn.aborted']);
     expect(events).toEqual([
-      { type: 'tool.rejected', toolCallId: 'shell-a', reason: 'focused rejection' },
+      {
+        type: 'tool.rejected',
+        toolCallId: 'shell-a',
+        reason: 'focused rejection',
+        failure: {
+          kind: 'approval_rejected',
+          message: 'focused rejection',
+          retryable: false,
+          modelFixable: false,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: true,
+        },
+      },
       {
         type: 'turn.aborted',
         turnId: state.turn.turnId,
@@ -115,6 +129,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
         toolCallId: 'shell-a',
         generation: 0,
         reason: 'focused rejection',
+        owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       },
     ]);
 
@@ -248,6 +263,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     let lastAppliedEvents: RuntimeEvent[] = [];
@@ -293,6 +309,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
           toolCallId: 'shell-a',
           generation: action.type === 'reject' ? action.generation : 0,
           reason: 'provider rejection',
+          owner: { kind: 'root_tool', toolCallId: 'shell-a' },
           outcome: {
             schemaVersion: 1,
             status: 'rejected',
@@ -363,6 +380,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     const originalRevision = state.revision;
@@ -487,6 +505,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     let lastAppliedEvents: RuntimeEvent[] = [];
@@ -746,6 +765,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       approval: approval('printf awaiting'),
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'awaiting' },
     });
     state = reduceRuntimeState(state, {
       type: 'approval.requested',
@@ -754,6 +774,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       approval: approval('printf authorized'),
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'authorized' },
     });
     const awaitingPending = state.pendingApprovals.get('approval-awaiting');
     const authorizedPending = state.pendingApprovals.get('approval-authorized');
@@ -770,10 +791,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       },
       pendingApprovals: new Map([
         ['approval-awaiting', awaitingPending],
-        [
-          'approval-authorized',
-          { ...authorizedPending, status: 'authorized_queued', state: 'authorized_queued' },
-        ],
+        ['approval-authorized', { ...authorizedPending, status: 'authorized_queued' }],
       ]),
     };
 
@@ -809,6 +827,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       grant: 'approve_once',
       receiptId: 'late-receipt',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'awaiting' },
     });
     expect(late).toEqual(settled);
   });

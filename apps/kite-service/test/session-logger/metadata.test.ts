@@ -128,6 +128,7 @@ describe('metadata-only session logging', () => {
         toolCallId: SECRET,
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: SECRET },
         approval: {
           scope: 'once',
           cwd: ABSOLUTE_PATH,

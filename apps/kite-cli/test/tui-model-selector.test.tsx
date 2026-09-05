@@ -38,13 +38,13 @@ describe('ModelSelector App Control projection', () => {
         currentModel="stale-model"
         currentProvider="stale-provider"
         snapshot={snapshot}
-        onSelect={(model) =>
+        onSelect={(model) => {
           selected.push({
             provider: model.provider,
             name: model.name,
             observedRevision: model.observedRevision,
-          })
-        }
+          });
+        }}
         onClose={() => {}}
       />,
     );

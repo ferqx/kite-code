@@ -20,8 +20,11 @@ import {
 
 export const LEGACY_STATE26_SCHEMA_VERSION = 26 as const;
 export const LEGACY_STATE26_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
+/** State 27 before the stable Subagent step/approval-owner epoch. */
+export const LEGACY_STATE27_SCHEMA_VERSION = 27 as const;
+export const LEGACY_STATE27_FORMAT_EPOCH = 'kite-runtime-saq-v1-2026-08-25' as const;
 
-export type StateFormatClassification = 'current' | 'state26' | 'unsupported';
+export type StateFormatClassification = 'current' | 'state27' | 'state26' | 'unsupported';
 
 export type StateMigrationFailure =
   | 'invalid_state26_snapshot'
@@ -92,6 +95,11 @@ export function classifyStateFormat(value: unknown): StateFormatClassification {
     candidate.formatEpoch === LEGACY_STATE26_FORMAT_EPOCH
   )
     return 'state26';
+  if (
+    candidate.schemaVersion === LEGACY_STATE27_SCHEMA_VERSION &&
+    candidate.formatEpoch === LEGACY_STATE27_FORMAT_EPOCH
+  )
+    return 'state27';
   return 'unsupported';
 }
 
@@ -99,6 +107,10 @@ export const classifyAgentStateFormat = classifyStateFormat;
 
 export function isLegacyState26Snapshot(value: unknown): boolean {
   return classifyStateFormat(value) === 'state26';
+}
+
+export function isLegacyState27Snapshot(value: unknown): boolean {
+  return classifyStateFormat(value) === 'state27';
 }
 
 /** Validate only the identity and shape needed to avoid treating arbitrary JSON as State. */
@@ -382,8 +394,88 @@ export function migrateState26To27(value: unknown): StateMigrationResult {
   };
 }
 
-export const migrateCompatibleAgentState = migrateState26To27;
-export const migrateLegacyAgentState = migrateState26To27;
+/**
+ * Upgrade the immediately previous State 27 snapshot epoch in-memory.  The
+ * snapshot shape is unchanged; the accompanying historical events are
+ * upgraded by convertLegacyRuntimeEvent, which allocates deterministic
+ * legacy Subagent step identities from persistence order.  No migrated value
+ * is written back by this reader.
+ */
+export function migrateState27ToCurrent(value: unknown): StateMigrationResult {
+  const candidate = parseRecord(value);
+  if (classifyStateFormat(candidate) !== 'state27' || !candidate) {
+    return { status: 'unsupported' };
+  }
+  const pendingApprovals = migrateLegacyPendingApprovals(candidate.pendingApprovals);
+  if (!pendingApprovals) {
+    return { status: 'unsupported', reason: 'invalid_state26_snapshot' };
+  }
+  const migrated = {
+    ...candidate,
+    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
+    pendingApprovals,
+    sessionCommandGrants: new Map(mapEntries(candidate.sessionCommandGrants)),
+    approvalReceipts: new Map(mapEntries(candidate.approvalReceipts)),
+  } as unknown as AgentState;
+  try {
+    assertAgentStateInvariants(migrated);
+  } catch {
+    return { status: 'unsupported', reason: 'invalid_state26_snapshot' };
+  }
+  return { status: 'migrated', state: migrated };
+}
+
+function mapEntries(value: unknown): readonly [string, unknown][] {
+  if (value instanceof Map) return [...value.entries()];
+  if (!isRecord(value)) return [];
+  return Object.entries(value);
+}
+
+/**
+ * State 27 approval records predate the explicit stable child owner field.
+ * Synthesize it once at the compatibility boundary, then keep the current
+ * reducer/owner helpers strict.  The fallback order is intentionally confined
+ * to this legacy reader; current events must carry the owner directly.
+ */
+function migrateLegacyPendingApprovals(
+  value: unknown,
+): Map<string, Record<string, unknown>> | undefined {
+  const entries = mapEntries(value);
+  const migrated = new Map<string, Record<string, unknown>>();
+  for (const [interactionId, rawValue] of entries) {
+    if (!isRecord(rawValue)) return undefined;
+    const hasParent = rawValue.parentToolCallId !== undefined;
+    const hasChild = rawValue.childSubagentId !== undefined;
+    if (hasParent || hasChild || rawValue.childToolCallId !== undefined) {
+      if (!nonEmptyString(rawValue.parentToolCallId) || !nonEmptyString(rawValue.childSubagentId)) {
+        return undefined;
+      }
+      const approval = isRecord(rawValue.approval) ? rawValue.approval : undefined;
+      const childToolCallId =
+        (nonEmptyString(rawValue.childToolCallId) && rawValue.childToolCallId) ||
+        (approval && nonEmptyString(approval.callId) && approval.callId) ||
+        (nonEmptyString(rawValue.runtimeToolCallId) && rawValue.runtimeToolCallId) ||
+        undefined;
+      if (!childToolCallId) return undefined;
+      const normalized: Record<string, unknown> = { ...rawValue, childToolCallId };
+      delete normalized.state;
+      migrated.set(interactionId, normalized);
+      continue;
+    }
+    const normalized: Record<string, unknown> = { ...rawValue };
+    delete normalized.state;
+    migrated.set(interactionId, normalized);
+  }
+  return migrated;
+}
+
+export function migrateCompatibleAgentState(value: unknown): StateMigrationResult {
+  const classification = classifyStateFormat(value);
+  return classification === 'state27' ? migrateState27ToCurrent(value) : migrateState26To27(value);
+}
+
+export const migrateLegacyAgentState = migrateCompatibleAgentState;
 
 const LEGACY_AUTHORIZATION_EVENT_TYPES = new Set([
   'authorization.changed',
@@ -427,6 +519,34 @@ function ignoredUnknownLegacyEvent(): Record<string, unknown> {
   };
 }
 
+function normalizeLegacySubagentIdentity(event: UnknownRecord, ordinal: number): UnknownRecord {
+  if (event.type !== 'subagent.step' && event.type !== 'subagent.tool_result') return event;
+  const payload = event.subagent;
+  if (!isRecord(payload)) return event;
+  const subagentId = nonEmptyString(payload.id) ? payload.id : 'unknown-subagent';
+  const safeOrdinal = nonNegativeInteger(ordinal) ? ordinal : 0;
+  const identity = `legacy:${subagentId}:${safeOrdinal}`;
+  const normalizedPayload: UnknownRecord = { ...payload };
+  if (event.type === 'subagent.tool_result' && !Object.hasOwn(normalizedPayload, 'status')) {
+    if (typeof normalizedPayload.ok !== 'boolean') return event;
+    normalizedPayload.status = normalizedPayload.ok ? 'completed' : 'failed';
+  }
+  // State 26 used `ok` as the result authority.  Current events use the
+  // explicit terminal status and never retain both representations.
+  delete normalizedPayload.ok;
+  if (nonEmptyString(payload.stepId) && nonEmptyString(payload.toolCallId)) {
+    return { ...event, subagent: normalizedPayload };
+  }
+  return {
+    ...event,
+    subagent: {
+      ...normalizedPayload,
+      stepId: nonEmptyString(payload.stepId) ? payload.stepId : identity,
+      toolCallId: nonEmptyString(payload.toolCallId) ? payload.toolCallId : identity,
+    },
+  };
+}
+
 /**
  * Convert one State 26 event payload. The returned event is a current
  * reducer-safe no-op for every legacy authority/review fact and for unknown
@@ -436,7 +556,10 @@ function ignoredUnknownLegacyEvent(): Record<string, unknown> {
  * Event sequence, revision, and eventId remain the envelope owner's
  * responsibility and are never synthesized here.
  */
-export function convertLegacyRuntimeEvent(value: unknown): LegacyRuntimeEventConversionResult {
+export function convertLegacyRuntimeEvent(
+  value: unknown,
+  legacyOrdinal = 0,
+): LegacyRuntimeEventConversionResult {
   if (!isRecord(value) || typeof value.type !== 'string') return { status: 'ignored' };
   if (isLegacyAuthorizationEvent(value)) {
     return { status: 'converted', event: ignoredAuthorizationEvent() };
@@ -451,8 +574,9 @@ export function convertLegacyRuntimeEvent(value: unknown): LegacyRuntimeEventCon
     };
   }
   try {
-    assertCurrentRuntimeEvent(value);
-    const event: Record<string, unknown> = { ...value };
+    const normalized = normalizeLegacySubagentIdentity(value, legacyOrdinal);
+    assertCurrentRuntimeEvent(normalized);
+    const event: Record<string, unknown> = { ...normalized };
     delete event.sequence;
     delete event.revision;
     delete event.eventId;
@@ -467,9 +591,10 @@ export const migrateState26Event = convertLegacyRuntimeEvent;
 
 export function convertLegacyRuntimeEventJson(
   serialized: string,
+  legacyOrdinal = 0,
 ): LegacyRuntimeEventConversionResult {
   try {
-    return convertLegacyRuntimeEvent(JSON.parse(serialized) as unknown);
+    return convertLegacyRuntimeEvent(JSON.parse(serialized) as unknown, legacyOrdinal);
   } catch {
     return { status: 'ignored' };
   }

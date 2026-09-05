@@ -26,17 +26,19 @@
 - Workspace Trust 的external-read scope说明使用统一中英文key；Service投影的canonical root逐项原样显示且不翻译，
   文案必须明确为只读访问，不能把scope描述成命令级批准或Full filesystem权限。
 - 可见错误只使用已脱敏的 bounded projection，不把 Provider 原文、credential、Artifact locator 或内部 identity 拼入译文。
-- Approval 的 queue sequence、generation 与 interaction ID 是内部 durable identity，不注册可见翻译 key。普通user
-  route不显示“人工审批”标签；Auto route仍翻译为“自动审查”。面板翻译匹配请求数量与用户动作，原始command不翻译，
-  settlement仍使用未展示的exact identity。确认提交中与receipt未接受的错误按connection、expired、state-changed或unknown
-  分类使用中英文catalog key；不显示raw transport错误、protocol payload或内部identity。
+- Approval 的 queue sequence、generation 与 interaction ID 是内部 durable identity，不注册可见翻译 key。普通 user
+  route 不显示“人工审批”标签；Auto route 仍翻译为“自动审查”。面板只翻译当前请求和用户动作，原始 command 不翻译；
+  已删除无生产消费者的匹配数量与批量释放文案，settlement 继续使用未展示的 exact identity。确认提交中与 receipt 未接受的错误按
+  connection、expired、state-changed 或 unknown 分类使用中英文 catalog key；不显示 raw transport 错误、protocol payload
+  或内部 identity。
 - 推荐标记、动作动词和快捷键说明由 catalog 统一生成，页面不得维护第二份同义字符串。
 
 ## 布局
 
 - 翻译后仍遵守 display-width 截断和 Overlay 四区布局；不得用固定字符串长度代替 `string-width`。
 - 数量、位置和步骤计数使用结构化参数，不通过拼接英文句子生成其他 locale。
-- locale 切换不改变 Runtime、Session、approval、MCP 或配置 revision 语义。
+- locale 切换只推进 visual RenderEpoch，在一次同步提交中重绘当前 viewport；不改变 Runtime、Session、approval、MCP、
+  Timeline identity 或配置 revision，也不向原生 scrollback 追加第二份历史。
 
 ## 验证
 

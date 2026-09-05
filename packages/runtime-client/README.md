@@ -7,7 +7,11 @@
 ## 拥有职责
 
 - 管理 Protocol request correlation、connection generation、显式 reconnect 与 subscription resubscribe。
+- 需要同时消费 event-free snapshot 与事件 envelope 的 Native presentation adapter 使用
+  `subscribeReadyWithGeneration()`；每个排队 notification 保留接收时的 connection generation，重连后不得用当前 generation 重新盖章。
 - 维护 Session/index/ephemeral 的 observable snapshot，使用 connection generation 隔离旧连接消息，并在 index reset end 原子替换 session 列表。
+- Store mutation返回`applied`后notification才进入consumer queue；ignored、same-revision divergence、durable gap或ephemeral sequence
+  gap均不dispatch原event。`resync_required`把Session置为not-ready并在同connection复用既有subscription重新订阅，不重放mutation。
 - connection generation 变化时清空旧 generation 的 Session/stream snapshot，使所有旧 `ready` 与 revision
   立即失效；只有新 generation 的 authoritative reset/replay 与 subscription ready 边界可以重新建立 Session。
   新 Server 可以合法建立 revision 更低的当前投影，Client 不得在 resubscribe 前用 stale revision 发命令。

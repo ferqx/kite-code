@@ -7,7 +7,7 @@ import {
 } from '../../src/agent-api/read-adapter';
 
 const sessionProjection = {
-  schema: 'kite.runtime-projection.v1',
+  schema: 'kite.runtime-projection.v2',
   sessionId: 'session-1',
   revision: 7,
   displayName: 'Session one',
@@ -15,7 +15,15 @@ const sessionProjection = {
   lifecycle: 'open',
   model: { provider: 'provider-1', name: 'model-1', reasoningEnabled: true },
   interactionQueue: { revision: 7, interactions: [] },
-  activeWork: { workId: 'work-1', phase: 'building', status: 'running' },
+  activeTask: { taskId: 'task-1', phase: 'building' },
+  currentRun: {
+    runId: 'run-1',
+    initialTurnId: 'turn-1',
+    activeTurnId: 'turn-1',
+    taskId: 'task-1',
+    status: 'running',
+    revision: 7,
+  },
 } as const;
 
 function fixture(

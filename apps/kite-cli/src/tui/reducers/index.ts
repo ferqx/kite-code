@@ -1,12 +1,12 @@
 // ── 组合 reducer：按领域分发到子 reducer ──
 
+import { advanceOutputBlockTimeline } from '../presentation/timeline';
 import type { TuiState } from '../types';
 import type { Action } from './actions';
 import { agentReducer } from './agentReducer';
 import { checkpointReducer } from './checkpointReducer';
 import { handleClientEventAction, reconcileClientInteractionQueue } from './handleClientEvent';
-import { handleEventAction } from './handleEvent';
-import { appendUserMessage } from './helpers';
+import { appendLocalText, appendUserMessage, replaceBlockById } from './helpers';
 import { sessionReducer } from './sessionReducer';
 import { skillReducer } from './skillReducer';
 import { uiReducer } from './uiReducer';
@@ -59,30 +59,28 @@ const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set(['EXECUTE_REWIND', 'SET_
 
 const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST_SKILLS']);
 
-// AGENT_ACTIONS：剩余所有非 RuntimeEvent action（SET_RUNNING, SET_EXITED,
+// AGENT_ACTIONS：剩余所有非 Runtime presentation action（SET_RUNNING, SET_EXITED,
 // RESOLVE_INTERRUPT, SWITCH_AUTH, EXPORT_SESSION,
 // EXPORT_SESSION_DONE, INJECT_MCP_PROMPT,
 // SET_PHASE, CTRL_C, ESCAPE）
 
-export function eventReducer(state: TuiState, action: Action): TuiState {
-  if (action.type === 'RUNTIME_EVENT') {
+function reduceEvent(state: TuiState, action: Action): TuiState {
+  if (action.type === 'ACCEPT_PRESENTATION_ENVELOPE') {
     return handleClientEventAction(state, action.event);
   }
   if (action.type === 'RECONCILE_RUNTIME_PROJECTION') {
-    const reconciled = reconcileClientInteractionQueue(state, action.interactionQueue);
+    const reconciled = reconcileClientInteractionQueue(state, action.projection.interactionQueue);
     return agentReducer(reconciled, action) ?? reconciled;
   }
   if (action.type === 'LOCAL_TEXT') {
-    return handleEventAction(state, {
-      type: 'text',
-      data: { text: action.text },
-    });
+    return appendLocalText(state, action.text, action.isError);
   }
   if (action.type === 'LOCAL_USER_PROMPT') {
     return appendUserMessage(state, {
       id: state.nextBlockId,
       kind: 'user',
       content: action.text,
+      presentationState: 'live',
       pendingEcho: true,
     });
   }
@@ -113,8 +111,23 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       id: dequeued.nextBlockId,
       kind: 'user',
       content: action.text,
+      presentationState: 'live',
+      messageId: action.messageId,
       pendingEcho: true,
     });
+  }
+  if (action.type === 'ACCEPT_LOCAL_PROMPT') {
+    const pending = [...state.turns.flatMap((turn) => turn.blocks)]
+      .reverse()
+      .find(
+        (block) =>
+          block.kind === 'user' &&
+          block.pendingEcho === true &&
+          block.messageId === undefined &&
+          block.content === action.text,
+      );
+    if (pending?.kind !== 'user') return state;
+    return replaceBlockById(state, pending.id, { ...pending, messageId: action.messageId });
   }
   if (action.type === 'DEQUEUE_LOCAL_PROMPT') {
     return {
@@ -147,4 +160,29 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
   if (CHECKPOINT_ACTIONS.has(action.type)) return checkpointReducer(state, action) ?? state;
   if (SKILL_ACTIONS.has(action.type)) return skillReducer(state, action) ?? state;
   return agentReducer(state, action) ?? state;
+}
+
+/**
+ * All presentation actions converge through one reducer-owned Timeline.
+ * OutputBlock remains a one-way render model adapter, while a previously
+ * sealed Timeline item can never be reopened or replaced by a late packet.
+ */
+export function eventReducer(state: TuiState, action: Action): TuiState {
+  const next = reduceEvent(state, action);
+  const resetTimeline =
+    action.type === 'CLEAR_OUTPUT' ||
+    next.sessionKey !== state.sessionKey ||
+    next.activeSessionId !== state.activeSessionId;
+  if (!resetTimeline && next.turns === state.turns && state.presentationTimeline) return next;
+
+  const previous = resetTimeline ? undefined : state.presentationTimeline;
+  const renderEpoch = resetTimeline
+    ? (state.presentationTimeline?.renderEpoch ?? 0) + 1
+    : (previous?.renderEpoch ?? 0);
+  const presentationTimeline = advanceOutputBlockTimeline(
+    previous,
+    next.turns.flatMap((turn) => turn.blocks),
+    renderEpoch,
+  );
+  return { ...next, presentationTimeline };
 }

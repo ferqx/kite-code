@@ -6,6 +6,7 @@ import {
   RuntimeClient,
   type RuntimeClientConnection,
   type RuntimeClientTransport,
+  toAcceptedPresentationEnvelope,
 } from '../src/index';
 
 describe('Runtime Client boundary', () => {
@@ -13,7 +14,7 @@ describe('Runtime Client boundary', () => {
     expect(RUNTIME_CLIENT_BOUNDARY_).toEqual({
       frameworkNeutral: true,
       transport: 'logical-message',
-      protocolSchema: 'kite.runtime-protocol.v1',
+      protocolSchema: 'kite.runtime-protocol.v2',
     });
     const transport = undefined as RuntimeClientTransport | undefined;
     expect(transport).toBeUndefined();
@@ -21,6 +22,26 @@ describe('Runtime Client boundary', () => {
 });
 
 describe('RuntimeClient protocol state machine', () => {
+  test('rejects a predecessor envelope identity when the terminal event names a successor Run', () => {
+    expect(() =>
+      toAcceptedPresentationEnvelope(
+        {
+          schema: 'kite.runtime-notification.v2',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 4,
+          runId: 'run-predecessor',
+          projection: {
+            kind: 'turn',
+            session: session('session-1', 4),
+            event: { type: 'run.terminal', runId: 'run-successor', status: 'completed' },
+          },
+        },
+        1,
+      ),
+    ).toThrow('Invalid AcceptedPresentationEnvelope');
+  });
+
   test('uses the same initialized connection for durable History reads', async () => {
     const sessionEntry = {
       sessionId: 'session-history',
@@ -149,7 +170,7 @@ describe('RuntimeClient protocol state machine', () => {
             commandId: message.params.command.commandId,
             sessionId: 'session-1',
             revision: 2,
-            resource: { kind: 'run', run },
+            resource: { kind: 'run', run, messageId: 'message-1' },
           }),
         );
       }
@@ -168,7 +189,7 @@ describe('RuntimeClient protocol state machine', () => {
       clientInfo: clientInfo(),
     });
     await client.connect();
-    await expect(client.execute(startCommand())).resolves.toMatchObject({
+    await expect(client.command(startCommand())).resolves.toMatchObject({
       status: 'applied',
       resource: { kind: 'run', run: { runId: 'run-1', status: 'queued' } },
     });
@@ -208,7 +229,7 @@ describe('RuntimeClient protocol state machine', () => {
       clientInfo: clientInfo(),
     });
     await client.connect();
-    await expect(client.execute(startCommand())).resolves.toMatchObject({
+    await expect(client.command(startCommand())).resolves.toMatchObject({
       status: 'applied',
       revision: 2,
     });
@@ -439,12 +460,13 @@ describe('RuntimeClient protocol state machine', () => {
         durability: 'ephemeral',
         sessionId: 'session-1',
         workId: 'work-1',
+        runId: 'run-1',
         turnId: 'turn-1',
         actorId: 'actor-1',
         attemptId: 'attempt-1',
         compositionRevision: 'composition-1',
         streamId: 'stream-1',
-        sequence: 9,
+        sequence: 1,
         event: {
           type: 'run.terminal',
           runId: 'run-1',
@@ -459,7 +481,7 @@ describe('RuntimeClient protocol state machine', () => {
       }),
     );
     expect((await iterator.next()).value).toMatchObject({
-      schema: 'kite.runtime-notification.v1',
+      schema: 'kite.runtime-notification.v2',
       durability: 'ephemeral',
       sessionId: 'session-1',
       workId: 'work-1',
@@ -468,7 +490,7 @@ describe('RuntimeClient protocol state machine', () => {
       attemptId: 'attempt-1',
       compositionRevision: 'composition-1',
       streamId: 'stream-1',
-      sequence: 9,
+      sequence: 1,
       event: {
         type: 'run.terminal',
         outcome: { reasonCode: 'queue_exhausted', recoveryEntry: 'reconcile' },
@@ -477,6 +499,60 @@ describe('RuntimeClient protocol state machine', () => {
     expect(Object.values(client.snapshotStore.getSnapshot().streams)[0]).toMatchObject({
       compositionRevision: 'composition-1',
       event: { type: 'run.terminal', runId: 'run-1' },
+    });
+    await iterator.return?.();
+    await client.close();
+  });
+
+  test('retains receipt generation on the ready notification stream', async () => {
+    const first = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('server-1')));
+      } else if (message.method === 'runtime/subscribe') {
+        target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+        target.push(
+          subscriptionUpdate(1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: 'session-1',
+            revision: 1,
+            session: session('session-1', 1),
+          }),
+        );
+        target.push(subscriptionUpdate(1, { type: 'ready', scope: 'session' }));
+      } else if (message.method === 'runtime/unsubscribe') {
+        target.push(result(message.id, { unsubscribed: true }));
+      }
+    });
+    const second = respondingConnection('server-2');
+    const client = new RuntimeClient({
+      transport: transport(first, second),
+      clientInfo: clientInfo(),
+    });
+    const stream = await client.subscribeReadyWithGeneration({
+      spec: { scope: 'session', sessionId: 'session-1', includeEphemeral: true },
+    });
+    const iterator = stream[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: { connectionGeneration: 1, notification: { durability: 'durable', revision: 1 } },
+    });
+    first.push(ephemeralUpdate(1));
+    await tick();
+
+    await client.reconnect();
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: {
+        connectionGeneration: 1,
+        notification: { durability: 'ephemeral', streamId: 'stream-1', sequence: 1 },
+      },
+    });
+    second.push(ephemeralUpdate(1));
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: {
+        connectionGeneration: 2,
+        notification: { durability: 'ephemeral', streamId: 'stream-1', sequence: 1 },
+      },
     });
     await iterator.return?.();
     await client.close();
@@ -652,8 +728,8 @@ function result(id: string, value: object): object {
 }
 function initializeResult(instanceId: string): object {
   return {
-    protocolVersion: 1,
-    protocolSchema: 'kite.runtime-protocol.v1',
+    protocolVersion: 2,
+    protocolSchema: 'kite.runtime-protocol.v2',
     serverInfo: { version: '1', instanceId },
     capabilities: {
       methods: [
@@ -690,7 +766,7 @@ function startCommand() {
 }
 function session(sessionId: string, revision: number) {
   return {
-    schema: 'kite.runtime-projection.v1' as const,
+    schema: 'kite.runtime-projection.v2' as const,
     sessionId,
     revision,
     lifecycle: 'open' as const,

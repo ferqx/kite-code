@@ -23,6 +23,8 @@ export type {
 export {
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
+  LEGACY_STATE27_FORMAT_EPOCH,
+  LEGACY_STATE27_SCHEMA_VERSION,
 } from '@kite-ai/agent-kernel';
 export { bestEffortRegularFileSize } from './artifact-metadata';
 export type { RuntimeHostCapabilityExecutionFailureCode } from './execution/capability-execution';
@@ -84,6 +86,7 @@ export {
 export {
   parseRuntimeStoredCommandResource,
   projectRuntimeStoredRun,
+  runtimeStartMessageId,
 } from './host/run-projection';
 export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
 
@@ -234,6 +237,7 @@ export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unkn
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
 }
@@ -244,6 +248,7 @@ export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unkno
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
   readonly contextCompiler?: ContextCompilerPort;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly modules?: never;
 }
 
@@ -269,6 +274,8 @@ export function createRuntimeHost<Event = unknown, State = unknown>(input: {
   readonly storage: RuntimeStorage<Event, State>;
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
 }): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
   input: RuntimeHostPrebuiltRegistryInput<Event, State>,
@@ -290,6 +297,9 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       capabilityRegistrySnapshot: moduleRegistry.snapshot(),
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
       ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.runWithSessionExecution
+        ? { runWithSessionExecution: input.runWithSessionExecution }
+        : {}),
     });
   }
 
@@ -306,6 +316,9 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       capabilityRegistrySnapshot: input.capabilityRegistrySnapshot,
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
       ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.runWithSessionExecution
+        ? { runWithSessionExecution: input.runWithSessionExecution }
+        : {}),
     });
   }
 

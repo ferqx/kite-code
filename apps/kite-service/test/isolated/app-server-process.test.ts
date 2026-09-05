@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKiteAppServerClient } from '@kite-ai/kite-local-runtime/client';
+import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteSessionAppServerStorageComposition } from '../../src/bootstrap';
 import { trustWorkspace } from '../../src/config/workspace-trust';
@@ -105,7 +106,7 @@ describe('KASD parent-owned App Server process', () => {
           id: 'initialize-1',
           method: 'initialize',
           params: {
-            protocolVersion: 1,
+            protocolVersion: RUNTIME_PROTOCOL_VERSION,
             clientInfo: { name: 'process-test', version: '1', instanceId: 'process-test-1' },
           },
         })}\n`,
@@ -143,7 +144,7 @@ describe('KASD parent-owned App Server process', () => {
           expect.objectContaining({
             id: 'initialize-1',
             result: expect.objectContaining({
-              protocolVersion: 1,
+              protocolVersion: RUNTIME_PROTOCOL_VERSION,
               serverInfo: expect.objectContaining({
                 version: `kite-app-server-v1-${createHash('sha256').update(buildId).digest('hex')}`,
               }),
@@ -220,11 +221,14 @@ describe('KASD parent-owned App Server process', () => {
     try {
       child.stdin.write(
         line('init', 'initialize', {
-          protocolVersion: 1,
+          protocolVersion: RUNTIME_PROTOCOL_VERSION,
           clientInfo: { name: 'active-test', version: '1', instanceId: 'active-test-1' },
         }),
       );
-      expect(await output.next()).toMatchObject({ id: 'init', result: { protocolVersion: 1 } });
+      expect(await output.next()).toMatchObject({
+        id: 'init',
+        result: { protocolVersion: RUNTIME_PROTOCOL_VERSION },
+      });
       child.stdin.write(
         line('app-release', 'app/release/status', {
           request: { schema: 'kite.app.release-status.request.v1' },
@@ -269,8 +273,36 @@ describe('KASD parent-owned App Server process', () => {
           },
         }),
       );
-      expect(await output.next()).toMatchObject({ id: 'turn', result: { status: 'applied' } });
+      const started = await output.next();
+      expect(started).toMatchObject({
+        id: 'turn',
+        result: {
+          status: 'applied',
+          resource: { kind: 'run', messageId: expect.stringMatching(/^message_[a-f0-9]{32}$/) },
+        },
+      });
       await eventually(() => model.getRequestCount() === 1);
+      child.stdin.write(
+        line('active-projection', 'runtime/query', {
+          query: {
+            schema: 'kite.runtime-query.v1',
+            type: 'get_session_projection',
+            sessionId,
+          },
+        }),
+      );
+      expect(await output.next()).toMatchObject({
+        id: 'active-projection',
+        result: {
+          status: 'ok',
+          session: {
+            currentRun: {
+              status: 'running',
+              activeTurnId: expect.stringMatching(/^turn_[a-f0-9]{32}$/),
+            },
+          },
+        },
+      });
       child.stdin.end();
       const [exitCode, stderr] = await Promise.all([
         child.exited,
@@ -345,7 +377,7 @@ describe('KASD parent-owned App Server process', () => {
     try {
       child.stdin.write(
         line('init', 'initialize', {
-          protocolVersion: 1,
+          protocolVersion: RUNTIME_PROTOCOL_VERSION,
           clientInfo: { name: 'sigkill-test', version: '1', instanceId: 'sigkill-test-1' },
         }),
       );
@@ -420,7 +452,7 @@ describe('KASD parent-owned App Server process', () => {
       try {
         resumed.stdin.write(
           line('resume-init', 'initialize', {
-            protocolVersion: 1,
+            protocolVersion: RUNTIME_PROTOCOL_VERSION,
             clientInfo: { name: 'resume-test', version: '1', instanceId: 'resume-test-1' },
           }),
         );
@@ -516,7 +548,7 @@ describe('KASD parent-owned App Server process', () => {
       try {
         child.stdin.write(
           line('init', 'initialize', {
-            protocolVersion: 1,
+            protocolVersion: RUNTIME_PROTOCOL_VERSION,
             clientInfo: { name: 'child-crash', version: '1', instanceId: 'child-crash-1' },
           }),
         );
@@ -638,7 +670,7 @@ describe('KASD parent-owned App Server process', () => {
         try {
           resumed.stdin.write(
             line('resume-init', 'initialize', {
-              protocolVersion: 1,
+              protocolVersion: RUNTIME_PROTOCOL_VERSION,
               clientInfo: { name: 'child-resume', version: '1', instanceId: 'child-resume-1' },
             }),
           );

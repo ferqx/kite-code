@@ -1,53 +1,11 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
 import { InteractionMode } from '@kite-ai/runtime-contract';
+import { isTuiRunActive } from '../presentation/selectors';
 import type { OutputBlock, TuiApprovalStatus, TuiPendingApproval, TuiState } from '../types';
 import type { Action } from './actions';
-import { appendBlock, finalizeLastTurnStreaming, findBlockById, replaceBlockById } from './helpers';
-import { deriveToolSummaryResult } from './tool-summary-result';
-
-function settleActiveThought(s: TuiState): TuiState {
-  if (s.currentThoughtSummaryId == null) return s;
-  const now = Date.now();
-  let changed = false;
-  let nextBlockId = s.nextBlockId;
-  const turns = s.turns.map((turn) => ({
-    blocks: turn.blocks.flatMap((block): OutputBlock[] => {
-      if (block.kind !== 'tool_summary' || block.id !== s.currentThoughtSummaryId) return [block];
-      changed = true;
-      // 纯思考块（无工具）同样保留并 settle，与 closeCurrentThought 行为一致
-      // Pure-thinking blocks are kept and settled, consistent with closeCurrentThought
-      const settled: OutputBlock = {
-        ...block,
-        active: false,
-        latestActivity: undefined,
-        totalElapsedMs: block.modelMs ?? now - block.createdAt,
-        pendingCaption: undefined,
-        result: deriveToolSummaryResult(block.tools),
-      };
-      // ADR-0030 / 规则 24：轮次边界 settle 时未确认旁白脱离为独立文本块
-      // （final 事件通常已先一步脱离；这里是中断/异常收尾的安全网）
-      // Unconfirmed captions detach at turn-boundary settle (final normally
-      // detaches first; this is the safety net for interrupts/error paths).
-      if (block.pendingCaption != null) {
-        return [
-          settled,
-          { id: nextBlockId++, kind: 'text' as const, content: block.pendingCaption },
-        ];
-      }
-      return [settled];
-    }),
-  }));
-  return changed
-    ? {
-        ...s,
-        turns,
-        nextBlockId,
-        currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
-      }
-    : s;
-}
+import { projectPresentationBoundary } from './handleClientEvent';
+import { appendBlock, findBlockById, replaceBlockById } from './helpers';
 
 function focusableApproval(status: TuiApprovalStatus): boolean {
   return (
@@ -61,7 +19,6 @@ function focusableApproval(status: TuiApprovalStatus): boolean {
 function advanceApprovalQueue(
   state: TuiState,
   interactionId: string | undefined,
-  status: 'approving' | 'rejected',
   grant?: 'approve_once' | 'same_command',
 ): TuiState {
   if (!state.pendingApprovals || interactionId == null) return state;
@@ -70,9 +27,8 @@ function advanceApprovalQueue(
   if (!pending) return { ...state, interrupt: null, activeApprovalId: null };
   queue.set(interactionId, {
     ...pending,
-    status,
+    status: 'approving',
     ...(grant ? { grant } : {}),
-    ...(status === 'rejected' ? { result: 'rejected' as const } : {}),
   });
   let next: TuiPendingApproval | undefined;
   for (const candidate of queue.values()) {
@@ -103,22 +59,37 @@ function advanceApprovalQueue(
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case 'RECONCILE_RUNTIME_PROJECTION': {
-      if (action.active) {
-        return state.running ? state : { ...state, running: true, exited: false };
+      const serverActive =
+        action.projection.currentRun?.status === 'queued' ||
+        action.projection.currentRun?.status === 'running' ||
+        action.projection.currentRun?.status === 'waiting' ||
+        action.projection.currentRun?.status === 'recovery_required';
+      if (serverActive) {
+        return {
+          ...state,
+          presentationMode: 'live',
+          runtimeAuthority: action.projection,
+          exited: false,
+        };
       }
-      if (!state.running && state.interrupt == null && !state.cancellationPending) return state;
-      const settled = finalizeLastTurnStreaming(settleActiveThought(state));
+      if (!isTuiRunActive(state) && state.interrupt == null && !state.cancelRequestedRunId) {
+        return { ...state, presentationMode: 'live', runtimeAuthority: action.projection };
+      }
+      const settled = projectPresentationBoundary(state);
       return {
         ...settled,
-        running: false,
-        cancellationPending: false,
+        presentationMode: 'live',
+        runtimeAuthority: action.projection,
+        cancelRequestedRunId: undefined,
         exited: false,
         interrupt: null,
         activeApprovalId: null,
         pendingApprovals: new Map(),
         toolStartTimes: undefined,
         pendingToolCalls: {},
+        presentationGroupSummaryIds: {},
         currentRunReasonId: undefined,
+        runStartTime: undefined,
         status: { ...settled.status, currentNode: null, plan: null, retryState: null },
       };
     }
@@ -140,8 +111,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'SET_RUNNING':
       return {
         ...state,
-        running: true,
-        cancellationPending: false,
+        presentationMode: 'live',
+        cancelRequestedRunId: undefined,
         runPromptPresented: false,
         exited: false,
         interrupt: null,
@@ -151,7 +122,6 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         runTokenBaseline: state.status.totalTokens,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
-        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelTextStreamed: undefined,
         currentModelTextSource: undefined,
@@ -160,19 +130,23 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         currentModelReasoningRequestId: undefined,
+        settledModelRequestIds: new Set(),
         explorationSummaryIds: {},
+        presentationGroupSummaryIds: {},
         pendingToolCalls: {},
+        pendingSubagentTerminals: new Map(),
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
         status: { ...state.status, currentNode: null, plan: null, retryState: null },
       };
     case 'SET_EXITED': {
-      const settled = finalizeLastTurnStreaming(settleActiveThought(state));
+      const settled = projectPresentationBoundary(state);
       return {
         ...settled,
-        running: false,
-        cancellationPending: false,
+        presentationMode: 'live',
+        cancelRequestedRunId: undefined,
+        runStartTime: undefined,
         exited: true,
         interrupt: null,
         status: { ...settled.status, currentNode: null, plan: null },
@@ -183,28 +157,18 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const resolution =
         typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
       const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
-      if (approvalInterrupt || action.approvalTarget) {
+      if (approvalInterrupt) {
         if (
           resolution.action === 'reject' ||
           resolution.action === 'denied' ||
           resolution.action === 'cancelled'
         ) {
-          const rejected = advanceApprovalQueue(
-            state,
-            approvalInterrupt?.interactionId,
-            'rejected',
-          );
-          const rejectedBlock =
-            b?.kind === 'approval'
-              ? replaceBlockById(rejected, b.id, {
-                  ...b,
-                  resolved: { action: 'reject' },
-                })
-              : rejected;
-          return {
-            ...rejectedBlock,
-            interrupt: state.pendingApprovals ? rejected.interrupt : null,
-          };
+          // Local rejection/cancellation has no durable identity on this
+          // action. Leave the approval queue and card live until the Runtime
+          // projects approval.rejected with its interactionId, generation,
+          // and owner binding; otherwise a stale key press could settle a
+          // different concurrent child.
+          return state;
         }
         // Only an accepted approval is safe to project optimistically. A
         // rejection/cancellation must keep the interrupt identity until the
@@ -213,12 +177,15 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         const queueAcknowledgement = advanceApprovalQueue(
           state,
           approvalInterrupt?.interactionId,
-          'approving',
           resolution.grant === 'same_command' ? 'same_command' : 'approve_once',
         );
         let withResolved = queueAcknowledgement;
         if (b?.kind === 'approval') {
-          withResolved = replaceBlockById(withResolved, b.id, { ...b, resolved: resolution });
+          withResolved = replaceBlockById(withResolved, b.id, {
+            ...b,
+            resolved: resolution,
+            presentationState: 'sealed',
+          });
         }
         // The local key acknowledgement may project only `approving` in the
         // durable queue. Child running/authorized state is derived exclusively
@@ -230,7 +197,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
 
       let resolved: OutputBlock;
       if (typeof action.resolution === 'string') {
-        resolved = { ...b, resolved: action.resolution };
+        resolved = {
+          ...b,
+          resolved: action.resolution,
+          presentationState: 'sealed',
+        };
       } else {
         // 多问题模式：resolved 带 answers / Multi-question: resolved with answers
         const r = action.resolution as unknown as {
@@ -239,7 +210,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           answers?: Record<string, string>;
         };
         const text = r.text ?? r.action ?? '';
-        resolved = { ...b, resolved: r.answers ? { text, answers: r.answers } : text };
+        resolved = {
+          ...b,
+          resolved: r.answers ? { text, answers: r.answers } : text,
+          presentationState: 'sealed',
+        };
       }
       const now = Date.now();
       const nextTimes: Record<string, number> = { ...(state.toolStartTimes ?? {}) };
@@ -330,6 +305,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         id: state.nextBlockId,
         kind: 'text',
         content: `✓ Session exported to ${action.filename}`,
+        presentationState: 'sealed',
       };
       return appendBlock(state, block);
     }
@@ -338,6 +314,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         id: state.nextBlockId,
         kind: 'user',
         content: `/mcp__${action.server}__${action.promptName}`,
+        presentationState: 'live',
       };
       return appendBlock(state, block);
     }
@@ -369,27 +346,34 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
 
     case 'CTRL_C': {
-      // The UI submits the cancel action before dispatching this key event.
-      // Keep the pending interaction visible until its durable Runtime
-      // terminal event is streamed back; clearing it locally would re-open the
-      // prompt if the process exits between those two steps.
+      // The UI records this presentation receipt immediately before submitting
+      // the Runtime command. Keep the pending interaction visible until its
+      // durable terminal event is streamed back; clearing it locally would
+      // re-open the prompt if the process exits between those two steps.
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
-      if (state.interrupt || state.running) {
-        return { ...state, ctrlCPressed: true, cancellationPending: true };
+      if (state.interrupt || isTuiRunActive(state)) {
+        return {
+          ...state,
+          ctrlCPressed: true,
+          cancelRequestedRunId: state.runtimeAuthority?.currentRun?.runId,
+        };
       }
       return { ...state, ctrlCPressed: true };
     }
     case 'CANCEL_REQUEST_FAILED':
-      return state.cancellationPending ? { ...state, cancellationPending: false } : state;
+      return state.cancelRequestedRunId ? { ...state, cancelRequestedRunId: undefined } : state;
     case 'RESET_CTRL_C':
       return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
     case 'ESCAPE': {
-      // App submits the Runtime cancel command synchronously before this
-      // presentation action. Keep domain and lifecycle completion owned by the
+      // App records this presentation action before submitting the Runtime
+      // cancel command. Keep domain and lifecycle completion owned by the
       // authoritative terminal, but acknowledge the in-flight request now so
       // repeated keys do not look ignored.
-      return state.running && !state.cancellationPending
-        ? { ...state, cancellationPending: true }
+      return isTuiRunActive(state) && !state.cancelRequestedRunId
+        ? {
+            ...state,
+            cancelRequestedRunId: state.runtimeAuthority?.currentRun?.runId,
+          }
         : state;
     }
     default:

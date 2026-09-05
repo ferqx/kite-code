@@ -9,7 +9,7 @@
   封闭Runtime、History、App Control、credential、status与snapshot generation；没有InProcess或legacy Service fallback。
 - `src/service-mode/tui-client.ts` 是 presentation facade 的显式 Native implementation。Session create/resume/query/
   subscribe、approval、rewind/fork/compact/cancel等操作全部形成 Runtime Client command/query/subscribe，不取得
-  `RuntimeHost`、`RuntimeServer`、Store、Builtin executor、SessionManager或 raw event。
+  `RuntimeHost`、`RuntimeServer`、Store、Builtin executor、legacy session manager或 raw event。
 - rewind在applied intent receipt后等待commandId绑定的`rewind.terminal`；target Session、失败码与bounded file outcome
   均来自Service safe projection，CLI/TUI不从source ID、checkpoint或history display推断成功。
 - raw Runtime event/history projection、Runtime Application、Workspace router、interaction broker、App Control owner、

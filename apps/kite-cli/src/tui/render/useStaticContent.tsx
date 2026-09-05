@@ -5,9 +5,8 @@
 //
 // Screen transitions (resize, session switch) use DEC synchronized output
 // (\x1B[?2026h/l) to buffer the full re-render and display it atomically.
-// The enable + clear sequence runs synchronously during the React render
-// phase (before Ink commits output), so ALL TUI rendering — Static,
-// dynamic tree, header, footer — is captured in the buffer.
+// Transition ownership lives in the commit/layout-effect coordinator below;
+// rendering this hook never writes to stdout.
 //
 // ═══════════════════════════════════════════════════════════════════════
 // REFERENCE STABILITY (2026-06-17 fix)
@@ -26,7 +25,14 @@
 // when the fingerprint changes. All downstream values are derived from these
 // stable refs, so references are constant between genuine state transitions.
 
-import { type ReactNode, useEffect, useMemo, useRef } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  advanceOutputBlockTimeline,
+  outputBlockVisualDigest,
+  projectApprovalViewport,
+  type TimelineItem,
+  type TimelineState,
+} from '../presentation/timeline';
 import type { OutputBlock, Turn } from '../types';
 
 export { changePrefix } from '../components/BlockRenderer';
@@ -36,126 +42,15 @@ export { toolColor } from '../components/render-utils';
 const HEADER_SENTINEL = { __header: true } as const;
 
 /**
- * 判定运行中（activeTurn）的 block 是否已绝对不可变，可以提前进入 Ink <Static>。
- *
- * Ink <Static> 是 append-only 的（items.slice(index) 只渲染新增项，已渲染项内容
- * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
- * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
- *
- * user prompt 在出现后续 block 后可以进入 Static。tool_summary 必须先关闭聚合
- * owner、结束 awaiting-terminal 状态，并由 reducer 发布整体 result；渲染层不从
- * 子工具状态重复推导完成。
- */
-export function isBlockSettledInRun(
-  block: OutputBlock,
-  _blocks: OutputBlock[],
-  _index: number,
-  _runActive = false,
-): boolean {
-  switch (block.kind) {
-    case 'user':
-      return _index < _blocks.length - 1;
-    case 'text':
-      return (
-        !block.streaming &&
-        !block.responsePending &&
-        (block.modelRequestId === undefined || block.modelTerminal === true) &&
-        block.streamingSource === undefined &&
-        block.streamingComponent === undefined
-      );
-    case 'tool_card':
-      return (
-        block.status === 'done' ||
-        block.status === 'error' ||
-        block.status === 'rejected' ||
-        block.status === 'cancelled' ||
-        block.status === 'timeout' ||
-        block.status === 'exhausted'
-      );
-    case 'tool_summary':
-      return !block.active && !block.responsePending && block.result !== undefined;
-    case 'reason':
-    case 'file_change':
-      return true;
-    case 'subagent': {
-      const terminal = (candidate: Extract<OutputBlock, { kind: 'subagent' }>) =>
-        candidate.status === 'done' ||
-        candidate.status === 'error' ||
-        candidate.status === 'cancelled';
-      if (!terminal(block)) return false;
-      if (block.concurrencyGroupId === undefined) return true;
-      // Group identity does not reveal siblings whose start event has not
-      // arrived yet. A later presentation block proves this sibling group is
-      // closed; otherwise do not hand it to append-only Static mid-Run.
-      const hasLaterBoundary = _blocks.some(
-        (candidate, candidateIndex) =>
-          candidateIndex > _index &&
-          (candidate.kind !== 'subagent' ||
-            candidate.concurrencyGroupId !== block.concurrencyGroupId),
-      );
-      if (_runActive && !hasLaterBoundary) return false;
-      return _blocks.every(
-        (candidate) =>
-          candidate.kind !== 'subagent' ||
-          candidate.concurrencyGroupId !== block.concurrencyGroupId ||
-          terminal(candidate),
-      );
-    }
-    case 'approval':
-    case 'question':
-      return block.resolved !== undefined;
-  }
-}
-
-/**
- * Stable fingerprint of a block's identity and mutable state.
+ * Stable renderer cache key for a block's identity and visual state.
  * Only changes when the block's visual output actually changes.
  * This is the single source of truth for cache invalidation.
  */
-export function blockFingerprint(b: OutputBlock): string {
-  let extra = '';
-  switch (b.kind) {
-    case 'user':
-      extra = b.pendingEcho ? ':pending' : `:durable:${b.messageId ?? 'local'}`;
-      break;
-    case 'text':
-      extra =
-        (b.streaming ? `:s:${b.content.length}` : b.responsePending ? ':pending' : ':f') +
-        (b.thoughtElapsedMs != null ? `:th${b.thoughtElapsedMs}` : '') +
-        (b.thoughtContent ? `:tc${b.thoughtContent.length}:${b.thoughtContent.slice(-16)}` : '');
-      break;
-    case 'tool_card':
-      // liveOutput 头尾各 8 字符 + totalLines 做指纹：窗口滑动 → 头部变；新增行 → 尾部变 / 计数变
-      extra =
-        `:${b.status}` +
-        (b.liveOutput
-          ? `:lo${b.liveOutput.length}:${b.liveOutput.slice(0, 8)}:${b.liveOutput.slice(-8)}:t${b.liveTotalLines ?? 0}`
-          : '');
-      break;
-    case 'tool_summary':
-      // Every tool status change must trigger a split recomputation
-      extra =
-        `:${b.active ? 'a' : b.responsePending ? 'pending' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.liveModelStartedAt ?? '_'}:${b.result ?? '_'}` +
-        (b.latestActivity
-          ? b.latestActivity.kind === 'thinking'
-            ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
-            : `:tc:${b.latestActivity.callId}`
-          : '');
-      break;
-    case 'subagent':
-      extra =
-        `:${b.status}:${b.steps.length}:${b.steps.map((s) => s.status?.[0] ?? '_').join('')}` +
-        (b.awaitingApproval ? ':wait' : '') +
-        (b.approvalState ? `:approval-${b.approvalState}` : '') +
-        (b.concurrencyGroupId != null ? `:cg${b.concurrencyGroupId}` : '') +
-        (b.expanded ? ':expanded' : '');
-      break;
-    case 'approval':
-    case 'question':
-      extra = b.resolved !== undefined ? ':resolved' : ':pending';
-      break;
-  }
-  return `${b.id}:${b.kind}${extra}`;
+export function blockRenderCacheKey(b: OutputBlock): string {
+  // Lifecycle is a Timeline concern, but it must participate in the cache
+  // key so a live item is reconsidered for Static promotion when the same
+  // render model becomes sealed. The digest itself remains visual-only.
+  return `${b.id}:${b.kind}:${b.presentationState ?? 'live'}:${outputBlockVisualDigest(b)}`;
 }
 
 /** Element-by-element reference identity comparison. */
@@ -163,6 +58,26 @@ function blocksIdentical(a: OutputBlock[], b: OutputBlock[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** Keep canonical Timeline item references stable between real projection changes. */
+function timelineItemsIdentical(a: readonly TimelineItem[], b: readonly TimelineItem[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    const left = a[index]!;
+    const right = b[index]!;
+    if (
+      left.id !== right.id ||
+      left.state !== right.state ||
+      (left.state === 'sealed' &&
+        right.state === 'sealed' &&
+        left.visualDigest !== right.visualDigest) ||
+      left.renderModel.block !== right.renderModel.block
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -179,7 +94,7 @@ const turnFingerprintCache = new WeakMap<Turn, string>();
 function turnFingerprint(turn: Turn): string {
   const cached = turnFingerprintCache.get(turn);
   if (cached !== undefined) return cached;
-  const fingerprint = turn.blocks.map(blockFingerprint).join(',');
+  const fingerprint = turn.blocks.map(blockRenderCacheKey).join(',');
   turnFingerprintCache.set(turn, fingerprint);
   return fingerprint;
 }
@@ -204,10 +119,19 @@ export interface StaticContentResult {
   mergedStaticBlocks: OutputBlock[];
   /** Blocks kept in the dynamic tree (may still mutate) */
   activeDynamicBlocks: OutputBlock[];
+  /** Canonical sealed Timeline items owned by the physical Static ledger. */
+  mergedStaticTimeline: readonly TimelineItem[];
+  /** Canonical live/dynamic Timeline items after the approval viewport projection. */
+  activeDynamicTimeline: readonly TimelineItem[];
+  /** Monotonic physical-render epoch used to fence React child identities. */
+  renderEpoch: number;
 }
 
 export interface UseStaticContentOptions {
   turns: Turn[];
+  /** Reducer-owned normalized message projection. Tests and compatibility
+   * callers may omit it and use the one-way OutputBlock adapter. */
+  presentationTimeline?: TimelineState;
   running: boolean;
   sessionKey?: number;
   header: ReactNode;
@@ -215,33 +139,53 @@ export interface UseStaticContentOptions {
   resizeGeneration?: number;
   /** Presentation changes such as locale need a complete Static re-render. */
   presentationKey?: string;
+  /** Focused approval owns a bounded viewport frontier; projection lives with Timeline. */
+  awaitingApproval?: boolean;
 }
 
 export function useStaticContent({
   turns,
+  presentationTimeline,
   running,
   sessionKey,
   header,
   resizeGeneration,
   presentationKey,
+  awaitingApproval = false,
 }: UseStaticContentOptions): StaticContentResult {
   // ── Session / resize lifecycle ──
   const prevSessionKeyRef = useRef<number | undefined>(undefined);
   const prevPresentationKeyRef = useRef<string | undefined>(undefined);
-  const syncOutputRef = useRef(false);
+  const prevResizeGenerationRef = useRef<number | undefined>(undefined);
+  const prevTurnCountRef = useRef(turns.length);
+  const renderEpochRef = useRef(0);
+  const [transitionPaintEpoch, setTransitionPaintEpoch] = useState(0);
+  const staticCommittedRef = useRef(
+    new Map<string, { readonly digest: string; readonly item: TimelineItem }>(),
+  );
+  const pendingTransitionRef = useRef<number | undefined>(undefined);
+  const synchronizedTransitionRef = useRef<number | undefined>(undefined);
   // 会话重挂载后历史（含最后 turn）整体进 Static；新 run 开始时恢复活跃尾。
   // After a session remount the whole history (including the last turn) is
   // immutable; a new run (SET_RUNNING) restores the live-tail split.
   const prevRunningRef = useRef(running);
   const allSettledRef = useRef(false);
-  const needsClear =
-    sessionKey !== prevSessionKeyRef.current || presentationKey !== prevPresentationKeyRef.current;
-  const isResize = (resizeGeneration ?? 0) > 0;
   const isInitialMount = prevSessionKeyRef.current === undefined;
+  const resizeChanged = resizeGeneration !== prevResizeGenerationRef.current;
+  const clearDetected = prevTurnCountRef.current > 0 && turns.length === 0;
+  const needsClear =
+    sessionKey !== prevSessionKeyRef.current ||
+    presentationKey !== prevPresentationKeyRef.current ||
+    resizeChanged ||
+    clearDetected;
 
   if (needsClear) {
+    renderEpochRef.current += 1;
+    staticCommittedRef.current.clear();
     prevSessionKeyRef.current = sessionKey;
     prevPresentationKeyRef.current = presentationKey;
+    prevResizeGenerationRef.current = resizeGeneration;
+    pendingTransitionRef.current = isInitialMount ? undefined : renderEpochRef.current;
 
     // Session switch / remount with an idle session: promote the ENTIRE
     // conversation (including the last turn) to <Static>. The screen was
@@ -251,19 +195,10 @@ export function useStaticContent({
     // re-render it on every keystroke. A session that is still running keeps
     // its live tail dynamic so streamed content stays updateable.
     allSettledRef.current = !running;
-
-    if (isResize || !isInitialMount) {
-      // Resize / session switch: scroll to bottom, enable sync, clear.
-      // \x1B[9999H forces viewport to bottom before sync freezes it.
-      // eslint-disable-next-line no-restricted-properties
-      process.stdout.write('\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J');
-      syncOutputRef.current = true;
-    } else {
-      // Initial mount: clear only, no sync (content appears naturally).
-      // eslint-disable-next-line no-restricted-properties
-      process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
-    }
   }
+  prevTurnCountRef.current = turns.length;
+  const renderEpoch = renderEpochRef.current;
+  const pendingTransition = pendingTransitionRef.current;
 
   // A new run (SET_RUNNING fires before the durable user.message in the same tick) ends
   // the remount all-settled window: the freshly appended user turn becomes the
@@ -282,22 +217,46 @@ export function useStaticContent({
   const allSettled = allSettledRef.current;
   const settledTurns = allSettled ? turns : turns.slice(0, -1);
   const activeTurn = allSettled ? undefined : turns.at(-1);
+  const timelineRef = useRef<TimelineState | undefined>(undefined);
+  const flatBlocks = turns.flatMap((turn) => turn.blocks);
+  let fallbackTimeline = timelineRef.current;
+  if (!presentationTimeline) {
+    fallbackTimeline = advanceOutputBlockTimeline(fallbackTimeline, flatBlocks, renderEpoch);
+    timelineRef.current = fallbackTimeline;
+  }
+  const timeline: TimelineState = presentationTimeline
+    ? { renderEpoch, items: presentationTimeline.items }
+    : (fallbackTimeline ?? { renderEpoch, items: [] });
+  const settledBlockCount = settledTurns.reduce((count, turn) => count + turn.blocks.length, 0);
+  const settledTimelineItems = timeline.items.slice(0, settledBlockCount);
+  const activeTimelineItems = timeline.items.slice(settledBlockCount);
 
-  // Disable synchronized output after the first render commits.
-  useEffect(() => {
-    if (syncOutputRef.current) {
-      syncOutputRef.current = false;
-      // eslint-disable-next-line no-restricted-properties
-      process.stdout.write('\x1B[?2026l');
-    }
-    return () => {
-      if (syncOutputRef.current) {
-        syncOutputRef.current = false;
-        // eslint-disable-next-line no-restricted-properties
-        process.stdout.write('\x1B[?2026l');
-      }
-    };
-  });
+  // Physical screen ownership belongs to the commit phase. Keeping this out
+  // of render is important: a reducer replay or StrictMode render must never
+  // emit a partial clear/synchronized-output sequence.
+  useLayoutEffect(() => {
+    const epoch = pendingTransition;
+    if (epoch === undefined) return;
+    pendingTransitionRef.current = undefined;
+    // Scroll to the bottom before freezing the viewport. Ink then commits the
+    // new Static/dynamic tree as one terminal transaction.
+    process.stdout.write('\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J');
+    // The transition-triggering commit happened before this layout effect and
+    // is intentionally erased. Force one new Static key while synchronized
+    // output is held so the rebuilt viewport is committed after the clear.
+    synchronizedTransitionRef.current = epoch;
+    setTransitionPaintEpoch(epoch);
+  }, [pendingTransition]);
+
+  useLayoutEffect(() => {
+    const epoch = synchronizedTransitionRef.current;
+    if (epoch === undefined || transitionPaintEpoch !== epoch) return;
+    synchronizedTransitionRef.current = undefined;
+    // This effect runs only after the forced paint commit above. Releasing in
+    // a microtask from the clearing commit races React and can expose an empty
+    // viewport when LOAD_SESSION and local presentation notes are batched.
+    process.stdout.write('\x1B[?2026l');
+  }, [transitionPaintEpoch]);
 
   // ═══════════════════════════════════════════════════════════════════
   // STABLE CACHE LAYER
@@ -311,14 +270,14 @@ export function useStaticContent({
   // new turns/settledTurns/activeTurn references on every dispatch.
   // ═══════════════════════════════════════════════════════════════════
 
-  // ── Settled turn blocks: cache by fingerprint ──
+  // ── Settled turn Timeline items: cache by fingerprint ──
   // When running flips from true to false, the active turn moves into
   // settled turns. If a block inside it later changes state (e.g. running
   // sub-agent receives subagent_error, tool_card receives tool_done), the
   // count stays the same but the content differs. Fingerprint catches this.
   const prevSettledFpRef = useRef('');
   const prevSettledTurnsRef = useRef<Turn[]>([]);
-  const staticBlocksRef = useRef<OutputBlock[]>([]);
+  const staticTimelineRef = useRef<readonly TimelineItem[]>([]);
 
   // Most renders are input/status updates. Their `turns` container may be
   // recreated, but settled Turn identities are unchanged, so avoid walking
@@ -331,7 +290,7 @@ export function useStaticContent({
 
   if (settledFp !== prevSettledFpRef.current) {
     prevSettledFpRef.current = settledFp;
-    staticBlocksRef.current = settledTurns.flatMap((t) => t.blocks);
+    staticTimelineRef.current = settledTimelineItems;
   }
 
   // ── Active turn dynamic cache: cache by fingerprint ──
@@ -340,10 +299,12 @@ export function useStaticContent({
   const prevFingerprintRef = useRef('');
   const activeSettledRef = useRef<OutputBlock[]>([]);
   const activeDynamicRef = useRef<OutputBlock[]>([]);
+  const activeSettledTimelineRef = useRef<readonly TimelineItem[]>([]);
+  const activeDynamicTimelineRef = useRef<readonly TimelineItem[]>([]);
 
   let fingerprint = running ? 'running:' : 'idle:';
   if (activeTurn) {
-    fingerprint += activeTurn.blocks.map(blockFingerprint).join(',');
+    fingerprint += activeTurn.blocks.map(blockRenderCacheKey).join(',');
   }
 
   if (fingerprint !== prevFingerprintRef.current) {
@@ -351,6 +312,8 @@ export function useStaticContent({
 
     let nextSettled: OutputBlock[];
     let nextDynamic: OutputBlock[];
+    let nextSettledTimeline: readonly TimelineItem[];
+    let nextDynamicTimeline: readonly TimelineItem[];
 
     if (activeTurn && activeTurn.blocks.length > 0) {
       // active turn 中已完成（绝对不可变）的连续前缀提升进 <Static>，只把活跃
@@ -359,8 +322,9 @@ export function useStaticContent({
       // 修改的 block 才能离开动态树；一旦遇到第一个仍可变的块，其后的块
       // 全部留在动态树（保证 Static→动态的渲染顺序）。
       const blocks = activeTurn.blocks;
+      const timelineItems = activeTimelineItems;
       let split = 0;
-      while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split, running)) {
+      while (split < blocks.length && timelineItems[split]?.state === 'sealed') {
         split++;
       }
 
@@ -368,11 +332,19 @@ export function useStaticContent({
       // frame that the Run becomes idle.  ADR-0168/0171/0172 make those block
       // facts—not Run liveness—the completion authority, so retain no stale
       // dynamic owner once the prefix is proven immutable.
-      nextSettled = blocks.slice(0, split);
-      nextDynamic = blocks.slice(split);
+      // Timeline owns both lifecycle and the immutable render model. Reading
+      // the fresh OutputBlock array here would bypass advanceOutputBlockTimeline:
+      // a late event could then swap a previously sealed block into Static even
+      // though the Timeline correctly retained its committed digest/model.
+      nextSettled = timelineItems.slice(0, split).map((item) => item.renderModel.block);
+      nextDynamic = timelineItems.slice(split).map((item) => item.renderModel.block);
+      nextSettledTimeline = timelineItems.slice(0, split);
+      nextDynamicTimeline = timelineItems.slice(split);
     } else {
       nextSettled = [];
       nextDynamic = [];
+      nextSettledTimeline = [];
+      nextDynamicTimeline = [];
     }
 
     // Only update refs when arrays actually differ by element identity.
@@ -386,27 +358,78 @@ export function useStaticContent({
     if (!blocksIdentical(activeDynamicRef.current, nextDynamic)) {
       activeDynamicRef.current = nextDynamic;
     }
+    if (!timelineItemsIdentical(activeSettledTimelineRef.current, nextSettledTimeline)) {
+      activeSettledTimelineRef.current = nextSettledTimeline;
+    }
+    if (!timelineItemsIdentical(activeDynamicTimelineRef.current, nextDynamicTimeline)) {
+      activeDynamicTimelineRef.current = nextDynamicTimeline;
+    }
   }
 
   // ── Derived values with stable references ──
   // These useMemos depend on the ref values. Since we only update the refs
   // when content actually changes, the useMemo dependencies are stable
   // between renders, preventing unnecessary recomputation.
-  const staticBlocks = staticBlocksRef.current;
-  const activeSettledBlocks = activeSettledRef.current;
   const activeDynamicBlocks = activeDynamicRef.current;
+  const staticTimeline = staticTimelineRef.current;
+  const activeSettledTimeline = activeSettledTimelineRef.current;
+  const activeDynamicTimeline = activeDynamicTimelineRef.current;
 
-  const mergedStaticBlocks = useMemo(
-    () => [...staticBlocks, ...activeSettledBlocks],
-    [staticBlocks, activeSettledBlocks],
+  const proposedStaticTimeline = useMemo(
+    () => [...staticTimeline, ...activeSettledTimeline],
+    [staticTimeline, activeSettledTimeline],
   );
+  const physicalStaticTimelineRef = useRef<readonly TimelineItem[]>([]);
+  const resolvedStaticTimeline = proposedStaticTimeline.map((item) => {
+    const committed = staticCommittedRef.current.get(`${renderEpoch}:item-${item.id}`);
+    // Ink Static ownership is irreversible. A late identity join or stale
+    // presentation packet may update the reducer DTO, but it cannot replace
+    // the render model already committed for this logical item.
+    if (!committed) return item;
+    return committed.digest === outputBlockVisualDigest(item.renderModel.block)
+      ? item
+      : committed.item;
+  });
+  if (!timelineItemsIdentical(physicalStaticTimelineRef.current, resolvedStaticTimeline)) {
+    physicalStaticTimelineRef.current = resolvedStaticTimeline;
+  }
+  const mergedStaticTimeline = physicalStaticTimelineRef.current;
+  const mergedStaticBlocks = mergedStaticTimeline.map((item) => item.renderModel.block);
+  const projectedApproval = projectApprovalViewport(activeDynamicTimeline, awaitingApproval);
+  const visibleDynamicTimeline = projectedApproval.visibleItems;
 
   const staticItems = useMemo(() => [HEADER_SENTINEL, ...mergedStaticBlocks], [mergedStaticBlocks]);
 
+  // Effects run after Ink commits the render. Until this point the ledger is
+  // only a plan and cannot claim physical Static ownership.
+  useEffect(() => {
+    for (const item of mergedStaticTimeline) {
+      const block = item.renderModel.block;
+      const id = `${renderEpoch}:item-${item.id}`;
+      if (staticCommittedRef.current.has(id)) continue;
+      staticCommittedRef.current.set(id, {
+        digest: outputBlockVisualDigest(block),
+        item,
+      });
+    }
+  }, [mergedStaticTimeline, renderEpoch]);
+
   const staticKey = useMemo(
-    () => `s-${sessionKey ?? 0}-${presentationKey ?? 'default'}`,
-    [presentationKey, sessionKey],
+    () =>
+      renderEpoch === 0
+        ? `s-${sessionKey ?? 0}-${presentationKey ?? 'default'}`
+        : `s-${sessionKey ?? 0}-${presentationKey ?? 'default'}-e${renderEpoch}-p${transitionPaintEpoch}`,
+    [presentationKey, renderEpoch, sessionKey, transitionPaintEpoch],
   );
 
-  return { staticItems, staticKey, header, mergedStaticBlocks, activeDynamicBlocks };
+  return {
+    staticItems,
+    staticKey,
+    header,
+    mergedStaticBlocks,
+    activeDynamicBlocks,
+    mergedStaticTimeline,
+    activeDynamicTimeline: visibleDynamicTimeline,
+    renderEpoch,
+  };
 }

@@ -174,7 +174,19 @@ function createKiteServiceRuntimeCompositionUnchecked(
   // The normal Service process is neutral at startup. A template is resolved only after a
   // connection has passed Workspace Trust and Runtime admission.
   const hasDynamicTemplate = true;
-  const owner = createKiteMultiWorkspaceRuntimeServer({
+  const runtimeControlReleases = new Map<string, () => void>();
+  let owner!: KiteMultiWorkspaceRuntimeServerOwner;
+  const bindRuntimeModelControl = (workspace: KiteWorkspaceIdentity): void => {
+    const key = `${workspace.workspaceDigest}\0${workspace.projectId}\0${workspace.canonicalPath}`;
+    if (runtimeControlReleases.has(key)) return;
+    runtimeControlReleases.set(
+      key,
+      appControl.bindRuntimeControl(workspace, {
+        applySelectedConfig: (config) => owner.applySelectedConfig(workspace, config),
+      }),
+    );
+  };
+  owner = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath: input.checkpointPath,
     serverInstanceId: instanceId,
     ...(input.runtimeServerVersion ? { serverVersion: input.runtimeServerVersion } : {}),
@@ -210,11 +222,13 @@ function createKiteServiceRuntimeCompositionUnchecked(
                     initialSkillActivations: requested?.initialSkillActivations ?? [],
                   };
                 })();
+            bindRuntimeModelControl(workspace);
             return template;
           },
         }
       : {}),
   });
+  for (const workspace of workspaces) bindRuntimeModelControl(workspace);
   const rawHistory = input.storageOwner
     ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
     : createKiteRuntimeHistory(input.checkpointPath);
@@ -243,6 +257,8 @@ function createKiteServiceRuntimeCompositionUnchecked(
       try {
         await owner[Symbol.asyncDispose]();
       } finally {
+        for (const release of runtimeControlReleases.values()) release();
+        runtimeControlReleases.clear();
         await appControl[Symbol.asyncDispose]();
       }
     },

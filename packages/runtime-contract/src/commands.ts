@@ -48,7 +48,7 @@ export interface StartTurnCommand extends RuntimeSessionCommandBase {
 export interface CancelTurnCommand extends RuntimeSessionCommandBase {
   readonly type: 'cancel_turn';
   readonly turnId: string;
-  readonly runId?: string;
+  readonly runId: string;
 }
 
 export type RuntimeInteractionResponse =
@@ -175,7 +175,11 @@ export type RuntimeCommandReceipt =
       readonly commandId: string;
       readonly sessionId: string;
       readonly revision: number;
-      readonly resource?: { readonly kind: 'run'; readonly run: RuntimeRunProjection };
+      readonly resource?: {
+        readonly kind: 'run';
+        readonly run: RuntimeRunProjection;
+        readonly messageId: string;
+      };
     }
   | {
       readonly status: 'conflict' | 'rejected' | 'not_found';
@@ -188,7 +192,11 @@ export type RuntimeCommandReceipt =
       readonly commandId: string;
       readonly sessionId: string;
       readonly originalRevision: number;
-      readonly resource?: { readonly kind: 'run'; readonly run: RuntimeRunProjection };
+      readonly resource?: {
+        readonly kind: 'run';
+        readonly run: RuntimeRunProjection;
+        readonly messageId: string;
+      };
     };
 
 const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
@@ -250,7 +258,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
       return (
         isSessionCommand(candidate, ['turnId', 'runId']) &&
         isIdentifier(candidate.turnId) &&
-        (!Object.hasOwn(candidate, 'runId') || isIdentifier(candidate.runId))
+        isIdentifier(candidate.runId)
       );
     case 'respond_interaction':
       return (

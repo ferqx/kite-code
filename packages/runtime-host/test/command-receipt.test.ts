@@ -7,6 +7,7 @@ import {
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from '../src/host/command-receipt';
+import { runtimeStartMessageId } from '../src/host/run-projection';
 import { createRuntimeStoredCommandReceipt } from '../src/storage';
 
 const DIGEST = 'a'.repeat(64);
@@ -179,6 +180,7 @@ describe('Host persistent command receipt helper', () => {
       originalRevision: 3,
       resource: {
         kind: 'run',
+        messageId: runtimeStartMessageId('command-1'),
         run: {
           schema: 'kite.runtime-run.v1',
           sessionId: 'session-1',

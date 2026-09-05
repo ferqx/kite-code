@@ -996,6 +996,7 @@ describe('runtime host command and projection authority', () => {
       sessionId: 'session-1',
       expectedRevision: 1,
       turnId: 'turn-1',
+      runId: 'turn-1',
     });
     await host.waitForSessionIdle('session-1');
 
@@ -1303,6 +1304,7 @@ describe('runtime host command and projection authority', () => {
       sessionId: 'session-1',
       expectedRevision: 1,
       turnId: 'turn-1',
+      runId: 'turn-1',
     });
     await host.command(startCommand('turn-2', 'session-1', 2));
     expect(order).toEqual(['predecessor-started', 'predecessor-aborted']);
@@ -1372,6 +1374,7 @@ describe('runtime host command and projection authority', () => {
       sessionId: 'session-1',
       expectedRevision: 1,
       turnId: 'turn-1',
+      runId: 'turn-1',
     });
     await host.command(startCommand('turn-2', 'session-1', 2));
     await host.cancelSession('session-1', 'queued successor cancelled');
@@ -1536,6 +1539,7 @@ function respondInteractionCommand(): Extract<RuntimeCommand, { type: 'respond_i
     generation: 0,
     command: 'bun test',
     grants: ['approve_once' as const],
+    owner: { kind: 'root_tool' as const, toolCallId: 'approval-1-tool' },
   };
   return {
     schema: RUNTIME_COMMAND_SCHEMA_,

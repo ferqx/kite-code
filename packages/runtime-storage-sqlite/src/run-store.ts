@@ -828,6 +828,18 @@ function assertImmutableRunIdentity(current: RuntimeStoredRun, next: RuntimeStor
 }
 
 function assertLifecycleTransition(current: RuntimeStoredRun, next: RuntimeStoredRun): void {
+  if (
+    current.status === next.status &&
+    (current.status === 'queued' || current.status === 'running' || current.status === 'waiting')
+  ) {
+    if (next.lastRevision <= current.lastRevision) {
+      throw new Error('Runtime Run continuation transition must advance its revision.');
+    }
+    if (current.startedAtMs !== next.startedAtMs || current.finishedAtMs !== next.finishedAtMs) {
+      throw new Error('Runtime Run continuation transition changed a durable timestamp.');
+    }
+    return;
+  }
   const allowed: Readonly<
     Record<RuntimeStoredRun['status'], readonly RuntimeStoredRun['status'][]>
   > = {

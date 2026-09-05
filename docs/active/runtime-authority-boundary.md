@@ -104,6 +104,9 @@ connection从不取得control token。每个HTTP请求绑定发起时的Service 
 迟到响应在reconnect后拒绝；Runtime reconnect按generation清空旧index/readiness/ephemeral stream并重新订阅。History
 transcript逐条复用closed`RuntimeClientEvent`validator，unknown或带额外字段的event不能跨Native边界。client close只
 释放本connection、subscription与snapshot state，不取消Session/Turn或dispose Host。
+Native presentation adapter消费event-free snapshot时也必须保留每条notification入队时的connection generation；重连后排队的
+旧事件不得用当前generation重新盖章。进入TUI的model/tool/subagent/interaction事件必须携带Turn identity，Task/Turn/Run
+terminal的envelope identity必须与事件字段精确相等；History record通过持久顺序join或显式`legacy-*`迁移identity构造同一边界。
 Trust identity除canonical Workspace三元组外还绑定Service发现的exact external-read roots digest；query在Runtime连接前
 向TUI/CLI投影canonical paths，decision经revision/scope CAS后才允许Sandbox只读挂载。scope drift重新阻断connection，
 generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust record自行提升这一authority。
@@ -121,10 +124,18 @@ legacy Session seam与concrete Service bridge共享该实现，
 publisher同样受active frame barrier约束；Native TUI在completed reasoning后等待一次真实Ink presentation flush，才消费
 后续client event，不能让terminal先结算后再补一个独立Thought。该presentation-only等待最多1秒；正常路径仍以真实commit为准，
 但UI promise迟到或失败不能取得subscription、Runtime terminal或prompt FIFO authority。
-Native run completion只由跨过current command revision floor且匹配receipt canonical `runId`的`run.terminal|run.failure`拥有；
+Native run completion只由跨过current command revision floor且匹配receipt canonical `runId`的`run.terminal`拥有；失败使用
+`status=failed`与同一事件中的terminal outcome；
 Task/Turn终态仍可展示，但不能解决后继Run的completion callback。
+Session projection使用exact v2 vocabulary：`activeTask`与stable `currentRun`分别来自committed State和Store Run row；
+Provider continuation只推进同一Run的activeTurn与revision。accepted receipt的`messageId`由持久commandId确定性派生，resource JSON与
+State/event format不增加字段。Start Turn的公开事件在notification metadata中复用同一accepted run/task/turn identity，首条prompt
+不得继承predecessor Turn；无active/unknown Run时只读hydrate最近settled Run。Native/Protocol要求已建立Run的cancel同时携带
+runId与activeTurnId。
+RuntimeClient必须先取得snapshot store `applied`再分发durable/ephemeral notification；revision或sequence gap触发同connection
+resubscribe并把Session置为not-ready，旧packet不得进入TUI reducer。
 
-Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
+Protocol V2 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V2 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
 Public Agent API Browser route当前只在显式daemon listener增加认证与bounded read façade，不增加第二RuntimeAccess或Store入口。Agent one-shot capability
 hash-only authority恢复Client/generation/role binding，exchange重验Workspace Trust后签发hash-only context；每个context只取得一条
