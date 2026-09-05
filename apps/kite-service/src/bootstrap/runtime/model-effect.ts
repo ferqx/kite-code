@@ -751,11 +751,13 @@ export async function projectPrimaryModelEffect(params: {
           // Client projector. The presentation layer must never rediscover it
           // from a tool name or a namespaced child call id.
           presentation:
-            capability.effectClass === 'read_only' && capability.sideEffect === false
-              ? call.name === 'task'
-                ? ('hidden' as const)
-                : ('exploration' as const)
-              : ('standalone' as const),
+            builtinEntry?.kind === 'interrupt' || builtinEntry?.executionMechanism === 'user_input'
+              ? ('standalone' as const)
+              : capability.effectClass === 'read_only' && capability.sideEffect === false
+                ? call.name === 'task'
+                  ? ('hidden' as const)
+                  : ('exploration' as const)
+                : ('standalone' as const),
           invocationFingerprint,
           unknownFields,
           ...(binding

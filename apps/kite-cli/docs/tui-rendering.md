@@ -101,6 +101,8 @@
 - 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
   统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued event 已由 Runtime 分类为
   `effectClass=read_only` 且 `sideEffect=false` 时才归 exploration；TUI 不读取命令文本重新分类。
+  `ask_user`等Server已分类为standalone的interaction工具先封口当前Thought，再由独立tool card与Footer问题展示；不得计入
+  Thinking的工具数量或摘要。
   同一 Thought 中的只读 Shell 按 `ran N shell command(s)` 计入题头，例如
   `Thinking 1s · read 2 files, ran 1 shell command`。当前模型调用进行时，标题耗时按本地墙钟持续刷新；
   `model.responded.durationMs` 到达后校正并冻结最终模型耗时，工具与人机等待不计入。terminal event 即使没有重复分类事实也按 call ID

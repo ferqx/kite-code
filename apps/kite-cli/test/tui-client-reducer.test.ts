@@ -2864,6 +2864,67 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('keeps ask_user outside the Thinking tool aggregate', () => {
+    const events = [
+      { type: 'model.requested', requestId: 'ask-request' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'ask-request',
+        state: 'completed',
+        segmentId: 'ask-reasoning',
+        text: 'I need the user to choose.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'ask-request',
+        messageId: 'ask-message',
+        durationMs: 4_000,
+        toolCallCount: 1,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'ask-tool',
+        presentationGroupId: 'ask-message',
+        toolName: 'ask_user',
+        presentation: 'standalone',
+        arguments: { question: 'Continue?' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'ask-tool' },
+      {
+        type: 'input.requested',
+        interaction: {
+          kind: 'input',
+          interactionId: 'ask-interaction',
+          sessionRevision: 5,
+          question: 'Continue?',
+          allowFreeText: true,
+          options: [],
+        },
+      },
+    ] satisfies RuntimeClientEvent[];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event }),
+      createInitialState(),
+    );
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    const summaries = blocks.filter(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toEqual(
+      expect.objectContaining({ active: false, tools: [], summaryLine: '' }),
+    );
+    expect(blocks).toContainEqual(
+      expect.objectContaining({ kind: 'tool_card', callId: 'ask-tool', name: 'ask_user' }),
+    );
+    expect(blocks).toContainEqual(
+      expect.objectContaining({ kind: 'question', interactionId: 'ask-interaction' }),
+    );
+  });
+
   test('consumes reasoning once across repeated approval and standalone-tool boundaries', () => {
     const approval = (interactionId: string, sessionRevision: number) =>
       ({

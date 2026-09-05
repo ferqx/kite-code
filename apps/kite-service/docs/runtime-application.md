@@ -104,7 +104,9 @@ tool queue projector另把raw `modelMessageId`收窄为browser-safe `presentatio
 `model.responded.messageId`配对。它只提供模型步骤聚合因果关系，不携带prompt、Provider handle、Kernel State或
 execution authority；Service不得让TUI从事件相邻关系反推该归属。queued Shell 只有已携带 Runtime 的
 `effectClass=read_only + sideEffect=false` 事实时才发布 `presentation=exploration`；缺失分类、写入或有副作用均保持
-`standalone`，terminal event 不重新猜测命令语义。
+`standalone`，terminal event 不重新猜测命令语义。Builtin catalog中`kind=interrupt`或
+`executionMechanism=user_input`的能力即使没有外部副作用也必须保持`standalone`；`ask_user`由Footer interaction拥有，不能进入
+Thinking只读工具聚合。该判断使用admission时捕获的能力语义，不在TUI按工具名维护白名单。
 Runtime已在`subagent.started` payload签发的`concurrencyGroupId`必须由Client Event projector原样收窄并保留，随后由
 同一closed Contract与Protocol codec服务live订阅和History回放；不得丢弃该字段后让TUI按相邻child、名称或时间窗口猜测并发组。
 `subagent.completed`的Runtime实测`toolCallCount/durationMs`同样必须保留；failed事件可保留这两个计量与
