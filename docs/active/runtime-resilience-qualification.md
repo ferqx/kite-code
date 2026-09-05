@@ -148,6 +148,7 @@ lease renewal/takeover、effect response loss、SIGKILL recovery_required与expl
 Native TUI client的Esc/Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 若重连后的替换controller尚未恢复该Session而明确拒绝`session_unavailable`，client先恢复同一Session的mutation authority，
 再核对active Run identity并以刷新revision重试一次；该未提交拒绝不得让同一Esc不断追加失败诊断，也不得跨Run取消successor。
+mutation admission必须绑定Runtime connection generation，重连后的任何写命令都不能复用旧generation的本地admitted标记。
 TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
 Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
 conversation rewind使用Service返回的target Session加载safe History，file outcome只含bounded path/error/conflict投影，
@@ -232,6 +233,8 @@ legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 D
 不能随进程寿命无界增长：grant tombstone 按 sealed expiry 回收，其他 recovery hint 按短 TTL/固定总容量回收；
 expiry clock 必须是 finite safe integer 的非递减 high-water，wall-clock 回拨后不能让旧 grant/hint 重新有效；
 丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。
+effect consumer关闭或cleanup grace耗尽时必须同步关闭该effect的事件确认通道；non-cooperative executor的late
+`persistEvent(s)`只得到`applied=false`，不得创建无人消费的pending waiter或在sealed/terminal边界后提交事件。
 
 same-process user cancel的资格证据还必须覆盖多个并发Subagent、重复Esc与queued successor：UI在1秒内进入`Cancelling`，
 只发送一个取消command，全部Provider cleanup receipt早于successor user/turn事实，已waived capability不出现unknown，

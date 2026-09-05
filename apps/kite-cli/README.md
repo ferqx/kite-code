@@ -56,6 +56,8 @@
   `cancel_turn` Promise。连接恢复后若替换的Service controller尚未恢复该Session，首个`session_unavailable`拒绝证明取消未提交；
   client先用同一Session恢复mutation authority，再核对仍是原Run并以刷新revision重试一次。其他receipt失败清除本地pending状态并显示可重试诊断。排队后继只有在前驱Subagent Provider
   cleanup全部确认后才可取得`start_turn` receipt，用户取消已经写入的waived capability终态不得在同进程cleanup中被改写为unknown。
+- Session mutation admission与Runtime connection generation绑定；重连后的projection只恢复展示事实，不继承旧连接的写权限。
+  下一次cancel、interaction response、preference control或其他mutation必须先通过`resume_session`重新取得当前generation authority。
 - 普通模型正文仍按完整Markdown组件提交；没有待判定Thought归属时，完成的段落、列表项和已闭合结构组件立即进入Static，
   只有仍增长的表格/围栏代码容器留在dynamic。当前仍有探索Thought时，待分类正文只保存在有界`RequestAssembly`，
   不创建隐藏OutputBlock；`model.responded(toolCallCount=0)`才补齐并发布最终正文，`toolCallCount>0`丢弃待分类正文、把过程旁白
@@ -120,7 +122,7 @@ executable、release entrypoint与slot均已删除。
 ## 测试
 
 `bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
-Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前CLI workspace共873 tests；完整TUI system由独立PTY runner验证。
+Service/Worker Host/Store owner tests位于 `apps/kite-service/test`。当前CLI workspace共874 tests；完整TUI system由独立PTY runner验证。
 
 ## 文档影响
 

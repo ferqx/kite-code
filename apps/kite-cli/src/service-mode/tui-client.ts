@@ -100,7 +100,7 @@ interface NativeSessionRecord {
     | undefined;
   runProjectionRevisionFloor: number | undefined;
   commandBarrier: Promise<void>;
-  mutationAdmitted: boolean;
+  mutationAdmissionGeneration: number | undefined;
   resolveRun: (() => void) | undefined;
   rejectRun: ((error: unknown) => void) | undefined;
   cancelPromise: Promise<void> | undefined;
@@ -356,7 +356,7 @@ class NativeTuiRuntimeClient {
       runTerminalCandidate: undefined,
       runProjectionRevisionFloor: undefined,
       commandBarrier: Promise.resolve(),
-      mutationAdmitted: false,
+      mutationAdmissionGeneration: undefined,
       resolveRun: undefined,
       rejectRun: undefined,
       cancelPromise: undefined,
@@ -377,7 +377,7 @@ class NativeTuiRuntimeClient {
     });
     this.#assertApplied(receipt);
     this.#recordRevision(record, receipt);
-    record.mutationAdmitted = true;
+    record.mutationAdmissionGeneration = this.#runtime.connectionGeneration;
     record.dormant = false;
   }
 
@@ -454,7 +454,8 @@ class NativeTuiRuntimeClient {
   }
 
   async #ensureMutationAdmission(record: NativeSessionRecord): Promise<void> {
-    if (record.mutationAdmitted) return;
+    const generation = this.#runtime.connectionGeneration;
+    if (record.mutationAdmissionGeneration === generation) return;
     const receipt = await this.#runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'mutation-resume'),
@@ -464,7 +465,10 @@ class NativeTuiRuntimeClient {
     });
     this.#assertApplied(receipt);
     this.#recordRevision(record, receipt);
-    record.mutationAdmitted = true;
+    if (this.#runtime.connectionGeneration !== generation) {
+      throw new Error('Runtime connection changed while Session mutation was being resumed.');
+    }
+    record.mutationAdmissionGeneration = generation;
   }
 
   async #applyNotification(
@@ -1287,7 +1291,7 @@ class NativeTuiRuntimeClient {
         // cancellation was not committed, so resume the same Session and retry
         // once with its refreshed revision and a new command identity.
         recoveryAttempted = true;
-        record.mutationAdmitted = false;
+        record.mutationAdmissionGeneration = undefined;
         await this.#ensureMutationAdmission(record);
         this.#syncSnapshot(record);
         const refreshed = record.projection?.currentRun;

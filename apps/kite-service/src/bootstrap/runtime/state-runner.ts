@@ -257,6 +257,7 @@ async function* executeEffectWithStreaming(
   let result: RuntimeEvent[] = [];
   let deferred: { reason: string; retryAfterMs: number } | undefined;
   let failure: unknown;
+  let acceptingEvents = true;
 
   const enqueue = (
     events: RuntimeEvent[],
@@ -266,6 +267,10 @@ async function* executeEffectWithStreaming(
     requiredEffectLease?: RuntimeEffectLeaseExpectation,
     acknowledgement?: StateRuntimeEffectPersistenceAcknowledgement,
   ) => {
+    if (!acceptingEvents) {
+      resolve?.(false);
+      return;
+    }
     const event = events.length === 1 ? events[0] : undefined;
     if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
       const key = toolProgressKey(event);
@@ -286,6 +291,13 @@ async function* executeEffectWithStreaming(
     }
     wake?.();
     wake = null;
+  };
+  const closeEventChannel = () => {
+    acceptingEvents = false;
+    wake?.();
+    wake = null;
+    for (const pendingEvent of pending.splice(0)) pendingEvent.resolve?.(false);
+    pendingToolProgress.clear();
   };
   const execution = executor(
     lease.effect,
@@ -339,132 +351,147 @@ async function* executeEffectWithStreaming(
     },
   );
 
-  let emitted = false;
-  let cancellationIncomplete = false;
-  let cleanupDeadlineAt: number | undefined;
-  while (!settled || pending.length > 0) {
-    if (pending.length === 0) {
-      const waitForWake = new Promise<void>((resolve) => {
-        wake = resolve;
-      });
-      if (cleanupDeadlineAt != null || signal?.aborted) {
-        cleanupDeadlineAt ??= Date.now() + ABORT_CLEANUP_GRACE_MS;
-        const waited = await waitForPromiseOrTimeout(waitForWake, cleanupDeadlineAt - Date.now());
-        if (waited === TIMED_OUT_WAIT) return { applied: false, emitted };
-      } else {
-        const waited = await waitForPromiseOrAbort(waitForWake, signal);
-        if (waited === ABORTED_WAIT) {
-          cleanupDeadlineAt = Date.now() + ABORT_CLEANUP_GRACE_MS;
-        }
-      }
-    }
-    while (pending.length > 0) {
-      const pendingEvent = pending.shift()!;
-      const events = pendingEvent.events;
-      const event = events[0];
-      if (!event) {
-        pendingEvent.resolve?.(true);
-        continue;
-      }
-      if (event.type === 'tool.progress') {
-        const key = toolProgressKey(event);
-        if (pendingToolProgress.get(key) === pendingEvent) pendingToolProgress.delete(key);
-      }
-      emitted = true;
-      if (pendingEvent.mode === 'late_resource_reconciliation') {
-        try {
-          const applied = kernel.applyLateResourceReconciliation([event]);
-          pendingEvent.resolve?.(applied);
-          if (applied) yield* kernel.getLastAppliedEvents();
-        } catch (error) {
-          if (!pendingEvent.reject) throw error;
-          pendingEvent.reject(error);
-        }
-      } else if (events.length === 1 && isEphemeralEffectEvent(event)) {
-        const applied = kernel.isEffectEventCurrent(lease, event);
-        pendingEvent.resolve?.(applied);
-        if (applied) yield event;
-      } else {
-        if (events.some((candidate) => candidate.type === 'runtime.cancellation_diagnostic')) {
-          cancellationIncomplete = true;
-        }
-        try {
-          const applied = pendingEvent.acknowledgement
-            ? kernel.applyEffectEvents
-              ? kernel.applyEffectEvents(
-                  lease,
-                  events,
-                  pendingEvent.acknowledgement,
-                  pendingEvent.requiredEffectLease,
-                )
-              : pendingEvent.acknowledgement === 'receipt_evidence'
-                ? events.length === 1
-                  ? kernel.applyEffectEvent(lease, event)
-                  : kernel.applyEffectResult(lease, events, pendingEvent.requiredEffectLease)
-                : false
-            : events.length === 1
-              ? kernel.applyEffectEvent(lease, event)
-              : kernel.applyEffectResult(lease, events, pendingEvent.requiredEffectLease);
-          pendingEvent.resolve?.(applied);
-          if (applied) {
-            yield* kernel.getLastAppliedEvents();
+  try {
+    let emitted = false;
+    let cancellationIncomplete = false;
+    let cleanupDeadlineAt: number | undefined;
+    while (!settled || pending.length > 0) {
+      if (pending.length === 0) {
+        const waitForWake = new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+        if (cleanupDeadlineAt != null || signal?.aborted) {
+          cleanupDeadlineAt ??= Date.now() + ABORT_CLEANUP_GRACE_MS;
+          const waited = await waitForPromiseOrTimeout(waitForWake, cleanupDeadlineAt - Date.now());
+          if (waited === TIMED_OUT_WAIT) {
+            // The executor has exhausted its bounded cleanup grace. Close its
+            // persistence channel before returning so a non-cooperative late
+            // callback cannot enqueue an event whose acknowledgement will never
+            // be consumed by this finished generator.
+            closeEventChannel();
+            return { applied: false, emitted };
           }
-        } catch (error) {
-          if (!pendingEvent.reject) throw error;
-          pendingEvent.reject(error);
+        } else {
+          const waited = await waitForPromiseOrAbort(waitForWake, signal);
+          if (waited === ABORTED_WAIT) {
+            cleanupDeadlineAt = Date.now() + ABORT_CLEANUP_GRACE_MS;
+          }
+        }
+      }
+      while (pending.length > 0) {
+        const pendingEvent = pending.shift()!;
+        const events = pendingEvent.events;
+        const event = events[0];
+        if (!event) {
+          pendingEvent.resolve?.(true);
+          continue;
+        }
+        if (event.type === 'tool.progress') {
+          const key = toolProgressKey(event);
+          if (pendingToolProgress.get(key) === pendingEvent) pendingToolProgress.delete(key);
+        }
+        emitted = true;
+        if (pendingEvent.mode === 'late_resource_reconciliation') {
+          try {
+            const applied = kernel.applyLateResourceReconciliation([event]);
+            pendingEvent.resolve?.(applied);
+            if (applied) yield* kernel.getLastAppliedEvents();
+          } catch (error) {
+            if (!pendingEvent.reject) throw error;
+            pendingEvent.reject(error);
+          }
+        } else if (events.length === 1 && isEphemeralEffectEvent(event)) {
+          const applied = kernel.isEffectEventCurrent(lease, event);
+          pendingEvent.resolve?.(applied);
+          if (applied) yield event;
+        } else {
+          if (events.some((candidate) => candidate.type === 'runtime.cancellation_diagnostic')) {
+            cancellationIncomplete = true;
+          }
+          try {
+            const applied = pendingEvent.acknowledgement
+              ? kernel.applyEffectEvents
+                ? kernel.applyEffectEvents(
+                    lease,
+                    events,
+                    pendingEvent.acknowledgement,
+                    pendingEvent.requiredEffectLease,
+                  )
+                : pendingEvent.acknowledgement === 'receipt_evidence'
+                  ? events.length === 1
+                    ? kernel.applyEffectEvent(lease, event)
+                    : kernel.applyEffectResult(lease, events, pendingEvent.requiredEffectLease)
+                  : false
+              : events.length === 1
+                ? kernel.applyEffectEvent(lease, event)
+                : kernel.applyEffectResult(lease, events, pendingEvent.requiredEffectLease);
+            pendingEvent.resolve?.(applied);
+            if (applied) {
+              yield* kernel.getLastAppliedEvents();
+            }
+          } catch (error) {
+            if (!pendingEvent.reject) throw error;
+            pendingEvent.reject(error);
+          }
         }
       }
     }
-  }
-  await execution;
-  if (deferred) return { applied: false, emitted: false, deferred };
-  if (failure) {
-    if (failure instanceof DescendantResourceAdmissionError) {
-      const terminalEvents = resourceAdmissionTerminalEvents(kernel.getState(), failure.reason);
-      kernel.applyEffectResult(lease, terminalEvents);
-      yield* kernel.getLastAppliedEvents();
-      return { applied: true, emitted: true };
+    await execution;
+    if (deferred) return { applied: false, emitted: false, deferred };
+    if (failure) {
+      if (failure instanceof DescendantResourceAdmissionError) {
+        const terminalEvents = resourceAdmissionTerminalEvents(kernel.getState(), failure.reason);
+        kernel.applyEffectResult(lease, terminalEvents);
+        yield* kernel.getLastAppliedEvents();
+        return { applied: true, emitted: true };
+      }
+      if (reservationIds.length > 0) {
+        const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) => ({
+          type: 'resource_budget.unknown',
+          reservationId,
+        }));
+        kernel.applyEffectResult(lease, terminalReservationEvents);
+      }
+      throw failure;
     }
-    if (reservationIds.length > 0) {
-      const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) => ({
-        type: 'resource_budget.unknown',
-        reservationId,
-      }));
-      kernel.applyEffectResult(lease, terminalReservationEvents);
-    }
-    throw failure;
-  }
 
-  const reconciled = reconciliationEventsForReservations(kernel.getState(), reservationIds, result);
-  const terminalResult = [...result, ...reconciled];
-  if (terminalResult.length > 0) {
-    emitted = true;
-    try {
-      if (!kernel.applyEffectResult(lease, terminalResult)) {
-        if (
-          !cancellationIncomplete &&
-          reconciled.length > 0 &&
-          kernel.applyLateResourceReconciliation(reconciled)
-        ) {
-          yield* reconciled;
+    const reconciled = reconciliationEventsForReservations(
+      kernel.getState(),
+      reservationIds,
+      result,
+    );
+    const terminalResult = [...result, ...reconciled];
+    if (terminalResult.length > 0) {
+      emitted = true;
+      try {
+        if (!kernel.applyEffectResult(lease, terminalResult)) {
+          if (
+            !cancellationIncomplete &&
+            reconciled.length > 0 &&
+            kernel.applyLateResourceReconciliation(reconciled)
+          ) {
+            yield* reconciled;
+          }
+          return { applied: false, emitted };
         }
-        return { applied: false, emitted };
+      } catch (error) {
+        const unknownEvents: RuntimeEvent[] = reservationIds.flatMap((reservationId) => {
+          const budget = kernel.getState().resourceBudget;
+          return budget.status === 'active' &&
+            budget.reservations[reservationId]?.state === 'dispatch_started'
+            ? [{ type: 'resource_budget.unknown' as const, reservationId }]
+            : [];
+        });
+        if (unknownEvents.length > 0) kernel.applyEffectResult(lease, unknownEvents);
+        throw error;
       }
-    } catch (error) {
-      const unknownEvents: RuntimeEvent[] = reservationIds.flatMap((reservationId) => {
-        const budget = kernel.getState().resourceBudget;
-        return budget.status === 'active' &&
-          budget.reservations[reservationId]?.state === 'dispatch_started'
-          ? [{ type: 'resource_budget.unknown' as const, reservationId }]
-          : [];
-      });
-      if (unknownEvents.length > 0) kernel.applyEffectResult(lease, unknownEvents);
-      throw error;
+      yield* kernel.getLastAppliedEvents();
     }
-    yield* kernel.getLastAppliedEvents();
+    if (!emitted) return { applied: true, emitted: false };
+    return { applied: true, emitted: true };
+  } finally {
+    closeEventChannel();
   }
-  if (!emitted) return { applied: true, emitted: false };
-  return { applied: true, emitted: true };
 }
 
 function shellConcurrencyGroup(

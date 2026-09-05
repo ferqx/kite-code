@@ -536,6 +536,31 @@ test('Native TUI facade recovers the Session before retrying cancellation', asyn
   await facade.dispose();
 });
 
+test('Native TUI facade reacquires mutation authority after connection generation changes', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  let runtime: RuntimeClient | undefined;
+  const facade = facadeFor(remote, {
+    onRuntime: (value) => {
+      runtime = value;
+    },
+  });
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const initialGeneration = runtime!.connectionGeneration;
+
+  await runtime!.reconnect();
+  expect(runtime!.connectionGeneration).toBeGreaterThan(initialGeneration);
+  await Bun.sleep(10);
+  await facade.getRuntime(sessionId)!.abort();
+
+  expect(remote.commands.filter((command) => command === 'resume_session')).toHaveLength(1);
+  expect(remote.commands.indexOf('resume_session')).toBeLessThan(
+    remote.commands.indexOf('cancel_turn'),
+  );
+  await facade.dispose();
+});
+
 test('Native TUI facade reproduces the latest real session and fences a predecessor terminal by revision', async () => {
   // Regression extracted from tui-60771b71-c6d8-4944-b816-75c4dc723745:
   // the queued "主要了解tui" start_turn first saw runtime_busy, then the
@@ -1553,6 +1578,7 @@ function facadeFor(
     readonly initialInteractionMode?: 'accept_edits' | 'auto' | 'full';
     readonly onConnect?: () => void;
     readonly onReconnect?: () => void;
+    readonly onRuntime?: (runtime: RuntimeClient) => void;
     readonly flushPresentation?: () => Promise<void>;
   } = {},
 ) {
@@ -1561,6 +1587,7 @@ function facadeFor(
     clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
     history: history(),
   });
+  options.onRuntime?.(runtime);
   const connection = {
     runtime,
     history: history(),
