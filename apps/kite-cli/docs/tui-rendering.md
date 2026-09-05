@@ -22,7 +22,7 @@
 - resize 事件去抖后更新 columns/rows 与 generation；Static key 只在真实布局 generation 变化时重建。
 - App root 不使用 `height="100%"` 或 Footer 下方 `flexGrow` spacer；Footer 与 OutputArea 保持固定一行视觉间距。
 - queued-prompt由稳定Footer owner持有，Footer与独立StatusBar使用稳定key；queue增减不能改变其他presentation item的React identity。
-  活动Session按FIFO完整展示每个候选，每条使用浅色背景的单行`↵ 消息内容`；队列可见时隐藏Run状态行（包括`Working`），首项前与相邻队列行之间各留一行。
+  活动Session按FIFO完整展示每个候选，每条使用浅色背景的单行`↵ 消息内容`；普通队列与当前Run状态同时可见，不隐藏`Working`或`Cancelling`，首项前与相邻队列行之间各留一行。
   Approval/Input/Plan interaction拥有Footer时同样隐藏Run状态行；审批弹窗的生命周期由interaction projection表达，不额外保留`Working`。
   OutputArea使用浅比较隔离queue-only render，queued state不得重算、重挂载或拆分当前Thought，也不得改变Tool或Delegating的折叠形态。
   queued chrome不参与消息区动态高度预算；它只在Footer中增加自身行，不把队列数量提升为Subagent可见步骤的第二权威。

@@ -455,11 +455,7 @@ export default function App({
     ),
   );
   const visibleRunStatus =
-    showRunStatus &&
-    !state.interrupt &&
-    !approvalQueueActive &&
-    !subagentReviewPhaseActive &&
-    (activeQueuedPrompts.length === 0 || state.cancelRequestedRunId !== undefined);
+    showRunStatus && !state.interrupt && !approvalQueueActive && !subagentReviewPhaseActive;
   const runStatus = visibleRunStatus ? deriveRunStatusSnapshot(state) : undefined;
   const renderedStatus = useMemo(() => {
     if (!modelForDisplay) return state.status;

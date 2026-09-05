@@ -16,7 +16,7 @@
 - 普通prompt在Enter后立即追加带`pendingEcho`标记的live-only本地回显，并同步显示Footer `Working`；该反馈是presentation-only，不等待Session ready、前序cleanup、`start_turn` receipt或durable echo，也不创建Server Run identity。RuntimeClient的durable `user.message`按内容只匹配这一条显式pending记录，将其原位升级为`messageId`身份，不新增副本。未标记的同文消息不得按文本去重。提交失败只移除仍为pending的本地回显并清除本地状态；Server lifecycle和终态仍只由Runtime投影收敛。
 - active Run期间输入的新prompt先进入按Session绑定的live-only queued展示层，显示有界原文预览，但不追加到当前
   Turn的blocks，因此并发子Agent/工具仍能原位更新。FIFO轮到该prompt时先移除queued展示，再建立新Turn和pending echo。
-  活动Session按FIFO逐条显示浅色背景的单行`↵ 消息内容`，不再附加`Queued`解释行或折叠剩余数量；队列非空时隐藏Run状态行（包括`Working`），首项前与相邻队列行之间各留一行。
+  活动Session按FIFO逐条显示浅色背景的单行`↵ 消息内容`，不再附加`Queued`解释行或折叠剩余数量；普通prompt队列不隐藏当前Run状态行，`Working`或`Cancelling`与队列同时显示，首项前与相邻队列行之间各留一行。
   队列由稳定Footer owner持有，queue增减不能重挂载spinner，也不能让OutputArea重算或拆分当前Thought；消息区使用稳定投影引用和浅比较隔离队列专属更新。
   queued chrome不进入消息区动态高度预算，不能因为新增或移除队列项改变Tool、Thought或Delegating的展开、折叠与可见步骤。
   非空prompt提交时，InputLine独占该次Enter；OutputArea在key-dispatch时读取prompt ref并禁止同一次Enter切换最后一个

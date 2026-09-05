@@ -5806,7 +5806,7 @@ describe('App', () => {
     expect(frame).not.toContain('Queued — waiting for the current turn to finish');
     expect(frame).not.toContain('more queued');
     expect(frame).not.toContain('other session');
-    expect(frame).not.toContain('Working');
+    expect(frame).toContain('Working');
     expect(frame.indexOf('Explore · Inspect events')).toBeLessThan(
       frame.indexOf('↵ 补充检查事件顺序'),
     );
@@ -5821,7 +5821,7 @@ describe('App', () => {
     expect(lines[secondQueuedLine + 1]?.trim()).toBe('');
   });
 
-  test('hides the Working status when a queued prompt appears', async () => {
+  test('keeps the Working status when a queued prompt appears', async () => {
     const initial = fakeState({
       activeSessionId: 'session-a',
       running: true,
@@ -5873,7 +5873,7 @@ describe('App', () => {
     );
     const queuedFrame = view.lastFrame() ?? '';
     expect(queuedFrame).toContain('↵ queued while working');
-    expect(queuedFrame).not.toContain('Working');
+    expect(queuedFrame).toContain('Working');
     expect(queuedFrame.match(/Thinking /g)).toHaveLength(1);
     expect(queuedFrame.match(/read 1 file/g)).toHaveLength(1);
 
