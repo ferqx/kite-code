@@ -69,6 +69,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
   关闭后丢失用户选择，也不得把完整内部Tool Result作为答案恢复来源。
 - 用户取消并发Subagent后，当前execution owner必须在释放Session单飞权之前完成全部Provider lifecycle cleanup；cleanup pending时
   后继`start_turn`只返回`runtime_busy`。同进程cleanup保留取消事务已写入的waived capability终态，只有真正的restore/crash恢复才收敛unknown。
+- Service的production Subagent adapter始终向Builtin child模型循环提供固定的12轮工具响应上限；该本地收敛边界在共享
+  `resourceBudget`关闭时仍生效。达到上限后只执行一次无工具总结调用，不能以30分钟执行超时替代循环收敛。
 - 一个已接纳Run的所有公开durable/ephemeral presentation notification复用admission时固定的`runId/taskId/turnId`；取消事务和Turn终态后迟到的Subagent/Tool cleanup事实不得从已settled的Session snapshot反推identity。
 - Effect stream因取消、presentation/bridge关闭或consumer退出而结束时，必须先关闭该stream的事件确认通道；非协作executor的
   late `persistEvent(s)`立即返回未应用，不能进入无人消费的队列、永久悬挂Promise或修改已经关闭的Run投影。

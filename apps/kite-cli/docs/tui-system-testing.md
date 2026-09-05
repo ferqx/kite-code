@@ -68,7 +68,8 @@
   且完成后的原生滚动在焦点报告前后仍保持零stdout与原偏移。
   仅验证headless `scrollLines()`后的buffer位置不足以覆盖真实滚动条交互。
 - `model.requested`不是可见边界；没有正文、standalone tool或interaction打断时，相邻read/search与服务端判定为read-only的shell继续聚合在
-  同一个Thought。TUI只消费Service给出的`presentation`分类，不根据原始command重新推断工具风险或展示类别。
+  同一个Thought，即使中间跨过多个模型请求或不同的server presentation group也不能拆成多个聚合。TUI只消费Service给出的
+  `presentation`分类，不根据原始command重新推断工具风险或展示类别。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
 - Presentation收尾场景必须覆盖terminal-before-receipt、terminal后的late text/reasoning/tool事件、`/clear`后的marker唯一与零空闲stdout；
   active-stream场景必须用真实provider request同时证明当前Run模型冻结、下一Run模型生效，以及主题/语言切换不新增Run或重复正文。
@@ -77,9 +78,12 @@
 - 并发Subagent取消回归必须在真实PTY中同时验证child identity、Esc后1秒内`Cancelling`、重复Esc去重、queued successor
   的模型响应、入队前后完全相同的`Delegating`投影，以及durable Provider cleanup全部早于successor message且不产生
   `capability.execution_unknown`。
+- Subagent有界收敛回归必须让child连续完成12轮不同只读工具调用，随后验证Provider收到空工具面的总结请求、parent只显示
+  一份最终回复且Footer退出`Working`；该场景必须在共享`resourceBudget`关闭的production composition上成立。
 - 普通消息输入必须覆盖当前 Turn 运行期间的连续 Enter：第二条消息先显示本地排队回执，再以提交时的 Session identity
   等待 Service 权威 idle projection；遇到明确 `revision_conflict` 只使用同一 commandId 与 Service 返回的 current revision
-  有界重试，最终两条模型请求和渲染各一次，不得清空后静默丢失或因切换 Session 改投目标。
+  有界重试。排队回执不得隐藏仍在执行的当前Run `Working`状态；最终两条模型请求和渲染各一次，不得清空后静默丢失或因切换
+  Session改投目标。
 - Harness 不得用“模型请求已经出现”替代排队输入的即时语义回执；deferred-delivery helper必须分别等待本地queue receipt
   与后续Runtime request。Native fake默认校验`start_turn.expectedRevision`，并可显式调度terminal projection先于command
   receipt；无条件applied或同调用栈固定顺序不能作为client时序证据。

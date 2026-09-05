@@ -22,6 +22,7 @@ import {
   createBuiltinSubagentModelContext,
   createBuiltinSubagentModelLoopEngine,
   createBuiltinSubagentToolSurface,
+  DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
   getRoleConfig,
   rejectShellOutsideSubAgentRoleCeiling,
 } from '@kite-ai/builtin-runtime/subagent';
@@ -580,6 +581,7 @@ async function executeCoreSubagentToolAdapter(
       coordinator: input.modelEffectCoordinator,
       initialMessages: messages,
       startModelInvocationOrdinal: modelInvocationOrdinal,
+      maxToolRounds: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
       model,
       config: input.config,
       tools,

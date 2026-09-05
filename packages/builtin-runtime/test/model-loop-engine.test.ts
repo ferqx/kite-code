@@ -14,6 +14,7 @@ import {
 import {
   type BuiltinSubagentModelLoopCoordinator,
   createBuiltinSubagentModelLoopEngine,
+  DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
 } from '@kite-ai/builtin-runtime/subagent';
 import type { ToolSet } from 'ai';
 
@@ -59,6 +60,7 @@ function coordinatorFor(responses: readonly AIMessage[]): {
   coordinator: BuiltinSubagentModelLoopCoordinator;
   calls: Array<{
     readonly messages: readonly BaseMessage[];
+    readonly tools: ToolSet;
     readonly estimatedInputTokens: number;
     readonly maxOutputTokens?: number;
   }>;
@@ -66,6 +68,7 @@ function coordinatorFor(responses: readonly AIMessage[]): {
   let responseIndex = 0;
   const calls: Array<{
     readonly messages: readonly BaseMessage[];
+    readonly tools: ToolSet;
     readonly estimatedInputTokens: number;
     readonly maxOutputTokens?: number;
   }> = [];
@@ -81,6 +84,7 @@ function coordinatorFor(responses: readonly AIMessage[]): {
       responseIndex += 1;
       calls.push({
         messages: input.messages,
+        tools: input.tools,
         estimatedInputTokens: input.estimatedInputTokens,
         ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
       });
@@ -102,6 +106,7 @@ function inputFor(
     coordinator,
     initialMessages: [INITIAL_MESSAGE],
     startModelInvocationOrdinal: 0,
+    maxToolRounds: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
     model: MODEL,
     config: CONFIG,
     tools: TOOLS,
@@ -195,6 +200,94 @@ describe('Builtin subagent model loop engine', () => {
     ]);
     if (result.kind !== 'completed') throw new Error('expected completed model loop');
     expect(Object.isFrozen(result.messages)).toBe(true);
+  });
+
+  test('forces one tool-free finalization after the bounded tool rounds', async () => {
+    const toolRound = (id: string) =>
+      aiMessage({
+        tool_calls: [{ id, name: 'read_file', args: { path: `${id}.ts` } }],
+      });
+    const fixture = coordinatorFor([
+      toolRound('call-1'),
+      toolRound('call-2'),
+      aiMessage({ content: 'finalized from collected evidence' }),
+    ]);
+    const result = await createBuiltinSubagentModelLoopEngine(
+      inputFor(fixture.coordinator, {
+        maxToolRounds: 2,
+        consumer: {
+          consume: ({ append, response }) => {
+            append([
+              toolMessage({
+                content: 'ok',
+                tool_call_id: response.tool_calls![0]!.id!,
+              }),
+            ]);
+            return { kind: 'continue' };
+          },
+        },
+      }),
+    ).run();
+
+    expect(result).toMatchObject({
+      kind: 'completed',
+      summary: 'finalized from collected evidence',
+      modelInvocationOrdinal: 3,
+    });
+    expect(fixture.calls).toHaveLength(3);
+    expect(Object.keys(fixture.calls[2]!.tools)).toEqual([]);
+    expect(fixture.calls[2]!.messages.at(-1)?.content).toContain('Return the concise final result');
+  });
+
+  test('fails closed when the tool-free finalization still returns a tool call', async () => {
+    const toolRound = (id: string) =>
+      aiMessage({ tool_calls: [{ id, name: 'read_file', args: { path: `${id}.ts` } }] });
+    const fixture = coordinatorFor([toolRound('call-1'), toolRound('forged-final-tool')]);
+    const run = createBuiltinSubagentModelLoopEngine(
+      inputFor(fixture.coordinator, {
+        maxToolRounds: 1,
+        consumer: {
+          consume: ({ append, response }) => {
+            append([toolMessage({ content: 'ok', tool_call_id: response.tool_calls![0]!.id! })]);
+            return { kind: 'continue' };
+          },
+        },
+      }),
+    ).run();
+
+    await expect(run).rejects.toMatchObject({
+      code: 'internal_error',
+      stage: 'model_response_validation',
+      modelInvocationId: 'loop-invocation-2',
+    });
+    expect(fixture.calls).toHaveLength(2);
+    expect(Object.keys(fixture.calls[1]!.tools)).toEqual([]);
+  });
+
+  test('does not reset the finalization ceiling when a suspended child resumes', async () => {
+    const fixture = coordinatorFor([aiMessage({ content: 'finalized after resume' })]);
+    const result = await createBuiltinSubagentModelLoopEngine(
+      inputFor(fixture.coordinator, {
+        startModelInvocationOrdinal: 2,
+        maxToolRounds: 2,
+      }),
+    ).run();
+
+    expect(result).toMatchObject({
+      kind: 'completed',
+      summary: 'finalized after resume',
+      modelInvocationOrdinal: 3,
+    });
+    expect(fixture.calls).toHaveLength(1);
+    expect(Object.keys(fixture.calls[0]!.tools)).toEqual([]);
+  });
+
+  test('rejects an invalid local loop ceiling before model dispatch', () => {
+    const fixture = coordinatorFor([aiMessage({ content: 'never dispatched' })]);
+    expect(() =>
+      createBuiltinSubagentModelLoopEngine(inputFor(fixture.coordinator, { maxToolRounds: 0 })),
+    ).toThrow('maxToolRounds');
+    expect(fixture.calls).toHaveLength(0);
   });
 
   test('returns terminal text and frozen transcript when the model has no tool calls', async () => {

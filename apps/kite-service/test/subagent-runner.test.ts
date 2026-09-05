@@ -11,7 +11,7 @@ import {
   BuiltinModelEffectCoordinator,
   resolveProjectInstructionSnapshot,
 } from '@kite-ai/builtin-runtime/model';
-import { getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
+import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS, getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
@@ -355,6 +355,61 @@ describe('SubAgentRunner integration', () => {
       expect(events.find((event) => event.type === 'done')?.data).toMatchObject({
         modelInvocationId: invocation?.invocationId,
       });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('finalizes a successful tool loop even when the shared resource budget is disabled', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-bounded-finalization-'));
+    const { events, sink } = mockEventSink();
+    const toolResponses = Array.from({ length: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }, (_, index) => {
+      const filename = `evidence-${index + 1}.txt`;
+      writeFileSync(join(workspace, filename), `evidence ${index + 1}\n`, 'utf8');
+      return {
+        message: aiMessage({
+          tool_calls: [
+            { id: `bounded-read-${index + 1}`, name: 'read_file', args: { path: filename } },
+          ],
+        }),
+      };
+    });
+    const input: TestSubAgentRunnerInput = {
+      config: {
+        providerName: 'fixture',
+        modelName: 'fixture',
+        features: { resourceBudget: false },
+      } as AgentConfig,
+      workspace,
+      role: getRoleConfig('explore'),
+      task: 'Collect bounded evidence and then finalize.',
+      interactionMode: 'accept_edits',
+      timeoutMs: 5_000,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: new StreamingMockModel({
+        responses: [
+          ...toolResponses,
+          { message: aiMessage({ content: 'Bounded evidence summary.' }) },
+        ],
+      }),
+    };
+
+    try {
+      const result = await runSubAgent(input);
+
+      expect(result).toMatchObject({
+        ok: true,
+        terminalStatus: 'completed',
+        summary: 'Bounded evidence summary.',
+        toolCallCount: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
+      });
+      expect(result.steps).toHaveLength(DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS);
+      expect(events.filter((event) => event.type === 'done')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'error')).toHaveLength(0);
+      expect(Object.keys(modelInvocationHarness(input).getState().modelInvocations)).toHaveLength(
+        DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS + 1,
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

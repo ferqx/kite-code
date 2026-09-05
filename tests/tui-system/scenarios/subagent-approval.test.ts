@@ -15,6 +15,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS } from '@kite-ai/builtin-runtime/subagent';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage, submitUserMessageForDeferredDelivery } from '../harness/input-helpers';
@@ -616,6 +617,103 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       expect(screenContains(output, '工具授权')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Bounded Sub-agent Finalization', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let finalizationWasToolFree = false;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    const evidenceFiles = Array.from({ length: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }, (_, index) => {
+      const filename = `bounded-evidence-${index + 1}.txt`;
+      writeFileSync(join(workspace.workspace, filename), `evidence ${index + 1}\n`);
+      return filename;
+    });
+    server.setResponses([
+      {
+        message: {
+          content: 'I will delegate a bounded exploration.',
+          tool_calls: [
+            {
+              id: 'call_bounded_explore',
+              name: 'task',
+              args: {
+                name: 'Bounded exploration',
+                subagent_type: 'explore',
+                task: 'Read the available evidence and report a concise result.',
+              },
+            },
+          ],
+        },
+      },
+      ...evidenceFiles.map((filename, index) => ({
+        ...(index === 0
+          ? {}
+          : {
+              expectedRequest: {
+                toolResults: [{ toolCallId: `call_bounded_read_${index}` }],
+              },
+            }),
+        message: {
+          tool_calls: [
+            {
+              id: `call_bounded_read_${index + 1}`,
+              name: 'read_file',
+              args: { path: filename },
+            },
+          ],
+        },
+      })),
+      {
+        response: (request) => {
+          const tools = request.body.tools;
+          finalizationWasToolFree = !Array.isArray(tools) || tools.length === 0;
+          return {
+            expectedRequest: {
+              toolResults: [
+                { toolCallId: `call_bounded_read_${DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS}` },
+              ],
+            },
+            message: { content: 'BOUNDED_CHILD_FINAL' },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_bounded_explore', contentIncludes: ['BOUNDED_CHILD_FINAL'] },
+          ],
+        },
+        message: { content: 'BOUNDED_PARENT_FINAL' },
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'forces a tool-free child summary and lets the parent Run complete',
+    async () => {
+      await submitUserMessage(tui, server, 'Run a bounded explore child', { timeout: 15_000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'BOUNDED_PARENT_FINAL', TIMEOUT);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const output = stripAnsi(tui.scrollback());
+      expect(finalizationWasToolFree).toBe(true);
+      expect(server.getRequestCount()).toBe(DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS + 3);
+      expect(output).toContain('BOUNDED_PARENT_FINAL');
+      expect(output).not.toContain('Working');
+      expect(output).not.toContain('Cancellation was not accepted');
     },
     TIMEOUT,
   );

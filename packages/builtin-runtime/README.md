@@ -37,6 +37,9 @@
 - Subagent工具在admission时取得稳定`stepId + toolCallId`；started、terminal、private continuation与历史重放保留
   同一identity。Builtin结果投影以`completed | failed | cancelled` status作为唯一终态，严格拒绝缺失identity、旧`ok`
   双权威或未知字段的新格式结果；旧格式转换只发生在State migration reader。
+- Subagent模型循环独立于可选共享`resourceBudget`保持有界：最多接受12轮含工具调用的成功模型响应，随后只允许一次
+  不披露工具的总结调用；若该响应仍返回工具调用，child必须以现有失败终态收敛，不能再次进入循环。恢复后的
+  `modelInvocationOrdinal`延续同一上限，不得因审批暂停或continuation而重置。
 - `PrivateImmutableArtifactStorage`必须在App注入backend与filesystem root之间二选一。single-Service production固定使用typed DB backend且不
   fallback；filesystem root只保留给显式旧owner和owner-local测试。ref derivation、canonical JSON、schema、digest、size与owner验证在两种backend间一致。
 - Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、

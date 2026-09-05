@@ -220,6 +220,10 @@ sealed handle publish → low-information handle-ready ack → activate。Provid
 cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
 或 cleanup timeout 必须进入 `capability.execution_unknown`，不得提交普通失败 receipt 或自动重放。
 
+Subagent正常执行还必须独立于共享`resourceBudget`证明模型工具循环有界：12轮成功工具响应后只允许一次空工具面的总结请求，
+正常总结继续闭合parent Run，伪造工具调用则child失败且模型请求数不再增长。owner单元测试固定上限、失败关闭与continuation ordinal；
+Service集成测试显式关闭`resourceBudget`并执行12个真实只读步骤；串行PTY再证明child总结、parent最终回复与`Working`共同收敛。
+
 current schema v25 以五类 `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
 dispatch intent、observation 与 cleanup ordinal；event codec、reducer 和 snapshot invariant 都拒绝额外字段、非法
 digest、字段组或 lifecycle 倒退。startup 在任何新模型/Driver dispatch 前以同一 installation-private handle

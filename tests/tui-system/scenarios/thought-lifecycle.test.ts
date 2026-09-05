@@ -134,12 +134,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // Reasoning and tool activity share one transient window. Tool-bearing
+      // Reasoning and adjacent tool activity share one aggregate. Tool-bearing
       // narration is not accumulated into the archived Thought.
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'searched 1 file pattern')).toBe(true);
-      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(false);
+      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(true);
       expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(false);
       expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(false);
       expect(screenContains(output, 'PHASE_ONE')).toBe(false);
@@ -462,7 +462,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'successive exploration requests retain distinct server groups',
+    'successive exploration requests stay in one aggregate',
     async () => {
       server.setResponses([
         // Phase 1
@@ -499,9 +499,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
-      expect(screenContains(output, 'read 2 files')).toBe(false);
-      expect(clean.match(/read 1 file/gu)?.length ?? 0).toBe(2);
-      expect(clean.match(/Thinking \d+s · read 1 file/gu)?.length ?? 0).toBe(1);
+      expect(screenContains(output, 'read 2 files')).toBe(true);
+      expect(clean.match(/Thinking \d+s · read 2 files/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'Phase 1:')).toBe(false);
       expect(screenContains(output, 'Phase 2:')).toBe(false);
 
@@ -720,7 +719,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'project overview preserves server groups without archiving tool-bearing narration',
+    'project overview keeps adjacent exploration in one aggregate without narration',
     async () => {
       const captions = [
         '好的，我来探索一下这个项目。先看看整体结构。',
@@ -821,12 +820,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .split('\n')
         .map((line) => line.trim());
       const thoughtLines = lines.filter((line) => line.startsWith('Thinking '));
-      expect(thoughtLines).toHaveLength(2);
-      expect(
-        lines.filter((line) => line.includes('read 2 files, searched 1 file pattern')),
-      ).toHaveLength(4);
+      expect(thoughtLines).toHaveLength(1);
+      expect(lines.some((line) => line.includes('read 8 files'))).toBe(true);
+      expect(lines.some((line) => line.includes('searched 6 file patterns'))).toBe(true);
       expect(lines.some((line) => line.includes('ran 1 shell command'))).toBe(true);
-      expect(lines.some((line) => line.includes('searched 2 file patterns'))).toBe(true);
       captions.forEach((caption) => {
         expect(lines).not.toContain(caption);
       });
@@ -972,10 +969,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const activeFrame = stripAnsi(tui.viewport());
       const activeProjectFrame = activeFrame.slice(activeFrame.indexOf('❯ 了解当前项目'));
-      expect(activeProjectFrame.match(/Thinking /g)).toHaveLength(3);
-      expect(activeProjectFrame).toContain('read 1 file, searched 2 file patterns');
-      expect(activeProjectFrame).toContain('read 2 files, ran 1 shell command');
-      expect(activeProjectFrame).toContain('ran 1 shell command');
+      expect(activeProjectFrame.match(/Thinking /g)).toHaveLength(1);
+      expect(activeProjectFrame).toContain('read 3 files');
+      expect(activeProjectFrame).toContain('searched 2 file patterns');
+      expect(activeProjectFrame).toContain('ran 2 shell commands');
       narrations.forEach((narration) => {
         expect(activeProjectFrame).not.toContain(narration);
       });
@@ -988,9 +985,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       });
       const queuedFrame = stripAnsi(tui.viewport());
       const queuedProjectFrame = queuedFrame.slice(queuedFrame.indexOf('❯ 了解当前项目'));
-      expect(queuedProjectFrame.match(/Thinking /g)).toHaveLength(3);
-      expect(queuedProjectFrame).toContain('read 1 file, searched 2 file patterns');
-      expect(queuedProjectFrame).toContain('read 2 files, ran 1 shell command');
+      expect(queuedProjectFrame.match(/Thinking /g)).toHaveLength(1);
+      expect(queuedProjectFrame).toContain('read 3 files');
+      expect(queuedProjectFrame).toContain('searched 2 file patterns');
+      expect(queuedProjectFrame).toContain('ran 2 shell commands');
       expect(queuedProjectFrame).toContain('↵ 你好');
       narrations.forEach((narration) => {
         expect(queuedProjectFrame).not.toContain(narration);
@@ -1002,12 +1000,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const settled = stripAnsi(tui.viewport());
       const lines = settled.split('\n').map((line) => line.trim());
-      expect(
-        lines.filter((line) => line.includes('read 1 file, searched 2 file patterns')),
-      ).toHaveLength(1);
-      expect(
-        lines.filter((line) => line.includes('read 2 files, ran 1 shell command')),
-      ).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('read 3 files'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('searched 2 file patterns'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('ran 2 shell commands'))).toHaveLength(1);
       expect(lines.filter((line) => line === 'REAL_SESSION_RENDER_DONE')).toHaveLength(1);
       expect(lines.filter((line) => line.includes('请问你想做什么？'))).toHaveLength(1);
       expect(settled).not.toContain(internalReasoning);
