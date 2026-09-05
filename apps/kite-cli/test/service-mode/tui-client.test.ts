@@ -515,6 +515,29 @@ test('Native TUI facade coalesces repeated abort requests for the same active tu
   await facade.dispose();
 });
 
+test('Native TUI facade can cancel after a presentation envelope stops its subscription', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  remote.emitInvalidSubagentStep();
+  await Bun.sleep(10);
+  await expect(facade.waitForSessionReady(sessionId)).rejects.toThrow(
+    'Invalid AcceptedPresentationEnvelope',
+  );
+
+  await facade.getRuntime(sessionId)!.abort();
+
+  expect(remote.commands.filter((command) => command === 'cancel_turn')).toHaveLength(1);
+  // The broken presentation stream remains rejected; stopping work does not
+  // relax event validation or admit new work through a failed subscription.
+  await expect(facade.waitForSessionReady(sessionId)).rejects.toThrow(
+    'Invalid AcceptedPresentationEnvelope',
+  );
+  await facade.dispose();
+});
+
 test('Native TUI facade recovers the Session before retrying cancellation', async () => {
   const remote = new FakeRuntimeConnection();
   remote.restoreActiveTurnOnSubscribe();
@@ -691,6 +714,28 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #interactionConflictsRemaining = 1;
   #cancelSessionUnavailableRemaining = 0;
   readonly #subscriptionBySession = new Map<string, string>();
+
+  emitInvalidSubagentStep(): void {
+    this.#authoritativeRevision += 1;
+    this.push(
+      subscriptionUpdate(this.#subscriptionBySession.get(this.#sessionId)!, 1, {
+        type: 'notification',
+        durability: 'durable',
+        sessionId: this.#sessionId,
+        revision: this.#authoritativeRevision,
+        session: projection(this.#sessionId, this.#authoritativeRevision, 'running'),
+        event: {
+          type: 'subagent.step',
+          subagentId: 'child',
+          stepId: 'step',
+          toolCallId: 'tool',
+          toolName: 'read_file',
+          status: 'completed',
+          summary: '',
+        },
+      }),
+    );
+  }
 
   requestApprovalOnNextTurn(): void {
     this.#approvalOnNextTurn = true;

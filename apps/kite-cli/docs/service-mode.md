@@ -48,6 +48,7 @@ presentation state machine，Runtime Client cache不是第二套UI lifecycle aut
 Host idle，再取得唯一prompt reservation并发送`start_turn`；连续输入按提交顺序逐条执行。重连/恢复时即使本地没有
 `runPromise`，只要authoritative projection仍是queued/running/waiting，client就轮询exact Session projection直到远端
 cleanup barrier idle后才放行下一条消息。等待或command失败必须返回TUI可见的“未发送”错误，不能只清空输入框。
+Session初始化成功后，展示订阅校验失败不得阻止Esc/Ctrl+C提交`cancel_turn`。取消仍等待初始化完成，并携带原Run/Turn身份与revision，由Server校验和提交。订阅错误继续阻止依赖健康展示流的新操作；取消成功不清除订阅错误、不接受非法事件，也不伪造运行终态。
 活动Turn的重复Esc/Ctrl+C共享每Session唯一的in-flight取消Promise；第一次按键即可进入`Cancelling`展示，只有权威终态或
 取消receipt失败才清除该pending状态。前驱含Subagent时，Service返回`runtime_busy`直至Provider lifecycle cleanup全部确认；
 client保留queued prompt并退避重试，不能在前驱用户可见终态与实际cleanup之间启动后继。

@@ -17,6 +17,8 @@ root `AbortController`，同一 Session 同时最多一个活动 operation；只
 barrier。CLI/TUI compatibility path 只消费 Host signal，并把内部 deadline/拒绝产生的 abort 请求回送 Host；它们不再
 拥有 production root controller。
 
+Native TUI的展示订阅失败不得阻止已接收Run的取消。Session初始化失败仍拒绝操作；初始化成功后的取消独立于订阅consumer是否健康，继续使用Server的命令、身份和revision校验。取消请求成功不代表展示流恢复，也不替代Server终态和cleanup确认。
+
 `cancel_turn` 与 Host shutdown 仍先通过唯一 live Kernel control plane 提交 durable cancellation facts，再由 Host
 触发 root signal。Host `EffectSupervisor` 是四类 SQLite Store transaction acknowledgement 与单-Store effect lease 的
 production owner：intent/attempt ack 失败时外部调用为零，lease 必须在 dispatch 前取得并在运行中续租，terminal

@@ -1243,7 +1243,11 @@ class NativeTuiRuntimeClient {
   }
 
   async #cancelRuntime(record: NativeSessionRecord): Promise<void> {
-    await this.#waitForSessionReady(record.threadId);
+    // Admission must succeed, but a failed presentation consumer must never
+    // prevent the user from stopping the accepted Server run. The Server still
+    // validates the exact run/turn identity and revision below.
+    await record.readyPromise;
+    this.#assertOpen();
     const run = record.projection?.currentRun;
     const accepted = record.acceptedRun;
     if (!run && !accepted && record.startCommand.state === 'submitting') {
