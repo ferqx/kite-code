@@ -144,8 +144,8 @@ async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest
 }
 
 async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
-  const homeParent = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-home-')));
-  const workspace = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
+  const homeParent = realpathSync.native(mkdtempSync(join(smokeRoot, 'daemon-home-')));
+  const workspace = realpathSync.native(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
   const kiteHome = join(homeParent, '.kite-code');
   const common = ['--kite-home', kiteHome];
   let predecessor: ReturnType<typeof Bun.spawn> | undefined;
