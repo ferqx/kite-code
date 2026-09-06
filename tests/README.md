@@ -227,3 +227,12 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 设计方案链接位于产品和技术页面；`tests/isolated/scripts/docs-impact-scopes.test.ts` 验证计划删除后两侧都必须清理链接，部分交付保持有效入口。核心回归命令：`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts tests/integration/document-sync-skill.test.ts tests/isolated/scripts/docs-impact-scopes.test.ts`。
 
 根入口检查覆盖仓库根目录与 docs 根目录的全部 Markdown，而非仅固定 README 名单；新增客户端规则或产品入口的失效链接同样会失败。历史 ADR 正文仍按历史材料处理，不以旧代码路径强制改写决策。
+
+
+## 桌面客户端验证
+
+`apps/kite-desktop/test` 归属桌面 owner，已加入默认测试发现；验证累计文本/持久终态与 IPC 关闭、发送失败不重试等语义。`bun run typecheck` 与 runtime package gate 包含桌面 workspace；renderer 只允许 `kite-local-runtime/client/protocol`，禁止 Node/Bun 和 Native I/O 根入口。
+
+`bun run test:desktop:native` 是显式原生测试，需先准备编译服务与 Rust。它使用隔离 home/workspace、本地模型 fixture 和真实 Rust carrier，验证同包握手、信任、流式任务、历史、活动模型 EOF 清理及新进程读取；不调用外部 Provider，也不证明 WebView IPC、隐藏窗口或工具进程树崩溃清理。
+
+原生 `.app` 的目录选择、流式、关窗、重连、确认退出和工具进程树崩溃清理已通过本机验收，准确制品与范围见[原生验收](../apps/kite-desktop/docs/native-validation.md)。该证据不替代正式发布与其他平台资格。文档结构测试中的子进程检查移至 `tests/isolated/scripts/docs-structure.test.ts`；普通 workspace/契约导航读取仍在 `tests/integration/docs-structure.test.ts`，原断言保持。

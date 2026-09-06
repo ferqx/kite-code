@@ -6,6 +6,8 @@
 
 [客户端启动、服务生命周期与发布升级规范](daemon-upgrade-lifecycle.md)：阶段 1、2 已完成本机实现与验证，阶段 3 的发布门禁已接入；Linux/Windows hosted 资格仍待验证。覆盖默认 TUI/CLI 配套服务、共享 daemon 与 Web；未来桌面端仅规定接入边界。
 
+[桌面客户端首版](desktop-client.md)：阶段 0 已完成，Tauri/React、环境无关 Client、受限 IPC、Rust stdio 服务和 macOS `.app` 已通过本机原生验收，包括关窗、退出、历史恢复和工具进程树崩溃清理。后续完成日常开发闭环和发布验证。
+
 ## 待核实问题
 
 [Backlog](backlog.md)保存需求、实际差异和必要历史链接。重新确认目标后再制定方案；旧方案全文不作为当前实现步骤。

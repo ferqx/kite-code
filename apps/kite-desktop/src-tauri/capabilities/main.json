@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local main window may use only the paired Runtime transport and native project picker.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-select-workspace",
+    "allow-runtime-open",
+    "allow-runtime-send",
+    "allow-runtime-receive",
+    "allow-runtime-close",
+    "dialog:allow-message"
+  ]
+}

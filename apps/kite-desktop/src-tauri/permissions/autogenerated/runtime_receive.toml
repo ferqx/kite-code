@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-receive"
+description = "Enables the runtime_receive command without any pre-configured scope."
+commands.allow = ["runtime_receive"]
+
+[[permission]]
+identifier = "deny-runtime-receive"
+description = "Denies the runtime_receive command without any pre-configured scope."
+commands.deny = ["runtime_receive"]

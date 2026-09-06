@@ -33,6 +33,8 @@ Agent → Capability → Policy → Execution → Verification
 | Execution | Runtime Host lifecycle + Builtin concrete mechanisms + App composition | ack 后执行一次，形成 receipt/unknown/terminal，并完成 cleanup |
 | Verification | Builtin verifier + Kernel verification domain | 从 Receipt/Artifact/注入 port 形成 evidence，由 Kernel 决定通过、修复、重规划、补偿或 waiver |
 
+桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过受限 Tauri IPC 连接 Rust-owned 服务；不能导入 Native I/O、Host、Store 或 Service concrete source。当前实现与验证限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+
 ## Client Contract 与 SPI
 
 `@kite-ai/runtime-contract` 是 client-facing 的 App semantic contract，不是 wire protocol。command、query、可序列化 subscription spec、封闭 client event 与 projection 分别位于独立模块；presentation/capability/observability 只携带中立数据。Contract 不包含 Kernel state、Host lifecycle、Provider handle、SQLite 类型、wire envelope 或 TUI block。
@@ -41,11 +43,11 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server 与 Local Service client contract：十六个workspace、一个当前 concrete composition
+## Runtime Server 与 Local Service client contract：十七个workspace、一个当前 concrete composition
 
-Runtime package Gate当前检查十六个workspace（含private Web App）：`agent-api-contract`、`agent-api-client`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
+Runtime package Gate当前检查十七个workspace（含 private Web 与 Desktop App）：`agent-api-contract`、`agent-api-client`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
 `runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
-`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli`、private `apps/kite-service`与`apps/kite-web`。核心graph不把Web App算作
+`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli`、private `apps/kite-service`、`apps/kite-web`与`apps/kite-desktop`。核心graph不把Web App算作
 Runtime composition owner；它们不是可互换Runtime。依赖和authority必须
 保持下列层级：
 
@@ -257,7 +259,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
 - `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
-- `check:runtime-packages`：十六个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
+- `check:runtime-packages`：十七个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
 

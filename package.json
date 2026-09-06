@@ -54,7 +54,9 @@
     "check:docs": "bun run scripts/check-docs.ts",
     "check:docs-impact": "bun run scripts/check-docs-impact.ts",
     "check:protected-branch": "bun run scripts/check-protected-branch.ts",
-    "check:plan-evidence": "bun run scripts/check-plan-execution-matrix.ts"
+    "check:plan-evidence": "bun run scripts/check-plan-execution-matrix.ts",
+    "desktop": "bun run --cwd apps/kite-desktop dev",
+    "test:desktop:native": "bun run tests/qualification/desktop-service-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",

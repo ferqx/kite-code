@@ -9,6 +9,12 @@
 
 ## 当前拓扑
 
+开发中的 [Tauri 桌面客户端](../../apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Rust 持有 stdio 进程，WebView 复用环境无关 TypeScript client；当前已通过阶段 0 本机原生验收，后续开发和发布仍按[计划](../plans/desktop-client.md)推进。下图列出既有正式入口。
+
+桌面宿主在编译时固定已验证 candidate 的 build ID、服务摘要及 release owner 提供的环境变量名白名单；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。debug 使用现有 checkout digest 规则隔离 source profile，打包版使用用户 canonical profile；数据目录校验类型、owner 并限制为私有权限。其 Rust carrier 的队列、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
+
+macOS Cocoa Quit 通过原生 delegate 适配进入绑定主窗口的确认；确认后先关闭 stdin，清理完成才允许事件循环退出。重复退出请求不得提前取得退出许可；崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。
+
 ```text
 default:
 TUI/CLI build X -- parent-owned stdio --> App Server build X

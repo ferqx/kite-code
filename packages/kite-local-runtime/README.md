@@ -9,6 +9,7 @@
 
 - `/client`：stdio、Unix socket/named-pipe transport，App Server connection，Runtime/History/App Control/credential adapters，
   以及独立 lifecycle v1 codec/client 和业务 daemon status/shutdown codec。
+- `/client/protocol`：供可信原生应用传输组合的环境无关 Runtime/History/App Control connection；桌面 WebView 只消费此子路径，不能导入含 Node/Bun I/O 的 `/client`。它不启动进程，也不为浏览器 Web 扩权。
 - `/config`：共享用户配置的 owner-specific lock、revision CAS 与 atomic replacement primitive。
 - `/coordinator`：仍有生产消费者的 internal coordination substrate；不参与默认 App Server discovery。
 - `/service`：Kite profile home 校验、owner-only private directory、daemon endpoint path、PID/start identity 与 dead-only endpoint

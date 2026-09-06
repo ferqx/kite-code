@@ -15,7 +15,7 @@
 | Native 与控制 | kite-local-runtime / kite-app-contract | 不为 TUI 暴露 raw Repository/Store |
 | Browser API | agent-api-contract / agent-api-client | browser-safe，客户端不能引入 Native/Service |
 | 组装 | kite-service | 负责具体依赖与公开入口的组合 |
-| 展示 | kite-cli / kite-web | 不组合第二个 Kernel/Host/Store |
+| 展示 | kite-cli / kite-web / kite-desktop | 不组合第二个 Kernel/Host/Store；desktop renderer 只通过环境无关协议组合与受限 IPC 接入原生宿主 |
 
 ## 跨边界修改
 

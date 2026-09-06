@@ -18,6 +18,7 @@ const WORKSPACES = [
   'apps/kite-cli',
   'apps/kite-service',
   'apps/kite-web',
+  'apps/kite-desktop',
 ] as const;
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);

@@ -8,7 +8,8 @@
     "./client": "./src/client/index.ts",
     "./config": "./src/config/index.ts",
     "./coordinator": "./src/coordinator/index.ts",
-    "./service": "./src/service/index.ts"
+    "./service": "./src/service/index.ts",
+    "./client/protocol": "./src/client/protocol-connection.ts"
   },
   "scripts": {
     "build": "bun build ./src/client/index.ts ./src/config/index.ts ./src/coordinator/index.ts ./src/service/index.ts --outdir ./dist --target bun",

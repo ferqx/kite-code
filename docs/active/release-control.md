@@ -44,6 +44,8 @@ NODE/BUN injection不得跨边界。profile、Workspace、build、Web asset root
 
 ## 安装、升级、回滚、卸载
 
+开发中的 Tauri 桌面端通过[服务准备脚本](../../scripts/release/prepare-desktop-service.ts)消费既有 verified candidate，仅提取当前 macOS stdio 服务制品，并把 candidate ID、服务摘要、expected server version 和环境变量名白名单固定到宿主构建输入。该脚本不改动安装器或 active pointer，不额外分发 CLI/TUI/Web。桌面 `.app` 的本机构建不等于正式签名、公证、升级或平台发布资格；相关限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+
 安装器只接受显式archive/prefix。prefix不能是filesystem root、用户home、repo root、symlink/reparse point或未标记的非空目录。
 每个candidate物化到immutable `releases/<candidateId>`；stable launcher、唯一`active` pointer、managed marker、`.candidate-id`
 与manifest/checksum交叉验证。

@@ -23,13 +23,4 @@ describe('current documentation navigation', () => {
       expect(index.split(`(../../active/${file})`).length - 1, file).toBe(1);
     }
   });
-
-  test('passes recursive current links and map validation', () => {
-    const result = Bun.spawnSync(['bun', 'run', 'scripts/check-docs.ts'], {
-      cwd: root,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    expect(result.exitCode, result.stderr.toString()).toBe(0);
-  });
 });

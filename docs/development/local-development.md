@@ -8,6 +8,8 @@
 | Web 完整环境 | `bun run server` | 构建资源、启动显式 daemon、打印地址 |
 | Web 资源热开发 | `bun run --cwd apps/kite-web dev` | 仅 Vite，不替代后端启动 |
 | CLI | `bun run agent run --workspace . --task "任务"` | 信任与配置仍须满足 |
+| 桌面开发 | `bun run desktop` | 先按[桌面 owner](../../apps/kite-desktop/README.md)准备 Rust/Xcode 与配套服务；当前处于阶段 0 验证 |
+| 桌面原生服务测试 | `bun run test:desktop:native` | Rust 在隔离 home/workspace 下调用编译服务与本地模型 fixture，不调用外部 Provider |
 | 默认测试 | `bun run test` | 使用仓库测试 runner |
 | TUI 系统测试 | `bun run test:tui:system` | PTY 场景，按修改选择定向场景 |
 | 类型检查 | `bun run typecheck` | 根与 workspace |

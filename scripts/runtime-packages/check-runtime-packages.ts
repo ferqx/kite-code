@@ -19,6 +19,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/kite-cli', 'apps/kite-cli'],
   ['@kite-ai/kite-service', 'apps/kite-service'],
   ['@kite-ai/kite-web', 'apps/kite-web'],
+  ['@kite-ai/kite-desktop', 'apps/kite-desktop'],
 ] as const);
 
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
@@ -67,9 +68,19 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   // The Browser is a private presentation application. It consumes only the
   // typed HTTP client and public DTO contract; UI/tooling remains app-local.
   '@kite-ai/kite-web': ['@kite-ai/agent-api-client', '@kite-ai/agent-api-contract'],
+  '@kite-ai/kite-desktop': [
+    '@kite-ai/kite-local-runtime',
+    '@kite-ai/runtime-client',
+    '@kite-ai/runtime-contract',
+    '@kite-ai/runtime-protocol',
+    '@kite-ai/kite-app-contract',
+  ],
 });
 
-const NON_EXPORTING_PRIVATE_APPS: ReadonlySet<string> = new Set(['@kite-ai/kite-web']);
+const NON_EXPORTING_PRIVATE_APPS: ReadonlySet<string> = new Set([
+  '@kite-ai/kite-web',
+  '@kite-ai/kite-desktop',
+]);
 
 const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
   '@kite-ai/agent-api-contract': [
@@ -722,6 +733,19 @@ function validateImports(
       }
     }
 
+    if (
+      edge.owner.name === '@kite-ai/kite-desktop' &&
+      packageName === '@kite-ai/kite-local-runtime' &&
+      edge.specifier !== '@kite-ai/kite-local-runtime/client/protocol'
+    ) {
+      addViolation(
+        violations,
+        'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+        'Desktop renderer may use only the environment-free protocol composition.',
+        sourcePath,
+      );
+    }
+
     const declared = edge.owner.manifest.dependencies?.[packageName];
     if (!declared) {
       addViolation(
@@ -768,7 +792,12 @@ function validateExternalDependency(
       `${path}/package.json`,
     );
   }
-  if (isUiPackage(dependency) && owner !== '@kite-ai/kite-cli' && owner !== '@kite-ai/kite-web') {
+  if (
+    isUiPackage(dependency) &&
+    owner !== '@kite-ai/kite-cli' &&
+    owner !== '@kite-ai/kite-web' &&
+    owner !== '@kite-ai/kite-desktop'
+  ) {
     addViolation(
       violations,
       'FORBIDDEN_UI_IMPORT',
@@ -803,7 +832,8 @@ function validateExternalImport(
       owner === '@kite-ai/kite-app-contract' ||
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi' ||
-      owner === '@kite-ai/kite-web'
+      owner === '@kite-ai/kite-web' ||
+      owner === '@kite-ai/kite-desktop'
     ) {
       addViolation(
         violations,

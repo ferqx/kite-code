@@ -70,6 +70,7 @@ export function analyzeTestOwnership(repositoryRoot: string): TestOwnershipViola
     ...collect(join(root, 'apps', 'kite-cli', 'test')),
     ...collect(join(root, 'apps', 'kite-service', 'test')),
     ...collect(join(root, 'apps', 'kite-web', 'test')),
+    ...collect(join(root, 'apps', 'kite-desktop', 'test')),
     ...readdirSync(join(root, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => collect(join(root, 'packages', entry.name, 'test'))),

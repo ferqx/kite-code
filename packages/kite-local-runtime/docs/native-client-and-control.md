@@ -6,6 +6,8 @@
 
 prepareAppControl 调用 RuntimeClient.connect，先初始化唯一协议连接以访问工作区信任和配置控制面；确认 canonical workspace 与 external-read scope 后才提交 Runtime mutation。后续 connect 复用已初始化的连接，不做第二次握手。App Control codec 和 Native credential 操作各有精确接口，不把配置 repository 或 raw key交给 TUI。
 
+[环境无关 connection](../src/client/protocol-connection.ts)以 `/client/protocol` 导出，接收明确 transport、expected server version、client identity 与 required methods。现有 stdio/socket composition 和 Tauri 桌面端复用这一份 Runtime/History/App Control/credential 组合；文件不导入 Node/Bun I/O。Tauri renderer 经桌面 IPC 使用 Rust-owned stdio child，具体进程与队列由[桌面 owner](../../../apps/kite-desktop/README.md)维护。TUI/CLI 的配对、握手和关闭语义保持不变。
+
 ## 配置写入与进程资料
 
 [config](../src/config/) 的 per-file lock 在锁内重读，再 atomic replace；它是共享 filesystem primitive，不定义 Provider 或权限语义。Service 状态 primitive 处理本机路径、权限和 process identity，不创建第二份 Session authority。

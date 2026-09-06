@@ -132,3 +132,5 @@ accepted 表示当时已接受，不表示全文仍定义当前行为。当前�
 - [ADR-0174：TUI 消息投影升级事件格式并使用单一 Timeline 权威](0174-tui-message-projection-event-format-epoch.md)
 - [ADR-0175：产品手册、内部实现说明与当前知识](0175-product-handbook-and-current-development-knowledge.md)
 - [ADR-0176：稳定 Daemon 生命周期协议与显式重启](0176-stable-daemon-lifecycle-and-explicit-restart.md)
+- [ADR-0177：桌面客户端采用 Tauri 并复用现有 App Server](0177-tauri-desktop-client.md)
+- [ADR-0178：桌面 macOS 退出先确认并等待服务清理](0178-desktop-macos-termination.md)

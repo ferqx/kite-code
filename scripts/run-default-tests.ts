@@ -26,6 +26,7 @@ const workspaces = [
   'packages/builtin-runtime',
   'apps/kite-cli',
   'apps/kite-service',
+  'apps/kite-desktop',
 ] as const;
 
 const concurrency = testParallelism();

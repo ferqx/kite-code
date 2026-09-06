@@ -932,6 +932,18 @@
         "packages/runtime-storage-sqlite/docs/authority-and-recovery.md",
         "docs/handbook/features/recovery.md"
       ]
+    },
+    {
+      "id": "desktop-client",
+      "sources": [
+        "apps/kite-desktop/src/**",
+        "apps/kite-desktop/src-tauri/**",
+        "apps/kite-desktop/package.json",
+        "apps/kite-desktop/vite.config.ts",
+        "apps/kite-desktop/tsconfig.json",
+        "apps/kite-desktop/index.html"
+      ],
+      "authorities": ["apps/kite-desktop/README.md", "docs/active/app-server-local-runtime.md"]
     }
   ]
 }
