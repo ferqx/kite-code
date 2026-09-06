@@ -9,6 +9,7 @@ export function runProcessTreeChild(args: readonly string[]): void {
   let buffer = Buffer.alloc(0);
   let started = false;
   let terminal = false;
+  let child: ReturnType<typeof spawnRuntimeHostProcess> | undefined;
   const parentWatch = setInterval(() => {
     if (process.ppid !== parentPid || !isProcessAlive(parentPid)) emergencyExit();
   }, 100);
@@ -26,7 +27,7 @@ export function runProcessTreeChild(args: readonly string[]): void {
     buffer = Buffer.alloc(0);
     if (!request) return emergencyExit();
     started = true;
-    const child = spawnRuntimeHostProcess(request.argv, {
+    child = spawnRuntimeHostProcess(request.argv, {
       cwd: request.cwd,
       stdin: 'ignore',
       stdout: 'inherit',
@@ -48,6 +49,11 @@ export function runProcessTreeChild(args: readonly string[]): void {
   function emergencyExit(): void {
     if (terminal) return;
     if (started) {
+      try {
+        child?.kill('SIGKILL');
+      } catch {
+        // The direct child may already have exited; the process-group kill remains authoritative.
+      }
       try {
         process.kill(-process.pid, 'SIGKILL');
       } catch {
