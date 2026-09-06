@@ -10,7 +10,7 @@ export function runProcessTreeChild(args: readonly string[]): void {
   let started = false;
   let terminal = false;
   const parentWatch = setInterval(() => {
-    if (process.ppid !== parentPid) emergencyExit();
+    if (process.ppid !== parentPid || !isProcessAlive(parentPid)) emergencyExit();
   }, 100);
 
   process.stdin.on('data', (chunk: Buffer | string) => {
@@ -56,6 +56,15 @@ export function runProcessTreeChild(args: readonly string[]): void {
       return;
     }
     process.exit(125);
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
 
