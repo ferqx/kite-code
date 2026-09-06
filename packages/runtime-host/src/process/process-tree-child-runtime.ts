@@ -6,6 +6,10 @@ const MAX_REQUEST_BYTES = 1_048_576;
 /** POSIX watchdog used by the generic Host process port; request bytes arrive only on inherited stdin. */
 export function runProcessTreeChild(args: readonly string[]): void {
   if (args.length !== 0 || process.platform === 'win32') process.exit(125);
+  // The guard owns graceful-to-forced escalation for the whole process group.
+  // Keep the watchdog alive for SIGTERM so an ignoring command cannot turn a
+  // required forced cleanup into an apparent graceful watchdog exit.
+  process.on('SIGTERM', () => undefined);
   let buffer = Buffer.alloc(0);
   let started = false;
   let terminal = false;
