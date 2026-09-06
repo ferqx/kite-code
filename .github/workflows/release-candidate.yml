@@ -53,13 +53,12 @@ jobs:
           git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
         name: Verify Windows App Server endpoint and Session Store fencing
-        run: >-
-          bun test
-          packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
-          packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts
-          packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts
-          packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
-          tests/release/app-server-daemon.test.ts
+        run: |
+          bun test --parallel=1 --max-concurrency=1 packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
+          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts
+          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts
+          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
+          bun test --parallel=1 --max-concurrency=1 tests/release/app-server-daemon.test.ts
       - name: Release contract tests
         run: >-
           bun test

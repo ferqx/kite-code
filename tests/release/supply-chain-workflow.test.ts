@@ -94,6 +94,15 @@ describe('ordinary open-source release candidate workflow', () => {
       expect(index).toBeGreaterThan(previousIndex);
       previousIndex = index;
     }
+    for (const testFile of [
+      'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts',
+      'packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts',
+      'tests/release/app-server-daemon.test.ts',
+    ]) {
+      expect(workflow).toContain(`bun test --parallel=1 --max-concurrency=1 ${testFile}`);
+    }
 
     for (const asset of [
       'release/platform-capabilities/windows-runner.json',
