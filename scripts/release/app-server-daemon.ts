@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, win32 } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import {
   createKiteAppServerDaemonClient,
   KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_,
@@ -246,8 +246,7 @@ export function createManagedLocalAppServerDaemon(
         existing = await readStatus();
       }
       if (existing.state !== 'absent') {
-        return existing.state === 'ready' &&
-          (existing.workspace === undefined || !samePath(existing.workspace, canonicalWorkspace))
+        return existing.state === 'ready' && existing.workspace !== canonicalWorkspace
           ? { ...existing, state: 'incompatible' }
           : existing;
       }
@@ -305,7 +304,7 @@ export function createManagedLocalAppServerDaemon(
       const canonicalWorkspace = realpathSync.native(
         workspace ?? current.workspace ?? process.cwd(),
       );
-      if (current.workspace && !samePath(current.workspace, canonicalWorkspace))
+      if (current.workspace && current.workspace !== canonicalWorkspace)
         throw new Error('Selected App Server daemon serves a different Workspace.');
       const prepared = prepareManagedLocalAppServerTarget(target);
       validateWebStaticRoot(prepared.webStaticRoot);
@@ -316,8 +315,7 @@ export function createManagedLocalAppServerDaemon(
       if (
         started.state !== 'ready' ||
         started.buildId !== target.buildId ||
-        started.workspace === undefined ||
-        !samePath(started.workspace, canonicalWorkspace)
+        started.workspace !== canonicalWorkspace
       ) {
         throw new Error(
           'App Server restart did not reach the selected build and Workspace; inspect status.',
@@ -448,19 +446,6 @@ function pathExists(path: string): boolean {
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
     throw error;
-  }
-}
-
-function samePath(left: string, right: string): boolean {
-  try {
-    const canonicalLeft = realpathSync.native(left);
-    const canonicalRight = realpathSync.native(right);
-    return process.platform === 'win32'
-      ? win32.normalize(canonicalLeft).toLowerCase() ===
-          win32.normalize(canonicalRight).toLowerCase()
-      : canonicalLeft === canonicalRight;
-  } catch {
-    return false;
   }
 }
 

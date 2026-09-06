@@ -83,7 +83,9 @@ describe('explicit App Server daemon lifecycle', () => {
   });
 
   test('restarts an independently running incompatible business version through lifecycle v1', async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-upgrade-')));
+    const root = realpathSync.native(
+      mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-upgrade-')),
+    );
     cleanup.push(root);
     const daemon = createManagedLocalAppServerDaemon({
       argv: ['kite', '--kite-home', join(root, 'home')],
