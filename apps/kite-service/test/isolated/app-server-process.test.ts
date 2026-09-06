@@ -627,7 +627,7 @@ describe('KASD parent-owned App Server process', () => {
 
         child.kill('SIGKILL');
         await child.exited;
-        await eventually(() => !isLivePid(shellPid!), 1_000);
+        await eventually(() => !isRunningPid(shellPid!), 1_000);
         await Bun.sleep(650);
 
         const successor = createKiteSessionAppServerStorageComposition({
@@ -700,7 +700,7 @@ describe('KASD parent-owned App Server process', () => {
       } finally {
         if (child.exitCode === null) child.kill('SIGKILL');
         await child.exited;
-        if (shellPid !== undefined && isLivePid(shellPid)) process.kill(shellPid, 'SIGKILL');
+        if (shellPid !== undefined && isRunningPid(shellPid)) process.kill(shellPid, 'SIGKILL');
         model.stop();
         rmSync(root, { recursive: true, force: true });
       }
@@ -778,6 +778,24 @@ function isLivePid(pid: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+function isRunningPid(pid: number): boolean {
+  if (!isLivePid(pid)) return false;
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const closing = stat.lastIndexOf(')');
+    if (closing < 0) return true;
+    return (
+      stat
+        .slice(closing + 2)
+        .trim()
+        .split(/\s+/u)[0] !== 'Z'
+    );
+  } catch {
+    return isLivePid(pid);
   }
 }
 
