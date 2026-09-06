@@ -289,6 +289,14 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
       }),
     },
     '/v1/auth/browser/session': {
+      post: operation({
+        id: 'refreshAgentApiBrowserSession',
+        tag: 'Authentication',
+        summary: 'Establish a replacement Browser session after expiry',
+        security: [],
+        success: { 204: emptyResponse('Browser session available') },
+        errors: [400, 403, 503],
+      }),
       delete: operation({
         id: 'revokeAgentApiBrowserSession',
         tag: 'Authentication',

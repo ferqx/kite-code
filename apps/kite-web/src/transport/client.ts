@@ -67,12 +67,38 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
   const client = options.client ?? createAgentApiBrowserClient({ fetch: options.fetch });
   let generation = 0;
   let connected = false;
+  let browserSessionRefresh: Promise<void> | undefined;
+
+  const readWithBrowserSessionRecovery = async <Output>(
+    operation: () => Promise<Output>,
+    recoverBeforeConnect = false,
+  ): Promise<Output> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        !(error instanceof AgentApiClientError) ||
+        error.status !== 401 ||
+        (!connected && !recoverBeforeConnect)
+      ) {
+        throw error;
+      }
+      const refresh = browserSessionRefresh ?? client.refreshBrowserSession();
+      browserSessionRefresh = refresh;
+      try {
+        await refresh;
+      } finally {
+        if (browserSessionRefresh === refresh) browserSessionRefresh = undefined;
+      }
+      return await operation();
+    }
+  };
 
   return Object.freeze({
     async connect() {
       if (connected) return { generation };
       try {
-        const info = await client.getServerInfo();
+        const info = await readWithBrowserSessionRecovery(() => client.getServerInfo(), true);
         for (const required of ['workspaces', 'sessions', 'history'] as const) {
           if (!info.capabilities.includes(required)) {
             throw new WebRestTransportError('protocol_error');
@@ -91,7 +117,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         const workspaces: WebDirectorySnapshot['workspaces'][number][] = [];
         let cursor: string | undefined;
         for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-          const page = await client.listWorkspaces({ cursor, limit: 100 });
+          const page = await readWithBrowserSessionRecovery(() =>
+            client.listWorkspaces({ cursor, limit: 100 }),
+          );
           for (const workspace of page.items) {
             workspaces.push({
               workspaceId: workspace.workspace_id,
@@ -104,7 +132,11 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
           if (!page.next_cursor) {
             const first = workspaces[0];
             if (!first) return { workspaces };
-            const sessions = await listAllSessions(client, first.workspaceId);
+            const sessions = await listAllSessions(
+              client,
+              first.workspaceId,
+              readWithBrowserSessionRecovery,
+            );
             return {
               workspaces: [
                 { ...first, sessionState: 'loaded' as const, sessions },
@@ -122,7 +154,7 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
     async listWorkspaceSessions(workspaceId: string) {
       requireConnected(connected);
       try {
-        return await listAllSessions(client, workspaceId);
+        return await listAllSessions(client, workspaceId, readWithBrowserSessionRecovery);
       } catch (error) {
         throw normalizeError(error, 'session_unavailable');
       }
@@ -130,7 +162,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
     async getSession(sessionId: string) {
       requireConnected(connected);
       try {
-        return projectSession(await client.getSession(sessionId));
+        return projectSession(
+          await readWithBrowserSessionRecovery(() => client.getSession(sessionId)),
+        );
       } catch (error) {
         throw normalizeError(error, 'session_unavailable');
       }
@@ -142,11 +176,13 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         let cursor: string | undefined;
         let observedLastSequence = 0;
         for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-          const page = await client.listHistory(sessionId, {
-            cursor,
-            limit: 200,
-            ...(cursor === undefined && afterSequence !== undefined ? { afterSequence } : {}),
-          });
+          const page = await readWithBrowserSessionRecovery(() =>
+            client.listHistory(sessionId, {
+              cursor,
+              limit: 200,
+              ...(cursor === undefined && afterSequence !== undefined ? { afterSequence } : {}),
+            }),
+          );
           if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
           observedLastSequence = page.through_sequence;
           messages.push(...page.items.map(projectHistoryItem));
@@ -171,11 +207,13 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         let cursor: string | undefined;
         let observedLastSequence = 0;
         for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-          const page = await client.listLogs(sessionId, {
-            cursor,
-            limit: 200,
-            ...(cursor === undefined && afterSequence !== undefined ? { afterSequence } : {}),
-          });
+          const page = await readWithBrowserSessionRecovery(() =>
+            client.listLogs(sessionId, {
+              cursor,
+              limit: 200,
+              ...(cursor === undefined && afterSequence !== undefined ? { afterSequence } : {}),
+            }),
+          );
           if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
           observedLastSequence = page.through_sequence;
           entries.push(...page.items.map(projectLogItem));
@@ -196,7 +234,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
     async loadModelContext(sessionId: string, invocationId: string) {
       requireConnected(connected);
       try {
-        const context = await client.getModelContext(sessionId, invocationId);
+        const context = await readWithBrowserSessionRecovery(() =>
+          client.getModelContext(sessionId, invocationId),
+        );
         if (context.session_id !== sessionId || context.invocation_id !== invocationId) {
           throw new WebRestTransportError('protocol_error');
         }
@@ -211,7 +251,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         const checkpoints: WebCheckpointSnapshot['checkpoints'][number][] = [];
         let cursor: string | undefined;
         for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-          const page = await client.listCheckpoints(sessionId, { cursor, limit: 100 });
+          const page = await readWithBrowserSessionRecovery(() =>
+            client.listCheckpoints(sessionId, { cursor, limit: 100 }),
+          );
           if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
           checkpoints.push(
             ...page.items.map((item) => ({
@@ -237,11 +279,19 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
   });
 }
 
-async function listAllSessions(client: AgentApiBrowserClient, workspaceId: string) {
+type BrowserSessionRead = <Output>(operation: () => Promise<Output>) => Promise<Output>;
+
+async function listAllSessions(
+  client: AgentApiBrowserClient,
+  workspaceId: string,
+  read: BrowserSessionRead,
+) {
   const sessions: ReturnType<typeof projectSession>[] = [];
   let cursor: string | undefined;
   for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-    const page = await client.listWorkspaceSessions(workspaceId, { cursor, limit: 100 });
+    const page = await read(() =>
+      client.listWorkspaceSessions(workspaceId, { cursor, limit: 100 }),
+    );
     if (page.workspace_id !== workspaceId) throw new WebRestTransportError('protocol_error');
     sessions.push(...page.items.map(projectSession));
     if (!page.next_cursor) {

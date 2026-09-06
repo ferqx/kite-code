@@ -9,6 +9,7 @@ Browser cookie两种只读principal；default stdio App Server不开放HTTP。Ru
 | --- | --- |
 | `POST /v1/auth/exchange` | 消费`agent_api_observer|agent_api_controller` one-shot Worker capability，创建Workspace-scoped bearer context |
 | `DELETE /v1/auth/session` | 撤销当前bearer context |
+| `POST /v1/auth/browser/session` | 在旧Browser session缺失或到期后建立替代session；仍有效时保持原absolute TTL |
 | `DELETE /v1/auth/browser/session` | 撤销当前Browser session |
 | `GET /v1` | 返回build/schema digest及当前principal capability |
 | `GET /v1/workspaces` | Browser/Agent可见的path-free Workspace page；Browser数据来自Store 9 Directory |
@@ -32,11 +33,11 @@ Agent exchange在消费capability前重新验证Workspace Trust，创建hash-onl
 digest、Client/generation、role与一条query-only private Runtime logical connection。logout、TTL、generation drift、Trust撤销、connection close、
 drain/daemon restart关闭context。
 
-`GET /`创建或复用受TTL/容量限制的内存Browser session。cookie不暴露给JavaScript，不写Kite Home。logout、Service close/restart、expiry
+`GET /`创建或复用受TTL/容量限制的内存Browser session。到期后的页面可通过同源browser-session POST建立替代session；仍有效的session不被滑动续期。cookie不暴露给JavaScript，不写Kite Home。logout、Service close/restart、expiry
 撤销session；Browser关闭不停止App Server daemon。Browser principal是
 App-Server-scoped read-only，但每个Session direct read必须在当前 Session Store Directory 中可见。
 
-真实浏览器的同源GET不保证发送`Origin`：Browser只读GET允许Origin缺失但存在时必须exact；logout要求exact Origin。Browser API请求都
+真实浏览器的同源GET不保证发送`Origin`：Browser只读GET允许Origin缺失但存在时必须exact；session续建与logout要求exact Origin，且续建只在无body、无query时接受。Browser API请求都
 必须带`Sec-Fetch-Site: same-origin`与`cors|same-origin`mode，cross-site保持403。
 
 Agent request携带Origin/Cookie/Sec-Fetch固定403；Browser与bearer/Native header混用同样fail closed。所有request受target、segment、header、body、

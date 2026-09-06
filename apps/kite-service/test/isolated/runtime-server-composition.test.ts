@@ -15,7 +15,9 @@ import { createMockModelServer } from '../../../../tests/tui-system/harness/fixt
 import { createKiteCliRuntimeServer } from '../../src/bootstrap';
 
 test('CLI Runtime Server owner composes one trusted session through an InProcess client', async () => {
-  const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-server-composition-'));
+  const workspace = realpathSync.native(
+    mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-runtime-server-composition-')),
+  );
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = workspace;
   const model = createMockModelServer();

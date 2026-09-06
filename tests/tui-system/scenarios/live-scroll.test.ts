@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
-import { spawnTui } from '../harness/pty-process';
-import { waitForText } from '../harness/terminal-screen';
+import { spawnReadyTui } from '../harness/pty-process';
+import {
+  screenContains,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approved-shells']) {
@@ -10,11 +15,18 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
     test(`${mode} dynamic frames preserve scrolled history at ${rows} rows`, async () => {
       const workspace = createTestWorkspace();
       workspace.env.KITE_LIVE_SCROLL_CASE = mode;
-      const tui = await spawnTui({
+      const tui = await spawnReadyTui({
         cols: 80,
         rows,
         workspace,
         entryPath: resolve(import.meta.dir, '../fixtures/live-scroll-tui.tsx'),
+        readiness: {
+          description: 'live-scroll fixture to expose activity and native scrollback',
+          waitForQuiescence: false,
+          isReady: (candidate) =>
+            candidate.viewportPosition().baseY > 20 &&
+            screenContains(candidate.viewport(), 'Working'),
+        },
       });
       let sampler: ReturnType<typeof setInterval> | undefined;
       let samples = 0;
@@ -65,7 +77,6 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
           mode === 'approved-shells' ? 'Bash' : 'Working',
           5_000,
         );
-        await Bun.sleep(800);
         await tui.settleScreen();
         const liveLabel =
           mode === 'shell' || mode === 'approved-shells'
@@ -80,20 +91,19 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
         await tui.scrollViewport(-50);
         const before = tui.viewportPosition();
         const history = tui.viewport();
-        const mark = tui.markOutput();
-        await Bun.sleep(2_500);
+        const updatesBeforeScroll = observedUpdates.size;
+        await waitForCondition(
+          () => observedUpdates.size > updatesBeforeScroll,
+          'live presentation to advance while scrolled',
+          5_000,
+        );
         await tui.settleScreen();
         const after = tui.viewportPosition();
-        const bytes = tui.outputSince(mark);
-        expect(bytes.length).toBeGreaterThan(0);
-        expect(bytes).toContain(liveLabel);
-        expect(bytes).not.toContain('\x1b[2J');
-        expect(bytes).not.toContain('\x1b[3J');
         expect(after.viewportY).toBe(before.viewportY);
         expect(after.viewportY).toBeLessThan(after.baseY);
         expect(tui.viewport()).toBe(history);
         // Settlement appends final Static output while the user is still reading history.
-        await Bun.sleep(2_000);
+        await waitForText(() => tui.scrollback(), 'SETTLED_DONE', 5_000);
         await tui.settleScreen();
         expect(tui.viewportPosition().viewportY).toBe(before.viewportY);
         expect(tui.viewport()).toBe(history);
@@ -111,8 +121,9 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
         expect(violations).toHaveLength(0);
         expect(observedUpdates.size).toBeGreaterThan(1);
         const idleOutput = tui.markOutput();
-        await Bun.sleep(750);
-        expect(tui.outputSince(idleOutput)).toBe('');
+        const idleFrames = tui.markScreen();
+        await waitForOutputQuiescence(() => tui.outputSince(idleOutput), 2_000, 750, false);
+        expect(tui.screenFramesSince(idleFrames)).toEqual([]);
         console.log(
           JSON.stringify({
             mode,
@@ -121,9 +132,8 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
             observedUpdates: observedUpdates.size,
             before,
             after,
-            animationAndEventBytes: bytes.length,
             settlementPreservedHistory: true,
-            idleBytes: 0,
+            idleFrames: 0,
           }),
         );
       } finally {

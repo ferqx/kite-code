@@ -4,7 +4,7 @@
 
 Footer 只响应当前 active interaction，后台 pending 不抢焦点。request 绑定 interactionId、generation、owner 与 revision；过期动作不能回退作用于后来选择的 Session。
 
-Enter/Esc 提交后，applied/idempotent receipt 之前保持交互及提交态。连接、过期或状态变化错误不伪造授权、回答或取消；失败提示属于当前 Footer transient，不写入永久匿名消息。收到新 projection 后按稳定 identity 刷新 revision 再重试。
+Enter/Esc 提交后，applied/idempotent receipt 之前保持交互及提交态。Enter 立即屏蔽重复输入，但延迟 200ms 才展示提交中反馈，避免正常的短回执闪现等待页；慢回执仍有明确反馈。连接、过期或状态变化错误不伪造授权、回答或取消；失败提示属于当前 Footer transient，不写入永久匿名消息。收到新 projection 后按稳定 identity 刷新 revision 再重试。
 
 拒绝当前审批与整轮取消是不同输入语义；focused target 记 rejected，其他同轮 sibling 随真实 terminal 取消。Ctrl+C 始终整轮取消。取消先显示 Cancelling，等待 canonical terminal/idle；多次取消复用 Promise。start receipt 前取消进入 cancel-after-accept，取得身份后发送一次准确 cancel。
 

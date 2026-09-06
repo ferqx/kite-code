@@ -8,7 +8,7 @@ Browser adapter 只消费 browser-safe agent-api-client → agent-api-contract�
 
 selected Session running/waiting 且页面可见时，约 2 秒单飞读取 after_sequence History 并刷新 Session projection；page 生命周期停止对应工作。logs 只显式刷新，不新增第二个 scheduler。失败保留最后快照并显式错误，不恢复旧 bootstrap、WebSocket、SSE、BFF 或离线 fallback。
 
-index 响应建立 HttpOnly/SameSite Browser session，JavaScript 不兑换 launch token、不持有 Native bearer。document pagehide 调用 browser-session DELETE，route change 不清理。关闭浏览器不停止 daemon。
+index 响应建立 HttpOnly/SameSite Browser session，JavaScript 不兑换 launch token、不持有 Native bearer。读取因 session 到期返回401时，transport通过同源browser-session POST单飞建立替代session，并将原读取有界重试一次；不滑动续期、不增加后台刷新scheduler。document pagehide 调用 browser-session DELETE，route change 不清理。关闭浏览器不停止 daemon。
 
 验证：[transport](../test/transport.test.ts)、[app lifecycle](../test/app-lifecycle.test.tsx)。公共边界见[Agent API](../../../docs/active/agent-api-contract.md)。
 

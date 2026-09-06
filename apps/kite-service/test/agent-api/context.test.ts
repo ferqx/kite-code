@@ -169,15 +169,21 @@ describe('Agent API context and route shell', () => {
     } as AgentApiReadContext;
     const f = fixture({ browserReadContext: readContext });
     let active = true;
+    let currentCookie = 'kite_web_test=session';
     const browserAuth = {
       cookieName: 'kite_web_test',
       inspectCookie(cookie: string | null) {
-        return active && cookie === 'kite_web_test=session'
+        return active && cookie === currentCookie
           ? ({
               status: 'valid',
               record: { cookieHash: 'hash', expiresAt: Date.now() + 1_000 },
             } as const)
           : ({ status: cookie ? 'invalid' : 'absent' } as const);
+      },
+      createSession() {
+        active = true;
+        currentCookie = 'kite_web_test=replacement';
+        return `${currentCookie}; Max-Age=300; Path=/; HttpOnly; SameSite=Strict`;
       },
       revokeSession() {
         active = false;
@@ -251,10 +257,45 @@ describe('Agent API context and route shell', () => {
       decodeAgentApiResponse(agentApiModelContextSchema, await modelContext.json()).system_prompt,
     ).toEqual({ text: 'Browser-only prompt.', truncated: false });
 
+    const stillValid = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1/auth/browser/session', {
+        method: 'POST',
+        headers: { ...browserHeaders, cookie: currentCookie },
+      }),
+      browserAuth,
+    );
+    expect(stillValid.status).toBe(204);
+    expect(stillValid.headers.get('set-cookie')).toBeNull();
+
+    active = false;
+    const expired = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1', {
+        headers: { ...browserHeaders, cookie: 'kite_web_test=session' },
+      }),
+      browserAuth,
+    );
+    expect(expired.status).toBe(401);
+    const refreshed = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1/auth/browser/session', {
+        method: 'POST',
+        headers: { ...browserHeaders, cookie: 'kite_web_test=session' },
+      }),
+      browserAuth,
+    );
+    expect(refreshed.status).toBe(204);
+    expect(refreshed.headers.get('set-cookie')).toContain(currentCookie);
+    const recovered = await f.handler.handle(
+      new Request('http://127.0.0.1:43123/v1', {
+        headers: { ...browserHeaders, cookie: currentCookie },
+      }),
+      browserAuth,
+    );
+    expect(recovered.status).toBe(200);
+
     const logout = await f.handler.handle(
       new Request('http://127.0.0.1:43123/v1/auth/browser/session', {
         method: 'DELETE',
-        headers: { ...browserHeaders, cookie: 'kite_web_test=session' },
+        headers: { ...browserHeaders, cookie: currentCookie },
       }),
       browserAuth,
     );

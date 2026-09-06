@@ -27,6 +27,7 @@
 ## 输入 readiness
 
 - Harness 从当前 VT buffer 识别 focused InputLine 的 inverse-cursor marker；marker 不可达时 fail closed。
+- 不含生产InputLine的test-owned renderer fixture仍通过`spawnReadyTui`进入，并提供明确的可见语义probe；持续活动帧测试可跳过quiescence等待，但不能退回裸`spawnTui`或固定sleep。
 - 不通过写字符探测 listener；readiness 后只发送一次 bracketed-paste transaction。
 - Bun `Terminal.write()` 的同步 byte count 不作为重放依据；缺少应用 projection receipt 时测试失败。
 

@@ -3,7 +3,7 @@
 ## 定位
 
 `@kite-ai/agent-api-contract`拥有本机Kite Agent API V1的browser-safe Public wire contract。显式App Server daemon listener已经实现
-Agent bearer与Browser cookie认证，以及Workspace、Session、History、诊断Log、Browser-only Model Context、Checkpoint只读route；default
+Agent bearer与Browser cookie认证、Browser session续建，以及Workspace、Session、History、诊断Log、Browser-only Model Context、Checkpoint只读route；default
 stdio App Server不开放HTTP，Run mutation、SSE与外部SDK尚未ready。
 
 ## 拥有职责

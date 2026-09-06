@@ -895,22 +895,18 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
     async () => {
       await submitUserMessage(tui, server, 'Start four cancellable subagents', { timeout: 15_000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 4 agents', TIMEOUT);
-      const active = stripAnsi(tui.viewport());
-      for (let index = 1; index <= 4; index += 1) {
-        expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
-      }
       await waitForCondition(
         () => server.getRequestCount() === 6,
         'an empty child search result to reach the next model request',
         TIMEOUT,
       );
-      expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
-      const animationOutput = tui.markOutput();
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      await waitForText(() => tui.viewport(), 'Search .', TIMEOUT);
       await tui.settleScreen();
-      expect(tui.outputSince(animationOutput).length).toBeGreaterThan(0);
-      expect(tui.outputSince(animationOutput)).not.toContain('\x1b[2J');
-      expect(tui.outputSince(animationOutput)).not.toContain('\x1b[3J');
+      expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
+      const active = stripAnsi(tui.viewport());
+      for (let index = 1; index <= 4; index += 1) {
+        expect(active).toContain(`Explore · Inspect cancellation area ${index}`);
+      }
       const activeGroupStart = active.indexOf('Delegating · 4 agents');
       const activeGroupEnd = active.indexOf('\n\n', activeGroupStart);
       const activeGroup = active

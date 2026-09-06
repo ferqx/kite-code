@@ -29,7 +29,7 @@ Schema、standalone wire declarations、examples与SHA-256 digest。`@kite-ai/ag
 connection；Browser只读取Store 9 Directory允许投影的Workspace/Session，不能调用全局`GET /v1/sessions`、mutation或SSE。cookie、bearer、
 Native header混用fail closed。
 
-当前Browser-ready surface是`GET /v1`、Browser logout、Workspace page、Workspace-scoped Session page、Session get、History/Log/Model Context page、
+当前Browser-ready surface是`GET /v1`、Browser session续建与logout、Workspace page、Workspace-scoped Session page、Session get、History/Log/Model Context page、
 Checkpoint list/preview。History支持`after_sequence`增量边界；它与cursor互斥。Run、Interaction、mutation、SSE与外部SDK尚未ready，
 OpenAPI中存在future contract不等于ServerInfo capability开放。
 
@@ -40,8 +40,9 @@ OpenAPI中存在future contract不等于ServerInfo capability开放。
 - schema tag、ID、timestamp、text、page、cursor、array、depth、object key与UTF-8 byte均有hard limit；
 - Public DTO不包含Workspace/Store path、Worker/Controller binding、credential、Provider-native options/response或raw Runtime event；唯一模型请求正文
   例外是Browser-only Model Context的provider-neutral system/messages/tools显式诊断投影；
-- Browser mutation要求exact Origin；Browser只读GET允许Origin缺失但存在时必须exact，且所有Browser请求都要求same-origin Fetch Metadata、
-  cookie principal与无Authorization。Agent请求拒绝Origin/Cookie/Sec-Fetch；
+- Browser mutation要求exact Origin；Browser只读GET允许Origin缺失但存在时必须exact，且所有Browser请求都要求same-origin Fetch Metadata与
+  无Authorization。唯一不要求有效cookie principal的Browser操作是无body、无query的session续建POST；它只创建同一read-only cookie，
+  对仍有效的session不滑动续期。Agent请求拒绝Origin/Cookie/Sec-Fetch；
 - 所有response带`no-store`、API version、artifact digest与request ID；Problem不泄漏内部binding或path；
 - Session direct read在Browser context下先验证Directory membership；不存在的或不可见的identity统一404；
 - Browser capability仅发布`checkpoints/history/sessions/workspaces`，不把controller role或contract operation误当ready capability。

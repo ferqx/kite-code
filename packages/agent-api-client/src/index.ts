@@ -45,6 +45,7 @@ export interface AgentApiHistoryPageOptions extends AgentApiPageOptions {
 }
 
 export interface AgentApiBrowserClient {
+  refreshBrowserSession(signal?: AbortSignal): Promise<void>;
   revokeBrowser(signal?: AbortSignal): Promise<void>;
   getServerInfo(signal?: AbortSignal): Promise<AgentApiServerInfo>;
   listWorkspaces(options?: AgentApiPageOptions): Promise<AgentApiWorkspacePage>;
@@ -93,6 +94,9 @@ export function createAgentApiBrowserClient(
   const baseUrl = normalizeBaseUrl(options.baseUrl);
 
   const client: AgentApiBrowserClient = {
+    async refreshBrowserSession(signal) {
+      await request('/v1/auth/browser/session', { method: 'POST', signal });
+    },
     async revokeBrowser(signal) {
       await request('/v1/auth/browser/session', { method: 'DELETE', signal });
     },

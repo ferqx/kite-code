@@ -209,18 +209,16 @@ export function createKiteAppServerAgentApiReadContext(input: {
           (left, right) =>
             left.revision - right.revision || left.checkpointId.localeCompare(right.checkpointId),
         );
-      const start = request.cursor
-        ? entries.findIndex(
+      const remaining = request.cursor
+        ? entries.filter(
             (entry) =>
-              entry.revision === request.cursor!.revision &&
-              entry.checkpointId === request.cursor!.checkpointId,
-          ) + 1
-        : 0;
-      if (request.cursor && start === 0) {
-        return { entries: [], hasMore: false };
-      }
-      const selected = entries.slice(start, start + request.limit);
-      const hasMore = start + selected.length < entries.length;
+              entry.revision > request.cursor!.revision ||
+              (entry.revision === request.cursor!.revision &&
+                entry.checkpointId > request.cursor!.checkpointId),
+          )
+        : entries;
+      const selected = remaining.slice(0, request.limit);
+      const hasMore = selected.length < remaining.length;
       const last = selected.at(-1);
       return {
         entries: selected,

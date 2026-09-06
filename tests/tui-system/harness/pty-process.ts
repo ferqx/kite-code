@@ -50,7 +50,13 @@ export interface PtyProcessOptions {
   args?: readonly string[];
 }
 
-export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
+export interface TuiReadinessProbe {
+  readonly description: string;
+  readonly waitForQuiescence?: boolean;
+  isReady(tui: PtyProcess): boolean;
+}
+
+export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust' | TuiReadinessProbe;
 
 export interface PtyProcess {
   /** Write keystrokes and return the output checkpoint immediately before the action. */
@@ -700,6 +706,8 @@ export async function spawnReadyTui(
   opts: PtyProcessOptions & { readiness?: TuiReadiness } = {},
 ): Promise<PtyProcess> {
   const readiness = opts.readiness ?? 'main';
+  const readinessDescription =
+    typeof readiness === 'string' ? `${readiness} TUI readiness` : readiness.description;
   const tui = spawnTui(opts);
   tui.setRawMode(true);
   try {
@@ -708,7 +716,7 @@ export async function spawnReadyTui(
   } catch (error) {
     await tui.killAndWait().catch(() => {});
     throw new Error(
-      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-8_000)}`,
+      `TUI failed ${readinessDescription}. Last output:\n${stripAnsi(tui.transcript()).slice(-8_000)}`,
       { cause: error },
     );
   }
@@ -723,6 +731,7 @@ export async function waitForTuiReady(
   const workspacePath = workspace ? realpathSync(workspace.workspace) : undefined;
   await waitForCondition(
     () => {
+      if (typeof readiness !== 'string') return readiness.isReady(tui);
       const viewport = tui.viewport();
       if (readiness === 'main') {
         const input = activeInput(tui.inputViewport());
@@ -755,9 +764,11 @@ export async function waitForTuiReady(
         !screenContains(viewport, 'shortcuts')
       );
     },
-    `${readiness} TUI readiness`,
+    typeof readiness === 'string' ? `${readiness} TUI readiness` : readiness.description,
     15_000,
   );
-  await waitForOutputQuiescence(() => tui.viewport(), 5_000, 250, false);
+  if (typeof readiness === 'string' || readiness.waitForQuiescence !== false) {
+    await waitForOutputQuiescence(() => tui.viewport(), 5_000, 250, false);
+  }
   await tui.settleScreen();
 }

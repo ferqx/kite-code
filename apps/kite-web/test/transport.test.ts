@@ -1,9 +1,10 @@
-import type { AgentApiBrowserClient } from '@kite-ai/agent-api-client';
+import { type AgentApiBrowserClient, AgentApiClientError } from '@kite-ai/agent-api-client';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebRestTransport } from '@/transport/client';
 
 function client(): AgentApiBrowserClient {
   return {
+    refreshBrowserSession: vi.fn(async () => undefined),
     revokeBrowser: vi.fn(async () => undefined),
     getServerInfo: vi.fn(async () => ({
       schema: 'kite.agent-api.server-info.v1',
@@ -135,6 +136,43 @@ it('revokes a shell-created Browser session before REST connect', async () => {
   await transport.disconnect();
 
   expect(api.revokeBrowser).toHaveBeenCalledOnce();
+});
+
+it('coalesces an expired Browser session refresh and retries concurrent reads once', async () => {
+  let authorized = false;
+  let announceRefresh!: () => void;
+  let releaseRefresh!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => {
+    announceRefresh = resolve;
+  });
+  const refreshBlocked = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  const base = client();
+  const api: AgentApiBrowserClient = {
+    ...base,
+    refreshBrowserSession: vi.fn(async () => {
+      announceRefresh();
+      await refreshBlocked;
+      authorized = true;
+    }),
+    listHistory: vi.fn(async (sessionId, page) => {
+      if (!authorized) throw new AgentApiClientError(401);
+      return await base.listHistory(sessionId, page);
+    }),
+  };
+  const transport = createWebRestTransport({ client: api });
+  await transport.connect();
+
+  const first = transport.loadHistory('session-one');
+  const second = transport.loadHistory('session-one');
+  await refreshStarted;
+  await Promise.resolve();
+  expect(api.refreshBrowserSession).toHaveBeenCalledOnce();
+  releaseRefresh();
+
+  await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+  expect(api.listHistory).toHaveBeenCalledTimes(4);
 });
 
 describe('Web REST transport', () => {

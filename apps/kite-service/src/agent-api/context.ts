@@ -66,6 +66,7 @@ export interface AgentApiRouteHandlerOptions {
 
 export interface AgentApiBrowserSessionPort {
   readonly cookieName: string;
+  createSession(): string | undefined;
   inspectCookie(cookieHeader: string | null):
     | { readonly status: 'absent' | 'invalid' }
     | {
@@ -456,6 +457,20 @@ export function createAgentApiRouteHandler(
   ): Promise<Response> {
     if (!browserAuth || !options.browserReadContext || !browserRequestAllowed(request, url)) {
       return problemResponse(403, 'forbidden', requestId, false);
+    }
+    if (url.pathname === '/v1/auth/browser/session' && request.method === 'POST') {
+      if (url.search.length !== 0 || request.body !== null) {
+        return problemResponse(400, 'invalid_request', requestId, false);
+      }
+      const current = browserAuth.inspectCookie(request.headers.get('cookie'));
+      if (current.status === 'valid') return emptyResponse(204, requestId);
+      const setCookie = browserAuth.createSession();
+      if (!setCookie) {
+        return problemResponse(503, 'temporarily_unavailable', requestId, true, {
+          retryAfter: 1,
+        });
+      }
+      return emptyResponse(204, requestId, { 'set-cookie': setCookie });
     }
     const inspected = browserAuth.inspectCookie(request.headers.get('cookie'));
     if (inspected.status !== 'valid') {

@@ -7,7 +7,7 @@
 
 ## 拥有职责
 
-- Browser logout；
+- Browser session续建原语与logout；
 - ServerInfo capability读取；
 - Workspace、Workspace Session、Session、History、诊断Log、Browser-only Model Context、Checkpoint list/preview request；
 - identifier、page cursor、filter与非负`after_sequence`编码；
@@ -18,7 +18,7 @@
 
 - 不发现、ensure或停止Service，不读取Native endpoint；
 - 不保存cookie、bearer、Workspace path或client state；
-- 不实现retry daemon、offline cache、SSE、WebSocket、poll scheduler、generation reducer或恢复策略；
+- 不实现retry daemon、offline cache、SSE、WebSocket、poll scheduler、generation reducer或页面恢复策略；401后的单次读取重试由Web owner决定；
 - 不导入Service、Runtime、Host、Store、SQLite、Node或Bun I/O。
 
 ## 允许依赖

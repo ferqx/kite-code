@@ -1519,7 +1519,7 @@ describe('ApprovalBlock', () => {
     });
   });
 
-  test('shows confirmation feedback immediately while the Runtime receipt is pending', async () => {
+  test('only shows confirmation feedback when the Runtime receipt is slow', async () => {
     const approval = fakeClientApproval({ interactionId: 'approval-slow', generation: 2 });
     const provider = fakeProvider();
     let accept!: () => void;
@@ -1541,6 +1541,12 @@ describe('ApprovalBlock', () => {
     view.stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
 
+    expect(view.lastFrame()).not.toContain('Sending confirmation…');
+    expect(view.lastFrame()).toContain('Allow once');
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (view.lastFrame()?.includes('Sending confirmation…')) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(view.lastFrame()).toContain('Sending confirmation…');
     expect(view.lastFrame()).not.toContain('Allow once');
     accept();

@@ -10,6 +10,29 @@ const headers = {
 };
 
 describe('Agent API Browser client', () => {
+  test('requests a replacement Browser session without holding cookie material', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createAgentApiBrowserClient({
+      baseUrl: 'http://127.0.0.1:43123',
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return new Response(null, { status: 204, headers });
+      },
+    });
+
+    await client.refreshBrowserSession();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: 'http://127.0.0.1:43123/v1/auth/browser/session',
+      init: {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+      },
+    });
+  });
+
   test('uses cookie-authenticated REST and validates path-free Workspace responses', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const client = createAgentApiBrowserClient({

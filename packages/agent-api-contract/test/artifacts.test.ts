@@ -137,6 +137,11 @@ describe('Agent API generated artifacts', () => {
         '/v1/sessions/{session_id}/runs/{run_id}/wait',
       ].sort(),
     );
+    expect(Object.keys(openapi.paths?.['/v1/auth/browser/session'] ?? {}).sort()).toEqual([
+      'delete',
+      'post',
+    ]);
+    expect(openapi.paths?.['/v1/auth/browser/session']?.post?.security).toEqual([]);
     expect(
       Object.keys(openapi.paths?.['/v1/sessions/{session_id}/runs']?.post?.responses ?? {}).filter(
         (status) => status.startsWith('2'),

@@ -1,6 +1,6 @@
 import type { RuntimeClientInteraction, ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#kite-cli/tui/provider';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useI18n } from '../i18n';
@@ -26,6 +26,8 @@ interface Option {
   grant?: ShellApprovalGrant;
 }
 
+const SUBMISSION_FEEDBACK_DELAY_MS = 200;
+
 export default function ApprovalBlock({
   approval,
   provider,
@@ -41,6 +43,7 @@ export default function ApprovalBlock({
   const visibleSubmissionFailure = submissionFailure ?? externalSubmissionFailure;
   const selectedIndexRef = useRef(0);
   const submittingRef = useRef(false);
+  const submissionFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rawInputBuffer = useRef('');
   const approvalLabel =
     approval.command ?? approval.title ?? approval.summary ?? translate('approval.genericTool');
@@ -65,6 +68,15 @@ export default function ApprovalBlock({
           : translate('approval.denyToolDescription'),
   }));
 
+  useEffect(
+    () => () => {
+      if (submissionFeedbackTimerRef.current !== undefined) {
+        clearTimeout(submissionFeedbackTimerRef.current);
+      }
+    },
+    [],
+  );
+
   async function resolve(opt: Option) {
     // Approval actions are accepted only with the focused durable identity
     // pair. Legacy/off-screen cards without that pair cannot grant anything.
@@ -77,8 +89,12 @@ export default function ApprovalBlock({
     }
     if (submittingRef.current) return;
     submittingRef.current = true;
-    setSubmitting(true);
+    submissionFeedbackTimerRef.current = setTimeout(() => {
+      submissionFeedbackTimerRef.current = undefined;
+      setSubmitting(true);
+    }, SUBMISSION_FEEDBACK_DELAY_MS);
     setSubmissionFailure(undefined);
+    let resolvedAction: { action: string; grant?: string } | undefined;
     try {
       if (opt.action === 'approve') {
         const grant = opt.grant ?? 'approve_once';
@@ -91,7 +107,7 @@ export default function ApprovalBlock({
         if (!accepted) throw new Error('Approval submission was not accepted.');
         // The optimistic projection is safe only after Runtime accepts the
         // respond_interaction command receipt.
-        onResolved('approve', grant);
+        resolvedAction = { action: 'approve', grant };
       } else {
         const accepted = await provider.submitActionAsync({
           type: 'reject',
@@ -99,17 +115,23 @@ export default function ApprovalBlock({
           generation,
         });
         if (!accepted) throw new Error('Approval rejection was not accepted.');
-        onResolved('denied');
+        resolvedAction = { action: 'denied' };
       }
     } catch (error) {
       setSubmissionFailure(classifyInteractionSubmissionFailure(error));
     } finally {
+      if (submissionFeedbackTimerRef.current !== undefined) {
+        clearTimeout(submissionFeedbackTimerRef.current);
+        submissionFeedbackTimerRef.current = undefined;
+      }
       submittingRef.current = false;
       setSubmitting(false);
     }
+    if (resolvedAction) onResolved(resolvedAction.action, resolvedAction.grant);
   }
 
   useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    if (submittingRef.current) return;
     rawInputBuffer.current = `${rawInputBuffer.current}${input}`.slice(-4);
     const upArrow =
       key.upArrow ||

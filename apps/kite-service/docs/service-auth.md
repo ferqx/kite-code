@@ -16,7 +16,7 @@ mismatch返回incompatible，不触发stop、spawn或upgrade。PID/start identit
 Workspace Trust与Runtime admission分两阶段：App Control query/decision可在Runtime mutation前使用同一connection，但只有Server返回trusted
 canonical identity后才允许执行。request path、cwd、clientInfo、socket存在或Web URL都不产生Trust/Session authority。
 
-Browser cookie与Runtime connection不能互换。Browser只读取可见Workspace、Session、History、Model Context和Checkpoint；不能进入
+Browser cookie与Runtime connection不能互换。session到期后的无body同源POST只通过现有Browser authority建立替代cookie，不授予额外能力或滑动延长有效session。Browser只读取可见Workspace、Session、History、Model Context和Checkpoint；不能进入
 credential、controller、server shutdown或Runtime mutation。Agent API capability与Browser cookie也不互换。
 
 响应采用no-store、CSP、nosniff、frame与referrer限制，不提供宽松CORS。错误使用固定低信息值，不包含credential、Workspace内容、
