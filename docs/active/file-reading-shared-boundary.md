@@ -339,4 +339,4 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 - [Shell 平台兼容性](shell-platform-compatibility.md) — bash 选择策略、MSYS2 DLL 依赖
 - [工具描述契约](tool-description-contracts.md) — 工具 ACI 契约
 - [Runtime 架构](six-concept-runtime-architecture.md) — workspace 与 authority 边界
-- [TUI 渲染规范](../../apps/kite-cli/docs/tui-rendering.md) — Static、引用稳定与终端渲染
+- [TUI 渲染规范](../../apps/kite-cli/docs/terminal-output.md) — Static、引用稳定与终端渲染

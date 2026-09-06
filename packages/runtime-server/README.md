@@ -2,7 +2,7 @@
 
 ## 定位
 
-`@kite-ai/runtime-server` 是 transport-neutral Runtime Protocol V1 gateway core。它只把经过严格 codec 的
+`@kite-ai/runtime-server` 是 transport-neutral Runtime Protocol V2 gateway core。它只把经过严格 codec 的
 logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它不是 listener，也不是第二个 Runtime。
 
 ## 拥有职责
@@ -69,3 +69,14 @@ App 可同时提供 `onClose(connectionId)` 清理自身 connection-to-interacti
 
 模块局部变化更新本 README；跨包 Runtime authority、receipt、admission、transport 或恢复变化同时更新对应
 `docs/active/` current authority。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [Server 准入与订阅](docs/admission-and-subscriptions.md)

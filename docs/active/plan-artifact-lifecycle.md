@@ -52,6 +52,6 @@
   不建立 recovery-only Plan 工具面，也不恢复 active plan authority；未知格式静默忽略，损坏只让该会话
   打开失败。既有 Artifact 文件不主动删除或搬移。
 
-详细实施方案见 [`2026-07-13-plan-artifact-lifecycle.md`](../space/plans/2026-07-13-plan-artifact-lifecycle.md)。
+历史演变（不是当前实施依据）见 [`2026-07-13-plan-artifact-lifecycle.md`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-07-13-plan-artifact-lifecycle.md)。
 > 测试路径同步：当前 runtime state/store conformance 测试使用无版本文件名和嵌套
 > `sessions`/`transactions`/`effects`/`checkpoints` 端口；持久格式版本仍仅保留在 metadata。

@@ -80,3 +80,15 @@
 ## 文档影响
 
 模块局部变化更新本 README；authority、恢复或韧性变化同时更新 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和 [韧性验证](../../docs/active/runtime-resilience-qualification.md)。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [命令、Mailbox 与持久回执](docs/commands-mailbox.md)
+- [Prepared execution、Attempt 与清理](docs/execution-lifecycle.md)

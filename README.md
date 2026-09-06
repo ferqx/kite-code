@@ -6,7 +6,7 @@
 
 **A controllable, recoverable, and verifiable open-source coding agent.**
 
-Kite Code understands codebases, modifies files, runs commands, and verifies results from the terminal. It supports multiple models through an interactive TUI and a headless CLI.
+Kite Code helps you understand codebases, modify files, run commands, and check results using multiple models. Use the TUI or CLI to execute tasks, and the local read-only Web interface to inspect sessions and diagnostics.
 
 <p align="center">
   <a href="terminal.png">
@@ -20,7 +20,7 @@ Kite Code understands codebases, modifies files, runs commands, and verifies res
 - **Recoverable**: Persistent session state with Restore and Fork.
 - **Bounded**: Approvals, authorization, and sandboxing constrain side effects.
 - **Extensible**: Builtin Tools, MCP, and Subagents; Skill Workflow is feature-gated and disabled by default.
-- **Evidence-backed completion**: Receipts, Artifacts, and Verification determine whether work is complete.
+- **Evidence-backed completion**: Required execution evidence and enabled verification checks help determine whether a task is complete.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ bun run tui
 
 `bun run tui` starts a same-build, parent-owned App Server over stdio; it does not build Web assets or
 discover a shared process. `/status` shows the transport, profile, build, App Server version, and
-verified pairing. Sessions remain durable across TUI exits, and no `tui:fresh` workflow is needed.
+verified pairing. Sessions remain durable across TUI exits.
 On first launch, follow the interface to configure a model provider.
 
 Headless CLI:
@@ -67,9 +67,8 @@ explicit daemon lifecycle. `bun run --cwd apps/kite-web dev` remains only a Vite
 
 ## Documentation
 
-- [Project overview (Chinese)](docs/book/01-项目全景.md)
-- [CLI and configuration (Chinese)](docs/book/09-CLI模式与配置.md)
-- [Runtime architecture (Chinese)](docs/active/six-concept-runtime-architecture.md)
-- [Tools and safety policy (Chinese)](docs/book/05-工具系统与安全策略.md)
-- [MCP and Skills (Chinese)](docs/book/11-MCP与Skills扩展.md)
-- [Current behavior rules (Chinese)](docs/active/)
+- [Product handbook (Chinese)](docs/handbook/README.md): shared concepts, client guides, references, and troubleshooting.
+- [TUI guide](docs/handbook/clients/tui/README.md) · [Web guide](docs/handbook/clients/web/README.md)
+- [CLI](docs/handbook/cli/README.md) · [Server](docs/handbook/server/README.md) · [Client capabilities](docs/handbook/capabilities.md)
+- [Developer documentation (Chinese)](docs/development/README.md): architecture, module entrypoints, and verification.
+- [Current plans](docs/plans/README.md)

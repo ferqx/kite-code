@@ -43,3 +43,9 @@
 ## 验证
 
 `bun test apps/kite-cli/test`、语言/Overlay/StatusBar 定向测试和相关 TUI PTY scenario。
+
+## 当前覆盖与失败行为差异
+
+本页“自有文案统一 catalog、确认后切换语言”是预期，当前尚未全部实现：[StatusBar](../src/tui/StatusBar.tsx)、[ToolCardBlock](../src/tui/components/ToolCardBlock.tsx)、[slash 参数错误](../src/tui/hooks/useSlashCommand.ts)、会话/rewind 错误与[粘贴占位](../src/tui/components/InputLine.tsx)仍有固定中英文。不能把这些自有提示归入模型原文的免翻译范围。
+
+[TUI handleLanguageSelect](../src/tui/index.tsx) 仅在 saveUserLanguage 成功时更新内存 locale；[catalog](../src/tui/i18n/messages.ts) 的 language.saveFailed 却称本次会话已切换。当前保存失败时选择器关闭但语言保持原值。需统一行为与提示，并补保存失败断言；现有 [i18n tests](../test/tui-i18n.test.ts) 的 locale解析与候选渲染不证明这些分支已覆盖。

@@ -67,3 +67,14 @@ bun run test
 
 跨包行为变化时同步更新对应 Runtime/Service current authority；此 package 本身不决定 Service
 listener、History transport 或 Runtime Protocol。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [App Control 契约](docs/control-surface.md)

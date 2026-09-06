@@ -7,7 +7,7 @@
 验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
-相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
+相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
 
 Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-runtime/config`共享primitive，原有Linux boot-id/start-ticks、macOS
 current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变

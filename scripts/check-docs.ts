@@ -1,22 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { documentationPatternBase, documentationPatternError } from './check-docs-impact';
+import { validateDocumentationMap } from './check-docs-impact';
 
 const root = process.cwd();
 const activeDir = join(root, 'docs', 'active');
 const requiredMetadata = ['状态：active', '读取时机：', '验证：'];
 let failed = false;
-
-interface DocumentationMap {
-  version?: number;
-  rules?: Array<{
-    id: string;
-    sources?: string[];
-    excludeSources?: string[];
-    authorities?: string[];
-    documents?: string[];
-  }>;
-}
 
 function fail(message: string): void {
   failed = true;
@@ -75,68 +64,13 @@ function checkActiveMetadata(path: string, source: string): void {
 }
 
 function checkDocumentationMap(): void {
-  const mapPath = join(root, 'docs', 'documentation-map.json');
-  if (!existsSync(mapPath)) {
-    fail('docs/documentation-map.json is missing.');
-    return;
-  }
-  let map: DocumentationMap;
   try {
-    map = JSON.parse(readFileSync(mapPath, 'utf8')) as DocumentationMap;
-  } catch {
-    fail('docs/documentation-map.json is not valid JSON.');
-    return;
-  }
-  if (map.version !== 2) fail('docs/documentation-map.json must use version 2.');
-  const rules = map.rules ?? [];
-  if (rules.length === 0) fail('docs/documentation-map.json must contain non-empty rules.');
-  const ids = new Set<string>();
-  for (const rule of rules) {
-    if (!rule.id?.trim()) fail('docs/documentation-map.json contains a rule without an id.');
-    if (ids.has(rule.id))
-      fail(`docs/documentation-map.json contains duplicate rule id: ${rule.id}`);
-    ids.add(rule.id);
-    if (rule.documents !== undefined) {
-      fail(`docs/documentation-map.json rule ${rule.id} still uses retired documents.`);
-    }
-    if (!rule.sources || rule.sources.length === 0) {
-      fail(`docs/documentation-map.json rule ${rule.id} must have non-empty sources.`);
-    }
-    if (!rule.authorities || rule.authorities.length === 0) {
-      fail(`docs/documentation-map.json rule ${rule.id} must have non-empty authorities.`);
-    }
-    for (const pattern of [...(rule.sources ?? []), ...(rule.excludeSources ?? [])]) {
-      const patternError = documentationPatternError(pattern);
-      if (patternError) {
-        fail(
-          `docs/documentation-map.json rule ${rule.id} has invalid pattern ${pattern}: ${patternError}`,
-        );
-        continue;
-      }
-      const base = documentationPatternBase(pattern);
-      if (!existsSync(join(root, base))) {
-        fail(`docs/documentation-map.json rule ${rule.id} references missing source: ${pattern}`);
-      }
-    }
-    for (const authority of rule.authorities ?? []) {
-      const isCurrentAuthority =
-        authority === 'README.md' ||
-        authority === 'README.zh-CN.md' ||
-        authority === 'docs/README.md' ||
-        /^docs\/(?:active|runbooks)\/[^/]+\.md$/u.test(authority) ||
-        /^(?:packages|apps)\/[^/]+\/README\.md$/u.test(authority) ||
-        /^(?:packages|apps)\/[^/]+\/docs\/.+\.md$/u.test(authority) ||
-        authority === 'tests/README.md';
-      if (!isCurrentAuthority) {
-        fail(
-          `docs/documentation-map.json rule ${rule.id} uses non-current authority: ${authority}`,
-        );
-      } else if (!existsSync(join(root, authority))) {
-        fail(
-          `docs/documentation-map.json rule ${rule.id} references missing authority: ${authority}`,
-        );
-      }
-    }
+    validateDocumentationMap(
+      JSON.parse(readFileSync(join(root, 'docs/documentation-map.json'), 'utf8')),
+      root,
+    );
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -155,16 +89,17 @@ if (!existsSync(activeDir)) {
 }
 
 for (const path of [
-  join(root, 'README.md'),
-  join(root, 'README.zh-CN.md'),
-  join(root, 'docs', 'README.md'),
-  join(root, 'docs', 'AGENTS.md'),
+  ...[root, join(root, 'docs')].flatMap((directory) =>
+    readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => join(directory, entry.name)),
+  ),
   ...collectMarkdownFiles(join(root, 'docs', 'active')),
-  ...collectMarkdownFiles(join(root, 'docs', 'book')),
+  ...collectMarkdownFiles(join(root, 'docs', 'handbook')),
+  ...collectMarkdownFiles(join(root, 'docs', 'development')),
   ...collectMarkdownFiles(join(root, 'docs', 'runbooks')),
   join(root, 'docs', 'adr', 'README.md'),
-  join(root, 'docs', 'space', 'index.md'),
-  join(root, 'docs', 'space', 'plans', 'index.md'),
+  join(root, 'docs', 'plans', 'README.md'),
   ...collectMarkdownFiles(join(root, 'packages')),
   ...collectMarkdownFiles(join(root, 'apps')),
   join(root, 'tests', 'README.md'),
@@ -174,17 +109,22 @@ for (const path of [
 
 checkDocumentationMap();
 
-for (const directory of ['design', 'deprecated', 'adr']) {
-  if (!existsSync(join(root, 'docs', directory))) fail(`docs/${directory}/ is missing.`);
+for (const path of [
+  'docs/handbook/README.md',
+  'docs/development/README.md',
+  'docs/plans/README.md',
+]) {
+  if (!existsSync(join(root, path))) fail(`${path} is missing.`);
 }
-
-const planMatrixCheck = Bun.spawnSync({
-  cmd: ['bun', 'run', 'scripts/check-plan-execution-matrix.ts'],
-  cwd: root,
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-if (planMatrixCheck.exitCode !== 0) failed = true;
-
+for (const parent of ['apps', 'packages']) {
+  for (const entry of readdirSync(join(root, parent), { withFileTypes: true })) {
+    if (
+      entry.isDirectory() &&
+      existsSync(join(root, parent, entry.name, 'package.json')) &&
+      !existsSync(join(root, parent, entry.name, 'README.md'))
+    )
+      fail(`${parent}/${entry.name}/README.md is missing.`);
+  }
+}
 if (failed) process.exitCode = 1;
-else console.log('Documentation structure and plan governance checks passed.');
+else console.log('Documentation structure checks passed.');

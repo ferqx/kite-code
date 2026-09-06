@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface DocumentationRule {
@@ -13,10 +13,11 @@ export interface DocumentationMap {
   rules: DocumentationRule[];
 }
 
-export interface DocumentationImpactFailure {
+export interface DocumentationImpactItem {
   ruleId: string;
   sources: string[];
-  expectedAuthorities: string[];
+  authorities: string[];
+  changedAuthorities: string[];
 }
 
 export type DocumentationImpactScope = 'all' | 'staged' | 'range';
@@ -59,9 +60,9 @@ export function matchesDocumentationPattern(path: string, pattern: string): bool
 export function evaluateDocumentationImpact(
   changedFiles: readonly string[],
   map: DocumentationMap,
-): DocumentationImpactFailure[] {
+): DocumentationImpactItem[] {
   const changed = new Set(changedFiles.map(normalize));
-  const failures: DocumentationImpactFailure[] = [];
+  const impacts: DocumentationImpactItem[] = [];
   for (const rule of map.rules) {
     const matchedSources = [...changed].filter(
       (path) =>
@@ -69,14 +70,14 @@ export function evaluateDocumentationImpact(
         !rule.excludeSources?.some((pattern) => matchesDocumentationPattern(path, pattern)),
     );
     if (matchedSources.length === 0) continue;
-    if (rule.authorities.some((document) => changed.has(normalize(document)))) continue;
-    failures.push({
+    impacts.push({
       ruleId: rule.id,
       sources: matchedSources,
-      expectedAuthorities: rule.authorities,
+      authorities: rule.authorities,
+      changedAuthorities: rule.authorities.filter((document) => changed.has(normalize(document))),
     });
   }
-  return failures;
+  return impacts;
 }
 
 function gitPaths(args: readonly string[], repositoryRoot: string): string[] {
@@ -139,10 +140,71 @@ export function parseDocumentationImpactOptions(
   return { scope, ...(base?.trim() ? { base: base.trim() } : {}) };
 }
 
+export function isCurrentDocumentation(path: string): boolean {
+  return (
+    path === 'README.md' ||
+    path === 'README.zh-CN.md' ||
+    path === 'tests/README.md' ||
+    path === 'docs/AGENTS.md' ||
+    (/^docs\/(?:handbook|development)\/.+\.md$/u.test(path) &&
+      !path.endsWith('/README.md') &&
+      path !== 'docs/development/architecture.md') ||
+    /^docs\/(?:active|runbooks)\/[^/]+\.md$/u.test(path) ||
+    /^(?:packages|apps)\/[^/]+\/(?:README\.md|docs\/.+\.md)$/u.test(path)
+  );
+}
+
+export function validateDocumentationMap(value: unknown, root: string): DocumentationMap {
+  const map = value as DocumentationMap | null;
+  if (map?.version !== 2 || !Array.isArray(map.rules) || map.rules.length === 0) {
+    throw new Error('Documentation map must contain version 2 and non-empty rules.');
+  }
+  const ids = new Set<string>();
+  for (const rule of map.rules) {
+    if (!rule || typeof rule.id !== 'string' || !rule.id.trim() || ids.has(rule.id)) {
+      throw new Error('Documentation rule id must be non-empty and unique.');
+    }
+    ids.add(rule.id);
+    if (
+      'documents' in rule ||
+      !Array.isArray(rule.sources) ||
+      !rule.sources.length ||
+      !Array.isArray(rule.authorities) ||
+      !rule.authorities.length ||
+      (rule.excludeSources !== undefined && !Array.isArray(rule.excludeSources))
+    ) {
+      throw new Error(`Invalid documentation rule: ${rule.id}`);
+    }
+    for (const pattern of [...rule.sources, ...(rule.excludeSources ?? [])]) {
+      if (
+        typeof pattern !== 'string' ||
+        documentationPatternError(pattern) ||
+        pattern.startsWith('/') ||
+        pattern.split('/').includes('..') ||
+        !existsSync(join(root, documentationPatternBase(pattern)))
+      ) {
+        throw new Error(`${rule.id}: invalid or missing source ${String(pattern)}`);
+      }
+    }
+    for (const document of rule.authorities) {
+      if (
+        typeof document !== 'string' ||
+        document.split('/').includes('..') ||
+        !isCurrentDocumentation(document) ||
+        !existsSync(join(root, document))
+      ) {
+        throw new Error(`${rule.id}: invalid or missing current document ${String(document)}`);
+      }
+    }
+  }
+  return map;
+}
+
 function loadMap(root: string): DocumentationMap {
-  return JSON.parse(
-    readFileSync(join(root, 'docs', 'documentation-map.json'), 'utf8'),
-  ) as DocumentationMap;
+  return validateDocumentationMap(
+    JSON.parse(readFileSync(join(root, 'docs', 'documentation-map.json'), 'utf8')),
+    root,
+  );
 }
 
 if (import.meta.main) {
@@ -153,20 +215,28 @@ if (import.meta.main) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(2);
   }
-  const changed = changedFilesForScope(options);
-  const failures = evaluateDocumentationImpact(changed, loadMap(process.cwd()));
-  if (failures.length === 0) {
+  try {
+    const changed = changedFilesForScope(options);
+    const impacts = evaluateDocumentationImpact(changed, loadMap(process.cwd()));
     console.log(
-      `Documentation impact checks passed (scope=${options.scope}, changed=${changed.length}).`,
+      `Documentation impact review (scope=${options.scope}, changed=${changed.length}, rules=${impacts.length}).`,
     );
-  } else {
-    console.error('Documentation impact check failed. Update a mapped current authority:');
-    for (const failure of failures) {
-      console.error(`\n[${failure.ruleId}] changed implementation:`);
-      for (const source of failure.sources) console.error(`  - ${source}`);
-      console.error('Expected one of:');
-      for (const document of failure.expectedAuthorities) console.error(`  - ${document}`);
+    if (impacts.length === 0)
+      console.log('No mapped source changes; this is not a semantic no-impact conclusion.');
+    for (const impact of impacts) {
+      console.log(`\n[${impact.ruleId}] ${impact.sources.join(', ')}`);
+      for (const document of impact.authorities) {
+        const state = impact.changedAuthorities.includes(document)
+          ? 'changed; review content'
+          : 'review unchanged';
+        console.log(`  ${state}: ${document}`);
+      }
     }
+    console.log(
+      'Confirm product/client impact and document accuracy in the review. Changed paths do not prove semantic correctness.',
+    );
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

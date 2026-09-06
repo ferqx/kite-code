@@ -100,7 +100,7 @@ state残留、busy activity、PID/start-token/control uncertainty、unknown exte
 是macOS arm64 local evidence。Runtime fault 36、CI-profile soak 7/7（digest
 `sha256:c91a603e5ef88a4c5552e2bb8c14972c78d955741e83a18aa2dfc5663ac7fcd6`）、release 211、最终focused 38及
 candidate `af43f919f756c276fb945834`已通过；完整边界见
-[03B本地证据](../space/understanding/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
+[03B本地证据](../../release/agent-api/evidence/2026-08-30-kite-runtime-run-store-v1-local-evidence.md)。GitHub-hosted
 macOS/Linux/Windows command/candidate结果未登记前，三平台qualification继续pending。
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。

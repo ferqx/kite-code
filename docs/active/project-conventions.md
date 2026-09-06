@@ -20,11 +20,10 @@
 
 - `model-provider-boundary.md`
 - `documentation-language.md`
-- `docs/space/execution/completed/2026-04-27-harness-engineering-doc-hygiene.md`
 
 验证：
 
-- `bun test tests/integration/docs-space.test.ts`
+- `bun test tests/integration/docs-structure.test.ts`
 
 > CLAUDE.md 之外的补充约定。需要时查阅，不占用每次会话的上下文。
 
@@ -52,7 +51,7 @@
 ## 仓库卫生
 
 - 不要提交本地 checkpoint、临时文件、密钥配置或 `tests/.tmp-*` 下的运行产物。
-- 不要创建 `docs/superpowers/` 或 Superpowers 计划文档；需要当前持久规则时使用 `docs/active/`，计划与执行记录使用 `docs/space/`。
+- 不要创建 `docs/superpowers/` 或 Superpowers 计划文档；需要当前持久规则时使用 `docs/active/`，有效计划使用 `docs/plans/`，必要证据归所属发布/测试领域，完成过程由 Git 保存。
 - 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
 
 ## 分支合并策略

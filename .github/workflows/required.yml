@@ -50,6 +50,7 @@ jobs:
       - run: bun run check:docs
         env:
           OPENPX_REQUIRE_EVIDENCE_HISTORY: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+      - run: bun run check:plan-evidence
       - run: bun run check:docs-impact --scope=range
         env:
           DOCS_IMPACT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

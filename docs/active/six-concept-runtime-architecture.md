@@ -11,7 +11,7 @@
 物理本机默认拓扑是每个TUI/CLI invocation一个parent-owned stdio App Server；source/installed按各自profile共享多连接
 `kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。显式`kite server start`可创建
 同一composition的多client Unix socket/Windows named-pipe daemon，但默认client不发现它。Workspace仍是逻辑admission/execution scope，
-不对应独立Worker进程或DB。显式legacy Service/Web控制面等待KASD后续删除。详见
+不对应独立Worker进程或DB。旧 Service/Web 控制面不是当前运行入口。详见
 [`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。
 
 ## 总览
@@ -68,7 +68,7 @@ apps/kite-service ────────────────────�
 apps/kite-web ─────────────────────────────────────────────→ agent-api-client + agent-api-contract
 ```
 
-`runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
+`runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 Runtime Protocol V2（JSON-RPC 2.0）DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
 
 KASD parent-owned App Server在同一条已initialize Protocol connection上增加三个exact durable History read与九个no-secret App Control方法。
 Service stdio carrier在消息进入Runtime Server前处理这些App-owned方法，以单一SQLite read snapshot调用History projector，并用现有
@@ -85,7 +85,7 @@ read-only `/v1`，默认stdio仍不创建HTTP。
 journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
 I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native
 出口：`./service`已经实现Native filesystem state/lock primitive，`./client`冻结descriptor/lifecycle/raw credential
-codec并实现Native connector；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
+codec并实现Native connector；package不组合Store或Runtime业务owner；client端stdio transport可按显式参数spawn配套App Server child，不创建listener。它不得依赖Host、Server、Builtin、SQLite、UI或
 任一 App source。
 
 `@kite-ai/agent-api-contract`是zero-workspace-dependency的browser-safe Public wire contract；`@kite-ai/agent-api-client`只依赖该contract并
@@ -93,12 +93,9 @@ codec并实现Native connector；package本身仍不实现listener、spawn、Sto
 Runtime或Store；Browser read context直接复用同一`kite-session.sqlite` Directory/Runtime/History/Checkpoint authority。Agent context仍可由
 内部Worker carrier以query-only private Runtime logical connection承载。Web只依赖client与contract，不依赖Service或Runtime package。
 
-`apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
-SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App
-Control owner。一个 Service process可承载多个 canonical Workspace与同一 Workspace的多个 Session；context按完整
-Project identity隔离，重启从这一个 Store恢复 Session identity，跨 Workspace create/resume/query/subscribe/fork
-fail closed。不存在第二 composition root、第二默认 Store writer、dual write、alternate execution backend、
-`try-new-catch-old` fallback或legacy Host bridge。
+`apps/kite-service/src/composition.ts` 负责具体 Runtime 依赖组装。默认 App Server owner 先打开当前 profile 的 `kite-session.sqlite`，注入 Session Store、Builtin assembly、Host、Runtime Server、History 与 App Control。物理/逻辑版本和非默认 adapter 的范围只在[Storage 格式与入口](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)完整维护。
+
+一个 App Server process 可访问多个持久 Session，context 按完整 Project/Workspace identity 隔离；同一 Session 的多进程写入由持久 execution authority 裁决。不能把保留的 Worker factory 或旧 adapter 当成默认第二 writer，不使用 try-new-catch-old fallback。
 
 Runtime Application的共享 operation gate先阻止新 mutation admission，再等待active临界区并决定resume或commit drain。
 Service-owned interaction broker持有durable generation/revision waiter；connection disconnect只释放client binding，
@@ -106,7 +103,7 @@ Service-owned interaction broker持有durable generation/revision waiter；conne
 execution/release和Native first-run credential由Service的exact App Control/credential owner提供；config、actual Skill、
 MCP runtime provider、shell/sandbox、observability与History projector也都按canonical Workspace在Service内组合。
 
-Workspace Worker可在Provider尚未配置时先ready同一个Store 8/Host/Server与neutral App Control；execution dependency context只在
+非默认 Workspace Worker 路径可在Provider尚未配置时先ready同一个Store 8/Host/Server与neutral App Control；execution dependency context只在
 first-run完成、首个Runtime context请求到达时由lazy Workspace template创建。它不是第二Runtime或configuration daemon，配置仍未ready
 时execution fail closed。
 
@@ -235,26 +232,17 @@ Approval rejection的durable settlement同样只由当前turn的事实决定：i
 
 ## SQLite storage
 
-`@kite-ai/runtime-storage-sqlite`是Host storage port的唯一concrete adapter。当前production Workspace Worker target精确为
-**State 27 / Store 8 / `kite-agent-server-api-v1-2026-08-29`**，固定为11 tables / 3 named non-primary-key indexes；显式legacy
-Service maintenance仍使用State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`的8 tables / 2 indexes，Store 7只作offline generation source：
+`@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite adapter。默认 App Server 使用 Session Store owner；物理格式、逻辑 epoch 与保留的旧布局见[Storage 入口表](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)。不能把 adapter.ts 的旧 profile lifecycle 视为默认数据库 owner。
 
-- `adapter.ts` 单独拥有当前数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；`compatibility.ts` 只拥有历史 source 的 readonly discovery、atomic target import ledger 与 tombstone；
-- SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；
-- 命名恢复点按 durable `event_position` 降序投影；秒级 `created_at` 与 snapshot 名称都不承担同秒内的恢复时序；
-- `preflight.ts` 在写连接前验证 current metadata；
-- event/session/snapshot/artifact/authority/effect 子模块共享同一 database context；
-- `transaction.ts` 是 Runtime event+snapshot 原子提交唯一 owner；一个 applied command 的 State/event/snapshot/revision decision 与 scoped receipt 在同一 transaction 提交；
-- App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；
-- `runtime_command_receipts` 的唯一主键是 `(scope_session_id, command_id)`，并绑定 request digest、target session、original receipt、committed revision/time；同 scope/key 的不同 digest fail closed。close、Session delete、target delete 都保留 receipt，fork 不复制 source receipt；不设 TTL/容量裁剪，只有删除整个 Store 才删除 receipt metadata；
-- Store 8在Store 7 Workspace binding上增加canonical Run index、receipt resource result与coverage boundary；normal ensure只初始化fresh
-  Store 8，existing Store 7只通过formal offline whole-generation command copy-and-switch；
-- Store 5 只可作为 explicit readonly source：State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都经 no-follow isolated copy、selected-session atomic import 进入显式Store 6 legacy target。source 不写回、checkpoint、rename 或 fallback 执行；未知/损坏 source 只隔离该 Session；
-- 默认Coordinator/Worker的Session selector与normal ensure不发现、列出或lazy import Store 5；即使source Workspace identity匹配也保持
-  byte-for-byte隔离。Store 5兼容只存在于显式legacy Service path；
-- 不存在平面 bridge、alternate current-writer constructor、format selector、sidecar receipt database、dual write、Store 5 current writer、try-new-catch-old、alternate-driver retry 或 execution fallback。
+跨包不变量：
 
-Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle 与 effect lease 仍保持原有事务顺序。拆分不允许复制 transaction、Store、reducer 或 recovery identity owner。
+- Host/App 只消费注入的 storage ports，CLI/Web 不直接取得 SQLite 或第二 writer。
+- Session execution generation、revision 和 lease 校验在写入事务内完成；同一 applied command 的 State/event/snapshot/Run 与 scoped receipt 按所属事务原子提交。
+- receipt 以 scope/commandId/digest 识别原决定；close/delete 保留，fork 不复制 source receipt，不以 TTL 或容量裁剪破坏重放语义。
+- 读取不取得执行权限；Directory/History/Checkpoint 的投影不能取代严格 Session 恢复检查。恢复点顺序使用 durable event position，不按显示时间猜测。
+- 默认 Session Store 不自动导入旧文件；非默认 migration/compatibility reader 只能在其明确 profile 和调用范围内使用，不建立 dual write 或执行 fallback。
+
+事务、Artifact、Run coverage、fork/rewind 与版本内检查的完整实现约束分别见[事务](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)、[恢复](../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md)、[查询](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。Ack、Receipt、terminal 与 cleanup 的顺序不得因 adapter 选择而改写。
 
 ## MCP、Subagent 与 Verification
 

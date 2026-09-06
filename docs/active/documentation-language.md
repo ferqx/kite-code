@@ -1,63 +1,13 @@
-# 当前规则：文档语言
+# 文档语言与当前内容检查
 
 状态：active
-最后更新：2026-08-26
-最后验证：2026-08-26
-范围：
+读取时机：创建、修改、迁移文档或修改文档检查时。
+验证：`bun run check:docs`、`bun run check:docs-impact`、`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts`。
 
-- `README.md`
-- `README.zh-CN.md`
-- `AGENTS.md`
-- `docs/**/*.md`
-- `packages/*/README.md`、`packages/*/docs/**/*.md`
-- `apps/*/README.md`、`apps/*/docs/**/*.md`
-- `tests/README.md`
-- 文档结构与链接检查（`scripts/check-docs.ts`）
+正文以中文为标准。根 README.md 保留英文，README.zh-CN.md 保留中文，命令、事实和入口同步。命令、路径、类型名、配置键和正式产品名称保留原文；不为翻译改产品行为。
 
-读取时机：
+详细职责与冲突处理见[文档维护](../development/documentation.md)。产品手册按共享定义和各客户端指南组织；内部文档按实际 owner 组织。不得把 TUI 的渲染规则或 Web 的可用能力默认推广到其他客户端。
 
-- 创建或修改任何 Markdown 文档。
-- 修改 `docs/space` 记录格式。
-- 修改文档结构或文档索引测试。
+结构检查递归覆盖 handbook、development、active、runbooks、workspace 文档和当前入口；检查本地链接、禁止 wiki-link、active 元数据和 V2 映射。历史 ADR 与保留的计划证据不需要旧代码路径仍存在，但当前文档指向它们的链接必须有效。
 
-相关：
-
-- `docs/space/understanding/space-system-design.md`
-- `docs/space/execution/completed/2026-04-27-harness-engineering-doc-hygiene.md`
-- `docs/space/execution/completed/2026-04-27-documentation-language-standard.md`
-
-验证：
-
-- `bun run check:docs`
-- `bun test tests/integration/docs-space.test.ts`
-- `bun test tests/integration/docs-impact.test.ts`
-- `git diff --check`
-
-## 规则
-
-除根 README 的双语入口外，仓库 current 文档内容以中文为标准。Workspace README、本地文档、测试入口、Markdown 标题、段落、列表说明、元数据标签和维护规则都使用中文。`README.md` 是默认显示的英文入口，`README.zh-CN.md` 是对应的中文入口；两份文件必须保持事实、命令和链接同步，并通过顶部语言链接互相跳转。
-
-可以保留英文的内容：
-
-- 命令、路径、包名、类型名、函数名、配置键、provider 类型等机器可读 token。
-- 代码块中的示例代码、JSON、shell 命令和测试名称。
-- 外部项目或产品的正式名称，例如 OpenAI、Codex、LangGraph、DeepSeek、Opencode。
-- 状态枚举值，例如 `active`、`completed`、`understanding`、`reference`、`generated`。
-- 根 `README.md` 的英文正文；其中文对应版本必须保留在 `README.zh-CN.md`。
-
-## 不要做
-
-- 不要新增以英文段落为主的 Markdown 文档。
-- 不要把英文元数据标签（例如 `Status:`、`Read when:`、`Verification:`）作为 `docs/space` 的标准格式。
-- 不要为了翻译而改动代码行为、测试语义或配置键。
-
-## 测试期望
-
-文档影响规则以行为 owner 为粒度，而不是以整个 workspace 树为粒度。通用 package/App 规则只覆盖生产
-`src/**` 与 manifest；普通 owner test、fixture 和本地文档不触发架构文档。Model、MCP、Sandbox、TUI、
-qualification、release/platform 与 observability 使用专业规则，并从通用规则排除。代表路径测试必须证明
-纯测试改动不触发架构 authority、专业路径只命中对应规则、测试 runner/CI 基础设施仍命中 `tests/README.md`。
-
-`tests/integration/docs-space.test.ts` 应检查 `docs/active/` 记录使用中文元数据标签，并继续检查 active 记录被 `docs/space/index.md` 的兼容索引覆盖。
-
-`bun run check:docs` 必须检查根 README、workspace README/本地文档、测试入口、active、book、runbook 与当前索引的本地链接可解析、不得使用未渲染的 `[[wiki-link]]` 语法、每份 active 记录在首个章节前恰好声明一次必填元数据，并完整验证 `docs/documentation-map.json` V2。ADR、plan、completed、design 与 deprecated 保留实施当时的路径事实，不因后续 current 文档搬迁改写，也不作为当前链接门禁输入。代码块和行内代码中的 Markdown 示例不属于链接校验对象。
+影响映射只覆盖实际生产源码、manifest 和相关基础设施，普通测试不因路径位于 workspace 内触发架构规则。专业路径与通用 source owner 互斥。映射提供产品与技术文档核对提示，不要求行为不变的改动制造文档 diff。

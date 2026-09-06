@@ -95,3 +95,14 @@
 ## 文档影响
 
 模块局部变化更新本 README；跨包 Session 或客户端语义同时更新 [Runtime 架构](../../docs/active/six-concept-runtime-architecture.md)。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [Runtime 访问对象与投影边界](docs/access-and-projections.md)

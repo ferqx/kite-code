@@ -47,3 +47,13 @@ protected DACL。路径或 owner 证据不确定时拒绝，不自动修复外�
 
 `bun run --cwd packages/kite-local-runtime test`、`bun run --cwd packages/kite-local-runtime typecheck`、
 `bun test tests/release/app-server-client.test.ts tests/release/app-server-daemon.test.ts`。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [test](test)
+
+## 深入机制
+
+- [Native 连接与 App Control](docs/native-client-and-control.md)

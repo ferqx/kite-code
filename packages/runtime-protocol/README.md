@@ -76,3 +76,14 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 ## Documentation impact
 
 Owner-local behavior changes update this README. Cross-package Runtime protocol, security or recovery changes also update the applicable `docs/active/` authority.
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [协议编码、版本与传输边界](docs/wire-format.md)

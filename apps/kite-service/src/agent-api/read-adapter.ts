@@ -128,7 +128,11 @@ export interface AgentApiDirectoryReadPort {
   }[];
 }
 
-/** One Public context owns one private in-process Runtime logical connection. */
+/**
+ * Read access for a Public principal. Worker Agent contexts own a private
+ * in-process Runtime connection; daemon Browser contexts borrow the Service
+ * read facade and do not own or close its Runtime connection or Store.
+ */
 export interface AgentApiReadContext extends AsyncDisposable {
   query(query: RuntimeQuery): Promise<RuntimeQueryResult>;
   readonly history: Pick<RuntimeHistoryClient, 'listSessions' | 'listEvents'>;

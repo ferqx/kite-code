@@ -34,7 +34,7 @@ drain/daemon restart关闭context。
 
 `GET /`创建或复用受TTL/容量限制的内存Browser session。cookie不暴露给JavaScript，不写Kite Home。logout、Service close/restart、expiry
 撤销session；Browser关闭不停止App Server daemon。Browser principal是
-App-Server-scoped read-only，但每个Session direct read必须在Store 9 Directory中可见。
+App-Server-scoped read-only，但每个Session direct read必须在当前 Session Store Directory 中可见。
 
 真实浏览器的同源GET不保证发送`Origin`：Browser只读GET允许Origin缺失但存在时必须exact；logout要求exact Origin。Browser API请求都
 必须带`Sec-Fetch-Site: same-origin`与`cors|same-origin`mode，cross-site保持403。
@@ -45,7 +45,7 @@ media type、并发与response byte上限约束；所有response使用contract c
 ## Read composition
 
 production executable只打开一个`kite-session.sqlite`与一个Runtime/History composition。Browser read context直接引用同一Directory、Runtime query、
-History client与Checkpoint store；它的close是Service composition的生命周期边界，不建立reader pool、Browser cache或第二DB。
+History client与Checkpoint store；该 Browser read facade 的 close 为 no-op，底层资源由 Service owner 关闭；它不拥有 private logical connection，不建立 reader pool、Browser cache 或第二 DB。同一 `AgentApiReadContext` 接口承载这两种实现，资源所有权由实际 composition 决定，不能从接口名称推断每个 context 都拥有连接。
 
 Workspace cursor按Directory稳定identity续页。Workspace Session page只对当前Workspace记录做Runtime projection；展示标题优先使用持久化名称，
 名称为空时通过同一History authority读取首条用户消息生成最多80字符的只读展示名，空会话回退Session ID，且不反向写入Store。History cursor携带Session、固定

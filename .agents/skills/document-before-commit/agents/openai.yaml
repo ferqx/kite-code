@@ -1,6 +1,6 @@
 interface:
-  display_name: "Document Before Commit"
-  short_description: "Synchronize documentation before code commits"
-  default_prompt: "Use $document-before-commit to synchronize affected documentation before committing changes."
+  display_name: "文档同步"
+  short_description: "在设计、迭代完成及提交前同步产品与技术文档"
+  default_prompt: "Use $document-before-commit with the appropriate design_complete, iteration_complete, or Git action to synchronize product, technical, and related documentation."
 policy:
   allow_implicit_invocation: false

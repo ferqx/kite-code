@@ -6,7 +6,7 @@
 
 Runtime 功能开关注册在 `apps/kite-service/src/config/features.ts`；CLI只保留显式拒绝已退役本地override的presentation parser。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
 
-单次运行可使用 `bun run agent run --feature autoReview` 覆盖。值可以显式给出，例如 `--feature autoReview=false`；未知名称会立即失败。
+当前公开 CLI 拒绝 `--feature`（包括 true/false），不能使用旧的单次运行覆盖示例。配置与 release composition 按各自边界解析已注册名称；实际默认值见 [features 源码](../../apps/kite-service/src/config/features.ts)。
 
 新增开关必须默认 `false` 并覆盖两个取值的测试。Kite Code 未发布；当 current 路径成为唯一生产语义后，必须删除旧分支与对应 flag，不保留回滚 alias。只有 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。
 

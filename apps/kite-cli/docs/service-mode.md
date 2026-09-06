@@ -80,3 +80,9 @@ query权威投影独立hydrate。rewind mutation、Controller命令与普通turn
 `activeSessionId`为准，mutable ref只作尚未建立Reducer identity时的fallback。
 
 验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。
+
+## 当前 CLI 终态退出差异
+
+[headless main loop](../src/cli/index.ts) 仅在无 client event的 durable projection显示 completed/cancelled/failed时退出，没有包含 recovery_required；run.terminal输出本身也不直接结束循环。Runtime unknown映射为recovery_required后，CLI可能继续等待未关闭的订阅。
+
+需补不会自行结束的订阅器回归，证明未知结果可报告后退出，并保留reconcile信息；[CLI tests](../test/cli.test.ts) 的直接done iterator不能证明此分支。当前只能确认静态退出条件缺口，尚未通过真实进程复现所有触发条件。

@@ -90,7 +90,8 @@ resumable invocation按不同evidence digest保存partial与terminal结果，同
 forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants，以及OpenAPI/JSON Schema/wire/example/digest
 byte-exact generation；独立`check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`packages/agent-api-client/test/`
 验证cookie REST、contract header/Problem、path/cursor与`after_sequence`编码。`apps/kite-web/test/`验证Workspace懒加载、Session/History/
-Checkpoint presentation、generation隔离与可见性敏感增量轮询；`apps/kite-service/test/agent-api/`验证Agent capability与Browser launch exchange、
+Checkpoint presentation、generation隔离与迟到日志隔离；可见性轮询的验证缺口见[Web 验证](../apps/kite-web/docs/testing.md)。
+`apps/kite-service/test/agent-api/`验证Agent capability与Browser launch exchange、
 Workspace Trust/Directory scope、hash-only context/session、role/TTL/generation/revoke及bounded Workspace/Session/History/Checkpoint adapter，
 包括cursor checksum/filter、History through/boundary/after-sequence、Checkpoint path non-disclosure与drain。daemon Web carrier test证明
 static与Browser `/v1`复用一个listener且credential route不混用；同时固定退役`/_kite/web/*`业务route 404以及`/api-docs`精确allowlist。
@@ -207,3 +208,21 @@ execution-boundary workflow 的触发路径与 adversarial command 全部使用�
 owner，并显式拒绝旧 `apps/kite-cli/test/**` 路径。stateful TUI overlay journey在发送确认键前等待对应action footer，
 避免把标题已渲染误作输入层已ready；mutation次数与最终disk/Session断言不放宽。fixture lifecycle owner test使用真实
 explicit Kite home/state absent组合，先验证manager stop fence，再验证其余server/workspace cleanup与聚合错误顺序。
+
+## 文档结构、影响与保留证据
+
+`bun run check:docs` 递归检查当前手册、内部文档和入口；`bun run check:docs-impact` 的 all/staged/range 输出需要核对的文档，不以 Markdown diff 证明语义正确。映射或路径错误仍失败。
+
+`bun run check:plan-evidence` 独立检查 release/oss-first-release/evidence 中实际保留的任务和完成证据。App Server 迁移证据位于 release/app-server/evidence，由对应 release tests 消费；不再要求历史 Space 索引存在。
+
+文档工具回归：`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts tests/isolated/scripts/docs-impact-scopes.test.ts`。客户端行为分别使用 TUI/PTY 与 Web tests，不能互相代替。
+
+## 文档任务路由与完成动作
+
+文档映射按 Web 视觉/路由/数据/诊断、TUI 输入/导航/审批/投影/终端、Storage 查询/事务/authority/Artifact 和 Host 职责定位。全部生产文件仍必须有唯一 source owner；新增路径不能通过重叠或漏映射满足检查。
+
+`tests/integration/document-sync-skill.test.ts` 使用 JSON Schema 验证 design_complete、iteration_complete 和既有提交动作，并保留 ready/blocked 输出契约。语义完整性由 skill 与评审核对，测试不把标题或字数当作正确性。
+
+设计方案链接位于产品和技术页面；`tests/isolated/scripts/docs-impact-scopes.test.ts` 验证计划删除后两侧都必须清理链接，部分交付保持有效入口。核心回归命令：`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts tests/integration/document-sync-skill.test.ts tests/isolated/scripts/docs-impact-scopes.test.ts`。
+
+根入口检查覆盖仓库根目录与 docs 根目录的全部 Markdown，而非仅固定 README 名单；新增客户端规则或产品入口的失效链接同样会失败。历史 ADR 正文仍按历史材料处理，不以旧代码路径强制改写决策。

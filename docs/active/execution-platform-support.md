@@ -15,7 +15,7 @@ apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
 相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、ADR-0137、`release/platform-capabilities/support-matrix.json`、
-`docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
+`release/oss-first-release/evidence/2026-07-29-agent-production-execution-isolation.md`。
 
 ## SAQ-10 scope contract
 
@@ -408,7 +408,7 @@ smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只�
 synthetic bundle 完成 bootstrap verification。Task 1B.9 因此以负向 conformance 完成并唯一产生
 `MS:1B-DONE`。该 milestone 只证明 exclusion 和 fail-closed contract，不改变 D-04 空支持集，也不
 产生 production qualification 或可分发制品。完整身份见
-[Phase 1B 完成记录](../space/execution/completed/2026-08-02-agent-production-phase-1b.md)。
+[Phase 1B 完成记录](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-08-02-agent-production-phase-1b.md)。
 
 三平台 conformance 的测试夹具必须只依赖 runner 上可移植、可规范化的身份：临时路径按
 canonical native path 比较，不假定 POSIX `/tmp` 或未规范化的短路径；需要生成提交或 merge

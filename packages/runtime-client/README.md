@@ -56,3 +56,14 @@
 ## 文档影响
 
 模块局部变化更新本 README；跨包 Client/Server、恢复或 history 语义同时更新 Runtime current authority。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [请求关联、订阅与历史](docs/requests-and-history.md)

@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据、repair/waive/compensation 时。
 验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0008、`docs/space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`。
+相关：ADR-0008。
 
 ## 当前行为
 

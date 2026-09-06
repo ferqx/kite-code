@@ -70,3 +70,14 @@ bun run check:agent-api-packages
 
 owner-local schema或codec变化更新本README。跨包Agent API compatibility、安全、持久化或release行为同时更新
 `docs/active/agent-api-contract.md`与受影响owner current authority。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [Public API 数据契约与生成产物](docs/public-wire.md)

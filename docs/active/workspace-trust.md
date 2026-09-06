@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite-cli/src/cli/index.ts`）、workspace 信任存储、`apps/kite-service/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
-验证：`bun test apps/kite-service/test/workspace-trust.test.ts apps/kite-service/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
+验证：`bun test apps/kite-service/test/workspace-trust.test.ts apps/kite-service/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-structure.test.ts`、`bun run test:tui:system workspace-trust`
 
 ## 概述
 

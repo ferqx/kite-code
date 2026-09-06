@@ -7,7 +7,7 @@
 验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite-cli/test/runtime/` 与 `tests/integration/`
 Model/compaction/provider suites，以及 `bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0114、ADR-0115、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0114、ADR-0115、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`。
 
 ## 规则
 
@@ -143,7 +143,7 @@ Artifact receipt；恢复路径不自动重放，也没有 live fallback。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `packages/builtin-runtime/src/model/` 或配置解析边界。
 - 文件工具超长输出在最后完整行处截断并报告省略行数（如 `... (25 more lines omitted)`），避免发送拆散行号的散碎文本给模型。
 - Model Controller 将 provider 输出规范化为 Runtime transcript/events；上游不读取私有响应对象。
-- `model.responded` 事件必须把模型调用时长（`kite_code.model.duration_ms`，来自 `model.responded.durationMs`）持久化进会话日志属性；TUI 阶段块的 `Thinking Xs` 计时（thought-pre-consolidation.md 规则 11/22）依赖此字段，缺失时回放回退墙钟。
+- `model.responded` 事件必须把模型调用时长（`kite_code.model.duration_ms`，来自 `model.responded.durationMs`）持久化进会话日志属性；TUI 对模型时长的消费见[流式展示](../../apps/kite-cli/docs/streaming-presentation.md)与[事件投影](../../apps/kite-cli/src/tui/reducers/handleClientEvent.ts)，日志映射见[metadata mapper](../../apps/kite-service/src/session-logger/metadata-mapper.ts)。不再通过已删除的阶段规则推导当前计时或缺失值回退行为。
 - Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
 - 主Agent静态Prompt告知模型常规检查已经位于当前Workspace，并优先使用file/search能力；Git读取优先发出单条简单命令，不为组合或裁剪输出引入冗余`cd`、当前Workspace的`git -C`、`&&`、pipe或loop。这只减少无法证明的Shell形态和多余审批，实际read-only授权仍完全由Builtin grammar决定。
 - 模型发起 `ask_user` 时，每个选项必须提供 `label` 与 `description`，并将推荐项放在首位；

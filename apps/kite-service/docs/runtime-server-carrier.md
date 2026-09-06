@@ -1,14 +1,13 @@
 # Service Runtime carriers
 
-本页是 `apps/kite-service/src/carrier/` 的 owner-local current authority。production Native loopback、parent-owned
-stdio implementation与development/reference carrier都在Service workspace；只有Native managed listener进入默认路径。
+本页是 `apps/kite-service/src/carrier/` 的 owner-local current authority。parent-owned stdio、显式 daemon 与非默认 Native/Worker/reference carrier 都在 Service workspace。默认 TUI/CLI 使用配套 stdio child；显式 daemon 使用本机 socket/named pipe 并提供独立 loopback Web listener。
 
-## Native listener 与路由
+## 非默认 Native/Worker listener 与路由
 
 legacy Native carrier只绑定 `127.0.0.1:0`，descriptor固定发布同端口HTTP origin与`ws://127.0.0.1:<port>/rpc`。封闭路由为
 health/ready、authenticated instance handshake、connect、Runtime WebSocket、三个History use case、Workspace Trust、
 Provider/model、MCP、Skill、execution/release、Native provider credential与control stop。不存在static assets、
-CORS/OPTIONS授权、cookie session、Browser static/`/v1` route、restart route或generic App/RPC registry。
+CORS/OPTIONS授权、Browser static attachment、restart route或generic App/RPC registry；`/v1` 是否存在取决于下述显式 Agent API 注入，不应统称为404。
 
 除health/ready外，所有route在Service ready前统一503。manager先以unauthenticated exact `GET /readyz`做liveness
 precheck，再以access token发送 exact `POST /_kite/instance`、`Content-Type: application/json`、body `{}`、无query/cookie。
@@ -37,7 +36,7 @@ queue、buffered amount、heartbeat与drain都有hard ceiling；binary/oversized
 fail closed，diagnostic不携带body、token、path或secret。
 
 同一Worker listener把`/v1`namespace委托给注入的Agent API façade。carrier只完成loopback/Host/readiness/close barrier，不解析Public
-credential、resource或role。当前façade只实现`/v1/auth/exchange`、`/v1/auth/session`与`GET /v1`；其他route固定404。Agent query由
+credential、resource或role。注入的 façade 可处理整个 `/v1` namespace，实际 route 与 principal 权限由 Agent API owner 决定，并非仅三个 auth/info route。Agent query由
 façade自行closed decode，因此不会被private carrier的全局“禁止query”规则提前吞掉；private route仍保持无query。未注入façade时
 `/v1`固定404，不创建第二listener或generic route registry。
 
@@ -64,7 +63,7 @@ correlation，随后owner取消active Turn、drain全部connection、关闭endpo
 
 daemon v2在endpoint ready前另创建唯一`127.0.0.1:0` Web carrier；status返回strict `webOrigin`。该listener提供同build static/API Docs与
 Browser cookie read-only `/v1`，直接复用daemon的Runtime/History/Directory/Checkpoint owner。Web close先停止新请求并bounded drain，随后
-Runtime shutdown继续；Browser断开不等于daemon stop。legacy Native carrier已删除static route attachment，根与Browser `/v1`保持404。
+Runtime shutdown继续；Browser断开不等于daemon stop。legacy Native carrier已删除static route attachment，根不提供 static；未注入 Agent API 时 `/v1` 为404，Worker 注入情形按本页非默认路径处理。
 
 App Server执行未sandboxed host Shell时，Runtime Host generic process port使用Service内嵌的
 `--kite-internal-process-tree-v1`（source使用同源码child）作为POSIX watchdog；App Server意外死亡会关闭watchdog stdin，watchdog终止

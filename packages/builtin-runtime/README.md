@@ -84,3 +84,17 @@
 ## 文档影响
 
 模块局部变化更新本 README；授权、Model、MCP 或 Tool Pipeline 跨包语义同时更新对应 `docs/active/` authority。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [MCP、Skills、Subagent 与验证](docs/extensions-and-verification.md)
+- [文件与 Shell 执行机制](docs/filesystem-shell.md)
+- [模型输入、上下文与响应](docs/model-and-context.md)
+- [工具契约、解析与执行流水线](docs/tool-pipeline.md)

@@ -53,7 +53,8 @@
     "check:compaction-legacy": "bun run scripts/check-compaction-legacy.ts",
     "check:docs": "bun run scripts/check-docs.ts",
     "check:docs-impact": "bun run scripts/check-docs-impact.ts",
-    "check:protected-branch": "bun run scripts/check-protected-branch.ts"
+    "check:protected-branch": "bun run scripts/check-protected-branch.ts",
+    "check:plan-evidence": "bun run scripts/check-plan-execution-matrix.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",

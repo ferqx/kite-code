@@ -95,3 +95,18 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 
 App Server、Session/Store authority、daemon/Web、Trust、安全、恢复或release行为变化时，必须同步更新本README、对应本地文档与
 `docs/active/` current authority；架构决策另增ADR。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [src/bootstrap.ts](src/bootstrap.ts)
+- [src/composition.ts](src/composition.ts)
+- [test](test)
+
+## 深入机制
+
+- [Service 组装与执行交接](docs/composition-and-execution.md)
+- [App Server lifecycle 与恢复](docs/service-resilience.md)
+- [App Server endpoint state](docs/service-state.md)

@@ -9,7 +9,6 @@
 - `packages/builtin-runtime/src/tool-schemas.ts`
 - `packages/builtin-runtime/src/tool-catalog.ts`
 - `apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition.ts`（Service composition bridge）
-- `tests/helpers/governed-tool.ts`（严格 test-only 的旧执行兼容体，不属于 production authority）
 - `apps/kite-service/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`、
   `packages/builtin-runtime/test/builtin-runtime.test.ts`（契约与 catalog 验证测试）
 
@@ -19,7 +18,6 @@
 - 修改 `packages/builtin-runtime/src/tool-contracts.ts` 中的契约结构或内容。
 - 修改工具的实际行为（`packages/builtin-runtime/src/git/runtime-module.ts`、
   `packages/builtin-runtime/src/planning/runtime-module.ts` 或 Builtin sandbox consumer），需要同步更新契约。
-- 修改 `tests/helpers/governed-tool.ts` 中仅供测试的执行兼容、错误处理或恢复指导。
 - 新增 Builtin operation 到 `packages/builtin-runtime/src/model/runtime-module.ts`、
   `packages/builtin-runtime/src/git/runtime-module.ts`、`packages/builtin-runtime/src/planning/runtime-module.ts`、
   `packages/builtin-runtime/src/subagent/runtime-module.ts` 或 `packages/builtin-runtime/src/verification/runtime-module.ts`。
@@ -28,8 +26,6 @@
 
 - `./tool-gated-autonomy.md`
 - `../adr/0118-trusted-workspace-unrestricted-file-access.md`
-- `docs/space/execution/completed/2026-05-06-tool-description-contracts.md`
-- `docs/space/understanding/space-system-design.md`
 
 验证：
 
