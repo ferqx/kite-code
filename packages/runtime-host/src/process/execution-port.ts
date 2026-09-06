@@ -86,7 +86,7 @@ function spawnWatchedPosixProcess(input: {
   const command =
     process.env.KITE_STANDALONE_EXECUTABLE === '1'
       ? [process.execPath, '--kite-internal-process-tree-v1']
-      : [process.execPath, childPath];
+      : [process.execPath, '--no-orphans', childPath];
   const watched = spawnRuntimeHostProcess(command, {
     cwd: input.cwd,
     stdin: 'pipe',
