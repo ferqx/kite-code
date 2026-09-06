@@ -5,14 +5,11 @@ const MAX_REQUEST_BYTES = 1_048_576;
 /** POSIX watchdog used by the generic Host process port; request bytes arrive only on inherited stdin. */
 export function runProcessTreeChild(args: readonly string[]): void {
   if (args.length !== 0 || process.platform === 'win32') process.exit(125);
-  const parentPid = process.ppid;
   let buffer = Buffer.alloc(0);
   let started = false;
   let terminal = false;
   let child: ReturnType<typeof spawnRuntimeHostProcess> | undefined;
-  const parentWatch = setInterval(() => {
-    if (process.ppid !== parentPid || !isProcessAlive(parentPid)) emergencyExit();
-  }, 100);
+  let parentWatch: ReturnType<typeof setInterval> | undefined;
 
   process.stdin.on('data', (chunk: Buffer | string) => {
     if (started) return emergencyExit();
@@ -27,6 +24,9 @@ export function runProcessTreeChild(args: readonly string[]): void {
     buffer = Buffer.alloc(0);
     if (!request) return emergencyExit();
     started = true;
+    parentWatch = setInterval(() => {
+      if (!isProcessAlive(request.ownerPid)) emergencyExit();
+    }, 100);
     child = spawnRuntimeHostProcess(request.argv, {
       cwd: request.cwd,
       stdin: 'ignore',
@@ -37,7 +37,7 @@ export function runProcessTreeChild(args: readonly string[]): void {
     void child.exited.then(
       (exitCode) => {
         terminal = true;
-        clearInterval(parentWatch);
+        if (parentWatch) clearInterval(parentWatch);
         process.exit(exitCode);
       },
       () => emergencyExit(),
@@ -74,9 +74,12 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function decodeRequest(
-  bytes: Uint8Array,
-): { readonly argv: string[]; readonly cwd: string; readonly env?: Record<string, string> } | null {
+function decodeRequest(bytes: Uint8Array): {
+  readonly argv: string[];
+  readonly cwd: string;
+  readonly env?: Record<string, string>;
+  readonly ownerPid: number;
+} | null {
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
@@ -85,7 +88,9 @@ function decodeRequest(
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join('\0') !== ['argv', 'cwd', 'env'].sort().join('\0'))
+  if (
+    Object.keys(record).sort().join('\0') !== ['argv', 'cwd', 'env', 'ownerPid'].sort().join('\0')
+  )
     return null;
   if (
     !Array.isArray(record.argv) ||
@@ -97,6 +102,8 @@ function decodeRequest(
     typeof record.cwd !== 'string' ||
     record.cwd.length === 0 ||
     record.cwd.length > 4_096 ||
+    !Number.isSafeInteger(record.ownerPid) ||
+    (record.ownerPid as number) <= 1 ||
     (record.env !== null && !isStringRecord(record.env))
   ) {
     return null;
@@ -104,6 +111,7 @@ function decodeRequest(
   return {
     argv: [...(record.argv as string[])],
     cwd: record.cwd,
+    ownerPid: record.ownerPid as number,
     ...(record.env === null ? {} : { env: { ...(record.env as Record<string, string>) } }),
   };
 }

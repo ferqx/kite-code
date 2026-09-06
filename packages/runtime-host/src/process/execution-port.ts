@@ -101,7 +101,12 @@ function spawnWatchedPosixProcess(input: {
     ...processTreeSpawnOptions(),
   });
   const request = Buffer.from(
-    `${JSON.stringify({ argv: [...input.argv], cwd: input.cwd, env: input.env ?? null })}\n`,
+    `${JSON.stringify({
+      argv: [...input.argv],
+      cwd: input.cwd,
+      env: input.env ?? null,
+      ownerPid: process.pid,
+    })}\n`,
   );
   watched.stdin.write(request);
   request.fill(0);

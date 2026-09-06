@@ -52,7 +52,7 @@ describe('ordinary open-source release candidate workflow', () => {
     ]) {
       expect(workflow).toContain(command);
     }
-    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).toContain('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a');
     expect(workflow).toContain('retention-days: 14');
     expect(workflow).toContain('persist-credentials: false');
     expect(workflow).toContain(
@@ -131,7 +131,7 @@ describe('ordinary open-source release candidate workflow', () => {
   });
 
   test('pins all third-party Actions to immutable commits', () => {
-    expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
+    expect(workflow).toContain('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1');
     expect(workflow).toContain('oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6');
     expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d+/);
   });

@@ -7,6 +7,27 @@ const repositoryRoot = join(import.meta.dir, '..', '..', '..');
 const workflowRoot = join(repositoryRoot, '.github', 'workflows');
 
 describe('CI Bun baseline', () => {
+  test('pins every third-party workflow action to an immutable current-runtime commit', () => {
+    const workflows = readdirSync(workflowRoot)
+      .filter((name) => name.endsWith('.yml'))
+      .map((name) => ({ name, source: readFileSync(join(workflowRoot, name), 'utf8') }));
+    const allowed = new Set([
+      'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+      'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
+      'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
+    ]);
+
+    for (const { name, source } of workflows) {
+      const actions = [...source.matchAll(/^\s*-?\s*uses:\s+([^\s]+)\s*$/gmu)].map(
+        (match) => match[1]!,
+      );
+      for (const action of actions) {
+        expect(action, name).toMatch(/^[^@\s]+@[a-f0-9]{40}$/u);
+        expect(allowed.has(action), `${name}: ${action}`).toBe(true);
+      }
+    }
+  });
+
   test('pins every setup-bun workflow to the formal qualification version', () => {
     expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.0');
 

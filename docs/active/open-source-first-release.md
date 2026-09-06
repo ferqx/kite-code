@@ -56,6 +56,8 @@ attestation。构建只允许当前 OS/architecture 的 native target；macOS、
 GitHub-hosted runner 生成，不通过 cross-compile 或候选构建期 runtime 下载替代真实平台验证。PR workflow
 显式 checkout `pull_request.head.repo.full_name` 的 `pull_request.head.sha`，并要求 manifest `commitSha` 与
 该 SHA 完全一致；不得把临时 merge ref 登记为最终候选提交。fork PR 只以只读权限构建其自身 head repository。
+全部workflow第三方Action固定到经过核对的40位commit；当前checkout与artifact上传使用Node 24主版本，setup-bun固定到Node 24 runtime的v2.2.0 commit，
+禁止重新引入浮动major tag或已触发runner弃用警告的旧Action runtime。
 归档 writer 会规范化 tar entry 时间戳并重算 header checksum；相同 target、manifest 和文件内容
 必须生成字节一致的 `.tar.gz`，不能让构建墙钟改变候选 SHA-256。
 Standalone build resolver机械覆盖十六个workspace package的全部public export，包括browser-safe `agent-api-contract`与
@@ -64,7 +66,7 @@ Standalone build resolver机械覆盖十六个workspace package的全部public e
 `bun run release:verify` 在执行 payload 前检查 archive 文件集合、manifest schema、目标平台和全部
 checksum；CI额外传入`--require-clean-source`，拒绝上传从dirty worktree生成的候选。`bun run release:smoke`在
 临时prefix中完成安装、CLI help/version、已安装standalone TUI通过parent-owned App Server的真实PTY startup、显式daemon start/status/stop、
-installed Service MCP stdio wrapper、retired companion absence、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
+installed Service MCP stdio wrapper、retired companion absence、旧/新immutable candidate TUI同profile并存、第二候选安装、回滚和卸载。候选先写入并验证`releases/<candidateId>.next`，再原子
 改名到 immutable 最终目录。v2 managed-install marker 与唯一 `active` pointer 原子绑定当前/previous candidate；
 stable launcher 将启动时的 candidate root pin 给 child process，running process 不重新读取 pointer。首次安装才以
 atomic copy创建`bin/kite`、`bin/kite-tui`与`bin/kite-service` stable launcher；upgrade/rollback只验证既有
