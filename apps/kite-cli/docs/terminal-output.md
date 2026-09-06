@@ -16,6 +16,8 @@ FocusIn/Out 只进入共享 focus store，不解释成 Esc。当前工作树的 
 
 动态区域由根容器与消息区的实际布局约束高度，保留终端全屏阈值余量；使用完整的有界动态帧重绘，关闭 Ink 的增量行绘制，避免活动窗口增高时留下旧题头。它不重放已取得 Static 所有权的历史。审批仅接管输入，运行中工具按各自状态更新；错峰启动的小圆点共享动画相位，耗时仍独立计算。
 
+[activityDot](../src/tui/components/activity-dot.ts) 每 1000ms 切换圆点与等宽空白，完整周期为两秒；动画相位由共享时钟计算，不改变时钟采样间隔或耗时计算。
+
 验证必须分别检查进行中和完成后：[动态滚动](../../../tests/tui-system/scenarios/live-scroll.test.ts)持续采样题头、旧输出残留和上滚位置；[两轮子任务](../../../tests/tui-system/scenarios/thought-scroll-live.test.ts)覆盖长 reasoning 与并发子任务的活动过渡。终态画面正确不能替代中间帧证据。
 
 验证：[渲染](../test/tui-mock-render.test.tsx)、[Timeline](../test/tui-timeline-closeout.test.ts)和相关 resize/scrollback PTY。设计理由：业务 terminal 与物理输出生命周期不同，混用会重复写入 append-only scrollback。

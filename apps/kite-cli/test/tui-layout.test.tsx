@@ -7243,6 +7243,7 @@ test('settled Thinking uses its frozen duration even if an old model clock remai
     presentationState: 'sealed',
     active: false,
     tools: [],
+    hasThought: true,
     hasThinking: true,
     totalElapsedMs: 7000,
     createdAt: Date.now() - 20000,
