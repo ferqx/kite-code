@@ -196,6 +196,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
         timeout: 15_000,
       });
       await waitForText(() => tui.viewport(), 'ACTIVE_VISUAL_EPOCH_FIRST', 10_000);
+      await waitForText(() => tui.viewport(), 'ACTIVE_VISUAL_EPOCH_MIDDLE_01', 10_000);
       const requestBaseline = server.getRequestCount();
 
       await submitCommand(tui, '/theme');
