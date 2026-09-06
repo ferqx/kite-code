@@ -124,17 +124,35 @@ export interface RuntimeLogEventPage {
 }
 
 /**
+ * Runtime lifecycle identity captured for one durable history record. History
+ * does not invent event fields; this metadata lets replay build the same
+ * accepted presentation envelope as live delivery when the closed event
+ * itself predates the envelope identity fields.
+ */
+export interface RuntimeHistoryRecordIdentity {
+  readonly runId?: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
+}
+
+/**
  * A complete, display-only durable transcript for one current-format session.
  * It deliberately carries the same closed RuntimeClientEvent vocabulary as
  * live delivery; it is not an event reducer input or settlement authority.
  */
 export interface RuntimeHistorySessionTranscript {
   readonly session: RuntimeLogSessionEntry;
+  /** Durable source-sequence groups; History and live presentation fold the same event vocabulary. */
+  readonly records: readonly {
+    readonly sequence: number;
+    readonly events: readonly RuntimeClientEvent[];
+    readonly identity?: RuntimeHistoryRecordIdentity;
+  }[];
   readonly events: readonly RuntimeClientEvent[];
   /** Folded history fallback; an admitted live Host projection remains authoritative. */
   readonly interactionMode: InteractionMode;
   /** Historical interaction facts require fresh Runtime recovery before settlement. */
-  readonly recovery: 'normal' | 'pending_interaction';
+  readonly recovery: 'normal' | 'pending_interaction' | 'restart_required';
 }
 
 export class RuntimeLogRequestValidationError extends Error {
@@ -196,10 +214,12 @@ export function assertListRuntimeLogEventsRequest(value: ListRuntimeLogEventsReq
   if (value.direction !== 'forward' && value.direction !== 'backward') {
     throw new RuntimeLogRequestValidationError('direction must be forward or backward.');
   }
-  if (value.afterSequence !== undefined && value.beforeSequence !== undefined) {
-    throw new RuntimeLogRequestValidationError(
-      'afterSequence and beforeSequence are mutually exclusive.',
-    );
+  if (
+    value.afterSequence !== undefined &&
+    value.beforeSequence !== undefined &&
+    value.afterSequence >= value.beforeSequence
+  ) {
+    throw new RuntimeLogRequestValidationError('afterSequence must be lower than beforeSequence.');
   }
   for (const cursor of [value.afterSequence, value.beforeSequence]) {
     if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0)) {

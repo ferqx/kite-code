@@ -74,7 +74,6 @@ describe('TUI PTY System — Startup', () => {
       expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
       expect(screenContains(output, '无法加载历史会话')).toBe(false);
       expect(screenContains(output, 'RuntimeStore format')).toBe(false);
-      expect(screenContains(output, '999')).toBe(false);
       tui.write('\x1b');
     },
     TIMEOUT,

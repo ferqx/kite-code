@@ -3,7 +3,7 @@
   "id": "rpc-initialize-1",
   "method": "initialize",
   "params": {
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "clientInfo": {
       "name": "protocol-fixture",
       "version": "1.0.0",

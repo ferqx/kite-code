@@ -55,6 +55,7 @@ describe('approval command identity and grant key', () => {
       grant: 'full_access',
       receiptId: 'receipt-1',
       generation: 1,
+      owner: { kind: 'root_tool', toolCallId: 'call-1' },
     };
     expect(() => assertCurrentRuntimeEvent(legacyApproval)).toThrow(
       'approval.granted may only issue approve_once.',

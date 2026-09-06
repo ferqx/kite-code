@@ -7,6 +7,7 @@ import {
   type SkillScanOptions,
 } from '@kite-ai/builtin-runtime/skills';
 import type { RuntimeCommand } from '@kite-ai/runtime-contract';
+import { runtimeStartMessageId } from '@kite-ai/runtime-host';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -88,7 +89,7 @@ export function planStartTurnCommand(
 
   const phase = command.phase ?? 'building';
   const taskId = commandDerivedId(command.commandId, 'task');
-  const messageId = commandDerivedId(command.commandId, 'message');
+  const messageId = runtimeStartMessageId(command.commandId);
   const turnId = commandDerivedId(command.commandId, 'turn');
   const events: RuntimeEvent[] = [...eventsForSupersededTurnRecovery(state)];
   if (phase === 'planning' && events.length > 0) {
@@ -114,6 +115,8 @@ export function planStartTurnCommand(
   }
 
   const planningTask = replacesPlanningPlaceholder ? null : activeTask;
+  const admittedTaskId =
+    phase === 'planning' ? (planningTask?.taskId ?? taskId) : activeTask?.taskId;
   if (phase === 'planning' && !planningTask) {
     events.push({
       type: 'task.started',
@@ -205,7 +208,7 @@ export function planStartTurnCommand(
       turnId,
       messageId,
       phase,
-      ...(phase === 'planning' ? { taskId: planningTask?.taskId ?? taskId } : {}),
+      ...(admittedTaskId === undefined ? {} : { taskId: admittedTaskId }),
       ...(plannedSkillActivations.length > 0
         ? { initialSkillActivations: Object.freeze(plannedSkillActivations) }
         : {}),
@@ -229,7 +232,18 @@ export function commitStartTurnCommand(
     context,
     evidence.committedAt,
   );
-  const committed = session.commitCommandBatch(planned.events, evidence);
+  const committed = session.commitCommandBatch(
+    planned.events,
+    session.supportsRunStorage()
+      ? Object.freeze({
+          ...evidence,
+          runStart: Object.freeze({
+            runId: planned.descriptor.turnId,
+            phase: planned.descriptor.phase,
+          }),
+        })
+      : evidence,
+  );
   return Object.freeze({
     receipt: committed.receipt,
     events: committed.events as readonly RuntimeEvent[],
@@ -272,7 +286,7 @@ export function assertPrecommittedStartTurn(
   }
 }
 
-function commandDerivedId(commandId: string, domain: 'task' | 'message' | 'turn'): string {
+function commandDerivedId(commandId: string, domain: 'task' | 'turn'): string {
   const digest = createHash('sha256')
     .update(`kite.runtime.start-turn.v1\0${domain}\0${commandId}`)
     .digest('hex');

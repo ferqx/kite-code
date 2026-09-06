@@ -182,6 +182,8 @@ export interface RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
     context?: StartTurnSkillPlanningContext,
   ): CommittedStartTurnCommand;
+  /** Commits the queued-to-running Store 8 activation before execution scheduling. */
+  activateStartTurnRun?(runId: string): void;
   /** Commits one Host-inspected interaction command against its exact accepted revision. */
   commitInteractionCommand?(
     input: RuntimeInteractionCommandCommitInput,
@@ -630,6 +632,11 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     const committed = commitStartTurnCommand(this.session, command, evidence, context);
     this.#recordLastAppliedEventRevisions(before);
     return committed;
+  }
+
+  activateStartTurnRun(runId: string): void {
+    this.#assertOpen();
+    this.session.activateRun(runId);
   }
 
   commitInteractionCommand(

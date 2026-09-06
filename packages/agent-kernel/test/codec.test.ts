@@ -83,6 +83,32 @@ describe('State event codec', () => {
     );
   });
 
+  test('uses one explicit terminal status for Subagent tool results', () => {
+    const result = {
+      type: 'subagent.tool_result',
+      subagent: {
+        id: 'child-1',
+        stepId: 'step-1',
+        toolCallId: 'child-tool-1',
+        toolName: 'read_file',
+        status: 'cancelled',
+      },
+    } as const;
+    expect(() => assertCurrentRuntimeEvent(result)).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...result,
+        subagent: { ...result.subagent, ok: false },
+      }),
+    ).toThrow('payload is invalid');
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        ...result,
+        subagent: { ...result.subagent, status: 'completed', stepId: '' },
+      }),
+    ).toThrow('read-only compatibility data');
+  });
+
   test('keeps approval batch and session-clear facts exact and receipt-safe', () => {
     const commandIdentity = {
       sessionId: 'session-1',
@@ -107,12 +133,14 @@ describe('State event codec', () => {
       sessionRevision: 4,
       generation: 2,
       commandIdentity,
+      owner: { kind: 'root_tool', toolCallId: 'tool-1' },
       matches: [
         {
           interactionId: 'approval-1',
           toolCallId: 'tool-1',
           receiptId: 'receipt-1',
           generation: 2,
+          owner: { kind: 'root_tool', toolCallId: 'tool-1' },
           bindingDigest: 'binding-1',
         },
         {
@@ -120,6 +148,7 @@ describe('State event codec', () => {
           toolCallId: 'tool-2',
           receiptId: 'receipt-2',
           generation: 2,
+          owner: { kind: 'root_tool', toolCallId: 'tool-2' },
           bindingDigest: 'binding-2',
         },
       ],

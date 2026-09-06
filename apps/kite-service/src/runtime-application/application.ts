@@ -22,6 +22,7 @@ export interface KiteRuntimeApplication extends AsyncDisposable {
   readonly history: RuntimeHistoryClient;
   readonly appControl: KiteAppControlService;
   readonly operationGate: RuntimeOperationGate;
+  readonly activeOperations: boolean;
   start(): Promise<void>;
   quiesceMutations(): Promise<RuntimeApplicationQuiesceLease>;
   cancelAll(reason: string): Promise<void>;
@@ -34,13 +35,18 @@ export interface KiteRuntimeApplicationDependencies {
   readonly appControl: KiteAppControlService;
   readonly operationGate?: RuntimeOperationGate;
   readonly start?: () => Promise<void>;
+  /** Host-owned long-lived Session operation fact; queried only after mutation admission closes. */
+  readonly hasActiveOperations?: () => boolean;
   readonly cancelAll: (reason: string) => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
 
-function leaseFromGate(lease: RuntimeOperationQuiesceLease): RuntimeApplicationQuiesceLease {
+function leaseFromGate(
+  lease: RuntimeOperationQuiesceLease,
+  activeOperations = lease.activeOperations,
+): RuntimeApplicationQuiesceLease {
   return Object.freeze({
-    activeOperations: lease.activeOperations,
+    activeOperations,
     resume: lease.resume,
     commitDrain: lease.commitDrain,
   });
@@ -66,6 +72,9 @@ export function createKiteRuntimeApplication(
     history: dependencies.history,
     appControl: dependencies.appControl,
     operationGate,
+    get activeOperations() {
+      return operationGate.activeOperations || dependencies.hasActiveOperations?.() === true;
+    },
 
     start(): Promise<void> {
       if (disposed || disposing)
@@ -80,7 +89,11 @@ export function createKiteRuntimeApplication(
 
     async quiesceMutations(): Promise<RuntimeApplicationQuiesceLease> {
       if (disposed) throw new Error('Runtime application is disposed.');
-      return leaseFromGate(await operationGate.quiesce());
+      const lease = await operationGate.quiesce();
+      return leaseFromGate(
+        lease,
+        lease.activeOperations || dependencies.hasActiveOperations?.() === true,
+      );
     },
 
     cancelAll(reason: string): Promise<void> {

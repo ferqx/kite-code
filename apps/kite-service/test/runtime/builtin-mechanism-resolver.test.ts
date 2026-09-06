@@ -246,6 +246,7 @@ describe('App Builtin mechanism resolver', () => {
       networkAccess: 'none',
       filesystemAccess: 'workspace_only',
     });
+
     await expect(
       Promise.resolve().then(() => shell.execute({ command: 'different', timeoutMs: 100 })),
     ).rejects.toThrow(AppBuiltinMechanismResolverError);

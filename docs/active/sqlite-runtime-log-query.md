@@ -6,24 +6,33 @@
 
 验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite-service/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
 
-相关：ADR-0129、ADR-0142、ADR-0143、[`Kite Runtime Server V1`](../space/plans/2026-08-26-kite-runtime-server-v1.md)。
+相关：ADR-0129、ADR-0142、ADR-0143、[`Kite Runtime Server V1`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-26-kite-runtime-server-v1.md)。
 
 SQLite Runtime Store 是可回放会话日志的唯一事实源。`runtime_events` 的 `(session_id, sequence)` 是单会话的唯一顺序；rolling snapshot 只服务恢复。Session Logger、`events.jsonl`、trace 和 metadata/content logging 是独立诊断设施，不得被查询器、Server 或 Web 用来补齐、覆盖或验证 SQLite 结果。
 
-`@kite-ai/runtime-contract` 仅定义 storage-neutral DTO 和 validator；`@kite-ai/runtime-host/storage` 的 `RuntimeLogQueryPort` 是受信任 App 进程内部使用的原始事件只读 port，绝不混入可写 `SessionStore`，也不能直接作为 HTTP 或 RPC 返回类型。SQLite adapter 先做 no-follow preflight，再在实际用于查询的只读连接上重新验证 current Store marker 与表结构；有界、参数化 cursor 查询和本页 current-codec 解码都使用这条连接。它不创建 schema、不写库、不返回 raw `event_json`，也不接受旧 epoch/兼容 decoder。busy/locked 归为 temporary unavailable，未知或损坏 current event 只让所在查询失败，不扫描或拖垮其他会话。不同分页允许观察到并发 writer 的新提交，因此结果只报告该次查询观察到的最后序号，不宣称跨页快照一致，也不宣称未读取事件或 snapshot 已通过全会话完整性验证；恢复完整性仍由 session-scoped Store 打开边界负责。
+`@kite-ai/runtime-contract` 仅定义 storage-neutral DTO 和 validator；`@kite-ai/runtime-host/storage` 的 `RuntimeLogQueryPort` 是受信任 App 进程内部使用的原始事件只读 port，绝不混入可写 `SessionStore`，也不能直接作为 HTTP 或 RPC 返回类型。旧独立 SQLite log reader 先做 no-follow preflight，再在实际查询的只读连接上重新验证该 profile marker 与表结构；有界、参数化 cursor 查询和本页 current-codec 解码都使用这条连接。它不创建 schema、不写库、不返回 raw `event_json`，也不接受旧 epoch/兼容 decoder。busy/locked 归为 temporary unavailable，未知或损坏 current event 只让所在查询失败，不扫描或拖垮其他会话。不同分页允许观察到并发 writer 的新提交，因此结果只报告该次查询观察到的最后序号，不宣称跨页快照一致，也不宣称未读取事件或 snapshot 已通过全会话完整性验证；恢复完整性仍由 session-scoped Store 打开边界负责。
+
+非默认 Store 8 offline History 是独立 pinned snapshot journey（不用于当前 daemon Web）：`createSqliteWorkspaceRuntimeLogQueryPort`由旧布局调用者显式选择Run profile，只接受server-owned
+layout、active generation与opaque Worker scope，路径由layout内部推导；它在隔离只读snapshot上读取内部Workspace digest并复核
+exact Store 8 header/DDL/所有ownership rows，query前后再次验证active pointer/manifest/journal/fence与owner/no-follow/nlink。
+因此不会在source旁创建WAL/SHM或第二writer。Service Web adapter的一次`loadSession`只创建一个reader并在同一snapshot分页，
+`observedLastSequence`变化、超过4096 records、binding/layout drift、Store 6/legacy-only或损坏内容都fail closed为unavailable；
+compatibility import不参与该journey。
+
+当前daemon Web与Native App Server History直接从同一`kite-session.sqlite` `RuntimeStorage`/Directory owner读取，不打开第二SQLite connection、不经过Catalog
+mirror或Worker discovery。Directory的空Session name只读投影第一条durable `user.message_appended`正文作为Browser展示fallback；它不写回
+`runtime_sessions.name`，不创建命名receipt或第二authority。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
 
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留
 普通 reasoning、tool label、path/pattern/command/arguments 与 result。State 27 的
 `approval.batch_released` 与 `approval.session_grants_cleared` 均作为 interaction detail 投影，不回显 grant
-subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。当前没有 Artifact reader，因此不会
-宣称 Artifact 可用，也不会输出 locator。
+subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。Runtime Log projector自身没有Artifact reader，因此不会
+宣称 Artifact 正文可用，也不会输出 locator。Browser-only Model Context是独立的显式诊断route：它从prepared event取得private ref后交给
+Builtin `ModelArtifactStore`严格readback，只投影有界Public DTO；Runtime Log projector本身仍不取得Artifact reader或通用正文读取能力。
 
-当前 writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 与
-State 27 / Store 5（`kite-runtime-saq-v1-2026-08-25`）都只是 no-follow、只读、隔离的 source-only
-compatibility profile；App 只会把可验证的 source 原子导入 Store 6，绝不向 source 写入、checkpoint、rename，
-也不以 Store 5 fallback 执行。完整 durable history 固定为 `RuntimeClient.history` 经 App projector 到本 port，
+默认 App Server 的物理 Session Store 与逻辑 State/Run 格式见[Storage 入口表](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)。旧 Store 5→6 compatibility import 仅适用于显式 legacy adapter，不在默认 child/daemon 查询路径执行。完整 durable history 固定为 `RuntimeClient.history` 经 App projector 到本 port，
 再向前分页直到读取完整 Session。`model.reasoning_*`、`model.text_delta` 与 `tool.progress` 是 live ephemeral；
 history mapper 从 durable `model.responded` 的完整 reasoning/text/tool-call facts 合成等价 completed client
 序列，并为 reasoning/text/responded 重建同一 canonical model `requestId`，再与其他 durable event 一起交给
@@ -36,14 +45,35 @@ checkpoint、delete 或 Artifact read。当前 loopback WebSocket 仅为 develop
 HTTP/SSE/Web UI 或 production entrypoint。任何 bootstrap bearer、cookie、token、Workspace/Store path 或事件正文
 均不得写入 carrier 诊断或任何日志、Session Logger、Runtime Store 或 observability。
 
-`apps/kite-service`的唯一concrete composition同时创建State 27 / Store 6 writer、SQLite readonly reader、raw event/
-history projector与三个authenticated exact History HTTP handler。handler只取得`RuntimeHistoryClient` safe result，不取得
+非默认 legacy Service 的 History HTTP handler 使用其显式 Store 6 reader 与 projector；当前 App Server 通过已初始化协议上的 exact History 方法或 daemon Agent API 读取同一 Session owner。handler 只取得 safe result，不取得
 Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
 `apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
 
-Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
+当前daemon Agent API与Browser read journey不打开上述offline snapshot或第二SQLite connection。App Server composition把同一Directory、
+Runtime query、History client与Checkpoint owner直接注入bounded read adapter；不把raw event或SQLite concrete交给HTTP层。Public History first
+page固定`through_sequence`，cursor续页同时使用exclusive after/before window并复核boundary event digest；`after_sequence`提供与cursor互斥的
+running Session增量读取；durable
+`model.responded`最多展开reasoning/message两个`public_ordinal`，cursor可在同sequence内续读。selected Checkpoint metadata按revision/id keyset并
+逐个验证current schema/epoch/checksum，preview只经Runtime query返回计数。不存在全Workspace transcript物化、compatibility import、path投影、
+DDL/index变化、Browser cache或Store writer替代。
+Public History page还受1 MiB encoded response上限：adapter只在已取得的bounded source page内逐项计算Public body，达到上限即以最后
+`sequence/public_ordinal`生成next cursor。续页仍固定first-page through sequence并复核boundary digest；不会扩张SQLite query、打开第二connection
+或把超限安全前缀整体降成503。
+
+KRSRUN-01A当时的unpublished Store 8增加`runtime_runs` dedicated index，但不改变`runtime_events` History authority、Log Query port或当时的
+Store 7 read journey。Run port只在调用方提供的same connection上查询自身table，禁止event scan；在当时Store 8尚未cutover前，Web/Agent History
+仍只消费Store 7 bounded event window，不能从Run row补写、验证或截断History。
+KRSRUN-02A的显式unpublished Run target与delete/rewind/fork maintenance同样不改变该边界：Run rewind随既有Session transaction删除较新
+row，但History仍只按event/snapshot的原子结果和既有cursor invalidation判断；fork的Run coverage/origin也不成为History内容或完整性来源。
+KRSRUN-02B迁移逐字节保留event/snapshot/History逻辑事实并仅增加coverage/空Run index；source/target logical digest必须一致。KRSRUN-03A后
+offline Web History与same-connection Worker page port承认exact Store 8；Store 7入口仅保留为显式旧profile测试/迁移source，production不在
+Store 8 open/read失败时fallback，也不得用Run coverage截断既有History。
+
+旧 Native HTTP connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
 transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不
 终止Session，replacement client可从同一SQLite authority继续读取；Service restart仍由唯一Store恢复。当前这些是本机
 composition/focused evidence，KLSV1-07的三平台installed process/release qualification仍pending，不能以源码存在替代。
 
-普通 Store 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。
+旧 adapter 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。
+
+当前 Session Store 的文件打开、结构检查和会话恢复以[Storage 当前 owner](../../packages/runtime-storage-sqlite/README.md#当前数据库与执行所有权)为准；旧 standalone reader 的隔离快照规则不能代替它，也不能给普通 Browser 查询添加第二连接。

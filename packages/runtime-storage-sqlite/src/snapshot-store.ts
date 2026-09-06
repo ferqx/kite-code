@@ -19,6 +19,8 @@ export function createSqliteSnapshotStore<Event, State>(input: {
   readonly ensureSession: (sessionId: string, state?: State) => void;
   readonly hasSessionMetadata: (sessionId: string) => boolean;
   readonly lastEventPosition: (sessionId: string) => number;
+  /** Called immediately before any snapshot mutation, including named snapshots. */
+  readonly beforeWrite?: () => void;
 }) {
   const upsertSnapshot = input.db.query(
     'INSERT OR REPLACE INTO runtime_snapshots (session_id, state_json, event_position, revision, state_checksum, schema_version, format_epoch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())',
@@ -73,6 +75,7 @@ export function createSqliteSnapshotStore<Event, State>(input: {
     _stateChecksum: string,
     schemaVersion: number,
   ): void => {
+    input.beforeWrite?.();
     upsertSnapshot.run(
       sessionId,
       json,

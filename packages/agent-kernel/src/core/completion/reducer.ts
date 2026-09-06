@@ -163,6 +163,53 @@ function completionOutcome(
   };
 }
 
+export interface CanonicalTaskCompletionFact {
+  readonly taskId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly output: string;
+  readonly completionGuardVersion: string;
+  readonly planIdentity?: PlanIdentity;
+  readonly outcome: AgentRunTerminalOutcome;
+}
+
+/** Normalize the legacy raw name into the one Task-completion domain fact. */
+export function normalizeCanonicalTaskCompletionFact(
+  state: AgentState,
+  event: Extract<KernelEvent, { readonly type: 'run.completed' }>,
+  runtimeRunId = event.turnId,
+): CanonicalTaskCompletionFact | undefined {
+  const payload = eventRecord(event);
+  const turnId = nonEmptyStringField(payload, 'turnId');
+  if (!turnId || turnId !== state.turn.turnId || runtimeRunId.length === 0) return undefined;
+  const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+  if (!activeTask) return undefined;
+  const version =
+    stringField(payload, 'completionGuardVersion') ?? COMPLETION_GUARD_UNPLANNED_VERSION;
+  if (hasPlanDocument(state) && version !== COMPLETION_GUARD_PLANNED_VERSION) return undefined;
+  const decision = completionDecisionForVersion(state, version);
+  if (decision?.status !== 'accepted') return undefined;
+  const normalizedPlanIdentity = planIdentity(payload.planIdentity);
+  if (
+    decision.version === COMPLETION_GUARD_PLANNED_VERSION &&
+    !samePlanIdentity(normalizedPlanIdentity, decision.planIdentity)
+  ) {
+    return undefined;
+  }
+  const outcome = completionOutcome(payload);
+  const output = stringField(payload, 'output');
+  if (!outcome || output === undefined) return undefined;
+  return Object.freeze({
+    taskId: activeTask.taskId,
+    runId: runtimeRunId,
+    turnId,
+    output,
+    completionGuardVersion: version,
+    ...(normalizedPlanIdentity === undefined ? {} : { planIdentity: normalizedPlanIdentity }),
+    outcome,
+  });
+}
+
 /** Completion truth is produced by this fixed reducer, never by a provider. */
 export function reduceCompletionState(state: AgentState, event: KernelEvent): AgentState {
   const payload = eventRecord(event);
@@ -191,31 +238,18 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
         : state;
     }
     case 'run.completed': {
-      const turnId = nonEmptyStringField(payload, 'turnId');
-      if (!turnId || turnId !== state.turn.turnId) return state;
-      const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
-      if (!activeTask) return state;
-      const version =
-        stringField(payload, 'completionGuardVersion') ?? COMPLETION_GUARD_UNPLANNED_VERSION;
-      if (hasPlanDocument(state) && version !== COMPLETION_GUARD_PLANNED_VERSION) return state;
-      const decision = completionDecisionForVersion(state, version);
-      if (decision?.status !== 'accepted') return state;
-      if (
-        decision.version === COMPLETION_GUARD_PLANNED_VERSION &&
-        !samePlanIdentity(planIdentity(payload.planIdentity), decision.planIdentity)
-      )
-        return state;
-      const outcome = completionOutcome(payload);
-      if (!outcome) return state;
+      const fact = normalizeCanonicalTaskCompletionFact(state, event);
+      if (!fact) return state;
+      const activeTask = state.tasks[fact.taskId]!;
       const completed = {
         ...activeTask,
         status: 'completed' as const,
-        completedAtTurnId: turnId,
+        completedAtTurnId: fact.turnId,
         executionMode: undefined,
       };
       return {
         ...state,
-        terminalOutcome: outcome,
+        terminalOutcome: fact.outcome,
         activeTaskId: null,
         tasks: { ...state.tasks, [activeTask.taskId]: completed },
       };

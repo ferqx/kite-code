@@ -4,6 +4,14 @@ import { resolve } from 'node:path';
 
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
 const candidateBuilder = readFileSync(resolve('scripts/release/oss-candidate.ts'), 'utf8');
+const candidateInstaller = readFileSync(
+  resolve('scripts/release/install-oss-candidate.ts'),
+  'utf8',
+);
+const windowsPublication = readFileSync(
+  resolve('packages/builtin-runtime/src/filesystem/descriptor-relative.ts'),
+  'utf8',
+);
 const windowsRunnerBuilder = readFileSync(
   resolve('scripts/release/build-windows-runner.ts'),
   'utf8',
@@ -44,7 +52,7 @@ describe('ordinary open-source release candidate workflow', () => {
     ]) {
       expect(workflow).toContain(command);
     }
-    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).toContain('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a');
     expect(workflow).toContain('retention-days: 14');
     expect(workflow).toContain('persist-credentials: false');
     expect(workflow).toContain(
@@ -73,7 +81,11 @@ describe('ordinary open-source release candidate workflow', () => {
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
       'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
-      'bun test packages/kite-local-runtime/test/isolated/service-state.test.ts',
+      'Verify Windows App Server endpoint and Session Store fencing',
+      'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts',
+      'tests/release/app-server-daemon.test.ts',
       'bun run release:build',
     ];
     let previousIndex = -1;
@@ -81,6 +93,15 @@ describe('ordinary open-source release candidate workflow', () => {
       const index = workflow.indexOf(step);
       expect(index).toBeGreaterThan(previousIndex);
       previousIndex = index;
+    }
+    for (const testFile of [
+      'packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts',
+      'packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts',
+      'packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts',
+      'tests/release/app-server-daemon.test.ts',
+    ]) {
+      expect(workflow).toContain(`bun test --parallel=1 --max-concurrency=1 ${testFile}`);
     }
 
     for (const asset of [
@@ -96,6 +117,18 @@ describe('ordinary open-source release candidate workflow', () => {
     }
   });
 
+  test('publishes Windows install metadata through bounded native atomic commits', () => {
+    expect(candidateInstaller).toContain(
+      "import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem'",
+    );
+    expect(candidateInstaller.match(/flushFileBuffers: false/g)).toHaveLength(3);
+    expect(candidateInstaller.match(/writeThroughFile: false/g)).toHaveLength(3);
+    expect(candidateInstaller.match(/writeThroughMove: false/g)).toHaveLength(3);
+    expect(windowsPublication).toContain('WINDOWS_FILE_FLAG_WRITE_THROUGH');
+    expect(windowsPublication).toContain('WINDOWS_MOVEFILE_WRITE_THROUGH');
+    expect(windowsPublication).toContain('input.flushFileBuffers !== false');
+  });
+
   test('does not ship the retired evaluation or live-Provider jobs', () => {
     expect(workflow).not.toContain('live-provider-smoke');
     expect(workflow).not.toContain('run_live_provider_smoke');
@@ -107,7 +140,7 @@ describe('ordinary open-source release candidate workflow', () => {
   });
 
   test('pins all third-party Actions to immutable commits', () => {
-    expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
+    expect(workflow).toContain('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1');
     expect(workflow).toContain('oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6');
     expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d+/);
   });

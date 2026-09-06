@@ -6,6 +6,15 @@ const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
 const FOCUS_IN = '\x1b[I';
 const FOCUS_OUT = '\x1b[O';
 
+export function isTerminalFocusReport(value: string): boolean {
+  return (
+    value === FOCUS_IN ||
+    value === FOCUS_IN.slice(1) ||
+    value === FOCUS_OUT ||
+    value === FOCUS_OUT.slice(1)
+  );
+}
+
 export interface TerminalFocusOutput {
   write(value: string): unknown;
 }

@@ -85,4 +85,4 @@ shellExecutor.prepare = async () => ({
   backend: 'none',
 });
 
-runTui({ connectService: createInProcessTuiServiceConnector(shellExecutor) });
+runTui({ connectRuntime: createInProcessTuiServiceConnector(shellExecutor) });

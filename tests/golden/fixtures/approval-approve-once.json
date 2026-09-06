@@ -17,6 +17,7 @@
           "interactionId": "approval-1",
           "toolCallId": "call-1",
           "approvalRoute": "user",
+          "owner": { "kind": "root_tool", "toolCallId": "call-1" },
           "fullModeBypassEligible": false,
           "fullModePolicyBypassAllowed": false,
           "queueGeneration": 0,

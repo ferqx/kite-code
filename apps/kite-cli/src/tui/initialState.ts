@@ -9,6 +9,10 @@ import type { TuiState } from './types.js';
 
 export const initialState: TuiState = {
   sessions: [],
+  presentationMode: 'live',
+  requestAssemblies: new Map(),
+  requestAssemblyIncomplete: new Set(),
+  presentationTimeline: { renderEpoch: 0, items: [] },
   activeSessionId: null,
   turns: [],
   nextBlockId: 1,
@@ -30,7 +34,6 @@ export const initialState: TuiState = {
     retryState: null,
   },
   exited: false,
-  running: false,
   runCount: 0,
   currentRunReasonId: undefined,
   showHelp: false,
@@ -50,15 +53,19 @@ export const initialState: TuiState = {
   loadingSessionId: null,
   sessionServiceUnavailable: false,
   explorationSummaryIds: {},
+  presentationGroupSummaryIds: {},
   pendingToolCalls: {},
+  pendingSubagentTerminals: new Map(),
+  acceptedEphemeralSequences: new Map(),
+  closedRunIds: new Set(),
   currentThoughtSummaryId: undefined,
-  thoughtPhaseStatus: undefined,
   currentModelRequestId: undefined,
   toolBearingModelRequestId: undefined,
   toolBearingPresentationGroupId: undefined,
   currentModelReasoningStreamed: false,
   currentModelReasoningText: undefined,
   currentModelReasoningRequestId: undefined,
+  settledModelRequestIds: new Set(),
   interactionMode: 'auto',
   sessionCommandGrants: new Map(),
   sessionCommandGrantGeneration: 0,
@@ -67,5 +74,11 @@ export const initialState: TuiState = {
 };
 
 export function createInitialState(): TuiState {
-  return { ...initialState, turns: [], interrupt: null, pendingToolCalls: {} };
+  return {
+    ...initialState,
+    turns: [],
+    interrupt: null,
+    pendingToolCalls: {},
+    presentationTimeline: { renderEpoch: 0, items: [] },
+  };
 }

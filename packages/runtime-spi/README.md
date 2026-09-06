@@ -9,6 +9,8 @@
 - 定义 capability、execution、model context、normalizer、adapter 与 module lifecycle port。
 - 提供同步注册、重复检测和冻结的 `RuntimeModuleRegistry` snapshot。
 - 定义 filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 的中立接口。
+- Subagent continuation step 必须携带 admission 时分配的 `stepId + toolCallId`；Task/Skill approval 与 auto-review
+  suspension 必须携带完整 `InteractionOwner`，resume/settlement 不通过工具名或 pending 顺序匹配。
 
 ## 不拥有职责
 
@@ -36,3 +38,14 @@
 ## 文档影响
 
 模块局部变化更新本 README；跨包能力或执行语义同时更新 [Runtime 架构](../../docs/active/six-concept-runtime-architecture.md)。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [Runtime modules、Registry 与注入 Port](docs/modules-and-ports.md)

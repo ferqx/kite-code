@@ -8,7 +8,11 @@ import {
   type ProviderModelSelectResponse,
   type ProviderModelSnapshot,
 } from '@kite-ai/kite-app-contract';
-import { listAvailableModels, probeAgentConfig, saveModelSelection } from '#kite-service/config';
+import {
+  listAvailableModels,
+  probeAgentConfig,
+  saveModelSelectionWithRevisionGuard,
+} from '#kite-service/config';
 import { defaultConfigPath, projectConfigPath } from '#kite-service/config/paths';
 import type { ProviderModelHandlerPort } from '../ports';
 
@@ -131,15 +135,17 @@ export function createProviderModelOwner(
           snapshot: before,
         };
       }
-      const saved = saveModelSelection(
-        request.provider,
-        request.name,
-        input.userConfigPath ?? defaultConfigPath(),
-      );
-      if (saved) await input.onSelected?.(request.provider, request.name);
+      const saved = saveModelSelectionWithRevisionGuard({
+        provider: request.provider,
+        name: request.name,
+        configPath: input.userConfigPath ?? defaultConfigPath(),
+        guardPaths: [projectConfigPath(input.workspace.canonicalPath)],
+        isCurrent: () => revision(input) === request.expectedRevision,
+      });
+      if (saved === 'saved') await input.onSelected?.(request.provider, request.name);
       return {
         schema: PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
-        outcome: saved ? 'applied' : 'unavailable',
+        outcome: saved === 'saved' ? 'applied' : saved === 'conflict' ? 'conflict' : 'unavailable',
         snapshot: snapshot(input),
       };
     },

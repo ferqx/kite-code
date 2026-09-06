@@ -33,6 +33,7 @@ describe('TUI PTY System — inline compaction input', () => {
   test(
     'renders both compaction sources inline and accepts input throughout',
     async () => {
+      const progressFrames = tui.markScreen();
       const manualScreen = tui.viewport();
       expect(screenContains(manualScreen, '/compact')).toBe(true);
       expect(screenContains(manualScreen, 'Summarizing context')).toBe(true);
@@ -50,7 +51,7 @@ describe('TUI PTY System — inline compaction input', () => {
       const automaticScreen = tui.viewport();
       expect(screenContains(automaticScreen, '/auto-compact')).toBe(true);
       expect(screenContains(automaticScreen, 'Summarizing context')).toBe(true);
-      expect(screenContains(automaticScreen, 'Thinking')).toBe(true);
+      expect(screenContains(automaticScreen, 'Working')).toBe(true);
 
       const automaticDraft = 'automatic compaction keeps input available';
       await typeText(tui, automaticDraft);
@@ -62,6 +63,12 @@ describe('TUI PTY System — inline compaction input', () => {
         requireAcceptWhen: true,
       });
       expect(screenContains(tui.viewport(), 'Automatic input submitted')).toBe(true);
+      const frames = tui.screenFramesSince(progressFrames);
+      expect(frames.length).toBeGreaterThan(2);
+      for (const frame of frames) {
+        expect((frame.match(/Summarizing context/g) ?? []).length).toBeLessThanOrEqual(1);
+        expect(frame).not.toContain('Waiting for response...');
+      }
     },
     TIMEOUT,
   );

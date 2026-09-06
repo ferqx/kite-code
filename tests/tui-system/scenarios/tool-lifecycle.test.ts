@@ -352,6 +352,11 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
                 content: 'This external write must be rejected.',
               },
             },
+            {
+              id: 'call_search_sibling',
+              name: 'search_files',
+              args: { path: '.', pattern: '*.md' },
+            },
           ],
         },
       },
@@ -427,12 +432,14 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
         false,
       );
-      // A rejected approval never reached tool.started, so its queued payload
-      // stays off-screen and no synthetic Write card is created.
-      expect(screenContains(afterRejection, '● Write')).toBe(false);
+      // The rejected card retains the exact queued operation, while the safe
+      // sibling is cancelled before dispatch and remains off-screen.
+      expect(screenContains(afterRejection, '● Write')).toBe(true);
+      expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(true);
+      expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(afterRejection, 'Tool execution rejected.')).toBe(false);
-      expect(screenContains(afterRejection, 'Approval rejected.')).toBe(true);
-      expect(screenContains(tui.viewport(), 'tool-lifecycle-rejected.txt')).toBe(false);
+      expect(screenContains(afterRejection, 'Command not run: approval rejected.')).toBe(false);
+      expect(screenContains(afterRejection, 'searched 1 file pattern')).toBe(false);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 
@@ -447,9 +454,21 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         (event) => event.type === 'tool.rejected',
       );
       const abortIndex = observed!.events.findIndex((event) => event.type === 'turn.aborted');
+      const siblingCancelledIndex = observed!.events.findIndex(
+        (event) => event.type === 'tool.cancelled' && event.toolCallId === 'call_search_sibling',
+      );
       expect(rejectionIndex).toBeGreaterThanOrEqual(0);
       expect(toolRejectedIndex).toBeGreaterThan(rejectionIndex);
-      expect(abortIndex).toBeGreaterThan(toolRejectedIndex);
+      expect(siblingCancelledIndex).toBeGreaterThan(toolRejectedIndex);
+      expect(abortIndex).toBeGreaterThan(siblingCancelledIndex);
+      expect(
+        observed!.events.some(
+          (event, index) =>
+            index > rejectionIndex &&
+            event.type === 'tool.started' &&
+            event.toolCallId === 'call_search_sibling',
+        ),
+      ).toBe(false);
       expect(
         observed!.events.some(
           (event, index) => index > rejectionIndex && event.type === 'model.requested',

@@ -6,6 +6,8 @@ import type {
   RuntimeCommandCommitEvidence,
   RuntimeStoredCommandReceipt,
 } from '../storage';
+import { assertRuntimeStoredCommandResourceResult } from '../storage';
+import { parseRuntimeStoredCommandResource } from './run-projection';
 
 const APPLIED_RECEIPT_KEYS = ['commandId', 'revision', 'sessionId', 'status'] as const;
 
@@ -84,11 +86,13 @@ export function resolveRuntimeCommandReceipt(
       code: 'invalid_command',
     });
   }
+  const resource = parseRuntimeStoredCommandResource(record.resourceResult, record.commandId);
   return Object.freeze({
     status: 'idempotent_replay',
     commandId: applied.commandId,
     sessionId: applied.sessionId,
     originalRevision: applied.revision,
+    ...(resource === undefined ? {} : { resource }),
   });
 }
 
@@ -174,6 +178,9 @@ function assertReceiptRecord(record: RuntimeStoredCommandReceipt): void {
   }
   if (!Number.isSafeInteger(record.committedAt) || record.committedAt < 0) {
     throw new Error('Runtime command receipt committed time is invalid.');
+  }
+  if (record.resourceResult !== undefined) {
+    assertRuntimeStoredCommandResourceResult(record.resourceResult);
   }
 }
 

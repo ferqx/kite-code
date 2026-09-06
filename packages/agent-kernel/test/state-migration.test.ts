@@ -5,6 +5,9 @@ import {
   convertLegacyRuntimeEvent,
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
+  LEGACY_STATE27_FORMAT_EPOCH,
+  LEGACY_STATE27_SCHEMA_VERSION,
+  migrateCompatibleAgentState,
   migrateState26To27,
 } from '../src/state-migration';
 
@@ -74,8 +77,122 @@ function legacyState(overrides: Record<string, unknown> = {}): Record<string, un
 describe('State 26 compatibility migration', () => {
   test('classifies only the exact legacy schema and epoch as migratable', () => {
     expect(classifyStateFormat(legacyState())).toBe('state26');
+    expect(
+      classifyStateFormat({
+        ...legacyState(),
+        schemaVersion: LEGACY_STATE27_SCHEMA_VERSION,
+        formatEpoch: LEGACY_STATE27_FORMAT_EPOCH,
+      }),
+    ).toBe('state27');
     expect(classifyStateFormat({ ...legacyState(), formatEpoch: 'future' })).toBe('unsupported');
     expect(classifyStateFormat({ ...legacyState(), schemaVersion: 999 })).toBe('unsupported');
+  });
+
+  test('allocates deterministic legacy Subagent step identities by persisted event order', () => {
+    const step = convertLegacyRuntimeEvent(
+      {
+        type: 'subagent.step',
+        subagent: { id: 'child-1', toolName: 'read_file', toolArgs: { path: 'README.md' } },
+      },
+      7,
+    );
+    expect(step).toEqual({
+      status: 'converted',
+      event: {
+        type: 'subagent.step',
+        subagent: {
+          id: 'child-1',
+          stepId: 'legacy:child-1:7',
+          toolCallId: 'legacy:child-1:7',
+          toolName: 'read_file',
+          toolArgs: { path: 'README.md' },
+        },
+      },
+    });
+    const result = convertLegacyRuntimeEvent(
+      {
+        type: 'subagent.tool_result',
+        subagent: { id: 'child-1', toolName: 'read_file', ok: true },
+      },
+      8,
+    );
+    expect(result).toMatchObject({
+      status: 'converted',
+      event: {
+        type: 'subagent.tool_result',
+        subagent: {
+          stepId: 'legacy:child-1:8',
+          toolCallId: 'legacy:child-1:8',
+          status: 'completed',
+          toolName: 'read_file',
+        },
+      },
+    });
+    if (result.status === 'converted') {
+      expect(result.event.subagent).not.toHaveProperty('ok');
+    }
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        type: 'subagent.step',
+        subagent: { id: 'child-1', toolName: 'read_file', toolArgs: {} },
+      }),
+    ).toThrow('read-only compatibility data');
+  });
+
+  test('hydrates the immediately previous State 27 epoch without rewriting its source value', () => {
+    const migrated = migrateState26To27(legacyState());
+    expect(migrated.status).toBe('migrated');
+    if (migrated.status !== 'migrated') return;
+    const previousEpoch = {
+      ...migrated.state,
+      schemaVersion: LEGACY_STATE27_SCHEMA_VERSION,
+      formatEpoch: LEGACY_STATE27_FORMAT_EPOCH,
+    };
+    const result = migrateCompatibleAgentState(previousEpoch);
+    expect(result.status).toBe('migrated');
+    expect(previousEpoch.schemaVersion).toBe(LEGACY_STATE27_SCHEMA_VERSION);
+    if (result.status === 'migrated') {
+      expect(result.state.schemaVersion).toBe(27);
+      expect(result.state.formatEpoch).not.toBe(LEGACY_STATE27_FORMAT_EPOCH);
+    }
+  });
+
+  test('synthesizes the stable child owner only at the legacy State 27 boundary', () => {
+    const migrated = migrateState26To27(legacyState());
+    expect(migrated.status).toBe('migrated');
+    if (migrated.status !== 'migrated') return;
+    const previousEpoch = {
+      ...migrated.state,
+      schemaVersion: LEGACY_STATE27_SCHEMA_VERSION,
+      formatEpoch: LEGACY_STATE27_FORMAT_EPOCH,
+      pendingApprovals: {
+        childApproval: {
+          interactionId: 'childApproval',
+          toolCallId: 'parent-call',
+          parentToolCallId: 'parent-call',
+          childSubagentId: 'child-agent',
+          runtimeToolCallId: 'runtime-child-call',
+          approval: { callId: 'model-child-call' },
+          route: 'user',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          bindingDigest: 'binding',
+          invocation: {},
+          sequence: 0,
+          generation: 0,
+          createdAt: '2026-08-25T00:00:00.000Z',
+          status: 'awaiting_user',
+          state: 'awaiting_user',
+        },
+      },
+      activeApprovalId: 'childApproval',
+    };
+    const result = migrateCompatibleAgentState(previousEpoch);
+    expect(result.status).toBe('migrated');
+    if (result.status !== 'migrated') return;
+    const pending = result.state.pendingApprovals.get('childApproval');
+    expect(pending).toMatchObject({ childToolCallId: 'model-child-call' });
+    expect(pending).not.toHaveProperty('state');
   });
 
   test('migrates history while dropping every legacy authority surface', () => {
@@ -217,6 +334,7 @@ describe('State 26 compatibility migration', () => {
         type: 'auto_review.completed',
         reviewId: 'review-1',
         toolCallId: 'tool-1',
+        owner: { kind: 'root_tool', toolCallId: 'tool-1' },
         result: { ok: true, approved: true, grant: 'full_access' },
       }),
     ).toThrow('read-only compatibility data');
@@ -225,6 +343,7 @@ describe('State 26 compatibility migration', () => {
         type: 'approval.requested',
         interactionId: 'interaction-1',
         toolCallId: 'tool-1',
+        owner: { kind: 'root_tool', toolCallId: 'tool-1' },
         approval: { recommendedGrant: 'full_access', grantOptions: ['full_access'] },
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,

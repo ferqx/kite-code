@@ -47,6 +47,8 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       lastActionMark = output().length;
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
+    scrollViewport: async () => {},
+    viewportPosition: () => ({ viewportY: 0, baseY: 0 }),
     viewport: () => `❯ ${output()}`,
     inputViewport() {
       return this.viewport();

@@ -4,12 +4,20 @@ import type {
   ListRuntimeLogSessionsRequest,
   RuntimeLogErrorCode,
 } from '@kite-ai/runtime-contract';
+import {
+  assertRuntimeStoredCommandResourceResult,
+  type RuntimeRunPhase,
+  type RuntimeRunStorePort,
+  type RuntimeRunTransactionMutation,
+  type RuntimeStoredCommandResourceResult,
+} from './runtime-run';
 
 export {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
   RuntimeLogRequestValidationError,
 } from '@kite-ai/runtime-contract';
+export * from './runtime-run';
 
 /**
  * Persistence contracts owned by Runtime Host.
@@ -35,18 +43,27 @@ export interface RuntimeCompatibleRecordFormat {
   readonly formatEpoch: string;
 }
 
+/** Persistence-order context required to synthesize deterministic legacy identities. */
+export interface RuntimeCompatibleEventContext {
+  readonly sequence: number;
+}
+
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */
 export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
   /** Re-encode already-decoded history while preserving read-only compatibility during fork. */
   encodeHistoricalEvent?(event: Event): string;
-  decodeEvent(json: string): Event;
+  decodeEvent(json: string, context?: RuntimeCompatibleEventContext): Event;
   /**
    * Decode one explicitly supported historical event into the current
    * in-memory event contract. Unknown formats return null and stay isolated
    * to their source session.
    */
-  decodeCompatibleEvent?(json: string, format: RuntimeCompatibleRecordFormat): Event | null;
+  decodeCompatibleEvent?(
+    json: string,
+    format: RuntimeCompatibleRecordFormat,
+    context?: RuntimeCompatibleEventContext,
+  ): Event | null;
   encodeState(state: State): string;
   decodeState<T = State>(json: string): T;
   /** Read-side State migration. Current encodeState remains single-format. */
@@ -107,6 +124,7 @@ export interface RuntimeStoredCommandReceipt extends RuntimeCommandReceiptLookup
   readonly originalReceiptJson: string;
   readonly committedRevision: number;
   readonly committedAt: number;
+  readonly resourceResult?: RuntimeStoredCommandResourceResult;
 }
 
 export type RuntimeCommandReceiptLookup =
@@ -127,6 +145,11 @@ export interface RuntimeCommandReceiptPort {
 export interface RuntimeCommandCommitEvidence extends RuntimeCommandReceiptLookupInput {
   readonly targetSessionId: string;
   readonly committedAt: number;
+  readonly resourceResult?: RuntimeStoredCommandResourceResult;
+  readonly runStart?: {
+    readonly runId: string;
+    readonly phase: RuntimeRunPhase;
+  };
 }
 
 export function createRuntimeStoredCommandReceipt(
@@ -145,6 +168,9 @@ export function createRuntimeStoredCommandReceipt(
   if (!Number.isSafeInteger(committedRevision) || committedRevision < 0) {
     throw new Error('Runtime command receipt committed revision is invalid.');
   }
+  if (evidence.resourceResult !== undefined) {
+    assertRuntimeStoredCommandResourceResult(evidence.resourceResult);
+  }
   const originalReceipt: RuntimeAppliedCommandReceipt = Object.freeze({
     status: 'applied',
     commandId: evidence.commandId,
@@ -159,6 +185,9 @@ export function createRuntimeStoredCommandReceipt(
     originalReceiptJson: JSON.stringify(originalReceipt),
     committedRevision,
     committedAt: evidence.committedAt,
+    ...(evidence.resourceResult === undefined
+      ? {}
+      : { resourceResult: Object.freeze({ ...evidence.resourceResult }) }),
   });
 }
 
@@ -316,6 +345,8 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly requiredEffectLease?: RuntimeEffectLeaseExpectation;
   /** Only command-decision commits may include this Store 6 record. */
   readonly commandReceipt?: RuntimeStoredCommandReceipt;
+  /** Store 8-only Run row change committed by the same transaction owner. */
+  readonly runMutation?: RuntimeRunTransactionMutation;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
@@ -442,6 +473,8 @@ export interface RuntimeStorage<Event = unknown, State = unknown> extends Runtim
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   /** Store 6 persistent replay authority; no in-memory or optional fallback exists. */
   readonly commandReceipts: RuntimeCommandReceiptPort;
+  /** Present only for a fully preflighted Store 8 owner. */
+  readonly runs?: RuntimeRunStorePort;
   close(): void;
 }
 

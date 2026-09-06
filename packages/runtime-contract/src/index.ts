@@ -6,6 +6,7 @@ export const RUNTIME_CONTRACT_SCHEMA_ = 'kite.runtime-contract.v1' as const;
 
 export * from './capabilities';
 export * from './commands';
+export * from './context';
 export * from './logs';
 export * from './notifications';
 export * from './observability';
@@ -29,7 +30,11 @@ export const RUNTIME_CONTRACT_BOUNDARY_: RuntimeContractBoundary = Object.freeze
 });
 
 export interface RuntimeAccess {
-  command(command: RuntimeCommand): Promise<RuntimeCommandReceipt>;
+  /** The context is in-process only and is never encoded by Runtime Protocol. */
+  command(
+    command: RuntimeCommand,
+    context?: Readonly<import('./context').RuntimeCommandContext>,
+  ): Promise<RuntimeCommandReceipt>;
   query(query: RuntimeQuery): Promise<RuntimeQueryResult>;
   subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeAccessNotification>;
 }

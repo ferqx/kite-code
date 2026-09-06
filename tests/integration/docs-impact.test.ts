@@ -5,6 +5,7 @@ import {
   type DocumentationMap,
   documentationPatternError,
   evaluateDocumentationImpact,
+  isCurrentDocumentation,
   matchesDocumentationPattern,
   parseDocumentationImpactOptions,
 } from '../../scripts/check-docs-impact';
@@ -52,12 +53,13 @@ describe('documentation impact gate V2', () => {
     expect(documentationPatternError('')).toContain('empty');
   });
 
-  it('requires a mapped current authority for implementation changes', () => {
+  it('reports all mapped documents and records which ones changed', () => {
     expect(evaluateDocumentationImpact(['src/core/runtime/kernel.ts'], map)).toEqual([
       {
         ruleId: 'runtime',
         sources: ['src/core/runtime/kernel.ts'],
-        expectedAuthorities: ['packages/runtime/README.md', 'docs/active/runtime.md'],
+        authorities: ['packages/runtime/README.md', 'docs/active/runtime.md'],
+        changedAuthorities: [],
       },
     ]);
     expect(
@@ -65,10 +67,17 @@ describe('documentation impact gate V2', () => {
         ['src/core/runtime/kernel.ts', 'packages/runtime/README.md'],
         map,
       ),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        ruleId: 'runtime',
+        sources: ['src/core/runtime/kernel.ts'],
+        authorities: ['packages/runtime/README.md', 'docs/active/runtime.md'],
+        changedAuthorities: ['packages/runtime/README.md'],
+      },
+    ]);
   });
 
-  it('requires every overlapping rule to converge independently', () => {
+  it('reports every overlapping rule to converge independently', () => {
     const overlapping: DocumentationMap = {
       version: 2,
       rules: [
@@ -91,9 +100,16 @@ describe('documentation impact gate V2', () => {
       ),
     ).toEqual([
       {
+        ruleId: 'package',
+        sources: ['packages/runtime/security/policy.ts', 'packages/runtime/README.md'],
+        authorities: ['packages/runtime/README.md'],
+        changedAuthorities: ['packages/runtime/README.md'],
+      },
+      {
         ruleId: 'security',
         sources: ['packages/runtime/security/policy.ts'],
-        expectedAuthorities: ['docs/active/security.md'],
+        authorities: ['docs/active/security.md'],
+        changedAuthorities: [],
       },
     ]);
   });
@@ -138,18 +154,7 @@ describe('documentation impact gate V2', () => {
     for (const rule of repositoryMap.rules) {
       expect(rule.sources.length).toBeGreaterThan(0);
       expect(rule.authorities.length).toBeGreaterThan(0);
-      expect(
-        rule.authorities.every(
-          (authority) =>
-            authority === 'README.md' ||
-            authority === 'README.zh-CN.md' ||
-            authority === 'docs/README.md' ||
-            authority === 'tests/README.md' ||
-            authority.startsWith('docs/active/') ||
-            authority.startsWith('docs/runbooks/') ||
-            /^(packages|apps)\/[^/]+\/(README\.md|docs\/)/u.test(authority),
-        ),
-      ).toBe(true);
+      expect(rule.authorities.every(isCurrentDocumentation)).toBe(true);
       expect(
         rule.authorities.some((authority) =>
           /docs\/(adr|book|space|design|deprecated)\//u.test(authority),
@@ -163,6 +168,18 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-cli/test/tui-layout.test.tsx')).toEqual([]);
     expect(triggeredRepositoryRules('packages/agent-kernel/src/reducer.ts')).toEqual([
       'agent-kernel',
+    ]);
+    expect(triggeredRepositoryRules('packages/agent-api-contract/src/schemas.ts')).toEqual([
+      'agent-api-contract',
+    ]);
+    expect(triggeredRepositoryRules('packages/agent-api-client/src/index.ts')).toEqual([
+      'agent-api-client',
+    ]);
+    expect(triggeredRepositoryRules('scripts/check-agent-api-packages.ts')).toEqual([
+      'agent-api-contract',
+    ]);
+    expect(triggeredRepositoryRules('packages/agent-api-contract/generated/openapi.json')).toEqual([
+      'agent-api-contract',
     ]);
     expect(
       triggeredRepositoryRules('packages/agent-kernel/src/core/authorization/reducer.ts'),
@@ -182,14 +199,20 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/runtime-client/src/client.ts')).toEqual([
       'runtime-client',
     ]);
+    expect(
+      triggeredRepositoryRules('packages/kite-local-runtime/src/coordinator/control-plane.ts'),
+    ).toEqual(['kite-local-runtime-client']);
+    expect(triggeredRepositoryRules('packages/runtime-host/src/format/storage-binding.ts')).toEqual(
+      ['runtime-host'],
+    );
     expect(triggeredRepositoryRules('packages/runtime-host/src/host/command-receipt.ts')).toEqual([
       'runtime-host-command-receipts',
     ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/carrier/runtime-server-stdio.ts'),
     ).toEqual(['kite-service-carrier']);
-    expect(triggeredRepositoryRules('apps/kite-service/src/shell.ts')).toEqual([
-      'kite-service-application',
+    expect(triggeredRepositoryRules('apps/kite-service/src/agent-api/context.ts')).toEqual([
+      'kite-service-agent-api',
     ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/carrier/native-loopback-carrier.ts'),
@@ -198,17 +221,17 @@ describe('documentation impact gate V2', () => {
       'apps/kite-service/package.json',
       'apps/kite-service/src/index.ts',
       'apps/kite-service/src/composition.ts',
-      'apps/kite-service/src/native-infrastructure.ts',
-      'apps/kite-service/src/ports.ts',
-      'apps/kite-service/src/readiness.ts',
-      'apps/kite-service/src/shell.ts',
-      'apps/kite-service/src/signals.ts',
+      'apps/kite-service/src/app-server.ts',
+      'apps/kite-service/src/app-server-daemon.ts',
       'apps/kite-service/src/executable.ts',
     ]) {
       expect(triggeredRepositoryRules(path), path).toEqual(['kite-service-application']);
     }
     expect(
       triggeredRepositoryRules('apps/kite-service/src/bootstrap/runtime/CliRuntimeBridge.ts'),
+    ).toEqual(['kite-service-runtime-owner']);
+    expect(
+      triggeredRepositoryRules('apps/kite-service/src/coordinator/run-store-maintenance.ts'),
     ).toEqual(['kite-service-runtime-owner']);
     expect(triggeredRepositoryRules('apps/kite-service/src/app-control/service.ts')).toEqual([
       'kite-service-runtime-owner',
@@ -228,9 +251,6 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('apps/kite-service/src/session-logger/writer.ts')).toEqual([
       'observability-and-session-logging',
     ]);
-    expect(triggeredRepositoryRules('packages/kite-local-runtime/src/manager/manager.ts')).toEqual([
-      'kite-local-runtime-manager',
-    ]);
     expect(
       triggeredRepositoryRules(
         'packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts',
@@ -239,14 +259,11 @@ describe('documentation impact gate V2', () => {
     expect(
       triggeredRepositoryRules('apps/kite-service/test/isolated/runtime-stdio-child.test.ts'),
     ).toEqual(['runtime-transport-qualification']);
-    expect(triggeredRepositoryRules('apps/kite-service/src/process-harness/harness.ts')).toEqual([
-      'kite-service-process-harness',
-    ]);
-    expect(
-      triggeredRepositoryRules('packages/kite-local-runtime/src/client/native-connector.ts'),
-    ).toEqual(['kite-local-runtime-connector']);
     expect(triggeredRepositoryRules('apps/kite-cli/src/service-mode/adapter.ts')).toEqual([
       'kite-service-mode-adapter',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/cli/index.ts')).toEqual([
+      'kite-cli-command-runtime',
     ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/runtime-client/presentation-history.ts'),
@@ -255,11 +272,11 @@ describe('documentation impact gate V2', () => {
       'tui-localization',
     ]);
     expect(triggeredRepositoryRules('apps/kite-cli/src/tui/render/useStaticContent.tsx')).toEqual([
-      'tui-rendering',
+      'tui-terminal',
     ]);
-    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/reducers/handleEvent.ts')).toEqual([
-      'tui-rendering',
-    ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/reducers/handleClientEvent.ts')).toEqual(
+      ['tui-projection'],
+    );
     expect(
       triggeredRepositoryRules('tests/qualification/sandbox/platform-capability-probe.test.ts'),
     ).toEqual(['platform-qualification']);
@@ -271,6 +288,9 @@ describe('documentation impact gate V2', () => {
     ]);
     expect(triggeredRepositoryRules('scripts/release/session-log-acl-smoke.ts')).toEqual([
       'observability-and-session-logging',
+    ]);
+    expect(triggeredRepositoryRules('scripts/release/app-server-client.ts')).toEqual([
+      'release-candidate',
     ]);
     expect(triggeredRepositoryRules('scripts/run-default-tests.ts')).toEqual(['test-system']);
   });
@@ -296,5 +316,61 @@ describe('documentation impact gate V2', () => {
 
     expect(unowned, JSON.stringify(unowned, null, 2)).toEqual([]);
     expect(overlapping, JSON.stringify(overlapping, null, 2)).toEqual([]);
+  });
+});
+
+describe('task-specific documentation impact', () => {
+  const documentsFor = (path: string) =>
+    evaluateDocumentationImpact([path], repositoryMap).flatMap((item) => item.authorities);
+  it('keeps Web visual edits away from execution and persistence contracts', () => {
+    expect(triggeredRepositoryRules('apps/kite-web/src/styles/globals.css')).toEqual([
+      'web-visual',
+    ]);
+    expect(documentsFor('apps/kite-web/src/styles/globals.css')).toEqual([
+      'apps/kite-web/docs/ui-design-system.md',
+      'docs/handbook/clients/web/interface.md',
+    ]);
+    expect(documentsFor('apps/kite-web/src/transport/client.ts')).toContain(
+      'docs/active/agent-api-contract.md',
+    );
+    expect(documentsFor('apps/kite-web/src/transport/client.ts')).not.toContain(
+      'docs/active/runtime-authority-boundary.md',
+    );
+  });
+  it('routes TUI navigation, input, approval, and projection independently', () => {
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/session-navigation.ts')).toEqual([
+      'tui-navigation',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/components/InputLine.tsx')).toEqual([
+      'tui-input',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/components/ApprovalBlock.tsx')).toEqual([
+      'tui-approval',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-cli/src/tui/presentation/timeline.ts')).toEqual([
+      'tui-projection',
+    ]);
+    expect(documentsFor('apps/kite-cli/src/tui/session-navigation.ts')).not.toContain(
+      'docs/handbook/clients/tui/reference/commands.md',
+    );
+  });
+  it('distinguishes Storage queries, writer fencing, artifacts, and transactions', () => {
+    expect(triggeredRepositoryRules('packages/runtime-storage-sqlite/src/log-query.ts')).toEqual([
+      'storage-queries',
+    ]);
+    expect(
+      triggeredRepositoryRules(
+        'packages/runtime-storage-sqlite/src/kite-session-execution-authority.ts',
+      ),
+    ).toEqual(['storage-authority']);
+    expect(
+      triggeredRepositoryRules('packages/runtime-storage-sqlite/src/kite-home-artifacts.ts'),
+    ).toEqual(['storage-artifacts']);
+    expect(
+      triggeredRepositoryRules('packages/runtime-storage-sqlite/src/kite-session-mutation.ts'),
+    ).toEqual(['runtime-storage-sqlite']);
+    expect(documentsFor('packages/runtime-storage-sqlite/src/log-query.ts')).not.toContain(
+      'docs/active/runtime-resilience-qualification.md',
+    );
   });
 });

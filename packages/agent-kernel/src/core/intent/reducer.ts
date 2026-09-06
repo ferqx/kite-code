@@ -427,6 +427,14 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         turnId: state.turn.turnId,
       });
       const effect = suppliedEffect(payload, name, args);
+      const presentation =
+        payload.presentation === 'exploration' ||
+        payload.presentation === 'standalone' ||
+        payload.presentation === 'hidden'
+          ? payload.presentation
+          : effect.effectClass === 'read_only' && effect.sideEffect === false
+            ? 'exploration'
+            : 'standalone';
       const call: AgentToolCallState = {
         toolCallId,
         ...(stringField(payload, 'modelInvocationId')
@@ -438,6 +446,9 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
           ? { ordinal: numberField(payload, 'ordinal') }
           : {}),
         name,
+        ...(stringField(payload, 'displayLabel')
+          ? { displayLabel: stringField(payload, 'displayLabel') }
+          : {}),
         args,
         status: 'queued',
         createdAtTurnId: state.turn.turnId,
@@ -449,6 +460,11 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         recoveryAdmission: admission.admitted ? 'admitted' : admission.detailCode,
         ...(unknownToolFields(payload.unknownFields)
           ? { unknownFields: unknownToolFields(payload.unknownFields) }
+          : {}),
+        ...(payload.presentation === 'exploration' ||
+        payload.presentation === 'standalone' ||
+        payload.presentation === 'hidden'
+          ? { presentation }
           : {}),
         ...(stringField(payload, 'bindingId')
           ? { bindingId: stringField(payload, 'bindingId') }

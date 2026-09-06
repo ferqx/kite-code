@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 const root = process.cwd();
-const planDirectory = join(root, 'docs', 'space', 'plans');
+const planDirectory = join(root, 'release', 'oss-first-release', 'evidence');
 const plans = [
   '2026-07-29-agent-production-governance-decisions.md',
   '2026-07-29-agent-production-local-data-privacy.md',
@@ -124,7 +124,7 @@ requireText('docs/active/open-source-first-release.md', [
   '25',
   '0 optional',
 ]);
-requireText('docs/space/plans/2026-07-29-agent-production-readiness-roadmap.md', [
+requireText('release/oss-first-release/evidence/2026-07-29-agent-production-readiness-roadmap.md', [
   '状态：archived',
   'ADR-0069',
   '`completed` | 83',
@@ -132,17 +132,8 @@ requireText('docs/space/plans/2026-07-29-agent-production-readiness-roadmap.md',
   '0 optional',
   '2026-08-04-single-maintainer-open-source-first-release.md',
 ]);
-requireText('docs/space/plans/README.md', [
-  '2026-07-29-agent-production-readiness-roadmap.md` 已完成并归档',
-]);
-requireText('docs/space/plans/index.md', [
-  '2026-07-29-agent-production-readiness-roadmap.md',
-  '| archived | P0 | ADR-0069 |',
-  '2026-08-04-single-maintainer-open-source-first-release.md',
-]);
-requireText('docs/space/index.md', ['[`plans/index.md`](plans/index.md)', '唯一全局注册表']);
 requireText(
-  'docs/space/execution/completed/2026-08-04-single-maintainer-open-source-first-release.md',
+  'release/oss-first-release/evidence/2026-08-04-single-maintainer-open-source-first-release.md',
   ['状态：completed', '83 completed / 25 superseded / 0 optional', '30915426607', '30915426783'],
 );
 const maintainerChecklist = readFileSync(
@@ -152,7 +143,7 @@ const maintainerChecklist = readFileSync(
 if (maintainerChecklist.includes('- [ ]')) {
   failures.push('first-release maintainer checklist still has unchecked items');
 }
-requireText('docs/space/plans/2026-07-29-agent-production-decision-register.md', [
+requireText('release/oss-first-release/evidence/2026-07-29-agent-production-decision-register.md', [
   'ADR-0069',
   '| 45 | 2026-08-04 |',
   '83 completed、25 superseded、0 optional',

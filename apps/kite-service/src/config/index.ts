@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type {
   ExecutionBoundary,
@@ -6,6 +6,11 @@ import type {
   ExecutionCapabilitySurface,
   ProductionExecutionEntrypoint,
 } from '@kite-ai/builtin-runtime/sandbox';
+import {
+  acquireConfigFileMutationLock,
+  acquireConfigFileMutationLocks,
+  replaceConfigFileAtomically,
+} from '@kite-ai/kite-local-runtime/config';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import { admitProductionExecutionBoundary } from './execution-boundary';
@@ -1027,23 +1032,50 @@ export function loadUserInteractionMode(
   return readConfigFile(configPath)?.interactionMode ?? 'auto';
 }
 
+type UserConfigMutationResult = 'saved' | 'conflict' | 'unavailable';
+
+function mutateUserConfigResult(
+  path: string,
+  mutate: (source: string) => string,
+  options: {
+    readonly guardPaths?: readonly string[];
+    readonly isCurrent?: () => boolean;
+  } = {},
+): UserConfigMutationResult {
+  let lock:
+    | ReturnType<typeof acquireConfigFileMutationLock>
+    | ReturnType<typeof acquireConfigFileMutationLocks>
+    | undefined;
+  try {
+    lock = options.guardPaths
+      ? acquireConfigFileMutationLocks([path, ...options.guardPaths])
+      : acquireConfigFileMutationLock(path);
+    if (options.isCurrent && !options.isCurrent()) return 'conflict';
+    const source = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    replaceConfigFileAtomically(path, mutate(source), 0o600);
+    return 'saved';
+  } catch {
+    return 'unavailable';
+  } finally {
+    lock?.release();
+  }
+}
+
+function mutateUserConfig(path: string, mutate: (source: string) => string): boolean {
+  return mutateUserConfigResult(path, mutate) === 'saved';
+}
+
 /** Persist the personal terminal language setting to the user config. */
 export function saveUserLanguage(
   language: LanguagePreference,
   configPath = defaultConfigPath(),
 ): boolean {
-  try {
-    const path = configPath;
-    const dir = resolve(path, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+  return mutateUserConfig(configPath, (source) => {
+    let text = source;
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
     text = applyEdits(text, modify(text, ['language'], language, fmt));
-    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
+    return text;
+  });
 }
 
 /** Persist the personal TUI permission mode for subsequent launches. */
@@ -1051,32 +1083,23 @@ export function saveInteractionMode(
   interactionMode: InteractionModePreference,
   configPath = defaultConfigPath(),
 ): boolean {
-  try {
-    const dir = resolve(configPath, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    let text = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
+  return mutateUserConfig(configPath, (source) => {
+    let text = source;
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
     text = applyEdits(text, modify(text, ['interactionMode'], interactionMode, fmt));
-    writeFileSync(configPath, text, { encoding: 'utf-8', mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
+    return text;
+  });
 }
 
 /** Persist colorPreset to the user-level config file (creates file if missing). */
 export function saveColorPreset(preset: string): void {
   const path = defaultConfigPath();
-  try {
-    const dir = resolve(path, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+  mutateUserConfig(path, (source) => {
+    let text = source;
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
     text = applyEdits(text, modify(text, ['colorPreset'], preset, fmt));
-    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
-  } catch {
-    // Non-critical — silently ignore write failures
-  }
+    return text;
+  });
 }
 
 /** Persist the model route selected in the TUI to the user-level config. */
@@ -1086,18 +1109,35 @@ export function saveModelSelection(
   configPath: string = defaultConfigPath(),
 ): boolean {
   if (!provider.trim() || !name.trim()) return false;
-  try {
-    const dir = resolve(configPath, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    let text = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
+  return mutateUserConfig(configPath, (source) => {
+    let text = source;
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
     const route = `${provider.trim()}:${name.trim()}`;
     text = applyEdits(text, modify(text, ['model'], route, fmt));
-    writeFileSync(configPath, text, { encoding: 'utf-8', mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
+    return text;
+  });
+}
+
+export function saveModelSelectionWithRevisionGuard(input: {
+  readonly provider: string;
+  readonly name: string;
+  readonly configPath?: string;
+  readonly guardPaths: readonly string[];
+  readonly isCurrent: () => boolean;
+}): UserConfigMutationResult {
+  if (!input.provider.trim() || !input.name.trim()) return 'unavailable';
+  const path = input.configPath ?? defaultConfigPath();
+  return mutateUserConfigResult(
+    path,
+    (source) => {
+      const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+      return applyEdits(
+        source,
+        modify(source, ['model'], `${input.provider.trim()}:${input.name.trim()}`, fmt),
+      );
+    },
+    { guardPaths: input.guardPaths, isCurrent: input.isCurrent },
+  );
 }
 
 // ── Provider config saving ──
@@ -1153,11 +1193,8 @@ export function saveProviderConfig(
   configPath: string = defaultConfigPath(),
 ): boolean {
   const path = configPath;
-  try {
-    const dir = resolve(path, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+  const saved = mutateUserConfig(path, (source) => {
+    let text = source;
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
 
     const provPath = ['provider', input.name];
@@ -1184,10 +1221,8 @@ export function saveProviderConfig(
       setField([...provPath, 'modelKwargs'], input.modelKwargs);
     }
 
-    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
-    _cachedModels = null;
-    return true;
-  } catch {
-    return false;
-  }
+    return text;
+  });
+  if (saved) _cachedModels = null;
+  return saved;
 }

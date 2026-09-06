@@ -84,11 +84,16 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
         expectedRevision: 0,
         input: 'Respond once without calling a tool.',
       }),
-    ).toEqual({
+    ).toMatchObject({
       status: 'idempotent_replay',
       commandId: 'cli-retained-turn',
       sessionId,
       originalRevision: 2,
+      resource: {
+        kind: 'run',
+        messageId: expect.any(String),
+        run: { sessionId, status: 'queued' },
+      },
     });
     expect(
       await access.command({
@@ -203,7 +208,7 @@ test('CLI close_session commits active cancellation instead of returning runtime
       status: 'ok',
       session: {
         lifecycle: 'closed',
-        activeWork: { status: 'cancelled', activeTurn: { status: 'cancelled' } },
+        currentRun: { status: 'cancelled' },
       },
     });
   } finally {

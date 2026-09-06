@@ -16,4 +16,4 @@ const shellExecutor = (async (input) => {
 }) as AppShellExecutor;
 shellExecutor.prepare = () => preparation;
 
-runTui({ connectService: createInProcessTuiServiceConnector(shellExecutor) });
+runTui({ connectRuntime: createInProcessTuiServiceConnector(shellExecutor) });

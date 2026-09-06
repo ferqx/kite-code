@@ -478,6 +478,12 @@ describe('runtime SPI tool pipeline contract', () => {
       type: 'approval.requested',
       interactionId: 'interaction-skill-1',
       toolCallId: 'skill-call-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'runtime-child-call-1',
+        subagentId: 'child-subagent-1',
+        parentToolCallId: 'skill-call-1',
+      },
       approval,
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: true,
@@ -494,6 +500,12 @@ describe('runtime SPI tool pipeline contract', () => {
       type: 'auto_review.requested',
       reviewId: 'review-skill-1',
       toolCallId: 'skill-call-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'runtime-child-call-1',
+        subagentId: 'child-subagent-1',
+        parentToolCallId: 'skill-call-1',
+      },
       toolName: 'shell_execute',
       reason: 'The child tool requires an auto review.',
       approval,
@@ -581,6 +593,7 @@ describe('runtime SPI tool pipeline contract', () => {
       'type',
       'interactionId',
       'toolCallId',
+      'owner',
       'approval',
       'fullModeBypassEligible',
       'fullModePolicyBypassAllowed',
@@ -597,6 +610,7 @@ describe('runtime SPI tool pipeline contract', () => {
       'type',
       'reviewId',
       'toolCallId',
+      'owner',
       'toolName',
       'reason',
       'approval',
@@ -663,6 +677,12 @@ describe('runtime SPI tool pipeline contract', () => {
       blockedToolCallId: 'child-call-1',
     };
     void malformedApprovalEvent;
+    const rootOwnerForChildEvent: ToolPipelineSkillForkApprovalRequestedEvent<'skill-call-1'> = {
+      ...approvalEvent,
+      // @ts-expect-error suspension approval must bind a subagent owner.
+      owner: { kind: 'root_tool', toolCallId: 'skill-call-1' },
+    };
+    void rootOwnerForChildEvent;
     const missingAutoReviewApproval: ToolPipelineSkillForkSuspensionEvent<'skill-call-1'> = {
       type: 'auto_review.requested',
       reviewId: 'review-skill-2',
@@ -748,6 +768,12 @@ describe('runtime SPI tool pipeline contract', () => {
       type: 'approval.requested',
       interactionId: 'interaction-task-1',
       toolCallId: 'task-call-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'runtime-task-child-call-1',
+        subagentId: 'child-subagent-task-1',
+        parentToolCallId: 'task-call-1',
+      },
       approval,
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: true,
@@ -764,6 +790,12 @@ describe('runtime SPI tool pipeline contract', () => {
       type: 'auto_review.requested',
       reviewId: 'review-task-1',
       toolCallId: 'task-call-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'runtime-task-child-call-1',
+        subagentId: 'child-subagent-task-1',
+        parentToolCallId: 'task-call-1',
+      },
       toolName: 'write_file',
       reason: 'The task child write requires auto review.',
       approval,

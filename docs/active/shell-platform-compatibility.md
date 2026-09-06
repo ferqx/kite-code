@@ -47,8 +47,8 @@ hidden basename 都不是 raw Shell 的授权来源；hard deny 仍不可覆盖�
 
 State 27 的 `pendingApprovals`/`activeApprovalId`/generation/sequence/Session grants 是唯一 queue authority。same-command 使用完整
 Session/workspace/cwd/executor/environment/scope/effects/parser-executor revision identity，并以一个 Store transaction 产生独立
-receipts、`authorized_queued` 和 batch event。Approval Enter 是 exact-once，Approval Esc 只 focused reject，Ctrl+C 才 whole-turn
-cancel；late generation/session event no-op。UI scope 必须等于 sealed boundary 与 backend evidence；unsupported 时 clean fail closed，
+receipts、`authorized_queued` 和 batch event。Approval Enter是exact-once；Approval Esc拒绝focused target并在同一transaction中
+取消同turn sibling、写入turn terminal，Ctrl+C仍是独立whole-turn cancel输入；late generation/session event no-op。UI scope 必须等于 sealed boundary 与 backend evidence；unsupported 时 clean fail closed，
 不能改用 host replay。
 
 ## 1. Shell 解析与受治理执行

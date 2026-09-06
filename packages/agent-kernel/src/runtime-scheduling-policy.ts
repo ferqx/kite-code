@@ -1,11 +1,11 @@
 import { sha256Hex } from './hash';
-import { MAX_PARALLEL_READ_TOOLS, MAX_PARALLEL_SUBAGENTS } from './scheduler';
+import { MAX_PARALLEL_SUBAGENTS } from './scheduler';
 
 export interface RuntimeSchedulingPolicy {
   version: 1;
   parallelRead: {
     concurrencyGroup: 'parallel-read';
-    ceiling: number;
+    batch: 'all_compatible_in_model_response';
     barrier: 'interaction_write_or_unknown';
   };
   parallelSubagent: {
@@ -20,10 +20,9 @@ export interface RuntimeSchedulingPolicy {
     rejection: 'stop_undispatched_siblings';
   };
   concurrencyAdmission: {
+    scope: 'subagent_and_writer';
     queue: 'fifo_per_resource';
-    compoundPermits: 'atomic_all_or_none';
     deadline: 'min_wait_deadline_and_run_deadline';
-    permits: readonly ['tool', 'shell_invocation'];
   };
   lateEventPolicy: 'diagnostic_or_reconciliation_only';
 }
@@ -33,7 +32,7 @@ export function createRuntimeSchedulingPolicy(): RuntimeSchedulingPolicy {
     version: 1 as const,
     parallelRead: Object.freeze({
       concurrencyGroup: 'parallel-read' as const,
-      ceiling: MAX_PARALLEL_READ_TOOLS,
+      batch: 'all_compatible_in_model_response' as const,
       barrier: 'interaction_write_or_unknown' as const,
     }),
     parallelSubagent: Object.freeze({
@@ -48,10 +47,9 @@ export function createRuntimeSchedulingPolicy(): RuntimeSchedulingPolicy {
       rejection: 'stop_undispatched_siblings' as const,
     }),
     concurrencyAdmission: Object.freeze({
+      scope: 'subagent_and_writer' as const,
       queue: 'fifo_per_resource' as const,
-      compoundPermits: 'atomic_all_or_none' as const,
       deadline: 'min_wait_deadline_and_run_deadline' as const,
-      permits: ['tool', 'shell_invocation'] as const,
     }),
     lateEventPolicy: 'diagnostic_or_reconciliation_only' as const,
   });

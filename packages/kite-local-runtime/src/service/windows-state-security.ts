@@ -67,7 +67,7 @@ function assertWindowsStatePathType(path: string, kind: WindowsStatePathKind): v
   if (isDirectory !== (kind === 'directory')) fail('type_mismatch');
 }
 
-function resolveCurrentWindowsUserSid(): string {
+export function resolveCurrentWindowsUserSid(): string {
   if (cachedWindowsUserSid) return cachedWindowsUserSid;
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
   const result = spawnSync(

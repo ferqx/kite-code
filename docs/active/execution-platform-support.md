@@ -15,7 +15,7 @@ apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
 相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、ADR-0137、`release/platform-capabilities/support-matrix.json`、
-`docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
+`release/oss-first-release/evidence/2026-07-29-agent-production-execution-isolation.md`。
 
 ## SAQ-10 scope contract
 
@@ -42,8 +42,8 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 G
 Docker、WSL2 和架构模拟只作开发预检。
 
 Local Runtime Service不扩大该production effectful支持集合。shipped terminal consumer仍只有本地TUI与用户在场的
-foreground CLI，但二者当前都通过managed Native client连接`apps/kite-service`的唯一Host/Store/Builtin composition；
-internal stdio与development/reference carrier不构成Web/Desktop支持。普通candidate已包含同identity的`kite-service`
+foreground CLI；二者默认通过parent-owned stdio App Server进入`apps/kite-service`的Host/Store/Builtin composition，显式`--server`可改连
+owner-only Unix socket/Windows named-pipe daemon。development/reference carrier不构成Web/Desktop支持。普通candidate已包含同identity的`kite-service`
 companion，installer也定义ordinary stop/lifecycle fence的fail-closed cutover；当前只登记owner-local focused evidence，
 完整40个PTY scenarios、本地fault与CI-profile soak、本机macOS arm64 release smoke已通过；CI-profile soak不提供formal
 资源资格，单平台结果也不能推断三平台passed。这些事实仍不能改变下方effectful execution空支持集。
@@ -304,6 +304,11 @@ production execution。composition 的 startup discovery 只解析静态候选�
 执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite-ai/runtime-host` 的唯一 process supervisor；
 Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
+不经过native sandbox的POSIX host-shell仍是当前development/用户显式fallback，因此KASD App Server不能在parent SIGKILL后留下该process tree。
+Runtime Host generic process port现以同组watchdog代替direct spawn：一次性bounded stdin传递argv/cwd/env且保持parent pipe，正常cancel走现有
+process-tree guard，parent EOF杀整个group。它不提供confinement、detached descendant containment或production sandbox资格，也不改变本页
+native backend空支持集；它只补足现有host-shell的parent-death cleanup。
+
 App composition 的 preparation abort 不依赖平台 probe 主动观察 `AbortSignal`：一旦 controller 轮换，当前
 `prepare()` waiter 必须立即以 typed abort 收敛，下一次 `prepare()` 重新执行 discovery。旧 probe 的迟到结果或异常
 仍由组合层消费以避免未处理 rejection，但不得写入 cache、选择 backend 或触发 host/native dispatch。该边界保证
@@ -403,7 +408,7 @@ smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只�
 synthetic bundle 完成 bootstrap verification。Task 1B.9 因此以负向 conformance 完成并唯一产生
 `MS:1B-DONE`。该 milestone 只证明 exclusion 和 fail-closed contract，不改变 D-04 空支持集，也不
 产生 production qualification 或可分发制品。完整身份见
-[Phase 1B 完成记录](../space/execution/completed/2026-08-02-agent-production-phase-1b.md)。
+[Phase 1B 完成记录](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-08-02-agent-production-phase-1b.md)。
 
 三平台 conformance 的测试夹具必须只依赖 runner 上可移植、可规范化的身份：临时路径按
 canonical native path 比较，不假定 POSIX `/tmp` 或未规范化的短路径；需要生成提交或 merge

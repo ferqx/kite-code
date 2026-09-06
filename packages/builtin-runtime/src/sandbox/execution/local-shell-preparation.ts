@@ -37,7 +37,7 @@ export function buildHardenedEnv(
       if (value !== undefined) env[key] = value;
     }
   }
-  if (process.env.HOME) env.HOME = process.env.HOME;
+  if (!options.policyProvenReadOnly && process.env.HOME) env.HOME = process.env.HOME;
   const developerBin = selectedDarwinDeveloperBin();
   if (developerBin) {
     env.PATH = env.PATH ? `${developerBin}${delimiter}${env.PATH}` : developerBin;

@@ -4,22 +4,41 @@
 import type {
   ContextCompactionProgressPhase,
   ContextStatusSnapshot,
-  RuntimeInteractionQueueProjection,
 } from '@kite-ai/runtime-contract';
-import type { RuntimeCheckpointEntry, RuntimePresentationEvent } from '../runtime-presentation';
-import type { InterruptState, OutputBlock, RewindScope, TuiState } from '../types';
+import type { RuntimeCheckpointEntry } from '../runtime-presentation';
+import type {
+  AcceptedPresentationEnvelope,
+  InterruptState,
+  OutputBlock,
+  RewindScope,
+  TuiRuntimeAuthorityProjection,
+  TuiState,
+} from '../types';
 
 export type Action =
-  | { type: 'RUNTIME_EVENT'; event: RuntimePresentationEvent }
+  | {
+      type: 'ACCEPT_PRESENTATION_ENVELOPE';
+      event: AcceptedPresentationEnvelope;
+    }
   | {
       type: 'RECONCILE_RUNTIME_PROJECTION';
-      active: boolean;
-      interactionQueue: RuntimeInteractionQueueProjection;
+      projection: TuiRuntimeAuthorityProjection;
     }
   | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
+  | { type: 'LOCAL_USER_PROMPT'; text: string }
+  | { type: 'DROP_LOCAL_USER_PROMPT'; text: string }
+  | { type: 'QUEUE_LOCAL_PROMPT'; id: number; sessionId: string; text: string }
+  | {
+      type: 'ACCEPT_QUEUED_PROMPT';
+      id: number;
+      sessionId: string;
+      text: string;
+      messageId: string;
+    }
+  | { type: 'ACCEPT_LOCAL_PROMPT'; text: string; messageId: string }
+  | { type: 'DEQUEUE_LOCAL_PROMPT'; id: number }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }
-  | { type: 'SET_IDLE' }
   | {
       type: 'SET_COMPACTION_PROGRESS';
       phase: ContextCompactionProgressPhase;
@@ -34,8 +53,6 @@ export type Action =
   | {
       type: 'RESOLVE_INTERRUPT';
       blockId?: number;
-      /** Child identity captured while the approval Footer is still mounted. */
-      approvalTarget?: { subagentId?: string; parentToolCallId?: string };
       resolution:
         | string
         | {
@@ -52,6 +69,7 @@ export type Action =
   | { type: 'SET_PHASE'; phase: 'planning' | 'building' }
   | { type: 'ESCAPE' }
   | { type: 'CTRL_C' }
+  | { type: 'CANCEL_REQUEST_FAILED' }
   | { type: 'RESET_CTRL_C' }
   | { type: 'SWITCH_AUTH'; mode: string }
   | { type: 'EXPORT_SESSION' }
@@ -83,7 +101,7 @@ export type Action =
     }
   | { type: 'SELECT_MODEL'; provider: string; modelName: string; reasoningEnabled?: boolean }
   | { type: 'NEW_SESSION'; threadId: string }
-  | { type: 'USER_MESSAGE'; text: string }
+  | { type: 'LOCAL_COMMAND'; text: string }
   | { type: 'SHOW_MCP' }
   | { type: 'HIDE_MCP' }
   | { type: 'INJECT_MCP_PROMPT'; server: string; promptName: string }

@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import React from 'react';
+import { projectOutputBlockTimelineItem, type TimelineItem } from '../presentation/timeline';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
@@ -91,13 +92,14 @@ function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
 }
 
 interface BlockRendererProps {
-  block: OutputBlock;
+  /** Canonical production input. Rendering receives state/digest through the item. */
+  item?: TimelineItem;
+  /** Transitional test/compatibility input; production OutputArea always passes item. */
+  block?: OutputBlock;
   isFocused: boolean;
   index: number;
   columns: number;
   prevBlock?: OutputBlock;
-  /** 当主 agent 等待审批时，工具并未真正执行，隐藏计时器 / When awaiting approval, tool isn't actually running, hide timer */
-  awaitingApproval?: boolean;
   /** 当 ask_user 正在等待用户输入时显示等待状态 / Show ask_user waiting state */
   awaitingInput?: boolean;
   /** Per-card live step budget used to keep concurrent subagents below fullscreen height. */
@@ -105,16 +107,20 @@ interface BlockRendererProps {
 }
 
 const BlockRenderer = React.memo(function BlockRenderer({
-  block,
+  item,
+  block: legacyBlock,
   isFocused: _isFocused,
   columns,
   index: _i,
   prevBlock,
-  awaitingApproval,
   awaitingInput,
   maxVisibleSubagentSteps,
 }: BlockRendererProps) {
   const dt = useTheme();
+  const renderItem =
+    item ?? (legacyBlock ? projectOutputBlockTimelineItem(legacyBlock) : undefined);
+  if (!renderItem) return null;
+  const block = renderItem.renderModel.block;
 
   switch (block.kind) {
     case 'user': {
@@ -179,12 +185,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'tool_card':
       return (
         <Box {...gapFrom(prevBlock)}>
-          <ToolCardBlock
-            block={block}
-            awaitingApproval={awaitingApproval}
-            awaitingInput={awaitingInput}
-            columns={columns}
-          />
+          <ToolCardBlock block={block} awaitingInput={awaitingInput} columns={columns} />
         </Box>
       );
 

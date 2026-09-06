@@ -237,7 +237,7 @@ describe('Kite Runtime Store compatibility composition', () => {
       }),
     ]);
     expect(result?.namedSnapshots).toHaveLength(1);
-    expect(result?.stateJson).toContain('kite-runtime-saq-v1-2026-08-25');
+    expect(result?.stateJson).toContain(RUNTIME_STATE_FORMAT_EPOCH);
   });
 
   test('fails only the selected session instead of dropping an invalid named recovery point', () => {

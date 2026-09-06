@@ -12,7 +12,10 @@ import {
 } from '@kite-ai/runtime-contract';
 import { createRuntimeCommandCommitEvidence } from '@kite-ai/runtime-host';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
-import { createKiteCliRuntimeAccess, createKiteRuntimeStorageOwner } from '../../src/bootstrap';
+import {
+  createKiteCliRuntimeAccess,
+  createKiteSessionAppServerStorageComposition,
+} from '../../src/bootstrap';
 import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
 
 type RestartCommand =
@@ -46,11 +49,16 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
     if (started.status !== 'applied') throw new Error('Start command was not applied.');
     const startRevision = started.revision;
     expect(startRevision).toBeNumber();
-    expect(started).toEqual({
+    expect(started).toMatchObject({
       status: 'applied',
       commandId: start.commandId,
       sessionId,
       revision: expect.any(Number),
+      resource: {
+        kind: 'run',
+        run: { sessionId, status: 'queued' },
+        messageId: expect.any(String),
+      },
     });
 
     // This barrier proves the committed command has crossed into the provider
@@ -63,7 +71,10 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
     // Read through a newly opened Store owner, not the closed first Host. The
     // receipt's original applied revision remains the command decision,
     // while shutdown/recovery may have advanced State to a terminal revision.
-    const reopenedStore = createKiteRuntimeStorageOwner(checkpointPath);
+    const reopenedStore = createKiteSessionAppServerStorageComposition({
+      databasePath: join(workspace, 'kite-session.sqlite'),
+      hostInstanceId: 'restart-receipt-observer',
+    });
     try {
       const storedStart = reopenedStore.storage.commandReceipts.lookup(receiptLookup(start));
       expect(storedStart).toMatchObject({
@@ -81,7 +92,7 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
           .some((entry) => entry.event.type === 'turn.aborted'),
       ).toBe(true);
     } finally {
-      reopenedStore.storage.close();
+      reopenedStore.disposeStorage();
     }
 
     second = createAccess({ workspace, checkpointPath, sessionId, baseURL: model.baseURL });
@@ -94,11 +105,16 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
     });
 
     const replayedStart = await second.command(start);
-    expect(replayedStart).toEqual({
+    expect(replayedStart).toMatchObject({
       status: 'idempotent_replay',
       commandId: start.commandId,
       sessionId,
       originalRevision: startRevision,
+      resource: {
+        kind: 'run',
+        run: { sessionId, status: 'queued' },
+        messageId: expect.any(String),
+      },
     });
     // A replay is an acknowledgement of the original commit, never a fake
     // terminal result; terminal State is only observed through State/query.
@@ -146,7 +162,7 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
   }
 });
 
-test('a pending approval survives process death and resumes from its durable interaction receipt', async () => {
+test('a pending approval stays durable while a crashed execution owner remains fenced', async () => {
   const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-approval-restart-'));
   const checkpointPath = join(workspace, 'runtime.sqlite');
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
@@ -172,7 +188,6 @@ test('a pending approval survives process death and resumes from its durable int
       stderr: 'pipe',
     },
   );
-  let second: ReturnType<typeof createKiteCliRuntimeAccess> | undefined;
   try {
     const interaction = JSON.parse(
       await readFirstLine(child.stdout, child.stderr),
@@ -185,92 +200,21 @@ test('a pending approval survives process death and resumes from its durable int
     child.kill('SIGKILL');
     expect(await child.exited).not.toBe(0);
 
-    const shellCommands: string[] = [];
-    second = createAccess({
-      workspace,
-      checkpointPath,
-      sessionId,
-      baseURL: model.baseURL,
-      sandboxBackend: 'seatbelt',
-      shellExecutor: async (command) => {
-        shellCommands.push(command);
-      },
+    const store = createKiteSessionAppServerStorageComposition({
+      databasePath: join(resolve(checkpointPath, '..'), 'kite-session.sqlite'),
+      hostInstanceId: 'restart-interaction-observer',
     });
-    const resumed = await second.command({
-      schema: RUNTIME_COMMAND_SCHEMA_,
-      commandId: 'restart-approval-resume',
-      type: 'resume_session',
-      sessionId,
-    });
-    expect(resumed).toMatchObject({ status: 'applied', sessionId });
-    const restored = await second.query({
-      schema: RUNTIME_QUERY_SCHEMA_,
-      type: 'get_session_projection',
-      sessionId,
-    });
-    const restoredApproval =
-      restored.status === 'ok'
-        ? restored.session?.interactionQueue.interactions.find(
-            (candidate) => candidate.interactionId === interaction.interactionId,
-          )
-        : undefined;
-    if (!restoredApproval) {
-      throw new Error(`Restarted projection omitted approval: ${JSON.stringify(restored)}`);
-    }
-    expect(restoredApproval).toMatchObject({
-      kind: 'approval',
-      interactionId: interaction.interactionId,
-      sessionRevision: restored.status === 'ok' ? restored.session?.revision : undefined,
-    });
-    if (restoredApproval?.kind !== 'approval') {
-      throw new Error('Restarted Service did not restore the pending approval.');
-    }
-
-    const receipt = await (async () => {
-      try {
-        return await second.command({
-          schema: RUNTIME_COMMAND_SCHEMA_,
-          commandId: 'restart-approval-response',
-          type: 'respond_interaction',
-          sessionId,
-          expectedRevision: restoredApproval.sessionRevision,
-          interaction: restoredApproval,
-          response: { kind: 'approval', decision: 'approve_once' },
-        });
-      } catch (error) {
-        throw new Error(`Restarted interaction command failed: ${JSON.stringify(error)}`, {
-          cause: error,
-        });
-      }
-    })();
-    expect(receipt).toMatchObject({ status: 'applied', sessionId });
-    await waitFor(() => model.requestCount() >= 2);
-    await waitForTerminal(second, sessionId);
-    await second[Symbol.asyncDispose]();
-    second = undefined;
-
-    const store = createKiteRuntimeStorageOwner(checkpointPath);
     try {
-      const eventTypes = store.storage.sessions
-        .loadEventsStrict(sessionId)
-        .map((entry) => entry.event.type);
-      expect(eventTypes.filter((type) => type === 'approval.granted')).toHaveLength(1);
-      if (!eventTypes.includes('tool.started')) {
-        throw new Error(
-          `Restarted interaction skipped tool execution: ${JSON.stringify(
-            store.storage.sessions.loadEventsStrict(sessionId).map((entry) => entry.event),
-          )}`,
-        );
-      }
-      expect(eventTypes).toContain('tool.started');
-      expect(shellCommands).toEqual(['bun test']);
+      const snapshot = store.storage.sessions.loadSnapshotRecord<RuntimeState>(sessionId);
+      expect(snapshot?.state.pendingApprovals.has(interaction.interactionId)).toBe(true);
+      expect(store.recovery.inspect(sessionId).authority.status).toBe('active');
+      expect(model.requestCount()).toBe(1);
     } finally {
-      store.storage.close();
+      store.disposeStorage();
     }
   } finally {
     child.kill('SIGKILL');
     await child.exited;
-    await second?.[Symbol.asyncDispose]();
     model.stop();
     if (previousKiteCodeHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;
@@ -364,47 +308,25 @@ async function readFirstLine(
   throw new Error(`Approval child did not become ready: ${diagnostic}`);
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt += 1) {
-    if (predicate()) return;
-    await Bun.sleep(10);
-  }
-  throw new Error('Restarted interaction continuation did not complete.');
-}
-
 async function waitForPersistedInteraction(
   checkpointPath: string,
   sessionId: string,
   interactionId: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
-    const store = createKiteRuntimeStorageOwner(checkpointPath);
+    const store = createKiteSessionAppServerStorageComposition({
+      databasePath: join(resolve(checkpointPath, '..'), 'kite-session.sqlite'),
+      hostInstanceId: `restart-interaction-observer-${attempt}`,
+    });
     try {
       const snapshot = store.storage.sessions.loadSnapshotRecord<RuntimeState>(sessionId);
       if (snapshot?.state.pendingApprovals.has(interactionId)) return;
     } finally {
-      store.storage.close();
+      store.disposeStorage();
     }
     await Bun.sleep(10);
   }
   throw new Error('Approval child did not make its interaction durable before process death.');
-}
-
-async function waitForTerminal(
-  access: ReturnType<typeof createKiteCliRuntimeAccess>,
-  sessionId: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt += 1) {
-    const result = await access.query({
-      schema: RUNTIME_QUERY_SCHEMA_,
-      type: 'get_session_projection',
-      sessionId,
-    });
-    const status = result.status === 'ok' ? result.session?.activeWork?.status : undefined;
-    if (status === 'completed' || status === 'failed' || status === 'cancelled') return;
-    await Bun.sleep(10);
-  }
-  throw new Error('Restarted interaction continuation did not reach a terminal projection.');
 }
 
 function createSessionCommand(

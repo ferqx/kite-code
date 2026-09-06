@@ -412,6 +412,25 @@ describe('State tool governance authorization facts', () => {
     expect(auto).toMatchObject({ kind: 'request_auto_review' });
   });
 
+  test('routes uncertain Shell effects to exact manual approval in every non-approved mode', () => {
+    for (const interactionMode of ['accept_edits', 'auto', 'full'] as const) {
+      expect(
+        authorizeToolGovernance(
+          shellFacts({
+            policy: {
+              decision: 'ask',
+              allowed: true,
+              requiresApproval: true,
+              risk: 'unknown',
+              effects: { uncertainEffects: true },
+            },
+            context: { interactionMode, executionMechanism: 'shell' },
+          }),
+        ),
+      ).toMatchObject({ kind: 'request_approval' });
+    }
+  });
+
   test('keeps deny and planning phase denial ahead of full_access', () => {
     expect(
       authorizeToolGovernance(

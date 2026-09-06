@@ -2,6 +2,7 @@ export { planArtifactPath, planArtifactRoot } from './plan-artifact-paths';
 export {
   type PlanArtifactContent,
   PlanArtifactError,
+  type PlanArtifactStorageBackend,
   PlanArtifactStore,
 } from './plan-artifacts';
 export {

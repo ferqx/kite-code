@@ -753,6 +753,12 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
             childSubagentId: 'subagent-1',
             runtimeToolCallId: blockedTool.runtimeToolCallId,
             bindingDigest: 'approval-hash-1',
+            owner: Object.freeze({
+              kind: 'subagent_tool' as const,
+              toolCallId: blockedTool.toolCallId,
+              subagentId: 'subagent-1',
+              parentToolCallId: 'call-1',
+            }),
             approval: Object.freeze({
               scope: 'once' as const,
               callId: blockedTool.runtimeToolCallId,

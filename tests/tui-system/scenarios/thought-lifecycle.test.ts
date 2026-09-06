@@ -15,7 +15,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  submitCommand,
+  submitUserMessage,
+  submitUserMessageForDeferredDelivery,
+} from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -57,11 +61,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       },
       files: {
         'CLAUDE.md': '# Test workspace\n\nFixture used by Thought Lifecycle read-tool scenarios.\n',
+        'README.md': '# Kite Code\n\nA controllable coding agent.\n',
+        'docs/README.md': '# Documentation\n\nCurrent documentation index.\n',
         'package.json': '{"name":"thought-lifecycle-fixture"}\n',
         'src/index.ts': 'export const runtime = "langgraph migration fixture";\n',
       },
     });
-
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
@@ -70,7 +75,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 0 — 流式正文按 ADR-0036 切开相邻探索阶段
+  // Test 0 — 多次模型调用仍归入同一个探索阶段
   //
   // 放在其他测试之前，因为共享 PTY session 中
   // 后续测试的 mock responses 会与前面的 auxiliary calls 竞争。
@@ -80,14 +85,14 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: PHASE_TWO 思考 + search_files  ← 新一轮模型调用
   //   Response 3: 文本输出（阶段结束，最终回答脱离）
   //
-  // 预期 TUI 现象（ADR-0036 / ADR-0045）：
+  // 预期 TUI 现象（ADR-0045 / ADR-0169）：
   //   - reasoning completed 后才显示，工具活动在同一窗口覆盖 reasoning
-  //   - 每段流式正文都是 sibling text，后续工具在正文之后建立新阶段
-  //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
+  //   - 带工具响应的流式正文保留归属但不渲染
+  //   - 阶段块 settle 后只保留单行统计，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'streamed narration separates adjacent exploration activity without becoming a caption',
+    'streamed narration stays hidden across server-owned exploration groups',
     async () => {
       server.setResponses([
         // Response 1: Phase 1 thinking + first tool
@@ -129,36 +134,197 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // Local reasoning reached the reducer but is folded out of the settled
-      // view. The two streamed narrations remain normal text boundaries, so
-      // the following tools cannot be collapsed back into one caption block.
+      // Reasoning and adjacent tool activity share one aggregate. Tool-bearing
+      // narration is not accumulated into the archived Thought.
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'searched 1 file pattern')).toBe(true);
-      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(false);
-      expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(true);
-      expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(true);
+      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(false);
+      expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(false);
       expect(screenContains(output, 'PHASE_ONE')).toBe(false);
       expect(screenContains(output, 'PHASE_TWO')).toBe(false);
       const lines = clean.split('\n').map((line) => line.trim());
-      const firstNarration = lines.indexOf('先查看项目入口和核心配置。');
-      const firstRead = lines.findIndex(
-        (line, index) => index > firstNarration && line.includes('read 1 file'),
-      );
-      const secondNarration = lines.indexOf('继续搜索源码和文档目录。');
-      const laterSearch = lines.findIndex(
-        (line, index) => index > secondNarration && line.includes('searched 1 file pattern'),
-      );
-      expect(firstNarration).toBeGreaterThan(-1);
-      expect(firstRead).toBeGreaterThan(firstNarration);
-      expect(secondNarration).toBeGreaterThan(firstRead);
-      expect(laterSearch).toBeGreaterThan(secondNarration);
+      expect(lines.filter((line) => line.startsWith('Thinking '))).toHaveLength(1);
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
       expect(screenContains(output, 'TIMELINE_DONE')).toBe(true);
 
       console.log('  [Test 0] clean output (last 3000 chars):', clean.slice(-3000));
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'classifies an exploration answer and preserves completed scrolling across two turns',
+    async () => {
+      const longTail = Array.from(
+        { length: 55 },
+        (_, index) =>
+          `SCROLL_HISTORY_LINE_${String(index + 1).padStart(2, '0')}: completed detail.`,
+      ).join('\n\n');
+      server.setResponses([
+        {
+          message: {
+            reasoning_content: 'Reading one file before the final response.',
+            tool_calls: [
+              { id: 'stream-after-tool', name: 'read_file', args: { path: 'README.md' } },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'stream-after-tool', contentIncludes: ['A controllable coding agent'] },
+            ],
+          },
+          message: {
+            reasoning_chunks: ['Composing the final response.'],
+            content_chunks: [
+              'FINAL_COMPONENT_FIRST: visible paragraph.\n\n',
+              'FINAL_COMPONENT_SECOND: visible before completion.\n\n',
+              `${longTail}\n\nFINAL_COMPONENT_LAST: visible before terminal.\n\nBUFFERED_TERMINAL_TAIL`,
+            ],
+          },
+          // Keep a deterministic observation window after each content frame,
+          // especially after the final delta and before stop/[DONE].
+          chunk_delay: 300,
+          stream_frame_delays: [0, 300, 300, 1_500, 0, 0],
+        },
+      ]);
+
+      await submitUserMessage(tui, server, 'Stream a long final answer after reading', {
+        timeout: 15_000,
+      });
+      // The preceding exploration Thought owns these components until the
+      // model terminal classifies the response as final. Their post-terminal
+      // Static ownership is verified below through scroll stability.
+      await waitForText(() => tui.scrollback(), 'FINAL_COMPONENT_LAST', 20_000);
+      await waitForText(() => tui.scrollback(), 'BUFFERED_TERMINAL_TAIL', 10_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10_000, 750);
+      await tui.settleScreen();
+      const expectCompletedScrollToStayIdle = async () => {
+        const atBottom = tui.viewportPosition();
+        expect(atBottom.baseY).toBeGreaterThan(0);
+        expect(atBottom.viewportY).toBe(atBottom.baseY);
+
+        await tui.scrollViewport(-20);
+        const scrolled = tui.viewportPosition();
+        expect(scrolled.viewportY).toBeLessThan(scrolled.baseY);
+        const idleFrames = tui.markScreen();
+
+        await tui.writeExact('\x1b[O');
+        await tui.writeExact('\x1b[I');
+        await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 2_000, 250, false);
+        await tui.settleScreen();
+        const afterIdleRenderWindow = tui.viewportPosition();
+        expect(afterIdleRenderWindow.baseY - afterIdleRenderWindow.viewportY).toBe(
+          scrolled.baseY - scrolled.viewportY,
+        );
+        expect(afterIdleRenderWindow.viewportY).toBeLessThan(afterIdleRenderWindow.baseY);
+        expect(tui.screenFramesSince(idleFrames)).toEqual([]);
+      };
+
+      await expectCompletedScrollToStayIdle();
+
+      const clean = stripAnsi(tui.scrollback());
+      expect(clean.split('FINAL_COMPONENT_FIRST')).toHaveLength(2);
+      expect(clean.split('FINAL_COMPONENT_SECOND')).toHaveLength(2);
+      expect(clean.split('FINAL_COMPONENT_LAST')).toHaveLength(2);
+      expect(clean.split('BUFFERED_TERMINAL_TAIL')).toHaveLength(2);
+
+      await tui.scrollViewport(10_000);
+      const secondTail = Array.from(
+        { length: 45 },
+        (_, index) =>
+          `SECOND_TURN_HISTORY_${String(index + 1).padStart(2, '0')}: completed detail.`,
+      ).join('\n\n');
+      server.setResponses([
+        {
+          message: {
+            content_chunks: [
+              'SECOND_TURN_FIRST_COMPONENT: visible paragraph.\n\n',
+              `${secondTail}\n\nSECOND_TURN_LAST_COMPONENT: visible paragraph.\n\nSECOND_TURN_BUFFERED_TAIL`,
+            ],
+          },
+          chunk_delay: 300,
+        },
+      ]);
+      await submitUserMessage(tui, server, 'Ask a second long question', { timeout: 15_000 });
+      await waitForText(() => tui.scrollback(), 'SECOND_TURN_BUFFERED_TAIL', 15_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10_000, 750);
+      await tui.settleScreen();
+
+      await expectCompletedScrollToStayIdle();
+      const twoTurnClean = stripAnsi(tui.scrollback());
+      expect(twoTurnClean.split('SECOND_TURN_FIRST_COMPONENT')).toHaveLength(2);
+      expect(twoTurnClean.split('SECOND_TURN_LAST_COMPONENT')).toHaveLength(2);
+      expect(twoTurnClean.split('SECOND_TURN_BUFFERED_TAIL')).toHaveLength(2);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'queueing a successor does not duplicate the active exploration Thought',
+    async () => {
+      server.setResponses([
+        {
+          message: {
+            reasoning_content: 'Inspecting the project before answering.',
+            content: 'First visible progress boundary.',
+            tool_calls: [
+              { id: 'queue-thought-read', name: 'read_file', args: { path: 'README.md' } },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'queue-thought-read',
+                contentIncludes: ['A controllable coding agent'],
+              },
+            ],
+          },
+          message: {
+            reasoning_content: 'Searching after the first visible boundary.',
+            content: 'Second visible progress boundary.',
+            tool_calls: [
+              {
+                id: 'queue-thought-search',
+                name: 'search_files',
+                args: { path: '.', pattern: 'README.md' },
+              },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'queue-thought-search', contentIncludes: ['README.md'] }],
+          },
+          message: { content: 'QUEUE_THOUGHT_DONE' },
+          delay: 2_000,
+        },
+        { message: { content: 'QUEUE_SUCCESSOR_DONE' }, delay: 10 },
+      ]);
+
+      await submitUserMessage(tui, server, 'Inspect before queued successor', { timeout: 15_000 });
+      await waitForText(() => tui.viewport(), 'searched 1 file pattern', 15_000);
+      const beforeQueue = stripAnsi(tui.scrollback());
+      const beforeThoughtCount = beforeQueue.match(/Thinking /g)?.length ?? 0;
+
+      await submitUserMessageForDeferredDelivery(tui, server, 'Queued successor', {
+        acceptWhen: (viewport) => screenContains(viewport, '↵ Queued successor'),
+        timeout: 15_000,
+      });
+      const whileQueued = stripAnsi(tui.scrollback());
+      expect(whileQueued.match(/Thinking /g)?.length ?? 0).toBe(beforeThoughtCount);
+      expect(whileQueued.match(/read 1 file/g)?.length ?? 0).toBe(1);
+      expect(whileQueued.match(/searched 1 file pattern/g)?.length ?? 0).toBe(1);
+
+      await waitForText(() => tui.scrollback(), 'QUEUE_THOUGHT_DONE', 15_000);
+      await waitForText(() => tui.scrollback(), 'QUEUE_SUCCESSOR_DONE', 15_000);
     },
     TIMEOUT,
   );
@@ -283,7 +449,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 每个模型请求拥有独立的思考/工具组件边界
+  // Test 2 — 相邻探索请求保持同一个 Thought 边界
   //
   // 消息结构：
   //   Response 1: reasoning + read_file(CLAUDE.md)
@@ -291,13 +457,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 3: content 文本输出（阶段结束）
   //
   // 预期 TUI 现象：
-  //   - 每个 model.requested(requestId) 结算前一个组件
-  //   - 两轮分别显示 "Thinking Xs · read 1 file"
-  //   - 不依赖相邻事件顺序把不同 request 的工具聚合到同一块
+  //   - model.requested(requestId) 本身不是可见边界
+  //   - 没有正文、独立工具或交互打断时，两轮探索合并为一个 Thought
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'successive model requests keep separate reasoning and tool components',
+    'successive exploration requests stay in one aggregate',
     async () => {
       server.setResponses([
         // Phase 1
@@ -334,9 +499,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
-
-      expect(screenContains(output, 'read 2 files')).toBe(false);
-      expect(clean.match(/Thinking \d+s · read 1 file/gu)?.length ?? 0).toBe(2);
+      expect(screenContains(output, 'read 2 files')).toBe(true);
+      expect(clean.match(/Thinking \d+s · read 2 files/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'Phase 1:')).toBe(false);
       expect(screenContains(output, 'Phase 2:')).toBe(false);
 
@@ -354,21 +518,20 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 3 — shell_execute 无 inspect intent 时使用独立工具块
+  // Test 3 — 只读 shell_execute 使用服务端安全展示分类
   //
   // 消息结构：
   //   Response 1: reasoning + read_file + shell_execute(without inspect intent)
   //   Response 2: content 文本输出 → 关闭 Thought
   //
   // 预期 TUI 现象：
-  //   - shell_execute 无 intent=inspect 时不纳入 Thought
-  //   - read_file 保持探索摘要
-  //   - shell_execute 使用独立 tool_card
+  //   - App Server 根据已解析的只读 effect 将 shell 纳入探索摘要
+  //   - 客户端不根据原始 command 自行重做分类
   //   - 最终文本正常出现
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'shell_execute keeps its governed tool lifecycle with a verified result',
+    'read-only shell_execute uses the server-owned exploration presentation',
     async () => {
       server.setResponses([
         {
@@ -405,13 +568,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       const shellHistory = tui.screenFramesSince(shellFrames).join('\n');
-
-      // ── shell_execute without inspect intent stays as independent tool_card ──
-      // The read starts after the shell boundary as a separate safe summary;
-      // it never renders a transient standalone Read card.
+      // ── 服务端将已验证的只读 shell 与 read 一起投影为探索摘要 ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'ran 1 command')).toBe(false);
-      expect(screenContains(output, 'Bash')).toBe(true);
+      expect(screenContains(output, 'ran 1 shell command')).toBe(true);
+      expect(screenContains(output, 'Bash')).toBe(false);
       expect(screenContains(shellHistory, 'exit: error')).toBe(false);
 
       // ── 独立工具卡完成后可折叠；最终回答仍可见 ──
@@ -429,7 +590,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'post-Bash searches and later reasoning keep request-scoped components',
+    'post-Bash searches and later reasoning form one exploration thought',
     async () => {
       server.setResponses([
         {
@@ -443,7 +604,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
                 // standalone terminal then arrives after the aggregate, which
                 // is the persisted ordering from the project-overview report.
                 args: {
-                  command: `bun -e "await Bun.sleep(200); console.log('status-ok')"`,
+                  command:
+                    "if [ -x /bin/sleep ]; then /bin/sleep 0.2; else /usr/bin/sleep 0.2; fi; printf 'status-ok\\n'",
                 },
               },
               {
@@ -478,22 +640,22 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await submitUserMessage(tui, server, 'Inspect after a standalone command', {
         timeout: 15_000,
       });
+      await waitForText(() => tui.viewport(), '工具授权', 15_000);
+      tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'POST_BASH_DONE', 25_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
       expect(screenContains(output, 'Bash')).toBe(true);
-      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(false);
+      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
       const bash = clean.indexOf('● Bash Ran:');
-      const searchSummary = clean.indexOf('searched 2 file patterns');
-      const laterThinking = clean.lastIndexOf('Thinking ');
+      const explorationThought = clean.lastIndexOf('Thinking ');
       const finalText = clean.indexOf('POST_BASH_DONE:');
-      expect(searchSummary).toBeGreaterThan(bash);
-      expect(laterThinking).toBeGreaterThan(searchSummary);
-      expect(finalText).toBeGreaterThan(laterThinking);
+      expect(explorationThought).toBeGreaterThan(bash);
+      expect(finalText).toBeGreaterThan(explorationThought);
       expect(tui.scrollback()).not.toContain('● Find');
 
       await waitForCondition(
@@ -549,17 +711,15 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .split('\n')
         .filter((line) => line.includes('searched 2 file patterns'));
       expect(searchLines).toHaveLength(1);
-      expect(searchLines[0]?.trim()).toBe('searched 2 file patterns');
+      expect(searchLines[0]?.trim()).toMatch(/^Thinking \d+s · searched 2 file patterns$/u);
       expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
-      expect(replay.indexOf('Thinking ')).toBeGreaterThan(
-        replay.indexOf('searched 2 file patterns'),
-      );
+      expect(replay.indexOf('Thinking ')).toBeGreaterThan(replay.indexOf('● Bash Ran:'));
     },
     TIMEOUT,
   );
 
   test(
-    'project overview keeps streamed narration as text and upgrades post-error searches',
+    'project overview keeps adjacent exploration in one aggregate without narration',
     async () => {
       const captions = [
         '好的，我来探索一下这个项目。先看看整体结构。',
@@ -659,43 +819,198 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const lines = stripAnsi(output)
         .split('\n')
         .map((line) => line.trim());
-      expect(lines.some((line) => line.includes('read 8 files, searched 4 file patterns'))).toBe(
-        false,
-      );
-      const narrationLines = captions.map((caption) => lines.indexOf(caption));
-      narrationLines.forEach((line) => {
-        expect(line).toBeGreaterThan(-1);
+      const thoughtLines = lines.filter((line) => line.startsWith('Thinking '));
+      expect(thoughtLines).toHaveLength(1);
+      expect(lines.some((line) => line.includes('read 8 files'))).toBe(true);
+      expect(lines.some((line) => line.includes('searched 6 file patterns'))).toBe(true);
+      expect(lines.some((line) => line.includes('ran 1 shell command'))).toBe(true);
+      captions.forEach((caption) => {
+        expect(lines).not.toContain(caption);
       });
-      for (let index = 1; index < narrationLines.length; index += 1) {
-        expect(narrationLines[index]).toBeGreaterThan(narrationLines[index - 1]!);
-      }
 
-      // Every narration is a normal sibling text block. The later Bash and
-      // post-Bash exploration therefore follow it instead of sharing a
-      // permanent caption collection inside the first Thought.
-      const lastNarration = narrationLines.at(-1)!;
-
-      const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
-      expect(bash).toBeGreaterThan(lastNarration);
-      const postBashSearch = lines.findIndex(
-        (line, index) => index > bash && line === 'searched 2 file patterns',
-      );
-      expect(postBashSearch).toBeGreaterThan(bash);
-      const secondThinking = lines.findIndex(
-        (line, index) => index > postBashSearch && line.startsWith('Thinking '),
-      );
-      expect(secondThinking).toBeGreaterThan(bash);
-      expect(
-        lines.some(
-          (line) => line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
-        ),
-      ).toBe(false);
+      expect(lines.some((line) => line.startsWith('● Bash Ran:'))).toBe(false);
       expect(
         lines.indexOf('PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。'),
-      ).toBeGreaterThan(secondThinking);
+      ).toBeGreaterThan(lines.indexOf(thoughtLines[0]!));
       expect(tui.scrollback()).not.toContain('● Find');
 
       console.log('  [project-overview] clean output:', stripAnsi(output));
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'replays server-owned project-inspection groups when a successor queues',
+    async () => {
+      // Sanitized from tui-384e0e46-bfc7-456b-85f5-3541bdc7494c.
+      // The response/tool topology and process narration are preserved;
+      // filesystem output and the final answer are reduced to stable fixtures.
+      const firstBatch = [
+        { id: 'real-search-package', name: 'search_files', args: { pattern: 'package.json' } },
+        {
+          id: 'real-search-docs',
+          name: 'search_files',
+          args: { path: 'docs', pattern: '*.md' },
+        },
+        { id: 'real-read-readme', name: 'read_file', args: { path: 'README.md' } },
+      ];
+      const secondBatch = [
+        { id: 'real-read-package', name: 'read_file', args: { path: 'package.json' } },
+        { id: 'real-read-docs', name: 'read_file', args: { path: 'docs/README.md' } },
+        {
+          id: 'real-git-status',
+          name: 'shell_execute',
+          args: { command: 'git log --oneline -10 && git status --short' },
+        },
+      ];
+      const thirdBatch = [
+        {
+          id: 'real-list-root',
+          name: 'shell_execute',
+          args: { command: 'ls -1 && ls -1 apps packages' },
+        },
+      ];
+      const narrations = [
+        '我来了解一下这个项目的整体情况。先并行查看仓库结构和关键文件。',
+        '我已有 README 和 CLAUDE.md 的概要，再补充看几个关键配置文件来形成完整图景。',
+        '再快速看一下顶层目录结构，然后给出完整总结。',
+      ];
+      const internalReasoning =
+        'The user asked to understand the current project. This is an informational/exploration request.';
+      const finalChunks = [
+        '我已经对项目做了整体勘察。以下是当前项目',
+        '的完整图景：\n\n## 项目定位\n\n**Kite Code** 是一个可控制、可恢复、可验证的终端编码 Agent。\n\n## 技术栈与形态\n\n- Bun + TypeScript ESM monorepo\n- React + Ink TUI\n\nREAL_SESSION_RENDER_DONE',
+      ];
+      const results = (calls: ReadonlyArray<{ id: string }>) =>
+        calls.map(({ id }) => ({ toolCallId: id }));
+
+      server.setResponses([
+        {
+          message: {
+            reasoning_chunks: ['The user greeted the assistant;', ' answer briefly in Chinese.'],
+            content_chunks: [
+              '你好！我是 Kite，可以在这个仓库里帮你处理任务。\n\n请',
+              '问你想做什么？',
+            ],
+          },
+          stream_frame_sequence: ['reasoning', 'reasoning', 'content', 'content'],
+          // Hold the terminal after the first complete paragraph so the test
+          // proves that text owned by an unresolved Thought stays hidden until
+          // model.responded classifies the response.
+          stream_frame_delays: [1_600, 500, 2_000, 0],
+        },
+        {
+          message: {
+            reasoning_content: 'Inspecting the repository structure and entry documents.',
+            content: narrations[0],
+            tool_calls: firstBatch,
+          },
+        },
+        {
+          expectedRequest: { toolResults: results(firstBatch) },
+          message: {
+            reasoning_content: 'Reading configuration and repository status.',
+            content: narrations[1],
+            tool_calls: secondBatch,
+          },
+        },
+        {
+          expectedRequest: { toolResults: results(secondBatch) },
+          message: {
+            reasoning_content: 'Checking the final directory layout.',
+            content: narrations[2],
+            tool_calls: thirdBatch,
+          },
+        },
+        {
+          expectedRequest: { toolResults: results(thirdBatch) },
+          message: {
+            reasoning_chunks: [internalReasoning],
+            content_chunks: finalChunks,
+          },
+          stream_frame_sequence: ['reasoning', 'content', 'content'],
+          // The first incomplete content chunk closes reasoning, then holds
+          // the request open so the real session's active-Thought window is
+          // observable before the terminal response arrives.
+          stream_frame_delays: [0, 2_500, 0],
+        },
+        { message: { content: 'QUEUED_AFTER_INSPECTION_DONE' }, delay: 10 },
+      ]);
+
+      await submitUserMessage(tui, server, '你好', { timeout: 15_000 });
+      await waitForText(() => tui.viewport(), 'Thinking', 15_000);
+      expect(screenContains(tui.viewport(), '你好！我是 Kite')).toBe(false);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        '你好！我是 Kite，可以在这个仓库里帮你处理任务。',
+        15_000,
+      );
+      await waitForText(() => tui.outputSinceLastAction(), '请问你想做什么？', 15_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await submitUserMessage(tui, server, '了解当前项目', { timeout: 15_000 });
+
+      await waitForCondition(
+        () => server.getRequestCount() === 5,
+        'real-session final model request',
+        20_000,
+      );
+      await waitForCondition(
+        () => {
+          const viewport = stripAnsi(tui.viewport());
+          return (
+            viewport.split('\n').some((line) => line.trim().startsWith('● Thinking ')) &&
+            viewport.includes(internalReasoning) &&
+            !viewport.includes('REAL_SESSION_RENDER_DONE')
+          );
+        },
+        'real-session final request active Thought',
+        10_000,
+      );
+
+      const activeFrame = stripAnsi(tui.viewport());
+      const activeProjectFrame = activeFrame.slice(activeFrame.indexOf('❯ 了解当前项目'));
+      expect(activeProjectFrame.match(/Thinking /g)).toHaveLength(1);
+      expect(activeProjectFrame).toContain('read 3 files');
+      expect(activeProjectFrame).toContain('searched 2 file patterns');
+      expect(activeProjectFrame).toContain('ran 2 shell commands');
+      narrations.forEach((narration) => {
+        expect(activeProjectFrame).not.toContain(narration);
+      });
+      expect(activeProjectFrame).toContain(internalReasoning);
+      expect(activeProjectFrame).not.toContain('REAL_SESSION_RENDER_DONE');
+
+      await submitUserMessageForDeferredDelivery(tui, server, '你好', {
+        acceptWhen: (viewport) => screenContains(viewport, '↵ 你好'),
+        timeout: 15_000,
+      });
+      const queuedFrame = stripAnsi(tui.viewport());
+      const queuedProjectFrame = queuedFrame.slice(queuedFrame.indexOf('❯ 了解当前项目'));
+      expect(queuedProjectFrame.match(/Thinking /g)).toHaveLength(1);
+      expect(queuedProjectFrame).toContain('read 3 files');
+      expect(queuedProjectFrame).toContain('searched 2 file patterns');
+      expect(queuedProjectFrame).toContain('ran 2 shell commands');
+      expect(queuedProjectFrame).toContain('↵ 你好');
+      narrations.forEach((narration) => {
+        expect(queuedProjectFrame).not.toContain(narration);
+      });
+
+      await waitForText(() => tui.outputSinceLastAction(), 'REAL_SESSION_RENDER_DONE', 20_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'QUEUED_AFTER_INSPECTION_DONE', 20_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const settled = stripAnsi(tui.viewport());
+      const lines = settled.split('\n').map((line) => line.trim());
+      expect(lines.filter((line) => line.includes('read 3 files'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('searched 2 file patterns'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('ran 2 shell commands'))).toHaveLength(1);
+      expect(lines.filter((line) => line === 'REAL_SESSION_RENDER_DONE')).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('请问你想做什么？'))).toHaveLength(1);
+      expect(settled).not.toContain(internalReasoning);
+      expect(settled).not.toContain('└─ The user asked');
+      narrations.forEach((narration) => {
+        expect(lines).not.toContain(narration);
+      });
+      expect(lines.findIndex((line) => line.includes('项目定位'))).toBeGreaterThan(-1);
     },
     TIMEOUT,
   );
@@ -771,6 +1086,74 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - "Thinking Xs" 作为回答文本的暗色题头行（无圆点、无独立块）
   //   - settle 后随文本块保留在消息列表中（时长并入题头，信息不丢失）
   // ═══════════════════════════════════════════════════════════════
+
+  test(
+    'painted reasoning stays one Thinking line when its response starts exploration',
+    async () => {
+      // Reduced, sanitized reproduction of
+      // tui-bb8cec02-4b43-435f-bd03-697ba9ac0389, sequences 5-31:
+      // requested -> painted reasoning -> narrated two-tool response -> next request.
+      // The original 2026-09-03 trace painted `Thinking 1s`, then promoted the
+      // same Thought to Static as `Thinking 3s`, leaving both physical lines.
+      const exploration = [
+        { id: 'incident-search', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
+        {
+          id: 'incident-shell',
+          name: 'shell_execute',
+          args: { command: 'git status --short' },
+        },
+      ];
+      server.setResponses([
+        {
+          message: {
+            reasoning_chunks: ['Inspecting the repository before choosing the next tools.'],
+            content_chunks: ['我来先了解一下仓库的当前状况，然后给出总结。'],
+            tool_calls: exploration,
+          },
+          stream_frame_sequence: ['reasoning', 'content'],
+          // Preserve the incident's important timing property: Ink paints the
+          // live reasoning before the tool-bearing terminal response arrives.
+          stream_frame_delays: [2200, 0],
+        },
+        {
+          expectedRequest: {
+            toolResults: exploration.map(({ id }) => ({ toolCallId: id })),
+          },
+          message: { content: 'SESSION_LOG_REPLAY_DONE: project summarized.' },
+          delay: 10,
+        },
+      ]);
+
+      const activityFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Summarize the project', { timeout: 15000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'SESSION_LOG_REPLAY_DONE', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const viewport = tui.viewport();
+      const lines = stripAnsi(viewport)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('Thinking '));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('searched 1 file pattern');
+      expect(lines[0]).toContain('ran 1 shell command');
+      expect(screenContains(viewport, '我来先了解一下仓库的当前状况，然后给出总结。')).toBe(false);
+      expect(screenContains(viewport, 'SESSION_LOG_REPLAY_DONE')).toBe(true);
+      const frames = tui.screenFramesSince(activityFrames);
+      expect(
+        frames.some((frame) => screenContains(frame, 'Inspecting the repository before choosing')),
+      ).toBe(true);
+      expect(frames.some((frame) => screenContains(frame, 'Thinking 2s'))).toBe(true);
+      expect(
+        frames.some(
+          (frame) =>
+            screenContains(frame, 'searched 1 file pattern') &&
+            screenContains(frame, 'ran 1 shell command'),
+        ),
+      ).toBe(true);
+    },
+    TIMEOUT,
+  );
 
   test(
     'thinking-only (no tools) → label is Thinking Xs without tool counts',

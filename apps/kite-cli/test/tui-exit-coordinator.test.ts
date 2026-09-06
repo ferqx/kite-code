@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createTuiExitCoordinator } from '#kite-cli/tui/exit-coordinator';
 
 describe('TUI exit coordinator', () => {
-  test('awaits bounded observability shutdown before dispose, unmount, and exit', async () => {
+  test('unmounts immediately before awaiting observability shutdown and dispose', async () => {
     const order: string[] = [];
     let releaseShutdown: (() => void) | undefined;
     const shutdown = new Promise<void>((resolve) => {
@@ -26,10 +26,10 @@ describe('TUI exit coordinator', () => {
     const second = coordinator.requestExit();
     expect(second).toBe(first);
     await Promise.resolve();
-    expect(order).toEqual(['shutdown:250']);
+    expect(order).toEqual(['unmount', 'shutdown:250']);
     releaseShutdown?.();
     await first;
-    expect(order).toEqual(['shutdown:250', 'dispose', 'unmount', 'exit:0']);
+    expect(order).toEqual(['unmount', 'shutdown:250', 'dispose', 'exit:0']);
   });
 
   test('restores the terminal and exits even when telemetry shutdown fails', async () => {
@@ -48,7 +48,7 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['unmount', 'dispose', 'exit']);
   });
 
   test('still unmounts and exits when dispose fails', async () => {
@@ -68,7 +68,7 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['shutdown', 'dispose', 'unmount', 'exit:1']);
+    expect(order).toEqual(['unmount', 'shutdown', 'dispose', 'exit:1']);
   });
 
   test('aborts the in-flight startup prewarm before client shutdown', async () => {
@@ -90,7 +90,7 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit();
-    expect(order).toEqual(['abort-preparation', 'shutdown', 'dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['abort-preparation', 'unmount', 'shutdown', 'dispose', 'exit']);
   });
 
   test('a failing prewarm abort cannot strand terminal teardown', async () => {
@@ -114,6 +114,6 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['shutdown', 'dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['unmount', 'shutdown', 'dispose', 'exit']);
   });
 });

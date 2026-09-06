@@ -12,7 +12,7 @@ tests/qualification/sandbox/windows-network-setup.test.ts tests/qualification/sa
 tests/qualification/sandbox/platform-capability-verifier.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
 apps/kite-service/test/sandbox/app-sandbox-composition.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
 apps/kite-service/test/git-broker.test.ts apps/kite-service/test/runtime/git-tool-controller.test.ts
-apps/kite-cli/test/tui-exit-coordinator.test.ts apps/kite-service/test/isolated/session-manager.test.ts apps/kite-cli/test/tui-reducer.test.ts`、
+apps/kite-cli/test/tui-exit-coordinator.test.ts apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts apps/kite-cli/test/tui-reducer.test.ts`、
 `bun run typecheck`、`bun run check:docs`。native runner
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为
@@ -59,8 +59,8 @@ review；同一 invocation 的 sealed scope 仍须在 approval、recovery 与 di
 Full 正交：Planning + Full 可直接执行但仍保留 Plan lifecycle。只有同一轮并发多个 Explore children
 才派生 Auto；单个 Explore 及 plan/code/review children 继承 parent route。
 
-人工队列由 State 27/SAQ epoch 持久化。Enter 提交 exact interactionId/generation，Esc 只拒绝当前
-可见焦点，Ctrl+C 才取消 whole turn；`/permissions` 的 session grants 清除通过 canonical event
+人工队列由 State 27/SAQ epoch 持久化。Enter提交exact interactionId/generation；Esc拒绝当前可见焦点并原子取消同turn
+其余未终结sibling、结束turn，Ctrl+C仍是独立整轮取消输入；`/permissions` 的 session grants 清除通过 canonical event
 持久化，并在 session/revision/generation 不匹配时 no-op。旧 queue/grant 或旧 epoch 不能在 restore
 后复活。
 
@@ -129,9 +129,13 @@ runner 只使用 manifest 固定的 POSIX runtime 与最小 environment allowlis
 可通过 invocation runtime/PATH 暴露，但不会复制 repository。默认 command language 仍为 POSIX/Bash，
 也可显式调用 cmd.exe、pwsh 或 powershell.exe。
 
-Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/isksh` runtime 保留在当前
-managed candidate payload。激活的 `kite.exe`/`kite-tui.exe` 通过 install marker 定位该 payload；缺失或
-digest 不一致使 backend 不可用，不会加载未固定的 host runner。
+Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/isksh` runtime 保留在 immutable
+managed candidate root。v2 managed-install marker 与唯一 `active` regular-file pointer 绑定当前 candidate；stable
+launcher 将其启动时的 candidate root 显式 pin 给 child process，running process 不重新读取 pointer。Runner resolver
+只接受 marker、pointer、`.candidate-id` 与 candidate `manifest.json` identity 完全一致的 candidate，并对 launcher、
+marker、pointer、candidate root、runner manifest、runner 与 Shell/Coreutils runtime 执行 no-follow/non-reparse/
+regular-file 检查；缺失、替换或 digest 不一致使 backend 不可用，不会加载未固定的 host runner，也不会回退 cwd、PATH
+或 ambient home。真实 Windows ACL/write-through 与三平台 candidate/process qualification 仍待 hosted/真实证据。
 
 ## protocol V6 与 manifest V1
 
@@ -197,7 +201,7 @@ circuit breaker 转真人审批。
 
 ## startup denial 与 no replay
 
-TUI 静默预热不阻塞首帧、typing、timer 或 Working animation。bootstrap 把 executor
+TUI 静默预热不阻塞首帧、typing 或静态 Working 状态的事件驱动渲染。bootstrap 把 executor
 注册到统一退出协调器。退出或等待 `prepare()` 的当前
 SessionRuntime 被取消时会中止探针，runner 清空 Job 并回收 ephemeral ACL；中止结果不缓存。setup gate
 与预热并行，并在用户确认时 re-check readiness。

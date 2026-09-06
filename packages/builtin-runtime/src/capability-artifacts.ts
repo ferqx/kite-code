@@ -11,6 +11,7 @@ import {
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPoint,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from './model';
 import { userKiteCodeDir } from './model/artifact-paths';
 
@@ -45,6 +46,7 @@ export function capabilityArtifactRoot(): string {
 
 export interface CapabilityArtifactStoreOptions {
   root?: string;
+  backend?: PrivateImmutableArtifactStorageBackend<'capability_result'>;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
@@ -164,7 +166,9 @@ export class CapabilityArtifactStore {
     if (this.storage) return this.storage;
     try {
       this.storage = new PrivateImmutableArtifactStorage({
-        root: this.options.root ?? capabilityArtifactRoot(),
+        ...(this.options.backend
+          ? { backend: this.options.backend }
+          : { root: this.options.root ?? capabilityArtifactRoot() }),
         namespace: 'capability-artifacts',
         partitions: CAPABILITY_ARTIFACT_PARTITIONS,
         maxArtifactBytes: this.options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,

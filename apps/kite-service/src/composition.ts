@@ -2,11 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { discoverSandboxBackendCandidate } from '@kite-ai/builtin-runtime/sandbox';
-import {
-  type KiteAppControlClient,
-  type KiteWorkspaceIdentity,
-  WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-} from '@kite-ai/kite-app-contract';
+import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import type { NativeProviderCredentialClient } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import type { InteractionMode, RuntimeAccess } from '@kite-ai/runtime-contract';
@@ -18,16 +14,10 @@ import {
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteRuntimeHistory,
+  createKiteRuntimeObserverHistoryFromStorage,
   type KiteMultiWorkspaceRuntimeServerInput,
   type KiteMultiWorkspaceRuntimeServerOwner,
 } from './bootstrap';
-import {
-  createNativeKiteServiceInfrastructure,
-  type NativeKiteServiceApplicationPort,
-  type NativeKiteServiceInfrastructure,
-  type NativeKiteServiceInfrastructureOptions,
-} from './native-infrastructure';
-import type { KiteServiceReadinessPort, KiteServiceSignalPort } from './ports';
 import {
   createKiteRuntimeApplication,
   type KiteRuntimeApplication,
@@ -58,8 +48,14 @@ export interface KiteServiceWorkspaceSpec {
 export interface KiteServiceRuntimeCompositionOptions {
   /** One process identity shared by descriptor, carrier handshake, and Runtime initialize. */
   readonly instanceId?: string;
+  readonly runtimeServerVersion?: string;
+  /** Enables only the parent-owned stdio App Server's History/App Control capability set. */
+  readonly appServerProtocol?: boolean;
+  readonly appServerDaemonProtocol?: boolean;
   /** The one explicit current Store path used by the Service owner. */
   readonly checkpointPath: string;
+  /** Already-open Store 9 owner; when present no legacy Store or History connection is opened. */
+  readonly storageOwner?: import('./bootstrap').KiteRuntimeStorageOwner;
   /** At least one admitted Workspace template is required for Runtime execution. */
   readonly workspaces?: readonly (KiteServiceWorkspaceTemplate | KiteServiceWorkspaceSpec)[];
   /** Lazy template resolver used after Trust/connection admission; it is never called at boot. */
@@ -81,15 +77,11 @@ export interface KiteServiceRuntimeCompositionOptions {
 
 export interface KiteServiceRuntimeComposition extends AsyncDisposable {
   readonly application: KiteRuntimeApplication;
-  readonly carrierApplication: NativeKiteServiceApplicationPort;
   readonly appControl: KiteInProcessAppControlComposition<RuntimeOperationGate>;
   readonly runtime: RuntimeAccess;
   readonly server: RuntimeServer;
   readonly history: RuntimeHistoryClient;
   readonly storage: KiteMultiWorkspaceRuntimeServerOwner['storage'];
-  readonly createInfrastructure: (
-    options: Omit<NativeKiteServiceInfrastructureOptions, 'application'>,
-  ) => NativeKiteServiceInfrastructure;
 }
 
 const CLAIMED_SERVICE_STORES = new Set<string>();
@@ -115,55 +107,9 @@ function claimServiceStore(path: string): { readonly release: () => void } {
   });
 }
 
-function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity): boolean {
-  return (
-    left.canonicalPath === right.canonicalPath &&
-    left.projectId === right.projectId &&
-    left.workspaceDigest === right.workspaceDigest
-  );
-}
-
-function sessionIdForRequest(input: {
-  readonly operation: string;
-  readonly command?: unknown;
-  readonly query?: unknown;
-  readonly subscription?: unknown;
-}): string | undefined {
-  if (input.operation === 'runtime/command') {
-    const command = input.command as {
-      readonly type?: unknown;
-      readonly sessionId?: unknown;
-      readonly sourceSessionId?: unknown;
-      readonly bootstrapSessionId?: unknown;
-    };
-    if (command.type === 'create_session') {
-      return typeof command.bootstrapSessionId === 'string'
-        ? command.bootstrapSessionId
-        : undefined;
-    }
-    if (typeof command.sessionId === 'string') return command.sessionId;
-    return typeof command.sourceSessionId === 'string' ? command.sourceSessionId : undefined;
-  }
-  if (input.operation === 'runtime/query') {
-    const query = input.query as { readonly sessionId?: unknown };
-    return typeof query.sessionId === 'string' ? query.sessionId : undefined;
-  }
-  if (input.operation === 'runtime/subscribe') {
-    const subscription = input.subscription as {
-      readonly scope?: unknown;
-      readonly sessionId?: unknown;
-    };
-    return subscription.scope === 'session' && typeof subscription.sessionId === 'string'
-      ? subscription.sessionId
-      : undefined;
-  }
-  return undefined;
-}
-
 /**
- * Compose the one concrete Service Runtime Application around the relocated Host/Store owner.
- * This is deliberately an internal application API: Native infrastructure remains the only
- * listener/state owner, and no CLI source or alternate backend is imported.
+ * Compose one App Server Runtime Application around the durable Session Store owner.
+ * Transport ownership remains with the parent stdio process or explicit daemon.
  */
 export function createKiteServiceRuntimeComposition(
   input: KiteServiceRuntimeCompositionOptions,
@@ -228,166 +174,75 @@ function createKiteServiceRuntimeCompositionUnchecked(
   // The normal Service process is neutral at startup. A template is resolved only after a
   // connection has passed Workspace Trust and Runtime admission.
   const hasDynamicTemplate = true;
-  const owner = createKiteMultiWorkspaceRuntimeServer({
+  const runtimeControlReleases = new Map<string, () => void>();
+  let owner!: KiteMultiWorkspaceRuntimeServerOwner;
+  const bindRuntimeModelControl = (workspace: KiteWorkspaceIdentity): void => {
+    const key = `${workspace.workspaceDigest}\0${workspace.projectId}\0${workspace.canonicalPath}`;
+    if (runtimeControlReleases.has(key)) return;
+    runtimeControlReleases.set(
+      key,
+      appControl.bindRuntimeControl(workspace, {
+        applySelectedConfig: (config) => owner.applySelectedConfig(workspace, config),
+      }),
+    );
+  };
+  owner = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath: input.checkpointPath,
     serverInstanceId: instanceId,
+    ...(input.runtimeServerVersion ? { serverVersion: input.runtimeServerVersion } : {}),
+    ...(input.appServerProtocol ? { appServerProtocol: true } : {}),
+    ...(input.appServerDaemonProtocol ? { appServerDaemonProtocol: true } : {}),
     operationGate,
+    ...(input.storageOwner ? { storageOwner: input.storageOwner } : {}),
     ...(templates.length === 0 ? {} : { workspaces: templates }),
     ...(hasDynamicTemplate
       ? {
           workspaceTemplateFor: async (workspace: KiteWorkspaceIdentity) => {
-            if (input.workspaceTemplateFor) return input.workspaceTemplateFor(workspace);
-            const requested = workspaceSpecs.find(
-              (spec) =>
-                appControl.admitWorkspace(spec.workspace).canonicalPath === workspace.canonicalPath,
-            );
-            const runtime = appControl.runtimeInputsFor(workspace);
-            await runtime.workspaceReady;
-            return {
-              userId: requested?.userId ?? 'kite-service',
-              workspace: workspace.canonicalPath,
-              config: runtime.config,
-              shellExecutor: runtime.shellExecutor,
-              interactionMode:
-                requested?.interactionMode ?? runtime.config.interactionMode ?? 'auto',
-              sandboxBackend: requested?.sandboxBackend ?? discoverSandboxBackendCandidate(),
-              mcpManager: runtime.mcpManager,
-              skillManifests: runtime.skillManifests,
-              skillOptions: runtime.skillOptions,
-              initialSkillActivations: requested?.initialSkillActivations ?? [],
-            };
+            const template = input.workspaceTemplateFor
+              ? await input.workspaceTemplateFor(workspace)
+              : await (async (): Promise<KiteServiceWorkspaceTemplate> => {
+                  const requested = workspaceSpecs.find(
+                    (spec) =>
+                      appControl.admitWorkspace(spec.workspace).canonicalPath ===
+                      workspace.canonicalPath,
+                  );
+                  const runtime = appControl.runtimeInputsFor(workspace);
+                  await runtime.workspaceReady;
+                  return {
+                    userId: requested?.userId ?? 'kite-service',
+                    workspace: workspace.canonicalPath,
+                    config: runtime.config,
+                    shellExecutor: runtime.shellExecutor,
+                    interactionMode:
+                      requested?.interactionMode ?? runtime.config.interactionMode ?? 'auto',
+                    sandboxBackend: requested?.sandboxBackend ?? discoverSandboxBackendCandidate(),
+                    mcpManager: runtime.mcpManager,
+                    skillManifests: runtime.skillManifests,
+                    skillOptions: runtime.skillOptions,
+                    initialSkillActivations: requested?.initialSkillActivations ?? [],
+                  };
+                })();
+            bindRuntimeModelControl(workspace);
+            return template;
           },
         }
       : {}),
   });
-  const history = createKiteRuntimeHistory(input.checkpointPath);
-  const persistedWorkspace = (sessionId: string): KiteWorkspaceIdentity | undefined => {
-    const snapshot = owner.storage.sessions.loadSnapshot<{
-      readonly session: {
-        readonly workspace: string;
-        readonly projectId?: string;
-        readonly canonicalWorkspaceDigest?: string;
-      };
-    }>(sessionId);
-    if (!snapshot) return undefined;
-    const session = snapshot.session;
-    if (!session.projectId || !session.canonicalWorkspaceDigest) return undefined;
-    let canonicalPath: string;
-    try {
-      canonicalPath = realpathSync.native(session.workspace);
-    } catch {
-      return undefined;
-    }
-    const registered = workspaces.find(
-      (workspace) =>
-        workspace.canonicalPath === canonicalPath &&
-        workspace.projectId === session.projectId &&
-        workspace.workspaceDigest === session.canonicalWorkspaceDigest,
-    );
-    if (registered) return registered;
-    if (hasDynamicTemplate) {
-      const candidate = appControl.admitWorkspace(canonicalPath);
-      if (
-        candidate.projectId !== session.projectId ||
-        candidate.workspaceDigest !== session.canonicalWorkspaceDigest
-      ) {
-        return undefined;
-      }
-      return candidate;
-    }
-    return undefined;
-  };
-  const workspaceForPath = (path: string): KiteWorkspaceIdentity | undefined => {
-    let canonicalPath: string;
-    try {
-      canonicalPath = realpathSync.native(path);
-    } catch {
-      return undefined;
-    }
-    const registered = workspaces.find((workspace) => workspace.canonicalPath === canonicalPath);
-    if (registered) return registered;
-    if (!hasDynamicTemplate) return undefined;
-    const project = appControl.admitWorkspace(canonicalPath);
-    return project;
-  };
-  const workspaceAdmission = {
-    async admitForConnect(requestedWorkspace: string) {
-      const admitted = workspaceForPath(requestedWorkspace);
-      if (!admitted) return { outcome: 'untrusted' as const };
-      try {
-        const trust = await appControl.gateway.discovery.queryWorkspaceTrust({
-          schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-          workspace: admitted.canonicalPath,
-        });
-        return trust.status === 'trusted'
-          ? { outcome: 'admitted' as const, workspace: admitted }
-          : { outcome: 'untrusted' as const };
-      } catch {
-        return { outcome: 'unavailable' as const };
-      }
-    },
-    async resolveIdentity(candidate: KiteWorkspaceIdentity) {
-      const admitted = workspaceForPath(candidate.canonicalPath);
-      if (!admitted || !sameWorkspace(admitted, candidate)) return undefined;
-      const trust = await appControl.gateway.discovery.queryWorkspaceTrust({
-        schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-        workspace: admitted.canonicalPath,
-      });
-      return trust.status === 'trusted' ? admitted : undefined;
-    },
-  };
-  const runtimeAdmission = {
-    create(workspace: KiteWorkspaceIdentity, connectionId: string) {
-      return {
-        async authorize(request: {
-          readonly connectionId: string;
-          readonly operation: string;
-          readonly command?: unknown;
-          readonly query?: unknown;
-          readonly subscription?: unknown;
-        }) {
-          if (request.connectionId !== connectionId) {
-            return { allowed: false as const, reason: 'unauthorized' as const };
-          }
-          const trust = await appControl.gateway.discovery.queryWorkspaceTrust({
-            schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-            workspace: workspace.canonicalPath,
-          });
-          if (trust.status !== 'trusted') {
-            return { allowed: false as const, reason: 'unauthorized' as const };
-          }
-          const sessionId = sessionIdForRequest(request);
-          if (sessionId !== undefined) {
-            const persisted = persistedWorkspace(sessionId);
-            const command = request.command as { readonly type?: unknown } | undefined;
-            const freshCreate = command?.type === 'create_session' && persisted === undefined;
-            if (!freshCreate && (!persisted || !sameWorkspace(persisted, workspace))) {
-              return { allowed: false as const, reason: 'unauthorized' as const };
-            }
-          }
-          return { allowed: true as const, workspace: workspace.canonicalPath };
-        },
-      };
-    },
-  };
+  for (const workspace of workspaces) bindRuntimeModelControl(workspace);
+  const rawHistory = input.storageOwner
+    ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
+    : createKiteRuntimeHistory(input.checkpointPath);
+  const history: RuntimeHistoryClient = input.storageOwner?.readSnapshot
+    ? Object.freeze({
+        listSessions: (request: Parameters<RuntimeHistoryClient['listSessions']>[0]) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.listSessions(request)),
+        listEvents: (request: Parameters<RuntimeHistoryClient['listEvents']>[0]) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.listEvents(request)),
+        loadSession: (sessionId: string) =>
+          input.storageOwner!.readSnapshot!(() => rawHistory.loadSession(sessionId)),
+      })
+    : rawHistory;
   let application!: KiteRuntimeApplication;
-  const carrierApplication: NativeKiteServiceApplicationPort = {
-    server: owner.server,
-    history,
-    workspaceAdmission,
-    runtimeAdmission,
-    appControl: appControl.gateway,
-    credential: appControl.credentialClient,
-    onConnectionBound: (connectionId, workspace) => {
-      const admitted = workspaceForPath(workspace.canonicalPath);
-      if (admitted) owner.bindConnection(connectionId, admitted);
-    },
-    onConnectionClosed: (connectionId) => owner.releaseConnection(connectionId),
-    start: () => application.start(),
-    quiesceMutations: () => application.quiesceMutations(),
-    cancelAll: (reason) => application.cancelAll(reason),
-    [Symbol.asyncDispose]: () => application[Symbol.asyncDispose](),
-  };
   application = createKiteRuntimeApplication({
     runtime: owner.runtime,
     server: owner.server,
@@ -396,11 +251,14 @@ function createKiteServiceRuntimeCompositionUnchecked(
       ? appControl.gateway.forWorkspace(defaultWorkspace)
       : appControl.gateway.discovery,
     operationGate,
+    hasActiveOperations: () => owner.host.hasActiveSessionOperations(),
     cancelAll: owner.cancelAllSessions,
     dispose: async () => {
       try {
         await owner[Symbol.asyncDispose]();
       } finally {
+        for (const release of runtimeControlReleases.values()) release();
+        runtimeControlReleases.clear();
         await appControl[Symbol.asyncDispose]();
       }
     },
@@ -408,18 +266,11 @@ function createKiteServiceRuntimeCompositionUnchecked(
   let disposePromise: Promise<void> | undefined;
   const composition: KiteServiceRuntimeComposition = {
     application,
-    carrierApplication,
     appControl,
     runtime: owner.runtime,
     server: owner.server,
     history,
     storage: owner.storage,
-    createInfrastructure: (options) =>
-      options.instanceId === instanceId
-        ? createNativeKiteServiceInfrastructure({ ...options, application: carrierApplication })
-        : (() => {
-            throw new Error('Service infrastructure instance does not match Runtime identity.');
-          })(),
     [Symbol.asyncDispose]: () => {
       if (!disposePromise) disposePromise = Promise.resolve(application[Symbol.asyncDispose]());
       return disposePromise;
@@ -432,14 +283,6 @@ function createKiteServiceRuntimeCompositionUnchecked(
 export const createKiteServiceApplicationComposition = createKiteServiceRuntimeComposition;
 
 export type KiteServiceApplication = KiteServiceRuntimeComposition;
-
-export type KiteServiceNativeInfrastructureInput = Omit<
-  NativeKiteServiceInfrastructureOptions,
-  'application'
-> & {
-  readonly readiness?: KiteServiceReadinessPort;
-  readonly signals?: KiteServiceSignalPort;
-};
 
 export type KiteServiceAppControlClient = KiteAppControlClient;
 export type KiteServiceCredentialClient = NativeProviderCredentialClient;

@@ -94,14 +94,15 @@ function rewindFilePreview(preview: RuntimeRewindPreviewProjection): RewindFileP
 
 /** RuntimeStore-backed recovery-point list. */
 export function useRewindCheckpoints(
-  state: { showRewind: boolean },
+  state: { showRewind: boolean; activeSessionId: string | null },
   dispatch: Dispatch<Action>,
   threadIdRef: React.MutableRefObject<string>,
   sessionManager: SessionManager,
 ) {
   React.useEffect(() => {
-    if (!state.showRewind || !threadIdRef.current) return;
-    const sessionId = threadIdRef.current;
+    if (!state.showRewind) return;
+    const sessionId = state.activeSessionId || threadIdRef.current;
+    if (!sessionId) return;
     let cancelled = false;
     void sessionManager
       .listRewindCheckpoints(sessionId)
@@ -118,7 +119,7 @@ export function useRewindCheckpoints(
     return () => {
       cancelled = true;
     };
-  }, [state.showRewind, dispatch, threadIdRef, sessionManager]);
+  }, [state.showRewind, state.activeSessionId, dispatch, threadIdRef, sessionManager]);
 }
 
 export function useRunRewind(deps: RewindDeps) {
@@ -192,8 +193,9 @@ export function useRunRewind(deps: RewindDeps) {
         }
       } catch {
         deps.dispatch({
-          type: 'RUNTIME_EVENT',
-          event: { type: 'unavailable', reason: 'unknown_event' },
+          type: 'LOCAL_TEXT',
+          text: 'Rewind result is unavailable.',
+          isError: true,
         });
       } finally {
         rewindInProgressRef.current = false;

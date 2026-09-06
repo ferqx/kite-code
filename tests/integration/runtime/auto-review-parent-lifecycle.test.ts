@@ -28,6 +28,12 @@ function approvalEvent(result: 'approve' | 'escalate' | 'reject') {
     type: 'auto_review.completed' as const,
     reviewId: 'review-parent-1',
     toolCallId: 'task-parent-1',
+    owner: {
+      kind: 'subagent_tool' as const,
+      toolCallId: 'child-tool-1',
+      subagentId: 'child-1',
+      parentToolCallId: 'task-parent-1',
+    },
     result:
       result === 'approve'
         ? {
@@ -92,10 +98,19 @@ function suspendedParentState(): RuntimeState {
       type: 'auto_review.requested',
       reviewId: 'review-parent-1',
       toolCallId: 'task-parent-1',
+      owner: {
+        kind: 'subagent_tool',
+        toolCallId: 'child-tool-1',
+        subagentId: 'child-1',
+        parentToolCallId: 'task-parent-1',
+      },
       toolName: 'shell_execute',
       reason: 'child requires review',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      parentToolCallId: 'task-parent-1',
+      childSubagentId: 'child-1',
+      runtimeToolCallId: 'child-tool-1',
       queueGeneration: 0,
       queueSequence: 0,
       approval: {

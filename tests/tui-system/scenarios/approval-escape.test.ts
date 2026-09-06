@@ -84,6 +84,7 @@ describe('TUI PTY System — Approval Escape', () => {
       expect(screenContains(beforeOutput, '工具授权')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
+      expect(screenContains(beforeOutput, 'Working')).toBe(false);
 
       // Press Escape to cancel the approval
       tui.write('\x1b');
@@ -156,6 +157,7 @@ describe('TUI PTY System — Approval Ctrl+C', () => {
     async () => {
       await submitUserMessage(tui, server, 'Run a command', { timeout: 15000 });
       await waitForText(() => tui.viewport(), '工具授权', 15000);
+      expect(screenContains(tui.viewport(), 'Working')).toBe(false);
 
       tui.write('\x03');
       await waitForTuiReady(tui);

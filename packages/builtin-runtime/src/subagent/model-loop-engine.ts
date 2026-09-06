@@ -10,11 +10,16 @@ import type {
   ModelInvocationStateView,
 } from '../model/invocation-gateway';
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '../model/messages';
-import { isSystemMessage } from '../model/messages';
+import { humanMessage, isSystemMessage } from '../model/messages';
 import type {
   BuiltinSubagentModelStepProvenance,
   BuiltinSubagentModelStepResult,
 } from '../model/subagent-effect';
+
+export const DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS = 12;
+const FINALIZATION_PROMPT =
+  'Stop using tools. Return the concise final result now, using only the evidence already collected.';
+const NO_TOOLS: ToolSet = Object.freeze({});
 
 /**
  * A deliberately narrow view of the Builtin model coordinator.  The loop
@@ -92,6 +97,8 @@ export interface BuiltinSubagentModelLoopInput<
     | BuiltinSubagentModelStepProvenance
     | BuiltinSubagentModelLoopProvenanceFactory;
   readonly resource?: BuiltinSubagentModelLoopResourceContext;
+  /** Successful tool-bearing model rounds allowed before one tool-free finalization call. */
+  readonly maxToolRounds: number;
   readonly consumer?: BuiltinSubagentModelLoopConsumerPort<TTerminal>;
   readonly signal?: AbortSignal;
 }
@@ -183,14 +190,19 @@ async function runLoop<
 ): Promise<BuiltinSubagentModelLoopResult<TTerminal>> {
   const messages = input.initialMessages.map(cloneAndFreezeMessage);
   let modelInvocationOrdinal = input.startModelInvocationOrdinal;
+  let toolRounds = input.startModelInvocationOrdinal;
   let failureStage: BuiltinSubagentModelLoopFailureStage = 'next_round_preparation';
 
   try {
     while (true) {
       failureStage = 'next_round_preparation';
       throwIfAborted(input.signal);
-      const transcript = freezeTranscript(messages);
-      const estimatedInputTokens = estimateInputTokens(transcript, input.tools);
+      const finalizing = toolRounds >= input.maxToolRounds;
+      const transcript = freezeTranscript(
+        finalizing ? [...messages, humanMessage(FINALIZATION_PROMPT)] : messages,
+      );
+      const availableTools = finalizing ? NO_TOOLS : input.tools;
+      const estimatedInputTokens = estimateInputTokens(transcript, availableTools);
       const nextOrdinal = modelInvocationOrdinal + 1;
       const provenance = await resolveProvenance(input.provenance, {
         modelInvocationOrdinal: nextOrdinal,
@@ -207,7 +219,7 @@ async function runLoop<
       const modelStep = await input.coordinator.executeSubagentModelStep({
         config: input.config,
         model: input.model,
-        tools: input.tools,
+        tools: availableTools,
         messages: transcript,
         ...(input.persistence ? { persistence: input.persistence } : {}),
         provenance,
@@ -238,6 +250,16 @@ async function runLoop<
           messages: freezeTranscript(messages),
         });
       }
+
+      if (finalizing) {
+        throw new BuiltinSubagentModelLoopError(
+          'internal_error',
+          'Subagent finalization returned another tool call.',
+          'model_response_validation',
+          modelStep.invocationId,
+        );
+      }
+      toolRounds += 1;
 
       if (!input.consumer) {
         throw new BuiltinSubagentModelLoopError(
@@ -381,6 +403,12 @@ function validateLoopInput<
     throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent model invocation ordinal is invalid.',
+    );
+  }
+  if (!Number.isSafeInteger(input.maxToolRounds) || input.maxToolRounds < 1) {
+    throw new BuiltinSubagentModelLoopError(
+      'invalid_input',
+      'Subagent maxToolRounds must be a positive safe integer.',
     );
   }
   if (!Array.isArray(input.initialMessages)) {

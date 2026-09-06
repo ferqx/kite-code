@@ -1,6 +1,7 @@
 import type {
   CheckpointPort,
   RuntimeRecoveryIdentityPort,
+  RuntimeRunStorePort,
   RuntimeStorage,
   RuntimeTransactionInput,
   SessionStore,
@@ -41,6 +42,7 @@ export interface RuntimeHostExecutionServices<Event = unknown, State = unknown> 
   readonly leases: RuntimeHostLeasePort;
   readonly checkpoints: CheckpointPort<State>;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  readonly runs?: RuntimeRunStorePort;
 }
 
 interface ActiveLease {
@@ -68,6 +70,7 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
       sessions: storage.sessions,
       checkpoints: storage.checkpoints,
       recoveryIdentities: storage.recoveryIdentities,
+      ...(storage.runs ? { runs: storage.runs } : {}),
       transactions: Object.freeze({
         commit: (
           acknowledgement: RuntimeTransactionAcknowledgement,
@@ -100,6 +103,9 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
     if (requiredLease && requiredLease.sessionId !== input.sessionId) {
       throw new Error('Runtime effect lease session does not match the transaction session');
     }
+    if (input.runMutation !== undefined && this.#storage.runs === undefined) {
+      throw new Error('Runtime Run mutation requires Store 8 authority.');
+    }
     const guardedInput = requiredLease
       ? { ...input, requiredEffectLease: this.#currentLeaseExpectation(requiredLease) }
       : input;
@@ -122,6 +128,9 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
   commitCommandDecision(input: RuntimeTransactionInput<Event, State>): void {
     const receipt = input.commandReceipt;
     if (!receipt) throw new Error('Runtime command decision requires receipt evidence.');
+    if (input.runMutation !== undefined && this.#storage.runs === undefined) {
+      throw new Error('Runtime Run mutation requires Store 8 authority.');
+    }
     if (
       receipt.targetSessionId !== input.sessionId ||
       receipt.committedRevision < 0 ||

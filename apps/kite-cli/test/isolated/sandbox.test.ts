@@ -506,7 +506,8 @@ describe('policy-proven read-only executable environment', () => {
         },
       });
       expect(env.PATH).toBe(realpathSync.native(safeBin));
-      expect(env.HOME).toBe('/safe-home');
+      expect(env.HOME).toBe('/nonexistent');
+      expect(env.XDG_CONFIG_HOME).toBe('/nonexistent');
       expect(env.BASH_ENV).toBeUndefined();
       expect(env.ENV).toBeUndefined();
       expect(env.SHELL).toBeUndefined();
@@ -518,6 +519,7 @@ describe('policy-proven read-only executable environment', () => {
       expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
       expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
       expect(env.GIT_CONFIG_VALUE_0).toBe('false');
+      expect(env.GIT_EXTERNAL_DIFF).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

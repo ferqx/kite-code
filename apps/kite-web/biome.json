@@ -1,0 +1,5 @@
+{
+  "root": false,
+  "extends": ["../../biome.json"],
+  "css": { "parser": { "tailwindDirectives": true } }
+}

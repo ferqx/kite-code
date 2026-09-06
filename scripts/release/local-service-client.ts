@@ -1,33 +1,27 @@
-import { createHash, randomUUID } from 'node:crypto';
-import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-} from 'node:fs';
-import { userInfo } from 'node:os';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import {
-  createLocalKiteConnection,
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  type LocalKiteConnection,
-} from '@kite-ai/kite-local-runtime/client';
-import {
-  createKiteServiceEnvironment,
-  createKiteServiceExecutableResolver,
-  createNativeKiteServiceManagerComposition,
-  KITE_SERVICE_ENVIRONMENT_ALLOWLIST,
-  type KiteServiceManager,
-  type KiteServiceManagerRequest,
-} from '@kite-ai/kite-local-runtime/manager';
-import {
-  createKiteHomeIdentity,
-  ensureLocalRuntimeServiceHome,
-  resolveLocalRuntimeServiceStatePaths,
-} from '@kite-ai/kite-local-runtime/service';
+
+const KITE_SERVICE_ENVIRONMENT_ALLOWLIST = Object.freeze([
+  'PATH',
+  'SHELL',
+  'COMSPEC',
+  'PATHEXT',
+  'SystemRoot',
+  'SYSTEMROOT',
+  'WINDIR',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LC_ALL',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'XDG_CACHE_HOME',
+  'BUN_INSTALL_CACHE_DIR',
+] as const);
 
 const PROVIDER_ENVIRONMENT_KEYS = Object.freeze([
   'DEEPSEEK_API_KEY',
@@ -38,8 +32,16 @@ const PROVIDER_ENVIRONMENT_KEYS = Object.freeze([
 ] as const);
 
 const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
+  'apps/kite-cli',
   'apps/kite-service',
+  'apps/kite-web',
   'packages',
+  'scripts/release/entrypoints/cli.ts',
+  'scripts/release/entrypoints/launcher.ts',
+  'scripts/release/entrypoints/service.ts',
+  'scripts/release/entrypoints/tui.ts',
+  'scripts/release/app-server-client.ts',
+  'scripts/release/local-service-client.ts',
   'package.json',
   'bun.lock',
   'tsconfig.json',
@@ -47,125 +49,31 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
 const MAX_SOURCE_BUILD_UNTRACKED_FILES = 1_024;
 const MAX_SOURCE_BUILD_UNTRACKED_BYTES = 64 * 1024 * 1024;
 
-export interface ManagedLocalServiceConnector {
-  connect(input: { readonly workspace: string }): Promise<LocalKiteConnection>;
+export function installedKiteSessionStorePath(kiteHomeRoot: string): string {
+  return join(realpathSync.native(kiteHomeRoot), 'kite-session.sqlite');
 }
 
-export interface ManagedLocalServiceLifecycle {
-  ensure(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['ensure']>;
-  status(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['status']>;
-  stop(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['stop']>;
-  restart(request?: KiteServiceManagerRequest): ReturnType<KiteServiceManager['restart']>;
+export function sourceKiteSessionStorePath(kiteHomeRoot: string, repositoryRoot: string): string {
+  const canonicalKiteHome = realpathSync.native(kiteHomeRoot);
+  const canonicalRepositoryRoot = realpathSync.native(repositoryRoot);
+  return sourceKiteSessionStorePathFromCanonicalRoots(canonicalKiteHome, canonicalRepositoryRoot);
 }
 
-export interface ManagedLocalServiceClientComposition {
-  readonly connector: ManagedLocalServiceConnector;
-  readonly lifecycle: ManagedLocalServiceLifecycle;
-  readonly executableMode: 'source' | 'installed';
+export function sourceKiteSessionStorePathFromCanonicalRoots(
+  canonicalKiteHome: string,
+  canonicalRepositoryRoot: string,
+): string {
+  const profileDigest = createHash('sha256')
+    .update('kite-source-runtime-profile\0')
+    .update(canonicalKiteHome)
+    .update('\0')
+    .update(canonicalRepositoryRoot)
+    .digest('hex')
+    .slice(0, 32);
+  return join(canonicalKiteHome, 'source-profiles', profileDigest, 'kite-session.sqlite');
 }
 
-export interface ManagedLocalServiceClientCompositionOptions {
-  readonly argv?: readonly string[];
-  readonly environment?: Readonly<Record<string, string | undefined>>;
-  /** Canonical OS account home supplied by the release/platform adapter. */
-  readonly systemHome?: string;
-  /** Build-owned executable layout; callers may not infer this from Workspace or ambient env. */
-  readonly executableMode?: 'source' | 'installed';
-}
-
-/**
- * Release/source entrypoint composition. App packages receive only typed connector/lifecycle
- * objects; neither terminal App imports the Service App or reconstructs state/process authority.
- */
-export function createManagedLocalServiceClientComposition(
-  options: ManagedLocalServiceClientCompositionOptions = {},
-): ManagedLocalServiceClientComposition {
-  const sourceEnvironment = options.environment ?? process.env;
-  const systemHome = realpathSync(options.systemHome ?? userInfo().homedir);
-  const explicitHome = explicitKiteHomeArgument(options.argv ?? process.argv);
-  const home = ensureLocalRuntimeServiceHome(
-    createKiteHomeIdentity(
-      explicitHome ?? join(systemHome, '.kite-code'),
-      explicitHome === undefined ? 'os_user_home' : 'explicit_argument',
-    ),
-  );
-  const statePaths = resolveLocalRuntimeServiceStatePaths(home);
-  const executableMode = options.executableMode ?? 'source';
-  const installed = executableMode === 'installed';
-  const sourceBuildId = installed
-    ? 'dev:installed-placeholder'
-    : sourceServiceBuildIdentity(resolve(import.meta.dir, '../..'));
-  const installedBuildId = installed ? installedBuildIdentity(process.execPath) : sourceBuildId;
-  const expectedBuildId = installed ? installedBuildId : sourceBuildId;
-  const source = selectKiteServiceEnvironmentSource(sourceEnvironment);
-  const environment = {
-    async resolve() {
-      const value = createKiteServiceEnvironment({
-        homeRoot: home.root,
-        stateRoot: statePaths.root,
-        source,
-        systemHome,
-        ...(process.platform === 'win32' ? { userProfile: systemHome } : {}),
-        nodeEnvironment: 'production',
-        allowedKeys: PROVIDER_ENVIRONMENT_KEYS,
-      });
-      ensureNeutralDirectory(value.cwd);
-      return value;
-    },
-  };
-  const sourceExecutable = resolve(import.meta.dir, './entrypoints/service.ts');
-  const installedExecutable = join(
-    dirname(process.execPath),
-    process.platform === 'win32' ? 'kite-service.exe' : 'kite-service',
-  );
-  const native = createNativeKiteServiceManagerComposition({
-    home,
-    environment,
-    executableMode,
-    executableResolver: createKiteServiceExecutableResolver({
-      source: sourceExecutable,
-      installed: installedExecutable,
-      sourceBuildId,
-      installedBuildId,
-    }),
-    expectedBuildId,
-  });
-  const withMode = (request?: KiteServiceManagerRequest): KiteServiceManagerRequest => ({
-    ...(request ?? {}),
-    executableMode,
-  });
-  const lifecycle: ManagedLocalServiceLifecycle = Object.freeze({
-    ensure: (request?: KiteServiceManagerRequest) => native.manager.ensure(withMode(request)),
-    status: (request?: KiteServiceManagerRequest) => native.manager.status(withMode(request)),
-    stop: (request?: KiteServiceManagerRequest) => native.manager.stop(withMode(request)),
-    restart: (request?: KiteServiceManagerRequest) => native.manager.restart(withMode(request)),
-  });
-  const connector: ManagedLocalServiceConnector = Object.freeze({
-    connect: async (input: { readonly workspace: string }) => {
-      const connection = createLocalKiteConnection({
-        manager: native.ensure,
-        state: native.clientState,
-        workspace: input.workspace,
-        clientInfo: {
-          name: 'kite-terminal',
-          version: '0.1.0',
-          instanceId: `terminal_${randomUUID()}`,
-        },
-        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-      });
-      try {
-        await connection.prepareAppControl();
-        return connection;
-      } catch (error) {
-        await connection.close('app_control_prepare_failed').catch(() => undefined);
-        throw error;
-      }
-    },
-  });
-  return Object.freeze({ connector, lifecycle, executableMode });
-}
-
-function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
+export function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
   const positions = argv.flatMap((value, index) => (value === '--kite-home' ? [index] : []));
   if (positions.length === 0) return undefined;
   if (positions.length !== 1) throw new Error('--kite-home may be supplied only once.');
@@ -186,16 +94,24 @@ export function selectKiteServiceEnvironmentSource(
   return Object.freeze(result);
 }
 
-function ensureNeutralDirectory(path: string): void {
-  if (!existsSync(path)) mkdirSync(path, { recursive: false, mode: 0o700 });
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error('Service neutral cwd is not a real directory.');
+/** Resolve the owner-checked OS runtime parent used by explicit local daemon endpoints. */
+export function resolveLocalRuntimeParent(
+  environment: Readonly<Record<string, string | undefined>>,
+): string {
+  const candidate =
+    process.platform === 'linux' && environment.XDG_RUNTIME_DIR
+      ? environment.XDG_RUNTIME_DIR
+      : tmpdir();
+  if (!isAbsolute(candidate)) throw new Error('OS runtime parent must be absolute.');
+  const canonical = realpathSync.native(candidate);
+  const stat = lstatSync(canonical);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error('OS runtime parent must be a real directory.');
   }
-  if (readdirSync(path).length !== 0) {
-    throw new Error('Service neutral cwd must remain empty.');
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    if ((stat.mode & 0o002) === 0) throw new Error('OS runtime parent owner is invalid.');
   }
-  chmodSync(path, 0o700);
+  return canonical;
 }
 
 export function sourceServiceBuildIdentity(repositoryRoot: string): string {
@@ -294,8 +210,30 @@ export function sourceServiceBuildIdentity(repositoryRoot: string): string {
   return `dev:${sourceTreeId}:dirty:${digest.digest('hex')}`;
 }
 
-function installedBuildIdentity(executable: string): string {
-  const installRoot = dirname(dirname(executable));
+export function installedBuildIdentity(
+  executable: string,
+  input: { readonly candidateRoot?: string } = {},
+): string {
+  const hintedCandidateRoot = input.candidateRoot ?? process.env.KITE_CODE_RELEASE_ROOT;
+  if (hintedCandidateRoot !== undefined && !isAbsolute(hintedCandidateRoot)) {
+    throw new Error(`Managed candidate root is not absolute for ${basename(executable)}.`);
+  }
+  const executablePath =
+    hintedCandidateRoot === undefined ? realpathSync.native(executable) : undefined;
+  const candidateRoot = resolve(
+    hintedCandidateRoot ?? dirname(dirname(executablePath ?? executable)),
+  );
+  const candidateId = basename(candidateRoot);
+  if (!/^[a-f0-9]{24}$/u.test(candidateId)) {
+    throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
+  }
+  if (realpathSync.native(candidateRoot) !== candidateRoot) {
+    throw new Error(`Managed candidate root is not immutable for ${basename(executable)}.`);
+  }
+  const installRoot = dirname(dirname(candidateRoot));
+  if (basename(dirname(candidateRoot)) !== 'releases') {
+    throw new Error(`Managed candidate layout is invalid for ${basename(executable)}.`);
+  }
   const marker = JSON.parse(
     readFileSync(join(installRoot, '.kite-code-managed.json'), 'utf8'),
   ) as unknown;
@@ -304,6 +242,7 @@ function installedBuildIdentity(executable: string): string {
   }
   const record = marker as Record<string, unknown>;
   const exactKeys = [
+    'activePointer',
     'canonicalRoot',
     'currentCandidateId',
     'previousCandidateId',
@@ -314,19 +253,50 @@ function installedBuildIdentity(executable: string): string {
   if (
     Object.keys(record).sort().join('\0') !== exactKeys.join('\0') ||
     record.schema !== 'KiteCodeManagedInstall' ||
-    record.version !== 1 ||
+    record.version !== 2 ||
     record.canonicalRoot !== realpathSync.native(installRoot) ||
     typeof record.currentCandidateId !== 'string' ||
-    !/^[a-f0-9]{24}$/u.test(record.currentCandidateId)
+    !/^[a-f0-9]{24}$/u.test(record.currentCandidateId) ||
+    record.currentCandidateId !== candidateId ||
+    record.activePointer !== 'active'
   ) {
     throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
   }
-  const materializedId = readFileSync(
-    join(installRoot, 'releases', record.currentCandidateId, '.candidate-id'),
-    'utf8',
-  ).trim();
-  if (materializedId !== record.currentCandidateId) {
+  const activePointer = readFileSync(join(installRoot, 'active'), 'utf8');
+  if (!/^[a-f0-9]{24}\n$/u.test(activePointer)) {
+    throw new Error(`Managed active release pointer is invalid for ${basename(executable)}.`);
+  }
+  if (activePointer.trim() !== record.currentCandidateId) {
+    throw new Error(`Managed active release pointer is inconsistent for ${basename(executable)}.`);
+  }
+  const materializedId = readFileSync(join(candidateRoot, '.candidate-id'), 'utf8').trim();
+  if (materializedId !== candidateId) {
     throw new Error(`Managed candidate identity is invalid for ${basename(executable)}.`);
   }
-  return record.currentCandidateId;
+  const manifest = readFileSync(join(candidateRoot, 'manifest.json'));
+  const manifestCandidateId = createHash('sha256').update(manifest).digest('hex').slice(0, 24);
+  if (manifestCandidateId !== candidateId) {
+    throw new Error(`Managed candidate manifest identity is invalid for ${basename(executable)}.`);
+  }
+  return candidateId;
+}
+
+export function resolveInstalledReleaseExecutable(
+  name: 'kite-service',
+  input: {
+    readonly executable?: string;
+    readonly candidateRoot?: string;
+    readonly platform?: NodeJS.Platform;
+  } = {},
+): string {
+  const candidateRoot = input.candidateRoot ?? process.env.KITE_CODE_RELEASE_ROOT;
+  if (candidateRoot !== undefined && !isAbsolute(candidateRoot)) {
+    throw new Error(`Managed candidate root is not absolute for ${name}.`);
+  }
+  const suffix = (input.platform ?? process.platform) === 'win32' ? '.exe' : '';
+  const binRoot =
+    candidateRoot === undefined
+      ? dirname(input.executable ?? process.execPath)
+      : join(candidateRoot, 'bin');
+  return join(binRoot, `${name}${suffix}`);
 }

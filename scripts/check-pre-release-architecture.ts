@@ -10,6 +10,7 @@ const packageSources = readdirSync(join(root, 'packages'))
 const productionRoots = [
   join(root, 'apps/kite-cli/src'),
   join(root, 'apps/kite-service/src'),
+  join(root, 'apps/kite-web/src'),
   ...packageSources,
   join(root, 'native'),
 ].filter(existsSync);
@@ -21,6 +22,20 @@ const sqliteFormatBranch = /\b(?:targetFormat|formatProfile|compatibilityMode|le
 const removedProductionNames =
   /\b(?:promptContract|project_legacy|user_legacy|project_mcp_json|project_kite_code|migrate_legacy|ClientPresentationEvent|localMcpConfigPath|LegacyToolContractSection|RuntimeSessionStoragePort|StateSessionStorage)\b/u;
 const implementationTaskIdentity = /\b(?:rmv\d+|rav\d+)\b/iu;
+const forbiddenWebAuthorityIdentifiers = new Set([
+  'approvalReply',
+  'cancelTurn',
+  'createSession',
+  'forkSession',
+  'interactionReply',
+  'interruptTurn',
+  'prompt',
+  'releaseControl',
+  'requestControl',
+  'resumeController',
+  'rewindSession',
+  'runtimeCommand',
+]);
 
 function directNamedExports(path: string): ReadonlySet<string> {
   const source = readFileSync(join(root, path), 'utf8');
@@ -124,6 +139,20 @@ function isVersionedEntity(name: string): boolean {
   return versionedEntity.test(withoutAlgorithmNames);
 }
 
+function containsIdentifier(source: ts.SourceFile, name: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isIdentifier(node) && node.text === name) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
 function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
   return (
     relativePath === 'packages/agent-kernel/src/state-migration.ts' ||
@@ -182,6 +211,53 @@ function inspectSource(path: string): void {
       );
     }
     if (
+      relativePath.startsWith('apps/kite-web/src/') &&
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      const specifier = node.moduleSpecifier.text;
+      const allowedContract =
+        specifier === '@kite-ai/agent-api-client' ||
+        specifier.startsWith('@kite-ai/agent-api-client/') ||
+        specifier === '@kite-ai/agent-api-contract' ||
+        specifier.startsWith('@kite-ai/agent-api-contract/');
+      const forbidden =
+        specifier === 'node' ||
+        specifier.startsWith('node:') ||
+        specifier === 'bun' ||
+        specifier.startsWith('bun:') ||
+        specifier.startsWith('#kite-') ||
+        (specifier.startsWith('@kite-ai/') && !allowedContract);
+      if (forbidden) {
+        const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+        violations.push(
+          `${relativePath}:${position.line + 1}: Kite Web may not import Node/Bun or Runtime authority ${specifier}`,
+        );
+      }
+    }
+    if (
+      relativePath === 'apps/kite-service/src/workspace-worker/process-state.ts' &&
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith('../bootstrap')
+    ) {
+      const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      violations.push(
+        `${relativePath}:${position.line + 1}: Worker process registry state may not import Runtime bootstrap`,
+      );
+    }
+    if (
+      (relativePath.startsWith('apps/kite-web/src/') ||
+        relativePath.startsWith('packages/agent-api-client/src/')) &&
+      ts.isIdentifier(node) &&
+      forbiddenWebAuthorityIdentifiers.has(node.text)
+    ) {
+      const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      violations.push(
+        `${relativePath}:${position.line + 1}: Kite Web declares forbidden authority ${node.text}`,
+      );
+    }
+    if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       node.moduleSpecifier.text === '@kite-ai/builtin-runtime' &&
@@ -235,6 +311,14 @@ function inspectSource(path: string): void {
     /\.sessions\.deleteSession\s*\(/u.test(source)
   ) {
     violations.push(`${relativePath}: App may not delete Runtime Store sessions directly`);
+  }
+  if (relativePath.startsWith('apps/kite-web/src/')) {
+    if (containsIdentifier(sourceFile, 'process')) {
+      violations.push(`${relativePath}: Kite Web may not use the Node process global`);
+    }
+    if (containsIdentifier(sourceFile, 'Bun')) {
+      violations.push(`${relativePath}: Kite Web may not use the Bun global`);
+    }
   }
 }
 
@@ -311,12 +395,10 @@ const requiredDomainFiles = [
   'packages/builtin-runtime/src/subagent/runtime-module.ts',
   'packages/builtin-runtime/src/subagent/index.ts',
   'packages/builtin-runtime/src/verification/runtime-module.ts',
-  'apps/kite-service/src/runtime/session/session-registry.ts',
   'apps/kite-service/src/runtime/session/session-lifecycle.ts',
   'apps/kite-service/src/runtime/session/rewind-service.ts',
   'apps/kite-service/src/runtime/session/planning-mode-service.ts',
   'apps/kite-service/src/runtime/session/context-compaction-service.ts',
-  'apps/kite-service/src/runtime/session/session-projection.ts',
   'apps/kite-service/src/logs/runtime-log-presentation.ts',
   'apps/kite-cli/src/adapters/tui/session-adapter.ts',
   'apps/kite-service/src/runtime/tool-execution/router.ts',

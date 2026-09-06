@@ -283,15 +283,15 @@ function verificationValid(
 }
 
 describe('Builtin Tool Pipeline callbacks', () => {
-  test('projects the frozen 28/20/8 catalog and preserves read_file identity', () => {
+  test('projects the frozen 28/19/9 catalog and preserves read_file identity', () => {
     const value = resolveReadFile();
     expect(value.projection.entries).toHaveLength(28);
     expect(value.projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(
-      20,
+      19,
     );
     expect(
       value.projection.entries.filter((entry) => entry.visibility === 'internal'),
-    ).toHaveLength(8);
+    ).toHaveLength(9);
     expect(Object.isFrozen(value.projection)).toBe(true);
     expect(Object.isFrozen(value.projection.entries)).toBe(true);
     expect(Object.isFrozen(value.resolved)).toBe(true);

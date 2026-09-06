@@ -23,16 +23,22 @@ function withModelName(state: TuiState): TuiState {
   };
 }
 
+function messageEnvelope(messageId: string, text: string) {
+  return {
+    sessionId: 'compaction-status-fixture',
+    connectionGeneration: 1,
+    durability: 'durable' as const,
+    revision: 1,
+    turnId: 'compaction-turn',
+    event: { type: 'user.message' as const, messageId, kind: 'task' as const, text },
+  };
+}
+
 function manualCompactionState(): TuiState {
   let state = withModelName(createInitialState());
   state = eventReducer(state, {
-    type: 'RUNTIME_EVENT',
-    event: {
-      type: 'user.message',
-      messageId: 'manual-command',
-      kind: 'task',
-      text: '/compact',
-    },
+    type: 'ACCEPT_PRESENTATION_ENVELOPE',
+    event: messageEnvelope('manual-command', '/compact'),
   });
   return eventReducer(state, {
     type: 'SET_COMPACTION_PROGRESS',
@@ -44,13 +50,8 @@ function manualCompactionState(): TuiState {
 function automaticCompactionState(): TuiState {
   let state = eventReducer(withModelName(createInitialState()), { type: 'SET_RUNNING' });
   state = eventReducer(state, {
-    type: 'RUNTIME_EVENT',
-    event: {
-      type: 'user.message',
-      messageId: 'automatic-command',
-      kind: 'task',
-      text: '/auto-compact',
-    },
+    type: 'ACCEPT_PRESENTATION_ENVELOPE',
+    event: messageEnvelope('automatic-command', '/auto-compact'),
   });
   return eventReducer(state, {
     type: 'SET_COMPACTION_PROGRESS',

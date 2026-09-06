@@ -225,10 +225,16 @@ export function createKiteRuntimeCompatibilityMigrator(
       ) {
         return null;
       }
-      const event = codec.decodeCompatibleEvent?.(row.eventJson, {
-        schemaVersion: row.schemaVersion,
-        formatEpoch: source.formatEpoch,
-      });
+      const event = codec.decodeCompatibleEvent?.(
+        row.eventJson,
+        {
+          schemaVersion: row.schemaVersion,
+          formatEpoch: source.formatEpoch,
+        },
+        {
+          sequence: row.sequence,
+        },
+      );
       if (!event) return null;
       events.push({
         eventId: row.eventId,

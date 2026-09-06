@@ -81,6 +81,8 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
     case 'get_context_status':
     case 'list_checkpoints':
     case 'get_rewind_preview':
+    case 'get_run':
+    case 'list_runs':
       return query;
   }
 }
@@ -92,6 +94,8 @@ export function mapRuntimeQueryToProtocol(query: RuntimeQuery): RuntimeProtocolQ
     case 'get_context_status':
     case 'list_checkpoints':
     case 'get_rewind_preview':
+    case 'get_run':
+    case 'list_runs':
       return query;
     default:
       return undefined;
@@ -142,14 +146,15 @@ export function mapRuntimeClientEventToProtocol(
     case 'provider.action':
     case 'verification.status':
     case 'subagent.started':
+    case 'subagent.phase':
     case 'subagent.step':
+    case 'subagent.review':
     case 'subagent.completed':
     case 'subagent.failed':
     case 'context.compaction':
     case 'task.terminal':
     case 'turn.terminal':
     case 'run.terminal':
-    case 'run.failure':
     case 'rewind.terminal':
     case 'interaction.available':
     case 'session.notice':
@@ -161,37 +166,6 @@ export function mapRuntimeClientEventToProtocol(
 }
 
 function mapSession(session: RuntimeSessionProjection) {
-  const activeTurn = session.activeWork?.activeTurn;
-  const activeWork =
-    session.activeWork === undefined
-      ? undefined
-      : {
-          workId: session.activeWork.workId,
-          phase: session.activeWork.phase,
-          status: session.activeWork.status,
-          ...(session.activeWork.title === undefined ? {} : { title: session.activeWork.title }),
-          ...(activeTurn === undefined
-            ? {}
-            : {
-                activeTurn: {
-                  turnId: activeTurn.turnId,
-                  status: activeTurn.status,
-                  ...(activeTurn.summary === undefined ? {} : { summary: activeTurn.summary }),
-                  ...(activeTurn.interaction === undefined
-                    ? {}
-                    : { interaction: mapInteraction(activeTurn.interaction) }),
-                  ...(activeTurn.evidence === undefined
-                    ? {}
-                    : {
-                        evidence: activeTurn.evidence.map((evidence) => ({
-                          kind: evidence.kind,
-                          status: evidence.status,
-                          ...(evidence.digest === undefined ? {} : { digest: evidence.digest }),
-                        })),
-                      }),
-                },
-              }),
-        };
   return RUNTIME_PROTOCOL_SESSION_SCHEMA_.parse({
     schema: session.schema,
     sessionId: session.sessionId,
@@ -208,7 +182,17 @@ function mapSession(session: RuntimeSessionProjection) {
         : { activeInteractionId: session.interactionQueue.activeInteractionId }),
       interactions: session.interactionQueue.interactions.map(mapInteraction),
     },
-    ...(activeWork === undefined ? {} : { activeWork }),
+    ...(session.activeTask === undefined ? {} : { activeTask: { ...session.activeTask } }),
+    ...(session.currentRun === undefined
+      ? {}
+      : {
+          currentRun: {
+            ...session.currentRun,
+            ...(session.currentRun.outcome === undefined
+              ? {}
+              : { outcome: { ...session.currentRun.outcome } }),
+          },
+        }),
   });
 }
 
@@ -226,6 +210,7 @@ function mapInteraction(interaction: RuntimeClientInteraction): RuntimeClientInt
         kind: interaction.kind,
         generation: interaction.generation,
         grants: [...interaction.grants],
+        owner: { ...interaction.owner },
         ...(interaction.command === undefined ? {} : { command: interaction.command }),
       };
     case 'input':
@@ -267,6 +252,9 @@ export function mapRuntimeNotificationToSubscriptionMessage(
           durability: 'durable',
           sessionId: notification.sessionId,
           revision: notification.revision,
+          ...(notification.runId === undefined ? {} : { runId: notification.runId }),
+          ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
+          ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
           session: mapSession(notification.projection.session),
           ...(event === undefined ? {} : { event }),
         }
@@ -275,6 +263,9 @@ export function mapRuntimeNotificationToSubscriptionMessage(
           durability: 'durable',
           sessionId: notification.sessionId,
           revision: notification.revision,
+          ...(notification.runId === undefined ? {} : { runId: notification.runId }),
+          ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
+          ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
           session: mapSession(notification.projection.session),
         };
   }
@@ -287,6 +278,8 @@ export function mapRuntimeNotificationToSubscriptionMessage(
     durability: 'ephemeral',
     sessionId: notification.sessionId,
     workId: notification.workId,
+    ...(notification.runId === undefined ? {} : { runId: notification.runId }),
+    ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
     turnId: notification.turnId,
     actorId: notification.actorId,
     attemptId: notification.attemptId,
@@ -391,6 +384,23 @@ export function mapRuntimeQueryResultToProtocol(
             ...(result.revision === undefined ? {} : { revision: result.revision }),
             rewindPreview: result.rewindPreview,
           }).data;
+    case 'get_run':
+      return result.run === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            ...(result.revision === undefined ? {} : { revision: result.revision }),
+            run: result.run,
+          }).data;
+    case 'list_runs':
+      return RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        status: 'ok',
+        queryType: result.queryType,
+        ...(result.revision === undefined ? {} : { revision: result.revision }),
+        runs: result.runs ?? [],
+        ...(result.nextRunCursor === undefined ? {} : { nextRunCursor: result.nextRunCursor }),
+      }).data;
     default:
       return undefined;
   }

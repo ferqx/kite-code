@@ -26,6 +26,12 @@ export function hasPendingSubagentProviderRecovery(state: Readonly<RuntimeState>
 /** App restore adapter for the Builtin-owned Subagent Provider lifecycle. */
 export async function reconcilePendingSubagentProvidersAfterCrash(input: {
   readonly composition: GovernedSubagentComposition;
+  /**
+   * Same-process user cancellation already terminalizes the capability as a
+   * waived failure. In that case recovery owns only Provider cleanup and must
+   * not overwrite the acknowledged cancellation with an unknown outcome.
+   */
+  readonly terminalDisposition?: 'unknown' | 'preserve_user_cancellation';
   readonly persistence: {
     getState(): Readonly<RuntimeState>;
     persistEvents(events: RuntimeEvent[]): Promise<boolean>;
@@ -127,6 +133,18 @@ export async function reconcilePendingSubagentProvidersAfterCrash(input: {
       completed.subagentProviderLifecycle.cleanupConfirmed !== true
     ) {
       return false;
+    }
+    if (input.terminalDisposition === 'preserve_user_cancellation') {
+      const terminal = input.persistence.getState().capabilities.invocations[current.invocationId];
+      if (
+        terminal?.status !== 'failed' ||
+        terminal.reconciliation !== 'waived' ||
+        terminal.subagentProviderLifecycle?.status !== 'cleanup_completed' ||
+        terminal.subagentProviderLifecycle.cleanupConfirmed !== true
+      ) {
+        return false;
+      }
+      continue;
     }
     const unknownReason = 'Subagent Provider lifecycle was reconciled after Runtime restore.';
     const finishedAt = new Date().toISOString();

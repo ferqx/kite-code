@@ -7,7 +7,12 @@ import type {
 } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 
-export { assertRuntimeClientEvent } from '@kite-ai/runtime-contract';
+export type { AcceptedPresentationEnvelope } from '@kite-ai/runtime-contract';
+export {
+  assertAcceptedPresentationEnvelope,
+  assertRuntimeClientEvent,
+  isAcceptedPresentationEnvelope,
+} from '@kite-ai/runtime-contract';
 
 export * from './client';
 export * from './store';
@@ -15,7 +20,7 @@ export * from './store';
 export const RUNTIME_CLIENT_BOUNDARY_ = Object.freeze({
   frameworkNeutral: true,
   transport: 'logical-message',
-  protocolSchema: 'kite.runtime-protocol.v1',
+  protocolSchema: 'kite.runtime-protocol.v2',
 } as const);
 
 export interface RuntimeClientConnection {

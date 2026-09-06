@@ -282,7 +282,7 @@ describe('tool policy', () => {
     }
   });
 
-  test('allows the Building workspace baseline directly without a grant', () => {
+  test('requests exact approval for an unproven Building project script', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
@@ -290,10 +290,10 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
+    expect(decision.requiresApproval).toBe(true);
     expect(decision.risk).toBe('unknown');
     expect(decision.userVisibleSummary).toContain('bun test');
-    expect(decision.expectedEffects).toContain('Runs inside the workspace sandbox baseline');
+    expect(decision.expectedEffects).toContain('Runs only after exact user approval');
   });
 
   test('keeps baseline shell commands direct without a command allowlist', () => {
@@ -323,7 +323,7 @@ describe('tool policy', () => {
     }
   });
 
-  test('keeps Planning baseline shell execution direct', () => {
+  test('requests exact approval for an unproven Planning project script', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
@@ -331,7 +331,7 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
+    expect(decision.requiresApproval).toBe(true);
     expect(decision.risk).toBe('unknown');
   });
 
@@ -419,8 +419,8 @@ describe('tool policy', () => {
   });
 
   // Full is a mode, not a persisted approval grant.
-  test('allows shell execution risk classes under Full interaction mode without a grant', () => {
-    for (const command of ['echo hi > hello.txt', 'git add -A', 'bun test']) {
+  test('allows known Full shell effects but still reviews uncertain project scripts', () => {
+    for (const command of ['echo hi > hello.txt', 'git add -A']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
         toolArgs: { command },
@@ -434,6 +434,16 @@ describe('tool policy', () => {
       expect(decision.requiresApproval).toBe(false);
       expect(decision.grantUsed).toBe('none');
     }
+    expect(
+      evaluateToolApproval({
+        toolName: 'shell_execute',
+        toolArgs: { command: 'bun test' },
+        phase: 'building',
+        workspace: '/tmp/project',
+        threadId: 'thread-a',
+        interactionMode: 'full',
+      }),
+    ).toMatchObject({ allowed: true, requiresApproval: true, grantUsed: 'none' });
   });
 
   test('denies destructive commands even under Full interaction mode', () => {

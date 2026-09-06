@@ -140,7 +140,7 @@ export function pendingWithStatus(
   status: AgentApprovalStatus,
   extras: Partial<AgentPendingApproval> = {},
 ): AgentPendingApproval {
-  return { ...pending, ...extras, status, state: status };
+  return { ...pending, ...extras, status };
 }
 
 export function approvalPayloadFromEvent(event: unknown): UnknownRecord {

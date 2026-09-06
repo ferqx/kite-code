@@ -2,6 +2,8 @@ import type {
   AgentPhase,
   AgentPlan,
   InteractionMode,
+  InteractionOwner,
+  AcceptedPresentationEnvelope as RuntimeAcceptedPresentationEnvelope,
   RuntimeToolPresentation,
   SubAgentFailureDiagnostic,
   SubAgentRole,
@@ -11,6 +13,10 @@ import type {
   WorkspaceAccess,
 } from '@kite-ai/runtime-contract';
 
+/** Re-export the protocol-owned envelope; the TUI must not fork its shape. */
+export type AcceptedPresentationEnvelope = RuntimeAcceptedPresentationEnvelope;
+export type TuiInteractionOwner = InteractionOwner;
+
 /** 合并工具摘要中的单条工具记录 / Single tool entry in a consolidated summary */
 export interface ConsolidatedToolEntry {
   callId: string;
@@ -19,7 +25,15 @@ export interface ConsolidatedToolEntry {
   ok: boolean;
   summary: string;
   elapsedMs?: number;
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+  status:
+    | 'queued'
+    | 'running'
+    | 'done'
+    | 'error'
+    | 'rejected'
+    | 'cancelled'
+    | 'timeout'
+    | 'exhausted';
   /** 读取文件时的文件总行数 / Total lines for read_file tool */
   totalLines?: number;
   /** 自动审批失败原因。工具执行成功但审批失败时展示 / Auto-review failure reason. Shown when tool ok but review failed. */
@@ -37,12 +51,15 @@ export interface ThoughtTimelineEntry {
 }
 
 export interface SubAgentStepRecord {
+  /** Stable Runtime identity shared by admission, started, result and replay. */
+  stepId: string;
+  toolCallId: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
   /** 步生命周期状态，渲染层只读此字段决定颜色，不依赖任何布尔组合推断
    *  Step lifecycle status — the single source of truth for color decisions.
    *  pending → awaiting_approval → success | rejected | error */
-  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error' | 'cancelled';
   /** 工具执行结果（仅 success / error 时有意义），保留用于日志和调试
    *  Tool execution outcome (meaningful only for success / error status), kept for logging */
   ok?: boolean;
@@ -54,7 +71,7 @@ export interface SubAgentStepRecord {
   durationMs?: number;
 }
 
-export type OutputBlock =
+export type OutputBlockVariant =
   | {
       id: number;
       kind: 'user';
@@ -66,17 +83,20 @@ export type OutputBlock =
        * Local-only slash-command echoes intentionally omit it.
        */
       messageId?: string;
+      /** Live-only echo shown before the authoritative Runtime user.message arrives. */
+      pendingEcho?: boolean;
     }
   | {
       id: number;
       kind: 'text';
       content: string;
       streaming?: boolean;
-      /** Compatibility marker for mutable text that cannot enter Static yet. */
-      responsePending?: boolean;
+      /** Hidden ownership buffer while an active Thought awaits model classification. */
       isError?: boolean;
       /** Model invocation that owns this live/reconnected response segment. */
       modelRequestId?: string;
+      /** The model terminal reconciled this component; later packets cannot mutate it. */
+      modelTerminal?: boolean;
       /** Terminal duration retained off-screen so reasoning that arrives after
        *  model.responded can still attach the one canonical Thinking header. */
       modelDurationMs?: number;
@@ -100,7 +120,15 @@ export type OutputBlock =
       callId: string;
       name: string;
       args: Record<string, unknown>;
-      status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+      status:
+        | 'queued'
+        | 'running'
+        | 'done'
+        | 'error'
+        | 'rejected'
+        | 'cancelled'
+        | 'timeout'
+        | 'exhausted';
       summary: string;
       preview?: string;
       /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */
@@ -124,6 +152,9 @@ export type OutputBlock =
   | {
       id: number;
       kind: 'tool_summary';
+      /** Server-owned read-only presentation group.  A summary never merges
+       * tools from another explicit group. */
+      presentationGroupId?: string;
       tools: ConsolidatedToolEntry[];
       totalElapsedMs: number;
       createdAt: number;
@@ -134,11 +165,16 @@ export type OutputBlock =
        *  excluding tool execution). When present, totalElapsedMs follows it
        *  (current "Thinking Xs" semantics); absent in old logs → wall clock. */
       modelMs?: number;
+      /** Wall-clock start of the currently active model invocation. Cleared by
+       * model.responded so tool and interaction waits are never counted. */
+      liveModelStartedAt?: number;
       summaryLine: string;
       active: boolean;
+      /** The owning model invocation reached its terminal fact. Tool steps
+       * may remain live after this marker until their own terminal events. */
+      modelTerminal?: boolean;
       /** Keep a just-closed streamed Thought dynamic until model.responded
        *  removes its transient reasoning preview. */
-      responsePending?: boolean;
       /** Model invocation that most recently contributed reasoning to this phase. */
       modelRequestId?: string;
       /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
@@ -149,25 +185,20 @@ export type OutputBlock =
        *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
        *  Controls the summary label: with thinking → "Thinking Xs · <tool stats>", without → just tool counts. */
       hasThinking?: boolean;
-      /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
-       *  Event timeline: records reason/tool_call ordering so the render layer
-       *  can interleave thinking lines with tool steps chronologically. */
+      /** 事件时间线：记录 reason / tool_call 的先后顺序，供归属与回放保留；
+       *  活动渲染只消费 latestActivity，不累计整条时间线。
+       *  Event timeline retained for ownership/replay; the active renderer
+       *  consumes only latestActivity instead of replaying the whole timeline. */
       timeline?: ThoughtTimelineEntry[];
       /** 时间线序列号 / Monotonic sequence counter for timeline entries */
       nextTimelineSeq?: number;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';
-      /** ADR-0030 / 规则 24：阶段内已确认的旁白文本（被随后的只读工具确认），
-       *  渲染于块顶部。多段按时间顺序累积。
-       *  Confirmed narration texts (confirmed by a subsequent read-only tool),
-       *  rendered at the top of the phase block in chronological order. */
+      /** Legacy in-memory narration residue consumed only by cancellation/settlement cleanup.
+       *  Current model-visible text must use ordinary text blocks and never enter this field. */
       captions?: string[];
-      /** ADR-0030 / 规则 24：待确认的旁白文本——文本在阶段块活跃时先吸收于此，
-       *  随后到来只读工具则确认进 captions；阶段结束时仍未确认则脱离为独立
-       *  文本块（最终回答）。纯思考块被文本关闭时并入该文本块题头（ADR-0026）。
-       *  Pending narration: absorbed while the phase block is active; confirmed
-       *  into captions when a read-only tool arrives, or detached as a standalone
-       *  text block (final answer) when the phase ends unconfirmed. */
+      /** Transitional tail used by terminal/cancellation settlement. Tool-bearing model-visible
+       *  text is published as a normal text block instead of being stored here. */
       pendingCaption?: string;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
@@ -181,6 +212,10 @@ export type OutputBlock =
       id: number;
       kind: 'question';
       question: UserInputPayload;
+      /** Durable interaction identity used for idempotent answer/cancel
+       * projection and replay. */
+      interactionId?: string;
+      projectionIdentity?: string;
       /** Runtime tool identity that opened this input interaction. */
       toolCallId?: string;
       resolved?: string | { text: string; answers?: Record<string, string> };
@@ -223,6 +258,18 @@ export type OutputBlock =
       concurrencyGroupId?: string;
     };
 
+/**
+ * Reducer-owned lifecycle marker consumed by Timeline/Static.  Renderer code
+ * must not infer business terminality from the variant-specific fields below.
+ * Keep this as a distributive mapped union so existing `Extract<OutputBlock,
+ * {kind: ...}>` narrowing remains sound after adding the marker.
+ */
+type WithPresentationState<T> = T extends OutputBlockVariant
+  ? T & { presentationState?: 'live' | 'sealed' }
+  : never;
+
+export type OutputBlock = WithPresentationState<OutputBlockVariant>;
+
 /** 一次完整的「用户提问 → Agent 回复」往返 */
 export interface Turn {
   blocks: OutputBlock[];
@@ -254,29 +301,19 @@ export type TuiApprovalStatus =
 export interface TuiPendingApproval {
   interactionId: string;
   toolCallId: string;
-  parentToolCallId?: string;
-  childSubagentId?: string;
+  /** Exact Runtime owner binding used for owner-aware settlement. */
+  owner: TuiInteractionOwner;
   route: 'user' | 'auto';
   status: TuiApprovalStatus;
   sequence: number;
   generation: number;
-  /**
-   * Closed Runtime-facing approval facts. This is the only approval detail
-   * rendered by the RuntimeClient reducer; legacy `approval` stays solely for
-   * restoring pre-RuntimeServer local snapshots.
-   */
-  clientInteraction?: Extract<
+  /** Closed Runtime-facing approval facts rendered by the RuntimeClient reducer. */
+  clientInteraction: Extract<
     import('@kite-ai/runtime-contract').RuntimeClientInteraction,
     { readonly kind: 'approval' }
   >;
-  approval?: ToolApprovalPayload;
-  approvalHash?: string;
-  bindingDigest?: string;
   grant?: 'approve_once' | 'same_command';
-  receiptId?: string;
-  matchCount?: number;
   result?: 'authorized' | 'rejected' | 'cancelled' | 'succeeded' | 'failed';
-  actualSandboxScope?: ToolApprovalPayload['sandboxScope'];
 }
 
 export interface TuiSessionCommandGrant {
@@ -291,6 +328,23 @@ export interface TuiSessionCommandGrant {
 export interface TuiState {
   // ── 多会话 ──
   sessions: SessionSnapshot[];
+  /**
+   * Lifecycle terminals are accepted without a live Runtime authority only
+   * while an explicit history replay is in progress. Live TUI state is
+   * fail-closed until its authority projection has been joined.
+   */
+  presentationMode?: 'live' | 'history';
+  runtimeAuthority?: TuiRuntimeAuthorityProjection;
+  requestAssemblies?: ReadonlyMap<string, RequestAssembly>;
+  /** Reducer-owned normalized message timeline. Renderers consume this
+   * projection and never decide whether a business entity is terminal. */
+  presentationTimeline: import('./presentation/timeline').TimelineState;
+  /** A legacy aggregate diagnostic retained for telemetry.  It never blocks
+   * a different request's model terminal. */
+  requestAssemblyOverflow?: boolean;
+  /** Request-scoped assembly failures.  Only the matching request terminal is
+   * held for history recovery. */
+  requestAssemblyIncomplete?: ReadonlySet<string>;
   activeSessionId: string | null;
 
   // ── 现有字段保留不变 ──
@@ -300,7 +354,12 @@ export interface TuiState {
   toolStartTimes?: Record<string, number>;
   status: StatusState;
   exited: boolean;
-  running: boolean;
+  /** False only between local run reservation and the authoritative user.message projection. */
+  runPromptPresented?: boolean;
+  /** Live-only prompts waiting behind an active Run. They are presentation state, not turns. */
+  queuedPrompts?: Array<{ id: number; sessionId: string; text: string }>;
+  /** Run-scoped cancel presentation; durable Runtime terminal facts still own completion. */
+  cancelRequestedRunId?: string;
   runCount: number;
   runStartTime?: number;
   runTokenBaseline?: number;
@@ -326,6 +385,8 @@ export interface TuiState {
   sessionServiceUnavailable: boolean;
   /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
   explorationSummaryIds: Record<string, number>;
+  /** Explicit Server presentation group → Thought summary identity. */
+  presentationGroupSummaryIds?: Record<string, number>;
   /**
    * Runtime queue metadata is retained off-screen until execution reaches the
    * call or it fails terminally. Approval targets remain in the Footer only.
@@ -339,6 +400,7 @@ export interface TuiState {
       displayName?: string;
       args: Record<string, unknown>;
       presentation: RuntimeToolPresentation;
+      presentationGroupId?: string;
       /** Exact model request resolved from the event's presentation group. */
       modelRequestId?: string;
     }
@@ -347,12 +409,14 @@ export interface TuiState {
   currentThoughtSummaryId?: number;
   /** Explicit Thought lifecycle. `awaiting_terminal` is visually settled but
    *  still owns the current model invocation's terminal duration. */
-  thoughtPhaseStatus?: 'running' | 'awaiting_terminal';
   /** Current model invocation, used to scope streamed terminal reconciliation. */
   currentModelRequestId?: string;
   /** The current invocation emitted cumulative text deltas. The visible tree
    *  may still be empty while an incomplete paragraph remains buffered. */
   currentModelTextStreamed?: boolean;
+  /** Latest accepted cumulative model text. It closes an incomplete ordinary
+   *  paragraph when the terminal event legitimately omits its optional summary. */
+  currentModelTextSource?: string;
   /** Most recently settled tool-bearing invocation. Delayed cumulative text
    *  remains correlated to its sibling response components without becoming
    *  a Thought caption. */
@@ -367,6 +431,9 @@ export interface TuiState {
   currentModelReasoningSegmentId?: string;
   /** Model invocation that owns the cached reasoning segment. */
   currentModelReasoningRequestId?: string;
+  /** Request identities whose `model.responded` terminal was already
+   * projected. Late/duplicate model lifecycle packets cannot reopen them. */
+  settledModelRequestIds?: ReadonlySet<string>;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Durable Kernel approval queue projection; optional for legacy snapshots. */
@@ -386,7 +453,42 @@ export interface TuiState {
     phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase;
     source: 'manual' | 'automatic';
   };
+  /** Client-side identity fence state for AcceptedPresentationEnvelope. */
+  acceptedSessionId?: string;
+  acceptedConnectionGeneration?: number;
+  acceptedDurableRevision?: number;
+  acceptedEphemeralSequences?: ReadonlyMap<string, number>;
+  /** Runs whose durable terminal has closed their ephemeral stream. */
+  closedRunIds?: ReadonlySet<string>;
+  /** A terminal may arrive before the matching subagent.started receipt. */
+  pendingSubagentTerminals?: ReadonlyMap<string, PendingSubagentTerminal>;
 }
+
+export interface PendingSubagentTerminal {
+  readonly status: 'done' | 'error' | 'cancelled';
+  readonly summary: string;
+  /** Durable revision at which the terminal was observed, when available. */
+  readonly revision?: number;
+  readonly toolCallCount?: number;
+  readonly durationMs?: number;
+  readonly diagnostic?: SubAgentFailureDiagnostic;
+}
+
+export type RequestAssembly =
+  | {
+      readonly state: 'collecting' | 'execution_terminal_seen';
+      readonly requestId: string;
+      readonly text: string;
+      readonly reasoning: string;
+      readonly possibleThoughtId?: number;
+    }
+  | {
+      readonly state: 'presentation_incomplete';
+      readonly requestId: string;
+      readonly expectedSequence?: number;
+      readonly observedSequence?: number;
+      readonly recovery: 'resubscribe' | 'history';
+    };
 
 export type RewindScope = 'code_and_conversation' | 'conversation_only' | 'code_only';
 
@@ -458,7 +560,11 @@ export interface SessionSnapshot {
   name: string;
   workspace: string;
   active: boolean;
-  running: boolean;
+  runtimeAuthority?: TuiRuntimeAuthorityProjection;
+  /** Whether the active Run's user prompt has reached the visible message owner. */
+  runPromptPresented?: boolean;
+  /** Run-scoped cancel presentation for this Session. */
+  cancelRequestedRunId?: string;
   pendingInterrupt: boolean;
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;
@@ -474,4 +580,11 @@ export interface SessionSnapshot {
   sessionCommandGrants?: ReadonlyMap<string, TuiSessionCommandGrant>;
   sessionCommandGrantGeneration?: number;
   sessionCommandGrantRevision?: number;
+}
+
+export interface TuiRuntimeAuthorityProjection {
+  readonly revision: number;
+  readonly activeTask?: import('@kite-ai/runtime-contract').RuntimeSessionTaskProjection;
+  readonly currentRun?: import('@kite-ai/runtime-contract').RuntimeSessionRunProjection;
+  readonly interactionQueue: import('@kite-ai/runtime-contract').RuntimeInteractionQueueProjection;
 }

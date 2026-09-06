@@ -1,9 +1,13 @@
 import type { RuntimeClientInteraction, ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#kite-cli/tui/provider';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useI18n } from '../i18n';
+import {
+  classifyInteractionSubmissionFailure,
+  type InteractionSubmissionFailure,
+} from '../interaction-submission-diagnostic';
 import type { TuiPendingApproval } from '../types';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
@@ -13,6 +17,7 @@ export interface ApprovalBlockProps {
   provider: TuiUserInputProvider;
   onResolved: (action: string, grant?: string) => void;
   queueEntry?: TuiPendingApproval;
+  externalSubmissionFailure?: InteractionSubmissionFailure;
 }
 
 interface Option {
@@ -21,19 +26,24 @@ interface Option {
   grant?: ShellApprovalGrant;
 }
 
+const SUBMISSION_FEEDBACK_DELAY_MS = 200;
+
 export default function ApprovalBlock({
   approval,
   provider,
   onResolved,
   queueEntry,
+  externalSubmissionFailure,
 }: ApprovalBlockProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionFailed, setSubmissionFailed] = useState(false);
+  const [submissionFailure, setSubmissionFailure] = useState<InteractionSubmissionFailure>();
+  const visibleSubmissionFailure = submissionFailure ?? externalSubmissionFailure;
   const selectedIndexRef = useRef(0);
   const submittingRef = useRef(false);
+  const submissionFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rawInputBuffer = useRef('');
   const approvalLabel =
     approval.command ?? approval.title ?? approval.summary ?? translate('approval.genericTool');
@@ -58,6 +68,15 @@ export default function ApprovalBlock({
           : translate('approval.denyToolDescription'),
   }));
 
+  useEffect(
+    () => () => {
+      if (submissionFeedbackTimerRef.current !== undefined) {
+        clearTimeout(submissionFeedbackTimerRef.current);
+      }
+    },
+    [],
+  );
+
   async function resolve(opt: Option) {
     // Approval actions are accepted only with the focused durable identity
     // pair. Legacy/off-screen cards without that pair cannot grant anything.
@@ -70,8 +89,12 @@ export default function ApprovalBlock({
     }
     if (submittingRef.current) return;
     submittingRef.current = true;
-    setSubmitting(true);
-    setSubmissionFailed(false);
+    submissionFeedbackTimerRef.current = setTimeout(() => {
+      submissionFeedbackTimerRef.current = undefined;
+      setSubmitting(true);
+    }, SUBMISSION_FEEDBACK_DELAY_MS);
+    setSubmissionFailure(undefined);
+    let resolvedAction: { action: string; grant?: string } | undefined;
     try {
       if (opt.action === 'approve') {
         const grant = opt.grant ?? 'approve_once';
@@ -84,7 +107,7 @@ export default function ApprovalBlock({
         if (!accepted) throw new Error('Approval submission was not accepted.');
         // The optimistic projection is safe only after Runtime accepts the
         // respond_interaction command receipt.
-        onResolved('approve', grant);
+        resolvedAction = { action: 'approve', grant };
       } else {
         const accepted = await provider.submitActionAsync({
           type: 'reject',
@@ -92,17 +115,23 @@ export default function ApprovalBlock({
           generation,
         });
         if (!accepted) throw new Error('Approval rejection was not accepted.');
-        onResolved('denied');
+        resolvedAction = { action: 'denied' };
       }
-    } catch {
-      setSubmissionFailed(true);
+    } catch (error) {
+      setSubmissionFailure(classifyInteractionSubmissionFailure(error));
     } finally {
+      if (submissionFeedbackTimerRef.current !== undefined) {
+        clearTimeout(submissionFeedbackTimerRef.current);
+        submissionFeedbackTimerRef.current = undefined;
+      }
       submittingRef.current = false;
       setSubmitting(false);
     }
+    if (resolvedAction) onResolved(resolvedAction.action, resolvedAction.grant);
   }
 
   useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    if (submittingRef.current) return;
     rawInputBuffer.current = `${rawInputBuffer.current}${input}`.slice(-4);
     const upArrow =
       key.upArrow ||
@@ -133,6 +162,18 @@ export default function ApprovalBlock({
     }
   });
 
+  if (submitting) {
+    return (
+      <OverlayFrame
+        title={translate('approval.title', { tool: translate('approval.genericTool') })}
+      >
+        <Box marginLeft={1}>
+          <Text color={t.dim}>{translate('approval.submitting')}</Text>
+        </Box>
+      </OverlayFrame>
+    );
+  }
+
   return (
     <OverlayFrame
       title={translate('approval.title', { tool: translate('approval.genericTool') })}
@@ -158,18 +199,9 @@ export default function ApprovalBlock({
       >
         <Text wrap="truncate-end">{approvalLabel}</Text>
       </Box>
-      {(route === 'auto' ||
-        (queueEntry?.matchCount != null && queueEntry.matchCount > 1) ||
-        queueEntry?.status === 'authorized_queued') && (
+      {(route === 'auto' || queueEntry?.status === 'authorized_queued') && (
         <Box marginTop={1} marginLeft={1} flexDirection="column">
           {route === 'auto' && <Text color={t.dim}>{translate('approval.routeAuto')}</Text>}
-          {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
-            <Text color={t.dim}>
-              {queueEntry.grant === 'same_command'
-                ? translate('approval.batchReleased', { count: queueEntry.matchCount })
-                : translate('approval.matchCount', { count: queueEntry.matchCount })}
-            </Text>
-          )}
           {queueEntry?.status === 'authorized_queued' && (
             <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
           )}
@@ -182,10 +214,10 @@ export default function ApprovalBlock({
           selectionBackground={false}
         />
       </Box>
-      {(submitting || submissionFailed) && (
+      {visibleSubmissionFailure && (
         <Box marginTop={1} marginLeft={1}>
-          <Text color={submissionFailed ? t.error : t.dim}>
-            {translate(submissionFailed ? 'approval.submissionFailed' : 'approval.submitting')}
+          <Text color={t.error}>
+            {translate(`approval.submissionFailed.${visibleSubmissionFailure}`)}
           </Text>
         </Box>
       )}

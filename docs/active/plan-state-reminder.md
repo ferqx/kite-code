@@ -6,7 +6,7 @@
 
 验证：`bun test tests/integration/builtin-runtime/context.test.ts tests/integration/builtin-runtime/runtime-context.test.ts tests/integration/runtime/plan-transcript.test.ts apps/kite-service/test/runtime/context-compaction-auto.test.ts apps/kite-service/test/runtime/context-compaction-manual.test.ts apps/kite-service/test/model.test.ts`、`bun run typecheck`。
 
-相关：ADR-0021、ADR-0022、ADR-0024、ADR-0137、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0021、ADR-0022、ADR-0024、ADR-0137。
 
 压缩 effect 在模型调用前后重新解析实际 projection environment，并把 provider/model、能力、estimator、summary policy、工具 schema、active Skill 与 workflow descriptor 的稳定 digest 纳入同一 lease；环境变化产生 retryable `stale_context` failed 终态并清除 pending，不写 checkpoint。安全 source 只能由从最旧消息开始的完整 settled turns 组成，tool call/result 必须一一配对；manual 覆盖全部 safe source，但 Runtime 当前 turn 仍为 active 时同样必须保护该 turn；auto 始终保护当前 turn。Correctness hard block 只能由带 invariant reason、source digest、turn 和诊断证据的统一 factory 创建，且只允许匹配原 reason/digest 的恢复事件清除。
 

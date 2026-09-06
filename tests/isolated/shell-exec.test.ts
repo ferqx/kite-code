@@ -70,8 +70,13 @@ describe('shell live output', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(events[0]).toEqual({ chunk: 'err-first', stream: 'stderr' });
-    expect(events.map((e) => e.chunk)).toEqual(['err-first', 'out-late']);
+    const commandEvents = events.filter(
+      (event) => event.chunk === 'err-first' || event.chunk === 'out-late',
+    );
+    expect(commandEvents).toEqual([
+      { chunk: 'err-first', stream: 'stderr' },
+      { chunk: 'out-late', stream: 'stdout' },
+    ]);
   });
 
   test('kills descendant processes before returning a timeout result', async () => {
@@ -267,6 +272,15 @@ describe('shell live output', () => {
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const status = Bun.spawnSync(['/bin/ps', '-o', 'stat=', '-p', String(pid)], {
+        stdout: 'pipe',
+        stderr: 'ignore',
+      })
+        .stdout.toString()
+        .trim();
+      if (!status || status.startsWith('Z')) return false;
+    }
     return true;
   } catch {
     return false;

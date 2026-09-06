@@ -31,6 +31,7 @@ type BoundedSandboxDiagnostic = (typeof BOUNDED_SANDBOX_DIAGNOSTICS)[number];
 type PlanningShellResult =
   | { kind: 'workspace' }
   | { kind: 'sandbox_exec_denied'; diagnostic: BoundedSandboxDiagnostic }
+  | { kind: 'sandbox_preparation_failed' }
   | { kind: 'sandbox_unavailable' };
 
 describe('TUI PTY System — Plan Mode Policy Boundary', () => {
@@ -175,6 +176,22 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
               },
             };
           }
+          if (content.includes('Sandbox preparation_failed:')) {
+            planningShellResult = { kind: 'sandbox_preparation_failed' };
+            return {
+              expectedRequest: {
+                toolResults: [
+                  {
+                    toolCallId: 'call_plan_baseline_shell',
+                    contentIncludes: ['Sandbox preparation_failed:'],
+                    contentExcludes: [workspace.workspace],
+                  },
+                ],
+              },
+              delay: 5_000,
+              message: { content: 'Planning sandbox preparation failed closed.' },
+            };
+          }
           throw new Error(
             'Planning shell result was neither workspace success nor a fail-closed denial.',
           );
@@ -308,6 +325,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                   event.type === 'tool.rejected') &&
                 event.toolCallId === 'call_plan_baseline_shell' &&
                 (shellResult.kind === 'sandbox_exec_denied' ||
+                  shellResult.kind === 'sandbox_preparation_failed' ||
                   (typeof event.failure === 'object' &&
                     event.failure !== null &&
                     'kind' in event.failure &&
@@ -329,6 +347,19 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                 event.toolCallId === 'call_plan_baseline_shell',
             ),
           ).toBe(false);
+          expect(
+            persistedEvents.some(
+              (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',
+            ),
+          ).toBe(false);
+        } else if (shellResult.kind === 'sandbox_preparation_failed') {
+          expect(
+            persistedEvents.some(
+              (event) =>
+                event.type === 'capability.invocation_recorded' &&
+                event.toolCallId === 'call_plan_baseline_shell',
+            ),
+          ).toBe(true);
           expect(
             persistedEvents.some(
               (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',

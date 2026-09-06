@@ -23,6 +23,8 @@ export type {
 export {
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
+  LEGACY_STATE27_FORMAT_EPOCH,
+  LEGACY_STATE27_SCHEMA_VERSION,
 } from '@kite-ai/agent-kernel';
 export { bestEffortRegularFileSize } from './artifact-metadata';
 export type { RuntimeHostCapabilityExecutionFailureCode } from './execution/capability-execution';
@@ -63,6 +65,7 @@ export {
   runtimeHostCurrentStateEventTypes,
   runtimeHostStateAdmitCurrentRuntimeEvent,
   runtimeHostStateAssertCurrentRuntimeEvent,
+  runtimeHostStateAssertReadableRuntimeEvent,
 } from './format/event-codec';
 export type {
   StateRuntimeRestoreInput,
@@ -71,13 +74,21 @@ export type {
 } from './format/restore';
 export { restoreRuntimeHostStateSession } from './format/restore';
 export type { RuntimeHostStateStorageBinding } from './format/storage-binding';
-export { createRuntimeHostStateStorageBinding } from './format/storage-binding';
+export {
+  createRuntimeHostStateStorageBinding,
+  isRuntimeHostStateSettledForMigration,
+} from './format/storage-binding';
 export {
   createRuntimeCommandCommitEvidence,
   digestRuntimeCommand,
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from './host/command-receipt';
+export {
+  parseRuntimeStoredCommandResource,
+  projectRuntimeStoredRun,
+  runtimeStartMessageId,
+} from './host/run-projection';
 export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
 
 export type {
@@ -192,6 +203,7 @@ export {
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
 } from './process/process-tree';
+export { runProcessTreeChild } from './process/process-tree-child-runtime';
 export { spawnRuntimeHostProcess } from './process/spawn';
 export {
   BoundedOutputBuffer,
@@ -225,6 +237,8 @@ export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unkn
   readonly storage: RuntimeStorage<Event, State>;
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
 }
@@ -234,6 +248,8 @@ export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unkno
   readonly moduleRegistry: RuntimeModuleRegistry;
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly modules?: never;
 }
 
@@ -259,6 +275,8 @@ export function createRuntimeHost<Event = unknown, State = unknown>(input: {
   readonly storage: RuntimeStorage<Event, State>;
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
+  readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
 }): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
   input: RuntimeHostPrebuiltRegistryInput<Event, State>,
@@ -279,6 +297,10 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       moduleRegistry,
       capabilityRegistrySnapshot: moduleRegistry.snapshot(),
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
+      ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.runWithSessionExecution
+        ? { runWithSessionExecution: input.runWithSessionExecution }
+        : {}),
     });
   }
 
@@ -294,6 +316,10 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       moduleRegistry: input.moduleRegistry,
       capabilityRegistrySnapshot: input.capabilityRegistrySnapshot,
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
+      ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.runWithSessionExecution
+        ? { runWithSessionExecution: input.runWithSessionExecution }
+        : {}),
     });
   }
 

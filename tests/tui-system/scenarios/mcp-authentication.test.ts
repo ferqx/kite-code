@@ -10,7 +10,12 @@ import {
   typeText,
 } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
 describe('TUI PTY System — MCP authentication recovery', () => {
@@ -133,7 +138,19 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     tui.write('\r');
     await waitForText(() => tui!.viewport(), '认证', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), '打开浏览器', 10_000);
+    await waitForCondition(
+      () => {
+        const viewport = tui!.viewport();
+        return (
+          screenContains(viewport, '认证 MCP 服务器') &&
+          screenContains(viewport, '❯ 打开浏览器') &&
+          screenContains(viewport, '↑↓ 导航  Enter 确认  Esc 返回')
+        );
+      },
+      'complete MCP authentication action to become interactive',
+      10_000,
+    );
+    await waitForOutputQuiescence(() => tui!.outputSinceLastAction());
     const openerFrames = tui.markScreen();
     await tui.writeExact('\r');
     await waitForText(() => tui!.viewport(), 'browser_open_failed', 15_000);

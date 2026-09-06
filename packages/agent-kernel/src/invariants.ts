@@ -1439,6 +1439,24 @@ function assertApprovalQueue(state: AgentState): void {
       'approval identity is invalid.',
     );
     assert(pending.toolCallId.length > 0, 'approval tool identity is required.');
+    const hasSubagentOwner =
+      pending.childSubagentId !== undefined ||
+      pending.parentToolCallId !== undefined ||
+      pending.childToolCallId !== undefined;
+    if (hasSubagentOwner) {
+      assert(
+        typeof pending.parentToolCallId === 'string' && pending.parentToolCallId.length > 0,
+        'subagent approval parent owner identity is required.',
+      );
+      assert(
+        typeof pending.childSubagentId === 'string' && pending.childSubagentId.length > 0,
+        'subagent approval child identity is required.',
+      );
+      assert(
+        typeof pending.childToolCallId === 'string' && pending.childToolCallId.length > 0,
+        'subagent approval child tool owner identity is required.',
+      );
+    }
     assert(pending.route === 'user' || pending.route === 'auto', 'approval route is invalid.');
     assert(
       typeof pending.fullModeBypassEligible === 'boolean',
@@ -1463,7 +1481,6 @@ function assertApprovalQueue(state: AgentState): void {
       typeof pending.createdAt === 'string' && pending.createdAt.length > 0,
       'approval createdAt is invalid.',
     );
-    assert(pending.status === pending.state, 'approval status/state projection diverged.');
     assert(
       [
         'queued_auto',

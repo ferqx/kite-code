@@ -55,6 +55,7 @@ export {
   type BuiltinSubagentModelLoopResourceContext,
   type BuiltinSubagentModelLoopResult,
   createBuiltinSubagentModelLoopEngine,
+  DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
 } from './model-loop-engine';
 export { subagentRoleAllowsShellCommand } from './role-ceiling';
 export {

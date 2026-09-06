@@ -3,6 +3,7 @@ name: MCP native keyring smoke
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - package.json
       - bun.lock
@@ -20,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-keyring:
     name: ${{ matrix.os }} native keyring
@@ -35,8 +40,8 @@ jobs:
     env:
       KITE_RUN_NATIVE_KEYRING_SMOKE: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile

@@ -8,16 +8,23 @@ import type {
   RuntimeCommandReceiptPort,
   RuntimeEventMetadata,
   RuntimeFileRestoreMaterial,
+  RuntimeLogQueryPort,
   RuntimeRecoveryIdentityPort,
   RuntimeSessionDeletionInput,
   RuntimeSessionInfo,
   RuntimeSessionModelRoute,
   RuntimeStorage,
+  RuntimeStoredCommandReceipt,
   SessionStore,
   StoredRuntimeEvent,
 } from '@kite-ai/runtime-host/storage';
 import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import { resolveSqliteArtifactStore } from './artifact-store';
+import {
+  createSqliteWorkspaceAuthorityForConnection_,
+  createSqliteWorkspaceInitialControllerTransaction,
+  type SqliteWorkspaceAuthority,
+} from './authority';
 import { createSqliteRecoveryIdentityLedger } from './authority-ledger';
 import {
   assertSqliteRuntimeCommandReceipt,
@@ -26,29 +33,58 @@ import {
   isSqliteRuntimeCommandReceiptConstraint,
 } from './command-receipts';
 import { openSqliteRuntimeConnection } from './connection';
+import {
+  createSqliteWorkspaceDirectoryOutbox,
+  type SqliteWorkspaceDirectoryOutbox,
+} from './directory-outbox';
 import { createSqliteEffectLeaseStore } from './effect-leases';
 import { createSqliteEventStore } from './event-store';
 import {
+  assertSqliteRuntimeRunStoreActive,
+  assertSqliteWorkspaceStoreActive,
+  markSqliteRuntimeRunStoreWritten,
+  markSqliteWorkspaceStoreWritten,
+} from './layout';
+import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
+import {
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
+  assertSqliteRuntimeStorageTargetCanOpen_,
+  assertSqliteRuntimeWorkspaceBinding,
+  assertWorkspaceSqliteRuntimeStoreConnection,
   checksum,
   defaultSqliteRuntimeJournalMode,
   isCanonicalRecoveryIdentity,
   type NamedSnapshotRow,
   type SnapshotRow,
   SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+  SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+  SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
   SqliteRuntimeCommandReceiptConflictError,
+  SqliteRuntimeFormatMismatchError,
   SqliteRuntimeRevisionConflictError,
+  type SqliteRuntimeSessionBinding,
   type SqliteRuntimeSnapshotCodec,
   type SqliteRuntimeStorageInput,
   SqliteRuntimeStorageOpenError,
 } from './preflight';
+import { assertSqliteRuntimeRunStoreConnection, createSqliteRuntimeRunStore } from './run-store';
 import { initializeSqliteRuntimeSchema } from './schema';
 import { createSqliteSessionMetadataStore } from './session-store';
 import { createSqliteSnapshotStore } from './snapshot-store';
-import { createSqliteRuntimeTransactionPort } from './transaction';
+import { createSqliteWorkspaceTombstoneStore } from './tombstones';
+import {
+  createSqliteRuntimeTransactionPort,
+  type SqliteWorkspaceSessionCreationPort,
+} from './transaction';
+import {
+  createSqliteWorkspaceCheckpointQuery,
+  type SqliteWorkspaceCheckpointQuery,
+} from './workspace-checkpoint-query';
 
 class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   implements RuntimeStorage<Event, State>
@@ -64,6 +100,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   readonly commandReceipts: RuntimeCommandReceiptPort;
+  /** Current Store 7/8 durable Worker authority facade; absent for Store 6. */
+  readonly workspaceAuthority?: SqliteWorkspaceAuthority;
+  /** Current Store 7/8 atomic Runtime-session + initial Controller create port. */
+  readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
+  /** Store 7/8 path-free Session Directory outbox on this same SQLite connection. */
+  readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
+  /** Store 7/8 bounded log reader factory over this same SQLite connection. */
+  readonly openWorkspaceLogQuery?: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<Event>;
+  /** Store 7/8 bounded Checkpoint metadata reader over this same SQLite connection. */
+  readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
+  /** Present only for Store 8. */
+  readonly runs?: RuntimeStorage<Event, State>['runs'];
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodec<Event, State>;
   #closed = false;
@@ -74,18 +124,96 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         'SQLite Runtime storage requires a databasePath and codec.',
       );
     }
-    const profile = {
-      stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
-    };
+    const workspaceBinding = input.workspaceBinding;
+    const runStoreTarget = input.targetStore === 'run';
+    if (workspaceBinding) assertSqliteRuntimeWorkspaceBinding(workspaceBinding);
+    if (runStoreTarget && !workspaceBinding) {
+      throw new SqliteRuntimeStorageOpenError(
+        'Store 8 target requires an explicit Workspace binding.',
+      );
+    }
+    const profile = runStoreTarget
+      ? {
+          stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+          storeSchemaVersion: SQLITE_RUNTIME_RUN_STORE_SCHEMA_VERSION,
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+          workspaceBinding: workspaceBinding!,
+        }
+      : workspaceBinding
+        ? {
+            stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+            storeSchemaVersion: SQLITE_RUNTIME_WORKSPACE_STORE_SCHEMA_VERSION,
+            formatEpoch: SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
+            workspaceBinding,
+          }
+        : {
+            stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+            storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+            formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+          };
     this.stateSchemaVersion = profile.stateSchemaVersion;
     this.storeSchemaVersion = profile.storeSchemaVersion;
     this.formatEpoch = profile.formatEpoch;
     this.#codec = input.codec;
     const baseArtifacts = resolveSqliteArtifactStore(input.artifacts);
     assertNoFollowDatabasePath(input.databasePath);
-    assertSqliteRuntimeStorageCanOpen(input.databasePath, input.codec, input.sessionId);
+    if (workspaceBinding) {
+      if (!input.workspaceLayout && !runStoreTarget) {
+        throw new SqliteRuntimeStorageOpenError(
+          'Store 7 writer requires active layout authority evidence.',
+        );
+      }
+      if (input.workspaceLayout) {
+        if (runStoreTarget) {
+          assertSqliteRuntimeRunStoreActive(
+            input.workspaceLayout,
+            workspaceBinding,
+            input.databasePath,
+          );
+        } else {
+          assertSqliteWorkspaceStoreActive(
+            input.workspaceLayout,
+            workspaceBinding,
+            input.databasePath,
+          );
+        }
+      }
+    }
+    const markWorkspaceWritten =
+      workspaceBinding && input.workspaceLayout
+        ? () =>
+            runStoreTarget
+              ? markSqliteRuntimeRunStoreWritten(
+                  input.workspaceLayout!,
+                  workspaceBinding,
+                  input.databasePath,
+                )
+              : markSqliteWorkspaceStoreWritten(
+                  input.workspaceLayout!,
+                  workspaceBinding,
+                  input.databasePath,
+                )
+        : undefined;
+    if (runStoreTarget) {
+      assertSqliteRuntimeStorageTargetCanOpen_(
+        input.databasePath,
+        input.codec,
+        input.sessionId,
+        workspaceBinding!,
+        {
+          formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+          assertConnection: (database) =>
+            assertSqliteRuntimeRunStoreConnection(database, workspaceBinding!),
+        },
+      );
+    } else {
+      assertSqliteRuntimeStorageCanOpen(
+        input.databasePath,
+        input.codec,
+        input.sessionId,
+        workspaceBinding,
+      );
+    }
     const journalMode = input.options?.journalMode ?? defaultSqliteRuntimeJournalMode();
     const db = openSqliteRuntimeConnection(input.databasePath, journalMode);
     try {
@@ -103,6 +231,36 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       throw error;
     }
     this.#db = db;
+    if (workspaceBinding) {
+      const assertConnection = runStoreTarget
+        ? assertSqliteRuntimeRunStoreConnection
+        : assertWorkspaceSqliteRuntimeStoreConnection;
+      this.workspaceAuthority = createSqliteWorkspaceAuthorityForConnection_({
+        db,
+        binding: workspaceBinding,
+        assertConnection,
+        beforeWrite: markWorkspaceWritten,
+      });
+      this.directoryOutbox = createSqliteWorkspaceDirectoryOutbox({
+        db,
+        binding: workspaceBinding,
+      });
+      this.openWorkspaceLogQuery = (currentEventTypes) => {
+        if (this.#closed) {
+          throw new SqliteRuntimeStorageOpenError('SQLite Runtime storage is closed.');
+        }
+        return createSqliteRuntimeLogQueryPortFromDatabase_({
+          database: db,
+          codec: input.codec,
+          currentEventTypes,
+        });
+      };
+      this.workspaceCheckpointQuery = createSqliteWorkspaceCheckpointQuery({
+        db,
+        binding: workspaceBinding,
+        formatEpoch: this.formatEpoch,
+      });
+    }
     const assertStorageOpen = (): void => {
       if (this.#closed)
         throw new SqliteRuntimeStorageOpenError('SQLite Runtime storage is closed.');
@@ -127,19 +285,37 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       db,
       assertStorageOpen,
       withImmediateTransaction,
+      markWorkspaceWritten,
     );
     this.recoveryIdentities = recoveryIdentities.port;
     this.commandReceipts = createSqliteRuntimeCommandReceiptPort({
       db,
       isClosed: () => this.#closed,
+      workspaceBinding,
+      resourceResults: runStoreTarget,
     });
-    const commandReceiptWriter = createSqliteRuntimeCommandReceiptWriter(db);
+    const commandReceiptWriter = createSqliteRuntimeCommandReceiptWriter({
+      db,
+      workspaceBinding,
+      beforeWrite: markWorkspaceWritten,
+      resourceResults: runStoreTarget,
+    });
+    const runStore = runStoreTarget
+      ? createSqliteRuntimeRunStore({
+          db,
+          workspaceBinding: workspaceBinding!,
+          isClosed: () => this.#closed,
+          beforeWrite: markWorkspaceWritten,
+        })
+      : undefined;
+    this.runs = runStore;
     this.artifacts = baseArtifacts;
     const eventStore = createSqliteEventStore<Event>({
       db,
       codec: this.#codec,
       stateSchemaVersion: this.stateSchemaVersion,
       isClosed: () => this.#closed,
+      beforeWrite: markWorkspaceWritten,
     });
     const {
       insertEvents,
@@ -152,6 +328,9 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       codec: this.#codec,
       stateSchemaVersion: this.stateSchemaVersion,
       formatEpoch: this.formatEpoch,
+      workspaceBinding,
+      beforeWrite: markWorkspaceWritten,
+      onDirectoryChange: this.directoryOutbox?.append,
     });
     const ensureSession = sessionMetadata.ensureSession;
     const snapshotStore = createSqliteSnapshotStore<Event, State>({
@@ -163,6 +342,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       ensureSession,
       hasSessionMetadata: sessionMetadata.hasMetadata,
       lastEventPosition: lastEvent,
+      beforeWrite: markWorkspaceWritten,
     });
     const {
       encode: encodeSnapshot,
@@ -258,7 +438,68 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     const selectSessionRevision = db.query<{ revision: number }, [string]>(
       'SELECT revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
     );
-    const effectLeases = createSqliteEffectLeaseStore(db, () => this.#closed);
+    const selectSessionBinding = workspaceBinding
+      ? db.query<SqliteRuntimeSessionBinding, [string]>(
+          'SELECT worker_scope_id AS workerScopeId, project_id AS projectId, workspace_digest AS workspaceDigest FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+      : undefined;
+    const selectCommandReceipt = workspaceBinding
+      ? db.query<
+          {
+            scope_session_id: string;
+            command_id: string;
+            request_digest: string;
+            target_session_id: string;
+            original_receipt_json: string;
+            committed_revision: number;
+            committed_at: number;
+          },
+          [string, string]
+        >(
+          'SELECT scope_session_id, command_id, request_digest, target_session_id, original_receipt_json, committed_revision, committed_at FROM runtime_command_receipts WHERE scope_session_id = ? AND command_id = ? LIMIT 1',
+        )
+      : undefined;
+    const selectSessionTombstone = workspaceBinding
+      ? db.query<{ session_id: string }, [string]>(
+          'SELECT session_id FROM session_workspace_tombstone WHERE session_id = ? LIMIT 1',
+        )
+      : undefined;
+    const readCommandReceipt = workspaceBinding
+      ? (receipt: RuntimeStoredCommandReceipt): RuntimeStoredCommandReceipt | null => {
+          const row = selectCommandReceipt?.get(receipt.scopeSessionId, receipt.commandId);
+          return row
+            ? {
+                scopeSessionId: row.scope_session_id,
+                commandId: row.command_id,
+                requestDigest: row.request_digest,
+                targetSessionId: row.target_session_id,
+                originalReceiptJson: row.original_receipt_json,
+                committedRevision: row.committed_revision,
+                committedAt: row.committed_at,
+              }
+            : null;
+        }
+      : undefined;
+    const assertSessionAbsent = workspaceBinding
+      ? (sessionId: string): void => {
+          const existing = selectSessionRevision.get(sessionId);
+          if (existing) {
+            throw new SqliteRuntimeRevisionConflictError(
+              sessionId,
+              0,
+              existing.revision,
+              `Initial Controller creation requires an absent Runtime session: ${sessionId}.`,
+            );
+          }
+          if (selectSessionTombstone?.get(sessionId)) {
+            throw new SqliteRuntimeFormatMismatchError(this.stateSchemaVersion, this.formatEpoch);
+          }
+        }
+      : undefined;
+    const tombstones = workspaceBinding
+      ? createSqliteWorkspaceTombstoneStore(db, markWorkspaceWritten)
+      : undefined;
+    const effectLeases = createSqliteEffectLeaseStore(db, () => this.#closed, markWorkspaceWritten);
 
     const persistNamedSnapshot = (
       sessionId: string,
@@ -270,6 +511,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       schemaVersion: number,
       createdAt?: number,
     ): void => {
+      markWorkspaceWritten?.();
       {
         const encodedRecord = encodeSnapshotRecord(sessionId, `named/${name}`, stateRevision, json);
         const args = [
@@ -294,13 +536,17 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         metadata?: readonly RuntimeEventMetadata[],
       ) => {
         if (this.#closed || events.length === 0) return;
+        markWorkspaceWritten?.();
         db.transaction(() => {
           ensureSession(sessionId);
           insertEvents(sessionId, events, metadata);
         })();
       },
       loadEventsStrict: loadEvents,
-      saveSnapshot,
+      saveSnapshot: (sessionId: string, state: State) => {
+        if (this.#closed) return;
+        db.transaction(() => saveSnapshot(sessionId, state))();
+      },
       loadSnapshot: <T = State>(sessionId: string) =>
         loadSnapshotRecord<T>(sessionId)?.state ?? null,
       loadSnapshotRecord,
@@ -337,8 +583,10 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       },
       setSessionName: (sessionId: string, name: string) => {
         if (!this.#closed) {
-          ensureSession(sessionId);
-          sessionMetadata.setName(sessionId, name);
+          db.transaction(() => {
+            ensureSession(sessionId);
+            sessionMetadata.setName(sessionId, name);
+          })();
         }
       },
       getSessionModelRoute: (sessionId): RuntimeSessionModelRoute | null => {
@@ -356,8 +604,10 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         // A receipt-bearing delete is the Runtime decision. Reserve the Store
         // writer up front so revision validation, retained receipt insertion,
         // and removal of every Session fact share one crash boundary.
+        markWorkspaceWritten?.();
         db.run('BEGIN IMMEDIATE');
         try {
+          const ownership = selectSessionBinding?.get(sessionId);
           if (deletion) {
             const current = selectSessionRevision.get(sessionId);
             if (!current || current.revision !== deletion.expectedRevision) {
@@ -372,6 +622,23 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
               sessionId,
               deletion.expectedRevision,
             );
+            if (
+              workspaceBinding &&
+              (!ownership || ownership.workerScopeId !== workspaceBinding.workerScopeId)
+            ) {
+              throw new SqliteRuntimeFormatMismatchError(this.stateSchemaVersion, this.formatEpoch);
+            }
+          }
+          if (workspaceBinding && ownership) {
+            tombstones?.write({
+              sessionId,
+              workerScopeId: ownership.workerScopeId,
+              projectId: ownership.projectId,
+              workspaceDigest: ownership.workspaceDigest,
+              deletedRevision:
+                deletion?.expectedRevision ?? selectSessionRevision.get(sessionId)?.revision ?? 0,
+              deletedAt: Math.floor(Date.now() / 1000),
+            });
           }
           eventStore.deleteAll(sessionId);
           deleteSnapshot.run(sessionId);
@@ -385,6 +652,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
               deletion.commandReceipt,
               sessionId,
               deletion.expectedRevision,
+              ownership ?? undefined,
             );
           }
           db.run('COMMIT');
@@ -407,7 +675,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     };
     this.sessions = Object.freeze(sessions);
 
-    this.transactions = createSqliteRuntimeTransactionPort({
+    const transactionPort = createSqliteRuntimeTransactionPort({
       db,
       isClosed: () => this.#closed,
       hasEffectLease: (sessionId, effectId, ownerId, observedAtMs) =>
@@ -420,7 +688,30 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       encodeSnapshot,
       persistSnapshot,
       receiptWriter: commandReceiptWriter,
+      readSessionBinding: (sessionId) => selectSessionBinding?.get(sessionId) ?? null,
+      readCommandReceipt,
+      assertSessionAbsent,
+      initialController: workspaceBinding
+        ? {
+            create: (request, mode) =>
+              createSqliteWorkspaceInitialControllerTransaction({
+                db,
+                binding: workspaceBinding,
+                request,
+                mode,
+                assertConnection: runStoreTarget
+                  ? assertSqliteRuntimeRunStoreConnection
+                  : assertWorkspaceSqliteRuntimeStoreConnection,
+              }),
+          }
+        : undefined,
+      beforeWrite: markWorkspaceWritten,
+      runStore,
     });
+    this.transactions = transactionPort;
+    this.workspaceSessionCreation = transactionPort.createSessionWithInitialController
+      ? Object.freeze({ create: transactionPort.createSessionWithInitialController })
+      : undefined;
     this.effects = effectLeases.port;
 
     const loadNamed = <T = State>(sessionId: string, name: string): T | null => {
@@ -455,6 +746,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       }
       let receipt: ReturnType<typeof createRuntimeStoredCommandReceipt> | undefined;
       try {
+        markWorkspaceWritten?.();
         db.run('BEGIN IMMEDIATE');
         const current = snapshotId === '__runtime_current__';
         const rolling = current ? snapshotStore.getRollingRow(sourceSessionId) : null;
@@ -612,6 +904,15 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           encodedFork.metadata.stateChecksum,
           encodedFork.metadata.schemaVersion,
         );
+        const runFork = runStore?.forkSession({
+          sourceSessionId,
+          targetSessionId,
+          throughRevision: sourceRow.state_revision,
+        });
+        if (runFork?.status === 'invalid_boundary') {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
         for (const snapshot of sourceNamed) {
           try {
             if (checksum(snapshot.state_json) !== snapshot.state_checksum) continue;
@@ -681,17 +982,19 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         eventPosition?: number,
       ) => {
         if (this.#closed) return;
-        const encoded = encodeSnapshot(state);
-        ensureSession(sessionId, state);
-        persistNamedSnapshot(
-          sessionId,
-          name,
-          eventPosition ?? lastEvent(sessionId),
-          encoded.json,
-          encoded.metadata.stateRevision,
-          encoded.metadata.stateChecksum,
-          encoded.metadata.schemaVersion,
-        );
+        db.transaction(() => {
+          const encoded = encodeSnapshot(state);
+          ensureSession(sessionId, state);
+          persistNamedSnapshot(
+            sessionId,
+            name,
+            eventPosition ?? lastEvent(sessionId),
+            encoded.json,
+            encoded.metadata.stateRevision,
+            encoded.metadata.stateChecksum,
+            encoded.metadata.schemaVersion,
+          );
+        })();
       },
       loadNamedSnapshot: loadNamed,
       listNamedSnapshots: (sessionId: string) => {
@@ -739,7 +1042,10 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         } catch {
           return false;
         }
-        db.transaction(() => {
+        markWorkspaceWritten?.();
+        return db.transaction(() => {
+          const runRewind = runStore?.rewindSession(sessionId, row.state_revision);
+          if (runRewind?.status === 'invalid_boundary') return false;
           eventStore.deleteAfter(sessionId, row.event_position);
           deleteNamedSnapshotsAfter.run(sessionId, row.event_position);
           deleteFilePreimagesAfter.run(sessionId, row.event_position);
@@ -753,8 +1059,8 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             encoded.metadata.schemaVersion,
           );
           ensureSession(sessionId, state);
+          return true;
         })();
-        return true;
       },
       forkSession: (
         sourceSessionId: string,
@@ -797,6 +1103,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         try {
           const boundary = selectLatestSnapshotPosition.get(sessionId)?.event_position ?? -1;
           if (selectFilePreimageInWindow.get(sessionId, path, boundary)) return;
+          markWorkspaceWritten?.();
           insertFilePreimage.run(sessionId, path, lastEvent(sessionId), content, existed ? 1 : 0);
         } catch {
           /* best effort by contract */
@@ -811,6 +1118,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         if (this.#closed || !sessionId || !path) return;
         try {
           const boundary = selectLatestSnapshotPosition.get(sessionId)?.event_position ?? -1;
+          markWorkspaceWritten?.();
           updateFilePostimageInWindow.run(contentHash, existed ? 1 : 0, sessionId, path, boundary);
         } catch {
           /* best effort by contract */
@@ -850,6 +1158,14 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
 
 export function createSqliteRuntimeStorageAdapter<Event = unknown, State = unknown>(
   input: SqliteRuntimeStorageInput<Event, State>,
-): RuntimeStorage<Event, State> {
+): RuntimeStorage<Event, State> & {
+  readonly workspaceAuthority?: SqliteWorkspaceAuthority;
+  readonly directoryOutbox?: SqliteWorkspaceDirectoryOutbox;
+  readonly openWorkspaceLogQuery?: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<Event>;
+  readonly workspaceCheckpointQuery?: SqliteWorkspaceCheckpointQuery;
+  readonly workspaceSessionCreation?: SqliteWorkspaceSessionCreationPort<Event, State>;
+} {
   return new SqliteRuntimeStorageAdapter(input);
 }

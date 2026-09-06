@@ -3,9 +3,10 @@ import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
 import { handleClientEventAction } from '../src/tui/reducers/handleClientEvent';
 import type { OutputBlock, TuiState } from '../src/tui/types';
+import { acceptedEnvelope } from './helpers/accepted-envelope';
 
 function reduce(state: TuiState, event: RuntimeClientEvent): TuiState {
-  return handleClientEventAction(state, event);
+  return handleClientEventAction(state, acceptedEnvelope(event));
 }
 
 function startShell(state: TuiState, callId: string): TuiState {
@@ -32,7 +33,7 @@ function shellCard(state: TuiState, callId: string): Extract<OutputBlock, { kind
 }
 
 describe('TUI shell progress projection', () => {
-  test('renders safe progress without inventing a missing tool identity', () => {
+  test('drops progress without a durable queued/started tool identity', () => {
     const state = reduce(createInitialState(), {
       type: 'tool.progress',
       toolId: 'late-shell',
@@ -40,10 +41,8 @@ describe('TUI shell progress projection', () => {
       stream: 'stdout',
     });
 
-    const card = shellCard(state, 'late-shell');
-    expect(card.liveOutput).toBe('late-safe-output');
-    expect(card.name).toBe('other');
-    expect(card.args).toEqual({});
+    expect(state.turns).toEqual([]);
+    expect(state.pendingToolCalls).toEqual({});
   });
 
   test('uses batch lineCount while retaining only the safe summary', () => {

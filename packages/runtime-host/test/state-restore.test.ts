@@ -111,7 +111,7 @@ describe('Runtime Host State restore', () => {
     const result = restore(services());
     expect(result.source).toBe('fresh');
     expect(result.state.schemaVersion).toBe(27);
-    expect(result.state.formatEpoch).toBe('kite-runtime-saq-v1-2026-08-25');
+    expect(result.state.formatEpoch).toBe('kite-runtime-saq-v2-2026-09-05');
     expect(result.state.turn.turnId).toBe('fresh-turn');
     expect(result.restoreBoundary).toEqual({ snapshot: null, lastEventPosition: 0 });
   });

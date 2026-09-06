@@ -29,7 +29,7 @@ export class SessionRegistry {
         const stableProjection = withoutModel(projection);
         if (
           canonicalProjection(stableCurrent) !== canonicalProjection(stableProjection) &&
-          !isExecutionCleanupEnrichment(stableCurrent, stableProjection)
+          !isExecutionLifecycleEnrichment(stableCurrent, stableProjection)
         ) {
           throw new Error('Runtime Session projection diverged at the same revision.');
         }
@@ -82,25 +82,27 @@ export class SessionRegistry {
   }
 }
 
-function isExecutionCleanupEnrichment(
+function isExecutionLifecycleEnrichment(
   current: RuntimeSessionProjection,
   next: RuntimeSessionProjection,
 ): boolean {
-  const currentWork = current.activeWork;
-  const nextWork = next.activeWork;
-  if (!currentWork || !nextWork) return false;
-  if (!['queued', 'running', 'waiting'].includes(currentWork.status)) return false;
-  if (!['completed', 'cancelled', 'failed'].includes(nextWork.status)) return false;
-  if (currentWork.activeTurn && nextWork.activeTurn?.status !== nextWork.status) return false;
+  const currentRun = current.currentRun;
+  const nextRun = next.currentRun;
+  if (!currentRun || !nextRun || currentRun.runId !== nextRun.runId) return false;
+  const activation = currentRun.status === 'queued' && nextRun.status === 'running';
+  const cleanup =
+    ['queued', 'running', 'waiting'].includes(currentRun.status) &&
+    ['completed', 'cancelled', 'failed'].includes(nextRun.status);
+  const taskEnrichment =
+    current.activeTask === undefined &&
+    next.activeTask !== undefined &&
+    currentRun.taskId === undefined &&
+    nextRun.taskId === next.activeTask.taskId;
+  if (!activation && !cleanup && !taskEnrichment) return false;
   const expected: RuntimeSessionProjection = {
     ...current,
-    activeWork: {
-      ...currentWork,
-      status: nextWork.status,
-      activeTurn: currentWork.activeTurn
-        ? { ...currentWork.activeTurn, status: nextWork.status, interaction: undefined }
-        : undefined,
-    },
+    ...(taskEnrichment ? { activeTask: next.activeTask } : {}),
+    currentRun: nextRun,
   };
   return stableSerializeIgnoringUndefined(expected) === stableSerializeIgnoringUndefined(next);
 }

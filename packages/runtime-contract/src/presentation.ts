@@ -410,6 +410,10 @@ export interface SubAgentStartPayload {
 
 export interface SubAgentStepPayload {
   id: string;
+  /** Stable identity allocated when this child tool call is admitted. */
+  stepId: string;
+  /** Stable server tool-call identity shared by started/result/replay. */
+  toolCallId: string;
   /** Committed child model invocation that requested this tool step. */
   modelInvocationId?: string;
   toolName: string;
@@ -420,8 +424,13 @@ export interface SubAgentStepPayload {
 
 export interface SubAgentToolResultPayload {
   id: string;
+  /** Stable identity of the step that produced this result. */
+  stepId: string;
+  /** Stable server tool-call identity shared with the corresponding step. */
+  toolCallId: string;
   toolName: string;
-  ok: boolean;
+  /** Canonical terminal outcome; the durable event must not carry a second `ok` authority. */
+  status: 'completed' | 'failed' | 'cancelled';
   /** 工具输出摘要（截断），用于日志记录 / Tool output summary (truncated) for log recording */
   summary?: string;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */

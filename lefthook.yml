@@ -17,6 +17,9 @@ pre-commit:
     golden:
       glob: "*.{ts,tsx,json}"
       run: bun test tests/golden/
+    plan-evidence:
+      glob: "{release/oss-first-release/**,scripts/check-plan-execution-matrix.ts,docs/active/open-source-first-release.md,docs/adr/0069-first-release-terminal-scope.md}"
+      run: bun run check:plan-evidence
     docs:
-      glob: "*.md"
+      glob: "*.{md,json,ts}"
       run: bun run check:docs

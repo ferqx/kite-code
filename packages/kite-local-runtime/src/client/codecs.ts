@@ -1,15 +1,5 @@
 import { assertProtocolJsonValue } from '@kite-ai/runtime-protocol';
 import { z } from 'zod';
-import {
-  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-  LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA,
-  type LocalRuntimeServiceDescriptor,
-} from '../service/codecs';
-
-export const LOCAL_RUNTIME_LIFECYCLE_REQUEST_SCHEMA_ =
-  'kite.local-runtime-lifecycle-request.v1' as const;
-export const LOCAL_RUNTIME_LIFECYCLE_RESULT_SCHEMA_ =
-  'kite.local-runtime-lifecycle-result.v1' as const;
 export const LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_ =
   'kite.local-runtime-credential-request.v1' as const;
 export const LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_ =
@@ -40,62 +30,6 @@ const providerApiKey = z
     (value) => ![...value].some((character) => /\p{Cc}/u.test(character)),
     'api key contains a control character',
   );
-
-const lifecycleOperation = z.enum(['ensure', 'status', 'stop', 'restart']);
-const lifecycleState = z.enum(['absent', 'starting', 'ready', 'quiescing', 'draining']);
-const lifecycleOutcome = z.enum([
-  'applied',
-  'service_busy',
-  'unavailable',
-  'incompatible',
-  'outcome_unknown',
-]);
-
-const localRuntimeLifecycleRequestSchema = z
-  .object({
-    schema: z.literal(LOCAL_RUNTIME_LIFECYCLE_REQUEST_SCHEMA_),
-    requestId: boundedIdentity,
-    operation: lifecycleOperation,
-    clientContractRevision: z.literal(LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_),
-  })
-  .strict();
-
-export type LocalRuntimeLifecycleOperation = z.infer<typeof lifecycleOperation>;
-export type LocalRuntimeLifecycleRequest = z.infer<typeof localRuntimeLifecycleRequestSchema>;
-export const LOCAL_RUNTIME_LIFECYCLE_REQUEST_SCHEMA = localRuntimeLifecycleRequestSchema;
-
-const localRuntimeLifecycleResultSchema = z
-  .object({
-    schema: z.literal(LOCAL_RUNTIME_LIFECYCLE_RESULT_SCHEMA_),
-    requestId: boundedIdentity,
-    operation: lifecycleOperation,
-    outcome: lifecycleOutcome,
-    state: lifecycleState,
-    descriptor: z
-      .custom<LocalRuntimeServiceDescriptor>((value) => {
-        try {
-          LOCAL_RUNTIME_SERVICE_DESCRIPTOR_SCHEMA.parse(value);
-          return true;
-        } catch {
-          return false;
-        }
-      }, 'invalid local runtime service descriptor')
-      .optional(),
-    diagnostic: z
-      .enum([
-        'not_running',
-        'identity_uncertain',
-        'protocol_incompatible',
-        'client_contract_incompatible',
-        'build_mismatch',
-        'service_busy',
-      ])
-      .optional(),
-  })
-  .strict();
-
-export type LocalRuntimeLifecycleResult = z.infer<typeof localRuntimeLifecycleResultSchema>;
-export const LOCAL_RUNTIME_LIFECYCLE_RESULT_SCHEMA = localRuntimeLifecycleResultSchema;
 
 const credentialOperation = z.enum([
   'write_provider_api_key',
@@ -191,50 +125,6 @@ export const LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA = localRuntimeCredentialResu
 function parseStrict<T>(schema: z.ZodType<T>, value: unknown): T {
   assertProtocolJsonValue(value);
   return schema.parse(value);
-}
-
-export function decodeLocalRuntimeLifecycleRequest(value: unknown): LocalRuntimeLifecycleRequest {
-  return parseStrict(localRuntimeLifecycleRequestSchema, value);
-}
-
-export function encodeLocalRuntimeLifecycleRequest(
-  value: LocalRuntimeLifecycleRequest,
-): LocalRuntimeLifecycleRequest {
-  return decodeLocalRuntimeLifecycleRequest(value);
-}
-
-export function safeDecodeLocalRuntimeLifecycleRequest(
-  value: unknown,
-):
-  | { readonly success: true; readonly data: LocalRuntimeLifecycleRequest }
-  | { readonly success: false; readonly error: unknown } {
-  try {
-    return { success: true, data: decodeLocalRuntimeLifecycleRequest(value) };
-  } catch (error) {
-    return { success: false, error };
-  }
-}
-
-export function decodeLocalRuntimeLifecycleResult(value: unknown): LocalRuntimeLifecycleResult {
-  return parseStrict(localRuntimeLifecycleResultSchema, value);
-}
-
-export function encodeLocalRuntimeLifecycleResult(
-  value: LocalRuntimeLifecycleResult,
-): LocalRuntimeLifecycleResult {
-  return decodeLocalRuntimeLifecycleResult(value);
-}
-
-export function safeDecodeLocalRuntimeLifecycleResult(
-  value: unknown,
-):
-  | { readonly success: true; readonly data: LocalRuntimeLifecycleResult }
-  | { readonly success: false; readonly error: unknown } {
-  try {
-    return { success: true, data: decodeLocalRuntimeLifecycleResult(value) };
-  } catch (error) {
-    return { success: false, error };
-  }
 }
 
 export function decodeLocalRuntimeCredentialRequest(value: unknown): LocalRuntimeCredentialRequest {

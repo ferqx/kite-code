@@ -3,9 +3,13 @@ import type {
   RuntimeCheckpointProjection,
   RuntimeContextProjection,
   RuntimeRewindPreviewProjection,
+  RuntimeRunPageCursor,
+  RuntimeRunPhase,
+  RuntimeRunProjection,
+  RuntimeRunStatus,
   RuntimeSessionProjection,
 } from './projections';
-import { hasExactKeys, isIdentifier, isRecord } from './validation';
+import { hasExactKeys, isIdentifier, isNonNegativeSafeInteger, isRecord } from './validation';
 
 export const RUNTIME_QUERY_SCHEMA_ = 'kite.runtime-query.v1' as const;
 
@@ -31,6 +35,21 @@ export type RuntimeQuery =
       readonly type: 'get_rewind_preview';
       readonly sessionId: string;
       readonly checkpointId: string;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'get_run';
+      readonly sessionId: string;
+      readonly runId: string;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'list_runs';
+      readonly sessionId: string;
+      readonly status?: RuntimeRunStatus;
+      readonly phase?: RuntimeRunPhase;
+      readonly cursor?: RuntimeRunPageCursor;
+      readonly limit: number;
     };
 
 export type RuntimeQueryResult =
@@ -43,6 +62,9 @@ export type RuntimeQueryResult =
       readonly context?: RuntimeContextProjection;
       readonly checkpoints?: readonly RuntimeCheckpointProjection[];
       readonly rewindPreview?: RuntimeRewindPreviewProjection;
+      readonly run?: RuntimeRunProjection;
+      readonly runs?: readonly RuntimeRunProjection[];
+      readonly nextRunCursor?: RuntimeRunPageCursor;
     }
   | {
       readonly status: 'not_found' | 'rejected' | 'unavailable';
@@ -71,9 +93,51 @@ export function isRuntimeQuery(value: unknown): value is RuntimeQuery {
         isIdentifier(value.sessionId) &&
         isIdentifier(value.checkpointId)
       );
+    case 'get_run':
+      return (
+        hasExactKeys(value, ['schema', 'type', 'sessionId', 'runId']) &&
+        isIdentifier(value.sessionId) &&
+        isIdentifier(value.runId)
+      );
+    case 'list_runs': {
+      const optional = ['status', 'phase', 'cursor'].filter((key) => Object.hasOwn(value, key));
+      return (
+        hasExactKeys(value, ['schema', 'type', 'sessionId', 'limit', ...optional]) &&
+        isIdentifier(value.sessionId) &&
+        isNonNegativeSafeInteger(value.limit) &&
+        value.limit >= 1 &&
+        value.limit <= 200 &&
+        (!Object.hasOwn(value, 'status') || isRunStatus(value.status)) &&
+        (!Object.hasOwn(value, 'phase') ||
+          value.phase === 'planning' ||
+          value.phase === 'building') &&
+        (!Object.hasOwn(value, 'cursor') || isRunCursor(value.cursor))
+      );
+    }
     default:
       return false;
   }
+}
+
+function isRunStatus(value: unknown): value is RuntimeRunStatus {
+  return (
+    value === 'queued' ||
+    value === 'running' ||
+    value === 'waiting' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled' ||
+    value === 'unknown'
+  );
+}
+
+function isRunCursor(value: unknown): value is RuntimeRunPageCursor {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['createdRevision', 'runId']) &&
+    isNonNegativeSafeInteger(value.createdRevision) &&
+    isIdentifier(value.runId)
+  );
 }
 
 export function assertRuntimeQuery(value: unknown): asserts value is RuntimeQuery {

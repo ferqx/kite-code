@@ -40,7 +40,6 @@ const EXPECTED_MODEL_TOOL_NAMES = Object.freeze([
   'ask_user',
   'complete_skill',
   'edit_file',
-  'git_inspect',
   'list_mcp_resources',
   'list_mcp_tools',
   'read_file',
@@ -142,12 +141,6 @@ const MODEL_VECTORS: readonly DifferentialVector[] = [
     label: 'edit_file',
     toolName: 'edit_file',
     input: { path: 'src/new.ts', old_string: 'old', new_string: 'new' },
-    phase: 'building',
-  },
-  {
-    label: 'git_inspect',
-    toolName: 'git_inspect',
-    input: { operation: 'status' },
     phase: 'building',
   },
   {
@@ -416,8 +409,6 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
       vector.label === 'shell_execute' ||
       vector.label === 'shell workspace-root rm' ||
       vector.label === 'shell local vcs mutation' ||
-      vector.label === 'shell uncertain script' ||
-      vector.label === 'shell planning non-read' ||
       vector.label === 'shell planning read'
     ) {
       return {
@@ -426,6 +417,16 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
         sameCommandMayBypassApproval: false,
         decision: 'allow',
         requiresApproval: false,
+        requiresSandbox: true,
+      };
+    }
+    if (vector.label === 'shell uncertain script' || vector.label === 'shell planning non-read') {
+      return {
+        minimumApproval: 'user',
+        fullAccessMayBypassApproval: false,
+        sameCommandMayBypassApproval: false,
+        decision: 'ask',
+        requiresApproval: true,
         requiresSandbox: true,
       };
     }
@@ -527,7 +528,7 @@ function askUserInvocation(entry: BuiltinModelToolCatalogEntry): CapabilityExecu
 }
 
 describe('RM-16 S7B Builtin policy corpus', () => {
-  test('compiles one frozen snapshot, all 20 model operations, and fixed policy corpus', async () => {
+  test('compiles one frozen snapshot, all 19 model operations, and fixed policy corpus', async () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const snapshot = registry.snapshot();
     const projection = createBuiltinToolCatalogProjection(snapshot, {
@@ -542,8 +543,8 @@ describe('RM-16 S7B Builtin policy corpus', () => {
     expect(Object.isFrozen(snapshot.modules)).toBe(true);
     expect(Object.isFrozen(snapshot.capabilities)).toBe(true);
     expect(projection.entries).toHaveLength(28);
-    expect(modelEntries).toHaveLength(20);
-    expect(internalEntries).toHaveLength(8);
+    expect(modelEntries).toHaveLength(19);
+    expect(internalEntries).toHaveLength(9);
     expect(modelEntries.map((entry) => entry.name).sort()).toEqual(
       [...EXPECTED_MODEL_TOOL_NAMES].sort(),
     );

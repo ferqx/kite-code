@@ -37,6 +37,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'rewind', aliases: [], descriptionKey: 'command.rewind' },
   { name: 'export', aliases: [], descriptionKey: 'command.export' },
   { name: 'context', aliases: [], descriptionKey: 'command.context' },
+  { name: 'status', aliases: [], descriptionKey: 'command.status' },
   { name: 'clear', aliases: ['c'], descriptionKey: 'command.clear' },
   { name: 'help', aliases: ['h'], descriptionKey: 'command.help' },
   { name: 'exit', aliases: ['quit', 'q'], descriptionKey: 'command.exit' },

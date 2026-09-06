@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import {
   buildWindowsRestrictedTokenEnvForTest,
   clearWindowsSandboxRunnerCache,
@@ -30,6 +31,18 @@ import {
   type TestSandboxDisposalReceipt,
   withAcknowledgedSandboxLifecycleForTest,
 } from '../../helpers/sandbox-executor';
+
+type WindowsRunnerFileSystem = {
+  readText(path: string): string;
+  readBytes(path: string): Uint8Array;
+  lstat(path: string): {
+    isFile(): boolean;
+    isDirectory(): boolean;
+    isSymbolicLink(): boolean;
+    isReparsePoint?(): boolean;
+  };
+  realpath(path: string): string;
+};
 
 function testAuthoritySession(invocationId: string) {
   return createWindowsSandboxControlSession({
@@ -380,6 +393,8 @@ describe('Windows restricted-token environment', () => {
     expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
     expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
     expect(env.GIT_CONFIG_VALUE_0).toBe('false');
+    expect(env.HOME).toBe('C:\\runtime');
+    expect(env).not.toHaveProperty('GIT_EXTERNAL_DIFF');
   });
 
   test('accepts only canonical Bun executable names for the PATH entry', () => {
@@ -401,20 +416,127 @@ describe('Windows restricted-token environment', () => {
 });
 
 describe('Windows standalone runner discovery', () => {
+  afterEach(() => {
+    clearWindowsSandboxRunnerCache();
+  });
+
   test('resolves the active candidate payload for both managed launchers', () => {
+    const fixture = managedRunnerFixture();
     for (const launcher of ['kite.exe', 'kite-tui.exe']) {
       const location = resolveInstalledWindowsRunnerManifestLocation({
         executablePath: `C:\\Kite\\bin\\${launcher}`,
-        readFile: (path) => {
-          expect(path).toBe('C:\\Kite\\.kite-code-managed.json');
-          return JSON.stringify({ currentCandidateId: 'a'.repeat(24) });
-        },
+        fileSystem: fixture.fileSystem,
       });
       expect(location).toEqual({
-        path: `C:\\Kite\\releases\\${'a'.repeat(24)}\\release\\platform-capabilities\\windows-runner.json`,
-        base: `C:\\Kite\\releases\\${'a'.repeat(24)}`,
+        path: `C:\\Kite\\releases\\${fixture.candidateId}\\release\\platform-capabilities\\windows-runner.json`,
+        base: `C:\\Kite\\releases\\${fixture.candidateId}`,
       });
     }
+  });
+
+  test('requires the v2 marker, one active pointer, and an exact candidate identity', () => {
+    const fixture = managedRunnerFixture();
+    const markerPath = 'C:\\Kite\\.kite-code-managed.json';
+    const pointerPath = 'C:\\Kite\\active';
+    fixture.text.set(markerPath, JSON.stringify({ currentCandidateId: fixture.candidateId }));
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+
+    fixture.text.set(markerPath, managedMarker(fixture.candidateId));
+    fixture.text.set(pointerPath, `${'f'.repeat(24)}\n`);
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+
+    fixture.text.set(pointerPath, `${fixture.candidateId}\n`);
+    fixture.text.set(
+      `C:\\Kite\\releases\\${fixture.candidateId}\\.candidate-id`,
+      `${'f'.repeat(24)}\n`,
+    );
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+  });
+
+  test('rejects symlink/reparse launchers and active candidates without source fallback', () => {
+    const fixture = managedRunnerFixture();
+    fixture.symlinks.add('C:\\Kite\\bin\\kite.exe');
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+
+    fixture.symlinks.clear();
+    fixture.symlinks.add('C:\\Kite\\active');
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+
+    fixture.symlinks.clear();
+    fixture.symlinks.add(`C:\\Kite\\releases\\${fixture.candidateId}`);
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+  });
+
+  test('pins the resolved runner to its startup candidate until the cache is cleared', () => {
+    const fixture = managedRunnerFixture();
+    const pointerPath = 'C:\\Kite\\active';
+    const markerPath = 'C:\\Kite\\.kite-code-managed.json';
+    clearWindowsSandboxRunnerCache();
+    const first = resolveWindowsSandboxRunner({
+      executablePath: 'C:\\Kite\\bin\\kite.exe',
+      fileSystem: fixture.fileSystem,
+    });
+    expect(first?.path).toBe(`C:\\Kite\\releases\\${fixture.candidateId}\\native\\runner.exe`);
+
+    fixture.text.set(pointerPath, `${'f'.repeat(24)}\n`);
+    expect(
+      resolveWindowsSandboxRunner({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toEqual(first);
+
+    clearWindowsSandboxRunnerCache();
+    fixture.text.set(markerPath, managedMarker('f'.repeat(24)));
+    expect(
+      resolveWindowsSandboxRunner({
+        executablePath: 'C:\\Kite\\bin\\kite.exe',
+        fileSystem: fixture.fileSystem,
+      }),
+    ).toBeNull();
+    clearWindowsSandboxRunnerCache();
+  });
+
+  test("uses the stable launcher's pinned candidate root for the candidate child process", () => {
+    const fixture = managedRunnerFixture();
+    clearWindowsSandboxRunnerCache();
+    const candidateRoot = `C:\\Kite\\releases\\${fixture.candidateId}`;
+    const resolved = resolveWindowsSandboxRunner({
+      executablePath: `${candidateRoot}\\bin\\kite.exe`,
+      candidateRoot,
+      fileSystem: fixture.fileSystem,
+    });
+    expect(resolved?.path).toBe(`${candidateRoot}\\native\\runner.exe`);
   });
 
   test('does not treat an arbitrary Bun or malformed installation marker as a managed launcher', () => {
@@ -427,6 +549,12 @@ describe('Windows standalone runner discovery', () => {
       resolveInstalledWindowsRunnerManifestLocation({
         executablePath: 'C:\\Kite\\bin\\kite.exe',
         readFile: () => JSON.stringify({ currentCandidateId: 'not-a-candidate' }),
+      }),
+    ).toBeNull();
+    expect(
+      resolveInstalledWindowsRunnerManifestLocation({
+        executablePath: 'bin\\kite.exe',
+        fileSystem: managedRunnerFixture().fileSystem,
       }),
     ).toBeNull();
   });
@@ -446,6 +574,120 @@ describe('Windows standalone runner discovery', () => {
     clearWindowsSandboxRunnerCache();
   });
 });
+
+function managedRunnerFixture(): {
+  candidateId: string;
+  text: Map<string, string>;
+  files: Map<string, Uint8Array>;
+  directories: Set<string>;
+  symlinks: Set<string>;
+  fileSystem: WindowsRunnerFileSystem;
+} {
+  const root = 'C:\\Kite';
+  const candidateManifest = new TextEncoder().encode('{"fixture":"candidate"}');
+  const candidateId = createHash('sha256').update(candidateManifest).digest('hex').slice(0, 24);
+  const candidateRoot = win32.join(root, 'releases', candidateId);
+  const runnerBytes = new Uint8Array([3]);
+  const shellRuntimeBytes = new Uint8Array([4]);
+  const coreutilsBytes = new Uint8Array([5]);
+  const runnerDigest = digestBytes(runnerBytes);
+  const shellRuntimeDigest = digestBytes(shellRuntimeBytes);
+  const coreutilsDigest = digestBytes(coreutilsBytes);
+  const text = new Map<string, string>([
+    [win32.join(root, '.kite-code-managed.json'), managedMarker(candidateId)],
+    [win32.join(root, 'active'), `${candidateId}\n`],
+    [win32.join(candidateRoot, '.candidate-id'), `${candidateId}\n`],
+    [win32.join(candidateRoot, 'manifest.json'), new TextDecoder().decode(candidateManifest)],
+    [
+      win32.join(candidateRoot, 'release/platform-capabilities/windows-runner.json'),
+      JSON.stringify({
+        version: 1,
+        protocolVersion: WINDOWS_SANDBOX_PROTOCOL_VERSION,
+        runnerVersion: '0.8.3',
+        minimumWindowsVersion: '10.0.19045',
+        runnerDigest,
+        runnerPath: 'native/runner.exe',
+        shellRuntime: 'isksh',
+        shellRuntimeDigest,
+        shellRuntimePath: 'vendor/isksh',
+        coreutilsDigest,
+      }),
+    ],
+  ]);
+  const files = new Map<string, Uint8Array>([
+    [win32.join(root, 'bin', 'kite.exe'), new Uint8Array([1])],
+    [win32.join(root, 'bin', 'kite-tui.exe'), new Uint8Array([2])],
+    [win32.join(candidateRoot, 'bin', 'kite.exe'), new Uint8Array([6])],
+    [win32.join(candidateRoot, 'native', 'runner.exe'), runnerBytes],
+    [win32.join(candidateRoot, 'vendor', 'isksh', 'isksh.exe'), shellRuntimeBytes],
+    [win32.join(candidateRoot, 'vendor', 'isksh', 'coreutils.exe'), coreutilsBytes],
+  ]);
+  const directories = new Set([
+    root,
+    win32.join(root, 'bin'),
+    win32.join(root, 'releases'),
+    candidateRoot,
+    win32.join(candidateRoot, 'bin'),
+    win32.join(candidateRoot, 'native'),
+    win32.join(candidateRoot, 'vendor'),
+    win32.join(candidateRoot, 'vendor', 'isksh'),
+  ]);
+  const symlinks = new Set<string>();
+  const fileSystem: WindowsRunnerFileSystem = {
+    readText(path) {
+      const value = text.get(path);
+      if (value === undefined) throw new Error(`missing text fixture: ${path}`);
+      return value;
+    },
+    readBytes(path) {
+      const value = files.get(path);
+      if (value !== undefined) return value;
+      const valueText = text.get(path);
+      if (valueText === undefined) throw new Error(`missing bytes fixture: ${path}`);
+      return new TextEncoder().encode(valueText);
+    },
+    lstat(path) {
+      const isSymlink = symlinks.has(path);
+      if (directories.has(path)) {
+        return {
+          isFile: () => false,
+          isDirectory: () => true,
+          isSymbolicLink: () => isSymlink,
+          isReparsePoint: () => isSymlink,
+        };
+      }
+      if (files.has(path) || text.has(path)) {
+        return {
+          isFile: () => true,
+          isDirectory: () => false,
+          isSymbolicLink: () => isSymlink,
+          isReparsePoint: () => isSymlink,
+        };
+      }
+      throw new Error(`missing stat fixture: ${path}`);
+    },
+    realpath(path) {
+      return path;
+    },
+  };
+  return { candidateId, text, files, directories, symlinks, fileSystem };
+}
+
+function managedMarker(candidateId: string): string {
+  return JSON.stringify({
+    schema: 'KiteCodeManagedInstall',
+    version: 2,
+    canonicalRoot: 'C:\\Kite',
+    currentCandidateId: candidateId,
+    previousCandidateId: null,
+    target: 'windows-x64',
+    activePointer: 'active',
+  });
+}
+
+function digestBytes(value: Uint8Array): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
 
 describe('Windows restricted-token network capability', () => {
   test('rejects the allowlist broker but projects an approved development network grant', () => {

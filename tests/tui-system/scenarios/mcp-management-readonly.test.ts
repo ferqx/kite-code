@@ -507,6 +507,7 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(continuedRequests).toHaveLength(5);
     expect(JSON.stringify(continuedRequests[4]?.messages)).toContain('provider_unavailable');
 
+    const resourceFrames = tui.markScreen();
     await submitUserMessage(tui, server, 'read the available MCP documentation resource', {
       delayMs: 20,
       timeout: 15_000,
@@ -516,9 +517,12 @@ describe('TUI PTY System — MCP Select management', () => {
       'RESOURCE_TAIL: MCP resource discovery and reading completed.',
       20_000,
     );
-    expect(tui.scrollback()).toContain('Listed MCP resources');
-    expect(tui.scrollback()).toContain('docs://langgraph/overview');
-    expect(tui.scrollback()).not.toContain('LangGraph resource content from MCP resources/read.');
+    const resourceConversation = tui.screenFramesSince(resourceFrames).join('\n');
+    expect(resourceConversation).toContain('Listed MCP resources');
+    expect(resourceConversation).toContain('docs://langgraph/overview');
+    expect(resourceConversation).not.toContain(
+      'LangGraph resource content from MCP resources/read.',
+    );
     const resourceRequests = server.getRequests();
     expect(resourceRequests).toHaveLength(8);
     expect(JSON.stringify(resourceRequests[7]?.messages)).toContain(

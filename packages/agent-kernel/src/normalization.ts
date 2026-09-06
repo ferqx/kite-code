@@ -1413,7 +1413,12 @@ function normalizeToolTerminalEvent(
           },
         }
       : outcome;
-  return { ...event, createdAt, outcome: outcomeWithLineage } as unknown as KernelEvent;
+  return {
+    ...event,
+    createdAt,
+    ...(call?.presentation === undefined ? {} : { presentation: call.presentation }),
+    outcome: outcomeWithLineage,
+  } as unknown as KernelEvent;
 }
 function normalizeApprovalRejected(
   event: KernelEvent,

@@ -919,7 +919,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     expect(capturedNetworkMode).toBe('disabled');
   });
 
-  it('opens networking for a full-access network shell command', async () => {
+  it('requires exact approval for a Full network command with uncertain effects', async () => {
     let capturedNetworkMode: string | undefined;
 
     const result = await invokeGovernedTool({
@@ -939,8 +939,8 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
-    expect(capturedNetworkMode).toBe('allow_all');
+    expect(result.ok).toBe(false);
+    expect(capturedNetworkMode).toBeUndefined();
   });
 
   it('applies the default hard timeout when the model omits timeout_ms', async () => {

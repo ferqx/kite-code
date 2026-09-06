@@ -10,9 +10,9 @@ type ToolProgressEvent = Extract<RuntimeEvent, { type: 'tool.progress' }> & {
 };
 
 /**
- * Shared live-presentation framing used by both the legacy SessionRuntime seam and the concrete
- * Service bridge. Durable State order is untouched; only cumulative ephemeral display packets are
- * coalesced to the canonical client cadence.
+ * Shared live-presentation framing used by the concrete Service bridge. Durable State order is
+ * untouched; only cumulative ephemeral display packets are coalesced to the canonical client
+ * cadence.
  */
 export class RuntimePresentationFrame {
   #model: {

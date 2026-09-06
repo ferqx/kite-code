@@ -6,15 +6,29 @@
  * for the purpose of admitting the next queued prompt.
  */
 export class TuiPromptSubmissionQueue {
-  #tail: Promise<void> = Promise.resolve();
+  readonly #tails = new Map<string, Promise<void>>();
+  readonly #pending = new Map<string, number>();
 
   enqueue<T>(sessionId: string, submit: (sessionId: string) => Promise<T>): Promise<T> {
-    const scheduled = this.#tail.then(() => submit(sessionId));
-    this.#tail = scheduled.then(
+    const tail = this.#tails.get(sessionId) ?? Promise.resolve();
+    this.#pending.set(sessionId, (this.#pending.get(sessionId) ?? 0) + 1);
+    const scheduled = tail.then(() => submit(sessionId));
+    const settled = scheduled.then(
       () => undefined,
       () => undefined,
     );
+    this.#tails.set(sessionId, settled);
+    void settled.finally(() => {
+      const remaining = (this.#pending.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) this.#pending.set(sessionId, remaining);
+      else this.#pending.delete(sessionId);
+      if (this.#tails.get(sessionId) === settled) this.#tails.delete(sessionId);
+    });
     return scheduled;
+  }
+
+  hasPending(sessionId: string): boolean {
+    return (this.#pending.get(sessionId) ?? 0) > 0;
   }
 }
 

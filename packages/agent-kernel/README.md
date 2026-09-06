@@ -28,7 +28,14 @@
 
 - 根 state/event union 和 Reducer 顺序均为编译期固定。
 - 当前 writer 只产生 State 27/SAQ epoch；State 26 只在封闭兼容边界投影为 inert history。
+- 新 writer 为每个 Subagent step 固定写入 `stepId + toolCallId`，并为 approval/auto-review settlement 写入完整
+  root/child owner；旧事件只由 persistence-order migration reader 合成 `legacy:<subagentId>:<ordinal>` identity。
 - 授权、完成、恢复与 verification decision 只有一个 Kernel owner。
+- Task 完成只由 `CanonicalTaskCompletionFact` 进入 completion reducer；该 normalization 完整保留 raw
+  `run.completed` 的 output、guard、plan identity 与 outcome，供 Host 在同一事务中推进 Run 和 checkpoint。
+- Resource Budget限制整轮工具总量、Subagent与writer并发，但不把普通Tool或Shell按活动数量分批；一次模型响应中通过traits冲突检查的调用可直接并行。
+- Shell `uncertainEffects`在未持有exact approval时始终投影为真人审批；`risk`只描述风险，不能替代Compiler的
+  `allowed/decision/requiresApproval`生成第二个hard deny。
 
 ## 测试
 
@@ -37,3 +44,16 @@
 ## 文档影响
 
 模块局部变化更新本 README；授权或跨包 lifecycle 变化同时更新 [授权规则](../../docs/active/authorization.md) 和 [Runtime 架构](../../docs/active/six-concept-runtime-architecture.md)。
+
+## 产品与修改导航
+
+[共享产品定义](../../docs/handbook/README.md) · [开发地图](../../docs/development/architecture.md)。本模块说明实现，不重新定义客户端操作。
+
+- [src/index.ts](src/index.ts)
+- [test](test)
+
+## 深入机制
+
+- [完成、失败与恢复决策](docs/completion-recovery.md)
+- [调度、授权与副作用选择](docs/scheduling-authorization.md)
+- [State、Event 与确定性转换](docs/state-transitions.md)

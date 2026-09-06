@@ -1,18 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, resolve } from 'node:path';
+  acquireConfigFileMutationLocks,
+  replaceConfigFileAtomically,
+} from '@kite-ai/kite-local-runtime/config';
 import { type ParseError, parse } from 'jsonc-parser';
 import { mcpProjectApprovalPath } from './paths';
 
@@ -176,21 +168,7 @@ export function readProjectMcpApprovalStore(
 }
 
 function writeStore(path: string, file: McpProjectApprovalFile): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let fd: number | undefined;
-  try {
-    fd = openSync(temporary, 'wx', 0o600);
-    writeFileSync(fd, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    renameSync(temporary, path);
-    chmodSync(path, 0o600);
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    if (existsSync(temporary)) unlinkSync(temporary);
-  }
+  replaceConfigFileAtomically(path, `${JSON.stringify(file, null, 2)}\n`, 0o600);
 }
 
 function readRawServer(sourcePath: string, serverName: string): Record<string, unknown> | null {
@@ -220,49 +198,51 @@ export function decideProjectMcpServer(input: {
   decision: McpProjectDecision;
   approvalPath?: string;
 }): McpProjectDecisionResult {
-  const currentRaw = readRawServer(input.sourcePath, input.serverName);
-  if (!currentRaw) {
-    return { status: 'config_changed', message: 'Project MCP configuration changed.' };
-  }
-  const currentDigest = computeProjectMcpConfigDigest({
-    serverName: input.serverName,
-    sourceKind: input.sourceKind,
-    rawConfig: currentRaw,
-  });
-  if (currentDigest !== input.expectedConfigDigest) {
-    return { status: 'config_changed', message: 'Project MCP configuration changed.' };
-  }
-
   const path = input.approvalPath ?? mcpProjectApprovalPath();
-  const store = readProjectMcpApprovalStore(path);
-  if (store.status === 'corrupt') return { status: 'store_corrupt', message: store.message };
-  if (store.status === 'unavailable')
-    return { status: 'store_unavailable', message: store.message };
-
   let workspaceKey: string;
   try {
     workspaceKey = canonicalWorkspaceKey(input.workspace);
   } catch {
     return { status: 'store_unavailable', message: 'Workspace identity is unavailable.' };
   }
-  const pathDigest = sourcePathDigest(input.sourcePath);
-  const record: McpProjectApprovalRecord = {
-    workspaceKey,
-    serverName: input.serverName,
-    sourceKind: input.sourceKind,
-    sourcePathDigest: pathDigest,
-    configDigest: currentDigest,
-    decision: input.decision,
-    decidedAt: new Date().toISOString(),
-  };
-  const id = projectApprovalRecordId(record);
+  let lock: ReturnType<typeof acquireConfigFileMutationLocks> | undefined;
   try {
+    lock = acquireConfigFileMutationLocks([input.sourcePath, path]);
+    const currentRaw = readRawServer(input.sourcePath, input.serverName);
+    if (!currentRaw) {
+      return { status: 'config_changed', message: 'Project MCP configuration changed.' };
+    }
+    const currentDigest = computeProjectMcpConfigDigest({
+      serverName: input.serverName,
+      sourceKind: input.sourceKind,
+      rawConfig: currentRaw,
+    });
+    if (currentDigest !== input.expectedConfigDigest) {
+      return { status: 'config_changed', message: 'Project MCP configuration changed.' };
+    }
+    const store = readProjectMcpApprovalStore(path);
+    if (store.status === 'corrupt') return { status: 'store_corrupt', message: store.message };
+    if (store.status === 'unavailable') {
+      return { status: 'store_unavailable', message: store.message };
+    }
+    const record: McpProjectApprovalRecord = {
+      workspaceKey,
+      serverName: input.serverName,
+      sourceKind: input.sourceKind,
+      sourcePathDigest: sourcePathDigest(input.sourcePath),
+      configDigest: currentDigest,
+      decision: input.decision,
+      decidedAt: new Date().toISOString(),
+    };
+    const id = projectApprovalRecordId(record);
     writeStore(path, { version: 1, records: { ...store.records, [id]: record } });
+    return { status: 'recorded', record };
   } catch {
     return {
       status: 'store_unavailable',
       message: 'Project MCP approval store could not be written.',
     };
+  } finally {
+    lock?.release();
   }
-  return { status: 'recorded', record };
 }

@@ -40,7 +40,7 @@ test('same command receipt is replayed and a slow outer client cannot block term
     );
     const results = await Promise.all([first.command(command), second.command(command)]);
     expect(results.map((result) => result.status).sort()).toEqual(['applied', 'idempotent_replay']);
-    await terminalProjection(fastIterator, fixture.sessionId);
+    await terminalProjection(fastIterator, fixture.sessionId, first);
     expect(fixture.model.getRequestCount()).toBe(1);
     await expect(
       second.command(start('same-command', fixture.sessionId, 0, 'different body')),
@@ -412,13 +412,16 @@ async function inputInteraction(
     if ('durability' in notification && notification.durability === 'durable') {
       const event = notification.projection.event;
       seen.push(
-        `${notification.revision}:${event?.type ?? notification.projection.session.activeWork?.status ?? 'snapshot'}`,
+        `${notification.revision}:${event?.type ?? notification.projection.session.currentRun?.status ?? 'snapshot'}`,
       );
       if (event?.type === 'interaction.available' && event.interaction.kind === 'input') {
         return event.interaction;
       }
       if (event?.type === 'input.requested') return event.interaction;
-      const fromProjection = notification.projection.session.activeWork?.activeTurn?.interaction;
+      const queue = notification.projection.session.interactionQueue;
+      const fromProjection = queue.interactions.find(
+        (interaction) => interaction.interactionId === queue.activeInteractionId,
+      );
       if (fromProjection?.kind === 'input') return fromProjection;
     }
   }
@@ -427,6 +430,13 @@ async function inputInteraction(
     type: 'get_session_projection',
     sessionId,
   });
+  if (projection.status === 'ok' && projection.session) {
+    const queue = projection.session.interactionQueue;
+    const interaction = queue.interactions.find(
+      (candidate) => candidate.interactionId === queue.activeInteractionId,
+    );
+    if (interaction?.kind === 'input') return interaction;
+  }
   throw new Error(
     `CLI ask_user interaction was not projected; seen=${seen.join(',')}; query=${JSON.stringify(projection)}`,
   );
@@ -488,13 +498,13 @@ async function terminalProjection(
       notification.durability === 'durable' &&
       notification.sessionId === sessionId &&
       ['completed', 'cancelled', 'failed'].includes(
-        notification.projection.session.activeWork?.status ?? '',
+        notification.projection.session.currentRun?.status ?? '',
       )
     )
       return;
     if ('durability' in notification && notification.durability === 'durable') {
       seen.push(
-        `${notification.revision}:${notification.projection.event?.type ?? notification.projection.session.activeWork?.status ?? 'snapshot'}`,
+        `${notification.revision}:${notification.projection.event?.type ?? notification.projection.session.currentRun?.status ?? 'snapshot'}`,
       );
     }
   }
@@ -508,7 +518,7 @@ async function terminalProjection(
   if (
     projection?.status === 'ok' &&
     projection.session &&
-    ['completed', 'cancelled', 'failed'].includes(projection.session.activeWork?.status ?? '')
+    ['completed', 'cancelled', 'failed'].includes(projection.session.currentRun?.status ?? '')
   ) {
     return;
   }

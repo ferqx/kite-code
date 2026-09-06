@@ -5,6 +5,8 @@ export interface RuntimeSessionExecution {
   readonly operation: RuntimeSessionOperation;
   readonly execute: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
   readonly onSkipped?: (reason: string) => void;
+  /** Host has observed the predecessor's durable terminal before cleanup settled. */
+  readonly allowQueuedSuccessor?: boolean;
 }
 
 interface ScheduledExecution {
@@ -29,7 +31,11 @@ export class SessionLifecycleSupervisor {
 
   schedule(sessionId: string, input: RuntimeSessionExecution): boolean {
     const lifecycle = this.#session(sessionId);
-    if (!this.canSchedule(sessionId) || lifecycle.scheduled.has(input.operationId)) return false;
+    if (
+      (!input.allowQueuedSuccessor && !this.canSchedule(sessionId)) ||
+      lifecycle.scheduled.has(input.operationId)
+    )
+      return false;
     const controller = new AbortController();
     const completion = lifecycle.tail
       .catch(() => undefined)

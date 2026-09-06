@@ -1,0 +1,12 @@
+{
+  "root": false,
+  "extends": ["../../biome.json"],
+  "overrides": [
+    {
+      "includes": ["generated/**"],
+      "formatter": { "enabled": false },
+      "linter": { "enabled": false },
+      "assist": { "enabled": false }
+    }
+  ]
+}

@@ -42,7 +42,7 @@ import {
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const INITIAL_STATE_FIXTURE_JSON =
-  '{"schemaVersion":27,"formatEpoch":"kite-runtime-saq-v1-2026-08-25","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"mode":"accept_edits","interactionModeRevision":0,"workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{},"pendingApprovals":{},"activeApprovalId":null,"nextQueueSequence":0,"approvalGeneration":0,"sessionCommandGrants":{},"approvalReceipts":{}}';
+  '{"schemaVersion":27,"formatEpoch":"kite-runtime-saq-v2-2026-09-05","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"mode":"accept_edits","interactionModeRevision":0,"workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{},"pendingApprovals":{},"activeApprovalId":null,"nextQueueSequence":0,"approvalGeneration":0,"sessionCommandGrants":{},"approvalReceipts":{}}';
 
 function stableFixtureJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -278,6 +278,7 @@ function completeEvidenceFixture(
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
     if (field === 'grantKey') return 'grant-key-fixture';
+    if (field === 'owner') return { kind: 'root_tool', toolCallId: 'fixture' };
     if (field === 'failureCode' && type === 'session.rewind_failed') {
       return 'execution_failed';
     }
@@ -295,8 +296,32 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
     }
     if (field === 'matches') {
       return [
-        { interactionId: 'fixture', toolCallId: 'fixture', receiptId: 'fixture', generation: 1 },
+        {
+          interactionId: 'fixture',
+          toolCallId: 'fixture',
+          receiptId: 'fixture',
+          generation: 1,
+          owner: { kind: 'root_tool', toolCallId: 'fixture' },
+        },
       ];
+    }
+    if (field === 'subagent') {
+      if (type === 'subagent.step') {
+        return {
+          id: 'fixture',
+          stepId: 'step-fixture',
+          toolCallId: 'fixture',
+          toolName: 'fixture',
+          toolArgs: {},
+        };
+      }
+      return {
+        id: 'fixture',
+        stepId: 'step-fixture',
+        toolCallId: 'fixture',
+        toolName: 'fixture',
+        status: 'completed',
+      };
     }
     if (field === 'commandIdentity') {
       return {
@@ -866,6 +891,7 @@ describe('agent kernel package boundary', () => {
         return false;
       }
       if (field === 'grantKey') return 'grant-key-fixture';
+      if (field === 'owner') return { kind: 'root_tool', toolCallId: 'fixture' };
       if (field === 'failureCode' && eventType === 'session.rewind_failed') {
         return 'execution_failed';
       }
@@ -886,8 +912,27 @@ describe('agent kernel package boundary', () => {
             toolCallId: 'fixture',
             receiptId: 'receipt-fixture',
             generation: 1,
+            owner: { kind: 'root_tool', toolCallId: 'fixture' },
           },
         ];
+      }
+      if (field === 'subagent') {
+        if (eventType === 'subagent.step') {
+          return {
+            id: 'fixture',
+            stepId: 'step-fixture',
+            toolCallId: 'fixture',
+            toolName: 'fixture',
+            toolArgs: {},
+          };
+        }
+        return {
+          id: 'fixture',
+          stepId: 'step-fixture',
+          toolCallId: 'fixture',
+          toolName: 'fixture',
+          status: 'completed',
+        };
       }
       if (field === 'commandIdentity') {
         return {
@@ -1627,7 +1672,7 @@ describe('agent kernel package boundary', () => {
     ]);
     expect(state).toEqual({
       schemaVersion: 27,
-      formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
+      formatEpoch: 'kite-runtime-saq-v2-2026-09-05',
       revision: 0,
       appliedEventIds: [],
       recoveryState: { kind: 'normal' },
@@ -1725,7 +1770,7 @@ describe('agent kernel package boundary', () => {
         }),
       ),
     ).toThrow();
-    expect(serialized).toContain('"formatEpoch":"kite-runtime-saq-v1-2026-08-25"');
+    expect(serialized).toContain('"formatEpoch":"kite-runtime-saq-v2-2026-09-05"');
   });
 
   test('rejects legacy full_access authorization facts without producing a State event', () => {

@@ -22,6 +22,13 @@ import type {
 } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 import { digestCapabilityBindingValue } from './capability-binding';
+import {
+  isDeclaredGitMutation,
+  isDeclaredGitRemoteMutation,
+  isDeclaredReadOnlyGitBranch,
+  isDeclaredReadOnlyGitRemote,
+  shellSemanticInspector,
+} from './shell-semantics';
 import { buildDescription, getToolContract, toolContractSection } from './tool-contracts';
 import {
   BUILTIN_JSON_SCHEMAS_,
@@ -567,13 +574,6 @@ export const toolSearchAvailability: CapabilityAvailabilityResolver = (context) 
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'tool_search_disabled' });
 
-export const gitAvailability: CapabilityAvailabilityResolver = (context) =>
-  context.featureFlags?.brokeredGit === true &&
-  context.hasGitBroker === true &&
-  context.brokeredGitFeatureRevision === 'brokered-git-r1'
-    ? Object.freeze({ status: 'available' as const })
-    : Object.freeze({ status: 'hidden' as const, reason: 'brokered_git_unavailable' });
-
 export const taskAvailability: CapabilityAvailabilityResolver = (context) =>
   context.hasTaskAdapter === true
     ? Object.freeze({ status: 'available' as const })
@@ -655,7 +655,7 @@ export function shellEffectsClassifier(
       return Object.freeze({
         effectClass: 'read_only' as const,
         sideEffect: false,
-        classificationReason: 'Shell command matches the conservative read-only allowlist.',
+        classificationReason: 'Shell command matches the versioned conservative read-only grammar.',
         risk: 'read' as const,
         effectiveEffects: readOnlyEffects(effects),
       });
@@ -695,37 +695,13 @@ export function shellEffectsClassifier(
     return Object.freeze({
       effectClass: 'unknown' as const,
       sideEffect: true,
-      classificationReason: 'Shell command could not be proven read-only.',
+      classificationReason: `Shell command could not be proven read-only: ${shellReadOnlyUncertaintyCode(normalized)}.`,
       risk: 'unknown' as const,
       effectiveEffects: effects,
     });
   };
 }
 
-const READ_ONLY_SHELL_COMMANDS_ = new Set([
-  'awk',
-  'cat',
-  'cut',
-  'du',
-  'echo',
-  'file',
-  'find',
-  'grep',
-  'head',
-  'ls',
-  'nl',
-  'pwd',
-  'rg',
-  'sed',
-  'sort',
-  'stat',
-  'tail',
-  'test',
-  'tr',
-  'uniq',
-  'wc',
-]);
-const LOCAL_RUNTIME_VERSION_COMMANDS_ = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
 const FILE_FLAG_OPTIONS_ = new Set([
   '--brief',
   '--checking-printout',
@@ -1164,6 +1140,35 @@ export function isReadOnlyShellCommand(command: string): boolean {
   return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
 }
 
+export type ShellReadOnlyUncertaintyCode =
+  | 'empty_or_multiline'
+  | 'output_redirect'
+  | 'dynamic_expansion'
+  | 'background_execution'
+  | 'unregistered_program'
+  | 'unsupported_invocation';
+
+/** Local low-cardinality diagnostic only; it never grants execution authority. */
+export function shellReadOnlyUncertaintyCode(command: string): ShellReadOnlyUncertaintyCode {
+  const trimmed = command.trim();
+  if (!trimmed || /[\r\n]/u.test(trimmed)) return 'empty_or_multiline';
+  if (hasUnsafeOutputRedirect(trimmed)) return 'output_redirect';
+  if (/[$`]/u.test(trimmed) || /[<>]\(/u.test(trimmed) || hasUnquotedBraceExpansion(trimmed)) {
+    return 'dynamic_expansion';
+  }
+  const stripped = trimmed.replace(/&&/gu, '').replace(/\d?>&\d?/gu, '');
+  if (stripped.includes('&')) return 'background_execution';
+  const segments = splitReadOnlySegments(trimmed);
+  const hasUnregisteredProgram = segments.some((segment) => {
+    const token = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/gu)?.[0] ?? '';
+    const program = stripShellQuotes(token)
+      .toLowerCase()
+      .replace(/\.(?:cmd|exe)$/iu, '');
+    return !shellSemanticInspector(program);
+  });
+  return hasUnregisteredProgram ? 'unregistered_program' : 'unsupported_invocation';
+}
+
 /**
  * Recognize the narrow loop shape emitted for workspace inventory. This is
  * intentionally not a general shell parser: the iterator is restricted to
@@ -1281,18 +1286,31 @@ function isReadOnlySegment(segment: string): boolean {
   const command = stripShellQuotes(tokens[0] ?? '').toLowerCase();
   if (!command) return false;
   const portableCommand = command.replace(/\.(?:cmd|exe)$/i, '');
-  if (LOCAL_RUNTIME_VERSION_COMMANDS_.has(portableCommand)) {
-    return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
+  const inspector = shellSemanticInspector(portableCommand);
+  switch (inspector) {
+    case 'always_read_only':
+      return true;
+    case 'file':
+      return isReadOnlyFile(tokens);
+    case 'find':
+      return isReadOnlyFind(tokens);
+    case 'git':
+      return isReadOnlyGit(tokens);
+    case 'reject_dynamic_execution':
+      return false;
+    case 'ripgrep':
+      return isReadOnlyRipgrep(tokens);
+    case 'runtime_version':
+      return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
+    case 'sed':
+      return isReadOnlySed(tokens);
+    case 'sort':
+      return isReadOnlySort(tokens);
+    case 'uniq':
+      return isReadOnlyUniq(tokens);
+    default:
+      return false;
   }
-  if (portableCommand === 'git') return isReadOnlyGit(tokens);
-  if (portableCommand === 'file') return isReadOnlyFile(tokens);
-  if (portableCommand === 'rg') return isReadOnlyRipgrep(tokens);
-  if (portableCommand === 'sed') return isReadOnlySed(tokens);
-  if (portableCommand === 'find') return isReadOnlyFind(tokens);
-  if (portableCommand === 'sort') return isReadOnlySort(tokens);
-  if (portableCommand === 'uniq') return isReadOnlyUniq(tokens);
-  if (portableCommand === 'awk' || portableCommand === 'xargs') return false;
-  return READ_ONLY_SHELL_COMMANDS_.has(portableCommand);
 }
 
 const GIT_STATUS_FLAG_ = new Set([
@@ -1316,37 +1334,69 @@ const GIT_STATUS_VALUE_FLAG_ = new Set([
   '--column',
   '--find-renames',
   '--ignored',
+  '--porcelain',
   '--untracked-files',
 ]);
 const GIT_LOG_FLAG_ = new Set([
+  '--abbrev-commit',
   '--all',
   '--author-date-order',
   '--date-order',
   '--decorate',
   '--first-parent',
+  '--follow',
+  '--graph',
   '--merges',
   '--no-decorate',
   '--no-merges',
+  '--name-only',
+  '--name-status',
   '--oneline',
   '--reverse',
+  '--stat',
   '--topo-order',
 ]);
-const GIT_LOG_VALUE_FLAG_ = new Set(['--after', '--before', '--max-count', '--since', '--until']);
+const GIT_LOG_VALUE_FLAG_ = new Set([
+  '--after',
+  '--author',
+  '--before',
+  '--date',
+  '--decorate',
+  '--format',
+  '--grep',
+  '--max-count',
+  '--pretty',
+  '--since',
+  '--until',
+]);
 const GIT_DIFF_FLAG_ = new Set([
   '--cached',
   '--check',
+  '--exit-code',
+  '--ignore-all-space',
+  '--ignore-blank-lines',
+  '--ignore-space-at-eol',
+  '--ignore-space-change',
   '--name-only',
   '--name-status',
   '--no-color',
   '--no-ext-diff',
   '--no-index',
   '--numstat',
+  '--quiet',
   '--shortstat',
   '--staged',
   '--stat',
   '--summary',
+  '--word-diff',
 ]);
-const GIT_DIFF_VALUE_FLAG_ = new Set(['--diff-filter', '--relative', '--submodule']);
+const GIT_DIFF_VALUE_FLAG_ = new Set([
+  '--color',
+  '--diff-filter',
+  '--relative',
+  '--submodule',
+  '--word-diff',
+]);
 
 /** Closed direct-command grammar for Workspace-only Git metadata inspection. */
 function isReadOnlyGit(tokens: string[]): boolean {
@@ -1354,9 +1404,12 @@ function isReadOnlyGit(tokens: string[]): boolean {
   if (subcommand === 'status') return isReadOnlyGitStatus(tokens.slice(2));
   if (subcommand === 'log') return isReadOnlyGitLog(tokens.slice(2));
   if (subcommand === 'diff') return isReadOnlyGitDiff(tokens.slice(2));
+  if (subcommand === 'rev-parse' || subcommand === 'ls-files') return true;
   if (subcommand === 'branch') {
-    const arguments_ = tokens.slice(2).map(stripShellQuotes);
-    return arguments_.length === 1 && arguments_[0] === '--show-current';
+    return isDeclaredReadOnlyGitBranch(tokens.slice(2).map(stripShellQuotes));
+  }
+  if (subcommand === 'remote') {
+    return isDeclaredReadOnlyGitRemote(tokens.slice(2).map(stripShellQuotes));
   }
   return false;
 }
@@ -1450,33 +1503,185 @@ export function isWriteShellCommand(command: string): boolean {
 }
 
 export function isDestructiveShellCommand(command: string): boolean {
-  return (
-    /(?:(?:^|[;&|]\s*)|\/)(?:sudo|runas)\b/.test(command) ||
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(
-      command,
-    ) ||
-    /\brm\s+-[^\s]*f\b/.test(command) ||
-    /\b(?:del|rmdir|rd)\s+\/[^\s]*[sq]/i.test(command) ||
-    /\bchmod\s+(?:-[^\s]*[rR]|--recursive)\b/.test(command) ||
-    /\bchown\s+(?:-[^\s]*[rR]|--recursive)\b/.test(command) ||
-    /(?:(?:^|[;&|]\s*)|\/)(?:kill|taskkill)(?:all)?\b/.test(command) ||
-    /\bdd\b.*\bof=\/dev\//.test(command) ||
-    /\bmkfs\b/.test(command) ||
-    /\b(?:shutdown|reboot|halt|poweroff)\b/.test(command) ||
-    /\binit\s+[06]\b/.test(command) ||
-    /\bfdisk\b/.test(command) ||
-    /\bparted\b/.test(command) ||
-    /:\(\)\s*\{.*:.*\|.*:.*\}/.test(command) ||
-    />\s*\/dev\/sd/.test(command) ||
-    /\b(?:diskpart|format)\b/.test(command)
-  );
+  const segments = tokenizeShellCommandSegments(command);
+  if (segments?.some(isDestructiveShellSegment)) return true;
+  const unquoted = unquotedShellControlText(command);
+  return /:\(\)\s*\{.*:.*\|.*:.*\}/.test(unquoted) || />\s*\/dev\/sd/.test(unquoted);
+}
+
+function tokenizeShellCommandSegments(command: string): readonly (readonly string[])[] | null {
+  const segments: string[][] = [];
+  let tokens: string[] = [];
+  let token = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  const pushToken = (): void => {
+    if (token.length > 0) tokens.push(token);
+    token = '';
+  };
+  const pushSegment = (): void => {
+    pushToken();
+    if (tokens.length > 0) segments.push(tokens);
+    tokens = [];
+  };
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      token += character;
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      else token += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/[;&|\n\r]/u.test(character)) {
+      pushSegment();
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      pushToken();
+      continue;
+    }
+    token += character;
+  }
+  if (quote || escaped) return null;
+  pushSegment();
+  return segments;
+}
+
+function shellExecutableName(value: string): string {
+  return (value.replace(/\\/g, '/').split('/').at(-1) ?? '')
+    .toLowerCase()
+    .replace(/\.(?:cmd|com|exe)$/u, '');
+}
+
+function isDestructiveShellSegment(tokens: readonly string[]): boolean {
+  const invocation = unwrapDirectShellInvocation(tokens);
+  const executable = shellExecutableName(invocation[0] ?? '');
+  const args = invocation.slice(1);
+  if (executable === 'sudo' || executable === 'runas') return true;
+  if (executable === 'rm') {
+    const flags = args.filter((argument) => argument.startsWith('-')).join('');
+    return (
+      flags.includes('--force') ||
+      /-[^-]*f/u.test(flags) ||
+      ((flags.includes('--recursive') || /-[^-]*r/iu.test(flags)) && /f/iu.test(flags))
+    );
+  }
+  if (executable === 'del' || executable === 'rmdir' || executable === 'rd') {
+    return args.some((argument) => /^\/[^\s]*[sq]/iu.test(argument));
+  }
+  if (executable === 'chmod' || executable === 'chown') {
+    return args.some((argument) => argument === '--recursive' || /^-[^-]*r/iu.test(argument));
+  }
+  if (['kill', 'killall', 'taskkill', 'taskkillall'].includes(executable)) return true;
+  if (executable === 'dd') return args.some((argument) => argument.startsWith('of=/dev/'));
+  if (executable === 'mkfs' || executable.startsWith('mkfs.')) return true;
+  if (['shutdown', 'reboot', 'halt', 'poweroff', 'fdisk', 'parted'].includes(executable)) {
+    return true;
+  }
+  if (executable === 'init') return args[0] === '0' || args[0] === '6';
+  return executable === 'diskpart' || executable === 'format';
+}
+
+function unwrapDirectShellInvocation(tokens: readonly string[]): readonly string[] {
+  let index = 0;
+  for (let depth = 0; depth < 4 && index < tokens.length; depth += 1) {
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(tokens[index] ?? '')) index += 1;
+    const executable = shellExecutableName(tokens[index] ?? '');
+    if (executable === 'env') {
+      index += 1;
+      while (index < tokens.length) {
+        const argument = tokens[index] ?? '';
+        if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(argument)) {
+          index += 1;
+          continue;
+        }
+        if (argument === '--') {
+          index += 1;
+          break;
+        }
+        if (argument === '-i' || argument === '--ignore-environment') {
+          index += 1;
+          continue;
+        }
+        if (argument === '-u' || argument === '--unset' || argument === '-C') {
+          index += 2;
+          continue;
+        }
+        if (argument.startsWith('--unset=') || argument.startsWith('--chdir=')) {
+          index += 1;
+          continue;
+        }
+        break;
+      }
+      continue;
+    }
+    if (['builtin', 'command', 'exec', 'nohup'].includes(executable)) {
+      index += 1;
+      while (tokens[index] === '--' || tokens[index] === '-p') index += 1;
+      continue;
+    }
+    break;
+  }
+  return tokens.slice(index);
+}
+
+function unquotedShellControlText(command: string): string {
+  let result = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const character of command) {
+    if (escaped) {
+      result += ' ';
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      result += ' ';
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      result += ' ';
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      result += ' ';
+      continue;
+    }
+    result += character;
+  }
+  return result;
 }
 
 export function isVcsMutationShellCommand(command: string): boolean {
   if (isReadOnlyShellCommand(command)) return false;
-  return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    command,
-  );
+  const segments = tokenizeShellCommandSegments(command);
+  if (!segments) return false;
+  return segments.some((tokens) => {
+    if (shellExecutableName(tokens[0] ?? '') !== 'git') return false;
+    const subcommand = (tokens[1] ?? '').toLowerCase();
+    if (subcommand === 'remote') {
+      return isDeclaredGitRemoteMutation((tokens[2] ?? '').toLowerCase());
+    }
+    if (subcommand === 'branch') {
+      return !isDeclaredReadOnlyGitBranch(tokens.slice(2));
+    }
+    return isDeclaredGitMutation(subcommand);
+  });
 }
 
 function readOnlyEffects(effects: NonNullable<CapabilityDefinition['effects']>): CapabilityEffects {

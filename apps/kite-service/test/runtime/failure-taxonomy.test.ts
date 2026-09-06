@@ -64,6 +64,7 @@ describe('runtime terminal taxonomy v1', () => {
     const clientEvent = projectRuntimeClientEvent(
       {
         type: 'run.error',
+        turnId: 'runtime-run',
         message: '任意展示字符串',
         recoverable: false,
         failure,
@@ -73,11 +74,15 @@ describe('runtime terminal taxonomy v1', () => {
     );
     if (!clientEvent) throw new Error('expected a projected failure lifecycle event');
     expect(clientEvent).toEqual({
-      type: 'run.failure',
+      type: 'run.terminal',
       runId: 'runtime-run',
-      code: 'verification_inconclusive',
-      retryable: false,
-      recoveryEntry: 'operator_action',
+      status: 'failed',
+      outcome: {
+        status: outcome.status,
+        reasonCode: 'verification_inconclusive',
+        safeRetry: false,
+        recoveryEntry: 'operator_action',
+      },
     });
   });
 });

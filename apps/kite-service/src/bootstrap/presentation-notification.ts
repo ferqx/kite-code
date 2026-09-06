@@ -5,6 +5,8 @@ import type { RuntimeEvent } from './runtime/state-runtime';
 interface RuntimeStreamIdentity {
   readonly sessionId: string;
   readonly workId: string;
+  readonly runId?: string;
+  readonly taskId?: string;
   readonly turnId: string;
   readonly actorId: string;
   readonly attemptId: string;

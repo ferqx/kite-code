@@ -156,6 +156,7 @@ describe('Builtin observability allowlist projector', () => {
         toolCallId: 'private-tool',
         generation: 0,
         reason: 'private',
+        owner: { kind: 'root_tool', toolCallId: 'private-tool' },
         createdAt: NOW,
         outcome: rejectionOutcome,
       },
@@ -167,6 +168,7 @@ describe('Builtin observability allowlist projector', () => {
         type: 'auto_review.completed',
         reviewId: 'private-review',
         toolCallId: 'private-tool',
+        owner: { kind: 'root_tool', toolCallId: 'private-tool' },
         result: { ok: true, approved: false, reviewerModelName: 'private', durationMs: 17 },
         outcome: {
           ...rejectionOutcome,

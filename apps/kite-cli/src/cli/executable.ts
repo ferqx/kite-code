@@ -1,13 +1,10 @@
-import type { KiteServiceManager } from '@kite-ai/kite-local-runtime/manager';
 import packageJson from '../../package.json' with { type: 'json' };
-import type { KiteServiceModeConnector } from '../service-mode';
+import type { KiteRuntimeModeConnector } from '../service-mode';
 import { main } from './index';
 
 export interface KiteCliExecutableOptions {
-  /** Explicit managed Service connector supplied by release composition. */
-  readonly serviceConnector?: KiteServiceModeConnector;
-  /** Explicit lifecycle manager supplied by release composition; no ambient discovery is allowed. */
-  readonly serviceManager?: KiteServiceManager;
+  /** Explicit parent-owned Runtime connector supplied by release composition. */
+  readonly runtimeConnector?: KiteRuntimeModeConnector;
 }
 
 export async function runCli(options: KiteCliExecutableOptions = {}): Promise<void> {
@@ -16,8 +13,7 @@ export async function runCli(options: KiteCliExecutableOptions = {}): Promise<vo
     return;
   }
   await main({
-    serviceConnector: options.serviceConnector,
-    serviceManager: options.serviceManager,
+    runtimeConnector: options.runtimeConnector,
   });
 }
 

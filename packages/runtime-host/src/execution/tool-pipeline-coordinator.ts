@@ -1062,6 +1062,7 @@ function isValidSkillForkSuspension(
     blockedTool,
     subagentBlockedTool.reasonCode,
     blockedTool.toolCallId,
+    subagent.subagentId,
   );
 }
 
@@ -1116,6 +1117,7 @@ function isValidTaskSubagentSuspension(
     blockedTool,
     subagentBlockedTool.reasonCode,
     blockedTool.runtimeToolCallId ?? blockedTool.toolCallId,
+    subagent.subagentId,
   );
 }
 
@@ -1237,6 +1239,7 @@ function isValidSubagentSuspensionEvent(
   blockedTool: Record<string, unknown>,
   subagentBlockedReasonCode: unknown,
   expectedApprovalCallId = blockedTool.toolCallId,
+  expectedSubagentId: unknown,
 ): boolean {
   if (!isRecordObject(value)) return false;
   const type = ownDataDescriptor(value, 'type')?.value;
@@ -1248,6 +1251,7 @@ function isValidSubagentSuspensionEvent(
           'type',
           'interactionId',
           'toolCallId',
+          'owner',
           'approval',
           'approvalRoute',
           'fullModeBypassEligible',
@@ -1261,6 +1265,12 @@ function isValidSubagentSuspensionEvent(
         ['runtimeToolCallId', 'commandIdentity', 'createdAt'],
       ) ||
       value.toolCallId !== parentToolCallId ||
+      !isValidSubagentInteractionOwner(
+        value.owner,
+        parentToolCallId,
+        blockedTool,
+        expectedSubagentId,
+      ) ||
       !isBoundedIdentityString(value.interactionId) ||
       value.approvalRoute !== 'user' ||
       typeof value.fullModeBypassEligible !== 'boolean' ||
@@ -1291,6 +1301,7 @@ function isValidSubagentSuspensionEvent(
         'type',
         'reviewId',
         'toolCallId',
+        'owner',
         'toolName',
         'reason',
         'approval',
@@ -1306,6 +1317,12 @@ function isValidSubagentSuspensionEvent(
       ['runtimeToolCallId', 'commandIdentity', 'requestFingerprint', 'createdAt'],
     ) ||
     value.toolCallId !== parentToolCallId ||
+    !isValidSubagentInteractionOwner(
+      value.owner,
+      parentToolCallId,
+      blockedTool,
+      expectedSubagentId,
+    ) ||
     !isBoundedIdentityString(value.reviewId) ||
     !isBoundedIdentityString(value.toolName) ||
     value.toolName !== blockedTool.toolName ||
@@ -1331,6 +1348,29 @@ function isValidSubagentSuspensionEvent(
   return (
     subagentBlockedReasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
     isValidSubagentApproval(value.approval, blockedTool, expectedApprovalCallId)
+  );
+}
+
+function isValidSubagentInteractionOwner(
+  value: unknown,
+  expectedParentToolCallId: unknown,
+  blockedTool: Record<string, unknown>,
+  expectedSubagentId: unknown,
+): boolean {
+  if (
+    !isRecordObject(value) ||
+    !hasExactOwnDataKeys(value, ['kind', 'toolCallId', 'subagentId', 'parentToolCallId'])
+  ) {
+    return false;
+  }
+  return (
+    value.kind === 'subagent_tool' &&
+    isBoundedIdentityString(value.toolCallId) &&
+    value.toolCallId === blockedTool.toolCallId &&
+    isBoundedIdentityString(value.subagentId) &&
+    value.subagentId === expectedSubagentId &&
+    isBoundedIdentityString(value.parentToolCallId) &&
+    value.parentToolCallId === expectedParentToolCallId
   );
 }
 

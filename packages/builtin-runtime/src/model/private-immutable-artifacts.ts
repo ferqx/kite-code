@@ -66,13 +66,23 @@ export type PrivateArtifactWriteFaultPoint =
   | 'after_atomic_publish_before_directory_fsync';
 
 export interface PrivateImmutableArtifactStorageOptions<Kind extends string> {
-  root: string;
+  root?: string;
   namespace: string;
   partitions: readonly PrivateArtifactPartition<Kind>[];
   maxArtifactBytes: number;
+  /** App-owned durable backend; exactly one of `root` or `backend` must be supplied. */
+  backend?: PrivateImmutableArtifactStorageBackend<Kind>;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
   faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
+}
+
+export interface PrivateImmutableArtifactStorageBackend<Kind extends string> {
+  write(ref: PrivateImmutableArtifactRef<Kind>, payload: Uint8Array): void;
+  read(ref: PrivateImmutableArtifactRef<Kind>): Uint8Array;
+  collectGarbage(
+    options: PrivateArtifactGarbageCollectionOptions<Kind>,
+  ): PrivateArtifactGarbageCollectionResult;
 }
 
 export interface PrivateArtifactReachabilitySnapshot<Kind extends string> {
@@ -141,6 +151,41 @@ function safeEqual(left: string, right: string): boolean {
   return left === right;
 }
 
+/** Stable content reference shared by filesystem and App-injected durable backends. */
+export function derivePrivateImmutableArtifactReference<Kind extends string>(
+  namespace: string,
+  kind: Kind,
+  payload: Uint8Array,
+): PrivateImmutableArtifactRef<Kind> {
+  if (!SAFE_STORAGE_SEGMENT.test(namespace) || !SAFE_ARTIFACT_KIND.test(kind)) {
+    storageError('invalid_reference', 'Private Artifact identity domain is invalid.');
+  }
+  const bytes = Buffer.from(payload);
+  if (bytes.byteLength < 1) {
+    storageError('invalid_reference', 'Private Artifact payload is empty.');
+  }
+  const contentDigest = createHash('sha256').update(bytes).digest('hex');
+  const identityMaterial = `${namespace}\0${kind}\0${contentDigest}`;
+  const artifactId = `pa_${createHash('sha256')
+    .update(ARTIFACT_ID_DOMAIN)
+    .update(identityMaterial)
+    .digest('hex')}`;
+  const integrityIdentifier = `sha256:${createHash('sha256')
+    .update(ARTIFACT_INTEGRITY_DOMAIN)
+    .update(identityMaterial)
+    .update('\0')
+    .update(artifactId)
+    .update('\0')
+    .update(String(bytes.byteLength))
+    .digest('hex')}`;
+  return {
+    artifactId,
+    kind,
+    integrityIdentifier,
+    byteLength: bytes.byteLength,
+  };
+}
+
 /**
  * Shared storage primitive for private, immutable, content-addressed artifacts.
  *
@@ -155,6 +200,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
   private readonly secureWindowsPath: (path: string) => void;
   private readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
   private readonly partitions: ReadonlyMap<Kind, PrivateArtifactPartition<Kind>>;
+  private readonly backend?: PrivateImmutableArtifactStorageBackend<Kind>;
 
   constructor(options: PrivateImmutableArtifactStorageOptions<Kind>) {
     if (!SAFE_STORAGE_SEGMENT.test(options.namespace)) {
@@ -164,8 +210,17 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
       storageError('storage_boundary_violation', 'Private Artifact byte limit is invalid.');
     }
 
-    const root = resolve(options.root);
-    if (root === resolve(dirname(root)) || basename(root) !== options.namespace) {
+    if ((options.root === undefined) === (options.backend === undefined)) {
+      storageError(
+        'storage_boundary_violation',
+        'Private Artifact storage requires exactly one durable owner.',
+      );
+    }
+    const root = options.root === undefined ? '' : resolve(options.root);
+    if (
+      options.root !== undefined &&
+      (root === resolve(dirname(root)) || basename(root) !== options.namespace)
+    ) {
       storageError('storage_boundary_violation', 'Private Artifact root is too broad.');
     }
     const partitions = new Map<Kind, PrivateArtifactPartition<Kind>>();
@@ -194,6 +249,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
     this.secureWindowsPath = options.secureWindowsPath ?? secureWindowsOwnerOnlyPath;
     this.faultInjector = options.faultInjector;
     this.partitions = partitions;
+    this.backend = options.backend;
   }
 
   write<SpecificKind extends Kind>(
@@ -202,6 +258,18 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
   ): PrivateImmutableArtifactRef<SpecificKind> {
     const bytes = Buffer.from(payload);
     const ref = this.deriveReference(kind, bytes);
+    if (this.backend) {
+      try {
+        this.backend.write(ref, bytes);
+        if (!Buffer.from(this.read(ref)).equals(bytes)) {
+          storageError('artifact_corrupt', 'Private Artifact backend readback differs.');
+        }
+        return ref;
+      } catch (error) {
+        if (error instanceof PrivateArtifactStorageError) throw error;
+        storageError('publish_failed', 'Private Artifact backend write failed.');
+      }
+    }
     const partition = this.bindPartition(kind, true);
     const target = this.artifactPath(partition, ref.artifactId);
 
@@ -273,9 +341,13 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
 
   read(ref: PrivateImmutableArtifactRef<Kind>): Uint8Array {
     this.assertReference(ref);
-    const partition = this.bindPartition(ref.kind, false);
-    const target = this.artifactPath(partition, ref.artifactId);
-    const bytes = this.readPayload(target, partition, 'artifact_missing');
+    const bytes = this.backend
+      ? Buffer.from(this.backend.read(ref))
+      : (() => {
+          const partition = this.bindPartition(ref.kind, false);
+          const target = this.artifactPath(partition, ref.artifactId);
+          return this.readPayload(target, partition, 'artifact_missing');
+        })();
     if (bytes.byteLength !== ref.byteLength) {
       storageError(
         'artifact_corrupt',
@@ -318,6 +390,8 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
       this.read(ref);
       reachableIds.add(`${ref.kind}\0${ref.artifactId}`);
     }
+
+    if (this.backend) return this.backend.collectGarbage(options);
 
     if (!this.rootExists()) {
       if (reachableIds.size > 0) {
@@ -410,7 +484,12 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
         entry.mtimeMs > cutoff &&
         !reachableIds.has(`${entry.parent.descriptor.kind}\0${entry.artifactId}`),
     ).length;
-    return { scannedEntries, retainedArtifacts, deletedArtifacts, deletedTemporaryFiles };
+    return {
+      scannedEntries,
+      retainedArtifacts,
+      deletedArtifacts,
+      deletedTemporaryFiles,
+    };
   }
 
   private deriveReference<SpecificKind extends Kind>(
@@ -421,21 +500,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
     if (bytes.byteLength > this.maxArtifactBytes) {
       storageError('artifact_too_large', 'Private Artifact exceeds its byte limit.');
     }
-    const contentDigest = createHash('sha256').update(bytes).digest('hex');
-    const identityMaterial = `${this.namespace}\0${kind}\0${contentDigest}`;
-    const artifactId = `pa_${createHash('sha256')
-      .update(ARTIFACT_ID_DOMAIN)
-      .update(identityMaterial)
-      .digest('hex')}`;
-    const integrityIdentifier = `sha256:${createHash('sha256')
-      .update(ARTIFACT_INTEGRITY_DOMAIN)
-      .update(identityMaterial)
-      .update('\0')
-      .update(artifactId)
-      .update('\0')
-      .update(String(bytes.byteLength))
-      .digest('hex')}`;
-    return { artifactId, kind, integrityIdentifier, byteLength: bytes.byteLength };
+    return derivePrivateImmutableArtifactReference(this.namespace, kind, bytes);
   }
 
   private assertReference(ref: PrivateImmutableArtifactRef<Kind>): void {

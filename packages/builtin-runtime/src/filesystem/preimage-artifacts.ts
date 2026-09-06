@@ -7,6 +7,7 @@ import {
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPoint,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from '../model';
 import { userKiteCodeDir } from '../model/artifact-paths';
 
@@ -59,6 +60,7 @@ export interface FilesystemPreimageArtifactWriter {
 
 export interface FilesystemPreimageArtifactStoreOptions {
   readonly root?: string;
+  readonly backend?: PrivateImmutableArtifactStorageBackend<'filesystem_preimage'>;
   readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
   readonly secureWindowsPath?: (path: string) => void;
@@ -113,7 +115,9 @@ export class FilesystemPreimageArtifactStore implements FilesystemPreimageArtifa
     if (this.#storage) return this.#storage;
     try {
       this.#storage = new PrivateImmutableArtifactStorage({
-        root: this.#options.root ?? filesystemPreimageArtifactRoot(),
+        ...(this.#options.backend
+          ? { backend: this.#options.backend }
+          : { root: this.#options.root ?? filesystemPreimageArtifactRoot() }),
         namespace: 'filesystem-preimages',
         partitions: PARTITIONS,
         maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,

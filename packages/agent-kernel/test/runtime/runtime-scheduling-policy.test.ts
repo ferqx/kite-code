@@ -11,7 +11,7 @@ describe('RuntimeSchedulingPolicy', () => {
       version: 1,
       parallelRead: {
         concurrencyGroup: 'parallel-read',
-        ceiling: 4,
+        batch: 'all_compatible_in_model_response',
         barrier: 'interaction_write_or_unknown',
       },
       parallelSubagent: {
@@ -25,8 +25,8 @@ describe('RuntimeSchedulingPolicy', () => {
         approval: 'per_invocation',
       },
       concurrencyAdmission: {
+        scope: 'subagent_and_writer',
         queue: 'fifo_per_resource',
-        compoundPermits: 'atomic_all_or_none',
       },
       lateEventPolicy: 'diagnostic_or_reconciliation_only',
     });

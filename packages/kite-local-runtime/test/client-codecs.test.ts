@@ -2,40 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   decodeLocalRuntimeCredentialRequest,
   decodeLocalRuntimeCredentialResult,
-  decodeLocalRuntimeLifecycleRequest,
-  decodeLocalRuntimeLifecycleResult,
   LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
   LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
-  LOCAL_RUNTIME_LIFECYCLE_REQUEST_SCHEMA_,
-  LOCAL_RUNTIME_LIFECYCLE_RESULT_SCHEMA_,
   safeDecodeLocalRuntimeCredentialRequest,
 } from '@kite-ai/kite-local-runtime/client';
-import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/service';
-
-describe('kite-local-runtime client lifecycle codecs', () => {
-  test('accepts exact lifecycle requests and results', () => {
-    const request = {
-      schema: LOCAL_RUNTIME_LIFECYCLE_REQUEST_SCHEMA_,
-      requestId: 'request-1',
-      operation: 'status',
-      clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
-    } as const;
-    expect(decodeLocalRuntimeLifecycleRequest(request)).toEqual(request);
-
-    const result = {
-      schema: LOCAL_RUNTIME_LIFECYCLE_RESULT_SCHEMA_,
-      requestId: request.requestId,
-      operation: request.operation,
-      outcome: 'applied',
-      state: 'ready',
-      diagnostic: 'build_mismatch',
-    } as const;
-    expect(decodeLocalRuntimeLifecycleResult(result)).toEqual(result);
-    expect(() =>
-      decodeLocalRuntimeLifecycleRequest({ ...request, controlToken: 'secret' }),
-    ).toThrow();
-  });
-});
 
 describe('kite-local-runtime native credential codecs', () => {
   test('keeps provider secret writes native-only and exact', () => {

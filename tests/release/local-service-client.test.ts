@@ -1,19 +1,13 @@
 import { expect, test } from 'bun:test';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  createManagedLocalServiceClientComposition,
+  installedKiteSessionStorePath,
+  resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
+  sourceKiteSessionStorePath,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
 
@@ -43,7 +37,7 @@ test('managed client forwards only explicit built-in provider environment keys',
   expect(selected.KITE_CODE_HOME).toBeUndefined();
 });
 
-test('source Service build identity ignores unrelated commits and changes with owned inputs', () => {
+test('source release build identity includes paired App Server bundle inputs', () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-source-build-id-'));
   try {
     mkdirSync(join(root, 'apps', 'kite-service'), { recursive: true });
@@ -62,7 +56,8 @@ test('source Service build identity ignores unrelated commits and changes with o
     writeFileSync(unrelated, 'export const presentationOnly = true;\n');
     runGit(root, ['add', '.']);
     runGit(root, ['-c', 'commit.gpgsign=false', 'commit', '-m', 'unrelated cli change']);
-    expect(sourceServiceBuildIdentity(root)).toBe(clean);
+    const committedClientChange = sourceServiceBuildIdentity(root);
+    expect(committedClientChange).not.toBe(clean);
 
     writeFileSync(tracked, 'export const value = 2;\n');
     runGit(root, ['add', '.']);
@@ -77,6 +72,7 @@ test('source Service build identity ignores unrelated commits and changes with o
     const withUntracked = sourceServiceBuildIdentity(root);
 
     expect(clean).toMatch(/^dev:[0-9a-f]{40}$/u);
+    expect(committedClientChange).toMatch(/^dev:[0-9a-f]{40}$/u);
     expect(committedServiceChange).toMatch(/^dev:[0-9a-f]{40}$/u);
     expect(committedServiceChange).not.toBe(clean);
     expect(trackedDirty).toMatch(/^dev:[0-9a-f]{40}:dirty:[0-9a-f]{64}$/u);
@@ -87,71 +83,52 @@ test('source Service build identity ignores unrelated commits and changes with o
   }
 });
 
-test('managed client derives default KiteHome only from the canonical OS identity', () => {
-  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-managed-home-'));
-  const systemHome = join(root, 'os-home');
-  const ambientHome = join(root, 'workspace-dotenv-home');
-  mkdirSync(systemHome);
+test('Session Store profiles separate installed data from each canonical source checkout', () => {
+  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'kite-session-profiles-')));
+  const kiteHome = join(root, 'kite-home');
+  const firstRepository = join(root, 'first-repository');
+  const secondRepository = join(root, 'second-repository');
+  mkdirSync(kiteHome);
+  mkdirSync(firstRepository);
+  mkdirSync(secondRepository);
   try {
-    const managed = createManagedLocalServiceClientComposition({
-      argv: ['bun', 'kite'],
-      systemHome,
-      environment: {
-        HOME: ambientHome,
-        USERPROFILE: ambientHome,
-        KITE_CODE_HOME: join(root, 'ambient-kite-home'),
-        KITE_STANDALONE_EXECUTABLE: '1',
-        PATH: process.env.PATH,
-      },
-    });
-    expect(managed.executableMode).toBe('source');
-    expect(existsSync(join(systemHome, '.kite-code'))).toBe(true);
-    expect(existsSync(ambientHome)).toBe(false);
-    expect(existsSync(join(root, 'ambient-kite-home'))).toBe(false);
+    expect(installedKiteSessionStorePath(kiteHome)).toBe(join(kiteHome, 'kite-session.sqlite'));
+    const firstDigest = createHash('sha256')
+      .update('kite-source-runtime-profile\0')
+      .update(kiteHome)
+      .update('\0')
+      .update(firstRepository)
+      .digest('hex')
+      .slice(0, 32);
+    expect(sourceKiteSessionStorePath(kiteHome, firstRepository)).toBe(
+      join(kiteHome, 'source-profiles', firstDigest, 'kite-session.sqlite'),
+    );
+    expect(sourceKiteSessionStorePath(kiteHome, secondRepository)).not.toBe(
+      sourceKiteSessionStorePath(kiteHome, firstRepository),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('managed client accepts one explicit absolute non-symlink KiteHome and rejects ambiguous input', () => {
-  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-explicit-home-'));
-  const systemHome = join(root, 'os-home');
-  const explicitHome = join(root, 'explicit-kite-home');
-  mkdirSync(systemHome);
-  mkdirSync(explicitHome, { mode: 0o755 });
+test('installed companion resolution pins the launcher-provided immutable candidate root', () => {
+  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'kite-installed-bin-')));
   try {
-    createManagedLocalServiceClientComposition({
-      argv: ['bun', 'kite', '--kite-home', explicitHome],
-      systemHome,
-      environment: { PATH: process.env.PATH },
-    });
-    expect(existsSync(explicitHome)).toBe(true);
-    expect(existsSync(join(explicitHome, '.kite-code'))).toBe(false);
-    if (process.platform !== 'win32') expect(lstatSync(explicitHome).mode & 0o777).toBe(0o700);
-
-    expect(() =>
-      createManagedLocalServiceClientComposition({
-        argv: ['bun', 'kite', '--kite-home', 'relative-home'],
-        systemHome,
+    const candidateRoot = join(root, 'releases', 'a'.repeat(24));
+    const stableExecutable = join(root, 'bin', 'kite');
+    expect(
+      resolveInstalledReleaseExecutable('kite-service', {
+        candidateRoot,
+        executable: stableExecutable,
+        platform: 'win32',
       }),
-    ).toThrow('absolute path');
+    ).toBe(join(candidateRoot, 'bin', 'kite-service.exe'));
     expect(() =>
-      createManagedLocalServiceClientComposition({
-        argv: ['bun', 'kite', '--kite-home', explicitHome, '--kite-home', explicitHome],
-        systemHome,
+      resolveInstalledReleaseExecutable('kite-service', {
+        candidateRoot: 'relative-candidate',
+        executable: stableExecutable,
       }),
-    ).toThrow('only once');
-
-    const target = join(root, 'symlink-target');
-    const link = join(root, 'symlink-home');
-    mkdirSync(target);
-    symlinkSync(target, link, 'dir');
-    expect(() =>
-      createManagedLocalServiceClientComposition({
-        argv: ['bun', 'kite', '--kite-home', link],
-        systemHome,
-      }),
-    ).toThrow('symbolic link');
+    ).toThrow('not absolute');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

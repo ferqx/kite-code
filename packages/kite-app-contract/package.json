@@ -5,7 +5,8 @@
   "type": "module",
   "module": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./worker-controller": "./src/worker-controller.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target browser",

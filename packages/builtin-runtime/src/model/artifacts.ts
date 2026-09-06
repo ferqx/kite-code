@@ -14,6 +14,7 @@ import {
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPoint,
   PrivateImmutableArtifactStorage,
+  type PrivateImmutableArtifactStorageBackend,
 } from './private-immutable-artifacts';
 import {
   assertCanonicalModelMessage,
@@ -42,11 +43,16 @@ const MODEL_RESPONSE_FINISH_REASONS = new Set([
 const MODEL_ARTIFACT_PARTITIONS = Object.freeze([
   { kind: 'model_surface', directory: 'surfaces', extension: '.json' },
   { kind: 'model_response', directory: 'responses', extension: '.json' },
-  { kind: 'provider_options', directory: 'provider-options', extension: '.json' },
+  {
+    kind: 'provider_options',
+    directory: 'provider-options',
+    extension: '.json',
+  },
 ] as const);
 
 export interface ModelArtifactStoreOptions {
   root?: string;
+  backend?: PrivateImmutableArtifactStorageBackend<PrivateArtifactKind>;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
@@ -78,7 +84,9 @@ export class ModelArtifactStore {
 
   constructor(options: ModelArtifactStoreOptions) {
     this.storage = new PrivateImmutableArtifactStorage({
-      root: options.root ?? modelArtifactRoot(),
+      ...(options.backend
+        ? { backend: options.backend }
+        : { root: options.root ?? modelArtifactRoot() }),
       namespace: 'model-artifacts',
       partitions: MODEL_ARTIFACT_PARTITIONS,
       maxArtifactBytes: options.maxArtifactBytes ?? DEFAULT_MODEL_ARTIFACT_MAX_BYTES,

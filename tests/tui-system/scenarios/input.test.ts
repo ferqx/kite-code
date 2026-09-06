@@ -88,16 +88,15 @@ describe('TUI PTY System — Input & Message', () => {
         server,
         'Second queued message',
         {
-          acceptWhen: (viewport) =>
-            screenContains(
-              viewport,
-              'Message queued; it will be sent after the current turn finishes.',
-            ),
+          acceptWhen: (viewport) => screenContains(viewport, '↵ Second queued message'),
           timeout: 15000,
         },
       );
 
       expect(server.getRequestCount()).toBe(queuedDelivery.requestBaseline);
+      const queuedViewport = stripAnsi(tui.viewport());
+      expect(queuedViewport).toContain('Working');
+      expect(queuedViewport).toContain('Second queued message');
       await queuedDelivery.waitForRuntimeRequest();
       await waitForText(() => tui.viewport(), 'Queued turn completed.', 15000);
 

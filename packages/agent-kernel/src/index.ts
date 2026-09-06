@@ -82,6 +82,8 @@ export {
   normalizeContextCompactionReason,
   normalizeContextRuntimeState,
 } from './context-normalization';
+export type { CanonicalTaskCompletionFact } from './core/completion/reducer';
+export { normalizeCanonicalTaskCompletionFact } from './core/completion/reducer';
 export type {
   AgentContextState,
   ContextAutoGuardEntry,
@@ -137,6 +139,7 @@ export {
   assertCapabilityToolTerminalBatch,
   attachSuspendedCapabilityTerminals,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,
   suspendedCapabilityTerminalRequirements,
@@ -152,6 +155,7 @@ export type {
   ContextCompactionResetEvent,
   KernelEvent,
   KernelEventEnvelope,
+  KernelInteractionOwner,
   RuntimeEvent,
   RuntimeEventType,
 } from './events';
@@ -337,7 +341,6 @@ export type { SchedulerFacts } from './scheduler';
 export {
   decideNextEffect,
   isValidSchedulerFacts,
-  MAX_PARALLEL_READ_TOOLS,
   MAX_PARALLEL_SUBAGENTS,
   selectPendingEffects as selectScheduledEffects,
 } from './scheduler';
@@ -393,6 +396,7 @@ export type {
   AgentTerminalOutcomeState,
   AgentTerminalReasonCode,
   AgentToolCallState,
+  AgentToolPresentation,
   AgentToolResultMeta,
   AgentToolResultState,
   AgentToolsState,
@@ -451,12 +455,16 @@ export {
   convertLegacyRuntimeEventJson,
   convertState26RuntimeEvent,
   isLegacyState26Snapshot,
+  isLegacyState27Snapshot,
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
+  LEGACY_STATE27_FORMAT_EPOCH,
+  LEGACY_STATE27_SCHEMA_VERSION,
   migrateCompatibleAgentState,
   migrateLegacyAgentState,
   migrateState26Event,
   migrateState26To27,
+  migrateState27ToCurrent,
 } from './state-migration';
 export type { RunTerminalOutcome, RuntimeTerminalStatus } from './terminal-outcome';
 export {

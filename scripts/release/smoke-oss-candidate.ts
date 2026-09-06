@@ -1,6 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  createKiteHomeIdentity,
+  resolveKiteAppServerDaemonEndpoint,
+} from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
@@ -12,10 +17,13 @@ import {
   rollbackOssCandidate,
   uninstallOssCandidate,
 } from './install-oss-candidate';
+import { resolveLocalRuntimeParent } from './local-service-client';
 import {
   createSmokeVariantCandidate,
   currentOssReleaseTarget,
   defaultOssCandidateArchivePath,
+  type OssCandidateManifest,
+  type VerifiedOssCandidate,
   verifyOssCandidate,
 } from './oss-candidate';
 
@@ -27,16 +35,19 @@ const archivePath =
 if (!archivePath) throw new Error('--archive requires a path.');
 
 const verified = await verifyOssCandidate(archivePath, currentOssReleaseTarget().id);
-const smokeRoot = mkdtempSync(join(tmpdir(), 'kite-code-release-smoke-'));
+const smokeRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-release-smoke-')));
 const prefix = join(smokeRoot, 'install');
 const variantPath = join(smokeRoot, 'variant.tar.gz');
-
 let smokeFailure: unknown;
 try {
-  await installOssCandidate({ archivePath: verified.archivePath, prefix });
-  await runInstalledSmokes(prefix, verified.manifest.target.os === 'win32');
+  await installOssCandidate({
+    archivePath: verified.archivePath,
+    prefix,
+  });
+  assertActiveRelease(prefix, verified.candidateId);
+  await runInstalledSmokes(prefix, verified.manifest);
   const variant = await createSmokeVariantCandidate(verified, variantPath);
-  await installOssCandidate({ archivePath: variant.archivePath, prefix });
+  await runInstalledTuiUpgradeCoexistence(prefix, verified, variant);
   const afterSecondInstall = readInstallStatus(prefix);
   if (
     afterSecondInstall.currentCandidateId !== variant.candidateId ||
@@ -44,11 +55,13 @@ try {
   ) {
     throw new Error('Second install did not preserve the previous candidate.');
   }
+  assertActiveRelease(prefix, variant.candidateId);
   const rolledBack = rollbackOssCandidate(prefix);
   if (rolledBack.currentCandidateId !== verified.candidateId) {
     throw new Error('Rollback did not restore the original candidate.');
   }
-  await runInstalledSmokes(prefix, verified.manifest.target.os === 'win32');
+  assertActiveRelease(prefix, verified.candidateId);
+  await runInstalledSmokes(prefix, verified.manifest);
   uninstallOssCandidate(prefix);
   if (existsSync(prefix)) throw new Error('Uninstall left the managed install root behind.');
   console.log(
@@ -61,9 +74,16 @@ try {
         'install',
         'cli-help-version',
         'tui-version-pty-startup',
-        'service-companion',
+        'explicit-app-server-daemon',
+        'compiled-predecessor-lifecycle-restart',
+        'paired-app-server-process',
+        'retired-companion-slots-absent',
+        'web-payload-assets',
         'mcp-stdio-authenticated-wrapper',
+        'tui-upgrade-process-coexistence',
         'upgrade',
+        'active-pointer',
+        'immutable-candidate-roots',
         'rollback',
         'uninstall',
       ],
@@ -90,13 +110,82 @@ try {
       : cleanupError;
   }
 }
+
+async function runInstalledTuiUpgradeCoexistence(
+  prefix: string,
+  current: VerifiedOssCandidate,
+  next: VerifiedOssCandidate,
+): Promise<void> {
+  const server = createMockModelServer();
+  const workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
+  workspace.env.CI = 'true';
+  server.setResponses([]);
+  const suffix = current.manifest.target.os === 'win32' ? '.exe' : '';
+  const executable = (candidateId: string) =>
+    join(prefix, 'releases', candidateId, 'bin', `kite-tui${suffix}`);
+  const tuis: Array<Awaited<ReturnType<typeof spawnReadyTui>>> = [];
+  let failure: unknown;
+  try {
+    const oldTui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      executablePath: executable(current.candidateId),
+      mockServer: server,
+      workspace,
+    });
+    tuis.push(oldTui);
+    await installOssCandidate({ archivePath: next.archivePath, prefix });
+    if (oldTui.exited || !oldTui.viewport().includes('Kite Code')) {
+      throw new Error('Upgrade interrupted the running predecessor TUI.');
+    }
+    const newTui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      executablePath: executable(next.candidateId),
+      mockServer: server,
+      workspace,
+    });
+    tuis.push(newTui);
+    if (oldTui.exited || newTui.exited) {
+      throw new Error('Old and new candidate TUI processes did not coexist.');
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    for (const tui of tuis.reverse()) {
+      try {
+        await tui.killAndWait();
+      } catch (error) {
+        failure = failure
+          ? new AggregateError([failure, error], 'TUI upgrade coexistence and cleanup failed')
+          : error;
+      }
+    }
+    try {
+      await cleanupTuiSystemFixtures({ tuis: [], mockServers: [server], workspaces: [workspace] });
+    } catch (error) {
+      failure = failure
+        ? new AggregateError([failure, error], 'TUI upgrade coexistence fixture cleanup failed')
+        : error;
+    }
+  }
+  if (failure) throw failure;
+}
 if (smokeFailure) throw smokeFailure;
 
-async function runInstalledSmokes(prefix: string, windows: boolean): Promise<void> {
-  const suffix = windows ? '.exe' : '';
+function assertActiveRelease(prefix: string, expectedCandidateId: string): void {
+  const status = readInstallStatus(prefix);
+  if (status.currentCandidateId !== expectedCandidateId) {
+    throw new Error('Managed active release marker did not follow the active pointer.');
+  }
+}
+
+async function runInstalledSmokes(prefix: string, manifest: OssCandidateManifest): Promise<void> {
+  const suffix = manifest.target.os === 'win32' ? '.exe' : '';
   const cli = join(prefix, 'bin', `kite${suffix}`);
   const tui = join(prefix, 'bin', `kite-tui${suffix}`);
   const service = join(prefix, 'bin', `kite-service${suffix}`);
+  assertInstalledReleaseAssets(prefix, manifest);
   const help = Bun.spawnSync([cli, '--help'], { stdout: 'pipe', stderr: 'pipe' });
   if (help.exitCode !== 0 || !help.stdout.toString().includes('Usage:')) {
     throw installedSmokeError('CLI help', help);
@@ -111,6 +200,178 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
   }
   await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
+  await runInstalledAppServerDaemonSmoke(cli);
+}
+
+async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
+  const homeParent = realpathSync.native(mkdtempSync(join(smokeRoot, 'daemon-home-')));
+  const workspace = realpathSync.native(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
+  const kiteHome = join(homeParent, '.kite-code');
+  const common = ['--kite-home', kiteHome];
+  let predecessor: ReturnType<typeof Bun.spawn> | undefined;
+  let primaryError: unknown;
+  try {
+    const absentWeb = Bun.spawnSync([cli, 'web', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (absentWeb.exitCode === 0) {
+      throw installedSmokeError('absent App Server daemon Web', absentWeb);
+    }
+    // First-release predecessor is a separate compiled fixture with incompatible business protocol.
+    const fixture = join(
+      homeParent,
+      process.platform === 'win32' ? 'old-daemon.exe' : 'old-daemon',
+    );
+    const compiled = Bun.spawnSync(
+      [
+        process.execPath,
+        'build',
+        'tests/fixtures/lifecycle/old-daemon.ts',
+        '--compile',
+        '--outfile',
+        fixture,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    if (compiled.exitCode !== 0) throw installedSmokeError('predecessor fixture compile', compiled);
+    const endpoint = resolveKiteAppServerDaemonEndpoint({
+      home: createKiteHomeIdentity(kiteHome, 'explicit_argument'),
+      ...(process.platform === 'win32'
+        ? {}
+        : { runtimeParent: resolveLocalRuntimeParent(process.env) }),
+    });
+    predecessor = Bun.spawn(
+      [
+        fixture,
+        endpoint.kind === 'unix' ? endpoint.socket : endpoint.pipeName,
+        endpoint.homeDigest,
+        workspace,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const reader = predecessor.stdout!.getReader();
+    try {
+      const ready = await Promise.race([
+        reader.read(),
+        Bun.sleep(10_000).then(() => {
+          throw new Error('Predecessor fixture startup timeout');
+        }),
+      ]);
+      if (ready.done || !new TextDecoder().decode(ready.value).includes('ready'))
+        throw new Error('Predecessor fixture did not start');
+    } finally {
+      reader.releaseLock();
+    }
+    const oldStatus = Bun.spawnSync([cli, 'server', 'status', '--json', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (
+      oldStatus.exitCode !== 0 ||
+      JSON.parse(oldStatus.stdout.toString()).state !== 'incompatible'
+    )
+      throw installedSmokeError('predecessor status', oldStatus);
+    // Keep this parent event loop running so it can reap the owned predecessor.
+    const restarting = Bun.spawn([cli, 'server', 'restart', '--workspace', workspace, ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(restarting.stdout).arrayBuffer(),
+      new Response(restarting.stderr).arrayBuffer(),
+      restarting.exited,
+    ]);
+    const start = { exitCode, stdout: Buffer.from(stdout), stderr: Buffer.from(stderr) };
+    if (start.exitCode !== 0 || !start.stdout.toString().includes('App Server: ready')) {
+      throw installedSmokeError('App Server daemon start', start);
+    }
+    if ((await predecessor.exited) !== 0) throw new Error('Predecessor did not stop cleanly');
+    const status = Bun.spawnSync([cli, 'server', 'status', '--json', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (status.exitCode !== 0) throw installedSmokeError('App Server daemon status', status);
+    const decoded = JSON.parse(status.stdout.toString()) as {
+      readonly state?: unknown;
+      readonly webOrigin?: unknown;
+    };
+    if (decoded.state !== 'ready' || typeof decoded.webOrigin !== 'string') {
+      throw new Error('Installed App Server daemon was not Web-ready.');
+    }
+    const web = Bun.spawnSync([cli, 'web', ...common], { stdout: 'pipe', stderr: 'pipe' });
+    if (web.exitCode !== 0 || web.stdout.toString().trim() !== `${decoded.webOrigin}/`) {
+      throw installedSmokeError('App Server daemon Web discovery', web);
+    }
+    const shell = await fetch(`${decoded.webOrigin}/`);
+    if (shell.status !== 200) throw new Error('Installed App Server daemon Web shell failed.');
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    const stop = Bun.spawnSync([cli, 'server', 'stop', ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (predecessor?.exitCode === null) {
+      predecessor.kill();
+      await predecessor.exited;
+    }
+    if (stop.exitCode !== 0 || !stop.stdout.toString().includes('App Server: absent')) {
+      primaryError ??= installedSmokeError('App Server daemon stop', stop);
+    }
+  }
+  if (primaryError !== undefined) throw primaryError;
+}
+
+function assertInstalledReleaseAssets(prefix: string, manifest: OssCandidateManifest): void {
+  if (manifest.releaseSlots === undefined) {
+    throw new Error('Installed candidate is missing release slots.');
+  }
+  const candidateId = readInstallStatus(prefix).currentCandidateId;
+  const candidateRoot = join(prefix, 'releases', candidateId);
+  for (const name of ['coordinator', 'worker', 'gateway'] as const) {
+    const slot = manifest.releaseSlots[name];
+    if (slot.entrypoint !== null || slot.identity !== null) {
+      throw new Error(`Installed retired ${name} slot is not empty.`);
+    }
+    const suffix = manifest.target.os === 'win32' ? '.exe' : '';
+    if (
+      existsSync(
+        join(candidateRoot, 'bin', `kite-${name === 'gateway' ? 'web-gateway' : name}${suffix}`),
+      )
+    ) {
+      throw new Error(`Installed candidate still contains retired ${name} companion.`);
+    }
+  }
+  const web = manifest.releaseSlots.web;
+  if (web.entrypoint !== 'payload/web/index.html' || web.identity === null) {
+    throw new Error('Installed Web payload slot is not bound to its fixed entrypoint.');
+  }
+  const webFiles = manifest.files.filter((entry) => entry.path.startsWith('payload/web/'));
+  if (
+    !webFiles.some((entry) => entry.path === web.entrypoint) ||
+    !webFiles.some((entry) => entry.path === 'payload/web/api-docs/openapi.json') ||
+    !webFiles.some((entry) => /^payload\/web\/assets\/[A-Za-z0-9_-]+\.js$/u.test(entry.path)) ||
+    webFiles.some((entry) => entry.path.endsWith('.map'))
+  ) {
+    throw new Error('Installed Web payload assets are incomplete or unsafe.');
+  }
+  for (const entry of webFiles) {
+    const path = join(candidateRoot, ...entry.path.split('/'));
+    assertRegularFile(path, 'Web payload asset');
+    const digest = `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+    if (digest !== entry.sha256)
+      throw new Error(`Installed Web asset identity drifted: ${entry.path}`);
+  }
+  const indexBytes = readFileSync(join(candidateRoot, ...web.entrypoint.split('/')));
+  if (`sha256:${createHash('sha256').update(indexBytes).digest('hex')}` !== web.identity) {
+    throw new Error('Installed Web payload identity does not match its release slot.');
+  }
+}
+
+function assertRegularFile(path: string, label: string): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} is unsafe.`);
 }
 
 async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise<void> {
@@ -194,7 +455,7 @@ async function drainRemainingMcpOutput(
   }
 }
 
-async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {
+async function runInstalledTuiStartupSmoke(tuiExecutablePath: string): Promise<void> {
   const server = createMockModelServer();
   // This is a standalone startup smoke, not Windows managed-network
   // onboarding coverage. Keep its fixture independent from any local account
@@ -203,24 +464,41 @@ async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void
   workspace.env.CI = 'true';
   server.setResponses([]);
   let tui: Awaited<ReturnType<typeof spawnReadyTui>> | undefined;
+  let failure: unknown;
   try {
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
-      executablePath,
+      executablePath: tuiExecutablePath,
       mockServer: server,
       workspace,
     });
     if (!tui.viewport().includes('Kite Code')) {
       throw new Error('Installed TUI startup did not render Kite Code branding.');
     }
+  } catch (error) {
+    failure = error;
   } finally {
-    await cleanupTuiSystemFixtures({
-      tuis: [tui],
-      mockServers: [server],
-      workspaces: [workspace],
-    });
+    try {
+      await tui?.killAndWait();
+    } catch (error) {
+      failure = failure
+        ? new AggregateError([failure, error], 'Installed TUI smoke and companion cleanup failed')
+        : error;
+    }
+    try {
+      await cleanupTuiSystemFixtures({
+        tuis: [],
+        mockServers: [server],
+        workspaces: [workspace],
+      });
+    } catch (error) {
+      failure = failure
+        ? new AggregateError([failure, error], 'Installed TUI smoke cleanup failed')
+        : error;
+    }
   }
+  if (failure) throw failure;
 }
 
 function installedSmokeError(

@@ -18,6 +18,10 @@ export interface HeadlessTerminalScreen {
   append(chunk: Uint8Array): Promise<void>;
   /** Resize the modeled terminal in the same order as pending PTY output. */
   resize(cols: number, rows: number): Promise<void>;
+  /** Scroll the modeled native terminal viewport; negative lines move upward. */
+  scrollLines(lines: number): Promise<void>;
+  /** Current native viewport and scrollback-bottom positions. */
+  viewportPosition(): { viewportY: number; baseY: number };
   /** Text currently visible in the terminal viewport. */
   viewport(): string;
   /**
@@ -243,6 +247,17 @@ export function createHeadlessTerminalScreen(
         terminal.resize(nextCols, nextRows);
         captureFrame(sequence);
       });
+    },
+    scrollLines(lines) {
+      const sequence = nextOperationSequence++;
+      return enqueue(() => {
+        terminal.scrollLines(lines);
+        captureFrame(sequence);
+      });
+    },
+    viewportPosition() {
+      const buffer = terminal.buffer.active;
+      return { viewportY: buffer.viewportY, baseY: buffer.baseY };
     },
     viewport() {
       return viewport();

@@ -77,7 +77,7 @@ function withStatuses(
 }
 
 describe('SAQ-16/17 — approval interaction semantics', () => {
-  test('focused rejection durably settles the Tool and aborts only an otherwise idle turn', () => {
+  test('approval rejection durably settles the Tool and aborts the turn', () => {
     const state = withStatuses(addTool(initialState(), 'shell-a'), [
       ['shell-a', 'awaiting_approval'],
     ]);
@@ -88,12 +88,26 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
         toolCallId: 'shell-a',
         generation: 0,
         reason: 'focused rejection',
+        owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       },
     ]);
 
     expect(events.map((event) => event.type)).toEqual(['tool.rejected', 'turn.aborted']);
     expect(events).toEqual([
-      { type: 'tool.rejected', toolCallId: 'shell-a', reason: 'focused rejection' },
+      {
+        type: 'tool.rejected',
+        toolCallId: 'shell-a',
+        reason: 'focused rejection',
+        failure: {
+          kind: 'approval_rejected',
+          message: 'focused rejection',
+          retryable: false,
+          modelFixable: false,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: true,
+        },
+      },
       {
         type: 'turn.aborted',
         turnId: state.turn.turnId,
@@ -103,7 +117,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     ]);
   });
 
-  test('focused rejection never cancels a queued sibling', () => {
+  test('approval rejection cancels queued siblings before aborting the turn', () => {
     const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'awaiting_approval'],
       ['shell-b', 'queued'],
@@ -115,14 +129,21 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
         toolCallId: 'shell-a',
         generation: 0,
         reason: 'focused rejection',
+        owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       },
     ]);
 
-    expect(events.map((event) => event.type)).toEqual(['tool.rejected']);
-    expect(events).not.toContainEqual(expect.objectContaining({ toolCallId: 'shell-b' }));
+    expect(events.map((event) => event.type)).toEqual([
+      'tool.rejected',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'shell-b' }),
+    );
   });
 
-  test('after a sibling settles, approval rejection closes the turn exactly once', () => {
+  test('repairs a legacy approval rejection missing its turn terminal exactly once', () => {
     const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'rejected'],
       ['shell-b', 'succeeded'],
@@ -151,7 +172,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     ).toBeNull();
   });
 
-  test('runStateRuntimeLoop defers rejection abort until siblings settle and never replays it', async () => {
+  test('runStateRuntimeLoop repairs a legacy rejection terminal and never replays it', async () => {
     let state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
       ['shell-a', 'rejected'],
       ['shell-b', 'succeeded'],
@@ -242,6 +263,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     let lastAppliedEvents: RuntimeEvent[] = [];
@@ -287,6 +309,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
           toolCallId: 'shell-a',
           generation: action.type === 'reject' ? action.generation : 0,
           reason: 'provider rejection',
+          owner: { kind: 'root_tool', toolCallId: 'shell-a' },
           outcome: {
             schemaVersion: 1,
             status: 'rejected',
@@ -357,6 +380,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     const originalRevision = state.revision;
@@ -481,6 +505,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       toolCallId: 'shell-a',
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'shell-a' },
       approval: approval(),
     });
     let lastAppliedEvents: RuntimeEvent[] = [];
@@ -669,7 +694,7 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     expect(events.some((event) => event.type === 'approval.batch_released')).toBe(false);
   });
 
-  test('Esc rejects only the focused approval; input and plan cancellation stay distinct', () => {
+  test('Esc rejection terminates the tool batch; input and plan cancellation stay distinct', () => {
     let state = addTool(initialState(), 'shell-a');
     state = addTool(state, 'shell-b');
     state = {
@@ -685,19 +710,23 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
       },
     };
 
-    const approvalEsc = eventsForRuntimeAction(state, {
+    const approvalDecision = eventsForRuntimeAction(state, {
       type: 'reject',
       interactionId: 'approval-a',
       generation: 0,
       reason: 'focused Esc',
     });
+    const approvalEsc = [
+      ...approvalDecision,
+      ...approvalRejectionSettlementEvents(state, approvalDecision),
+    ];
     expect(approvalEsc.filter((event) => event.type === 'approval.rejected')).toHaveLength(1);
-    expect(approvalEsc.some((event) => event.type === 'turn.aborted')).toBe(false);
+    expect(approvalEsc.some((event) => event.type === 'turn.aborted')).toBe(true);
     expect(
       approvalEsc.some(
         (event) => event.type === 'tool.cancelled' && event.toolCallId === 'shell-b',
       ),
-    ).toBe(false);
+    ).toBe(true);
 
     const inputState: RuntimeState = {
       ...state,
@@ -736,6 +765,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       approval: approval('printf awaiting'),
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'awaiting' },
     });
     state = reduceRuntimeState(state, {
       type: 'approval.requested',
@@ -744,6 +774,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       approval: approval('printf authorized'),
       fullModeBypassEligible: false,
       fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'authorized' },
     });
     const awaitingPending = state.pendingApprovals.get('approval-awaiting');
     const authorizedPending = state.pendingApprovals.get('approval-authorized');
@@ -760,10 +791,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       },
       pendingApprovals: new Map([
         ['approval-awaiting', awaitingPending],
-        [
-          'approval-authorized',
-          { ...authorizedPending, status: 'authorized_queued', state: 'authorized_queued' },
-        ],
+        ['approval-authorized', { ...authorizedPending, status: 'authorized_queued' }],
       ]),
     };
 
@@ -799,6 +827,7 @@ describe('SAQ-18 — whole-turn Ctrl+C cancellation', () => {
       grant: 'approve_once',
       receiptId: 'late-receipt',
       generation: 0,
+      owner: { kind: 'root_tool', toolCallId: 'awaiting' },
     });
     expect(late).toEqual(settled);
   });

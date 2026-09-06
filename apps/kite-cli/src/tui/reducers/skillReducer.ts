@@ -10,10 +10,16 @@ export function skillReducer(state: TuiState, action: Action): TuiState | null {
     case 'LIST_SKILLS': {
       const block: OutputBlock =
         state.skillManifests.length === 0
-          ? { id: state.nextBlockId, kind: 'text', content: 'No skills available.' }
+          ? {
+              id: state.nextBlockId,
+              kind: 'text',
+              content: 'No skills available.',
+              presentationState: 'sealed',
+            }
           : {
               id: state.nextBlockId,
               kind: 'text',
+              presentationState: 'sealed',
               content:
                 '## Available Skills\n\n' +
                 state.skillManifests

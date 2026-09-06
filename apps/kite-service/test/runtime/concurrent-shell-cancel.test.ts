@@ -79,6 +79,7 @@ describe('concurrent shell bounded cancellation', () => {
             toolCallId,
             fullModeBypassEligible: false,
             fullModePolicyBypassAllowed: false,
+            owner: { kind: 'root_tool', toolCallId },
             approval: {
               scope: 'once',
               cwd: '/',
@@ -217,6 +218,7 @@ describe('concurrent shell bounded cancellation', () => {
             toolCallId,
             fullModeBypassEligible: false,
             fullModePolicyBypassAllowed: false,
+            owner: { kind: 'root_tool', toolCallId },
             approval: {
               scope: 'once',
               cwd: '/',

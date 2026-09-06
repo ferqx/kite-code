@@ -1,8 +1,9 @@
 import { Box, Text } from 'ink';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo } from 'react';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
+import { activityDot } from './activity-dot';
 import { formatElapsed } from './render-utils';
 import SubAgentBlock, {
   MAX_RUNNING_STEPS,
@@ -11,7 +12,7 @@ import SubAgentBlock, {
   taskLabel,
   truncateToFit,
 } from './SubAgentBlock';
-import { useBlinkDot } from './use-blink-dot';
+import { useActivityClock } from './use-activity-clock';
 
 type SubagentBlock = Extract<OutputBlock, { kind: 'subagent' }>;
 
@@ -112,28 +113,19 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
     blocks.every(
       (block) => !isActive(block) || block.awaitingApproval || block.status === 'suspended',
     );
-  const spinnerFrame = useBlinkDot(active && !waitingOnly);
+  const activityFrame = activityDot(
+    active && !waitingOnly,
+    useActivityClock(active && !waitingOnly),
+  );
   const expanded = active && allowExpanded && blocks.some((block) => block.expanded === true);
   const earliestStartedAt = blocks.reduce<number | undefined>((earliest, block) => {
     if (block.startedAt == null) return earliest;
     return earliest == null ? block.startedAt : Math.min(earliest, block.startedAt);
   }, undefined);
-  const startedAtRef = useRef(earliestStartedAt);
-  startedAtRef.current = earliestStartedAt;
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    active && earliestStartedAt != null ? Date.now() - earliestStartedAt : 0,
-  );
+  const liveElapsed =
+    active && earliestStartedAt != null ? Math.max(0, Date.now() - earliestStartedAt) : 0;
 
-  useEffect(() => {
-    if (!active || waitingOnly) return;
-    const timer = setInterval(() => {
-      const at = startedAtRef.current;
-      if (at != null) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => clearInterval(timer);
-  }, [active, waitingOnly]);
-
-  const icon = active ? (waitingOnly ? '○ ' : spinnerFrame) : '● ';
+  const icon = active ? (waitingOnly ? '○ ' : activityFrame) : '● ';
   const title = active ? 'Delegating' : 'Delegated';
   const terminalDuration = (() => {
     const starts = blocks.map((block) => block.startedAt).filter((value) => value != null);

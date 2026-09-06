@@ -13,8 +13,8 @@ export interface TuiExitCoordinator {
 
 /**
  * Creates one idempotent exit boundary shared by commands, Ctrl+C and signals.
- * Observability is non-critical, but every exit path gives its bounded shutdown
- * a chance to settle before terminal teardown and process exit.
+ * Terminal teardown is immediate once exit is chosen. Observability and client
+ * cleanup continue afterward so slow I/O cannot leave the TUI visibly frozen.
  */
 export function createTuiExitCoordinator(input: {
   getSessionLifecycle: () => TuiExitSessionLifecycle | null;
@@ -45,6 +45,14 @@ export function createTuiExitCoordinator(input: {
           // Prewarm cancellation failure must not strand terminal teardown.
         }
         try {
+          // Restore the user's terminal before any asynchronous cleanup. Ink
+          // must not keep the last frame and cursor ownership visible while a
+          // child connection or observability sink is closing.
+          input.unmount();
+        } catch {
+          // Cleanup and process exit still proceed if terminal teardown faults.
+        }
+        try {
           if (lifecycle) await lifecycle.shutdownObservability(input.observabilityTimeoutMs ?? 250);
         } catch {
           // Telemetry cleanup cannot prevent terminal restoration.
@@ -54,11 +62,7 @@ export function createTuiExitCoordinator(input: {
         } catch {
           // A local persistence cleanup failure must not strand the terminal.
         }
-        try {
-          input.unmount();
-        } finally {
-          input.exit(code);
-        }
+        input.exit(code);
       })();
       return exitPromise;
     },

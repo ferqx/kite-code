@@ -23,10 +23,15 @@ describe('slash command suggestions', () => {
       'rewind',
       'export',
       'context',
+      'status',
       'clear',
       'help',
       'exit',
     ]);
+  });
+
+  test('removes the separate /web command', () => {
+    expect(findSlashCommandDefs('web')).toEqual([]);
   });
 
   test('presents permissions as a selector command without manual mode arguments', () => {

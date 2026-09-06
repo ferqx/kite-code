@@ -316,8 +316,9 @@ timing 的 typed evidence/receipt；App process adapter 只执行 broker 已准�
 
 按 ADR-0136，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
 classifier 不再产生免审授权。批准后，匹配 ADR-0134 grammar 的 status/log 仍可使用 hardened Shell
-environment，由 preparation 固定关闭外部 config、prompt、pager、external diff、optional locks 与 repository
-fsmonitor。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
+environment，由 preparation 在POSIX使用中性`HOME/XDG_CONFIG_HOME`，固定关闭system/global config、prompt、pager、
+optional locks与repository fsmonitor，并且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git当成待执行的
+空helper，不能用于关闭。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
 reviewer 与 sandbox scope 的结构化事实。
 `brokered-git-r1` 不按 raw Git token hard deny 或强制返回 `nextCapability=git_inspect`。Planning、关键系统
 destructive 与 capability admission 仍独立治理；typed `git_inspect` 不从 generic Shell authority 推导

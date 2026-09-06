@@ -6,7 +6,7 @@
 
 **可控、可恢复、可验证的开源代码 Agent。**
 
-Kite Code 在终端中理解代码、修改文件、运行命令并验证结果。它支持多种模型，提供交互式 TUI 和 Headless CLI。
+Kite Code 使用多种模型帮助你理解代码、修改文件、运行命令并检查结果。通过 TUI 或 CLI 执行任务，通过本机只读 Web 界面查看会话与诊断。
 
 <p align="center">
   <a href="terminal.png">
@@ -20,7 +20,7 @@ Kite Code 在终端中理解代码、修改文件、运行命令并验证结果�
 - **可恢复**：持久化会话状态，支持 Restore 和 Fork。
 - **有边界**：通过审批、授权和 sandbox 控制副作用。
 - **可扩展**：支持 Builtin Tool、MCP 和 Subagent；Skill Workflow 受 feature flag 控制，默认关闭。
-- **重验收**：使用 Receipt、Artifact 和 Verification 判断任务是否完成。
+- **重验收**：按任务要求检查执行证据及已启用的验证结果，判断工作是否完成。
 
 ## 快速开始
 
@@ -31,7 +31,9 @@ bun install
 bun run tui
 ```
 
-首次启动时，按照界面引导配置模型 Provider。
+源码开发命令会通过stdio启动同build、由TUI parent持有的App Server，不构建Web资产，也不发现共享进程。`/status`只显示transport、
+profile、build、App Server版本与已验证的配对状态；TUI退出后Session仍持久保留。
+首次启动时，按照界面引导配置模型Provider。
 
 Headless CLI：
 
@@ -44,11 +46,23 @@ bun run agent run \
 
 完整参数以 `bun run agent --help` 为准。
 
+## 本地 Service 与 Web
+
+不打开TUI时，可使用以下命令构建Web assets、显式启动App Server daemon并打印稳定的loopback根地址：
+
+```bash
+bun run server
+```
+
+daemon根地址就是Web入口；同一origin提供`/v1`与`/api-docs`。默认TUI/CLI各有配套stdio App Server并共享durable
+`kite-session.sqlite` facts；它们不打开Web端口。访问daemon的`/`会建立HttpOnly只读Browser session。显式daemon生命周期为
+`bun run agent server start|status|stop`；`bun run agent web`只发现已运行daemon。
+`bun run --cwd apps/kite-web dev`仍只是前端开发用的Vite asset server。
+
 ## 文档
 
-- [项目全景](docs/book/01-项目全景.md)
-- [CLI 与配置](docs/book/09-CLI模式与配置.md)
-- [Runtime 架构](docs/active/six-concept-runtime-architecture.md)
-- [工具与安全策略](docs/book/05-工具系统与安全策略.md)
-- [MCP 与 Skills](docs/book/11-MCP与Skills扩展.md)
-- [当前行为规则](docs/active/)
+- [产品手册](docs/handbook/README.md)：共享概念、各客户端指南、命令与问题处理。
+- [TUI 手册](docs/handbook/clients/tui/README.md) · [Web 手册](docs/handbook/clients/web/README.md)
+- [CLI](docs/handbook/cli/README.md) · [Server](docs/handbook/server/README.md) · [能力对照](docs/handbook/capabilities.md)
+- [开发文档](docs/development/README.md)：架构、模块入口和验证。
+- [有效计划](docs/plans/README.md)

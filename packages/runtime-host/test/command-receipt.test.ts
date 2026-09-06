@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { RuntimeCommand } from '@kite-ai/runtime-contract';
 import {
   createRuntimeCommandCommitEvidence,
@@ -6,6 +7,7 @@ import {
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from '../src/host/command-receipt';
+import { runtimeStartMessageId } from '../src/host/run-projection';
 import { createRuntimeStoredCommandReceipt } from '../src/storage';
 
 const DIGEST = 'a'.repeat(64);
@@ -146,6 +148,57 @@ describe('Host persistent command receipt helper', () => {
     expect(() =>
       resolveRuntimeCommandReceipt({ ...original, commandId: 'another-command' }, record),
     ).toThrow('does not match the command scope');
+  });
+
+  test('returns the original closed Run resource and rejects result tampering', () => {
+    const original = command();
+    const json = JSON.stringify({
+      schema: 'kite.runtime.run-resource-result.v1',
+      run: {
+        schema: 'kite.runtime-run.v1',
+        sessionId: 'session-1',
+        runId: 'run-1',
+        phase: 'building',
+        status: 'queued',
+        createdRevision: 3,
+        lastRevision: 3,
+        createdAtMs: 1_700_000_000_000,
+      },
+    });
+    const record = {
+      ...stored(original),
+      resourceResult: {
+        schema: 'kite.runtime.run-resource-result.v1',
+        json,
+        digest: createHash('sha256').update(json).digest('hex'),
+      },
+    };
+    expect(resolveRuntimeCommandReceipt(original, record)).toEqual({
+      status: 'idempotent_replay',
+      commandId: 'command-1',
+      sessionId: 'session-1',
+      originalRevision: 3,
+      resource: {
+        kind: 'run',
+        messageId: runtimeStartMessageId('command-1'),
+        run: {
+          schema: 'kite.runtime-run.v1',
+          sessionId: 'session-1',
+          runId: 'run-1',
+          phase: 'building',
+          status: 'queued',
+          createdRevision: 3,
+          lastRevision: 3,
+          createdAtMs: 1_700_000_000_000,
+        },
+      },
+    });
+    expect(() =>
+      resolveRuntimeCommandReceipt(original, {
+        ...record,
+        resourceResult: { ...record.resourceResult, digest: 'b'.repeat(64) },
+      }),
+    ).toThrow('digest does not match');
   });
 
   test('retains a lowercase SHA-256 digest without persisting the command body', () => {

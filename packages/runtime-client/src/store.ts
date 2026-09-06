@@ -27,6 +27,8 @@ export interface RuntimeClientSessionState {
 export interface RuntimeClientEphemeralStream {
   readonly sessionId: string;
   readonly workId: string;
+  readonly runId?: string;
+  readonly taskId?: string;
   readonly turnId: string;
   readonly actorId: string;
   readonly attemptId: string;
@@ -58,6 +60,13 @@ interface PendingIndexReset {
   readonly sessions: Map<string, RuntimeClientSessionState>;
 }
 
+interface ClosedRunFence {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
+}
+
 export type RuntimeSnapshotApplyResult = 'applied' | 'ignored' | 'resync_required';
 
 export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSnapshot> {
@@ -70,6 +79,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     streams: {},
   });
   #pendingIndex: PendingIndexReset | undefined;
+  readonly #closedRuns = new Map<string, ClosedRunFence>();
   #notificationScheduled = false;
   #closed = false;
 
@@ -91,6 +101,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     if (input.generation < this.#snapshot.connectionGeneration || this.#closed) return;
     const generationChanged = input.generation !== this.#snapshot.connectionGeneration;
     this.#pendingIndex = generationChanged ? undefined : this.#pendingIndex;
+    if (generationChanged) this.#closedRuns.clear();
     this.#replace({
       ...this.#snapshot,
       connectionGeneration: input.generation,
@@ -239,6 +250,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     const notification = input.notification;
     if (notification.durability === 'ephemeral') return this.#applyEphemeral(notification);
     const sessionId = notification.sessionId;
+    if (input.reset) this.#deleteClosedRuns(sessionId);
     const current = this.#snapshot.sessions[sessionId];
     if (current && input.subscriptionGeneration < current.subscriptionGeneration && !input.reset) {
       return 'ignored';
@@ -247,7 +259,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       ? 'newer'
       : compareProjection(current?.projection, notification.projection.session);
     if (compared === 'diverged') return this.#markResync(sessionId);
-    if (compared !== 'newer' && !input.ready) return 'ignored';
+    if (compared === 'older' || (compared === 'equal' && !input.ready)) return 'ignored';
     const hasGap =
       !input.reset &&
       current !== undefined &&
@@ -265,6 +277,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       },
       ...(input.reset ? { streams: removeSessionStreams(this.#snapshot.streams, sessionId) } : {}),
     });
+    this.#observeDurableTerminal(notification);
     return hasGap ? 'resync_required' : 'applied';
   }
 
@@ -294,17 +307,23 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     this.#closed = true;
     this.#pendingIndex = undefined;
     this.#listeners.clear();
+    this.#closedRuns.clear();
     this.#snapshot = freezeSnapshot({ ...this.#snapshot, status: 'closed', streams: {} });
   }
 
   #applyEphemeral(
     notification: Extract<RuntimeNotification, { durability: 'ephemeral' }>,
   ): RuntimeSnapshotApplyResult {
+    if (this.#isClosedRun(notification)) return 'ignored';
     const key = streamKey(notification);
     const current = this.#snapshot.streams[key];
+    if (!current && notification.sequence !== 1) {
+      return this.#markResync(notification.sessionId);
+    }
     if (
       current &&
       current.attemptId === notification.attemptId &&
+      current.compositionRevision === notification.compositionRevision &&
       current.streamId === notification.streamId &&
       notification.sequence <= current.sequence
     ) {
@@ -312,7 +331,17 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     }
     if (
       current &&
+      current.attemptId === notification.attemptId &&
+      current.compositionRevision === notification.compositionRevision &&
+      current.streamId === notification.streamId &&
+      notification.sequence !== current.sequence + 1
+    ) {
+      return this.#markResync(notification.sessionId);
+    }
+    if (
+      current &&
       (current.attemptId !== notification.attemptId ||
+        current.compositionRevision !== notification.compositionRevision ||
         current.streamId !== notification.streamId) &&
       notification.sequence !== 1
     ) {
@@ -325,6 +354,8 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
         [key]: {
           sessionId: notification.sessionId,
           workId: notification.workId,
+          ...(notification.runId === undefined ? {} : { runId: notification.runId }),
+          ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
           turnId: notification.turnId,
           actorId: notification.actorId,
           attemptId: notification.attemptId,
@@ -336,6 +367,64 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       },
     });
     return 'applied';
+  }
+
+  #observeDurableTerminal(
+    notification: Extract<RuntimeNotification, { readonly durability: 'durable' }>,
+  ): void {
+    const projection = notification.projection.session;
+    const currentRun = projection.currentRun;
+    const event = notification.projection.event;
+    const eventRunId = event?.type === 'run.terminal' ? event.runId : undefined;
+    if (currentRun && isTerminalRunStatus(currentRun.status)) {
+      this.#closedRuns.set(closedRunKey(notification.sessionId, currentRun.runId), {
+        sessionId: notification.sessionId,
+        runId: currentRun.runId,
+        ...(currentRun.taskId === undefined ? {} : { taskId: currentRun.taskId }),
+        ...(currentRun.activeTurnId === undefined ? {} : { turnId: currentRun.activeTurnId }),
+      });
+    } else if (eventRunId) {
+      this.#closedRuns.set(closedRunKey(notification.sessionId, eventRunId), {
+        sessionId: notification.sessionId,
+        runId: eventRunId,
+        ...(currentRun?.taskId === undefined ? {} : { taskId: currentRun.taskId }),
+        ...(currentRun?.activeTurnId === undefined ? {} : { turnId: currentRun.activeTurnId }),
+      });
+    }
+  }
+
+  #isClosedRun(
+    notification: Extract<RuntimeNotification, { readonly durability: 'ephemeral' }>,
+  ): boolean {
+    const currentRun = this.#snapshot.sessions[notification.sessionId]?.projection.currentRun;
+    if (currentRun && isTerminalRunStatus(currentRun.status)) {
+      if (notification.runId !== undefined && notification.runId !== currentRun.runId) {
+        return false;
+      }
+      if (
+        notification.taskId !== undefined &&
+        currentRun.taskId !== undefined &&
+        notification.taskId !== currentRun.taskId
+      ) {
+        return false;
+      }
+      return notification.turnId === currentRun.activeTurnId;
+    }
+    for (const fence of this.#closedRuns.values()) {
+      if (fence.sessionId !== notification.sessionId) continue;
+      if (notification.runId !== undefined) return notification.runId === fence.runId;
+      const taskMatches =
+        (notification.taskId ?? notification.workId) === fence.taskId || fence.taskId === undefined;
+      const turnMatches = fence.turnId === undefined || notification.turnId === fence.turnId;
+      if (taskMatches && turnMatches) return true;
+    }
+    return false;
+  }
+
+  #deleteClosedRuns(sessionId: string): void {
+    for (const [key, fence] of this.#closedRuns) {
+      if (fence.sessionId === sessionId) this.#closedRuns.delete(key);
+    }
   }
 
   #markResync(sessionId: string): RuntimeSnapshotApplyResult {
@@ -376,10 +465,10 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
 function compareProjection(
   current: RuntimeSessionProjection | undefined,
   next: RuntimeSessionProjection,
-): 'newer' | 'older_or_equal' | 'diverged' {
+): 'newer' | 'older' | 'equal' | 'diverged' {
   if (!current || next.revision > current.revision) return 'newer';
-  if (next.revision < current.revision) return 'older_or_equal';
-  return canonical(next) === canonical(current) ? 'older_or_equal' : 'diverged';
+  if (next.revision < current.revision) return 'older';
+  return canonical(next) === canonical(current) ? 'equal' : 'diverged';
 }
 
 function canonical(value: unknown): string {
@@ -401,6 +490,14 @@ function streamKey(
     notification.turnId,
     notification.actorId,
   ].join('\u0000');
+}
+
+function closedRunKey(sessionId: string, runId: string): string {
+  return `${sessionId}\u0000${runId}`;
+}
+
+function isTerminalRunStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 function removeSessionStreams(

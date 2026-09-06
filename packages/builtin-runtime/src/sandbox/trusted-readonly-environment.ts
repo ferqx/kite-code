@@ -156,6 +156,12 @@ export function buildPolicyProvenReadOnlyEnv(
     const value = source[key];
     if (value !== undefined) env[key] = value;
   }
+  if (platform !== 'win32') {
+    // Policy-proven reads must not consult user-controlled Git defaults or shell state outside
+    // the Workspace. Git probes $XDG_CONFIG_HOME/git/ignore even when global config is disabled.
+    env.HOME = '/nonexistent';
+    env.XDG_CONFIG_HOME = '/nonexistent';
+  }
   env.PATH = buildWorkspaceExcludedPath(workspace, {
     ...options,
     pathValue: options.pathValue ?? source.PATH,
@@ -174,7 +180,6 @@ export function policyProvenReadOnlyGitEnvironment(
     GIT_TERMINAL_PROMPT: '0',
     GIT_OPTIONAL_LOCKS: '0',
     GIT_PAGER: 'cat',
-    GIT_EXTERNAL_DIFF: '',
     // Command-scope config is applied after repository config and disables
     // the helper that `git status` can otherwise invoke from a checkout.
     GIT_CONFIG_COUNT: '1',

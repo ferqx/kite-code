@@ -8,6 +8,8 @@ import {
 import type {
   CheckpointPort,
   RuntimeCommandCommitEvidence,
+  RuntimeRunStorePort,
+  RuntimeStoredRun,
   RuntimeTransactionInput,
   SessionStore,
 } from '@kite-ai/runtime-host/storage';
@@ -35,21 +37,24 @@ interface Fixture {
   }[];
   readonly acknowledgements: string[];
   readonly leaseCalls: string[];
+  readonly runs: Map<string, RuntimeStoredRun>;
   failCommit: boolean;
   leaseAvailable: boolean;
 }
 
-function fixture(state: AgentState = initialState()): Fixture {
+function fixture(state: AgentState = initialState(), withRunAuthority = false): Fixture {
   const writes: RuntimeTransactionInput<KernelEvent, AgentState>[] = [];
   const acknowledgements: string[] = [];
   const requiredLeases: Fixture['requiredLeases'] = [];
   const leaseCalls: string[] = [];
+  const runs = new Map<string, RuntimeStoredRun>();
   const fixtureState: Fixture = {
     input: undefined as never,
     writes,
     requiredLeases,
     acknowledgements,
     leaseCalls,
+    runs,
     failCommit: false,
     leaseAvailable: true,
   };
@@ -60,12 +65,14 @@ function fixture(state: AgentState = initialState()): Fixture {
       commit: (acknowledgement, input, requiredLease) => {
         if (fixtureState.failCommit) throw new Error('commit refused');
         if (requiredLease && !fixtureState.leaseAvailable) throw new Error('lease lost');
+        applyRunMutation(runs, input);
         acknowledgements.push(acknowledgement);
         writes.push(input);
         if (requiredLease) requiredLeases.push(requiredLease);
       },
       commitCommandDecision: (input) => {
         if (fixtureState.failCommit) throw new Error('commit refused');
+        applyRunMutation(runs, input);
         acknowledgements.push('command_decision');
         writes.push(input);
       },
@@ -87,6 +94,7 @@ function fixture(state: AgentState = initialState()): Fixture {
       getOrCreate: (_sessionId, allocate) => allocate(),
       remove: () => undefined,
     },
+    ...(withRunAuthority ? { runs: runStore(runs) } : {}),
   };
   fixtureState.input = {
     state,
@@ -96,6 +104,74 @@ function fixture(state: AgentState = initialState()): Fixture {
     sandboxAvailable: true,
   };
   return fixtureState;
+}
+
+function runStore(records: Map<string, RuntimeStoredRun>): RuntimeRunStorePort {
+  return {
+    get: (sessionId, runId) => records.get(`${sessionId}\0${runId}`) ?? null,
+    getActive: (sessionId) =>
+      [...records.values()].find(
+        (run) =>
+          run.sessionId === sessionId &&
+          (run.status === 'queued' || run.status === 'running' || run.status === 'waiting'),
+      ) ?? null,
+    list: (request) => {
+      const candidates = [...records.values()]
+        .filter(
+          (run) =>
+            run.sessionId === request.sessionId &&
+            (request.status === undefined || run.status === request.status) &&
+            (request.phase === undefined || run.phase === request.phase),
+        )
+        .sort(
+          (left, right) =>
+            left.createdRevision - right.createdRevision || left.runId.localeCompare(right.runId),
+        )
+        .filter(
+          (run) =>
+            request.cursor === undefined ||
+            run.createdRevision > request.cursor.createdRevision ||
+            (run.createdRevision === request.cursor.createdRevision &&
+              run.runId.localeCompare(request.cursor.runId) > 0),
+        );
+      const entries = candidates.slice(0, request.limit);
+      const last = entries.at(-1);
+      return {
+        entries,
+        hasMore: candidates.length > entries.length,
+        ...(candidates.length > entries.length && last
+          ? { nextCursor: { createdRevision: last.createdRevision, runId: last.runId } }
+          : {}),
+      };
+    },
+    insert: (run) => {
+      const key = `${run.sessionId}\0${run.runId}`;
+      if (records.has(key)) throw new Error('duplicate Run');
+      records.set(key, run);
+    },
+    transition: (input) => {
+      const key = `${input.sessionId}\0${input.runId}`;
+      const current = records.get(key);
+      if (!current) return 'missing';
+      if (current.lastRevision !== input.expectedLastRevision) return 'conflict';
+      records.set(key, input.next);
+      return 'applied';
+    },
+    rewindSession: () => ({ status: 'applied', deletedCount: 0 }),
+    forkSession: () => ({ status: 'applied', copiedCount: 0 }),
+  };
+}
+
+function applyRunMutation(
+  records: Map<string, RuntimeStoredRun>,
+  input: RuntimeTransactionInput<KernelEvent, AgentState>,
+): void {
+  if (!input.runMutation) return;
+  const store = runStore(records);
+  if (input.runMutation.type === 'insert') store.insert(input.runMutation.run);
+  else if (store.transition(input.runMutation.transition) !== 'applied') {
+    throw new Error('Run transition failed');
+  }
 }
 
 function sessionStore(): SessionStore<KernelEvent, AgentState> {
@@ -132,6 +208,42 @@ function checkpointPort(): CheckpointPort<AgentState> {
 
 function message(messageId: string, content = 'hello'): KernelEvent {
   return { type: 'user.message_appended', messageId, content };
+}
+
+function preparedModelEvent(invocationId = 'model-1'): KernelEvent {
+  const surfaceArtifact = {
+    kind: 'model_surface' as const,
+    artifactId: `pa_${'b'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+    byteLength: 1,
+  };
+  return {
+    type: 'model.invocation_prepared',
+    invocationId,
+    purpose: 'primary_agent',
+    surfaceArtifact,
+    surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+    routeFingerprint: `sha256:${'d'.repeat(64)}`,
+    budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+    limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
+    preparedStateRevision: 0,
+    parentInvocationId: null,
+    parentToolCallId: null,
+  };
+}
+
+function completedModelEvent(invocationId = 'model-1'): KernelEvent {
+  return {
+    type: 'model.invocation_completed',
+    invocationId,
+    responseArtifact: {
+      kind: 'model_response',
+      artifactId: `pa_${'e'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'f'.repeat(64)}`,
+      byteLength: 2,
+    },
+    finishReason: 'stop',
+  };
 }
 
 function commandEvidence(): RuntimeCommandCommitEvidence {
@@ -181,6 +293,201 @@ describe('Runtime Host State session', () => {
     expect(f.acknowledgements).toEqual(['command_decision']);
     expect(f.writes[0]?.commandReceipt).toEqual(committed.receipt);
     expect(session.getState().revision).toBe(1);
+  });
+
+  test('commits queued Run/resource, activation, interaction and cancellation from one clock', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    const evidence = {
+      ...commandEvidence(),
+      runStart: { runId: 'run-1', phase: 'building' as const },
+    };
+    const committed = session.commitCommandBatch(
+      [{ type: 'turn.started', turnId: 'run-1' }],
+      evidence,
+    );
+    expect(f.writes[0]?.runMutation).toMatchObject({
+      type: 'insert',
+      run: {
+        runId: 'run-1',
+        status: 'queued',
+        createdRevision: 1,
+        createdAtMs: Date.parse(NOW),
+      },
+    });
+    expect(committed.receipt.resourceResult).toMatchObject({
+      schema: 'kite.runtime.run-resource-result.v1',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
+
+    session.activateRun('run-1');
+    expect(f.acknowledgements).toEqual(['command_decision', 'attempt_start']);
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({
+      status: 'running',
+      startedAtMs: Date.parse(NOW),
+    });
+
+    session.processEventBatch([
+      { type: 'tool.queued', toolCallId: 'ask-1', name: 'ask_user', args: {} },
+      {
+        type: 'user_input.requested',
+        interactionId: 'input-1',
+        toolCallId: 'ask-1',
+        request: { question: 'Continue?', options: [], allow_free_text: true },
+      },
+    ]);
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'waiting' });
+    session.processEvent({
+      type: 'user_input.answered',
+      interactionId: 'input-1',
+      toolCallId: 'ask-1',
+      answer: 'yes',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'running' });
+
+    session.processEvent({
+      type: 'turn.aborted',
+      turnId: 'run-1',
+      reason: 'Cancelled by user.',
+      cause: 'user',
+    });
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({
+      status: 'cancelled',
+      finishedAtMs: Date.parse(NOW),
+      terminal: { reasonCode: 'cancelled', recoveryEntry: 'new_run' },
+    });
+  });
+
+  test('keeps a queued Run unchanged when its activation transaction fails', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-1' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-1', phase: 'building' },
+    });
+    f.failCommit = true;
+
+    expect(() => session.activateRun('run-1')).toThrow('commit refused');
+    expect(f.runs.get('state-session-test\0run-1')).toMatchObject({ status: 'queued' });
+  });
+
+  test('keeps the accepted Run identity across a continuation Turn and terminal closure', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-initial' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-initial', phase: 'building' },
+    });
+    session.activateRun('run-initial');
+
+    session.processEvent({ type: 'turn.started', turnId: 'turn-continuation' });
+    expect(session.getState().turn).toMatchObject({
+      turnId: 'turn-continuation',
+      status: 'active',
+    });
+    expect(f.writes.at(-1)?.runMutation).toMatchObject({
+      type: 'transition',
+      transition: {
+        runId: 'run-initial',
+        next: { runId: 'run-initial', status: 'running', lastRevision: 2 },
+      },
+    });
+
+    session.processEvent({ type: 'turn.completed', turnId: 'turn-continuation' });
+    expect(f.runs.get('state-session-test\0run-initial')).toMatchObject({
+      runId: 'run-initial',
+      status: 'completed',
+      lastRevision: 3,
+    });
+    expect(f.runs.has('state-session-test\0turn-continuation')).toBe(false);
+    expect(session.getLifecycleProjection()).toEqual({
+      currentRun: {
+        runId: 'run-initial',
+        initialTurnId: 'run-initial',
+        activeTurnId: 'turn-continuation',
+        status: 'completed',
+        revision: 3,
+        outcome: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+      },
+    });
+  });
+
+  test('hydrates the most recently settled Run when no Run remains active', () => {
+    const state = { ...initialState(), revision: 6 } as AgentState;
+    const f = fixture(state, true);
+    f.runs.set('state-session-test\0run-old', {
+      sessionId: 'state-session-test',
+      runId: 'run-old',
+      startCommandId: 'start-old',
+      phase: 'building',
+      status: 'completed',
+      createdRevision: 1,
+      lastRevision: 3,
+      createdAtMs: 100,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+    });
+    f.runs.set('state-session-test\0run-new', {
+      sessionId: 'state-session-test',
+      runId: 'run-new',
+      startCommandId: 'start-new',
+      phase: 'building',
+      status: 'cancelled',
+      createdRevision: 4,
+      lastRevision: 6,
+      createdAtMs: 200,
+      startedAtMs: 210,
+      finishedAtMs: 220,
+      terminal: { reasonCode: 'cancelled', safeRetry: true, recoveryEntry: 'new_run' },
+    });
+    const session = createRuntimeHostStateSession(f.input);
+
+    expect(session.getLifecycleProjection()).toEqual({
+      currentRun: {
+        runId: 'run-new',
+        initialTurnId: 'run-new',
+        activeTurnId: 'turn-1',
+        status: 'cancelled',
+        revision: 6,
+        outcome: { reasonCode: 'cancelled', safeRetry: true, recoveryEntry: 'new_run' },
+      },
+    });
+  });
+
+  test('refines a recovered unknown Run only to a precise terminal without moving its finish clock', () => {
+    const f = fixture(initialState(), true);
+    f.runs.set('state-session-test\0turn-1', {
+      sessionId: 'state-session-test',
+      runId: 'turn-1',
+      startCommandId: 'start-turn-1',
+      phase: 'building',
+      status: 'unknown',
+      createdRevision: 0,
+      lastRevision: 0,
+      createdAtMs: 100,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: {
+        reasonCode: 'outcome_unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      },
+    });
+    const session = createRuntimeHostStateSession(f.input);
+
+    session.processEventBatch([{ type: 'turn.completed', turnId: 'turn-1' }], {
+      acknowledgement: 'terminal_recovery',
+      source: 'host_fact',
+    });
+
+    expect(f.acknowledgements).toEqual(['terminal_recovery']);
+    expect(f.runs.get('state-session-test\0turn-1')).toMatchObject({
+      status: 'completed',
+      lastRevision: 1,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'completed', recoveryEntry: 'none' },
+    });
   });
 
   test('atomically receipts a snapshot-only lifecycle decision without advancing State', () => {
@@ -384,6 +691,84 @@ describe('Runtime Host State session', () => {
     expect(f.acknowledgements).toEqual(['attempt_start']);
     expect(f.writes).toHaveLength(1);
     expect(session.getState().revision).toBe(1);
+  });
+
+  test('preserves dispatched Model completion across an unrelated interaction-mode revision', () => {
+    const f = fixture();
+    const session = createRuntimeHostStateSession(f.input);
+    const lease = session.beginEffect({ type: 'call_model' });
+    expect(session.applyEffectResult(lease, [preparedModelEvent()])).toBe(true);
+    expect(
+      session.applyEffectEvents(
+        lease,
+        [
+          {
+            type: 'model.invocation_attempt_started',
+            invocationId: 'model-1',
+            attempt: 1,
+            maxAttempts: 1,
+          },
+        ],
+        'attempt_start',
+      ),
+    ).toBe(true);
+
+    session.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(session.isEffectLeaseCurrent(lease)).toBe(false);
+    expect(session.applyEffectResult(lease, [completedModelEvent()])).toBe(true);
+    expect(session.getState().modelInvocations['model-1']?.status).toBe('completed');
+  });
+
+  test('rejects stale Model attempt-start and completion after its Turn is aborted', () => {
+    const staleAttemptFixture = fixture();
+    const staleAttemptSession = createRuntimeHostStateSession(staleAttemptFixture.input);
+    const staleAttemptLease = staleAttemptSession.beginEffect({ type: 'call_model' });
+    staleAttemptSession.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(
+      staleAttemptSession.applyEffectEvents(
+        staleAttemptLease,
+        [preparedModelEvent()],
+        'attempt_start',
+      ),
+    ).toBe(false);
+
+    const abortedFixture = fixture();
+    const abortedSession = createRuntimeHostStateSession(abortedFixture.input);
+    const abortedLease = abortedSession.beginEffect({ type: 'call_model' });
+    expect(abortedSession.applyEffectResult(abortedLease, [preparedModelEvent()])).toBe(true);
+    expect(
+      abortedSession.applyEffectEvents(
+        abortedLease,
+        [
+          {
+            type: 'model.invocation_attempt_started',
+            invocationId: 'model-1',
+            attempt: 1,
+            maxAttempts: 1,
+          },
+        ],
+        'attempt_start',
+      ),
+    ).toBe(true);
+    abortedSession.processEvent({
+      type: 'turn.aborted',
+      turnId: 'turn-1',
+      reason: 'cancelled',
+      cause: 'user',
+    });
+    expect(
+      abortedSession.applyEffectEvents(abortedLease, [completedModelEvent()], 'receipt_evidence'),
+    ).toBe(false);
   });
 
   test('does not run run_tools terminal validation for attempt-start facts', () => {

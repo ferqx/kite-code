@@ -404,14 +404,22 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
       },
       {
         type: 'subagent.step',
-        subagent: { id: 'sub-1', toolName: 'read_file', toolArgs: { path: 'src/core/runtime' } },
+        subagent: {
+          id: 'sub-1',
+          stepId: 'step-1',
+          toolCallId: 'child-tool-1',
+          toolName: 'read_file',
+          toolArgs: { path: 'src/core/runtime' },
+        },
       },
       {
         type: 'subagent.tool_result',
         subagent: {
           id: 'sub-1',
+          stepId: 'step-1',
+          toolCallId: 'child-tool-1',
           toolName: 'read_file',
-          ok: true,
+          status: 'completed',
           summary: 'found 4 files',
           totalLines: 80,
           toolTokenCount: 12,
@@ -798,6 +806,7 @@ describe('edge cases', () => {
         toolCallId: 'c6',
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: 'c6' },
         approval: { toolName: 'shell' } as unknown as ToolApprovalPayload,
       },
       {
@@ -807,6 +816,7 @@ describe('edge cases', () => {
         grant: 'approve_once',
         receiptId: 'receipt-i3',
         generation: 0,
+        owner: { kind: 'root_tool', toolCallId: 'c6' },
       },
       {
         type: 'approval.rejected',
@@ -814,6 +824,7 @@ describe('edge cases', () => {
         toolCallId: 'c1',
         generation: 0,
         reason: 'unsafe',
+        owner: { kind: 'root_tool', toolCallId: 'c1' },
       },
     ];
 
@@ -1348,6 +1359,7 @@ describe('persistence edge cases', () => {
         toolCallId: 'shell-1',
         fullModeBypassEligible: false,
         fullModePolicyBypassAllowed: false,
+        owner: { kind: 'root_tool', toolCallId: 'shell-1' },
         approval,
       },
     ]);
