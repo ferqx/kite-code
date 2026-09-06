@@ -6,7 +6,6 @@ import { useStaticContent } from '../src/tui/OutputArea';
 import {
   advanceOutputBlockTimeline,
   canonicalRenderSerialization,
-  projectApprovalViewport,
   projectOutputBlockTimeline,
   visualDigest,
 } from '../src/tui/presentation/timeline';
@@ -118,7 +117,7 @@ describe('useStaticContent session remount promotion', () => {
     expect(liveItem.visualDigest).toBe(replayItem.visualDigest);
   });
 
-  test('approval viewport frontier is projected from Timeline items', () => {
+  test('approval items do not truncate the live Timeline', () => {
     const timeline = projectOutputBlockTimeline([
       { id: 1, kind: 'text', content: 'before', presentationState: 'sealed' },
       {
@@ -153,9 +152,15 @@ describe('useStaticContent session remount promotion', () => {
       },
       { id: 4, kind: 'text', content: 'after', presentationState: 'live' },
     ]);
-    const viewport = projectApprovalViewport(timeline.items, true);
-    expect(viewport.visibleItems.map((item) => item.sourceIdentity.blockId)).toEqual([1, 2]);
-    expect(viewport.hiddenItems.map((item) => item.sourceIdentity.blockId)).toEqual([3, 4]);
+    const view = render(
+      <Harness
+        turns={[{ blocks: timeline.items.map((item) => item.renderModel.block) }]}
+        running
+        sessionKey={1}
+      />,
+    );
+    expect(view.lastFrame()).toContain('dynamicIds=2,3,4');
+    view.unmount();
   });
 
   test('clear creates a new render epoch before a reused local block id can commit', () => {

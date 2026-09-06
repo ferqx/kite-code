@@ -1,4 +1,6 @@
 import { Box, Text } from 'ink';
+import { useRef } from 'react';
+import { useActivityClock } from './components/use-activity-clock';
 import type { RunStatusSnapshot } from './run-status';
 import { useTheme } from './theme';
 
@@ -16,7 +18,22 @@ interface StatusBarProps {
 export default function StatusBar({ runStatus, running }: StatusBarProps) {
   const t = useTheme();
 
+  const now = useActivityClock(running);
+  const baseline = useRef({
+    elapsed: runStatus?.elapsedMs,
+    startedAt: Date.now() - (runStatus?.elapsedMs ?? 0),
+    running,
+  });
+  if (baseline.current.elapsed !== runStatus?.elapsedMs || baseline.current.running !== running) {
+    baseline.current = {
+      elapsed: runStatus?.elapsedMs,
+      startedAt: Date.now() - (runStatus?.elapsedMs ?? 0),
+      running,
+    };
+  }
   if (!running) return null;
+  const elapsed = Math.max(0, Math.floor((now - baseline.current.startedAt) / 1000));
+  const frame = ['·', '⋄', '⋆', '✧'][Math.floor(now / 250) % 4];
 
   const cancelling = runStatus?.verb === 'Cancelling';
   const retrying = !cancelling && Boolean(runStatus?.retry);
@@ -25,8 +42,10 @@ export default function StatusBar({ runStatus, running }: StatusBarProps) {
 
   return (
     <Box>
-      <Text color={color}>⋄ </Text>
-      <Text color={color}>{verb}</Text>
+      <Text color={color}>{frame} </Text>
+      <Text color={color}>
+        {verb} · {formatDuration(elapsed)}
+      </Text>
     </Box>
   );
 }

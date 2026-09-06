@@ -5,6 +5,7 @@ import { useTheme } from '../theme';
 import type { OutputBlock, SubAgentStepRecord } from '../types';
 import { activityDot } from './activity-dot';
 import { actionName, formatElapsed, formatReadFileRange, toolColor } from './render-utils';
+import { useActivityClock } from './use-activity-clock';
 
 export function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -142,13 +143,10 @@ export default function SubAgentBlock({
   const taskSummary = taskLabel(block.task);
   const col = columns ?? process.stdout.columns ?? 80;
 
-  // ── 静态活动圆点：统一 adapter ──
+  // Shared fixed-width activity animation.
   const activityActive = block.status === 'running' && !block.awaitingApproval;
-  const activityFrame = activityDot(activityActive);
+  const activityFrame = activityDot(activityActive, useActivityClock(activityActive));
 
-  // Elapsed time advances only when a Runtime event causes a real repaint.
-  // A presentation-only timer would continuously write stdout and make native
-  // terminal selection/scrollback unusable while a child is otherwise idle.
   const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
   // ── Status flags ──

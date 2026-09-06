@@ -5,11 +5,7 @@ import BlockRenderer from './components/BlockRenderer';
 import CompactionProgress from './components/CompactionProgress';
 import ConcurrentSubAgentBlock from './components/ConcurrentSubAgentBlock';
 import { MAX_RUNNING_STEPS } from './components/SubAgentBlock';
-import {
-  projectApprovalViewport,
-  projectOutputBlockTimelineItem,
-  type TimelineItem,
-} from './presentation/timeline';
+import { projectOutputBlockTimelineItem, type TimelineItem } from './presentation/timeline';
 import { blockRenderCacheKey } from './render/useStaticContent';
 import type { OutputBlock } from './types';
 
@@ -40,7 +36,7 @@ interface OutputAreaProps {
   /** Current prompt owns Enter whenever it contains a submission candidate. */
   canToggleLastBlock?: () => boolean;
   overlayActive?: boolean;
-  /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
+  /** Approval owns Enter; it must not change the display state of running siblings. */
   awaitingApproval?: boolean;
   /** 主 agent 等待 ask_user 输入时标记 ask 工具 / Mark ask_user while waiting for input */
   awaitingInput?: boolean;
@@ -203,16 +199,8 @@ function OutputArea({
     () => activeDynamicTimeline ?? activeDynamicBlocks.map(projectOutputBlockTimelineItem),
     [activeDynamicBlocks, activeDynamicTimeline],
   );
-  // The projector is the only owner of approval visibility. Applying it here
-  // is idempotent for the already-projected production input and keeps the
-  // compatibility block-array path on the same canonical code path.
-  const visibleDynamicTimeline = useMemo(
-    () =>
-      activeDynamicTimeline
-        ? dynamicTimeline
-        : projectApprovalViewport(dynamicTimeline, awaitingApproval).visibleItems,
-    [activeDynamicTimeline, awaitingApproval, dynamicTimeline],
-  );
+  // Approval owns input, not the visibility or running state of siblings.
+  const visibleDynamicTimeline = dynamicTimeline;
   const visibleDynamicBlocks = useMemo(
     () => visibleDynamicTimeline.map(timelineBlock),
     [visibleDynamicTimeline],
@@ -250,7 +238,7 @@ function OutputArea({
         }
       }
     },
-    { isActive: !overlayActive },
+    { isActive: !overlayActive && !awaitingApproval },
   );
 
   // 与 Footer 的 ApprovalBlock / PlanReviewBlock / InputBlock 的 border 内部 paddingX={1} 对齐，
@@ -260,7 +248,7 @@ function OutputArea({
   const hasMessages = mergedStaticBlocks.length + visibleDynamicBlocks.length > 0;
 
   return (
-    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
+    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0} flexShrink={1} minHeight={0}>
       <Box height={0} overflow="hidden">
         {staticPresentationItems && staticKey && (
           <Static key={staticKey} items={staticPresentationItems}>
@@ -295,7 +283,6 @@ function OutputArea({
                   isFocused={false}
                   index={index - 1}
                   prevBlock={prevBlock}
-                  awaitingApproval={false}
                   awaitingInput={false}
                   columns={innerColumns}
                 />
@@ -304,62 +291,69 @@ function OutputArea({
           </Static>
         )}
       </Box>
-      <Box flexDirection="column">
-        {dynamicRenderItems.map((item, i) => {
-          const prevBlock =
-            i > 0
-              ? lastOutputBlock(dynamicRenderItems[i - 1])
-              : lastOutputBlock(staticRenderItems.at(-1));
-          if (item.kind === 'concurrent_subagents') {
-            const topMarginRows = prevBlock ? 1 : 0;
+      <Box
+        flexDirection="column"
+        flexShrink={1}
+        minHeight={0}
+        overflowY="hidden"
+        justifyContent="flex-end"
+      >
+        <Box flexDirection="column" flexShrink={0}>
+          {dynamicRenderItems.map((item, i) => {
+            const prevBlock =
+              i > 0
+                ? lastOutputBlock(dynamicRenderItems[i - 1])
+                : lastOutputBlock(staticRenderItems.at(-1));
+            if (item.kind === 'concurrent_subagents') {
+              const topMarginRows = prevBlock ? 1 : 0;
+              return (
+                <Box
+                  key={`${renderEpoch}:subagent-group-${item.id}`}
+                  flexDirection="column"
+                  marginTop={prevBlock ? 1 : 0}
+                >
+                  <ConcurrentSubAgentBlock
+                    blocks={item.blocks}
+                    columns={Math.max(1, columns)}
+                    maxVisibleSteps={maxVisibleSubagentSteps}
+                    maxVisibleChildren={Math.max(
+                      0,
+                      Math.floor(
+                        (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
+                      ),
+                    )}
+                    allowExpanded={
+                      dynamicRenderItems.length === 1 &&
+                      1 +
+                        item.blocks.reduce(
+                          (height, block) => height + 2 + (block.steps.length > 0 ? 1 : 0),
+                          0,
+                        ) +
+                        DYNAMIC_CHROME_ROWS +
+                        topMarginRows <
+                        Math.floor(rows ?? 24)
+                    }
+                  />
+                </Box>
+              );
+            }
             return (
-              <Box
-                key={`${renderEpoch}:subagent-group-${item.id}`}
-                flexDirection="column"
-                marginTop={prevBlock ? 1 : 0}
-              >
-                <ConcurrentSubAgentBlock
-                  blocks={item.blocks}
-                  columns={Math.max(1, columns)}
-                  maxVisibleSteps={maxVisibleSubagentSteps}
-                  maxVisibleChildren={Math.max(
-                    0,
-                    Math.floor(
-                      (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
-                    ),
-                  )}
-                  allowExpanded={
-                    dynamicRenderItems.length === 1 &&
-                    1 +
-                      item.blocks.reduce(
-                        (height, block) => height + 2 + (block.steps.length > 0 ? 1 : 0),
-                        0,
-                      ) +
-                      DYNAMIC_CHROME_ROWS +
-                      topMarginRows <
-                      Math.floor(rows ?? 24)
-                  }
-                />
-              </Box>
+              <BlockRenderer
+                key={`${renderEpoch}:${item.id}`}
+                item={item}
+                isFocused={false}
+                index={i}
+                prevBlock={prevBlock}
+                awaitingInput={awaitingInput}
+                columns={innerColumns}
+                maxVisibleSubagentSteps={
+                  timelineBlock(item).kind === 'subagent' ? maxVisibleSubagentSteps : undefined
+                }
+              />
             );
-          }
-          return (
-            <BlockRenderer
-              key={`${renderEpoch}:${item.id}`}
-              item={item}
-              isFocused={false}
-              index={i}
-              prevBlock={prevBlock}
-              awaitingApproval={awaitingApproval}
-              awaitingInput={awaitingInput}
-              columns={innerColumns}
-              maxVisibleSubagentSteps={
-                timelineBlock(item).kind === 'subagent' ? maxVisibleSubagentSteps : undefined
-              }
-            />
-          );
-        })}
-        {compactionPhase && <CompactionProgress phase={compactionPhase} />}
+          })}
+          {compactionPhase && <CompactionProgress phase={compactionPhase} />}
+        </Box>
       </Box>
     </Box>
   );

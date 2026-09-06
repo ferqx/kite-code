@@ -12,6 +12,7 @@ import SubAgentBlock, {
   taskLabel,
   truncateToFit,
 } from './SubAgentBlock';
+import { useActivityClock } from './use-activity-clock';
 
 type SubagentBlock = Extract<OutputBlock, { kind: 'subagent' }>;
 
@@ -112,14 +113,15 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
     blocks.every(
       (block) => !isActive(block) || block.awaitingApproval || block.status === 'suspended',
     );
-  const activityFrame = activityDot(active && !waitingOnly);
+  const activityFrame = activityDot(
+    active && !waitingOnly,
+    useActivityClock(active && !waitingOnly),
+  );
   const expanded = active && allowExpanded && blocks.some((block) => block.expanded === true);
   const earliestStartedAt = blocks.reduce<number | undefined>((earliest, block) => {
     if (block.startedAt == null) return earliest;
     return earliest == null ? block.startedAt : Math.min(earliest, block.startedAt);
   }, undefined);
-  // Elapsed time is sampled only when a Runtime event repaints the group.
-  // Keeping an idle concurrent group timer-free preserves native scrollback.
   const liveElapsed =
     active && earliestStartedAt != null ? Math.max(0, Date.now() - earliestStartedAt) : 0;
 

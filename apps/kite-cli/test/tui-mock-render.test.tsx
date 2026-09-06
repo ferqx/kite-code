@@ -49,7 +49,7 @@ describe('Header', () => {
 });
 
 describe('StatusBar', () => {
-  test('shows fixed Working text and a static activity marker when running', () => {
+  test('shows Working with an animated activity marker', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         runStatus: fakeRunStatus(),
@@ -58,7 +58,7 @@ describe('StatusBar', () => {
     );
     const output = lastFrame();
     expect(output).toContain('Working');
-    expect(output).toContain('⋄ Working');
+    expect(output).toMatch(/[·⋄⋆✧] Working/);
   });
 
   test('does not show cumulative metrics in StatusBar', () => {
@@ -74,7 +74,7 @@ describe('StatusBar', () => {
     expect(output).not.toContain('123,456');
   });
 
-  test('keeps Working free of elapsed time between parent updates', async () => {
+  test('updates Working elapsed time between parent updates', async () => {
     const view = render(
       React.createElement(StatusBar, {
         runStatus: fakeRunStatus({ elapsedMs: 0, runTokenDelta: 0 }),
@@ -86,8 +86,21 @@ describe('StatusBar', () => {
     await Bun.sleep(1_250);
 
     expect(view.lastFrame()).toContain('Working');
-    expect(view.lastFrame()).not.toContain('(1s)');
-    expect(view.frames).toHaveLength(initialWriteCount);
+    expect(view.lastFrame()).toContain('00:01');
+    expect(view.frames.length).toBeGreaterThan(initialWriteCount);
+    view.unmount();
+  });
+
+  test('stops status animation writes once the Run is inactive', async () => {
+    const view = render(React.createElement(StatusBar, { running: true }));
+    await Bun.sleep(300);
+    view.rerender(React.createElement(StatusBar, { running: false }));
+    await Bun.sleep(30);
+    const idleFrames = view.frames.length;
+    await Bun.sleep(750);
+    expect(view.lastFrame()).toBe('');
+    expect(view.frames).toHaveLength(idleFrames);
+    view.unmount();
   });
 
   test('working phase shows Working prefix in status line', () => {
@@ -141,6 +154,6 @@ describe('CompactionProgress', () => {
     const output = lastFrame();
     expect(output).toContain('⎿');
     expect(output).toContain('Summarizing context');
-    expect(output).toMatch(/●/);
+    expect(output).toMatch(/(?:● | {2}) Summarizing context/);
   });
 });

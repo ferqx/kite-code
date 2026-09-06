@@ -10,6 +10,7 @@ import type { OutputBlock } from '../types';
 import { activityDot } from './activity-dot';
 import MarkdownBlock from './MarkdownBlock';
 import { ACTION_NAMES, formatElapsed, toolColor, writeFileActionName } from './render-utils';
+import { useActivityClock } from './use-activity-clock';
 
 export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '└─ ';
@@ -506,33 +507,25 @@ export function renderFileSummary(summary: string, dt: Theme, language?: string)
 
 interface ToolCardBlockProps {
   block: OutputBlock & { kind: 'tool_card' };
-  /** 工具等待审批时隐藏计时器 / Hide timer when tool is awaiting approval */
-  awaitingApproval?: boolean;
   /** ask_user 等待用户输入时显示等待状态 / Show waiting label while ask_user awaits input */
   awaitingInput?: boolean;
   /** 可用列宽（从 BlockRenderer 传入）/ Available terminal columns */
   columns?: number;
 }
 
-/**
- * The running-card clock is an event-driven snapshot. Wall-clock-only updates
- * would continuously write stdout while a tool is idle and make native
- * terminal selection and scrollback unusable.
- */
+/** Shared presentation clock; final duration comes from the tool result. */
 const RunningToolHeader = memo(function RunningToolHeader({
   block,
-  awaitingApproval,
   awaitingInput,
-}: Pick<ToolCardBlockProps, 'block' | 'awaitingApproval' | 'awaitingInput'>) {
+}: Pick<ToolCardBlockProps, 'block' | 'awaitingInput'>) {
   const dt = useTheme();
   const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
-  const activityActive =
-    block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
-  const activityFrame = activityDot(activityActive);
+  const activityActive = block.status === 'running' && block.name !== 'ask_user';
+  const activityFrame = activityDot(activityActive, useActivityClock(activityActive));
   const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
-  const isWaiting = awaitingApproval || block.name === 'ask_user';
+  const isWaiting = block.name === 'ask_user';
   const askQuestionCount = block.name === 'ask_user' ? askQuestions(block.args).length : 0;
   const isMultiQuestionAsk = askQuestionCount > 1;
   const preview =
@@ -558,9 +551,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
       {!isMultiQuestionAsk && preview ? (
         <Text color={dt.muted}>{block.name === 'ask_user' ? ` · ${preview}` : ` ${preview}`}</Text>
       ) : null}
-      {awaitingApproval ? (
-        <Text color={dt.dim}> (awaiting approval)</Text>
-      ) : awaitingInput && block.name === 'ask_user' ? (
+      {awaitingInput && block.name === 'ask_user' ? (
         <Text color={dt.dim}> (awaiting input)</Text>
       ) : showElapsed ? (
         <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
@@ -569,12 +560,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
   );
 });
 
-export default function ToolCardBlock({
-  block,
-  awaitingApproval,
-  awaitingInput,
-  columns = 80,
-}: ToolCardBlockProps) {
+export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: ToolCardBlockProps) {
   const dt = useTheme();
   const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
@@ -615,11 +601,7 @@ export default function ToolCardBlock({
   if (block.status === 'running') {
     return (
       <Box flexDirection="column">
-        <RunningToolHeader
-          block={block}
-          awaitingApproval={awaitingApproval}
-          awaitingInput={awaitingInput}
-        />
+        <RunningToolHeader block={block} awaitingInput={awaitingInput} />
         {/* ask_user 运行时问题由 Footer InputBlock 渲染，scrollback 不重复展示 */}
         {/* Shell 实时输出 — tail-follow 最近 5 行，与 renderShellSummary 保持视觉一致 */}
         {isShell && block.liveOutput && (

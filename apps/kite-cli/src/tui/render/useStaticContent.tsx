@@ -29,7 +29,6 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import {
   advanceOutputBlockTimeline,
   outputBlockVisualDigest,
-  projectApprovalViewport,
   type TimelineItem,
   type TimelineState,
 } from '../presentation/timeline';
@@ -139,8 +138,6 @@ export interface UseStaticContentOptions {
   resizeGeneration?: number;
   /** Presentation changes such as locale need a complete Static re-render. */
   presentationKey?: string;
-  /** Focused approval owns a bounded viewport frontier; projection lives with Timeline. */
-  awaitingApproval?: boolean;
 }
 
 export function useStaticContent({
@@ -151,7 +148,6 @@ export function useStaticContent({
   header,
   resizeGeneration,
   presentationKey,
-  awaitingApproval = false,
 }: UseStaticContentOptions): StaticContentResult {
   // ── Session / resize lifecycle ──
   const prevSessionKeyRef = useRef<number | undefined>(undefined);
@@ -395,8 +391,6 @@ export function useStaticContent({
   }
   const mergedStaticTimeline = physicalStaticTimelineRef.current;
   const mergedStaticBlocks = mergedStaticTimeline.map((item) => item.renderModel.block);
-  const projectedApproval = projectApprovalViewport(activeDynamicTimeline, awaitingApproval);
-  const visibleDynamicTimeline = projectedApproval.visibleItems;
 
   const staticItems = useMemo(() => [HEADER_SENTINEL, ...mergedStaticBlocks], [mergedStaticBlocks]);
 
@@ -429,7 +423,7 @@ export function useStaticContent({
     mergedStaticBlocks,
     activeDynamicBlocks,
     mergedStaticTimeline,
-    activeDynamicTimeline: visibleDynamicTimeline,
+    activeDynamicTimeline,
     renderEpoch,
   };
 }

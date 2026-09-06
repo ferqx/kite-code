@@ -100,8 +100,6 @@ interface BlockRendererProps {
   index: number;
   columns: number;
   prevBlock?: OutputBlock;
-  /** 当主 agent 等待审批时，工具并未真正执行，隐藏计时器 / When awaiting approval, tool isn't actually running, hide timer */
-  awaitingApproval?: boolean;
   /** 当 ask_user 正在等待用户输入时显示等待状态 / Show ask_user waiting state */
   awaitingInput?: boolean;
   /** Per-card live step budget used to keep concurrent subagents below fullscreen height. */
@@ -115,7 +113,6 @@ const BlockRenderer = React.memo(function BlockRenderer({
   columns,
   index: _i,
   prevBlock,
-  awaitingApproval,
   awaitingInput,
   maxVisibleSubagentSteps,
 }: BlockRendererProps) {
@@ -188,12 +185,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'tool_card':
       return (
         <Box {...gapFrom(prevBlock)}>
-          <ToolCardBlock
-            block={block}
-            awaitingApproval={awaitingApproval}
-            awaitingInput={awaitingInput}
-            columns={columns}
-          />
+          <ToolCardBlock block={block} awaitingInput={awaitingInput} columns={columns} />
         </Box>
       );
 

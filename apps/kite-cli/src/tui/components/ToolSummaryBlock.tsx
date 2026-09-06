@@ -11,21 +11,13 @@ import {
   writeFileActionName,
 } from './render-utils';
 import { wrapDisplayLines } from './soft-wrap';
+import { useActivityClock } from './use-activity-clock';
 
-// ══════════════════════════════════════════════════════════════════
-// BlinkDot — 活动状态标记
-//
-// 进行中圆点为主题暗（dim，不抢眼）实心 ●。它保持静态，
-// 只在 Runtime 事件导致真实重绘时更新，以免活动 Run 的墙钟动画持续写
-// stdout，并打断原生终端的文本选择或强制 scrollback 回到底部。
-//
-// The small adapter keeps activity-dot semantics consistent across Thought,
-// tool, and subagent views without owning a presentation timer.
-// ══════════════════════════════════════════════════════════════════
+// The shared presentation clock animates only live indicators.
 
 function BlinkDot({ active }: { active: boolean }) {
   const dt = useTheme();
-  const frame = activityDot(active);
+  const frame = activityDot(active, useActivityClock(active));
   return <Text color={dt.dim}>{frame}</Text>;
 }
 
@@ -216,9 +208,8 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
 
   const isRunning = block.active;
 
-  // Snapshot elapsed time only on event-driven renders. Do not create a clock
-  // that repaints an unchanged active Thought while the user reads scrollback.
-  const liveNow = Date.now();
+  // Preview elapsed time locally; Runtime duration remains the settled authority.
+  const liveNow = useActivityClock(isRunning) || Date.now();
   const elapsedMs =
     block.liveModelStartedAt === undefined
       ? block.totalElapsedMs

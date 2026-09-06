@@ -23,7 +23,7 @@ export default function Footer({
   children,
 }: FooterProps) {
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       <StatusBar runStatus={runStatus} running={running} />
       {children}
       {!hideGlobalStatus && (

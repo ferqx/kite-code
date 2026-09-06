@@ -1737,7 +1737,7 @@ export function runTui(props: TuiBootstrapProps): void {
       maxFps: 60,
       exitOnCtrlC: false,
       kittyKeyboard: { mode: 'enabled' },
-      incrementalRendering: false,
+      incrementalRendering: true,
       // Ink 7.1.1 treats every CI environment as non-interactive by default,
       // even when stdout is a real PTY. Use the actual terminal capabilities so
       // PTY-backed sessions (including system tests) keep input and live rendering.

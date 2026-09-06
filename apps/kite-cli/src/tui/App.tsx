@@ -389,8 +389,8 @@ export default function App({
   const resolvePlanReview = useCallback((_action: string, _feedback?: string) => undefined, []);
 
   // ── Static content computation ──
-  // <Static> is rendered at ROOT LEVEL (outside any layout Box) so its
-  // scrollback writes never compete with the dynamic tree's Yoga layout.
+  // Static history stays inside OutputArea's zero-height owner. Only the live
+  // frame is constrained below; completed history is never viewport-clipped.
   const activeWorkspace =
     state.sessions.find((session) => session.threadId === state.activeSessionId)?.workspace ??
     workspace;
@@ -432,7 +432,6 @@ export default function App({
     header,
     resizeGeneration,
     presentationKey: presentationKey ?? language,
-    awaitingApproval,
   });
 
   // Runtime decisions supersede any stale local selector state while the
@@ -470,7 +469,12 @@ export default function App({
   }, [modelForDisplay, state.status]);
 
   return (
-    <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      maxHeight={Math.max(1, rows - 1)}
+      overflowY="hidden"
+      justifyContent="flex-end"
+    >
       {/* ── Body: OutputArea ── */}
       <OutputArea
         staticItems={staticItems}

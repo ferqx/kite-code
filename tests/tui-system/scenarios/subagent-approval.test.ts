@@ -876,11 +876,12 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
         TIMEOUT,
       );
       expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 3_000, 300, false);
-      const idleConcurrentFrames = tui.markScreen();
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const animationOutput = tui.markOutput();
+      await new Promise((resolve) => setTimeout(resolve, 750));
       await tui.settleScreen();
-      expect(tui.screenFramesSince(idleConcurrentFrames)).toEqual([]);
+      expect(tui.outputSince(animationOutput).length).toBeGreaterThan(0);
+      expect(tui.outputSince(animationOutput)).not.toContain('\x1b[2J');
+      expect(tui.outputSince(animationOutput)).not.toContain('\x1b[3J');
       const activeGroupStart = active.indexOf('Delegating · 4 agents');
       const activeGroupEnd = active.indexOf('\n\n', activeGroupStart);
       const activeGroup = active

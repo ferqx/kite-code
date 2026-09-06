@@ -1,11 +1,4 @@
-/**
- * Unified activity-dot adapter. Runtime events own repaint cadence; keeping
- * the glyph static prevents idle agent work from continuously writing stdout
- * and forcing a native terminal viewport back to the bottom.
- *
- * @param active  Whether the activity dot should be visible
- * @returns       Static frame string: '● ' or '  '
- */
-export function activityDot(active: boolean): string {
-  return active ? '● ' : '  ';
+/** Fixed-width activity frames; terminal output is owned by Ink. */
+export function activityDot(active: boolean, now = 0): string {
+  return active && Math.floor(now / 500) % 2 === 0 ? '● ' : '  ';
 }

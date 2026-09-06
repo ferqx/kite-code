@@ -2399,7 +2399,7 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame.split('\n').length + 4).toBeLessThan(24);
   });
 
-  test('does not repaint an idle concurrent group on wall-clock time alone', async () => {
+  test('animates a live concurrent group without Runtime events', async () => {
     const view = render(
       <OutputArea
         activeDynamicBlocks={childBlocks}
@@ -2409,13 +2409,11 @@ describe('concurrent subagent dynamic height', () => {
         rows={24}
       />,
     );
-    const initialFrame = view.lastFrame();
     const initialWriteCount = view.frames.length;
 
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    expect(view.lastFrame()).toBe(initialFrame);
-    expect(view.frames).toHaveLength(initialWriteCount);
+    expect(view.frames.length).toBeGreaterThan(initialWriteCount);
     view.unmount();
   });
 
@@ -2921,7 +2919,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('⠋');
   });
 
-  test('running tool_card renders a static activity marker', () => {
+  test('running tool_card renders an activity header', () => {
     const block: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -2936,7 +2934,7 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).toContain('●');
+    expect(lastFrame()).toMatch(/(?:● | {2})(?:Bash|Code)/);
   });
 
   test('running shell tool_card renders liveOutput', () => {
@@ -3502,7 +3500,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('find files');
   });
 
-  test('does not repaint a running Thinking duration without a Runtime event', async () => {
+  test('updates a running Thinking duration without Runtime events', async () => {
     const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
       id: 1,
       kind: 'tool_summary',
@@ -3522,8 +3520,39 @@ describe('BlockRenderer', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 1_200));
 
-    expect(view.lastFrame()).toBe(initialFrame);
-    expect(view.frames).toHaveLength(initialWriteCount);
+    expect(view.frames.length).toBeGreaterThan(initialWriteCount);
+    view.unmount();
+  });
+
+  test('animates a tool-waiting Thought without adding tool time to model duration', async () => {
+    const block: Extract<OutputBlock, { kind: 'tool_summary' }> = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 3_000,
+      totalElapsedMs: 3_000,
+      modelMs: 3_000,
+      active: true,
+      hasThought: true,
+      hasThinking: true,
+      summaryLine: 'read 1 file',
+      latestActivity: { kind: 'tool', callId: 'read' },
+      tools: [
+        {
+          callId: 'read',
+          name: 'read_file',
+          args: { path: 'fixture.txt' },
+          status: 'running',
+          ok: false,
+          summary: '',
+        },
+      ],
+    };
+    const view = render(<BlockRenderer columns={80} block={block} isFocused={false} index={0} />);
+    const frames = view.frames.length;
+    await Bun.sleep(1_250);
+    expect(view.lastFrame()).toContain('Thinking 3s');
+    expect(view.frames.length).toBeGreaterThan(frames);
+    expect(block.totalElapsedMs).toBe(3_000);
     view.unmount();
   });
 
@@ -4261,7 +4290,7 @@ describe('BlockRenderer', () => {
 
     // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
     // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
-    expect(lastFrame()).toContain('● Thinking 1s');
+    expect(lastFrame()).toMatch(/(?:● | {2})Thinking 1s/);
     expect(lastFrame()).toContain('└─ reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
@@ -4980,7 +5009,7 @@ describe('OutputArea', () => {
       <OutputAreaTestWrap running={true} turns={state.turns} onToggleReason={noop} />,
     );
 
-    expect(lastFrame()).toContain('● langchian · search_docs_by_lang_chain');
+    expect(lastFrame()).toContain('langchian · search_docs_by_lang_chain');
     expect(lastFrame()).not.toContain('mcp__langchian__');
   });
 
@@ -5089,7 +5118,7 @@ describe('OutputArea', () => {
 
     expect(frame).toContain('❯ Inspect the runtime bridge');
     expect(frame).toContain('The runtime bridge is connected.');
-    expect(frame).toContain('● Bash');
+    expect(frame).toMatch(/(?:● | {2})Bash/);
     expect(frame).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:runtime_error');
     expect(frame).toContain('echo runtime-bridge');
     expect(frame.indexOf('Inspect the runtime bridge')).toBeLessThan(
@@ -5466,7 +5495,7 @@ describe('OutputArea', () => {
     expect(lastFrame()).not.toContain('npm publish');
   });
 
-  test('hides dynamic blocks after the approval tool while awaiting approval', () => {
+  test('keeps running siblings visible while approval owns input', () => {
     const blocks: OutputBlock[] = [
       {
         id: 1,
@@ -5481,7 +5510,7 @@ describe('OutputArea', () => {
       {
         id: 2,
         kind: 'tool_summary',
-        active: false,
+        active: true,
         createdAt: Date.now() - 1000,
         totalElapsedMs: 1000,
         summaryLine: 'read 2 files',
@@ -5514,10 +5543,10 @@ describe('OutputArea', () => {
 
     expect(frame).toContain('Bash');
     expect(frame).toContain('find src -type f | sort');
-    expect(frame).toContain('awaiting approval');
+    expect(frame).not.toContain('awaiting approval');
     expect(frame).not.toContain('Thought');
-    expect(frame).not.toContain('index.ts');
-    expect(frame).not.toContain('CLAUDE.md');
+    expect(frame).toContain('index.ts');
+    expect(frame).toContain('CLAUDE.md');
     expect(frame).not.toContain('等待工具结果');
   });
 
@@ -6944,7 +6973,7 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).not.toContain('✓');
   });
 
-  test('running subagent renders a static activity marker', () => {
+  test('running subagent renders an activity header', () => {
     const block = {
       id: 1,
       kind: 'subagent' as const,
@@ -6960,7 +6989,7 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
 
-    expect(lastFrame()).toContain('●');
+    expect(lastFrame()).toMatch(/(?:● | {2})(?:Bash|Code)/);
   });
 
   test('renders the bounded child failure diagnostic without an opaque invocation id', () => {

@@ -53,66 +53,6 @@ export interface TimelineState {
 }
 
 /**
- * Presentation-only visibility projection used while a Footer interaction owns
- * the input surface.  The boundary is computed here, next to the canonical
- * Timeline items, so OutputArea never decides which business entities are
- * hidden by inspecting raw OutputBlock fields itself.
- */
-export interface TimelineApprovalViewport {
-  readonly visibleItems: readonly TimelineItem[];
-  readonly hiddenItems: readonly TimelineItem[];
-  readonly frontierIndex: number;
-}
-
-/**
- * Hide the mutable tail behind the focused approval interaction.  Queued
- * metadata remains off-screen; once an execution card is visible, only the
- * card immediately preceding the approval frontier is retained.  This is a
- * presentation projection, not a lifecycle transition: the source Timeline
- * item identities and sealed state are unchanged.
- */
-export function projectApprovalViewport(
-  items: readonly TimelineItem[],
-  awaitingApproval = false,
-): TimelineApprovalViewport {
-  if (!awaitingApproval) {
-    return { visibleItems: items, hiddenItems: [], frontierIndex: items.length };
-  }
-
-  const blockAt = (index: number): OutputBlock => items[index]!.renderModel.block;
-  const pendingApprovalIndex = items.findIndex((item) => {
-    const block = item.renderModel.block;
-    return block.kind === 'approval' && block.resolved === undefined;
-  });
-
-  let frontierIndex = items.length;
-  if (pendingApprovalIndex >= 0) {
-    for (let index = pendingApprovalIndex - 1; index >= 0; index -= 1) {
-      const block = blockAt(index);
-      if (block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running')) {
-        frontierIndex = index + 1;
-        break;
-      }
-    }
-    if (frontierIndex === items.length) frontierIndex = pendingApprovalIndex;
-  } else {
-    const approvalToolIndex = items.findIndex((item) => {
-      const block = item.renderModel.block;
-      return (
-        block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running')
-      );
-    });
-    if (approvalToolIndex >= 0) frontierIndex = approvalToolIndex + 1;
-  }
-
-  return {
-    visibleItems: items.slice(0, frontierIndex),
-    hiddenItems: items.slice(frontierIndex),
-    frontierIndex,
-  };
-}
-
-/**
  * Canonical serialization for every field that can reach a TUI render model.
  * Object key ordering is normalized so live projection and replay generate the
  * same digest even when their JSON objects were assembled in a different
