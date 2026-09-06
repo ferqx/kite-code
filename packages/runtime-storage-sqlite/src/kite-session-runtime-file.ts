@@ -40,7 +40,7 @@ export function openKiteSessionStoreDatabase(databasePath: string): Database {
       database.run('PRAGMA busy_timeout = 5000');
       database.run('PRAGMA foreign_keys = ON');
       initializeKiteSessionStoreIfNeeded(database);
-      database.run('PRAGMA journal_mode = WAL');
+      configureJournalMode(database);
       database.run('PRAGMA synchronous = FULL');
     } catch (error) {
       if (error instanceof KiteHomeStoreSchemaError || isStoreFormatFailure(error)) {
@@ -57,6 +57,25 @@ export function openKiteSessionStoreDatabase(databasePath: string): Database {
     database.close(false);
     throw error;
   }
+}
+
+function configureJournalMode(database: Database): void {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      database.run('PRAGMA journal_mode = WAL');
+      return;
+    } catch (error) {
+      if (!isStoreBusy(error) || Date.now() >= deadline) throw error;
+      Bun.sleepSync(10);
+    }
+  }
+}
+
+function isStoreBusy(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = String(error.code);
+  return code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED';
 }
 
 function isStoreFormatFailure(error: unknown): boolean {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { spawnRuntimeHostProcess } from './spawn';
 
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -68,9 +69,21 @@ export function runProcessTreeChild(args: readonly string[]): void {
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const closing = stat.lastIndexOf(')');
+    if (closing < 0) return true;
+    const state = stat
+      .slice(closing + 2)
+      .trim()
+      .split(/\s+/u)[0];
+    return state !== 'Z' && state !== 'X';
+  } catch {
+    return true;
   }
 }
 
