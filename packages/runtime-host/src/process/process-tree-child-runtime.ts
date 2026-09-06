@@ -5,9 +5,13 @@ const MAX_REQUEST_BYTES = 1_048_576;
 /** POSIX watchdog used by the generic Host process port; request bytes arrive only on inherited stdin. */
 export function runProcessTreeChild(args: readonly string[]): void {
   if (args.length !== 0 || process.platform === 'win32') process.exit(125);
+  const parentPid = process.ppid;
   let buffer = Buffer.alloc(0);
   let started = false;
   let terminal = false;
+  const parentWatch = setInterval(() => {
+    if (process.ppid !== parentPid) emergencyExit();
+  }, 100);
 
   process.stdin.on('data', (chunk: Buffer | string) => {
     if (started) return emergencyExit();
@@ -32,6 +36,7 @@ export function runProcessTreeChild(args: readonly string[]): void {
     void child.exited.then(
       (exitCode) => {
         terminal = true;
+        clearInterval(parentWatch);
         process.exit(exitCode);
       },
       () => emergencyExit(),

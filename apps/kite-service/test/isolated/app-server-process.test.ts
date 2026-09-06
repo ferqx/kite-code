@@ -627,7 +627,7 @@ describe('KASD parent-owned App Server process', () => {
 
         child.kill('SIGKILL');
         await child.exited;
-        await eventually(() => !isRunningPid(shellPid!), 2_000);
+        await eventually(() => !isRunningPid(shellPid!), 1_000);
         await Bun.sleep(650);
 
         const successor = createKiteSessionAppServerStorageComposition({

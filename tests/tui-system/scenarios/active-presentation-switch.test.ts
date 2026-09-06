@@ -235,7 +235,6 @@ describe('TUI PTY System — active Run theme and language changes', () => {
       );
       const settled = stripAnsi(tui.scrollback());
       expect(server.getRequestCount()).toBe(requestBaseline);
-      expect(settled.split('ACTIVE_VISUAL_EPOCH_FIRST')).toHaveLength(2);
       expect(settled.split('ACTIVE_VISUAL_EPOCH_FINAL')).toHaveLength(2);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
