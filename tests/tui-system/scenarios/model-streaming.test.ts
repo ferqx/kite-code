@@ -83,7 +83,14 @@ describe('TUI PTY System — model streaming', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.viewport(), 'STREAM_MIDDLE')).toBe(true);
       const clean = stripAnsi(tui.viewport());
-      const responseHistory = tui.screenFramesSince(responseFrames).join('\n');
+      const firstResponseFrames = tui.screenFramesSince(responseFrames);
+      for (const frame of firstResponseFrames) {
+        expect((frame.match(/Thinking \d+s/g) ?? []).length).toBeLessThanOrEqual(1);
+        for (const marker of ['STREAM_FIRST', 'STREAM_MIDDLE', 'STREAM_FINAL']) {
+          expect((frame.match(new RegExp(marker, 'g')) ?? []).length).toBeLessThanOrEqual(1);
+        }
+      }
+      const responseHistory = firstResponseFrames.join('\n');
       // Completed reasoning is visible only in the active Thought window;
       // once answer components become visible, the settled transcript omits it.
       expect(screenContains(responseHistory, 'Thinking ')).toBe(true);
@@ -100,7 +107,12 @@ describe('TUI PTY System — model streaming', () => {
       server.setResponses([
         {
           message: {
-            content_chunks: ['CONTENT_FIRST\n\n', 'CONTENT_MIDDLE\n\n', 'CONTENT_FINAL'],
+            content_chunks: [
+              'CONTENT_FIRST\n\n',
+              'CONTENT_MIDDLE\n\n```ts\nconst CODE_ROW = 1;\n',
+              '```\n\n| Item | Value |\n| --- | --- |\n| TABLE_ROW | 2 |\n\n',
+              'CONTENT_FINAL',
+            ],
           },
           chunk_delay: 250,
         },
@@ -122,6 +134,25 @@ describe('TUI PTY System — model streaming', () => {
       expect(screenContains(firstFrame!, 'CONTENT_FINAL')).toBe(false);
       await waitForText(() => tui.viewport(), 'CONTENT_FINAL', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      const markdownFrames = tui.screenFramesSince(contentFrames);
+      for (const marker of [
+        'CONTENT_FIRST',
+        'CONTENT_MIDDLE',
+        'CODE_ROW',
+        'TABLE_ROW',
+        'CONTENT_FINAL',
+      ]) {
+        for (const frame of markdownFrames) {
+          expect((frame.match(new RegExp(marker, 'g')) ?? []).length).toBeLessThanOrEqual(1);
+        }
+      }
+      for (const marker of ['CODE_ROW', 'TABLE_ROW']) {
+        expect(
+          markdownFrames.some(
+            (frame) => frame.includes(marker) && !frame.includes('CONTENT_FINAL'),
+          ),
+        ).toBe(true);
+      }
       const contentClean = stripAnsi(tui.viewport());
       expect(contentClean.lastIndexOf('CONTENT_FIRST')).toBeLessThan(
         contentClean.lastIndexOf('CONTENT_MIDDLE'),

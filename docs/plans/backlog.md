@@ -44,10 +44,6 @@
 
 Web 已显示 idle 会话后，其他客户端开始执行：当前 [App 轮询](../../apps/kite-web/src/app/app.tsx) 由本页已读取的 running/waiting 状态启动，不主动探测 idle→running。手册的活动条件尚未明确是否承诺发现这种外部变化，需单独确认预期；不能以当前实现自动缩减承诺，也不能把这一差异视为本轮文档规则修改引入的缺陷。
 
-## TUI 活动时钟与终端静默
-
-现有产品预期为运行中无事件时不因计时持续刷新；当前工作树新增共享 250ms 活动时钟，Shell 活动测试要求等待时产生新帧。预期、实现与测试入口集中在[终端输出](../../apps/kite-cli/docs/terminal-output.md)。需确认允许活动指示器动画是否取代原运行中静默要求，并分别验证运行中与完成后的原生滚动；本轮保留代码和已有产品承诺，不自行选择方向。
-
 ## 高级配置参考完整性
 
 手册[设置参考](../handbook/clients/tui/reference/settings.md)已覆盖顶层配置与常用模型字段，但 autoReview、compaction、sessionLogging、telemetry、sandbox 的嵌套参数尚未形成完整的取值、默认值、合并和生效时机参考。例如 compaction.cohortSalt/livePercentage/cooldownTurns/providerSafetyRatio 及 autoReview 的循环限制目前只有概述。后续应沿配置 schema 与实际消费者逐项核对，不能仅凭 schema 接受就承诺生效。当前不能据顶层覆盖宣称所有可配置项均有完整用户说明。

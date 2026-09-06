@@ -12,8 +12,10 @@ visualDigest 只包含 renderer-visible 输入，业务 fence 不进入像素摘
 
 消息区不实现行估算、viewport culling 或历史裁剪。Overlay 列表可虚拟化；并发子任务步骤按真实剩余空间显示，不以新增输入队列强制折叠。内容隐藏只影响展示，不删除 Runtime 事实。
 
-FocusIn/Out 只进入共享 focus store，不解释成 Esc。当前工作树的 [useActivityClock](../src/tui/components/use-activity-clock.ts) 为已挂载活动指示器共享 250ms 定时器，最后一个订阅者退出后停止；[StatusBar](../src/tui/StatusBar.tsx) 和工具卡消费该时钟更新显示。它不写 Runtime 状态，但可能触发终端重绘。
+FocusIn/Out 只进入共享 focus store，不解释成 Esc。当前工作树的 [useActivityClock](../src/tui/components/use-activity-clock.ts) 为已挂载活动指示器共享 250ms 定时器，最后一个订阅者退出后停止；[StatusBar](../src/tui/StatusBar.tsx) 和工具卡消费该时钟更新显示。StatusBar 仅用共享时钟推进动画，不维护本地耗时基准，也不显示整轮计时。共享时钟不写 Runtime 状态，但可能触发终端重绘。
 
-这与[终端手册](../../../docs/handbook/clients/tui/guides/terminal-behavior.md)现有“无执行事件或用户操作时不因计时持续刷新”的预期冲突，尚未在本轮确认新行为取代旧预期。[Shell 活动测试](../test/tui-shell-activity.test.tsx)明确断言等待时产生新帧，不能作为运行中静默的证据；完成后静默与运行中静默需分别验证。待决项见[Backlog](../../../docs/plans/backlog.md#tui-活动时钟与终端静默)。
+动态区域由根容器与消息区的实际布局约束高度，保留终端全屏阈值余量；使用完整的有界动态帧重绘，关闭 Ink 的增量行绘制，避免活动窗口增高时留下旧题头。它不重放已取得 Static 所有权的历史。审批仅接管输入，运行中工具按各自状态更新；错峰启动的小圆点共享动画相位，耗时仍独立计算。
+
+验证必须分别检查进行中和完成后：[动态滚动](../../../tests/tui-system/scenarios/live-scroll.test.ts)持续采样题头、旧输出残留和上滚位置；[两轮子任务](../../../tests/tui-system/scenarios/thought-scroll-live.test.ts)覆盖长 reasoning 与并发子任务的活动过渡。终态画面正确不能替代中间帧证据。
 
 验证：[渲染](../test/tui-mock-render.test.tsx)、[Timeline](../test/tui-timeline-closeout.test.ts)和相关 resize/scrollback PTY。设计理由：业务 terminal 与物理输出生命周期不同，混用会重复写入 append-only scrollback。

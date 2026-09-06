@@ -299,3 +299,7 @@ Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free
 以下名称不属于 production contract：Runtime/Artifact installation key、AuthorityKey/bootstrap/HMAC/authenticator、ProjectHandle/ProjectIdentityStore、single-Host global lock、persisted authority envelope、DataOrigin、EgressAuthority、Remote MCP permit/receipt、`providerDataPolicy` 与固定 Provider route policy。负向测试可引用旧文件名以证明它不会被创建，但不得恢复实现或 public export。
 
 真实 API key、OAuth token 和系统 keyring credential 不在删除范围内；它们只用于连接外部服务，并必须通过共享 CredentialBroker 在使用点短暂物化。
+
+## 执行权丢失后的本地停止
+
+写入仍受当前generation与未过期lease约束；活跃写入可在原续租间隔内续租有效执行权，不能复活过期lease。失去执行权后，Host仍负责停止自己已启动的Provider工作并等待本地清理，但不能替现owner写取消、完成或清理确认。只读Run查询以当前执行权检查补充进程恢复记录，将不再可信的非终态执行投影为unknown/recovery_required；不因查询自动恢复或重放。

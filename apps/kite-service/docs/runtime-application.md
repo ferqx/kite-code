@@ -143,3 +143,11 @@ committed Store8 evidence，Store7 profile不作为open failure fallback。
 
 `bun test apps/kite-service/test/composition.test.ts apps/kite-service/test/bootstrap.test.ts apps/kite-service/test/runtime-application apps/kite-service/test/app-control apps/kite-service/test/runtime-history-client.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts`、
 `bun run --cwd apps/kite-service typecheck`。
+
+## 活动执行权续租
+
+Session 写入口在核对当前执行权与有效期后，可使用同一 authority 的 CAS 续租；达到正常续租间隔时随实际写入进度续租，避免连续同步工具提交延后定时器而使活跃执行过期。模型等待等无写入阶段仍由原定时器续租。已过期、失去 generation 或属于其他 owner 的执行权不能借写入重新激活，仍需恢复处理；不延长默认租约或新增后台协调进程。
+
+续租失败时在 Server stderr 记录 Session、失败原因或租约失效时间，便于区分定时器延后与存储/执行权错误；不污染 stdio protocol 的 stdout。
+
+执行权失效由原Storage owner通知同一Host停止本地执行，不另设执行登记或后台协调器。取消监听器即使无法持久化也必须继续传播Provider停止信号；只发布成功提交的终态事件，持久恢复记录不会因本地I/O关闭而被伪装成已完成。

@@ -178,4 +178,4 @@ function Fixture() {
     </App>
   );
 }
-render(<Fixture />, { interactive: true, incrementalRendering: true, exitOnCtrlC: true });
+render(<Fixture />, { interactive: true, incrementalRendering: false, exitOnCtrlC: true });

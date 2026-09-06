@@ -16,7 +16,50 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
         workspace,
         entryPath: resolve(import.meta.dir, '../fixtures/live-scroll-tui.tsx'),
       });
+      let sampler: ReturnType<typeof setInterval> | undefined;
+      let samples = 0;
+      const violations: string[] = [];
+      const observedUpdates = new Set<string>();
       try {
+        sampler = setInterval(() => {
+          const buffer = tui.scrollback();
+          if (buffer.includes('SETTLED_DONE')) return;
+          samples++;
+          const limits: Array<[RegExp, number]> = [
+            [/^.*Thinking \d+s.*$/gm, 1],
+            [/^.*read \d+ files.*$/gm, 1],
+            [/^.*Delegating ·.*$/gm, 1],
+            [/^.*Bash.*$/gm, mode === 'approved-shells' ? 3 : 1],
+          ];
+          for (const [pattern, limit] of limits) {
+            if ((buffer.match(pattern) ?? []).length > limit && violations.length === 0)
+              violations.push(buffer);
+          }
+          // Each fixture publishes one current output generation per activity.
+          // A stale tail can survive without duplicating the header itself.
+          for (const prefix of ['THINKING', 'LIVE', 'OUTPUT_0', 'OUTPUT_1', 'OUTPUT_2']) {
+            const generations = new Set(
+              [...buffer.matchAll(new RegExp(`${prefix}_(\\d+)`, 'g'))].map((match) => match[1]),
+            );
+            if (generations.size > 1 && violations.length === 0) violations.push(buffer);
+          }
+          for (const label of [
+            'SHELL_0',
+            'SHELL_1',
+            'SHELL_2',
+            'Child 0',
+            'Child 1',
+            'Child 2',
+            'Child 3',
+          ]) {
+            if (buffer.split(label).length - 1 > 1 && violations.length === 0)
+              violations.push(buffer);
+          }
+          for (const value of buffer.match(
+            /(?:THINKING_\d+|LIVE_\d+|OUTPUT_\d+_\d+|file-\d+\.ts|read-\d+|read \d+ files)/g,
+          ) ?? [])
+            observedUpdates.add(value);
+        }, 25);
         await waitForText(
           () => tui.viewport(),
           mode === 'approved-shells' ? 'Bash' : 'Working',
@@ -62,6 +105,11 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
             expect(tui.scrollback()).toContain(label);
           }
         }
+        clearInterval(sampler);
+        expect(samples).toBeGreaterThan(30);
+        if (violations.length) console.log('Invalid intermediate frame:', violations[0]);
+        expect(violations).toHaveLength(0);
+        expect(observedUpdates.size).toBeGreaterThan(1);
         const idleOutput = tui.markOutput();
         await Bun.sleep(750);
         expect(tui.outputSince(idleOutput)).toBe('');
@@ -69,6 +117,8 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
           JSON.stringify({
             mode,
             rows,
+            intermediateSamples: samples,
+            observedUpdates: observedUpdates.size,
             before,
             after,
             animationAndEventBytes: bytes.length,
@@ -77,6 +127,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
           }),
         );
       } finally {
+        clearInterval(sampler);
         await cleanupTuiSystemFixtures({ tuis: [tui], workspaces: [workspace] });
       }
     }, 20_000);

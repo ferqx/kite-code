@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
 import { isTuiRunActive } from '../src/tui/presentation/selectors';
@@ -3106,4 +3106,49 @@ describe('closed RuntimeClientEvent reducer', () => {
       expect.objectContaining({ generation: 3, sequence: 4 }),
     );
   });
+});
+
+test('completed reasoning does not count the active model interval twice', () => {
+  const clock = spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    };
+    dispatch({ type: 'model.requested', requestId: 'clock-request' });
+    dispatch({
+      type: 'reasoning.activity',
+      requestId: 'clock-request',
+      segmentId: 'segment',
+      state: 'streaming',
+      text: 'Plan',
+    });
+    clock.mockReturnValue(8000);
+    dispatch({
+      type: 'reasoning.activity',
+      requestId: 'clock-request',
+      segmentId: 'segment',
+      state: 'completed',
+      text: 'Plan',
+    });
+    const summary = state.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(summary?.kind).toBe('tool_summary');
+    if (summary?.kind !== 'tool_summary') return;
+    expect(summary.totalElapsedMs + (8000 - summary.liveModelStartedAt!)).toBe(7000);
+    dispatch({
+      type: 'model.responded',
+      requestId: 'clock-request',
+      messageId: 'clock-message',
+      toolCallCount: 0,
+      summary: 'Answer',
+      durationMs: 7500,
+    });
+    expect(state.turns.flatMap((turn) => turn.blocks)).toContainEqual(
+      expect.objectContaining({ kind: 'text', thoughtElapsedMs: 7500 }),
+    );
+  } finally {
+    clock.mockRestore();
+  }
 });

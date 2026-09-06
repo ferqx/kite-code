@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { parseInline } from '../src/tui/components/MarkdownBlock';
 import { writeFileActionName } from '../src/tui/components/render-utils';
 import { changePrefix, toolColor } from '../src/tui/OutputArea';
-import { formatDuration } from '../src/tui/StatusBar';
 import type { Theme } from '../src/tui/theme';
 import { darkTheme } from '../src/tui/theme';
 
@@ -141,26 +140,6 @@ describe('parseInline', () => {
     expect(parseInline(String.raw`web\_search and \*literal\* and \\`)).toEqual([
       { text: 'web_search and *literal* and \\' },
     ]);
-  });
-});
-
-// ── formatDuration ──
-
-describe('formatDuration', () => {
-  test('0 seconds -> 00:00', () => {
-    expect(formatDuration(0)).toBe('00:00');
-  });
-
-  test('59 seconds -> 00:59', () => {
-    expect(formatDuration(59)).toBe('00:59');
-  });
-
-  test('60 seconds -> 01:00', () => {
-    expect(formatDuration(60)).toBe('01:00');
-  });
-
-  test('3661 seconds -> 61:01', () => {
-    expect(formatDuration(3661)).toBe('61:01');
   });
 });
 

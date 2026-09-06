@@ -448,7 +448,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               queryType: query.type,
               revision: run.lastRevision,
               run: projectRuntimeStoredRun(run, {
-                recoveryRequired: !this.#recoveredSessions.has(query.sessionId),
+                recoveryRequired:
+                  !this.#recoveredSessions.has(query.sessionId) ||
+                  !this.#ownsSessionExecution(query.sessionId),
               }),
             }
           : {
@@ -457,7 +459,9 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               code: 'run_not_found',
             };
       }
-      const recoveryRequired = !this.#recoveredSessions.has(query.sessionId);
+      const recoveryRequired =
+        !this.#recoveredSessions.has(query.sessionId) ||
+        !this.#ownsSessionExecution(query.sessionId);
       const page =
         recoveryRequired && query.status === 'unknown'
           ? listRecoveryRequiredUnknownRuns(runs, query)
@@ -513,10 +517,17 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   }
 
   async #cancelSession(sessionId: string, reason: string): Promise<void> {
-    await this.#bridge.shutdownSession(sessionId, reason, (notification) => {
-      this.#notifications.publish(notification);
-    });
-    this.#lifecycle.abort(sessionId, reason);
+    try {
+      if (this.#ownsSessionExecution(sessionId)) {
+        await this.#bridge.shutdownSession(sessionId, reason, (notification) => {
+          this.#notifications.publish(notification);
+        });
+      }
+    } finally {
+      // Losing write authority must not leave this process's provider work alive.
+      // Aborting local work is not a durable cancellation or cleanup receipt.
+      this.#lifecycle.abort(sessionId, reason);
+    }
   }
 
   cancelAllSessions(reason = 'Runtime Host shutdown.'): Promise<void> {
@@ -530,7 +541,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     ]);
     await Promise.all(
       [...sessionIds]
-        .filter((sessionId) => this.#ownsSessionExecution(sessionId))
+        .filter(
+          (sessionId) =>
+            this.#ownsSessionExecution(sessionId) || this.#lifecycle.isActive(sessionId),
+        )
         .map((sessionId) => this.#cancelSession(sessionId, reason)),
     );
   }
@@ -562,14 +576,22 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
     for (const sessionId of [...sessionIds]) {
-      if (!this.#ownsSessionExecution(sessionId)) sessionIds.delete(sessionId);
+      if (!this.#ownsSessionExecution(sessionId) && !this.#lifecycle.isActive(sessionId)) {
+        sessionIds.delete(sessionId);
+      }
     }
     const failures: unknown[] = [];
     for (const sessionId of sessionIds) {
       try {
-        await this.#bridge.shutdownSession(sessionId, 'Runtime Host disposed.', (notification) => {
-          this.#notifications.publish(notification);
-        });
+        if (this.#ownsSessionExecution(sessionId)) {
+          await this.#bridge.shutdownSession(
+            sessionId,
+            'Runtime Host disposed.',
+            (notification) => {
+              this.#notifications.publish(notification);
+            },
+          );
+        }
       } catch (error) {
         failures.push(error);
       }

@@ -54,6 +54,7 @@ export { createInitialState, eventReducer };
 const MemoHeader = React.memo(Header);
 
 export function shouldShowRunStatus(state: TuiState): boolean {
+  if (state.runtimeAuthority?.currentRun?.status === 'recovery_required') return false;
   if (!isTuiRunActive(state)) return false;
   if (state.runPromptPresented === false) return false;
   return true;
@@ -468,6 +469,13 @@ export default function App({
     };
   }, [modelForDisplay, state.status]);
 
+  const recoveryRequired = state.runtimeAuthority?.currentRun?.status === 'recovery_required';
+  const visibleDynamicTimeline = recoveryRequired
+    ? activeDynamicTimeline.filter(
+        (item) => item.state === 'sealed' || item.kind === 'user' || item.kind === 'text',
+      )
+    : activeDynamicTimeline;
+
   return (
     <Box
       flexDirection="column"
@@ -484,7 +492,7 @@ export default function App({
         activeDynamicBlocks={activeDynamicBlocks}
         mergedStaticBlocks={mergedStaticBlocks}
         mergedStaticTimeline={mergedStaticTimeline}
-        activeDynamicTimeline={activeDynamicTimeline}
+        activeDynamicTimeline={visibleDynamicTimeline}
         onToggleReason={onToggleReason}
         onToggleToolExpand={onToggleToolExpand}
         onToggleSubagentExpand={onToggleSubagentExpand}
@@ -497,8 +505,12 @@ export default function App({
         awaitingInput={awaitingInput}
         columns={columns}
         rows={rows}
-        compactionPhase={state.compactionProgress?.phase}
+        compactionPhase={recoveryRequired ? undefined : state.compactionProgress?.phase}
       />
+
+      {recoveryRequired && (
+        <Text>Run requires recovery. Tool completion and cleanup are unconfirmed.</Text>
+      )}
 
       {/* ── Footer: run status, queued prompts, and the active interaction ── */}
       <Footer

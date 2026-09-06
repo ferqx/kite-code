@@ -685,6 +685,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly deferredTurnDeliveryOrder: string[] = [];
   readonly idleQueryRevisions: number[] = [];
   closeCalls = 0;
+  recoveryOnRunQuery = false;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
   #sessionId = '';
@@ -905,6 +906,17 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
                         this.#currentRunTerminalRevision === undefined
                           ? ('running' as const)
                           : ('completed' as const),
+                      ...(this.recoveryOnRunQuery
+                        ? {
+                            status: 'unknown' as const,
+                            finishedAtMs: revision,
+                            terminal: {
+                              reasonCode: 'recovery_required',
+                              safeRetry: false,
+                              recoveryEntry: 'reconcile' as const,
+                            },
+                          }
+                        : {}),
                       createdRevision: this.#currentRunCreatedRevision,
                       lastRevision: revision,
                       createdAtMs: this.#currentRunCreatedRevision,
@@ -921,7 +933,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         }
         if (query.type === 'get_session_projection') {
           const respond = () => {
-            const session = this.#pendingInteraction
+            const baseSession = this.#pendingInteraction
               ? projection(query.sessionId, this.#authoritativeRevision, 'waiting', {
                   ...this.#pendingInteraction,
                   sessionRevision: this.#authoritativeRevision,
@@ -931,6 +943,18 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
                 : this.#restoreActiveTurn && !this.#restoredTurnReleased
                   ? projection(query.sessionId, 1, 'running')
                   : idleProjection(query.sessionId, Math.max(2, this.#authoritativeRevision));
+            const session = this.recoveryOnRunQuery
+              ? {
+                  ...baseSession,
+                  currentRun: {
+                    runId: this.#currentRunId,
+                    initialTurnId: this.#currentRunId,
+                    activeTurnId: this.#currentRunId,
+                    status: 'recovery_required' as const,
+                    revision: this.#authoritativeRevision,
+                  },
+                }
+              : baseSession;
             this.idleQueryRevisions.push(session.revision);
             this.push(
               result(message.id, {
@@ -1680,3 +1704,40 @@ function subscriptionUpdate(subscriptionId: string, generation: number, message:
     params: { subscriptionId, generation, message },
   };
 }
+
+test('Native TUI reconciles recovery state before rejecting an accepted Run wait', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.finishNextTurnWithoutRunTerminal();
+  remote.recoveryOnRunQuery = true;
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const actions: SessionPresentationAction[] = [];
+  try {
+    await expect(
+      facade
+        .getRuntime(sessionId)!
+        .runTask('lost execution owner', { dispatch: (action) => actions.push(action) }),
+    ).rejects.toThrow('requires recovery');
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        type: 'RECONCILE_RUNTIME_PROJECTION',
+        projection: expect.objectContaining({
+          currentRun: expect.objectContaining({ status: 'recovery_required' }),
+        }),
+      }),
+    );
+    await expect(facade.getRuntime(sessionId)!.waitForRunCompletion()).rejects.toThrow(
+      'cleanup is not confirmed',
+    );
+    const starts = remote.commands.filter((command) => command === 'start_turn').length;
+    await expect(
+      facade
+        .getRuntime(sessionId)!
+        .runTask('do not resubmit while unknown', { dispatch: () => {} }),
+    ).rejects.toThrow('requires recovery');
+    expect(remote.commands.filter((command) => command === 'start_turn')).toHaveLength(starts);
+  } finally {
+    await facade.dispose();
+  }
+});

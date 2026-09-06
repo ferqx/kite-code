@@ -1574,7 +1574,7 @@ function TuiApp({
           }
           dispatchSessionLoad({
             type: 'LOCAL_TEXT',
-            text: `  ⎿  Message was not sent: ${toErrorMessage(error)}`,
+            text: `  ⎿  Task could not continue: ${toErrorMessage(error)}`,
             isError: true,
           });
         },
@@ -1737,7 +1737,9 @@ export function runTui(props: TuiBootstrapProps): void {
       maxFps: 60,
       exitOnCtrlC: false,
       kittyKeyboard: { mode: 'enabled' },
-      incrementalRendering: true,
+      // Repaint the bounded live frame. Incremental line updates can leave an old
+      // Thinking header behind when the reasoning window changes height.
+      incrementalRendering: false,
       // Ink 7.1.1 treats every CI environment as non-interactive by default,
       // even when stdout is a real PTY. Use the actual terminal capabilities so
       // PTY-backed sessions (including system tests) keep input and live rendering.

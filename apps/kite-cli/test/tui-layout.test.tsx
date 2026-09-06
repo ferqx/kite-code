@@ -7235,3 +7235,79 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).not.toContain('two.ts');
   });
 });
+
+test('settled Thinking uses its frozen duration even if an old model clock remains', async () => {
+  const block: OutputBlock = {
+    id: 77,
+    kind: 'tool_summary',
+    presentationState: 'sealed',
+    active: false,
+    tools: [],
+    hasThinking: true,
+    totalElapsedMs: 7000,
+    createdAt: Date.now() - 20000,
+    liveModelStartedAt: Date.now() - 15000,
+    summaryLine: '',
+  };
+  const view = render(
+    <OutputArea
+      activeDynamicBlocks={[block]}
+      mergedStaticBlocks={[]}
+      columns={80}
+      rows={24}
+      onToggleReason={() => {}}
+    />,
+  );
+  try {
+    expect(view.lastFrame()).toContain('Thinking 7s');
+    const frames = view.frames.length;
+    await Bun.sleep(600);
+    expect(view.frames.length).toBe(frames);
+    expect(view.lastFrame()).toContain('Thinking 7s');
+  } finally {
+    view.unmount();
+  }
+});
+
+test('recovery-required execution stops live indicators without declaring child completion', async () => {
+  const state = createInitialState();
+  const authority = activeRuntimeAuthority();
+  state.runtimeAuthority = {
+    ...authority,
+    currentRun: { ...authority.currentRun!, status: 'recovery_required' },
+  };
+  state.runStartTime = Date.now() - 120000;
+  const blocks: OutputBlock[] = [
+    { id: 1, kind: 'user', content: 'Recover this run', presentationState: 'sealed' },
+    {
+      id: 2,
+      kind: 'subagent',
+      subagentId: 'child-recovery',
+      role: 'explore',
+      task: 'UNCONFIRMED_CHILD',
+      status: 'running',
+      summary: '',
+      toolCallCount: 1,
+      durationMs: 0,
+      startedAt: state.runStartTime,
+      steps: [],
+      presentationState: 'live',
+    },
+  ];
+  state.turns = [{ blocks }];
+  state.presentationTimeline = projectOutputBlockTimeline(blocks);
+  const view = render(
+    <App state={state} dispatch={() => {}} onToggleReason={() => {}} provider={fakeProvider()} />,
+  );
+  try {
+    expect(view.lastFrame()).toContain('Run requires recovery');
+    expect(view.lastFrame()).not.toContain('Working');
+    expect(view.lastFrame()).not.toContain('UNCONFIRMED_CHILD');
+    const frames = view.frames.length;
+    await Bun.sleep(750);
+    expect(view.frames.length).toBe(frames);
+    expect(blocks[1]).toMatchObject({ status: 'running', presentationState: 'live' });
+  } finally {
+    view.unmount();
+  }
+});

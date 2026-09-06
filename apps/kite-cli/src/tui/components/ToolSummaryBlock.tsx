@@ -211,7 +211,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // Preview elapsed time locally; Runtime duration remains the settled authority.
   const liveNow = useActivityClock(isRunning) || Date.now();
   const elapsedMs =
-    block.liveModelStartedAt === undefined
+    !isRunning || block.liveModelStartedAt === undefined
       ? block.totalElapsedMs
       : block.totalElapsedMs + Math.max(0, liveNow - block.liveModelStartedAt);
   const elapsedStr = formatElapsed(elapsedMs);

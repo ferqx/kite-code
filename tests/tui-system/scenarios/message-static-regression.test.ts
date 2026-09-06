@@ -98,6 +98,9 @@ describe('TUI PTY System — terminal standalone tool Static ownership', () => {
       });
       await waitForText(() => tui.scrollback(), 'STANDALONE_STATIC_LAST', TIMEOUT);
 
+      // A visible final paragraph can still be in the mutable suffix until Run terminal.
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10000, 750);
+      await tui.settleScreen();
       const clean = stripAnsi(tui.scrollback());
       expect(clean.match(/STANDALONE_STATIC_FIRST/g)).toHaveLength(1);
       expect(clean.match(/STANDALONE_STATIC_LAST/g)).toHaveLength(1);
@@ -175,6 +178,9 @@ describe('TUI PTY System — terminal concurrent Subagent Static ownership', () 
       });
       await waitForText(() => tui.scrollback(), 'SUBAGENT_STATIC_LAST', TIMEOUT);
 
+      // A visible final paragraph can still be in the mutable suffix until Run terminal.
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10000, 750);
+      await tui.settleScreen();
       const clean = stripAnsi(tui.scrollback());
       expect(clean.match(/Delegated · 2 agents/g)).toHaveLength(1);
       expect(clean.match(/SUBAGENT_STATIC_FIRST/g)).toHaveLength(1);

@@ -782,6 +782,9 @@ class NativeTuiRuntimeClient {
     void completion.catch(() => undefined);
     try {
       await this.#ensureMutationAdmission(record);
+      if (record.projection?.currentRun?.status === 'recovery_required') {
+        throw new Error('Runtime Session requires recovery before another task can start.');
+      }
       let expectedRevision = this.#revision(record);
       let receipt: RuntimeCommandReceipt | undefined;
       const admissionDeadline = Date.now() + RUN_WAIT_DEADLINE_MS;
@@ -958,6 +961,9 @@ class NativeTuiRuntimeClient {
 
   async #waitForRunCompletion(record: NativeSessionRecord): Promise<void> {
     await this.#waitForSessionReady(record.threadId);
+    if (record.projection?.currentRun?.status === 'recovery_required') {
+      throw new Error('Runtime Session requires recovery; cleanup is not confirmed.');
+    }
     if (record.runPromise) {
       await record.runPromise;
       return;
@@ -971,6 +977,9 @@ class NativeTuiRuntimeClient {
   ): Promise<void> {
     while (!this.#closed && Date.now() < deadline) {
       if (await this.#queryRemoteIdle(record)) return;
+      if (record.projection?.currentRun?.status === 'recovery_required') {
+        throw new Error('Runtime Session requires recovery; cleanup is not confirmed.');
+      }
       await Bun.sleep(25);
     }
     throw new Error('Runtime execution did not reach its cleanup barrier.');
@@ -1013,6 +1022,8 @@ class NativeTuiRuntimeClient {
           continue;
         }
         if (result.run.status === 'unknown') {
+          // Refresh the authoritative recovery projection before ending the local wait.
+          await this.#queryRemoteIdle(record);
           accepted.rejectRun(new Error('Runtime Run requires recovery before completion.'));
           return;
         }

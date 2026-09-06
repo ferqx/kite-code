@@ -722,3 +722,192 @@ async function waitForTerminal(
   }
   throw new Error(`Runtime Session did not reach terminal state: ${sessionId}`);
 }
+
+test('continuous Session writes renew a valid lease without waiting for the timer', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-progress-renew-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const model = createMockModelServer();
+  let clock = Date.now();
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath: join(root, 'kite-session.sqlite'),
+    hostInstanceId: 'progress-owner',
+    executionLeaseMs: 60,
+    renewIntervalMs: 20,
+    now: () => clock,
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: join(root, 'kite-session.sqlite'),
+    storageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'model')],
+  });
+  const runtime = client(owner, admission(workspace), 'progress-client');
+  const sessionId = 'progress-session';
+  try {
+    await createSession(runtime, sessionId, workspace);
+    const generation = storageOwner.recovery.inspect(sessionId).authority.controllerGeneration;
+    // No awaits: model/tool continuations can perform several synchronous
+    // commits before the event loop services a renewal timer.
+    for (let index = 0; index < 12; index++) {
+      clock += 10;
+      storageOwner.runWithSessionExecution(sessionId, () =>
+        storageOwner.storage.sessions.setSessionName(sessionId, `progress-${index}`),
+      );
+    }
+    const authority = storageOwner.recovery.inspect(sessionId).authority;
+    expect(authority.status).toBe('active');
+    expect(authority.controllerGeneration).toBe(generation);
+    expect(authority.leaseUntilMs!).toBeGreaterThan(clock);
+    expect(storageOwner.storage.sessions.listSessions()).toContainEqual(
+      expect.objectContaining({ name: 'progress-11' }),
+    );
+    clock += 61;
+    expect(() =>
+      storageOwner.runWithSessionExecution(sessionId, () =>
+        storageOwner.storage.sessions.setSessionName(sessionId, 'must-not-write'),
+      ),
+    ).toThrow('expired');
+    expect(storageOwner.storage.sessions.listSessions()).not.toContainEqual(
+      expect.objectContaining({ name: 'must-not-write' }),
+    );
+  } finally {
+    storageOwner.releaseExecutions(false);
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    model.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('execution lease loss aborts all three real subagent model connections and preserves recovery facts', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-lease-model-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  let requests = 0;
+  let disconnected = 0;
+  const responseStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const model = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      const body = (await request.json()) as {
+        stream?: boolean;
+        messages?: Array<{ role: string; content: unknown }>;
+      };
+      requests++;
+      if (requests === 1) {
+        const calls = Array.from({ length: 3 }, (_, index) => ({
+          index,
+          id: `lease-child-${index}`,
+          type: 'function',
+          function: {
+            name: 'task',
+            arguments: JSON.stringify({
+              name: `Lease child ${index}`,
+              subagent_type: 'explore',
+              task: `Inspect independent area ${index}.`,
+            }),
+          },
+        }));
+        return body.stream
+          ? new Response(
+              `data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', tool_calls: calls } }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            )
+          : Response.json({
+              choices: [
+                {
+                  message: { role: 'assistant', content: '', tool_calls: calls },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            responseStreams.push(controller);
+            controller.enqueue(
+              new TextEncoder().encode(
+                body.stream
+                  ? 'data: {"choices":[{"index":0,"delta":{"content":"pending"}}]}\n\n'
+                  : '{"choices":[',
+              ),
+            );
+          },
+          cancel() {
+            disconnected++;
+          },
+        }),
+        { headers: { 'content-type': body.stream ? 'text/event-stream' : 'application/json' } },
+      );
+    },
+  });
+  let clock = Date.now();
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath: join(root, 'kite-session.sqlite'),
+    hostInstanceId: 'lease-model-owner',
+    executionLeaseMs: 60,
+    renewIntervalMs: 20,
+    now: () => clock,
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: join(root, 'kite-session.sqlite'),
+    storageOwner,
+    workspaces: [runtimeInput(workspace, `http://127.0.0.1:${model.port}`, 'pending-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'lease-model-client');
+  const sessionId = 'lease-model-session';
+  const waitUntil = async (condition: () => boolean) => {
+    const deadline = Date.now() + 3000;
+    while (!condition() && Date.now() < deadline) await Bun.sleep(10);
+    expect(condition()).toBe(true);
+  };
+  try {
+    await createSession(runtime, sessionId, workspace);
+    await runtime.command(start('lease-model-run', sessionId, 'wait for model'));
+    const runId = storageOwner.storage.runs!.getActive(sessionId)!.runId;
+    await waitUntil(() => requests === 4);
+    clock += 61;
+    await waitUntil(
+      () => storageOwner.recovery.inspect(sessionId).authority.status === 'recovery_required',
+    );
+    await waitUntil(() => disconnected === 3);
+    const run = await runtime.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_run',
+      sessionId,
+      runId,
+    });
+    expect(run).toMatchObject({ status: 'ok', run: { status: 'unknown' } });
+    expect(storageOwner.recovery.inspect(sessionId).authority.cleanupConfirmed).toBe(false);
+    expect(
+      storageOwner.storage.sessions
+        .loadEventsStrict(sessionId)
+        .some(({ event }) => event.type === 'run.completed' || event.type === 'turn.completed'),
+    ).toBe(false);
+    expect(requests).toBe(4);
+    expect(
+      storageOwner.storage.sessions
+        .loadEventsStrict(sessionId)
+        .filter(({ event }) => event.type === 'subagent.started'),
+    ).toHaveLength(3);
+  } finally {
+    for (const stream of responseStreams) {
+      try {
+        stream.close();
+      } catch {}
+    }
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    model.stop(true);
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -146,7 +146,9 @@ describe('runtime host package boundary', () => {
         forkSession: () => ({ status: 'applied', copiedCount: 0 }) as const,
       },
     } as RuntimeStorage;
+    let ownsExecution = true;
     const host = createRuntimeHost({
+      ownsSessionExecution: () => ownsExecution,
       storage,
       modules: testRuntimeModules(() => bridge),
     });
@@ -224,6 +226,38 @@ describe('runtime host package boundary', () => {
     expect(recovered.status === 'ok' && recovered.run && 'finishedAtMs' in recovered.run).toBe(
       false,
     );
+    expect(bridge.recoveries).toEqual(['session-1']);
+    ownsExecution = false;
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_run',
+        sessionId: 'session-1',
+        runId: 'run-1',
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      run: { status: 'unknown', terminal: { reasonCode: 'recovery_required' } },
+    });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'running',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [] });
+    await expect(
+      host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_runs',
+        sessionId: 'session-1',
+        status: 'unknown',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ status: 'ok', runs: [{ runId: 'run-1', status: 'unknown' }] });
+    expect(run.status).toBe('running');
     expect(bridge.recoveries).toEqual(['session-1']);
     await host[Symbol.asyncDispose]();
   });
@@ -1567,4 +1601,67 @@ async function until(predicate: () => boolean): Promise<void> {
     await Promise.resolve();
   }
   throw new Error('condition was not reached');
+}
+
+for (const failure of ['ownership_lost', 'shutdown_write_failed'] as const) {
+  test(`local provider cleanup survives ${failure}`, async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 0));
+    let ownsExecution = true;
+    let aborted = false;
+    let cleaned = false;
+    let shutdownWrites = 0;
+    const provider = deferred();
+    const cleanup = deferred();
+    bridge.prepareImplementation = async (command) => ({
+      receipt: applied(command.commandId, 'session-1', 1),
+      execution: {
+        sessionId: 'session-1',
+        operationId: command.commandId,
+        committedRevision: 1,
+        operation: 'turn',
+        run: async (signal) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              provider.resolve();
+            },
+            { once: true },
+          );
+          await provider.promise;
+          await cleanup.promise;
+          cleaned = true;
+        },
+      },
+    });
+    bridge.shutdownImplementation = async () => {
+      shutdownWrites++;
+      if (failure === 'shutdown_write_failed') throw new Error('write fenced');
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+      ownsSessionExecution: () => ownsExecution,
+    });
+    try {
+      await host.command(startCommand('cleanup-turn', 'session-1', 0));
+      await until(() => host.isSessionOperationActive('session-1'));
+      if (failure === 'ownership_lost') ownsExecution = false;
+      const cancel = host.cancelAllSessions('stop local work');
+      if (failure === 'shutdown_write_failed') await expect(cancel).rejects.toThrow('write fenced');
+      else await cancel;
+      expect(aborted).toBe(true);
+      expect(cleaned).toBe(false);
+      if (failure === 'ownership_lost') expect(shutdownWrites).toBe(0);
+      cleanup.resolve();
+      await host.waitForSessionIdle('session-1');
+      expect(cleaned).toBe(true);
+    } finally {
+      provider.resolve();
+      cleanup.resolve();
+      bridge.shutdownImplementation = async () => {};
+      await host[Symbol.asyncDispose]();
+    }
+  });
 }

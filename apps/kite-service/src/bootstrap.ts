@@ -894,6 +894,7 @@ export interface KiteRuntimeStorageOwner {
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly setExecutionLossHandler?: (handler: (sessionId: string) => void) => void;
   readonly ownedSessionIds?: () => readonly string[];
   readonly releaseExecutions?: (cleanupConfirmed: boolean) => void;
   readonly disposeStorage?: () => void;
@@ -1218,8 +1219,9 @@ function createKiteRuntimeHost(
   ) => RuntimeHostExecutionBridge,
   ownsSessionExecution?: (sessionId: string) => boolean,
   runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result,
+  setExecutionLossHandler?: (handler: (sessionId: string) => void) => void,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
-  return createRuntimeHost({
+  const host = createRuntimeHost({
     storage,
     modules: createKiteRuntimeModules((context) =>
       createBridge(context, createBuiltinToolCatalogProjection(context.capabilityRegistrySnapshot)),
@@ -1228,6 +1230,12 @@ function createKiteRuntimeHost(
     ...(ownsSessionExecution ? { ownsSessionExecution } : {}),
     ...(runWithSessionExecution ? { runWithSessionExecution } : {}),
   });
+  setExecutionLossHandler?.((sessionId) => {
+    void host.cancelSession(sessionId, 'Session execution ownership lost.').catch((error) => {
+      console.error('Local execution cleanup after ownership loss failed.', { sessionId, error });
+    });
+  });
+  return host;
 }
 
 function createKiteRuntimeModules(
@@ -1322,6 +1330,7 @@ function createKiteCliRuntimeHost(
     },
     owner.ownsSessionExecution,
     owner.runWithSessionExecution,
+    owner.setExecutionLossHandler,
   );
   return host;
 }
@@ -1720,6 +1729,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     },
     owner.ownsSessionExecution,
     owner.runWithSessionExecution,
+    owner.setExecutionLossHandler,
   );
   const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
     authorize: async () => ({

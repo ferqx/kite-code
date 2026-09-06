@@ -152,8 +152,37 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       expect(screenContains(beforeApprove, externalFile)).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 
-      // Approve the tool (default "允许一次" at index 0, press Enter)
+      // Measure the actual external effect separately from UI acknowledgement.
+      const approvalSubmittedAt = performance.now();
       tui.write('\r');
+      await waitForCondition(
+        () => existsSync(externalFile),
+        'approved child write to reach the filesystem',
+        TIMEOUT,
+        10,
+      );
+      const approvalToEffectMs = Math.round(performance.now() - approvalSubmittedAt);
+      expect(readFileSync(externalFile, 'utf8')).toContain('Test: sub-agent external write');
+      const persisted = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Test subagent external file write authorization'),
+      );
+      expect(persisted).toBeDefined();
+      const granted = persisted!.events.findIndex((event) => event.type === 'approval.granted');
+      const started = persisted!.events.findIndex(
+        (event, index) => index > granted && event.type === 'tool.started',
+      );
+      expect(granted).toBeGreaterThanOrEqual(0);
+      expect(persisted!.events[granted]?.owner).toEqual(
+        expect.objectContaining({ kind: 'subagent_tool', toolCallId: 'call_subagent_write' }),
+      );
+      expect(started).toBeGreaterThan(granted);
+      console.log(
+        JSON.stringify({
+          approvalToEffectMs,
+          granted: persisted!.events[granted],
+          started: persisted!.events[started],
+        }),
+      );
 
       // The optimistic `approving` projection may be shorter than one Ink
       // frame.  Require the first canonical post-grant child state instead:
@@ -945,7 +974,7 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       );
 
       const output = stripAnsi(tui.scrollback());
-      expect(output).not.toContain('Message was not sent: Internal error');
+      expect(output).not.toContain('Task could not continue: Internal error');
       expect(output).not.toContain('Cancellation was not accepted');
       expect(output).not.toContain('Invalid AcceptedPresentationEnvelope');
       const successorPromptCount = output.split('Run after cancellation cleanup').length - 1;

@@ -1259,8 +1259,8 @@ function projectReasoningActivity(
     hasThought: true,
     hasThinking: true,
     latestActivity: { kind: 'thinking', text },
-    totalElapsedMs:
-      summary.modelMs ?? Math.max(summary.totalElapsedMs, Date.now() - summary.createdAt),
+    // The active interval is already represented by liveModelStartedAt.
+    // Only model.responded adds its authoritative duration to the accumulator.
     ...(event.state === 'completed' ? appendCompletedReasoning(summary, text) : {}),
   });
 }

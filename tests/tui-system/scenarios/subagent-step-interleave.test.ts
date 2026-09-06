@@ -238,7 +238,7 @@ describe('TUI PTY System — concurrent same-name Subagent steps', () => {
       const settled = stripAnsi(tui.scrollback());
       expect(settled.match(/INTERLEAVED_PARENT_DONE/g)).toHaveLength(1);
       expect(settled).not.toContain('Encountered two children with the same key');
-      expect(settled).not.toContain('Message was not sent');
+      expect(settled).not.toContain('Task could not continue');
 
       const persisted = requirePersistedRuntimeReady(
         observePersistedTurnEvents(workspace, 'Run interleaved same-name child steps'),

@@ -29,7 +29,10 @@
   收到该snapshot并完成ready，不能只更新registry后永久等待。
 - KASD App Server可注入App-owned `ownsSessionExecution(sessionId)` predicate；Host hydrate/query仍可返回Store read DTO，但只有predicate为真的
   projection进入本进程notification registry，`cancelAll`与dispose也只调用这些Session的shutdown。默认predicate恒真，旧single-Service语义不变。
+  `get_run` 与 `list_runs` 每次查询同时核对本进程恢复记录和当前执行权；曾恢复成功但后来失去执行权的非终态 Run 以
+  `unknown / recovery_required` 返回，不能继续使用旧 `running`。该投影不改写持久 Run、不宣称工具已停止或清理完成，也不触发自动重放。
   predicate只读取App已取得的generation map，不自行acquire、renew或持久化authority。
+  取消和dispose仍须停止本进程已经启动的Provider工作，即使执行权丢失或持久取消失败。失去执行权时只停止本地操作并等待清理，不替其他owner写取消事件；只读观察过的外部Session不会因此被取消。
 
 ## 不拥有职责
 

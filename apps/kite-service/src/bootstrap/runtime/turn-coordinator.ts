@@ -337,11 +337,16 @@ export async function* executeRuntimeTurn(
     runCancelled = true;
     exitStatus = 'aborted';
     const events = eventsForRunCancellation(kernel.getState(), reason, cause);
-    kernel.processEventBatch(events);
-    const canonicalEvents = [...kernel.getLastAppliedEvents()];
-    for (const event of canonicalEvents) collector.recordRuntime(event);
-    abortExecution(reason);
-    return canonicalEvents;
+    try {
+      kernel.processEventBatch(events);
+      const canonicalEvents = [...kernel.getLastAppliedEvents()];
+      for (const event of canonicalEvents) collector.recordRuntime(event);
+      return canonicalEvents;
+    } finally {
+      // A fenced/failed durable cancellation must still stop local Provider I/O.
+      // Only successfully committed events above may be published as terminal facts.
+      abortExecution(reason);
+    }
   };
   const cancelAfterCommittedCommand = (
     events: readonly RuntimeEvent[],
@@ -395,7 +400,15 @@ export async function* executeRuntimeTurn(
     // The public AbortSignal is a real cancellation boundary, not merely a
     // transport hint. Persist the same durable cancellation transaction used
     // by the TUI before unblocking any effect/interaction wait.
-    externalCancellationEvents = cancelRun(externalAbortReason(), 'user');
+    try {
+      externalCancellationEvents = cancelRun(externalAbortReason(), 'user');
+    } catch (error) {
+      // Do not throw from AbortSignal dispatch: other Provider abort listeners
+      // must still run, even after this Session has lost write authority.
+      console.error('External cancellation could not be persisted; continuing local abort.', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
   if (input.signal?.aborted) forwardExternalAbort();
   else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });

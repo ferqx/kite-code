@@ -74,7 +74,7 @@ describe('StatusBar', () => {
     expect(output).not.toContain('123,456');
   });
 
-  test('updates Working elapsed time between parent updates', async () => {
+  test('animates Working without displaying elapsed time', async () => {
     const view = render(
       React.createElement(StatusBar, {
         runStatus: fakeRunStatus({ elapsedMs: 0, runTokenDelta: 0 }),
@@ -86,7 +86,8 @@ describe('StatusBar', () => {
     await Bun.sleep(1_250);
 
     expect(view.lastFrame()).toContain('Working');
-    expect(view.lastFrame()).toContain('00:01');
+    expect(view.lastFrame()).toMatch(/^[·⋄⋆✧] Working$/);
+    expect(view.lastFrame()).not.toMatch(/\d+:\d+/);
     expect(view.frames.length).toBeGreaterThan(initialWriteCount);
     view.unmount();
   });

@@ -47,6 +47,7 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
   runWithSessionExecution<Result>(sessionId: string, operation: () => Result): Result;
   readSnapshot<Result>(operation: () => Result): Result;
   ownsSessionExecution(sessionId: string): boolean;
+  setExecutionLossHandler(handler: (sessionId: string) => void): void;
   readonly recovery: KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>['recovery'];
   ownedSessionIds(): readonly string[];
   releaseExecutions(cleanupConfirmed: boolean): void;
@@ -84,6 +85,10 @@ export function createKiteSessionAppServerStorage(input: {
   const target = input.target;
   const owned = new Map<string, OwnedExecution>();
   const pendingRecoveryIdentities = new Map<string, string>();
+  let executionLossHandler: ((sessionId: string) => void) | undefined;
+  const loseExecution = (sessionId: string): void => {
+    if (owned.delete(sessionId)) executionLossHandler?.(sessionId);
+  };
   let hostClosed = false;
   let closed = false;
 
@@ -115,10 +120,31 @@ export function createKiteSessionAppServerStorage(input: {
       current.connectionGeneration === connectionGeneration
     ) {
       if (current.leaseUntilMs === null || current.leaseUntilMs <= now()) {
+        loseExecution(sessionId);
         throw new KiteAppServerSessionError(
           'recovery_required',
           'Session execution lease expired before renewal.',
         );
+      }
+      // Synchronous tool/Store continuations may postpone timer callbacks.
+      // Renew from real mutation progress while the existing lease is valid;
+      // never revive an expired lease or bypass the generation fence above.
+      if (current.leaseUntilMs - now() <= executionLeaseMs - renewIntervalMs) {
+        const renewed = target.authority.renew({
+          sessionId,
+          expectedRevision: current.revision,
+          controllerGeneration: current.controllerGeneration,
+          hostInstanceId: input.hostInstanceId,
+          leaseUntilMs: leaseUntil(),
+        });
+        if (renewed.status !== 'acquired') {
+          loseExecution(sessionId);
+          throw new KiteAppServerSessionError(
+            'recovery_required',
+            'Session execution lease could not be renewed.',
+          );
+        }
+        return bind(renewed.authority);
       }
       return bind(current);
     }
@@ -167,7 +193,7 @@ export function createKiteSessionAppServerStorage(input: {
           current.clientId !== clientId ||
           current.connectionGeneration !== connectionGeneration
         ) {
-          owned.delete(sessionId);
+          loseExecution(sessionId);
           continue;
         }
         const renewed = target.authority.renew({
@@ -178,13 +204,27 @@ export function createKiteSessionAppServerStorage(input: {
           leaseUntilMs: leaseUntil(),
         });
         if (renewed.status !== 'acquired') {
-          owned.delete(sessionId);
+          console.error('Session execution renewal lost ownership.', {
+            sessionId,
+            status: renewed.status,
+            previousLeaseUntilMs: current.leaseUntilMs,
+            observedAtMs: now(),
+          });
+          loseExecution(sessionId);
           continue;
         }
         execution.record = renewed.authority;
         target.refreshExecution(execution.handle, renewed.authority);
-      } catch {
-        owned.delete(sessionId);
+      } catch (error) {
+        console.error('Session execution renewal failed.', {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+          cause:
+            error instanceof Error && error.cause instanceof Error
+              ? error.cause.message
+              : undefined,
+        });
+        loseExecution(sessionId);
       }
     }
   }, renewIntervalMs);
@@ -348,6 +388,7 @@ export function createKiteSessionAppServerStorage(input: {
     hostClosed = true;
     clearInterval(renewTimer);
     pendingRecoveryIdentities.clear();
+    executionLossHandler = undefined;
     target.close();
   };
 
@@ -362,6 +403,9 @@ export function createKiteSessionAppServerStorage(input: {
     runWithSessionExecution,
     readSnapshot: target.readSnapshot,
     ownsSessionExecution: (sessionId) => owned.has(sessionId),
+    setExecutionLossHandler: (handler) => {
+      executionLossHandler = handler;
+    },
     recovery: target.recovery,
     ownedSessionIds: () => Object.freeze([...owned.keys()]),
     releaseExecutions,

@@ -192,6 +192,12 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       await waitForText(() => tui.viewport(), 'Successor completed once.', 15_000);
       await waitForTuiReady(tui);
 
+      // A single correct progress frame is insufficient: retain every parsed
+      // successor frame and reject duplicated live tool headers throughout.
+      for (const frame of tui.screenFramesSince(progressFrames)) {
+        expect((frame.match(/^.*Bash.*$/gm) ?? []).length).toBeLessThanOrEqual(1);
+        expect((frame.match(/Successor completed once\./g) ?? []).length).toBeLessThanOrEqual(1);
+      }
       const finalScreen = stripAnsi(tui.scrollback());
       expect(occurrenceCount(finalScreen, 'continue with successor')).toBe(1);
       expect(occurrenceCount(finalScreen, 'Successor completed once.')).toBe(1);

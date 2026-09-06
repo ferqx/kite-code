@@ -63,7 +63,7 @@ describe('TUI PTY System — presentation closeout races', () => {
       expect(scrollback.split('terminal before receipt')).toHaveLength(2);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       expect(screenContains(tui.viewport(), 'Working')).toBe(false);
-      expect(screenContains(tui.viewport(), 'Message was not sent')).toBe(false);
+      expect(screenContains(tui.viewport(), 'Task could not continue')).toBe(false);
     },
     TIMEOUT,
   );
