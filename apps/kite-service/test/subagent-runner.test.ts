@@ -18,7 +18,10 @@ import {
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { appApprovalBindingForPresentation } from '#kite-service/bootstrap/runtime/approval-binding';
+import {
+  appApprovalBindingForPresentation,
+  isAuthenticAppApprovalBinding,
+} from '#kite-service/bootstrap/runtime/approval-binding';
 import {
   executeSubagentResumeWithCoreToolAdapter as resumeSubAgentUnderTest,
   executeSubagentStartWithCoreToolAdapter as runSubAgentUnderTest,
@@ -1433,6 +1436,7 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
+                    timeout: 60_000,
                   },
                 },
               ],
@@ -1468,6 +1472,16 @@ describe('SubAgentRunner integration', () => {
       expect(result.blocked?.toolName).toBe('shell_execute');
       expect(result.blocked?.toolCallId).toBe('tc-verify-needs-approval');
       expect(result.blocked?.command).toBe('bun run typecheck');
+      expect(result.blocked?.args).toEqual({
+        command: 'bun run typecheck',
+        description: 'Run typecheck',
+      });
+      expect(
+        isAuthenticAppApprovalBinding({
+          binding: result.blocked!.approvalBinding!,
+          blocked: result.blocked!,
+        }),
+      ).toBe(true);
       expect(result.blocked?.continuation.messages.length).toBeGreaterThan(0);
       expect(shellExecutions).toBe(0);
       // 修复后 blocked 路径暂停子 agent，不发射 error 事件。

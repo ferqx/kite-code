@@ -1110,7 +1110,9 @@ async function executeCoreSubagentToolAdapter(
                 result,
                 pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
                 pendingRequest.name,
-                toolArgs,
+                // Approval facts bind parsed execution arguments, not the raw
+                // model call (which may contain stripped/defaulted fields).
+                pendingRequest.args as Record<string, unknown>,
                 {
                   id,
                   role: input.role,

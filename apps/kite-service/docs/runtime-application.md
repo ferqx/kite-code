@@ -19,6 +19,8 @@ connection/subscription/broker binding；quiesce、cancel、drain与dispose只�
 当前source/release默认组合App Server多连接Session Store。Coordinator、per-Workspace Worker与独立Web Gateway都不是普通启动拓扑；只有
 显式legacy Service仍在发布ready前把Web static surface挂到loopback listener，并与Runtime/API一起随Service关闭。
 
+子Agent在工具审批前挂起时，continuation中的blocked参数必须使用同一次解析得到的`pendingRequest.args`，与Kernel审批绑定和持久工具调用一致。原始模型参数仅保留在模型消息中；被schema移除的字段不能重新进入审批或恢复执行，也不能通过放宽digest校验补救。Shell审批等待时child Driver已清理，已批准的child工具由Host先执行，再恢复child模型循环；取消此窗口必须停止Host工具并保持父Run取消，不能为尚未恢复的Driver制造第二次清理事实。
+
 ## Workspace、Trust 与 routing
 
 Service neutral boot不解析请求Workspace的config/MCP/Skill或启动Workspace runtime。第一阶段，authenticated App Control
