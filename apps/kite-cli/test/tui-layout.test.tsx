@@ -5898,7 +5898,7 @@ describe('App', () => {
     const view = render(
       <App state={initial} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    await waitForFrameText(view.lastFrame, '⋄ Working');
+    await waitForFrameText(view.lastFrame, 'Working');
     expect(view.lastFrame()?.match(/Thinking /g)).toHaveLength(1);
 
     view.rerender(
@@ -6307,7 +6307,7 @@ describe('App', () => {
         <Text>footer-input-marker</Text>
       </App>,
     );
-    await waitForFrameText(view.lastFrame, '⋄ Working');
+    await waitForFrameText(view.lastFrame, 'Working');
 
     view.rerender(
       <App
@@ -6321,7 +6321,7 @@ describe('App', () => {
     );
 
     const overlayFrame = view.lastFrame() ?? '';
-    expect(overlayFrame).toContain('⋄ Working');
+    expect(overlayFrame).toContain('Working');
     expect(overlayFrame).not.toContain('footer-input-marker');
     expect(overlayFrame).toContain('Help');
   });
