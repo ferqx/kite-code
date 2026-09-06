@@ -288,7 +288,9 @@ const webSocketFixture = {
 const stdioFixture = {
   name: 'App stdio child',
   create: async (): Promise<MatrixFixture> => {
-    const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-transport-matrix-'));
+    const root = realpathSync.native(
+      mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-transport-matrix-')),
+    );
     const home = join(root, 'home');
     const workspace = join(root, 'workspace');
     const checkpointPath = join(root, 'runtime.sqlite');
