@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { toAcceptedPresentationEnvelope } from '@kite-ai/runtime-client';
 import { isAcceptedPresentationEnvelope, isRuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
+import { RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_ } from '@kite-ai/runtime-protocol';
 import { runtimeClientEventCoverageEntries } from '../src/runtime-client/event-coverage';
 import { projectRuntimeClientEvent } from '../src/runtime-client/event-projector';
 
@@ -65,6 +67,60 @@ test('projects every client-visible Kernel event into a valid accepted presentat
       }),
       `${type} projection must be accepted with lifecycle identity`,
     ).toBe(true);
+  }
+});
+
+test('accepts multiline child names and outcomes across projection, wire and client boundaries', () => {
+  const text = '第一项 finding\n第二项\r\n\tindented detail';
+  for (const type of ['subagent.started', 'subagent.completed', 'subagent.failed'] as const) {
+    const projected = projectRuntimeClientEvent(
+      {
+        type,
+        subagent: { ...SUBAGENT, name: text, summary: text },
+      } as RuntimeEvent,
+      { sessionRevision: 1 },
+    );
+    const decoded = RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_.parse({
+      type: 'notification',
+      durability: 'durable',
+      sessionId: 'child-results',
+      revision: 1,
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      session: {
+        schema: 'kite.runtime-projection.v2',
+        sessionId: 'child-results',
+        revision: 1,
+        lifecycle: 'open',
+        sessionCommandGrantCount: 0,
+        interactionQueue: { revision: 1, interactions: [] },
+      },
+      event: projected,
+    });
+    if (decoded.type !== 'notification' || decoded.durability !== 'durable') {
+      throw new Error('Expected a durable child notification');
+    }
+    const envelope = toAcceptedPresentationEnvelope(
+      {
+        schema: 'kite.runtime-notification.v2',
+        durability: 'durable',
+        sessionId: decoded.sessionId,
+        revision: decoded.revision,
+        runId: decoded.runId,
+        taskId: decoded.taskId,
+        turnId: decoded.turnId,
+        projection: { kind: 'turn', session: decoded.session, event: decoded.event },
+      },
+      1,
+    );
+    expect(envelope?.event).toEqual(projected);
+    const field = type === 'subagent.started' ? 'name' : 'summary';
+    expect((envelope?.event as unknown as Record<string, unknown>)[field]).toBe(text);
+    for (const invalid of ['', 'unsafe\x1b[2J', 'x'.repeat(8_193)]) {
+      expect(isRuntimeClientEvent({ ...projected, [field]: invalid })).toBe(false);
+    }
+    expect(isRuntimeClientEvent({ ...projected, subagentId: 'child\nother' })).toBe(false);
   }
 });
 

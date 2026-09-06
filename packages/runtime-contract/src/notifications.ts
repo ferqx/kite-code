@@ -1046,7 +1046,7 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value.role === 'plan' ||
           value.role === 'code' ||
           value.role === 'review') &&
-        isBoundedString(value.name)
+        isBoundedUserText(value.name, 8_192)
       );
     case 'subagent.phase':
       return (
@@ -1120,7 +1120,7 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       return (
         hasExactKeys(value, ['type', 'subagentId', 'summary', 'toolCallCount', 'durationMs']) &&
         isIdentifier(value.subagentId) &&
-        isBoundedString(value.summary) &&
+        isBoundedUserText(value.summary, 8_192) &&
         isNonNegativeSafeInteger(value.toolCallCount) &&
         isNonNegativeSafeInteger(value.durationMs)
       );
@@ -1135,7 +1135,7 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           ),
         ) &&
         isIdentifier(value.subagentId) &&
-        isBoundedString(value.summary) &&
+        isBoundedUserText(value.summary, 8_192) &&
         (!Object.hasOwn(value, 'toolCallCount') || isNonNegativeSafeInteger(value.toolCallCount)) &&
         (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs)) &&
         (!Object.hasOwn(value, 'diagnostic') || isRuntimeClientSubagentDiagnostic(value.diagnostic))

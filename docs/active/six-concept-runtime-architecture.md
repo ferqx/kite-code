@@ -37,6 +37,8 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-contract` 是 client-facing 的 App semantic contract，不是 wire protocol。command、query、可序列化 subscription spec、封闭 client event 与 projection 分别位于独立模块；presentation/capability/observability 只携带中立数据。Contract 不包含 Kernel state、Host lifecycle、Provider handle、SQLite 类型、wire envelope 或 TUI block。
 
+子Agent名称与完成/失败摘要是展示文本：Contract与Protocol均保留正常换行、回车和制表符，长度上限为8192字符；身份字段仍禁止控制字符。Service投影、Protocol解码和`AcceptedPresentationEnvelope`接收必须对同一多行结果一致接受，不能让正常子任务结果终止客户端订阅。空必填文本、超长文本和终端控制序列仍拒绝。组合回归位于`apps/kite-service/test/runtime-client-event-coverage.test.ts`，PTY验证子Agent多行结果进入父Agent并完成整轮。
+
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
 ## Runtime Server 与 Local Service client contract：十六个workspace、一个当前 concrete composition

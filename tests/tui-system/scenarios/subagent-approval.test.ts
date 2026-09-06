@@ -681,14 +681,17 @@ describe('TUI PTY System — Bounded Sub-agent Finalization', () => {
                 { toolCallId: `call_bounded_read_${DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS}` },
               ],
             },
-            message: { content: 'BOUNDED_CHILD_FINAL' },
+            message: { content: 'BOUNDED_CHILD_FINAL\n第二项发现\n- multiline child result' },
           };
         },
       },
       {
         expectedRequest: {
           toolResults: [
-            { toolCallId: 'call_bounded_explore', contentIncludes: ['BOUNDED_CHILD_FINAL'] },
+            {
+              toolCallId: 'call_bounded_explore',
+              contentIncludes: ['BOUNDED_CHILD_FINAL', '第二项发现', 'multiline child result'],
+            },
           ],
         },
         message: { content: 'BOUNDED_PARENT_FINAL' },
@@ -967,6 +970,9 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
         type === 'capability.subagent_cleanup_completed' ? [index] : [],
       );
       expect(cleanupIndexes).toHaveLength(4);
+      for (const index of cleanupIndexes) {
+        expect(persisted.events[index]).toMatchObject({ cleanupConfirmed: true });
+      }
       expect(successorMessageIndex).toBeGreaterThan(Math.max(...cleanupIndexes));
       expect(types).not.toContain('capability.execution_unknown');
     },
