@@ -41,6 +41,7 @@ permissions:
 
 jobs:
   native-probe:
+    timeout-minutes: 30
     env:
       QUALIFICATION_REPOSITORY: ${{ github.repository }}
       QUALIFICATION_REPOSITORY_ID: ${{ github.repository_id }}

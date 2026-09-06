@@ -44,14 +44,27 @@ describe('CI Bun baseline', () => {
     }
   });
 
-  test('cancels stale Required runs without cancelling formal evidence workflows', () => {
-    const required = readFileSync(join(workflowRoot, 'required.yml'), 'utf8');
-    expect(required).toMatch(
-      /group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/u,
-    );
-    expect(required).toContain('cancel-in-progress: true');
+  test('cancels stale ordinary checks without cancelling formal evidence workflows', () => {
+    for (const name of [
+      'required.yml',
+      'mcp-native-keyring-smoke.yml',
+      'runtime-stdio-smoke.yml',
+      'runtime-transport-qualification.yml',
+      'session-log-acl-smoke.yml',
+    ]) {
+      const source = readFileSync(join(workflowRoot, name), 'utf8');
+      expect(source, name).toMatch(
+        /group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/u,
+      );
+      expect(source, name).toContain('cancel-in-progress: true');
+    }
 
-    for (const name of ['runtime-resilience-qualification.yml', 'release-candidate.yml']) {
+    for (const name of [
+      'runtime-resilience-qualification.yml',
+      'release-candidate.yml',
+      'platform-capability-probe.yml',
+      'execution-boundary-conformance.yml',
+    ]) {
       const source = readFileSync(join(workflowRoot, name), 'utf8');
       expect(source, name).not.toContain('cancel-in-progress: true');
     }
@@ -59,8 +72,32 @@ describe('CI Bun baseline', () => {
 
   test('keeps the native keyring workflow on the qualification-owned test path', () => {
     const workflow = readFileSync(join(workflowRoot, 'mcp-native-keyring-smoke.yml'), 'utf8');
+    expect(workflow).toMatch(/push:\n\s+branches: \[main\]/u);
     expect(workflow).toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');
     expect(workflow).not.toContain('tests/mcp-keyring-platform-smoke.test.ts');
+  });
+
+  test('bounds platform jobs and keeps stdio owned by one workflow', () => {
+    const expectedTimeouts = new Map([
+      ['execution-boundary-conformance.yml', 20],
+      ['platform-capability-probe.yml', 30],
+      ['runtime-stdio-smoke.yml', 15],
+      ['runtime-transport-qualification.yml', 15],
+      ['session-log-acl-smoke.yml', 15],
+    ]);
+    for (const [name, timeout] of expectedTimeouts) {
+      const source = readFileSync(join(workflowRoot, name), 'utf8');
+      expect(source, name).toContain(`timeout-minutes: ${timeout}`);
+    }
+
+    const stdio = readFileSync(join(workflowRoot, 'runtime-stdio-smoke.yml'), 'utf8');
+    const transport = readFileSync(
+      join(workflowRoot, 'runtime-transport-qualification.yml'),
+      'utf8',
+    );
+    expect(stdio).toContain('bun run test:runtime:stdio');
+    expect(transport).not.toContain('bun run test:runtime:stdio');
+    expect(transport).not.toContain('.github/workflows/runtime-stdio-smoke.yml');
   });
 
   test('keeps execution-boundary triggers and commands on current test owners', () => {

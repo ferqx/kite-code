@@ -32,6 +32,7 @@ permissions:
 
 jobs:
   negative-artifact-conformance:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
