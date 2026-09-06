@@ -143,7 +143,8 @@ Browser读取Native刚写入的Session、普通disconnect保活以及PID/start/s
 
 Store qualification覆盖两个真实进程首次open、同Workspace不同Session并发、同Session writer竞争、stale generation、revision CAS、
 lease renewal/takeover、effect response loss、SIGKILL recovery_required与explicit reconciliation。release upgrade/rollback只切换pointer，
-不运行任何process discovery/stop；测试以candidate invocation log保持absent证明。
+不运行任何process discovery/stop；测试以candidate invocation log保持absent证明。三平台candidate smoke还会在pointer切换前从旧immutable
+candidate root启动TUI，切换后以同一profile与Workspace从新candidate root启动第二个TUI，要求两者并存且升级不终止旧进程，最后逐一确认退出。
 
 Native TUI client的Esc/Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
 若重连后的替换controller尚未恢复该Session而明确拒绝`session_unavailable`，client先恢复同一Session的mutation authority，

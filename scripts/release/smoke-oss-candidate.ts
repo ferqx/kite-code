@@ -23,6 +23,7 @@ import {
   currentOssReleaseTarget,
   defaultOssCandidateArchivePath,
   type OssCandidateManifest,
+  type VerifiedOssCandidate,
   verifyOssCandidate,
 } from './oss-candidate';
 
@@ -46,10 +47,7 @@ try {
   assertActiveRelease(prefix, verified.candidateId);
   await runInstalledSmokes(prefix, verified.manifest);
   const variant = await createSmokeVariantCandidate(verified, variantPath);
-  await installOssCandidate({
-    archivePath: variant.archivePath,
-    prefix,
-  });
+  await runInstalledTuiUpgradeCoexistence(prefix, verified, variant);
   const afterSecondInstall = readInstallStatus(prefix);
   if (
     afterSecondInstall.currentCandidateId !== variant.candidateId ||
@@ -82,6 +80,7 @@ try {
         'retired-companion-slots-absent',
         'web-payload-assets',
         'mcp-stdio-authenticated-wrapper',
+        'tui-upgrade-process-coexistence',
         'upgrade',
         'active-pointer',
         'immutable-candidate-roots',
@@ -110,6 +109,67 @@ try {
       ? new AggregateError([smokeFailure, cleanupError], 'Release smoke and cleanup both failed')
       : cleanupError;
   }
+}
+
+async function runInstalledTuiUpgradeCoexistence(
+  prefix: string,
+  current: VerifiedOssCandidate,
+  next: VerifiedOssCandidate,
+): Promise<void> {
+  const server = createMockModelServer();
+  const workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
+  workspace.env.CI = 'true';
+  server.setResponses([]);
+  const suffix = current.manifest.target.os === 'win32' ? '.exe' : '';
+  const executable = (candidateId: string) =>
+    join(prefix, 'releases', candidateId, 'bin', `kite-tui${suffix}`);
+  const tuis: Array<Awaited<ReturnType<typeof spawnReadyTui>>> = [];
+  let failure: unknown;
+  try {
+    const oldTui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      executablePath: executable(current.candidateId),
+      mockServer: server,
+      workspace,
+    });
+    tuis.push(oldTui);
+    await installOssCandidate({ archivePath: next.archivePath, prefix });
+    if (oldTui.exited || !oldTui.viewport().includes('Kite Code')) {
+      throw new Error('Upgrade interrupted the running predecessor TUI.');
+    }
+    const newTui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      executablePath: executable(next.candidateId),
+      mockServer: server,
+      workspace,
+    });
+    tuis.push(newTui);
+    if (oldTui.exited || newTui.exited) {
+      throw new Error('Old and new candidate TUI processes did not coexist.');
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    for (const tui of tuis.reverse()) {
+      try {
+        await tui.killAndWait();
+      } catch (error) {
+        failure = failure
+          ? new AggregateError([failure, error], 'TUI upgrade coexistence and cleanup failed')
+          : error;
+      }
+    }
+    try {
+      await cleanupTuiSystemFixtures({ tuis: [], mockServers: [server], workspaces: [workspace] });
+    } catch (error) {
+      failure = failure
+        ? new AggregateError([failure, error], 'TUI upgrade coexistence fixture cleanup failed')
+        : error;
+    }
+  }
+  if (failure) throw failure;
 }
 if (smokeFailure) throw smokeFailure;
 
