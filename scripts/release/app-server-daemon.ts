@@ -452,9 +452,16 @@ function pathExists(path: string): boolean {
 }
 
 function samePath(left: string, right: string): boolean {
-  return process.platform === 'win32'
-    ? win32.normalize(left).toLowerCase() === win32.normalize(right).toLowerCase()
-    : left === right;
+  try {
+    const canonicalLeft = realpathSync.native(left);
+    const canonicalRight = realpathSync.native(right);
+    return process.platform === 'win32'
+      ? win32.normalize(canonicalLeft).toLowerCase() ===
+          win32.normalize(canonicalRight).toLowerCase()
+      : canonicalLeft === canonicalRight;
+  } catch {
+    return false;
+  }
 }
 
 function validateWebStaticRoot(path: string): void {
