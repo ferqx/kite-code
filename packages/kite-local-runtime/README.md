@@ -8,7 +8,7 @@
 ## 公开子路径
 
 - `/client`：stdio、Unix socket/named-pipe transport，App Server connection，Runtime/History/App Control/credential adapters，
-  以及 daemon status/shutdown exact codec。
+  以及独立 lifecycle v1 codec/client 和业务 daemon status/shutdown codec。
 - `/config`：共享用户配置的 owner-specific lock、revision CAS 与 atomic replacement primitive。
 - `/coordinator`：仍有生产消费者的 internal coordination substrate；不参与默认 App Server discovery。
 - `/service`：Kite profile home 校验、owner-only private directory、daemon endpoint path、PID/start identity 与 dead-only endpoint
@@ -25,7 +25,7 @@ reservation 只记录 PID、OS start identity、instance、build 与可选 socke
 Session generation、credential 或启动意图。
 
 `status`/`stop` 在 endpoint absent 时不创建 profile 或 state。alive、identity uncertain、inode drift 一律保留证据并 fail closed；
-只有 exact dead proof 才允许清理。daemon protocol/capability mismatch 不触发 stop、replace 或 spawn。
+只有 exact dead proof 才允许清理。业务 mismatch 不触发自动替换；显式 stop/restart 使用独立 lifecycle v1 与 expectedInstanceId 校验。
 
 ## Profile 与配置
 
@@ -57,3 +57,5 @@ protected DACL。路径或 owner 证据不确定时拒绝，不自动修复外�
 ## 深入机制
 
 - [Native 连接与 App Control](docs/native-client-and-control.md)
+
+生命周期客户端位于 [lifecycle](src/client/lifecycle.ts)，只连接已选 owner-only endpoint，一次请求不自动重试 mutation；业务 codec 的升级不影响此入口。

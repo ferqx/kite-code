@@ -11,14 +11,14 @@ token，不自行discover/spawn owner，不创建Host/Store/SQLite/Builtin，也
 
 默认parent-child必须exact build；显式daemon只按exact protocol/capability判断兼容。任何mismatch都fail closed，不执行previous-build
 stop、replacement或fallback。默认配套模式的mismatch在TUI启动前提示安装可能不完整并要求更新或重新安装；显式daemon的mismatch
-提示更新Kite Code或改用matching client，升级后仍不兼容时由用户关闭旧daemon再显式启动。提示不比较client semver，也不自动stop、
+提示对同一目标执行 server status/restart；旧开发实例缺少生命周期接口时才使用匹配客户端处理。提示不比较client semver，也不自动stop、
 replace或upgrade daemon。
 
 默认`/status`展示stdio transport、profile mode、build、App Server version与same-build pairing。显式`--server`只连接指定的
 Unix socket/Windows named pipe，展示exact-protocol compatible pairing；daemon的build ID只用于诊断，不参与兼容判断。client/server mismatch在initialize时关闭连接，
 不会进入TUI形成build drift状态。legacy Service PID与daemon Web根地址都不出现在TUI `/status`，Web URL不是Runtime identity。
 
-`kite server start/status/stop`是唯一daemon lifecycle入口；默认TUI/CLI不发现或启动daemon。daemon固定服务start时选择的canonical
+`kite server start/status/stop/restart`是唯一daemon lifecycle入口；默认TUI/CLI不发现或启动daemon。daemon固定服务start时选择的canonical
 Workspace，另一Workspace连接拒绝；普通connection close不停止daemon，显式stop才取消active Turn并等待Runtime与Web carrier drain。
 `kite web [--server <endpoint>] [--json]`只读取现存daemon v2 status中的strict loopback `webOrigin`；absent提示先显式start，protocol mismatch
 提示使用matching client，均不spawn/replace。TUI没有Web discovery callback或`/web`。正式CLI不组合legacy Coordinator、Store migration或`web recover`；该
@@ -92,3 +92,5 @@ query权威投影独立hydrate。rewind mutation、Controller命令与普通turn
 已接受 Run 的查询返回 `unknown` 时，Native TUI 先取得并应用 Session 的权威恢复投影，再结束本地等待。App 保留历史、用户消息与诊断，停止渲染无法确认的活动工具/子任务区和 Working；不更改这些工具的业务状态，不生成完成或取消事实。运行异常使用 `Task could not continue` 提示，避免把已接受任务错误描述为消息未发送。
 
 恢复投影下的本地 cleanup barrier 会明确拒绝等待，后续任务也不向未恢复的执行继续提交；不会将本地 Promise 结束视为服务端 cleanup 完成。
+
+CLI restart 默认 if_idle，--cancel 显式授权取消，未传工作区时沿用现存实例。status 成功读取业务不兼容状态仍退出 0；Runtime 连接继续要求业务 exact protocol，不因可管理就允许业务请求。

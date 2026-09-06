@@ -89,7 +89,7 @@ History transcript的每个record还携带对应的Run/Task/Turn identity。持�
 显式daemon Browser的Model Context另从同一Store connection读取prepared event，并通过注入同一Artifact backend的Builtin reader验证
 `model_surface`；read adapter只消费App-owned Model Context read port，不取得Artifact ref/backend或通用正文读取authority。
 operation gate的quiesce线性化关闭新mutation admission后，Application在同一lease中合并gate临界区与Host
-`SessionLifecycleSupervisor`投影的长生命周期Session operation；普通stop发现任一active都立即resume并返回`service_busy`，不会等待active
+`SessionLifecycleSupervisor`投影的长生命周期Session operation；显式 daemon restart 的 if_idle 停止发现任一 active 都立即 resume 并返回 busy，不会等待active
 Turn或退化成manager timeout。只有两者均idle才允许commit drain；signal owner shutdown仍通过cancel/drain进入draining。
 动态MCP的raw `mcp__server__tool_hash`名称不得成为TUI card label；closed projector统一保留
 `mcp_tool` category/`mcp:dynamic_tool` fallback label。若 admission 时已有 MCP capability descriptor，则其经过
@@ -151,3 +151,5 @@ Session 写入口在核对当前执行权与有效期后，可使用同一 autho
 续租失败时在 Server stderr 记录 Session、失败原因或租约失效时间，便于区分定时器延后与存储/执行权错误；不污染 stdio protocol 的 stdout。
 
 执行权失效由原Storage owner通知同一Host停止本地执行，不另设执行登记或后台协调器。取消监听器即使无法持久化也必须继续传播Provider停止信号；只发布成功提交的终态事件，持久恢复记录不会因本地I/O关闭而被伪装成已完成。
+
+Daemon lifecycle status 直接读取 Application activeOperations（gate 临界区或 Host 活动 Session），不维护额外计数。接受 shutdown 后仍由同一 quiesce lease 管理取消和 drain，状态查询不会取得 lease。

@@ -8,7 +8,7 @@
 
 显式 `kite server start` 启动同一 composition 的本机 daemon。daemon 使用 owner-only Unix socket 或 current-user named pipe
 服务 TUI/CLI，并用唯一 loopback HTTP listener 提供同 build Web assets、API Docs 与 Browser read-only `/v1`。普通 client 断开
-不停止 daemon；只有 `server stop` 或 OS signal 触发 cancel、drain 与 endpoint cleanup。
+不停止 daemon；显式 stop、restart 或 OS signal 进入同一停止 owner；restart 默认 if_idle，--cancel 才取消活动执行。
 
 ## 拥有职责
 
@@ -110,3 +110,5 @@ App Server、Session/Store authority、daemon/Web、Trust、安全、恢复或re
 - [Service 组装与执行交接](docs/composition-and-execution.md)
 - [App Server lifecycle 与恢复](docs/service-resilience.md)
 - [App Server endpoint state](docs/service-state.md)
+
+稳定生命周期首帧分流由 [lifecycle carrier](src/carrier/daemon-lifecycle.ts) 拥有，独立于 Runtime initialize。daemon 在 Store 初始化前取得 endpoint，在资源释放后清理 endpoint，空闲停止复用既有 mutation gate 与 Host activeOperations。

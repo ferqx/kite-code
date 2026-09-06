@@ -13,3 +13,7 @@ prepareAppControl 调用 RuntimeClient.connect，先初始化唯一协议连接�
 coordinator 目录仍有被当前 composition 消费的本机机制；不能因为保留源文件就恢复旧 per-Workspace Worker 进程拓扑。当前组合关系以 Service 入口为准。
 
 连接错误、版本不匹配、工作区不符都在准入边界失败；不 fallback 到 embedded Runtime。验证：[Native tests](../test/)、[config lock](../test/isolated/config-file-mutation-lock.test.ts)。
+
+## 生命周期连接
+
+[Lifecycle client](../src/client/lifecycle.ts) 在同一显式 endpoint 发送独立 kite.lifecycle.v1 帧，不执行 Runtime initialize。status 投影实例身份、运行 build 和业务兼容事实；shutdown 绑定 expectedInstanceId 与 if_idle/cancel。POSIX 先核对 owner-only parent/socket；请求有大小与期限上限，不自动重试 mutation。业务连接与生命周期连接不共享初始化或版本 codec。

@@ -169,6 +169,7 @@ export {
   KiteSessionStoreOpenError,
   type KiteSessionStoreOpenErrorCode,
   openKiteSessionStoreDatabase,
+  validateKiteSessionStoreDatabase,
 } from './kite-session-runtime-file';
 export {
   type KiteSessionExecutionControl,

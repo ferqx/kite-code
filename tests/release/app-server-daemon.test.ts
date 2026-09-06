@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_ } from '@kite-ai/kite-app-contract';
@@ -9,6 +10,7 @@ import {
   KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_,
   KITE_APP_SERVER_DAEMON_STATUS_REQUEST_SCHEMA_,
   KITE_APP_SERVER_DAEMON_VERSION_,
+  requestKiteLifecycle,
 } from '@kite-ai/kite-local-runtime/client';
 import {
   createKiteLocalRuntimeProcessIdentityProbe,
@@ -25,6 +27,139 @@ describe('explicit App Server daemon lifecycle', () => {
   afterEach(() => {
     for (const path of cleanup.splice(0)) rmSync(path, { recursive: true, force: true });
   });
+
+  test('server-rejected protocol versions are incompatible without shutdown or replacement', async () => {
+    if (process.platform === 'win32') return;
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-daemon-version-')));
+    cleanup.push(root);
+    const endpoint = join(root, 'daemon.sock');
+    const methods: string[] = [];
+    const server = createServer((socket) => {
+      let buffered = '';
+      socket.on('data', (chunk) => {
+        buffered += chunk.toString();
+        while (true) {
+          const newline = buffered.indexOf('\n');
+          if (newline < 0) break;
+          const request = JSON.parse(buffered.slice(0, newline));
+          buffered = buffered.slice(newline + 1);
+          methods.push(request.method);
+          socket.write(
+            `${JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              error: {
+                code: -32004,
+                message: 'Protocol version mismatch',
+                data: { code: 'protocol_version_mismatch' },
+              },
+            })}\n`,
+          );
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(endpoint, resolve);
+    });
+    try {
+      const daemon = createManagedLocalAppServerDaemon({
+        argv: ['kite', '--kite-home', join(root, 'home')],
+        systemHome: root,
+        endpoint,
+      });
+      await expect(daemon.status()).resolves.toMatchObject({ state: 'incompatible' });
+      await expect(daemon.start(root)).resolves.toMatchObject({ state: 'incompatible' });
+      await expect(daemon.stop()).rejects.toThrow('lifecycle is unavailable');
+      await expect(daemon.discoverWeb()).rejects.toThrow('protocol is incompatible');
+      expect(methods.filter(Boolean)).toEqual(Array(4).fill('initialize'));
+      expect(existsSync(join(root, 'home'))).toBe(false);
+      expect(server.listening).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  test('restarts an independently running incompatible business version through lifecycle v1', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-upgrade-')));
+    cleanup.push(root);
+    const daemon = createManagedLocalAppServerDaemon({
+      argv: ['kite', '--kite-home', join(root, 'home')],
+      systemHome: root,
+      sourceWebStaticRoot: createWebAssets(root),
+    });
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        'tests/fixtures/lifecycle/old-daemon.ts',
+        daemon.endpoint.kind === 'unix' ? daemon.endpoint.socket : daemon.endpoint.pipeName,
+        daemon.endpoint.homeDigest,
+        root,
+      ],
+      { stdout: 'pipe', stderr: 'inherit' },
+    );
+    try {
+      await until(async () => (await daemon.status()).state === 'incompatible');
+      await expect(daemon.start(root)).resolves.toMatchObject({
+        state: 'incompatible',
+        buildId: 'old-release-fixture',
+      });
+      await expect(
+        requestKiteLifecycle(daemon.endpoint, {
+          operation: 'shutdown',
+          expectedInstanceId: 'wrong-instance',
+          mode: 'cancel',
+        }),
+      ).resolves.toMatchObject({ outcome: 'instance_changed' });
+      const restarted = await daemon.restart(root);
+      expect(restarted).toMatchObject({
+        state: 'ready',
+        buildId: daemon.target.buildId,
+        workspace: root,
+      });
+      expect(restarted.instanceId).not.toBe('released-old-fixture');
+      expect(await child.exited).toBe(0);
+      const again = await daemon.restart(root);
+      expect(again.instanceId).not.toBe(restarted.instanceId);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill();
+        await child.exited;
+      }
+      const status = await daemon.status();
+      if (status.lifecycle) await daemon.stop();
+    }
+  }, 30_000);
+
+  test('preflight failure preserves the instance and concurrent restarts settle on one owner', async () => {
+    if (process.platform === 'win32') return;
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-concurrent-restart-')));
+    cleanup.push(root);
+    const options = {
+      argv: ['kite', '--kite-home', join(root, 'home')],
+      systemHome: root,
+      sourceWebStaticRoot: createWebAssets(root),
+    };
+    const daemon = createManagedLocalAppServerDaemon(options);
+    try {
+      const original = await daemon.start(root);
+      const invalid = createManagedLocalAppServerDaemon({
+        ...options,
+        sourceWebStaticRoot: join(root, 'missing-assets'),
+      });
+      await expect(invalid.restart(root)).rejects.toThrow('Web assets');
+      expect((await daemon.status()).instanceId).toBe(original.instanceId);
+      const results = await Promise.allSettled([daemon.restart(root), daemon.restart(root)]);
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      const settled = await daemon.status();
+      expect(settled).toMatchObject({ state: 'ready', buildId: daemon.target.buildId });
+      expect(settled.instanceId).not.toBe(original.instanceId);
+    } finally {
+      if ((await daemon.status()).lifecycle) await daemon.stop();
+    }
+  }, 30_000);
 
   test('starts explicitly, serves two clients over the exact protocol, and stops explicitly', async () => {
     if (process.platform === 'win32') return;
@@ -64,7 +199,10 @@ describe('explicit App Server daemon lifecycle', () => {
       expect((await daemon.start(workspace)).instanceId).toBe(started.instanceId);
 
       const shell = await fetch(`${started.webOrigin}/`);
-      expect(await shell.text()).toContain('Kite daemon Web');
+      const html = await shell.text();
+      expect(html).toContain('Kite daemon Web');
+      const pageIdentity = /name="kite-web-identity" content="([^"]+)"/.exec(html)?.[1];
+      if (!pageIdentity) throw new Error('Web shell has no instance/build identity');
       const cookie = shell.headers.get('set-cookie');
       expect(cookie).toBeTruthy();
       const api = await fetch(`${started.webOrigin}/v1`, {
@@ -75,6 +213,7 @@ describe('explicit App Server daemon lifecycle', () => {
         },
       });
       expect(api.status).toBe(200);
+      expect(api.headers.get('x-kite-web-identity')).toBe(pageIdentity);
       await expect(api.json()).resolves.toMatchObject({ build_id: daemon.target.buildId });
 
       const oldCompatible = createKiteAppServerDaemonClient({
@@ -235,7 +374,7 @@ function createWebAssets(parent: string): string {
   const root = join(parent, 'web');
   mkdirSync(join(root, 'api-docs'), { recursive: true });
   mkdirSync(join(root, 'assets'), { recursive: true });
-  writeFileSync(join(root, 'index.html'), '<html>Kite daemon Web</html>');
+  writeFileSync(join(root, 'index.html'), '<html><head></head><body>Kite daemon Web</body></html>');
   writeFileSync(join(root, 'api-docs', 'openapi.json'), '{}');
   writeFileSync(join(root, 'assets', 'app.js'), 'export {};');
   return realpathSync(root);

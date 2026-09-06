@@ -221,7 +221,55 @@ describe('release App Server client pairing', () => {
       await client.connect();
       expect(spawned?.argv).toEqual([serviceExecutable, 'app-server', 'run-stdio']);
       expect(spawned?.env.KITE_STANDALONE_EXECUTABLE).toBe('1');
-      await client[Symbol.asyncDispose]();
+      const nextManifest = Buffer.from('{"schema":"next-fixture"}\n');
+      const nextId = createHash('sha256').update(nextManifest).digest('hex').slice(0, 24);
+      const nextRoot = join(installRoot, 'releases', nextId);
+      mkdirSync(join(nextRoot, 'bin'), { recursive: true });
+      for (const name of ['kite', 'kite-service'])
+        writeFileSync(join(nextRoot, 'bin', name), 'fixture');
+      writeFileSync(join(nextRoot, 'manifest.json'), nextManifest);
+      writeFileSync(join(nextRoot, '.candidate-id'), `${nextId}\n`);
+      writeFileSync(join(installRoot, 'active'), `${nextId}\n`);
+      writeFileSync(
+        join(installRoot, '.kite-code-managed.json'),
+        JSON.stringify({
+          schema: 'KiteCodeManagedInstall',
+          version: 2,
+          target: 'fixture',
+          canonicalRoot: realpathSync.native(installRoot),
+          currentCandidateId: nextId,
+          previousCandidateId: candidateId,
+          activePointer: 'active',
+        }),
+      );
+      await client.reconnect();
+      expect(spawned?.argv).toEqual([serviceExecutable, 'app-server', 'run-stdio']);
+      const newer = createManagedLocalAppServerComposition({
+        argv: ['kite-tui', '--kite-home', kiteHome],
+        environment: { KITE_CODE_RELEASE_ROOT: nextRoot },
+        systemHome,
+        executableMode: 'installed',
+        processExecutable: join(nextRoot, 'bin', 'kite'),
+        spawn: (options) => {
+          spawned = options;
+          return new InitializeChild(nextId);
+        },
+      }).connect({
+        workspace,
+        clientInfo: { name: 'new-client', version: '2', instanceId: 'new-client' },
+      });
+      try {
+        await newer.connect();
+        expect(spawned?.argv).toEqual([
+          join(nextRoot, 'bin', 'kite-service'),
+          'app-server',
+          'run-stdio',
+        ]);
+        expect(client.status).toBe('active');
+      } finally {
+        await newer.close();
+        await client.close();
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

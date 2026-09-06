@@ -68,10 +68,7 @@ installed Service MCP stdio wrapper、retired companion absence、第二候选�
 改名到 immutable 最终目录。v2 managed-install marker 与唯一 `active` pointer 原子绑定当前/previous candidate；
 stable launcher 将启动时的 candidate root pin 给 child process，running process 不重新读取 pointer。首次安装才以
 atomic copy创建`bin/kite`、`bin/kite-tui`与`bin/kite-service` stable launcher；upgrade/rollback只验证既有
-launcher identity，不逐文件替换或停止仍在运行的旧 candidate。只有 destructive uninstall 才执行 ordinary Service
-stop、确认 state absent 并取得 Native lifecycle fence。upgrade/rollback后的首个新candidate managed client会用reservation中的旧build identity
-内部验证并安全换代旧Service，同时每次按marker/active pointer拒绝退役client的反向换代；installer不force-kill，用户也不负责清理旧进程。busy、unknown、残留state或identity不确定时active candidate
-保持不变。upgrade还拒绝跨 OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、
+launcher identity，不逐文件替换或停止仍在运行的旧 candidate。uninstall 只删除已核验的 managed tree，不发送进程控制命令。upgrade/rollback 不更换运行中的服务；显式 daemon 切换由 `kite server restart` 发起，忙碌时需等待或明确 `--cancel`。进程身份不确定时拒绝控制，不自动强杀。upgrade还拒绝跨 OS/architecture target替换。安装器只修改带自身marker的显式prefix；目标为根目录、用户home、
 符号链接或不匹配 marker时拒绝覆盖、回滚或删除。
 
 当前候选manifest的`releaseSlots`绑定CLI、TUI、Service与Web entrypoint/identity；Coordinator、Worker、Gateway slot必须为null且archive

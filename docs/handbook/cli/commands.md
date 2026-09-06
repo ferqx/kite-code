@@ -10,7 +10,8 @@
 | `trace <events.jsonl> [--turn N] [--format json]` | 读取已有事件记录；turn 必须为正整数 |
 | `server start` | 显式启动 daemon |
 | `server status [--json]` | 查看 daemon 状态 |
-| `server stop` | 显式停止 daemon |
+| `server stop` | 显式取消任务并停止 daemon |
+| `server restart [--cancel]` | 空闲时切换到当前版本；--cancel 明确允许取消活动任务 |
 | `web [--json]` | 发现并打印已运行 daemon 的 Web 地址 |
 
 | 参数 | 范围与含义 |
@@ -26,7 +27,7 @@
 | `--execution-status` | 查看有效执行边界后退出 |
 | `--release-status` | 查看有效发布状态后退出 |
 | `--telemetry-status` | 查看脱敏遥测状态后退出 |
-| `--json` | 仅 server status 和 web，不能用于 server start/stop |
+| `--json` | 仅 server status 和 web，不能用于 server start/stop/restart |
 
 三个状态选项用于 `run` 路径，例如 `bun run agent run --execution-status`。它们先连接服务并检查工作区信任，再输出 JSON 并退出，不创建任务；不额外添加 `--json`。只写 `bun run agent --execution-status` 不会进入该路径。`resume` 在进入状态查询前仍要求任务文字，因此查询时使用 `run`。
 

@@ -13,3 +13,5 @@ Kite profile home 和 `source-profiles/<digest>` 等 fixed private subtree 由
 `runtime-service/v1/{instance.json,token,instance.lock,lifecycle.lock}` 布局。
 
 验证：`bun test packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts tests/release/app-server-daemon.test.ts`。
+
+排他 endpoint ownership 先于可变 Store/Host 初始化；starting 可通过 lifecycle v1 查询。资源释放完成后才清理 endpoint，防止并发启动提前取得同一地址。停止响应只表示已接受，release client 还需等进程退出；超时不升级为 PID 强杀。

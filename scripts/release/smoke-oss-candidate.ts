@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  createKiteHomeIdentity,
+  resolveKiteAppServerDaemonEndpoint,
+} from '@kite-ai/kite-local-runtime/service';
 import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
@@ -13,6 +17,7 @@ import {
   rollbackOssCandidate,
   uninstallOssCandidate,
 } from './install-oss-candidate';
+import { resolveLocalRuntimeParent } from './local-service-client';
 import {
   createSmokeVariantCandidate,
   currentOssReleaseTarget,
@@ -72,6 +77,7 @@ try {
         'cli-help-version',
         'tui-version-pty-startup',
         'explicit-app-server-daemon',
+        'compiled-predecessor-lifecycle-restart',
         'paired-app-server-process',
         'retired-companion-slots-absent',
         'web-payload-assets',
@@ -142,6 +148,7 @@ async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
   const workspace = realpathSync(mkdtempSync(join(smokeRoot, 'daemon-workspace-')));
   const kiteHome = join(homeParent, '.kite-code');
   const common = ['--kite-home', kiteHome];
+  let predecessor: ReturnType<typeof Bun.spawn> | undefined;
   let primaryError: unknown;
   try {
     const absentWeb = Bun.spawnSync([cli, 'web', ...common], {
@@ -151,13 +158,75 @@ async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
     if (absentWeb.exitCode === 0) {
       throw installedSmokeError('absent App Server daemon Web', absentWeb);
     }
-    const start = Bun.spawnSync([cli, 'server', 'start', '--workspace', workspace, ...common], {
+    // First-release predecessor is a separate compiled fixture with incompatible business protocol.
+    const fixture = join(
+      homeParent,
+      process.platform === 'win32' ? 'old-daemon.exe' : 'old-daemon',
+    );
+    const compiled = Bun.spawnSync(
+      [
+        process.execPath,
+        'build',
+        'tests/fixtures/lifecycle/old-daemon.ts',
+        '--compile',
+        '--outfile',
+        fixture,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    if (compiled.exitCode !== 0) throw installedSmokeError('predecessor fixture compile', compiled);
+    const endpoint = resolveKiteAppServerDaemonEndpoint({
+      home: createKiteHomeIdentity(kiteHome, 'explicit_argument'),
+      ...(process.platform === 'win32'
+        ? {}
+        : { runtimeParent: resolveLocalRuntimeParent(process.env) }),
+    });
+    predecessor = Bun.spawn(
+      [
+        fixture,
+        endpoint.kind === 'unix' ? endpoint.socket : endpoint.pipeName,
+        endpoint.homeDigest,
+        workspace,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const reader = predecessor.stdout!.getReader();
+    try {
+      const ready = await Promise.race([
+        reader.read(),
+        Bun.sleep(10_000).then(() => {
+          throw new Error('Predecessor fixture startup timeout');
+        }),
+      ]);
+      if (ready.done || !new TextDecoder().decode(ready.value).includes('ready'))
+        throw new Error('Predecessor fixture did not start');
+    } finally {
+      reader.releaseLock();
+    }
+    const oldStatus = Bun.spawnSync([cli, 'server', 'status', '--json', ...common], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    if (
+      oldStatus.exitCode !== 0 ||
+      JSON.parse(oldStatus.stdout.toString()).state !== 'incompatible'
+    )
+      throw installedSmokeError('predecessor status', oldStatus);
+    // Keep this parent event loop running so it can reap the owned predecessor.
+    const restarting = Bun.spawn([cli, 'server', 'restart', '--workspace', workspace, ...common], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(restarting.stdout).arrayBuffer(),
+      new Response(restarting.stderr).arrayBuffer(),
+      restarting.exited,
+    ]);
+    const start = { exitCode, stdout: Buffer.from(stdout), stderr: Buffer.from(stderr) };
     if (start.exitCode !== 0 || !start.stdout.toString().includes('App Server: ready')) {
       throw installedSmokeError('App Server daemon start', start);
     }
+    if ((await predecessor.exited) !== 0) throw new Error('Predecessor did not stop cleanly');
     const status = Bun.spawnSync([cli, 'server', 'status', '--json', ...common], {
       stdout: 'pipe',
       stderr: 'pipe',
@@ -183,6 +252,10 @@ async function runInstalledAppServerDaemonSmoke(cli: string): Promise<void> {
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    if (predecessor?.exitCode === null) {
+      predecessor.kill();
+      await predecessor.exited;
+    }
     if (stop.exitCode !== 0 || !stop.stdout.toString().includes('App Server: absent')) {
       primaryError ??= installedSmokeError('App Server daemon stop', stop);
     }

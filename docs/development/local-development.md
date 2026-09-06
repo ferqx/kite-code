@@ -20,6 +20,6 @@
 
 测试分层与真实模型调用约束见[测试入口](../../tests/README.md)。只修改文档不默认启动真实 Provider、发送外部请求或运行所有平台测试。
 
-## Web 启动失败链的已知差异
+## Web 启动失败处理
 
-[`ensure-web`](../../scripts/development/ensure-web.ts) 按 build→start→discover 调用子进程，但非零仅设置父进程 exitCode，没有立即停止后续步骤，因此可能在失败后打印已有 daemon 地址。后续需补 build/start 失败时不继续调用的回归，产品限制见[服务生命周期](../handbook/server/lifecycle.md)。
+[`ensure-web`](../../scripts/development/ensure-web.ts) 按 build→start→discover 调用子进程，任一步骤非零退出即终止并保留该退出码。回归见[入口测试](../../tests/release/companion-entrypoints.test.ts)。daemon lifecycle v1 可独立于业务握手查询和停止。旧开发实例的 `protocol_version_mismatch` 仍仅作只读诊断，start 不清理存活 owner；验证见[daemon 测试](../../tests/release/app-server-daemon.test.ts)，操作说明见[服务生命周期](../handbook/server/lifecycle.md)。

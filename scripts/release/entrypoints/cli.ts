@@ -12,7 +12,10 @@ if (process.argv.includes('--version')) {
   const run =
     command === 'help'
       ? runCliMain({})
-      : command === 'server-start' || command === 'server-status' || command === 'server-stop'
+      : command === 'server-restart' ||
+          command === 'server-start' ||
+          command === 'server-status' ||
+          command === 'server-stop'
         ? (() => {
             const daemon = createManagedLocalAppServerDaemon({
               argv: process.argv,

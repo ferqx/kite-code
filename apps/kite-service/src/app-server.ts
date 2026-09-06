@@ -112,9 +112,9 @@ export async function runKiteAppServerMain(
 export function createKiteAppServerRuntimeOwner(
   environment: KiteAppServerEnvironment,
   dependencies: Pick<KiteAppServerMainDependencies, 'createStorage' | 'createComposition'> = {},
-  options: { readonly daemonProtocol?: boolean } = {},
+  options: { readonly daemonProtocol?: boolean; readonly instanceId?: string } = {},
 ): KiteAppServerRuntimeOwner {
-  const instanceId = `app-server_${randomUUID()}`;
+  const instanceId = options.instanceId ?? `app-server_${randomUUID()}`;
   const databasePath = join(environment.runtimeRoot, 'kite-session.sqlite');
   const createStorage =
     dependencies.createStorage ?? ((input) => createKiteSessionAppServerStorageComposition(input));

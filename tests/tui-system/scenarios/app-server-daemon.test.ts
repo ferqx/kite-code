@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedLocalAppServerDaemon } from '../../../scripts/release/app-server-daemon';
-import { cleanupTuiSystemFixtures, stopTuiSystemServer } from '../harness/fixture-lifecycle';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
@@ -64,7 +64,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
     expect(await daemon.status()).toMatchObject({ state: 'ready' });
   }, 30_000);
 
-  test('explicit stop cancels an active daemon turn and removes the endpoint', async () => {
+  test('restart refuses an active turn unless cancellation is explicit', async () => {
     server.setResponses([{ message: { content: 'SHOULD_NOT_COMPLETE' }, delay: 10_000 }]);
     const endpoint =
       daemon.endpoint.kind === 'unix' ? daemon.endpoint.socket : daemon.endpoint.pipeName;
@@ -82,7 +82,12 @@ describe('TUI PTY System — explicit App Server daemon', () => {
       10_000,
     );
 
-    expect(await stopTuiSystemServer(daemon)).toMatchObject({ state: 'absent' });
+    const before = await daemon.status();
+    await expect(daemon.restart()).rejects.toThrow('busy');
+    expect(await daemon.status()).toMatchObject({ state: 'ready', instanceId: before.instanceId });
+    const restarted = await daemon.restart(undefined, true);
+    expect(restarted.state).toBe('ready');
+    expect(restarted.instanceId).not.toBe(before.instanceId);
     expect(screenContains(tui.viewport(), 'SHOULD_NOT_COMPLETE')).toBe(false);
   }, 30_000);
 });

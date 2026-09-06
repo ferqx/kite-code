@@ -24,7 +24,7 @@ async function run(command: readonly string[]): Promise<void> {
     stderr: 'inherit',
   });
   const exitCode = await child.exited;
-  if (exitCode !== 0) process.exitCode = exitCode;
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 function withoutValueOption(args: readonly string[], option: string): string[] {

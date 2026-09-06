@@ -18,3 +18,4 @@ export const KITE_LOCAL_RUNTIME_CLIENT_BOUNDARY_ = Object.freeze({
   ownsRuntimeExecution: false,
   ownsStore: false,
 } as const);
+export * from './lifecycle';

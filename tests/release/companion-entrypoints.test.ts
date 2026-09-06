@@ -1,7 +1,61 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('current release entrypoints', () => {
+  test('Web startup stops at the first failed step and preserves its exit code', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-web-start-'));
+    try {
+      mkdirSync(join(root, 'scripts/development'), { recursive: true });
+      mkdirSync(join(root, 'apps/kite-web'), { recursive: true });
+      copyFileSync(
+        'scripts/development/ensure-web.ts',
+        join(root, 'scripts/development/ensure-web.ts'),
+      );
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ scripts: { agent: 'bun step.ts' } }),
+      );
+      writeFileSync(
+        join(root, 'apps/kite-web/package.json'),
+        JSON.stringify({ scripts: { build: 'bun ../../step.ts build' } }),
+      );
+      writeFileSync(
+        join(root, 'step.ts'),
+        `
+        const step = process.argv[2];
+        console.log('STEP:' + step);
+        if (step === process.env.FAIL_STEP) process.exit(7);
+      `,
+      );
+      for (const [failure, steps] of [
+        ['build', ['build']],
+        ['server', ['build', 'server']],
+        ['web', ['build', 'server', 'web']],
+        ['', ['build', 'server', 'web']],
+      ] as const) {
+        const child = Bun.spawn(
+          [process.execPath, join(root, 'scripts/development/ensure-web.ts')],
+          {
+            env: { ...process.env, FAIL_STEP: failure },
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
+        const [output, , exitCode] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        expect(exitCode).toBe(failure ? 7 : 0);
+        expect(output.trim().split('\n')).toEqual(steps.map((step) => `STEP:${step}`));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('CLI release entrypoint does not import legacy companion or migration owners', () => {
     const source = readFileSync('scripts/release/entrypoints/cli.ts', 'utf8');
     expect(source).not.toContain('local-coordinator-client');

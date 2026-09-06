@@ -665,9 +665,15 @@ if (import.meta.main) {
     if (!archivePath) throw new Error('--archive requires a path.');
     const marker = await installOssCandidate({ archivePath, prefix });
     console.log(JSON.stringify({ status: 'installed', prefix: resolve(prefix), ...marker }));
+    console.error(
+      'New clients use the installed version. Running clients and daemons keep their version; use `kite server restart` to switch an idle daemon, or `kite server restart --cancel` to cancel its tasks first.',
+    );
   } else if (action === 'rollback') {
     const marker = rollbackOssCandidate(prefix);
     console.log(JSON.stringify({ status: 'rolled_back', prefix: resolve(prefix), ...marker }));
+    console.error(
+      'Running processes were not changed. Restart clients explicitly; daemon switching uses `kite server restart`. Data format compatibility is checked separately.',
+    );
   } else if (action === 'uninstall') {
     uninstallOssCandidate(prefix);
     console.log(JSON.stringify({ status: 'uninstalled', prefix: resolve(prefix) }));

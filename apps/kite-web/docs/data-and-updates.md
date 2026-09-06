@@ -17,3 +17,5 @@ index 响应建立 HttpOnly/SameSite Browser session，JavaScript 不兑换 laun
 ## 分页边界
 
 transport 自动追踪 next_cursor，每次读取最多 32 页；工作区、会话和恢复点请求每页 100 项，History/日志每页 200 项。超过 32 页且仍有 cursor 时返回 protocol_error，不返回部分成功。首次读取与后续增量均受此限制，日志刷新当前从起点重读。界面没有手动翻页控件；发生上限错误不能据此判断数据已删除。实现与上限定义见 [transport](../src/transport/client.ts)。
+
+生产请求在正文解码前核对 Web Gateway 的 x-kite-web-identity 响应头与 shell meta。摘要由同一 instanceId/buildId 派生，不是凭据；不匹配抛出 protocol_error 并显示重新加载提示。它不修改公共 Agent API DTO，也不改变 browser principal 权限。验证见 [页面身份测试](../test/page-identity.test.ts)。

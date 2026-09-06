@@ -41,6 +41,7 @@ describe('cli argument parsing', () => {
       process.argv = ['bun', 'kite', 'server', 'status', '--json'];
       await main({
         appServerDaemon: {
+          restart: async () => ({ state: 'ready' }),
           start: async () => ({ state: 'ready' }),
           status: async () => ({ state: 'ready', endpoint: '/tmp/kite.sock' }),
           stop: async () => ({ state: 'absent' }),
@@ -55,7 +56,7 @@ describe('cli argument parsing', () => {
     }
   });
 
-  test('explains how to recover from an incompatible explicit App Server daemon', async () => {
+  test('reports readable incompatible status without failing status itself', async () => {
     const originalArgv = process.argv;
     const output = spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -63,13 +64,50 @@ describe('cli argument parsing', () => {
       await expect(
         main({
           appServerDaemon: {
+            restart: async () => ({ state: 'ready' }),
             start: async () => ({ state: 'incompatible' }),
             status: async () => ({ state: 'incompatible', endpoint: '/tmp/kite.sock' }),
             stop: async () => ({ state: 'incompatible' }),
           },
         }),
-      ).rejects.toThrow('请更新 Kite Code');
+      ).resolves.toBeUndefined();
       expect(output.mock.calls.at(-1)).toEqual(['App Server: incompatible /tmp/kite.sock']);
+    } finally {
+      process.argv = originalArgv;
+      output.mockRestore();
+    }
+  });
+
+  test('restart forwards explicit cancellation and distinguishes omitted Workspace', async () => {
+    expect(parseArgs(['server', 'restart', '--cancel'])).toMatchObject({
+      command: 'server-restart',
+      cancelOnRestart: true,
+      workspaceExplicit: false,
+    });
+    expect(() => parseArgs(['server', 'start', '--cancel'])).toThrow('--cancel');
+    const originalArgv = process.argv;
+    const output = spyOn(console, 'log').mockImplementation(() => undefined);
+    const calls: unknown[] = [];
+    try {
+      process.argv = ['bun', 'kite', 'server', 'restart', '--cancel'];
+      await main({
+        appServerDaemon: {
+          start: async () => {
+            throw new Error('unexpected start');
+          },
+          status: async () => {
+            throw new Error('unexpected status');
+          },
+          stop: async () => {
+            throw new Error('unexpected stop');
+          },
+          restart: async (workspace, cancel) => {
+            calls.push([workspace, cancel]);
+            return { state: 'ready' };
+          },
+        },
+      });
+      expect(calls).toEqual([[undefined, true]]);
     } finally {
       process.argv = originalArgv;
       output.mockRestore();

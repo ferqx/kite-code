@@ -32,6 +32,7 @@ describe('Web Gateway static REST carrier', () => {
       [Symbol.asyncDispose]: async () => undefined,
     } satisfies AgentApiRouteHandler);
     const carrier = createWebGatewayCarrier({
+      buildId: 'test-build',
       staticAssetRoot: root,
       instanceId: 'instance-one',
       agentApi,

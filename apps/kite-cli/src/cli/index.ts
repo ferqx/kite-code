@@ -33,6 +33,7 @@ export interface CliMainDependencies {
     start(workspace: string): Promise<Readonly<Record<string, unknown>>>;
     status(): Promise<Readonly<Record<string, unknown>>>;
     stop(): Promise<Readonly<Record<string, unknown>>>;
+    restart(workspace?: string, cancel?: boolean): Promise<Readonly<Record<string, unknown>>>;
   };
   /** Reads the already-running explicit App Server daemon's stable Web root URL. */
   readonly appServerWeb?: {
@@ -50,6 +51,7 @@ export interface ParsedArgs {
     | 'sandbox-setup'
     | 'sandbox-status'
     | 'server-stdio'
+    | 'server-restart'
     | 'server-start'
     | 'server-status'
     | 'server-stop'
@@ -58,6 +60,8 @@ export interface ParsedArgs {
   threadId: string;
   userId: string;
   workspace: string;
+  workspaceExplicit: boolean;
+  cancelOnRestart: boolean;
   /** Explicit managed Service home forwarded to release composition; the CLI never reads it. */
   kiteHome?: string;
   serverEndpoint?: string;
@@ -108,6 +112,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     throw new Error('Runtime stdio is a Service-owned internal entrypoint.');
   }
   if (
+    args.command === 'server-restart' ||
     args.command === 'server-start' ||
     args.command === 'server-status' ||
     args.command === 'server-stop'
@@ -115,19 +120,27 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     const daemon = dependencies.appServerDaemon;
     if (!daemon) throw new Error('Explicit App Server daemon control is unavailable.');
     const result =
-      args.command === 'server-start'
-        ? await daemon.start(args.workspace)
-        : args.command === 'server-status'
-          ? await daemon.status()
-          : await daemon.stop();
+      args.command === 'server-restart'
+        ? await daemon.restart(
+            args.workspaceExplicit ? args.workspace : undefined,
+            args.cancelOnRestart,
+          )
+        : args.command === 'server-start'
+          ? await daemon.start(args.workspace)
+          : args.command === 'server-status'
+            ? await daemon.status()
+            : await daemon.stop();
     console.log(args.serverJson ? JSON.stringify(result) : formatAppServerDaemonResult(result));
-    if (result.state === 'incompatible') {
+    if (result.state === 'incompatible' && args.command !== 'server-status') {
       throw new Error(formatAppServerMismatch('exact_protocol'));
     }
     if (result.state === 'unavailable') {
       throw new Error(`App Server daemon is ${String(result.state)}.`);
     }
-    if (args.command === 'server-start' && result.state !== 'ready') {
+    if (
+      (args.command === 'server-start' || args.command === 'server-restart') &&
+      result.state !== 'ready'
+    ) {
       throw new Error(`App Server daemon did not start: ${String(result.state)}.`);
     }
     return;
@@ -585,7 +598,16 @@ function formatAppServerDaemonResult(result: Readonly<Record<string, unknown>>):
   const state = typeof result.state === 'string' ? result.state : 'unavailable';
   const endpoint = typeof result.endpoint === 'string' ? ` ${result.endpoint}` : '';
   const build = typeof result.buildId === 'string' ? ` build=${result.buildId}` : '';
-  return `App Server: ${state}${endpoint}${build}`;
+  const target =
+    typeof result.targetBuildId === 'string' && result.targetBuildId !== result.buildId
+      ? ` target=${result.targetBuildId}; ${result.lifecycle ? 'run server restart to use the selected build' : 'use a matching client to stop the old development instance'}`
+      : '';
+  const web = typeof result.webOrigin === 'string' ? ` ${result.webOrigin}/` : '';
+  const actions =
+    Array.isArray(result.availableActions) && result.availableActions.length > 0
+      ? ` actions=${result.availableActions.join(', ')}`
+      : '';
+  return `App Server: ${state}${endpoint}${build}${target}${web}${actions}`;
 }
 
 // ── Argument parsing (unchanged from original cli.ts) ──
@@ -596,25 +618,27 @@ export function parseArgs(argv: string[]): ParsedArgs {
     commandArgv[0] === 'web' &&
     (commandArgv.length === 1 || (commandArgv.length === 2 && commandArgv[1] === '--json'))
       ? 'web-open'
-      : commandArgv[0] === 'server' && commandArgv[1] === 'start'
-        ? 'server-start'
-        : commandArgv[0] === 'server' && commandArgv[1] === 'status'
-          ? 'server-status'
-          : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
-            ? 'server-stop'
-            : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
-              ? 'sandbox-setup'
-              : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
-                ? 'sandbox-status'
-                : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
-                  ? 'server-stdio'
-                  : commandArgv[0] === 'resume'
-                    ? 'resume'
-                    : commandArgv[0] === 'run'
-                      ? 'run'
-                      : commandArgv[0] === 'trace'
-                        ? 'trace'
-                        : 'help';
+      : commandArgv[0] === 'server' && commandArgv[1] === 'restart'
+        ? 'server-restart'
+        : commandArgv[0] === 'server' && commandArgv[1] === 'start'
+          ? 'server-start'
+          : commandArgv[0] === 'server' && commandArgv[1] === 'status'
+            ? 'server-status'
+            : commandArgv[0] === 'server' && commandArgv[1] === 'stop'
+              ? 'server-stop'
+              : commandArgv[0] === 'sandbox' && commandArgv[1] === 'setup'
+                ? 'sandbox-setup'
+                : commandArgv[0] === 'sandbox' && commandArgv[1] === 'status'
+                  ? 'sandbox-status'
+                  : commandArgv[0] === 'server' && commandArgv[1] === '--stdio'
+                    ? 'server-stdio'
+                    : commandArgv[0] === 'resume'
+                      ? 'resume'
+                      : commandArgv[0] === 'run'
+                        ? 'run'
+                        : commandArgv[0] === 'trace'
+                          ? 'trace'
+                          : 'help';
   rejectUnsupportedOptions(argv, command);
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
@@ -697,6 +721,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       (command === 'run' ? freshThreadId() : command === 'server-stdio' ? '' : 'default-thread'),
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
+    workspaceExplicit: argv.includes('--workspace'),
+    cancelOnRestart: argv.includes('--cancel'),
     kiteHome: optionalValue('--kite-home'),
     serverEndpoint: optionalValue('--server'),
     checkpointPath: resolve(value('--checkpoints', defaultClientCheckpointPath())),
@@ -740,6 +766,8 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['command']): void {
+  if (argv.includes('--cancel') && command !== 'server-restart')
+    throw new Error('--cancel is supported only by server restart.');
   if (argv.includes('--target-generation')) {
     throw new Error("Unsupported CLI option '--target-generation'.");
   }
@@ -775,6 +803,7 @@ function rejectUnsupportedOptions(argv: readonly string[], command: ParsedArgs['
     serverFlags.length === 1 &&
     command !== 'run' &&
     command !== 'resume' &&
+    command !== 'server-restart' &&
     command !== 'server-start' &&
     command !== 'server-status' &&
     command !== 'server-stop' &&
@@ -826,6 +855,7 @@ function printHelp(): void {
   bun run agent run --task "Create hello.txt"
   bun run agent resume --thread default-thread --task "Continue the task"
   bun run agent server start [--server <endpoint>]
+  bun run agent server restart [--workspace <path>] [--cancel] [--server <endpoint>]
   bun run agent server status [--server <endpoint>] [--json]
   bun run agent server stop [--server <endpoint>]
   bun run agent web [--server <endpoint>] [--json]

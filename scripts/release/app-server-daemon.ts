@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import {
   createKiteAppServerDaemonClient,
-  KITE_APP_SERVER_DAEMON_SHUTDOWN_REQUEST_SCHEMA_,
-  KITE_APP_SERVER_DAEMON_SHUTDOWN_RESPONSE_CODEC_,
+  KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_,
   KITE_APP_SERVER_DAEMON_STATUS_REQUEST_SCHEMA_,
   KITE_APP_SERVER_DAEMON_STATUS_RESPONSE_CODEC_,
+  KITE_APP_SERVER_DAEMON_VERSION_,
   type KiteAppServerConnection,
+  type KiteLifecycleStatus,
+  requestKiteLifecycle,
 } from '@kite-ai/kite-local-runtime/client';
 import {
   clearDeadKiteLocalRuntimeEndpoint,
@@ -18,6 +20,8 @@ import {
   resolveKiteAppServerDaemonEndpoint,
 } from '@kite-ai/kite-local-runtime/service';
 import { RuntimeClientError, type RuntimeClientInfo } from '@kite-ai/runtime-client';
+import { validateKiteSessionStoreDatabase } from '@kite-ai/runtime-storage-sqlite';
+import { preflightWebGatewayStaticAssets } from '../../apps/kite-service/src/web-gateway';
 import {
   type ManagedLocalAppServerOptions,
   type ManagedLocalAppServerTarget,
@@ -27,8 +31,13 @@ import {
 import { resolveLocalRuntimeParent } from './local-service-client';
 
 export interface AppServerDaemonStatus {
-  readonly state: 'absent' | 'ready' | 'draining' | 'incompatible' | 'unavailable';
+  readonly state: 'absent' | 'starting' | 'ready' | 'draining' | 'incompatible' | 'unavailable';
   readonly buildId?: string;
+  readonly targetBuildId?: string;
+  readonly businessCompatibility?: 'compatible' | 'incompatible' | 'unknown';
+  readonly lifecycle?: KiteLifecycleStatus;
+  readonly diagnostic?: string;
+  readonly availableActions?: readonly string[];
   readonly instanceId?: string;
   readonly startedAt?: string;
   readonly workspace?: string;
@@ -46,6 +55,7 @@ export interface ManagedLocalAppServerDaemon {
     }): Promise<KiteAppServerConnection>;
   };
   start(workspace: string): Promise<AppServerDaemonStatus>;
+  restart(workspace?: string, cancel?: boolean): Promise<AppServerDaemonStatus>;
   status(): Promise<AppServerDaemonStatus>;
   stop(): Promise<AppServerDaemonStatus>;
   discoverWeb(): Promise<string>;
@@ -74,7 +84,7 @@ export function createManagedLocalAppServerDaemon(
           instanceId: `daemon_client_${randomUUID()}`,
         }),
     });
-  const readStatus = async (): Promise<AppServerDaemonStatus> => {
+  const readLegacyStatus = async (): Promise<AppServerDaemonStatus> => {
     const client = connect();
     try {
       await client.connect();
@@ -105,7 +115,100 @@ export function createManagedLocalAppServerDaemon(
       await client.close('daemon-status').catch(() => undefined);
     }
   };
-  return Object.freeze({
+  const readStatus = async (): Promise<AppServerDaemonStatus> => {
+    try {
+      const response = await requestKiteLifecycle(endpoint, { operation: 'status' });
+      if (response.operation !== 'status') throw new Error('Lifecycle status is unavailable.');
+      const life = response.status;
+      if (life.homeDigest !== endpoint.homeDigest)
+        throw new Error('Lifecycle profile identity mismatch.');
+      const compatible =
+        life.protocol === KITE_APP_SERVER_DAEMON_VERSION_ &&
+        KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_.every((method) =>
+          life.capabilities.includes(method),
+        );
+      return {
+        state: compatible ? life.phase : 'incompatible',
+        endpoint: endpointLabel(endpoint),
+        buildId: life.buildId,
+        targetBuildId: target.buildId,
+        businessCompatibility: compatible ? 'compatible' : 'incompatible',
+        lifecycle: life,
+        availableActions:
+          life.phase === 'draining'
+            ? []
+            : life.phase === 'starting'
+              ? ['stop']
+              : [
+                  'stop',
+                  ...(life.activeOperations ? [] : ['restart']),
+                  'restart --cancel',
+                  ...(compatible && life.webOrigin ? ['web'] : []),
+                ],
+        instanceId: life.instanceId,
+        workspace: life.workspace,
+        startedAt: life.startedAt,
+        ...(life.webOrigin ? { webOrigin: life.webOrigin } : {}),
+      };
+    } catch {
+      // Read-only diagnosis of pre-release instances; never use their business shutdown as a fallback.
+      const legacy = await readLegacyStatus();
+      return {
+        ...legacy,
+        targetBuildId: target.buildId,
+        businessCompatibility:
+          legacy.state === 'incompatible'
+            ? 'incompatible'
+            : legacy.state === 'ready'
+              ? 'compatible'
+              : 'unknown',
+        availableActions:
+          legacy.state === 'absent'
+            ? ['start']
+            : legacy.state === 'ready' && legacy.webOrigin
+              ? ['web']
+              : [],
+        ...(legacy.state === 'absent' ? {} : { diagnostic: 'lifecycle_unavailable' }),
+      };
+    }
+  };
+  const stopInstance = async (current: AppServerDaemonStatus, cancel: boolean): Promise<void> => {
+    const life = current.lifecycle;
+    if (!life)
+      throw new Error(
+        'Daemon lifecycle is unavailable; use its matching client or verify the old development instance before stopping it.',
+      );
+    const response = await requestKiteLifecycle(endpoint, {
+      operation: 'shutdown',
+      expectedInstanceId: life.instanceId,
+      mode: cancel ? 'cancel' : 'if_idle',
+    });
+    if (response.operation !== 'shutdown')
+      throw new Error('Daemon lifecycle shutdown is unavailable.');
+    if (response.outcome === 'busy')
+      throw new Error(
+        'App Server is busy; wait for tasks to finish or use `server restart --cancel`.',
+      );
+    if (response.outcome === 'instance_changed')
+      throw new Error('App Server instance changed; inspect status before retrying.');
+    const probe = createKiteLocalRuntimeProcessIdentityProbe();
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const observed = await readStatus();
+      if (observed.instanceId && observed.instanceId !== life.instanceId)
+        throw new Error('App Server changed concurrently.');
+      if (
+        observed.state === 'absent' &&
+        (await probe.inspect(life.pid, life.processStartIdentity)) === 'dead'
+      )
+        return;
+      await Bun.sleep(50);
+    }
+    throw new Error(
+      'App Server stop_timeout; shutdown may still be completing. No replacement was started.',
+    );
+  };
+  const daemon: ManagedLocalAppServerDaemon = {
     target,
     endpoint,
     connector: Object.freeze({
@@ -158,6 +261,8 @@ export function createManagedLocalAppServerDaemon(
         }
       }
       validateWebStaticRoot(preparedTarget.webStaticRoot);
+      preflightWebGatewayStaticAssets(preparedTarget.webStaticRoot);
+      validateKiteSessionStoreDatabase(join(preparedTarget.runtimeRoot, 'kite-session.sqlite'));
       await clearDeadEndpoint(endpoint);
       const env = daemonEnvironment(preparedTarget, endpoint, canonicalWorkspace);
       const child = Bun.spawn({
@@ -185,9 +290,38 @@ export function createManagedLocalAppServerDaemon(
         ) {
           return status;
         }
+        if (child.exitCode !== null) {
+          throw new Error(
+            `App Server startup failed (exit ${child.exitCode}); check the selected installation and configuration.`,
+          );
+        }
         await Bun.sleep(50);
       }
-      throw new Error('App Server daemon did not become ready.');
+      throw new Error('App Server start_timeout; inspect server status before retrying.');
+    },
+    async restart(workspace?: string, cancel = false): Promise<AppServerDaemonStatus> {
+      const current = await readStatus();
+      const canonicalWorkspace = realpathSync.native(
+        workspace ?? current.workspace ?? process.cwd(),
+      );
+      if (current.workspace && current.workspace !== canonicalWorkspace)
+        throw new Error('Selected App Server daemon serves a different Workspace.');
+      const prepared = prepareManagedLocalAppServerTarget(target);
+      validateWebStaticRoot(prepared.webStaticRoot);
+      preflightWebGatewayStaticAssets(prepared.webStaticRoot);
+      validateKiteSessionStoreDatabase(join(prepared.runtimeRoot, 'kite-session.sqlite'));
+      if (current.state !== 'absent') await stopInstance(current, cancel);
+      const started = await daemon.start(canonicalWorkspace);
+      if (
+        started.state !== 'ready' ||
+        started.buildId !== target.buildId ||
+        started.workspace !== canonicalWorkspace
+      ) {
+        throw new Error(
+          'App Server restart did not reach the selected build and Workspace; inspect status.',
+        );
+      }
+      return started;
     },
     status: readStatus,
     async discoverWeb(): Promise<string> {
@@ -205,32 +339,12 @@ export function createManagedLocalAppServerDaemon(
     },
     async stop(): Promise<AppServerDaemonStatus> {
       const current = await readStatus();
-      if (
-        current.state === 'absent' ||
-        current.state === 'incompatible' ||
-        current.state === 'unavailable'
-      ) {
-        return current;
-      }
-      const client = connect();
-      try {
-        await client.connect();
-        const response = await client.runtime.requestServerControl('server/shutdown', {
-          schema: KITE_APP_SERVER_DAEMON_SHUTDOWN_REQUEST_SCHEMA_,
-        });
-        KITE_APP_SERVER_DAEMON_SHUTDOWN_RESPONSE_CODEC_.parse(response);
-      } finally {
-        await client.close('daemon-stop').catch(() => undefined);
-      }
-      const deadline = Date.now() + 10_000;
-      while (Date.now() < deadline) {
-        const status = await readStatus();
-        if (status.state === 'absent') return status;
-        await Bun.sleep(50);
-      }
-      throw new Error('App Server daemon shutdown did not settle.');
+      if (current.state === 'absent') return current;
+      await stopInstance(current, true);
+      return readStatus();
     },
-  });
+  };
+  return Object.freeze(daemon);
 }
 
 function daemonEnvironment(
@@ -349,5 +463,10 @@ function validateWebStaticRoot(path: string): void {
 }
 
 function isVersionMismatch(error: unknown): boolean {
-  return error instanceof RuntimeClientError && error.code === 'server_mismatch';
+  return (
+    error instanceof RuntimeClientError &&
+    (error.code === 'server_mismatch' ||
+      (error.code === 'protocol_error' &&
+        error.protocol?.data.code === 'protocol_version_mismatch'))
+  );
 }

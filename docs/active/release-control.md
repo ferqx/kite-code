@@ -21,6 +21,8 @@ workflow定义、本机单平台结果或artifact上传都不能替代三平台�
 
 ## Candidate
 
+本次生命周期升级实现及待验收范围：[客户端启动与升级规范](../plans/daemon-upgrade-lifecycle.md)补充 TUI/CLI 新旧版本配套、Web 制品身份、共享数据兼容与显式 daemon restart 的发布验收。现有发布资格不自动覆盖这些新增要求。
+
 `release:build`编译`kite`、`kite-tui`、`kite-service`和Web payload，并生成strict manifest、逐文件SHA-256、archive sidecar、
 release notes与known limitations。manifest中的CLI/TUI/Service/Web slot必须绑定exact identity；Coordinator/Worker/Gateway slot必须为null，
 archive不得出现对应executable/launcher。
@@ -30,7 +32,7 @@ installed固定launcher-pinned candidate。两者把同一个build ID交给clien
 不查PATH、不发现running process、不fallback。
 
 显式`kite server start`解析同candidate的`app-server run-daemon`。daemon v2 status携带build诊断与stable `webOrigin`；
-compatibility只依据exact protocol/capabilities。status/stop不替换不兼容或identity不确定的owner，`kite web` absent不spawn。
+compatibility只依据exact protocol/capabilities。status 不替换 owner；显式 stop/restart 通过独立 lifecycle v1 校验实例，identity 不确定时拒绝，`kite web` absent不spawn。
 
 ## Build identity 与环境
 
@@ -73,3 +75,5 @@ retired slot absence、Web payload、MCP wrapper、upgrade、active pointer、im
 `af7c7596c2e1b7b4aa6eccb12375aca017b45222`的
 [OSS RC run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)已在三平台完成build/verify/install/process/PTY/smoke，
 因此本次KASD release qualification为completed。
+
+升级/回滚 CLI 明确提示运行中的客户端不受影响；macOS/Windows/Linux candidate smoke 增加独立编译旧业务协议 fixture 经 lifecycle v1 切换到 installed daemon 的验证。该 fixture 是首发机制证明，不冒充真实已发布 predecessor；第二次发布起须增加受支持 predecessor 制品。新增门禁的通过状态见实施计划，历史 qualification 不自动覆盖新增代码。

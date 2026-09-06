@@ -22,6 +22,7 @@ export interface KiteRuntimeApplication extends AsyncDisposable {
   readonly history: RuntimeHistoryClient;
   readonly appControl: KiteAppControlService;
   readonly operationGate: RuntimeOperationGate;
+  readonly activeOperations: boolean;
   start(): Promise<void>;
   quiesceMutations(): Promise<RuntimeApplicationQuiesceLease>;
   cancelAll(reason: string): Promise<void>;
@@ -71,6 +72,9 @@ export function createKiteRuntimeApplication(
     history: dependencies.history,
     appControl: dependencies.appControl,
     operationGate,
+    get activeOperations() {
+      return operationGate.activeOperations || dependencies.hasActiveOperations?.() === true;
+    },
 
     start(): Promise<void> {
       if (disposed || disposing)

@@ -14,13 +14,23 @@ describe('TUI startup diagnostics', () => {
     );
   });
 
-  test('tells an explicit daemon user to update or use a matching client', () => {
+  test('directs explicit daemon clients to stable lifecycle management', () => {
     expect(
       formatTuiStartupError(
         new RuntimeClientError('server_mismatch', 'Runtime Server capability set is incomplete.'),
         'exact_protocol',
       ),
-    ).toContain('请更新 Kite Code，或改用与该 App Server 匹配的客户端');
+    ).toContain('server status 和 server restart');
+  });
+
+  test('recognizes a server-rejected wire version without treating it as an installation failure', () => {
+    const error = new RuntimeClientError('protocol_error', 'Protocol version mismatch', {
+      code: -32004,
+      message: 'Protocol version mismatch',
+      data: { code: 'protocol_version_mismatch' },
+    });
+    expect(formatTuiStartupError(error, 'exact_protocol')).toContain('server restart');
+    expect(formatTuiStartupError(error, 'same_build')).toContain('安装可能不完整');
   });
 
   test('preserves unrelated startup errors', () => {

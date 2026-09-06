@@ -60,3 +60,5 @@
 `bun run --cwd packages/runtime-storage-sqlite test`。测试分别验证 Session Store、多进程 generation、旧 Home Store、Run 与迁移 profile；某个旧 profile 的测试通过不证明它是当前生产入口。
 
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
+
+App Server 打开可变 Store 前，通过 [Session 文件 preflight](src/kite-session-runtime-file.ts) 只读检查现存格式；release restart 复用同一检查，失败时不停止旧实例。不兼容文件保持原样，不在普通启动迁移；absent preflight 不创建文件。

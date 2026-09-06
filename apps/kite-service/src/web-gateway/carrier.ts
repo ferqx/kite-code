@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -38,6 +39,7 @@ export type WebGatewayAssetReader = (absolutePath: string) => Promise<Response |
 export interface WebGatewayCarrierOptions {
   readonly staticAssetRoot: string;
   readonly instanceId: string;
+  readonly buildId: string;
   /** Optional Browser read API hosted on this same explicit daemon listener. */
   readonly agentApi?: AgentApiRouteHandler;
   readonly limits?: WebGatewayLimits;
@@ -65,6 +67,11 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
   const drainDeadlineMs = boundedDeadline(options.limits?.drainDeadlineMs);
   let closed = false;
   let closing: Promise<void> | undefined;
+  const pageIdentity = createHash('sha256')
+    .update(options.instanceId)
+    .update('\0')
+    .update(options.buildId)
+    .digest('hex');
   const auth = createWebGatewayAuth({
     instanceId: options.instanceId,
     cookiePath: '/',
@@ -90,7 +97,10 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       const url = new URL(request.url);
       if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
         if (!options.agentApi) return secureResponse(404, 'not_found');
-        return options.agentApi.handle(request, auth);
+        const response = await options.agentApi.handle(request, auth);
+        response.headers.set('x-kite-web-identity', pageIdentity);
+        response.headers.set('cache-control', 'no-store');
+        return response;
       }
       if (
         request.method !== 'GET' ||
@@ -114,7 +124,16 @@ export function createWebGatewayCarrier(options: WebGatewayCarrierOptions): WebG
       if (!path) return secureResponse(404, 'not_found');
       const asset = await readAsset(path);
       if (asset?.status !== 200) return secureResponse(404, 'not_found');
-      return secureResponse(200, await asset.arrayBuffer(), {
+      const bytes = await asset.arrayBuffer();
+      const body = isWebShellPath(url.pathname)
+        ? new TextDecoder()
+            .decode(bytes)
+            .replace(
+              /<head([^>]*)>/iu,
+              `<head$1><meta name="kite-web-identity" content="${pageIdentity}">`,
+            )
+        : bytes;
+      return secureResponse(200, body, {
         'content-type': contentTypeFor(path),
         ...(setCookie ? { 'set-cookie': setCookie } : {}),
       });
