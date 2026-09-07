@@ -8,6 +8,7 @@ import {
 import { runtimeInteractionOwnerForPending } from '#kite-service/bootstrap/runtime/interaction-owner';
 import type { RuntimeUserAction } from '#kite-service/bootstrap/runtime/state-actions';
 import type { RuntimeEffect, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
+import { projectPlanReview } from './plan-review';
 import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
 
 export type RuntimeInteractionEffect = Extract<RuntimeEffect, { type: `request_${string}` }>;
@@ -117,6 +118,7 @@ export function projectRuntimeClientInteraction(
       }
       return validInteraction({
         kind: 'plan_review',
+        review: projectPlanReview(interaction.plan),
         interactionId: interaction.interactionId,
         sessionRevision: revision,
         plan: {

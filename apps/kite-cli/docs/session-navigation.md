@@ -11,3 +11,5 @@ load token 只允许当前请求提交。切换到已注册会话会使旧 load 
 删除当前 Session 后建立新的可输入 Session；删除不等于恢复工作区文件。`/rewind` 的确认与执行分别防重复，历史恢复先完成数据与 writer 准入，再交给展示；不能把旧 viewport 当成新 fork 已完成。
 
 验证：[导航竞态](../test/session-navigation.test.ts)、[PTY 切换](../../../tests/tui-system/scenarios/session-switch.test.ts)、[会话持久化](../../../tests/tui-system/scenarios/session-persistence.test.ts)。
+
+发布构建通过锁文件应用 `ink-virtual-list@0.2.3` 的[JSX 入口补丁](../../../patches/ink-virtual-list@0.2.3.patch)。该版本发布的 dist 使用开发 JSX API，在 production React 下会使会话选择器崩溃；补丁使用生产 JSX 入口，保留原组件行为。验证见[编译版列表回归](../../../tests/release/oss-candidate.test.ts)。

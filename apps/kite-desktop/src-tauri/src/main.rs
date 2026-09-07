@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod editor;
 #[cfg(target_os = "macos")]
 mod macos;
 mod process;
@@ -79,6 +80,25 @@ async fn select_workspace(
         .to_string();
     inner.workspace = Some(path);
     Ok(Some(text))
+}
+
+#[tauri::command]
+async fn open_editor(
+    state: State<'_, DesktopState>,
+    connection_id: u64,
+    path: String,
+    editor: editor::Editor,
+) -> Result<(), String> {
+    let inner = state.inner.lock().await;
+    if inner.generation != connection_id
+        || inner.process.is_none()
+        || state.quitting.load(Ordering::SeqCst)
+    {
+        return Err("文件所属项目连接已改变，请重新查看。".into());
+    }
+    let workspace = inner.workspace.as_ref().ok_or("请先连接项目。")?;
+    let target = editor::file_target(workspace, &path)?;
+    editor::open(editor, &target).await
 }
 
 #[tauri::command]
@@ -246,7 +266,8 @@ fn main() {
             runtime_open,
             runtime_send,
             runtime_receive,
-            runtime_close
+            runtime_close,
+            open_editor
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

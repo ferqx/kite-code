@@ -108,6 +108,20 @@ describe('release App Server client pairing', () => {
       expect(created).toMatchObject({ status: 'applied' });
       if (created.status !== 'applied') throw new Error('Source Session creation was not applied.');
       createdRevision = created.revision;
+      const directory = await client.runtime.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_sessions',
+      });
+      expect(directory).toMatchObject({
+        status: 'ok',
+        sessions: expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: 'source-pairing-session',
+            workspaceDigest: `sha256:${createHash('sha256').update(workspace).digest('hex')}`,
+          }),
+        ]),
+      });
+      expect(JSON.stringify(directory)).not.toContain(workspace);
     } finally {
       await client[Symbol.asyncDispose]();
     }

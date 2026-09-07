@@ -9,6 +9,7 @@
     "allow-runtime-send",
     "allow-runtime-receive",
     "allow-runtime-close",
+    "allow-open-editor",
     "dialog:allow-message"
   ]
 }

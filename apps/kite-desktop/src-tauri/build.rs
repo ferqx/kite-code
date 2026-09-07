@@ -6,6 +6,7 @@ fn main() {
             "runtime_send",
             "runtime_receive",
             "runtime_close",
+            "open_editor",
         ]),
     ))
     .expect("Tauri build failed");

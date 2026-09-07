@@ -2,6 +2,9 @@ import { confirm } from '@tauri-apps/plugin-dialog';
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DesktopClient } from './client';
+import { Interaction } from './Interaction';
+import { Results } from './Results';
+import { Settings } from './Settings';
 import './style.css';
 
 const client = new DesktopClient();
@@ -31,6 +34,7 @@ function App() {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    client.clearError();
     try {
       await action();
     } catch (error) {
@@ -51,10 +55,26 @@ function App() {
         <button
           type="button"
           className="project"
-          disabled={busy || view.connected}
-          onClick={() => void act(() => client.openProject())}
+          disabled={busy}
+          onClick={() =>
+            void act(async () => {
+              if (view.connected) {
+                if (
+                  !(await confirm('切换项目将先停止当前连接的任务并等待清理，已有修改不会撤销。', {
+                    title: '切换项目？',
+                    kind: 'warning',
+                    okLabel: '停止并选择项目',
+                    cancelLabel: '留在当前项目',
+                  }))
+                )
+                  return;
+                await client.disconnect();
+              }
+              await client.openProject();
+            })
+          }
         >
-          <span>项目</span>
+          <span>{view.connected ? '切换项目' : '项目'}</span>
           <strong>{view.workspace.split('/').filter(Boolean).pop() || '打开本地项目'}</strong>
           <span>⌘</span>
         </button>
@@ -155,6 +175,8 @@ function App() {
           </section>
         )}
         <section className="conversation" aria-live="polite">
+          <Settings key={view.workspace} client={client} view={view} busy={busy} act={act} />
+          {view.selected && <Results client={client} view={view} busy={busy} act={act} />}
           {view.loadingSession ? (
             <div className="notice" role="status">
               正在加载会话…
@@ -230,10 +252,20 @@ function App() {
                 仅批准这一次
               </button>
             </section>
+          ) : (interaction?.kind === 'input' || interaction?.kind === 'plan_review') &&
+            view.selected ? (
+            <Interaction
+              key={`${view.workspace}:${view.selected}:${interaction.interactionId}`}
+              client={client}
+              sessionId={view.selected}
+              interaction={interaction}
+              disabled={busy || !view.ready}
+              act={act}
+            />
           ) : (
             runStatus === 'waiting' && (
               <div className="notice">
-                任务正在等待交互。当前接入版本尚未提供此类交互面板，可以取消任务；其余交互面板将在开发闭环阶段接入。
+                任务正在等待尚未支持的扩展或验证交互，可以取消任务并检查结果。
               </div>
             )
           )}

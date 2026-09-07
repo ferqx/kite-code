@@ -178,7 +178,11 @@ describe('Kite Runtime History Client adapter', () => {
       }),
       listEvents: (request) => {
         calls.push(request.afterSequence ?? 0);
-        const entries = records.filter((entry) => entry.sequence > (request.afterSequence ?? 0));
+        const entries = records.filter(
+          (entry) =>
+            entry.sequence > (request.afterSequence ?? 0) &&
+            (request.beforeSequence === undefined || entry.sequence < request.beforeSequence),
+        );
         const page = entries.slice(0, request.limit);
         const last = page.at(-1);
         return {
@@ -227,6 +231,13 @@ describe('Kite Runtime History Client adapter', () => {
       turnId: 'legacy-turn-2',
     });
     expect(transcript.records[1]?.identity).not.toEqual(transcript.records[0]?.identity);
+    const pinned = await createKiteRuntimeHistoryClient(logs).loadSession('long-session', 200);
+    expect(pinned.session.lastSequence).toBe(200);
+    expect(pinned.records).toEqual(transcript.records.slice(0, 200));
+    expect(pinned.events).toHaveLength(202);
+    await expect(
+      createKiteRuntimeHistoryClient(logs).loadSession('long-session', 402),
+    ).rejects.toThrow('snapshot sequence');
   });
 
   test('backfills pre-admission presentation facts from the following lifecycle identity', async () => {

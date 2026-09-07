@@ -22,3 +22,5 @@
 操作入口：[TUI](clients/tui/README.md)、[Web](clients/web/README.md)、[CLI](cli/README.md)。服务启动不属于浏览器权限，见[Server](server/README.md)。
 
 能力不同不自动意味着缺陷。发布和平台限制按实际运行环境核对，不能用一套测试结果承诺所有系统和模型。
+
+开发中的[桌面客户端](clients/desktop/README.md)已接入模型配置、任务、历史、审批、问题、计划审核和取消；尚未正式发布，本机 macOS 日常开发闭环已验收，平台与剩余能力按该入口说明，不计入上表的正式客户端承诺。

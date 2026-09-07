@@ -79,3 +79,7 @@ retired slot absence、Web payload、MCP wrapper、upgrade、active pointer、im
 因此本次KASD release qualification为completed。
 
 升级/回滚 CLI 明确提示运行中的客户端不受影响；macOS/Windows/Linux candidate smoke 增加独立编译旧业务协议 fixture 经 lifecycle v1 切换到 installed daemon 的验证。该 fixture 是首发机制证明，不冒充真实已发布 predecessor；第二次发布起须增加受支持 predecessor 制品。新增门禁的通过状态见实施计划，历史 qualification 不自动覆盖新增代码。
+
+macOS standalone 构建将已安装目标架构的 `@napi-rs/keyring` 原生模块嵌入 executable，不在运行时搜索包目录或环境指定的原生库。凭据仍由既有 NativeMcpCredentialStore 与共享 broker 管理；其他平台的 standalone 原生凭据资格未在本轮扩大。隔离编译 smoke 见[原生凭据验证](../../tests/qualification/mcp-keyring-platform-smoke.test.ts)，不替代桌面包签名、公证与最终运行验收。
+
+发布依赖补丁由 `package.json` 的 `patchedDependencies` 与 `bun.lock` 固定，安装不能绕过补丁。当前 `ink-virtual-list@0.2.3` 修正发布 dist 的开发 JSX 入口，编译版列表渲染由[候选包回归](../../tests/release/oss-candidate.test.ts)验证；不通过全局开启 React 开发模式修复生产制品。

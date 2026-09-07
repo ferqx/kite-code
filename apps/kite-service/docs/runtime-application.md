@@ -22,6 +22,10 @@ connection/subscription/broker binding；quiesce、cancel、drain与dispose只�
 
 ## Workspace、Trust 与 routing
 
+Store-only Session 投影保留 State 已持久化的 canonicalWorkspaceDigest 为安全的 workspaceDigest；桌面以其与当前 Trust identity 匹配目录，Protocol 仍排除原始 workspace 路径。目录显示名由已有 Session row 经安全文本投影，不另建项目或会话索引。
+
+活动 Bridge 和 Store-only 投影必须从同一持久 State 输出相同 workspaceDigest，避免恢复时产生同 revision 的投影漂移。文件变更事件仅投影已提交工具事实中的有界 path，差异正文复用 tool.finished 的已保存输出；不新增 Git 或 Store 读取入口。
+
 Service neutral boot不解析请求Workspace的config/MCP/Skill或启动Workspace runtime。第一阶段，authenticated App Control
 Trust query/decision重新canonicalize path，使用observed revision CAS并返回完整`canonicalPath + projectId +
 workspaceDigest`。第二阶段，carrier仅为trusted identity签发one-shot ticket并建立connection admission。
@@ -39,9 +43,12 @@ MCP readiness。它不创建configuration-only第二Worker或placeholder executi
 
 ## App Control、History 与 mutation
 
+[计划正文 projector](../src/runtime-client/plan-review.ts)从已保存的计划正文与步骤生成脱敏、有界的 review。实时交互与历史事件复用同一函数；Contract/Protocol 严格校验 text/truncated，交互结算继续绑定计划 identity 与 Session revision。超限明确标记，不暴露 Artifact/Store 句柄。验证见[计划正文测试](../test/runtime-plan-review.test.ts)。
+
 `KiteInProcessAppControlComposition` 只表示Service内部handler composition，不是CLI embedded mode。Workspace Trust、
 Provider/model、MCP、Skill、execution/release与Native credential均有exact route/codec；secret只进入Native credential
 owner，browser-safe App Contract不携带secret。Trust query另投影Workspace关联的exact external-read roots与digest；
+Provider/model 的显式选择即使返回 `already_selected` 也重新读取当前配置并更新后续执行的期望配置，避免同名模型替换凭据或地址后继续使用旧路由；活动执行保持已捕获的配置。
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
 Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
 grant subject与Host内部payload仍不进入client interaction。
@@ -153,3 +160,5 @@ Session 写入口在核对当前执行权与有效期后，可使用同一 autho
 执行权失效由原Storage owner通知同一Host停止本地执行，不另设执行登记或后台协调器。取消监听器即使无法持久化也必须继续传播Provider停止信号；只发布成功提交的终态事件，持久恢复记录不会因本地I/O关闭而被伪装成已完成。
 
 Daemon lifecycle status 直接读取 Application activeOperations（gate 临界区或 Host 活动 Session），不维护额外计数。接受 shutdown 后仍由同一 quiesce lease 管理取消和 drain，状态查询不会取得 lease。
+
+History 可按已观察的 `throughSequence` 重建历史前缀，模式、恢复与展示身份都来自该前缀。stdio carrier 将该只读结果按完整 source record 分页，每页最多 512 条并预留协议封装字节；不拆分事件正文、不持久化分页状态。现有完整历史 owner 仍在每页请求内重建前缀，此处不承诺 Store 扫描或客户端最终 transcript 的恒定内存。

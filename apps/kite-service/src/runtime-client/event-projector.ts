@@ -7,6 +7,7 @@ import {
 import { runtimeHostStateAssertReadableRuntimeEvent } from '@kite-ai/runtime-host';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { runtimeClientEventCoverageDecision } from './event-coverage';
+import { projectPlanReview } from './plan-review';
 import { projectRuntimeClientCommand, projectRuntimeClientText } from './safe-text';
 
 export interface RuntimeClientEventProjectionContext {
@@ -128,6 +129,7 @@ export function projectRuntimeClientEvent(
       return {
         type: 'tool.file_changed',
         toolId: event.toolCallId,
+        path: projectRuntimeClientText(event.path, 8_192),
         change: event.kind === 'add' ? 'added' : event.kind === 'edit' ? 'modified' : 'deleted',
         summary: 'Workspace file changed.',
       };
@@ -202,6 +204,7 @@ export function projectRuntimeClientEvent(
         type: 'plan.review_requested',
         interaction: {
           kind: 'plan_review',
+          review: projectPlanReview(event.plan),
           interactionId: event.interactionId,
           sessionRevision: context.sessionRevision,
           plan: {

@@ -87,6 +87,8 @@ export interface RuntimeInputInteraction extends RuntimeInteractionBase {
 
 export interface RuntimePlanReviewInteraction extends RuntimeInteractionBase {
   readonly kind: 'plan_review';
+  /** Display-only reviewed plan, bounded and redacted by the App projector. */
+  readonly review?: { readonly text: string; readonly truncated: boolean };
   readonly plan: {
     readonly planId: string;
     readonly version: number;
@@ -159,7 +161,9 @@ export function sameRuntimeClientInteractionIdentity(
         right.kind === 'plan_review' &&
         left.plan.planId === right.plan.planId &&
         left.plan.version === right.plan.version &&
-        left.plan.structuralDigest === right.plan.structuralDigest
+        left.plan.structuralDigest === right.plan.structuralDigest &&
+        left.review?.text === right.review?.text &&
+        left.review?.truncated === right.review?.truncated
       );
     case 'provider_action':
       return (
@@ -243,6 +247,8 @@ export interface RuntimeSessionProjection {
   readonly revision: number;
   readonly displayName?: string;
   readonly workspace?: string;
+  /** Opaque persisted workspace binding for client directory grouping. */
+  readonly workspaceDigest?: string;
   readonly updatedAt?: string;
   readonly lifecycle: 'open' | 'closed' | 'unavailable';
   /** Safe selected route; provider credentials and endpoint configuration never cross. */

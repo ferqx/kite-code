@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { z } from 'zod';
@@ -168,6 +169,8 @@ export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>>
   '@kite-ai/kite-app-contract/worker-controller':
     'packages/kite-app-contract/src/worker-controller.ts',
   '@kite-ai/kite-local-runtime/client': 'packages/kite-local-runtime/src/client/index.ts',
+  '@kite-ai/kite-local-runtime/client/protocol':
+    'packages/kite-local-runtime/src/client/protocol-connection.ts',
   '@kite-ai/kite-local-runtime/config': 'packages/kite-local-runtime/src/config/index.ts',
   '@kite-ai/kite-local-runtime/coordinator': 'packages/kite-local-runtime/src/coordinator/index.ts',
   '@kite-ai/kite-local-runtime/service': 'packages/kite-local-runtime/src/service/index.ts',
@@ -547,7 +550,7 @@ export async function compileOssReleaseExecutable(
     },
     plugins: [
       {
-        name: 'standalone-release-stubs',
+        name: 'standalone-release-bindings',
         setup(builder) {
           const resolveSource = (base: string): string | undefined => {
             for (const candidate of [
@@ -611,9 +614,28 @@ export async function compileOssReleaseExecutable(
             path: 'react-devtools-core',
             namespace: 'kite-release-stub',
           }));
-          builder.onResolve({ filter: /^@napi-rs\/keyring$/ }, () => ({
-            path: '@napi-rs/keyring',
-            namespace: 'kite-keyring-stub',
+          builder.onResolve({ filter: /^@napi-rs\/keyring$/ }, () => {
+            if (process.platform === 'darwin') {
+              // Pin the installed target addon into the executable. The package's
+              // runtime loader also probes other platforms and environment paths.
+              return {
+                path: '@napi-rs/keyring',
+                namespace: 'kite-keyring-native',
+              };
+            }
+            return { path: '@napi-rs/keyring', namespace: 'kite-keyring-stub' };
+          });
+          builder.onLoad({ filter: /.*/, namespace: 'kite-keyring-native' }, () => {
+            const require = createRequire(import.meta.resolve('@napi-rs/keyring'));
+            const addon = require.resolve(`@napi-rs/keyring-darwin-${process.arch}`);
+            return {
+              contents: `export const { AsyncEntry } = require(${JSON.stringify(addon)});`,
+              loader: 'js',
+            };
+          });
+          builder.onResolve({ filter: /\.node$/, namespace: 'kite-keyring-native' }, (args) => ({
+            path: args.path,
+            namespace: 'file',
           }));
           builder.onLoad({ filter: /.*/, namespace: 'kite-release-stub' }, () => ({
             contents: 'export default { initialize() {}, connectToDevTools() {} };',

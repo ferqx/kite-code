@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
+  compileOssReleaseExecutable,
   STANDALONE_WORKSPACE_ENTRYPOINTS_,
   verifyOssCandidate,
   writeOssCandidateArchive,
@@ -22,6 +25,38 @@ afterEach(() => {
 });
 
 describe('ordinary open-source candidate archive', () => {
+  test('renders the session list dependency in a compiled production executable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-production-list-'));
+    roots.push(root);
+    const entrypoint = join(root, 'list.ts');
+    const executable = join(root, process.platform === 'win32' ? 'list.exe' : 'list');
+    writeFileSync(
+      entrypoint,
+      `
+import { createElement } from ${JSON.stringify(fileURLToPath(import.meta.resolve('react')))};
+import { Text, renderToString } from ${JSON.stringify(fileURLToPath(import.meta.resolve('ink')))};
+import { VirtualList } from ${JSON.stringify(fileURLToPath(import.meta.resolve('ink-virtual-list')))};
+const text = await renderToString(createElement(VirtualList, {
+  items: ['saved session'], selectedIndex: 0, height: 5,
+  renderItem: ({ item }) => createElement(Text, null, item),
+}));
+if (!text.includes('saved session')) throw new Error('Session list did not render');
+console.log('production session list passed');
+`,
+    );
+    await compileOssReleaseExecutable(entrypoint, executable);
+    rmSync(entrypoint);
+    const child = Bun.spawn([executable], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+    const [exit, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(stderr).toBe('');
+    expect(exit).toBe(0);
+    expect(stdout).toContain('production session list passed');
+  }, 30_000);
+
   test('keeps the source App Server entrypoint directly executable by its parent', () => {
     const entrypoint = 'scripts/release/entrypoints/service.ts';
     expect(readFileSync(entrypoint, 'utf8')).toStartWith('#!/usr/bin/env bun\n');

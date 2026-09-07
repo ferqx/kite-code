@@ -127,6 +127,13 @@ const interaction = z.discriminatedUnion('kind', [
     .object({
       ...interactionBase,
       kind: z.literal('plan_review'),
+      review: z
+        .object({
+          text: z.string().max(65_536).refine(noForbiddenControls),
+          truncated: z.boolean(),
+        })
+        .strict()
+        .optional(),
       plan: z
         .object({ planId: identifier, version: safeRevision.min(1), structuralDigest: identifier })
         .strict(),
@@ -517,7 +524,18 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
     .object({
       ...requestBase,
       method: z.literal('history/load_session'),
-      params: z.object({ sessionId: identifier }).strict(),
+      params: z
+        .object({
+          sessionId: identifier,
+          page: z
+            .object({
+              afterSequence: safeRevision.optional(),
+              throughSequence: safeRevision.optional(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
     })
     .strict(),
   ...RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.options.map((method) =>
@@ -695,6 +713,7 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
     sessionId: identifier,
     revision: safeRevision,
     displayName: z.string().max(256).optional(),
+    workspaceDigest: identifier.optional(),
     updatedAt: z.string().max(128).optional(),
     lifecycle: z.enum(['open', 'closed', 'unavailable']),
     model: z
@@ -1088,6 +1107,13 @@ const historyTranscript = z
     recovery: z.enum(['normal', 'pending_interaction', 'restart_required']),
   })
   .strict();
+const historyTranscriptPage = historyTranscript
+  .omit({ events: true })
+  .extend({
+    type: z.literal('history_session_page'),
+    nextCursor: safeRevision.optional(),
+  })
+  .strict();
 const appControlResult = z
   .object({
     method: RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_,
@@ -1110,6 +1136,7 @@ export const RUNTIME_PROTOCOL_RESULT_SCHEMA_ = z.union([
   historySessionPage,
   historyEventPage,
   historyTranscript,
+  historyTranscriptPage,
   appControlResult,
   serverControlResult,
 ]);
@@ -1219,6 +1246,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .object({
       type: z.literal('tool.file_changed'),
       toolId: identifier,
+      path: shortText.optional(),
       change: z.enum(['added', 'modified', 'deleted']),
       summary: shortText.optional(),
     })

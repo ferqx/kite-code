@@ -37,6 +37,10 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 
 ## Authority
 
+桌面模型配置使用既有 Native Provider write 和 App Control model selection；凭据只进入精确写入接口，结果未知先查询且不重放。计划审核由 Service 同时向实时与 History 投影封闭的有界 review 正文和截断标记，参与稳定交互身份比对；没有新增 Store、进程或业务重试队列。
+
+桌面变更阅读复用已提交文件工具记录与终态输出。原生编辑器跳转绑定当前连接，校验项目内普通文件后仅启动固定编辑器；不会把事件中的路径当成任意本机访问权限。Store 与活动 Bridge 的工作区摘要保持同 revision 一致，恢复验证覆盖真实写入、测试及继续会话。
+
 - App Server process 只拥有自身 Host、transport、in-memory projection 与当前取得的 Session execution generation。
 - Durable Store 记录 Session facts、单调 `controllerGeneration`、lease、revision、cleanup 与 effect receipt。
 - 一个 Session 同时最多一个 execution writer；不同 App Server 可以并行写不同 Session。
@@ -125,3 +129,5 @@ release restart 固定目标、只读校验存储与 Web assets、按实例停�
 Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 API 响应携带同一摘要，浏览器入口在解码前核对；不匹配保留错误并要求重新加载。它不授予任何 Runtime 或 Session authority。
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
+
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。断线后的桌面 ready 立即失效，丢失 mutation 回执明确提示结果未知并要求检查实际会话与文件。

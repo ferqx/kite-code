@@ -206,6 +206,8 @@ export type RuntimeClientEvent =
   | {
       readonly type: 'tool.file_changed';
       readonly toolId: string;
+      /** Reported mutation target, display-only; native opening must validate it again. */
+      readonly path?: string;
       readonly change: 'added' | 'modified' | 'deleted';
       readonly summary?: string;
     }
@@ -682,6 +684,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
       'allowFreeText',
       'options',
       'plan',
+      'review',
       'provider',
       'action',
       'verification',
@@ -732,9 +735,15 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           presentKeys(
             value,
             ['kind', 'interactionId', 'sessionRevision', 'plan'],
-            ['title', 'summary'],
+            ['title', 'summary', 'review'],
           ),
-        ) && isPlanIdentity(value.plan)
+        ) &&
+        isPlanIdentity(value.plan) &&
+        (!Object.hasOwn(value, 'review') ||
+          (isRecord(value.review) &&
+            hasExactKeys(value.review, ['text', 'truncated']) &&
+            isBoundedUserText(value.review.text, 65_536) &&
+            typeof value.review.truncated === 'boolean'))
       );
     case 'provider_action':
       return (
@@ -931,7 +940,11 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'tool.file_changed':
       return (
-        hasExactKeys(value, presentKeys(value, ['type', 'toolId', 'change'], ['summary'])) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'toolId', 'change'], ['summary', 'path']),
+        ) &&
+        (!Object.hasOwn(value, 'path') || isBoundedUserText(value.path, 8_192)) &&
         isIdentifier(value.toolId) &&
         (value.change === 'added' || value.change === 'modified' || value.change === 'deleted') &&
         optionalSummary(value)
@@ -1439,6 +1452,7 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
         ['schema', 'sessionId', 'revision', 'lifecycle', 'interactionQueue'],
         [
           'displayName',
+          'workspaceDigest',
           'updatedAt',
           'sessionCommandGrantCount',
           'activeTask',
@@ -1456,6 +1470,7 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       value.lifecycle === 'closed' ||
       value.lifecycle === 'unavailable') &&
     (!Object.hasOwn(value, 'displayName') || isBoundedString(value.displayName)) &&
+    (!Object.hasOwn(value, 'workspaceDigest') || isIdentifier(value.workspaceDigest)) &&
     (!Object.hasOwn(value, 'updatedAt') || isBoundedString(value.updatedAt)) &&
     (!Object.hasOwn(value, 'model') ||
       (isRecord(value.model) &&

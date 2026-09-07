@@ -37,6 +37,25 @@ const initializeRequest = {
 };
 
 describe('Runtime Protocol', () => {
+  test('session directory preserves opaque workspace grouping without exposing a local path', () => {
+    const result = mapRuntimeQueryResultToProtocol({
+      status: 'ok',
+      queryType: 'list_sessions',
+      sessions: [
+        {
+          schema: 'kite.runtime-projection.v2',
+          sessionId: 'session-1',
+          revision: 1,
+          lifecycle: 'open',
+          workspace: '/private/project',
+          workspaceDigest: 'sha256:workspace-1',
+          interactionQueue: { revision: 1, interactions: [] },
+        },
+      ],
+    });
+    expect(result).toMatchObject({ sessions: [{ workspaceDigest: 'sha256:workspace-1' }] });
+    expect(JSON.stringify(result)).not.toContain('/private/project');
+  });
   test('decodes the stable initialize fixture and preserves it on re-encode', async () => {
     const fixture = await Bun.file(
       new URL('../fixtures/valid-initialize-request.json', import.meta.url),
@@ -910,7 +929,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'c0f23e63:b5c751b5';
+    const expectedDigest = 'f84ed23e:6398a4ff';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

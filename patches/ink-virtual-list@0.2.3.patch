@@ -1,0 +1,13 @@
+diff --git a/dist/index.js b/dist/index.js
+index b57d6740dd49901fe77682de86321e9f1791c039..39313bb4b22546ef26743b3c782b280f440bd1fe 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -29,7 +29,7 @@ function useTerminalSize() {
+ // src/VirtualList.tsx
+ import { Box, Text } from "ink";
+ import { forwardRef, useEffect as useEffect2, useImperativeHandle, useMemo, useState as useState2 } from "react";
+-import { jsxDEV } from "react/jsx-dev-runtime";
++import { jsx as jsxDEV } from "react/jsx-runtime";
+ var DEFAULT_HEIGHT = 10;
+ var DEFAULT_ITEM_HEIGHT = 1;
+ function getDefaultKey(item, index) {

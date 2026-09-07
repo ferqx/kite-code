@@ -1361,6 +1361,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       sessionId: this.#input.sessionId,
       revision,
       workspace: this.#input.workspace,
+      ...(state.session.canonicalWorkspaceDigest === undefined
+        ? {}
+        : { workspaceDigest: state.session.canonicalWorkspaceDigest }),
       lifecycle: this.#closed ? 'closed' : 'open',
       model: {
         provider: (this.#activeRunConfig ?? this.#desiredConfig).providerName,

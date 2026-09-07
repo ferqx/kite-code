@@ -131,6 +131,7 @@ import {
 } from './runtime-application';
 import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
+import { projectRuntimeClientText } from './runtime-client/safe-text';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
@@ -1460,6 +1461,11 @@ export function createKiteMultiWorkspaceRuntimeServer(
       sessionId: threadId,
       revision: snapshot.revision,
       workspace: snapshot.session.workspace,
+      ...(snapshot.session.canonicalWorkspaceDigest === undefined
+        ? {}
+        : {
+            workspaceDigest: snapshot.session.canonicalWorkspaceDigest,
+          }),
       lifecycle: 'open' as const,
       interactionQueue,
       ...(activeTask === undefined
@@ -1753,7 +1759,12 @@ export function createKiteMultiWorkspaceRuntimeServer(
           queryType: query.type,
           sessions: owner
             .listCurrentSessions('', 1_000)
-            .map(({ threadId }) => projectStoredSession(threadId))
+            .map(({ threadId, name }) => {
+              const projection = projectStoredSession(threadId);
+              return projection
+                ? { ...projection, displayName: projectRuntimeClientText(name || threadId, 256) }
+                : undefined;
+            })
             .filter((projection) => projection !== undefined),
         };
       }

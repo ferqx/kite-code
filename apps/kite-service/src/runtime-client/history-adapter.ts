@@ -288,7 +288,10 @@ export function createKiteRuntimeHistoryClient(
     async listEvents(request: ListRuntimeLogEventsRequest) {
       return withLogs(logs, (reader) => projectRuntimeLogEventPage(reader.listEvents(request)));
     },
-    async loadSession(sessionId: string): Promise<RuntimeHistorySessionTranscript> {
+    async loadSession(
+      sessionId: string,
+      throughSequence?: number,
+    ): Promise<RuntimeHistorySessionTranscript> {
       compatibility?.listSessions();
       let session = findCurrentSession(logs, sessionId);
       if (!session && compatibility) {
@@ -301,6 +304,16 @@ export function createKiteRuntimeHistoryClient(
         session = findCurrentSession(logs, sessionId);
       }
       if (!session) throw new Error(`Runtime session was not found: ${sessionId}`);
+      if (throughSequence !== undefined) {
+        if (
+          !Number.isSafeInteger(throughSequence) ||
+          throughSequence < 0 ||
+          throughSequence > session.lastSequence
+        ) {
+          throw new Error('Runtime history snapshot sequence is invalid.');
+        }
+        session = { ...session, lastSequence: throughSequence };
+      }
       const records = withLogs(logs, (reader) => {
         const all: Array<{
           sequence: number;
@@ -318,6 +331,7 @@ export function createKiteRuntimeHistoryClient(
           const page = reader.listEvents({
             sessionId,
             ...(afterSequence === undefined ? {} : { afterSequence }),
+            ...(throughSequence === undefined ? {} : { beforeSequence: throughSequence + 1 }),
             direction: 'forward',
             limit: 200,
           });

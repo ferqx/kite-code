@@ -1,10 +1,13 @@
-import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
+import type { RuntimeClientEvent, RuntimeClientToolResult } from '@kite-ai/runtime-contract';
 
 export interface Message {
   readonly id: string;
   readonly role: 'user' | 'assistant' | 'tool';
   readonly text: string;
   readonly settled: boolean;
+  readonly changedFile?: string;
+  readonly changeConfirmed?: boolean;
+  readonly toolResult?: RuntimeClientToolResult;
 }
 
 /** Service text deltas are cumulative; durable model output wins over late deltas. */
@@ -12,6 +15,18 @@ export function projectEvent(
   messages: readonly Message[],
   event: RuntimeClientEvent,
 ): readonly Message[] {
+  if (event.type === 'tool.file_changed') {
+    const id = `tool:${event.toolId}`;
+    const previous = messages.find((message) => message.id === id);
+    const change: Message = {
+      ...(previous ?? { id, role: 'tool', text: event.summary ?? '文件已变更', settled: false }),
+      changeConfirmed: true,
+      ...(event.path ? { changedFile: event.path } : {}),
+    };
+    return previous
+      ? messages.map((message) => (message.id === id ? change : message))
+      : [...messages, change];
+  }
   let next: Message;
   switch (event.type) {
     case 'user.message':
@@ -49,8 +64,9 @@ export function projectEvent(
       next = {
         id: `tool:${event.toolId}`,
         role: 'tool',
-        text: `${event.summary}\n${event.result.stdout || event.result.stderr}`,
+        text: [event.summary, event.result.stdout, event.result.stderr].filter(Boolean).join('\n'),
         settled: true,
+        toolResult: event.result,
       };
       break;
     case 'tool.failed':
@@ -75,5 +91,6 @@ export function projectEvent(
   if (next.role === 'assistant' && !next.settled && !next.text.startsWith(previous.text))
     return messages;
   if (next.settled && !next.text) next = { ...next, text: previous.text };
+  next = { ...previous, ...next };
   return messages.map((message, position) => (position === index ? next : message));
 }

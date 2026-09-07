@@ -9,6 +9,7 @@ on:
       - bun.lock
       - packages/builtin-runtime/src/mcp/credential-store.ts
       - tests/qualification/mcp-keyring-platform-smoke.test.ts
+      - scripts/release/oss-candidate.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - bun.lock
       - packages/builtin-runtime/src/mcp/credential-store.ts
       - tests/qualification/mcp-keyring-platform-smoke.test.ts
+      - scripts/release/oss-candidate.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
 
 permissions:

@@ -104,5 +104,8 @@
     "ink-testing-library": "^4.0.0",
     "lefthook": "^2.1.9",
     "typescript": "^5.9.3"
+  },
+  "patchedDependencies": {
+    "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch"
   }
 }

@@ -97,9 +97,9 @@ describe('RuntimeClient protocol state machine', () => {
       } else if (message.method === 'history/load_session') {
         target.push(
           result(message.id, {
+            type: 'history_session_page',
             session: sessionEntry,
             records: [],
-            events: [],
             interactionMode: 'auto',
             recovery: 'normal',
           }),
@@ -127,6 +127,71 @@ describe('RuntimeClient protocol state machine', () => {
     });
     expect(connection.requests('initialize')).toHaveLength(1);
     await client.close();
+  });
+
+  test.each([
+    'valid',
+    'stalled',
+    'snapshot-drift',
+    'overlap',
+  ] as const)('pins paginated History and rejects invalid continuation: %s', async (scenario) => {
+    let pages = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-pages')));
+      } else if (message.method === 'history/load_session') {
+        pages++;
+        if (pages === 1) expect(message.params.page).toEqual({});
+        else expect(message.params.page).toEqual({ afterSequence: 1, throughSequence: 2 });
+        const sequence = pages === 1 || scenario === 'overlap' ? 1 : 2;
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'history-pages',
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: pages > 1 && scenario === 'snapshot-drift' ? 3 : 2,
+            },
+            records: [
+              {
+                sequence,
+                events: [
+                  {
+                    type: 'user.message',
+                    messageId: `message-${sequence}`,
+                    kind: 'task',
+                    text: `message ${sequence}`,
+                  },
+                ],
+              },
+            ],
+            interactionMode: 'auto',
+            recovery: 'normal',
+            ...(pages === 1 ? { nextCursor: scenario === 'stalled' ? 0 : 1 } : {}),
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      if (scenario === 'valid') {
+        const transcript = await client.history!.loadSession('history-pages');
+        expect(transcript.records.map((record) => record.sequence)).toEqual([1, 2]);
+        expect(transcript.events).toHaveLength(2);
+      } else
+        await expect(client.history!.loadSession('history-pages')).rejects.toMatchObject({
+          code: 'protocol_error',
+        });
+      expect(pages).toBe(scenario === 'stalled' ? 1 : 2);
+    } finally {
+      await client.close();
+    }
   });
 
   test('correlates exact App Control envelopes on the initialized connection', async () => {

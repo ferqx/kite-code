@@ -28,6 +28,7 @@ import {
   type NativeProviderCredentialRequest,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
+import type { RuntimeHistorySessionTranscript } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_,
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
@@ -48,6 +49,27 @@ import type {
 } from '@kite-ai/runtime-server';
 
 const DEFAULT_DRAIN_DEADLINE_MS = 5_000;
+
+/** Keep source records intact and leave room for the JSON-RPC envelope. */
+function historyTranscriptPage(transcript: RuntimeHistorySessionTranscript, afterSequence = 0) {
+  const { events: _events, records: source, ...metadata } = transcript;
+  const records: RuntimeHistorySessionTranscript['records'][number][] = [];
+  const page = { type: 'history_session_page' as const, ...metadata, records };
+  const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  let bytes = byteLength(page);
+  for (const record of source) {
+    if (record.sequence <= afterSequence) continue;
+    const size = byteLength(record) + 1;
+    if (bytes + size > RUNTIME_PROTOCOL_LIMITS.maxMessageBytes - 65_536 || records.length === 512) {
+      const last = records.at(-1);
+      if (!last) throw new Error('History record exceeds the protocol frame limit.');
+      return { ...page, nextCursor: last.sequence };
+    }
+    records.push(record);
+    bytes += size;
+  }
+  return page;
+}
 
 export type RuntimeStdioInput = AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>;
 
@@ -372,16 +394,26 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
           : request.method === 'history/list_events'
             ? await history.listEvents(request.params.request)
             : request.method === 'history/load_session'
-              ? await history.loadSession(request.params.sessionId)
+              ? await history.loadSession(
+                  request.params.sessionId,
+                  request.params.page?.throughSequence,
+                )
               : undefined;
       if (result === undefined) {
         await this.#writeError(request.id, 'method_not_found');
         return true;
       }
+      const response =
+        request.method === 'history/load_session' && request.params.page
+          ? historyTranscriptPage(
+              result as RuntimeHistorySessionTranscript,
+              request.params.page.afterSequence,
+            )
+          : result;
       await this.#writeProtocol({
         jsonrpc: '2.0',
         id: request.id,
-        result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(result),
+        result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(response),
       });
     } catch {
       await this.#writeError(request.id, 'internal_error');

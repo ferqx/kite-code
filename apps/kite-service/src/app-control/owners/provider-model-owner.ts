@@ -129,6 +129,7 @@ export function createProviderModelOwner(
         };
       }
       if (before.selected?.provider === request.provider && before.selected.name === request.name) {
+        await input.onSelected?.(request.provider, request.name);
         return {
           schema: PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
           outcome: 'already_selected',

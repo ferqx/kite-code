@@ -37,6 +37,9 @@ export interface RuntimeClientTransport {
 export interface RuntimeHistoryClient {
   listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage>;
   listEvents(request: ListRuntimeLogEventsRequest): Promise<RuntimeLogEventPage>;
-  /** Complete closed transcript used by local presentation replay. */
-  loadSession(sessionId: string): Promise<RuntimeHistorySessionTranscript>;
+  /** Complete closed transcript, optionally pinned to an observed source sequence. */
+  loadSession(
+    sessionId: string,
+    throughSequence?: number,
+  ): Promise<RuntimeHistorySessionTranscript>;
 }

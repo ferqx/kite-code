@@ -1,6 +1,46 @@
 import { expect, test } from 'bun:test';
 import { projectEvent } from '../src/presentation';
 
+test('confirmed file changes retain the matching durable diff regardless of event arrival order', () => {
+  const changed = {
+    type: 'tool.file_changed',
+    toolId: 'edit-1',
+    change: 'modified',
+    path: 'src/app.ts',
+  } as const;
+  const finished = {
+    type: 'tool.finished',
+    toolId: 'edit-1',
+    presentation: 'standalone',
+    summary: 'edited',
+    result: { ok: true, exitCode: 0, stdout: ' 1 -old\n 1 +new', stderr: '' },
+  } as const;
+  for (const events of [
+    [changed, finished],
+    [finished, changed],
+  ]) {
+    let messages = events.reduce(
+      (current, event) => projectEvent(current, event),
+      [] as ReturnType<typeof projectEvent>,
+    );
+    messages = projectEvent(messages, { type: 'tool.progress', toolId: 'edit-1', summary: 'late' });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      settled: true,
+      changedFile: 'src/app.ts',
+      changeConfirmed: true,
+      toolResult: finished.result,
+    });
+  }
+  const rejected = projectEvent([], {
+    type: 'tool.rejected',
+    toolId: 'edit-2',
+    presentation: 'standalone',
+    summary: 'rejected',
+  });
+  expect(rejected[0]?.changeConfirmed).toBeUndefined();
+});
+
 test('cumulative text and a late delta cannot duplicate or overwrite durable output', () => {
   let messages = projectEvent([], { type: 'model.text_delta', requestId: 'r1', text: 'Hello' });
   messages = projectEvent(messages, {

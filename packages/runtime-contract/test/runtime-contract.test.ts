@@ -433,6 +433,23 @@ describe('runtime contract package boundary', () => {
         change: 'modified',
         path: '/private/workspace/secret.txt',
       }),
+    ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.file_changed',
+        toolId: 'tool-1',
+        change: 'modified',
+        path: 'x'.repeat(8193),
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.file_changed',
+        toolId: 'tool-1',
+        change: 'modified',
+        path: '/workspace/file.ts',
+        content: 'not part of this event',
+      }),
     ).toBe(false);
     expect(
       isRuntimeClientEvent({

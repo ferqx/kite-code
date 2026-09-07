@@ -48,6 +48,12 @@
 
 ## 关键不变量
 
+计划审核可携带封闭的 `review { text, truncated }` 展示投影：正文最多 65,536 个 UTF-16 单位，截断显式可见；旧历史可缺省。该字段由 App 从计划正文和步骤脱敏生成，参与稳定交互身份比对，不携带 Artifact 路径或 Store handle。
+
+Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录与当前信任身份分组核对；摘要不赋予授权，不需要暴露 workspace 路径。
+
+成功文件操作的 `tool.file_changed` 可携带有界 `path` 展示字段。客户端按 toolId 关联既有终态输出，路径不是任意文件读取或打开授权；本机宿主执行外部跳转前必须重新核实其工作区边界。
+
 - 所有客户端数据保持普通 JSON-safe 数据。
 - command 必须携带唯一 `commandId`；Session mutation 使用 revision fencing。
 - 已建立Run的`cancel_turn`必须同时携带canonical `runId`与active `turnId`；缺失或错配在执行前fail closed。

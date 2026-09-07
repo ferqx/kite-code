@@ -171,6 +171,7 @@ function mapSession(session: RuntimeSessionProjection) {
     sessionId: session.sessionId,
     revision: session.revision,
     ...(session.displayName === undefined ? {} : { displayName: session.displayName }),
+    ...(session.workspaceDigest === undefined ? {} : { workspaceDigest: session.workspaceDigest }),
     ...(session.updatedAt === undefined ? {} : { updatedAt: session.updatedAt }),
     lifecycle: session.lifecycle,
     ...(session.model === undefined ? {} : { model: session.model }),
@@ -224,7 +225,12 @@ function mapInteraction(interaction: RuntimeClientInteraction): RuntimeClientInt
           : { options: interaction.options.map((option) => ({ ...option })) }),
       };
     case 'plan_review':
-      return { ...base, kind: interaction.kind, plan: { ...interaction.plan } };
+      return {
+        ...base,
+        kind: interaction.kind,
+        plan: { ...interaction.plan },
+        ...(interaction.review === undefined ? {} : { review: { ...interaction.review } }),
+      };
     case 'provider_action':
       return {
         ...base,

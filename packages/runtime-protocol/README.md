@@ -38,6 +38,12 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 
 ## Invariants
 
+Plan review 的可选 `review { text, truncated }` 与 Contract 同步进入实时、History 和 respond_interaction codec；mapper 创建独立副本，正文上限 65,536 个 UTF-16 单位。新增字段没有增加协议方法或赋予任意文件读取能力。
+
+Session 的可选 `workspaceDigest` 在 wire 中保留，供客户端目录归属展示；原始 workspace 路径继续由 mapper 排除。
+
+`tool.file_changed.path` 是有界的用户文件展示目标，和既有工具参数路径一样允许进入 closed event；它不包含 Store 或 Artifact locator。实时与 History 使用相同 codec。
+
 - `jsonrpc` is exactly `"2.0"`; request IDs are bounded strings; batch, client notification, binary frame, numeric/null IDs, unknown fields and dynamic methods fail closed.
 - Inputs are bounded by UTF-8 bytes, object keys, array length, JSON depth and safe-number checks; prototype-shaped keys and accessors are rejected before schema parsing.
 - The only request methods are initialize, Runtime command/query/subscribe/unsubscribe, the three exact History reads,

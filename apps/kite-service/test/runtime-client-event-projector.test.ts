@@ -40,6 +40,7 @@ describe('Runtime Client event projector', () => {
     ).toEqual({
       type: 'tool.file_changed',
       toolId: 'tool-1',
+      path: '/private/secret',
       change: 'modified',
       summary: 'Workspace file changed.',
     });

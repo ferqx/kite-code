@@ -238,8 +238,10 @@ function createKiteServiceRuntimeCompositionUnchecked(
           input.storageOwner!.readSnapshot!(() => rawHistory.listSessions(request)),
         listEvents: (request: Parameters<RuntimeHistoryClient['listEvents']>[0]) =>
           input.storageOwner!.readSnapshot!(() => rawHistory.listEvents(request)),
-        loadSession: (sessionId: string) =>
-          input.storageOwner!.readSnapshot!(() => rawHistory.loadSession(sessionId)),
+        loadSession: (sessionId: string, throughSequence?: number) =>
+          input.storageOwner!.readSnapshot!(() =>
+            rawHistory.loadSession(sessionId, throughSequence),
+          ),
       })
     : rawHistory;
   let application!: KiteRuntimeApplication;
