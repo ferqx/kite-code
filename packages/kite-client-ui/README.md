@@ -4,9 +4,9 @@
 
 `SessionPage.newConversation` 提供[新对话欢迎区与上下文栏](src/NewConversation.tsx)：四个建议追加到草稿并聚焦；项目／分支菜单贴合输入区、左边缘对齐各自触发按钮，支持方向键、Enter、Escape 和焦点返回。只接收目录、分支展示数据及已授权回调，不创建会话或运行 Git。新对话的真实创建时机、草稿与原生能力由[桌面入口](../../apps/kite-desktop/docs/new-conversation.md)负责。图标使用该 Figma 节点导出的本地 SVG 资源。
 
-Web 与 Tauri 桌面共用的 React 会话页面 owner。两个生产入口均调用 [SessionPage](src/SessionPage.tsx)，共用[侧栏](src/Sidebar.tsx)、[会话阅读](src/Conversation.tsx)、[输入区](src/Composer.tsx)、[Markdown](src/MessageContent.tsx)和[样式](src/style.css)。不从某一 app 导入页面，不维护另一份 Web／Desktop 主界面。
+Web 与 Tauri 桌面共用的 React 会话页面 owner。两个生产入口均调用 [SessionPage](src/SessionPage.tsx)，共用[侧栏](src/Sidebar.tsx)、[工作台](src/Workbench.tsx)、[会话阅读](src/Conversation.tsx)、[输入区](src/Composer.tsx)、[Markdown](src/MessageContent.tsx)和[样式](src/style.css)。不从某一 app 导入页面，不维护另一份 Web／Desktop 主界面。全局“新对话”与“工作台”复用同一组左对齐主导航行样式；工作台只按宿主给出的运行状态组织“正在推进”和“最近会话”，没有主题归属和时间条件数据时不显示伪筛选，也不从标题推断。
 
-页面顶部只有一个横跨窗口的 `app-header`，内部按侧栏和会话区分成两个视觉段。侧栏段使用侧栏背景并把收起按钮放在右侧；会话段显示会话标题和端侧操作。侧栏关闭后展开按钮进入会话段。两个视觉段共同承担 Tauri 原生拖拽区域，不建立两套 header；窄屏展开侧栏时仍保留同一顶栏并让右侧段不可交互。
+页面顶部只有一个横跨窗口的 `app-header`，内部按 236 px 侧栏和会话区分成两个 52 px 高的视觉段。侧栏段使用侧栏背景，显示 kite 标识并把收起按钮放在右侧；会话段显示页面或会话标题及端侧操作。侧栏关闭后展开按钮进入会话段。两个视觉段共同承担 Tauri 原生拖拽区域，不建立两套 header；窄屏展开侧栏时仍保留同一顶栏并让右侧段不可交互。
 
 Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 HTML，外层统一使用 shadcn/typeset 的 `typeset typeset-chat`。正文不增加 padding 或独立最大宽度，与消息阅读列使用相同可用宽度。Web 与 Desktop 各自在 Tailwind 入口加载同一上游 Typeset stylesheet 和 Geist／Geist Mono 字体；共享样式只保留链接、文件操作、内容宽度选择和代码／表格溢出等功能规则，不维护第二套标题、列表、代码、引用或表格排版。
 
@@ -22,7 +22,7 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 空间标题右侧的新对话按钮仅在端侧提供 `actions.newWorkspaceSession` 时显示；独立于展开按钮，调用已有项目选择流程，不自行创建会话。Composer 保持既有边界，聚焦不叠加描边；禁用原生 resize 手柄，输入使用 14 px Regular 与字体正常行高，避免空白新行的光标随固定行高放大。其他控件保留键盘焦点反馈。
 
-目录默认仅展示空间名称与会话标题；会话数量、状态和更新时间移入详情浮层。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应时序回归见 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
+目录默认展示空间名称与会话标题；会话行最右侧用 Spinner 表示 `running`，用 Badge 文案“待用户输入”表示 `waiting` 或已有 `pendingInteractions`，后者优先。`idle` 与 `completed` 不显示行内状态。会话数量、完整状态和更新时间移入详情浮层。工作台继续按自己的汇总语境展示状态，不在空间名称后追加空闲或完成状态。宿主的提交中状态只禁用会发生冲突的操作，不传染为会话目录的视觉禁用；会话切换由宿主按目标 sessionId 保持消息归属。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应回归见 [共享目录测试](test/reading.test.tsx)和 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
 
 ## 数据与权限
 

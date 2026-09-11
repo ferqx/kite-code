@@ -1,4 +1,10 @@
-import { BookOpen, ChevronLeft, FileJson, ShieldCheck } from 'lucide-react';
+import {
+  ArrowLeft01Icon,
+  BookOpen02Icon,
+  FileCodeIcon,
+  ShieldCheckIcon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -65,11 +71,11 @@ export function ApiDocs({ loadSpec = loadBundledSpec }: ApiDocsProps = {}) {
             to="/"
             className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
           >
-            <ChevronLeft className="size-4" />
+            <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
             Observer
           </Link>
           <div className="h-5 w-px bg-border" />
-          <BookOpen className="size-4 text-accent" />
+          <HugeiconsIcon icon={BookOpen02Icon} strokeWidth={2} className="size-4 text-accent" />
           <div>
             <h1 className="text-sm font-semibold">Kite Agent API reference</h1>
             <p className="text-[11px] text-muted-foreground">Build-bundled, read-only OpenAPI</p>
@@ -79,7 +85,11 @@ export function ApiDocs({ loadSpec = loadBundledSpec }: ApiDocsProps = {}) {
       <div className="mx-auto max-w-6xl px-5 py-8">
         <aside className="mb-8 grid gap-4 rounded-xl border border-border bg-surface/75 p-5 md:grid-cols-2">
           <div className="flex gap-3">
-            <ShieldCheck className="mt-0.5 size-5 shrink-0 text-accent" />
+            <HugeiconsIcon
+              icon={ShieldCheckIcon}
+              strokeWidth={2}
+              className="mt-0.5 size-5 shrink-0 text-accent"
+            />
             <div>
               <h2 className="text-sm font-medium">Reference only</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -89,7 +99,11 @@ export function ApiDocs({ loadSpec = loadBundledSpec }: ApiDocsProps = {}) {
             </div>
           </div>
           <div className="flex gap-3">
-            <FileJson className="mt-0.5 size-5 shrink-0 text-accent" />
+            <HugeiconsIcon
+              icon={FileCodeIcon}
+              strokeWidth={2}
+              className="mt-0.5 size-5 shrink-0 text-accent"
+            />
             <div>
               <h2 className="text-sm font-medium">Availability is unconfirmed</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">

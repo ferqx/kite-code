@@ -12,13 +12,14 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
+    "@hugeicons/core-free-icons": "^4.3.2",
+    "@hugeicons/react": "^1.1.10",
     "@kite-ai/agent-api-client": "workspace:*",
     "@kite-ai/agent-api-contract": "workspace:*",
     "@kite-ai/kite-client-ui": "workspace:*",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "lucide-react": "^0.544.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-router": "^7.18.3"

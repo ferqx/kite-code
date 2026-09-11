@@ -14,3 +14,7 @@ const labels: Readonly<Record<string, string>> = {
 export function statusLabel(status: string): string {
   return labels[status] ?? status;
 }
+
+export function sessionStatusLabel(status: string): string | undefined {
+  return status === 'idle' || status === 'completed' ? undefined : statusLabel(status);
+}

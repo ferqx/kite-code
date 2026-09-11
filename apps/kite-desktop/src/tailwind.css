@@ -10,6 +10,12 @@
   --font-geist-mono: "Geist Mono Variable", monospace;
 }
 
+html,
+body,
+#root {
+  background: #fafafa;
+}
+
 .typeset-chat {
   --typeset-font-body: var(--font-geist);
   --typeset-font-heading: var(--font-geist);
@@ -20,8 +26,8 @@
 }
 
 html[data-platform="macos"] .kite-client.shell {
-  --app-header-height: 60px;
-  --sidebar: #e8e8e3;
+  --app-header-height: 52px;
+  --sidebar: #ededed;
 }
 
 html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
@@ -32,11 +38,8 @@ html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
   padding-block: 4px;
 }
 
-html[data-platform="macos"]
-  .kite-client
-  :is(.sidebar-header, .session-header)
-  > * {
-  transform: translateY(-9px);
+html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) > * {
+  transform: translateY(-5px);
 }
 
 html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-header {

@@ -400,6 +400,22 @@ async fn runtime_detach(state: State<'_, DesktopState>, connection_id: u64) -> R
     Ok(())
 }
 
+#[tauri::command]
+fn animated_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::animated_toggle_maximize(window)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if window.is_maximized().map_err(|error| error.to_string())? {
+            window.unmaximize().map_err(|error| error.to_string())
+        } else {
+            window.maximize().map_err(|error| error.to_string())
+        }
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -422,7 +438,8 @@ fn main() {
             runtime_receive,
             runtime_close,
             runtime_detach,
-            open_editor
+            open_editor,
+            animated_toggle_maximize
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

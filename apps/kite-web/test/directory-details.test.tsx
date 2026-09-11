@@ -39,7 +39,11 @@ test('directory details wait initially, switch immediately while warm, and hide 
               status: 'completed',
               updatedAt: '2026-09-11T06:00:00Z',
             },
-            { sessionId: 'waiting', displayName: '待处理任务', status: 'waiting' },
+            {
+              sessionId: 'waiting',
+              displayName: '待处理任务',
+              status: 'waiting',
+            },
           ],
         },
       ]}
@@ -52,7 +56,11 @@ test('directory details wait initially, switch immediately while warm, and hide 
   const rows = document.querySelectorAll<HTMLElement>('.session-row');
   const pointer = (target: HTMLElement, type: string, relatedTarget: EventTarget | null = null) => {
     target.dispatchEvent(
-      new PointerEvent(type, { bubbles: true, pointerType: 'mouse', relatedTarget }),
+      new PointerEvent(type, {
+        bubbles: true,
+        pointerType: 'mouse',
+        relatedTarget,
+      }),
     );
   };
   const wait = async (ms: number) => {
@@ -60,7 +68,8 @@ test('directory details wait initially, switch immediately while warm, and hide 
   };
   expect(space.textContent).not.toContain('个会话');
   expect(rows[0]!.textContent).toBe('完成的任务');
-  expect(rows[1]!.textContent).toBe('待处理任务');
+  expect(rows[1]!.textContent).toBe('待处理任务待用户输入');
+  expect(rows[1]!.querySelector('[role="status"]')).toBeNull();
   await act(() => pointer(space, 'pointermove'));
   await wait(250);
   expect(document.querySelector('[role="tooltip"]')).toBeNull();
@@ -76,7 +85,7 @@ test('directory details wait initially, switch immediately while warm, and hide 
     pointer(space, 'pointerout', rows[0]!);
     pointer(rows[0]!, 'pointermove');
   });
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('已完成');
+  expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain('已完成');
   expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('9/11');
   await act(() => {
     pointer(rows[0]!, 'pointerout', rows[1]!);

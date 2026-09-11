@@ -1,15 +1,16 @@
 import {
-  Bot,
-  CircleAlert,
-  FileText,
-  Info,
-  LoaderCircle,
-  MessageSquareText,
-  Settings2,
-  ShieldCheck,
-  Wrench,
-  X,
-} from 'lucide-react';
+  AlertCircleIcon,
+  Cancel01Icon,
+  FileTextIcon,
+  InformationCircleIcon,
+  LoaderCircleIcon,
+  MessageSquareTextIcon,
+  RoboticIcon,
+  Settings02Icon,
+  ShieldCheckIcon,
+  Wrench01Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,13 +23,13 @@ type InspectorTab = 'overview' | 'system' | 'messages' | 'tools' | 'settings';
 const INSPECTOR_TABS: readonly {
   readonly id: InspectorTab;
   readonly label: string;
-  readonly Icon: typeof Info;
+  readonly icon: IconSvgElement;
 }[] = [
-  { id: 'overview', label: 'Overview', Icon: Info },
-  { id: 'system', label: 'System prompt', Icon: FileText },
-  { id: 'messages', label: 'Messages', Icon: MessageSquareText },
-  { id: 'tools', label: 'Tools', Icon: Wrench },
-  { id: 'settings', label: 'Request settings', Icon: Settings2 },
+  { id: 'overview', label: 'Overview', icon: InformationCircleIcon },
+  { id: 'system', label: 'System prompt', icon: FileTextIcon },
+  { id: 'messages', label: 'Messages', icon: MessageSquareTextIcon },
+  { id: 'tools', label: 'Tools', icon: Wrench01Icon },
+  { id: 'settings', label: 'Request settings', icon: Settings02Icon },
 ];
 
 export function ModelContextInspector({
@@ -72,7 +73,7 @@ export function ModelContextInspector({
       >
         <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-border px-5">
           <div className="grid size-8 shrink-0 place-items-center rounded-[10px] border border-border/70 bg-surface-subtle/70 text-muted-foreground">
-            <Bot className="size-4" />
+            <HugeiconsIcon icon={RoboticIcon} strokeWidth={2} className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -91,7 +92,7 @@ export function ModelContextInspector({
             className="size-8 px-0"
             onClick={onClose}
           >
-            <X className="size-4" />
+            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-4" />
           </Button>
         </header>
 
@@ -102,7 +103,7 @@ export function ModelContextInspector({
               aria-label="Model context sections"
               className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 pt-2"
             >
-              {INSPECTOR_TABS.map(({ id, label, Icon }) => (
+              {INSPECTOR_TABS.map(({ id, label, icon }) => (
                 <button
                   key={id}
                   id={`model-context-tab-${id}`}
@@ -118,7 +119,7 @@ export function ModelContextInspector({
                   )}
                   onClick={() => setTab(id)}
                 >
-                  <Icon className="size-3.5" />
+                  <HugeiconsIcon icon={icon} strokeWidth={2} className="size-3.5" />
                   {label}
                 </button>
               ))}
@@ -175,7 +176,7 @@ function Overview({ context }: { readonly context: WebModelContextSnapshot }) {
     <div className="space-y-5">
       <div className="rounded-xl border border-warning/25 bg-warning/8 p-4">
         <div className="flex items-center gap-2 text-[11px] font-medium text-foreground">
-          <ShieldCheck className="size-4 text-warning" />
+          <HugeiconsIcon icon={ShieldCheckIcon} strokeWidth={2} className="size-4 text-warning" />
           Sensitive local diagnostic
         </div>
         <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
@@ -299,7 +300,11 @@ function Tools({ context }: { readonly context: WebModelContextSnapshot }) {
           <details key={tool.name} className="group rounded-xl border border-border bg-surface">
             <summary className="cursor-pointer list-none px-4 py-3 text-[11px] font-medium">
               <span className="flex items-center gap-2">
-                <Wrench className="size-3.5 text-muted-foreground" />
+                <HugeiconsIcon
+                  icon={Wrench01Icon}
+                  strokeWidth={2}
+                  className="size-3.5 text-muted-foreground"
+                />
                 <code>{tool.name}</code>
                 {tool.truncated ? <Badge>truncated</Badge> : null}
               </span>
@@ -394,9 +399,13 @@ function InspectorState({
       <div className="max-w-sm">
         <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/70 bg-surface/75 text-muted-foreground">
           {status === 'loading' ? (
-            <LoaderCircle className="size-5 animate-spin text-running" />
+            <HugeiconsIcon
+              icon={LoaderCircleIcon}
+              strokeWidth={2}
+              className="size-5 animate-spin text-running"
+            />
           ) : (
-            <CircleAlert className="size-5 text-danger" />
+            <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={2} className="size-5 text-danger" />
           )}
         </div>
         <h3 className="text-sm font-semibold">

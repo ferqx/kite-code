@@ -1,10 +1,17 @@
 import { useId, useRef, useState } from 'react';
+import { Badge } from './components/ui/badge';
+import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
-import { statusLabel } from './status';
+import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
 
-const newConversationIcon = new URL('./assets/new-conversation.svg', import.meta.url).href;
+const newConversationIcon = new URL('./assets/new-chat.svg', import.meta.url).href;
+const workbenchIcon = new URL('./assets/sidebar-workbench.svg', import.meta.url).href;
+const disclosureOpenIcon = new URL('./assets/disclosure-open.svg', import.meta.url).href;
+const disclosureClosedIcon = new URL('./assets/disclosure-closed.svg', import.meta.url).href;
+const avatarIcon = new URL('./assets/avatar-local.svg', import.meta.url).href;
+const ellipsisIcon = new URL('./assets/ellipsis.svg', import.meta.url).href;
 
 export function sessionTime(value?: string) {
   if (!value) return '';
@@ -54,7 +61,12 @@ function Workspace({
                 if (!expanded && workspace.state === 'idle') props.onExpand?.(workspace.id);
               }}
             >
-              <span aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+              <img
+                src={expanded ? disclosureOpenIcon : disclosureClosedIcon}
+                alt=""
+                width={16}
+                height={16}
+              />
               <span className="nav-copy">
                 <strong className={workspace.muted ? 'space-name-muted' : undefined}>
                   {workspace.label}
@@ -110,33 +122,48 @@ function Workspace({
             buttons[next]?.focus();
           }}
         >
-          {sessions.map((session) => (
-            <Tooltip key={session.sessionId}>
-              <TooltipTrigger asChild>
-                <Button
-                  className={`session-row ${props.selected === session.sessionId ? 'selected' : ''}`}
-                  aria-current={props.selected === session.sessionId ? 'page' : undefined}
-                  disabled={props.busy || !props.onOpen}
-                  onClick={() => props.onOpen?.(session.sessionId)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      props.onOpen?.(session.sessionId);
-                    }
-                  }}
+          {sessions.map((session) => {
+            const awaitingInteraction =
+              Boolean(session.pendingInteractions) || session.status === 'waiting';
+            return (
+              <Tooltip key={session.sessionId}>
+                <TooltipTrigger asChild>
+                  <Button
+                    className={`session-row ${props.selected === session.sessionId ? 'selected' : ''}`}
+                    aria-current={props.selected === session.sessionId ? 'page' : undefined}
+                    disabled={!props.onOpen}
+                    onClick={() => props.onOpen?.(session.sessionId)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        props.onOpen?.(session.sessionId);
+                      }
+                    }}
+                  >
+                    <span className="nav-copy">
+                      <strong>{session.displayName}</strong>
+                    </span>
+                    {awaitingInteraction ? (
+                      <Badge>待用户输入</Badge>
+                    ) : session.status === 'running' ? (
+                      <Spinner aria-label="会话运行中" />
+                    ) : null}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent
+                  className="kite-client directory-tooltip"
+                  side="right"
+                  sideOffset={8}
                 >
-                  <span className="nav-copy">
-                    <strong>{session.displayName}</strong>
-                  </span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
-                <strong>{session.displayName}</strong>
-                <span>{statusLabel(session.status)}</span>
-                {sessionTime(session.updatedAt) && <span>{sessionTime(session.updatedAt)}</span>}
-              </TooltipContent>
-            </Tooltip>
-          ))}
+                  <strong>{session.displayName}</strong>
+                  {sessionStatusLabel(session.status) && (
+                    <span>{sessionStatusLabel(session.status)}</span>
+                  )}
+                  {sessionTime(session.updatedAt) && <span>{sessionTime(session.updatedAt)}</span>}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
           {!sessions.length && workspace.state === 'loaded' && (
             <p className="empty-list">还没有会话。</p>
           )}
@@ -150,6 +177,7 @@ function Workspace({
 export interface PageActions {
   newSession?: () => void;
   newWorkspaceSession?: (workspaceId: string) => void;
+  workbench?: () => void;
   settings?: () => void;
   connection?: { label: string; run: () => void };
   openFile?: (path: string) => void;
@@ -157,18 +185,46 @@ export interface PageActions {
 export function Sidebar({
   actions,
   connectionLabel,
+  activePage = 'conversation',
   ...props
 }: DirectoryProps & {
   actions: PageActions;
   connectionLabel: string;
+  activePage?: 'conversation' | 'workbench';
 }) {
   return (
     <>
-      {actions.newSession && (
-        <Button className="new-session" disabled={props.busy} onClick={actions.newSession}>
-          <img src={newConversationIcon} alt="" width={16} height={16} />
-          新对话
-        </Button>
+      {(actions.newSession || actions.workbench) && (
+        <nav className="primary-navigation" aria-label="主要导航">
+          {actions.newSession && (
+            <Button
+              className="new-session"
+              variant="ghost"
+              disabled={props.busy}
+              onClick={actions.newSession}
+            >
+              <img
+                data-icon="inline-start"
+                src={newConversationIcon}
+                alt=""
+                width={16}
+                height={16}
+              />
+              <span>新对话</span>
+            </Button>
+          )}
+          {actions.workbench && (
+            <Button
+              variant="ghost"
+              className={activePage === 'workbench' ? 'selected' : undefined}
+              aria-current={activePage === 'workbench' ? 'page' : undefined}
+              onClick={actions.workbench}
+            >
+              <img data-icon="inline-start" src={workbenchIcon} alt="" width={16} height={16} />
+              <span>工作台</span>
+            </Button>
+          )}
+        </nav>
       )}
       <div className="nav-label">
         <span>空间</span>
@@ -191,11 +247,6 @@ export function Sidebar({
         </div>
       </TooltipProvider>
       <div className="sidebar-utilities">
-        {actions.settings && (
-          <Button className="ghost" onClick={actions.settings}>
-            模型与 Provider 设置
-          </Button>
-        )}
         <div className="connection">
           {connectionLabel && <span>{connectionLabel}</span>}
           {actions.connection && (
@@ -204,6 +255,16 @@ export function Sidebar({
             </Button>
           )}
         </div>
+        {actions.settings && (
+          <Button className="profile-card" onClick={actions.settings}>
+            <img src={avatarIcon} alt="" width={28} height={28} />
+            <span>
+              <strong>本地用户</strong>
+              <small>个人工作区</small>
+            </span>
+            <img src={ellipsisIcon} alt="更多操作" width={16} height={16} />
+          </Button>
+        )}
       </div>
     </>
   );

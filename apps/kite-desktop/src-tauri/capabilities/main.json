@@ -18,6 +18,7 @@
     "allow-runtime-detach",
     "allow-open-editor",
     "core:window:allow-start-dragging",
+    "allow-animated-toggle-maximize",
     "dialog:allow-message"
   ]
 }

@@ -23,6 +23,7 @@ import type {
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { type ProviderInput, saveProvider } from './models';
 import { isActiveRun, type Message, projectEvent } from './presentation';
 import { type DesktopConnectionInfo, type DesktopInvoke, desktopTransport } from './transport';
@@ -118,6 +119,11 @@ export class DesktopClient {
       this.#listeners.delete(listener);
     };
   };
+  handleHeaderMouseDown(clickCount: 1 | 2) {
+    return clickCount === 2
+      ? invoke<void>('animated_toggle_maximize')
+      : getCurrentWindow().startDragging();
+  }
   #publish(change: Partial<DesktopView>) {
     this.#view = { ...this.#view, ...change };
     for (const listener of this.#listeners) listener();
@@ -259,25 +265,25 @@ export class DesktopClient {
     const connection = this.#requireConnection();
     const workspace = this.#view.workspace;
     const expected = this.#view.branch;
+    const previousModel = this.#view.models?.selected;
     // Git is an optional project capability, not a precondition for general work.
     await this.checkProject(workspace);
-    const actual = expected?.repository
-      ? await this.refreshBranch().catch(() => undefined)
-      : undefined;
+    const [actual, trust, models] = await Promise.all([
+      expected?.repository ? this.refreshBranch().catch(() => undefined) : undefined,
+      readWithDeadline(
+        connection.app.queryWorkspaceTrust({
+          schema: 'kite.app.workspace-trust.query-request.v1',
+          workspace,
+        }),
+      ),
+      this.refreshModels(),
+    ]);
     if (expected && actual && !sameEnvironment(expected, actual))
       throw new Error('项目或分支已改变，已更新显示，请检查后重新发送。');
-    const trust = await readWithDeadline(
-      connection.app.queryWorkspaceTrust({
-        schema: 'kite.app.workspace-trust.query-request.v1',
-        workspace,
-      }),
-    );
     if (this.#connection !== connection || this.#view.workspace !== workspace)
       throw new Error('项目连接已改变，请重新检查。');
     this.#publish({ trust });
     if (trust.status !== 'trusted') throw new Error('请先确认工作区信任。');
-    const previousModel = this.#view.models?.selected;
-    const models = await this.refreshModels();
     const selected = models.selected;
     if (
       !selected ||
@@ -701,7 +707,7 @@ export class DesktopClient {
       throw new Error(`操作未执行：${receipt.code}`);
     return receipt;
   }
-  async newSession() {
+  async newSession(): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const sessionId = crypto.randomUUID();
     try {
@@ -719,8 +725,7 @@ export class DesktopClient {
       throw error;
     }
     this.#admitted.add(sessionId);
-    await this.selectSession(sessionId);
-    await this.refreshSessions();
+    return sessionId;
   }
   async selectSession(sessionId: string) {
     const connection = this.#requireConnection();
@@ -818,12 +823,18 @@ export class DesktopClient {
       if (this.#selection === controller) this.#publish({ loadingSession: false });
     }
   }
-  async send(input: string) {
-    const sessionId = this.#view.selected;
+  async send(input: string, targetSessionId?: string) {
+    const sessionId = targetSessionId ?? this.#view.selected;
     if (!sessionId || !input.trim()) return;
-    if (this.#view.projection?.workspaceDigest !== this.#view.trust?.workspace.workspaceDigest)
+    const trust = this.#view.trust;
+    if (trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
+    const trustedWorkspaceDigest = trust.workspace.workspaceDigest;
+    const knownSession =
+      this.#view.selected === sessionId
+        ? this.#view.projection
+        : this.#view.directory?.find((session) => session.sessionId === sessionId);
+    if (knownSession?.workspaceDigest && knownSession.workspaceDigest !== trustedWorkspaceDigest)
       throw new Error('请先选择此会话的工作目录再继续任务。');
-    if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     if (!this.#admitted.has(sessionId)) {
       await this.#command({
         schema: 'kite.runtime-command.v1',
@@ -840,6 +851,8 @@ export class DesktopClient {
       sessionId,
     });
     if (result.status !== 'ok' || !result.session) throw new Error('会话当前不可用。');
+    if (result.session.workspaceDigest !== trustedWorkspaceDigest)
+      throw new Error('请先选择此会话的工作目录再继续任务。');
     await this.#command({
       schema: 'kite.runtime-command.v1',
       commandId: crypto.randomUUID(),

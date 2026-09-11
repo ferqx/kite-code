@@ -894,6 +894,7 @@ function isUiPackage(name: string): boolean {
     name === 'tailwindcss' ||
     name === '@tailwindcss/vite' ||
     name === '@vitejs/plugin-react' ||
+    name.startsWith('@hugeicons/') ||
     name.startsWith('@radix-ui/') ||
     name === 'ink' ||
     name.startsWith('@inkjs/')

@@ -1,5 +1,12 @@
+import {
+  HistoryIcon,
+  ListTreeIcon,
+  MessageSquareTextIcon,
+  MoonIcon,
+  Sun03Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { SessionPage } from '@kite-ai/kite-client-ui';
-import { History, ListTree, MessageSquareText, Moon, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useMatch, useNavigate } from 'react-router';
 import { ModelContextInspector } from '@/components/session/model-context-inspector';
@@ -370,7 +377,11 @@ export function App(props: AppProps = {}) {
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
             onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
           >
-            {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            {theme === 'dark' ? (
+              <HugeiconsIcon icon={Sun03Icon} strokeWidth={2} className="size-3.5" />
+            ) : (
+              <HugeiconsIcon icon={MoonIcon} strokeWidth={2} className="size-3.5" />
+            )}
           </Button>
           <Link to="/api-docs" aria-label="Open API documentation">
             API docs
@@ -457,7 +468,7 @@ function SessionViewTabs({
           className={sessionTabClassName(value === 'history')}
           onClick={() => onChange('history')}
         >
-          <MessageSquareText className="size-3.5" />
+          <HugeiconsIcon icon={MessageSquareTextIcon} strokeWidth={2} className="size-3.5" />
           Conversation history
         </button>
         <button
@@ -469,7 +480,7 @@ function SessionViewTabs({
           className={sessionTabClassName(value === 'logs')}
           onClick={() => onChange('logs')}
         >
-          <ListTree className="size-3.5" />
+          <HugeiconsIcon icon={ListTreeIcon} strokeWidth={2} className="size-3.5" />
           Runtime logs
         </button>
       </div>
@@ -495,7 +506,7 @@ function CheckpointStrip({
 }) {
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-surface-subtle/35 px-6 text-[11px] text-muted-foreground">
-      <History className="size-3.5" />
+      <HugeiconsIcon icon={HistoryIcon} strokeWidth={2} className="size-3.5" />
       <span>
         {status === 'loading'
           ? 'Loading checkpoints…'

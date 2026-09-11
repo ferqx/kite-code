@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-animated-toggle-maximize"
+description = "Enables the animated_toggle_maximize command without any pre-configured scope."
+commands.allow = ["animated_toggle_maximize"]
+
+[[permission]]
+identifier = "deny-animated-toggle-maximize"
+description = "Denies the animated_toggle_maximize command without any pre-configured scope."
+commands.deny = ["animated_toggle_maximize"]

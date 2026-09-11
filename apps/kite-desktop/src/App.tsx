@@ -40,8 +40,9 @@ export function App({ client }: { client: DesktopClient }) {
   const busyRef = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newConversation, setNewConversation] = useState(!view.selected);
+  const [workbenchView, setWorkbenchView] = useState(false);
   const [navigation] = useState(readNavigation);
-  const navigationChanged = useRef(false);
+  const navigationRevision = useRef(0);
   const preparing = newConversation || !view.selected;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState<'vscode' | 'zed' | 'textedit'>('vscode');
@@ -96,8 +97,8 @@ export function App({ client }: { client: DesktopClient }) {
     [act, client, editor],
   );
   const openSession = (id: string) => {
-    if (busyRef.current) return;
-    navigationChanged.current = true;
+    navigationRevision.current++;
+    setWorkbenchView(false);
     setNewConversation(false);
     // Selection has its own abort/generation owner; a second selection may supersede it.
     void client
@@ -114,7 +115,8 @@ export function App({ client }: { client: DesktopClient }) {
   };
   const newSession = () => {
     if (!busyRef.current) {
-      navigationChanged.current = true;
+      navigationRevision.current++;
+      setWorkbenchView(false);
       setNewConversation(true);
       rememberNavigation(view.workspace);
     }
@@ -142,7 +144,7 @@ export function App({ client }: { client: DesktopClient }) {
     void act(async () => {
       const target = path ?? (await client.pickProject());
       if (!target || !(await activateForWork(target))) return;
-      navigationChanged.current = true;
+      navigationRevision.current++;
       setNewConversation(true);
       rememberNavigation(target);
     });
@@ -164,7 +166,7 @@ export function App({ client }: { client: DesktopClient }) {
         throw new Error('会话列表暂时无法读取，请重试。');
       if (
         !wasConnected &&
-        !navigationChanged.current &&
+        navigationRevision.current === 0 &&
         current.connected &&
         navigation?.sessionId
       ) {
@@ -297,29 +299,36 @@ export function App({ client }: { client: DesktopClient }) {
           : undefined
       }
       onExpand={() => void act(() => client.refreshSessions())}
-      selected={preparing ? undefined : view.selected}
+      selected={workbenchView || preparing ? undefined : view.selected}
       workspaceLabel={workspaceName}
       sessionLabel={selectedSession?.displayName || (view.selected ? '新会话' : '开始一项工作')}
       readingKey={draftKey}
-      messages={preparing ? [] : view.messages}
-      loading={!preparing && view.loadingSession && view.messages.length === 0}
+      messages={workbenchView || preparing ? [] : view.messages}
+      loading={!workbenchView && !preparing && view.loadingSession && view.messages.length === 0}
       connected={view.connected}
       connectionLabel=""
       busy={busy}
+      onHeaderMouseDown={(clickCount) =>
+        void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
+      }
       onOpen={view.connected ? openSession : undefined}
       actions={{
         newSession,
         newWorkspaceSession: (id) => chooseProject(id),
+        workbench: () => {
+          navigationRevision.current++;
+          setWorkbenchView(true);
+        },
         settings: () => setSettingsOpen(true),
         openFile: view.connected && selectedWorkspace === view.workspace ? openFile : undefined,
       }}
       fileChanges={
-        !preparing && view.selected
+        !workbenchView && !preparing && view.selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
       newConversation={
-        preparing
+        !workbenchView && preparing
           ? {
               projects: [
                 ...(view.projects ?? []),
@@ -397,7 +406,7 @@ export function App({ client }: { client: DesktopClient }) {
         </>
       }
       interaction={
-        interaction && interaction.kind === 'approval' && view.selected ? (
+        !workbenchView && interaction && interaction.kind === 'approval' && view.selected ? (
           <section className="notice" aria-label="工具审批">
             <strong>{interaction.title || '工具需要你的批准'}</strong>
             <p>{interaction.summary}</p>
@@ -430,7 +439,8 @@ export function App({ client }: { client: DesktopClient }) {
               </Button>
             </div>
           </section>
-        ) : interaction &&
+        ) : !workbenchView &&
+          interaction &&
           (interaction.kind === 'input' || interaction.kind === 'plan_review') &&
           view.selected ? (
           <Interaction
@@ -442,75 +452,88 @@ export function App({ client }: { client: DesktopClient }) {
             act={act}
           />
         ) : (
+          !workbenchView &&
           !preparing &&
           view.projection?.currentRun?.status === 'waiting' && (
             <p className="notice">任务正在等待尚未支持的扩展或验证交互，可以停止任务并检查结果。</p>
           )
         )
       }
-      composer={{
-        draft,
-        disabled: false,
-        active,
-        stopping: !!stopping,
-        cancelDisabled: busy || !view.ready || view.loadingSession,
-        model: model ? `${model.provider} / ${model.name}` : undefined,
-        onSettings: () => setSettingsOpen(true),
-        onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
-        onSend:
-          canSubmit && !active
-            ? () => {
-                const submitted = draft;
-                void act(async () => {
-                  let submittedKey = draftKey;
-                  if (preparing) {
-                    await client.prepareNewConversation();
-                    const previousSession = client.getSnapshot().selected;
-                    try {
-                      await client.newSession();
-                    } finally {
-                      const current = client.getSnapshot();
-                      if (current.selected && current.selected !== previousSession) {
-                        submittedKey = `${current.workspace}\0${current.selected}`;
+      composer={
+        workbenchView
+          ? undefined
+          : {
+              draft,
+              disabled: false,
+              active,
+              stopping: !!stopping,
+              cancelDisabled: busy || !view.ready || view.loadingSession,
+              model: model ? `${model.provider} / ${model.name}` : undefined,
+              onSettings: () => setSettingsOpen(true),
+              onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
+              onSend:
+                canSubmit && !active
+                  ? () => {
+                      const submitted = draft;
+                      const submittedNavigation = navigationRevision.current;
+                      void act(async () => {
+                        let submittedKey = draftKey;
+                        let targetSession = view.selected;
+                        if (preparing) {
+                          await client.prepareNewConversation();
+                          targetSession = await client.newSession();
+                          const current = client.getSnapshot();
+                          submittedKey = `${current.workspace}\0${targetSession}`;
+                          setDrafts((values) => ({
+                            ...values,
+                            [submittedKey]: values[draftKey] ?? submitted,
+                            [draftKey]: '',
+                          }));
+                          if (navigationRevision.current === submittedNavigation) {
+                            const selection = client.selectSession(targetSession);
+                            setNewConversation(false);
+                            rememberNavigation(current.workspace, targetSession);
+                            await selection;
+                          }
+                        }
+                        if (!preparing) {
+                          targetSession = view.selected;
+                          if (selectedWorkspace !== client.getSnapshot().workspace) {
+                            if (!selectedWorkspace || !(await activateForWork(selectedWorkspace)))
+                              return;
+                            await client.selectSession(view.selected!);
+                          }
+                        }
+                        try {
+                          await client.send(submitted, targetSession);
+                        } finally {
+                          if (preparing)
+                            void client.refreshSessions().catch((error) => client.report(error));
+                        }
                         setDrafts((values) => ({
                           ...values,
-                          [submittedKey]: values[draftKey] ?? submitted,
-                          [draftKey]: '',
+                          [submittedKey]:
+                            values[submittedKey] === submitted ? '' : (values[submittedKey] ?? ''),
                         }));
-                        setNewConversation(false);
-                        rememberNavigation(current.workspace, current.selected);
-                      }
+                      });
                     }
+                  : undefined,
+              onCancel: () =>
+                void act(async () => {
+                  if (busy || !view.ready || view.loadingSession || stopping) return;
+                  const runId = view.projection?.currentRun?.runId;
+                  if (!runId) return;
+                  setStopRequest({ key: draftKey, runId });
+                  try {
+                    await client.cancel();
+                  } catch (error) {
+                    setStopRequest(undefined);
+                    throw error;
                   }
-                  if (!preparing) {
-                    if (selectedWorkspace !== client.getSnapshot().workspace) {
-                      if (!selectedWorkspace || !(await activateForWork(selectedWorkspace))) return;
-                      await client.selectSession(view.selected!);
-                    }
-                  }
-                  await client.send(submitted);
-                  setDrafts((values) => ({
-                    ...values,
-                    [submittedKey]:
-                      values[submittedKey] === submitted ? '' : (values[submittedKey] ?? ''),
-                  }));
-                });
-              }
-            : undefined,
-        onCancel: () =>
-          void act(async () => {
-            if (busy || !view.ready || view.loadingSession || stopping) return;
-            const runId = view.projection?.currentRun?.runId;
-            if (!runId) return;
-            setStopRequest({ key: draftKey, runId });
-            try {
-              await client.cancel();
-            } catch (error) {
-              setStopRequest(undefined);
-              throw error;
+                }),
             }
-          }),
-      }}
+      }
+      workbench={workbenchView || undefined}
       overlays={
         settingsOpen && (
           <dialog

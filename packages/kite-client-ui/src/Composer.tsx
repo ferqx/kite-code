@@ -1,6 +1,9 @@
 import { type ReactNode, type Ref, useRef } from 'react';
 import { Button, Textarea } from './ui';
 
+const sendIcon = new URL('./assets/send.svg', import.meta.url).href;
+const stopIcon = new URL('./assets/stop.svg', import.meta.url).href;
+
 export interface ComposerProps {
   inputRef?: Ref<HTMLTextAreaElement>;
   context?: ReactNode;
@@ -60,13 +63,27 @@ export function Composer(props: ComposerProps) {
           )}
           {props.active ? (
             props.onCancel && (
-              <Button onClick={props.onCancel} disabled={props.stopping || props.cancelDisabled}>
-                {props.stopping ? '正在停止…' : '停止'}
+              <Button
+                className="primary composer-action"
+                size="icon-sm"
+                aria-label={props.stopping ? '正在停止…' : '停止任务'}
+                title={props.stopping ? '正在停止…' : '停止任务'}
+                onClick={props.onCancel}
+                disabled={props.stopping || props.cancelDisabled}
+              >
+                <img src={stopIcon} alt="" width={16} height={16} />
               </Button>
             )
           ) : (
-            <Button className="primary" type="submit" disabled={!canSend}>
-              发送
+            <Button
+              className="primary composer-action"
+              size="icon-sm"
+              type="submit"
+              aria-label="发送消息"
+              title="发送消息"
+              disabled={!canSend}
+            >
+              <img src={sendIcon} alt="" width={16} height={16} />
             </Button>
           )}
         </div>

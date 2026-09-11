@@ -204,11 +204,19 @@ export function Conversation({
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || loading || typeof ResizeObserver === 'undefined') return;
+    let frame: number | undefined;
     const observer = new ResizeObserver(() => {
-      if (reading.current.follow) element.scrollTop = element.scrollHeight;
+      if (!reading.current.follow || frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (reading.current.follow) element.scrollTop = element.scrollHeight;
+      });
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
   }, [loading]);
   // After each content/layout commit, follow only while the reader is at the bottom.
   useLayoutEffect(() => {

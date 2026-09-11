@@ -7,7 +7,9 @@ import { SessionPage } from '../src/SessionPage';
 import { Sidebar } from '../src/Sidebar';
 import type { Message } from '../src/types';
 
-const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+  url: 'http://localhost',
+});
 const globals = {
   window: dom.window,
   document: dom.window.document,
@@ -25,7 +27,11 @@ const globals = {
 const originals = new Map<string, PropertyDescriptor | undefined>();
 for (const [key, value] of Object.entries(globals)) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-  Object.defineProperty(globalThis, key, { configurable: true, value, writable: true });
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    value,
+    writable: true,
+  });
 }
 // React DOM must observe a DOM when it initializes its input event support.
 const { createRoot } = await import('react-dom/client');
@@ -62,6 +68,7 @@ async function click(element: HTMLElement) {
   });
 }
 test('one application header moves the sidebar toggle between its visual regions', async () => {
+  const windowClicks: number[] = [];
   await render(
     <SessionPage
       workspaces={[]}
@@ -73,6 +80,7 @@ test('one application header moves the sidebar toggle between its visual regions
       connected
       connectionLabel=""
       actions={{}}
+      onHeaderMouseDown={(clickCount) => windowClicks.push(clickCount)}
     />,
   );
   expect(document.querySelectorAll('header')).toHaveLength(1);
@@ -84,6 +92,17 @@ test('one application header moves the sidebar toggle between its visual regions
   await click(document.querySelector<HTMLButtonElement>('[aria-label="展开侧栏"]')!);
   expect(sidebar.hidden).toBe(false);
   expect(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')).not.toBeNull();
+  const header = document.querySelector<HTMLElement>('.session-header')!;
+  header.dispatchEvent(
+    new dom.window.MouseEvent('mousedown', { button: 0, detail: 1, bubbles: true }),
+  );
+  header.dispatchEvent(
+    new dom.window.MouseEvent('mousedown', { button: 0, detail: 2, bubbles: true }),
+  );
+  document
+    .querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!
+    .dispatchEvent(new dom.window.MouseEvent('mousedown', { button: 0, detail: 2, bubbles: true }));
+  expect(windowClicks).toEqual([1, 2]);
 });
 test('select all stays in visible message text and leaves editable fields to the browser', async () => {
   await render(
@@ -92,8 +111,19 @@ test('select all stays in visible message text and leaves editable fields to the
       <Conversation
         messages={[
           { id: 'u', role: 'user', text: '你好', settled: true },
-          { id: 'a', role: 'assistant', text: '回答正文\n\n- 第一项\n- 最后一项', settled: true },
-          { id: 'tool:t', role: 'tool', title: '折叠工具标题', text: '隐藏的输出', settled: true },
+          {
+            id: 'a',
+            role: 'assistant',
+            text: '回答正文\n\n- 第一项\n- 最后一项',
+            settled: true,
+          },
+          {
+            id: 'tool:t',
+            role: 'tool',
+            title: '折叠工具标题',
+            text: '隐藏的输出',
+            settled: true,
+          },
         ]}
         loading={false}
         connected
@@ -168,7 +198,13 @@ test('Markdown renders code and tables without executing HTML, loading images or
 test('scrolling history stops live follow; returning to a conversation restores reading and tool expansion', async () => {
   let saved: ReadingState | undefined;
   const messages: Message[] = [
-    { id: 'tool:t', role: 'tool', text: 'output', title: 'shell', settled: true },
+    {
+      id: 'tool:t',
+      role: 'tool',
+      text: 'output',
+      title: 'shell',
+      settled: true,
+    },
   ];
   const props = {
     loading: false,
@@ -201,7 +237,11 @@ test('scrolling history stops live follow; returning to a conversation restores 
   expect(viewport.scrollTop).toBe(200);
   expect(button('回到最新消息')).toBeDefined();
   await act(() => root!.render(<div />));
-  expect(saved).toMatchObject({ top: 200, follow: false, expanded: { 'tool:t': true } });
+  expect(saved).toMatchObject({
+    top: 200,
+    follow: false,
+    expanded: { 'tool:t': true },
+  });
   await act(() =>
     root!.render(<Conversation {...props} initialReading={saved} messages={updated} />),
   );
@@ -240,6 +280,52 @@ test('shared directory opens on click and preserves full names under read-only a
   expect(document.body.textContent).not.toContain('模型与 Provider 设置');
 });
 
+test('shared directory distinguishes running sessions from sessions awaiting input', async () => {
+  await render(
+    <Sidebar
+      workspaces={[
+        {
+          id: 'w',
+          label: 'Workspace',
+          state: 'loaded',
+          sessionCount: 4,
+          sessions: [
+            {
+              sessionId: 'running',
+              displayName: '正在运行',
+              status: 'running',
+            },
+            {
+              sessionId: 'waiting',
+              displayName: '等待回答',
+              status: 'waiting',
+            },
+            {
+              sessionId: 'pending',
+              displayName: '运行时请求输入',
+              status: 'running',
+              pendingInteractions: 1,
+            },
+            { sessionId: 'done', displayName: '已经完成', status: 'completed' },
+          ],
+        },
+      ]}
+      actions={{}}
+      connectionLabel=""
+      onOpen={() => {}}
+    />,
+  );
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('.session-row'));
+  expect(rows[0]?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('会话运行中');
+  expect(rows[0]?.textContent).toBe('正在运行');
+  expect(rows[1]?.textContent).toBe('等待回答待用户输入');
+  expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[2]?.textContent).toBe('运行时请求输入待用户输入');
+  expect(rows[2]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[3]?.textContent).toBe('已经完成');
+  expect(rows[3]?.querySelector('[role="status"]')).toBeNull();
+});
+
 test('exploration collapses after completion, keeps failures visible in its summary and never absorbs shell', async () => {
   const read: Message = {
     id: 'tool:r',
@@ -250,7 +336,12 @@ test('exploration collapses after completion, keeps failures visible in its summ
     settled: false,
     status: 'running',
   };
-  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  const props = {
+    loading: false,
+    selected: true,
+    connected: true,
+    saveReading: () => {},
+  };
   await render(<Conversation {...props} messages={[read]} />);
   expect(document.querySelector('.exploration-summary')?.getAttribute('aria-expanded')).toBe(
     'true',
@@ -296,7 +387,12 @@ test('exploration stays on its side of replies and preserves explicit user foldi
     settled: false,
     status: 'running',
   });
-  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  const props = {
+    loading: false,
+    selected: true,
+    connected: true,
+    saveReading: () => {},
+  };
   const messages: Message[] = [
     read('a'),
     read('b'),

@@ -63,6 +63,7 @@ class UiClient extends DesktopClient {
   listeners = new Set<() => void>();
   selectedIds: string[] = [];
   sent: string[] = [];
+  sentTargets: Array<string | undefined> = [];
   cancelled = 0;
   approvals = 0;
   mcpActions: string[] = [];
@@ -88,11 +89,9 @@ class UiClient extends DesktopClient {
     this.created++;
     const created = session(`created-${this.created}`);
     this.update({
-      selected: created.sessionId,
-      projection: created,
       sessions: [...this.view.sessions, created],
-      ready: true,
     });
+    return created.sessionId;
   }
   override async refreshMcp() {}
   override async refreshSkills() {}
@@ -181,8 +180,9 @@ class UiClient extends DesktopClient {
       messages: [],
     });
   }
-  override async send(input: string) {
+  override async send(input: string, targetSessionId?: string) {
     this.sent.push(input);
+    this.sentTargets.push(targetSessionId);
     await this.sendResult();
   }
   override async cancel() {
@@ -203,7 +203,8 @@ async function render(element: React.ReactNode) {
 }
 function button(text: string) {
   const found = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
-    (item) => item.textContent?.trim() === text,
+    (item) =>
+      item.textContent?.trim() === text || item.getAttribute('aria-label')?.startsWith(text),
   );
   if (!found) throw new Error(`Missing button: ${text}`);
   return found;
@@ -327,6 +328,9 @@ test('global new conversation preserves existing drafts, appends suggestions and
   const client = new UiClient();
   await render(<App client={client} />);
   await write(input(), '已有会话草稿');
+  const primaryNavigation = button('新对话').closest('.primary-navigation');
+  expect(primaryNavigation).not.toBeNull();
+  expect(primaryNavigation?.querySelector('button:last-child')?.textContent).toBe('工作台');
   await click(button('新对话'));
   expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
   expect(document.querySelector('.breadcrumb')?.textContent).toBe('新对话');
@@ -358,6 +362,35 @@ test('global new conversation preserves existing drafts, appends suggestions and
   await click(button('发送'));
   expect(client.created).toBe(1);
   expect(input().value).toBe('');
+});
+
+test('first send keeps existing session navigation available and stays bound to the created session', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  client.sendResult = () =>
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '后台开始的新任务');
+  await key(input(), 'Enter');
+
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('.session-row')];
+  expect(rows.every((row) => !row.disabled)).toBe(true);
+  expect(client.sentTargets).toEqual(['created-1']);
+  expect(document.querySelector('[aria-label="新对话"]')).toBeNull();
+  expect(document.querySelector('.session-row[aria-current="page"]')?.textContent).toContain(
+    'created-1',
+  );
+  await click(button('工作 1'));
+  expect(client.selectedIds.at(-1)).toBe('s1');
+  expect(document.querySelector('.session-row[aria-current="page"]')?.textContent).toContain(
+    '工作 1',
+  );
+
+  await act(() => finish());
+  expect(client.sentTargets).toEqual(['created-1']);
 });
 
 test('project and branch menus apply choices immediately, keep the new draft and restore keyboard focus', async () => {
@@ -649,7 +682,9 @@ test('waiting approval retains the composer, sends only the chosen response, and
   await render(<App client={client} />);
   expect(document.querySelectorAll('form.composer')).toHaveLength(1);
   expect(
-    Array.from(document.querySelectorAll('button')).filter((item) => item.textContent === '停止'),
+    Array.from(document.querySelectorAll('button')).filter((item) =>
+      item.getAttribute('aria-label')?.startsWith('停止'),
+    ),
   ).toHaveLength(1);
   await write(input(), '稍后的要求');
   await key(input(), 'Enter');

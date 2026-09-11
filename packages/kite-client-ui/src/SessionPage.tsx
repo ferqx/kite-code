@@ -11,6 +11,7 @@ import {
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, WorkspaceSummary } from './types';
 import { Button } from './ui';
+import { Workbench } from './Workbench';
 
 const collapseSidebarIcon = new URL('./assets/sidebar-collapse.svg', import.meta.url).href;
 const expandSidebarIcon = new URL('./assets/sidebar-expand.svg', import.meta.url).href;
@@ -35,6 +36,7 @@ export interface SessionPageProps {
   readOnlyReason?: string;
   notices?: ReactNode;
   headerActions?: ReactNode;
+  onHeaderMouseDown?: (clickCount: 1 | 2) => void;
   interaction?: ReactNode;
   beforeConversation?: ReactNode;
   diagnosticView?: ReactNode;
@@ -43,6 +45,7 @@ export interface SessionPageProps {
   overlays?: ReactNode;
   fileChanges?: readonly Message[];
   newConversation?: NewConversationProps;
+  workbench?: boolean;
 }
 
 /** The single production conversation page for both hosts. No host/protocol imports. */
@@ -112,15 +115,31 @@ export function SessionPage(props: SessionPageProps) {
     };
   }, [narrow, sidebarOpen]);
   const open = (id: string) => {
-    if (props.busy || !props.onOpen) return;
+    if (!props.onOpen) return;
     props.onOpen(id);
     if (narrow) setSidebarOpen(false);
   };
   return (
     <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
-      <header className="app-header" data-tauri-drag-region>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging; interactive descendants remain excluded. */}
+      <header
+        className="app-header"
+        onMouseDown={(event) => {
+          if (
+            event.button !== 0 ||
+            (event.detail !== 1 && event.detail !== 2) ||
+            (event.target as HTMLElement).closest(
+              'button, a, input, select, textarea, label, summary, [role="button"], [role="link"]',
+            )
+          )
+            return;
+          event.preventDefault();
+          props.onHeaderMouseDown?.(event.detail);
+        }}
+      >
         {sidebarOpen && (
-          <div className="sidebar-header" data-tauri-drag-region>
+          <div className="sidebar-header">
+            <strong className="brand">kite</strong>
             <Button
               ref={toggle}
               className="ghost sidebar-toggle"
@@ -134,7 +153,7 @@ export function SessionPage(props: SessionPageProps) {
             </Button>
           </div>
         )}
-        <div className="session-header" data-tauri-drag-region inert={narrow && sidebarOpen}>
+        <div className="session-header" inert={narrow && sidebarOpen}>
           {!sidebarOpen && (
             <Button
               ref={toggle}
@@ -148,8 +167,10 @@ export function SessionPage(props: SessionPageProps) {
               <img src={expandSidebarIcon} alt="" width={16} height={16} />
             </Button>
           )}
-          <div className="breadcrumb" data-tauri-drag-region>
-            {props.newConversation ? (
+          <div className="breadcrumb">
+            {props.workbench ? (
+              <strong>工作台</strong>
+            ) : props.newConversation ? (
               <strong>新对话</strong>
             ) : (
               <>
@@ -225,6 +246,7 @@ export function SessionPage(props: SessionPageProps) {
               : undefined,
           }}
           connectionLabel={props.connectionLabel}
+          activePage={props.workbench ? 'workbench' : 'conversation'}
           onExpand={props.onExpand}
           defaultExpanded={props.defaultExpanded}
           onLoadMore={props.onLoadMore}
@@ -244,64 +266,74 @@ export function SessionPage(props: SessionPageProps) {
         />
       )}
       <main
-        className={props.newConversation ? 'new-conversation-page' : undefined}
+        className={
+          props.newConversation
+            ? 'new-conversation-page'
+            : props.workbench
+              ? 'workbench-page'
+              : undefined
+        }
         inert={narrow && sidebarOpen}
       >
         {props.notices}
         <div className="session-body">
           <div className="session-view">
             {props.beforeConversation}
-            {props.diagnosticView ?? (
-              <section
-                className="history-panel"
-                role={props.historyPanel ? 'tabpanel' : undefined}
-                id={props.historyPanel?.id}
-                aria-labelledby={props.historyPanel?.labelledBy}
-              >
-                {props.newConversation && props.composer ? (
-                  <NewConversationWelcome
-                    onSuggest={(value) => {
-                      props.composer!.onChange(
-                        props.composer!.draft ? `${props.composer!.draft}\n${value}` : value,
-                      );
-                      composerInput.current?.focus();
-                    }}
-                  />
-                ) : props.historyError ? (
-                  <section className="notice error" role="alert">
-                    <strong>{props.historyError.title}</strong>
-                    <p>{props.historyError.detail}</p>
-                    <Button onClick={props.historyError.retry}>重试</Button>
-                  </section>
-                ) : (
-                  <Conversation
-                    key={props.readingKey}
-                    messages={props.messages}
-                    loading={props.loading}
-                    selected={!!props.selected}
-                    emptyState={
-                      !props.composer
-                        ? {
-                            title: props.selected
-                              ? '暂无消息'
-                              : props.workspaces.length
-                                ? '选择会话'
-                                : '暂无可查看的会话',
-                            detail: props.selected
-                              ? '当前会话没有可展示的历史消息。'
-                              : '从左侧空间中点击会话即可加载消息。',
-                          }
-                        : undefined
-                    }
-                    connected={props.connected}
-                    initialReading={readings.current[props.readingKey]}
-                    saveReading={(state) => {
-                      readings.current[props.readingKey] = state;
-                    }}
-                    openFile={props.actions.openFile}
-                  />
-                )}
-              </section>
+            {props.workbench ? (
+              <Workbench workspaces={props.workspaces} onOpen={props.onOpen ? open : undefined} />
+            ) : (
+              (props.diagnosticView ?? (
+                <section
+                  className="history-panel"
+                  role={props.historyPanel ? 'tabpanel' : undefined}
+                  id={props.historyPanel?.id}
+                  aria-labelledby={props.historyPanel?.labelledBy}
+                >
+                  {props.newConversation && props.composer ? (
+                    <NewConversationWelcome
+                      onSuggest={(value) => {
+                        props.composer!.onChange(
+                          props.composer!.draft ? `${props.composer!.draft}\n${value}` : value,
+                        );
+                        composerInput.current?.focus();
+                      }}
+                    />
+                  ) : props.historyError ? (
+                    <section className="notice error" role="alert">
+                      <strong>{props.historyError.title}</strong>
+                      <p>{props.historyError.detail}</p>
+                      <Button onClick={props.historyError.retry}>重试</Button>
+                    </section>
+                  ) : (
+                    <Conversation
+                      key={props.readingKey}
+                      messages={props.messages}
+                      loading={props.loading}
+                      selected={!!props.selected}
+                      emptyState={
+                        !props.composer
+                          ? {
+                              title: props.selected
+                                ? '暂无消息'
+                                : props.workspaces.length
+                                  ? '选择会话'
+                                  : '暂无可查看的会话',
+                              detail: props.selected
+                                ? '当前会话没有可展示的历史消息。'
+                                : '从左侧空间中点击会话即可加载消息。',
+                            }
+                          : undefined
+                      }
+                      connected={props.connected}
+                      initialReading={readings.current[props.readingKey]}
+                      saveReading={(state) => {
+                        readings.current[props.readingKey] = state;
+                      }}
+                      openFile={props.actions.openFile}
+                    />
+                  )}
+                </section>
+              ))
             )}
             <footer className="conversation-footer">
               <div className="bottom-controls">

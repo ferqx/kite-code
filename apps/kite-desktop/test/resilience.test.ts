@@ -147,8 +147,8 @@ test('lost receipt survives repeated internal recovery failures without replay o
     await client.openProject();
     await client.trustProject();
     await client.prepareNewConversation();
-    await client.newSession();
-    const sessionId = client.getSnapshot().selected;
+    const sessionId = await client.newSession();
+    await client.selectSession(sessionId);
     let failed = false;
     try {
       await client.send('Write the marker exactly once.');

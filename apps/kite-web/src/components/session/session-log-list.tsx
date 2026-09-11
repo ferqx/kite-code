@@ -1,13 +1,14 @@
-import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import {
-  Activity,
-  ChevronRight,
-  CircleAlert,
-  FileJson2,
-  LoaderCircle,
-  RefreshCw,
-  ScanSearch,
-} from 'lucide-react';
+  ActivityIcon,
+  AlertCircleIcon,
+  ArrowRight01Icon,
+  FileCodeIcon,
+  LoaderCircleIcon,
+  RepeatIcon,
+  ScanSearchIcon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,7 +55,11 @@ export function SessionLogList({
           disabled={status === 'loading'}
           onClick={onRefresh}
         >
-          <RefreshCw className={cn('size-3', status === 'loading' && 'animate-spin')} />
+          <HugeiconsIcon
+            icon={RepeatIcon}
+            strokeWidth={2}
+            className={cn('size-3', status === 'loading' && 'animate-spin')}
+          />
           Refresh
         </Button>
       </div>
@@ -111,7 +116,11 @@ function LogEntry({
             <time dateTime={new Date(entry.occurredAt).toISOString()}>
               {formatLogTime(entry.occurredAt)}
             </time>
-            <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              strokeWidth={2}
+              className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+            />
           </span>
         </CollapsiblePrimitive.Trigger>
         <CollapsiblePrimitive.Content className="border-t border-border bg-terminal/35">
@@ -145,7 +154,7 @@ function LogEntry({
                     className="h-8 px-2.5 text-[10px]"
                     onClick={() => onViewModelContext(invocationId)}
                   >
-                    <ScanSearch className="size-3.5" />
+                    <HugeiconsIcon icon={ScanSearchIcon} strokeWidth={2} className="size-3.5" />
                     View model context
                   </Button>
                 </div>
@@ -213,13 +222,17 @@ function LogStatePanel({
       <div className="max-w-md">
         <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/70 bg-surface/75 text-muted-foreground">
           {loading ? (
-            <LoaderCircle className="size-5 animate-spin text-running" />
+            <HugeiconsIcon
+              icon={LoaderCircleIcon}
+              strokeWidth={2}
+              className="size-5 animate-spin text-running"
+            />
           ) : failed ? (
-            <CircleAlert className="size-5 text-danger" />
+            <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={2} className="size-5 text-danger" />
           ) : status === 'empty' ? (
-            <FileJson2 className="size-5" />
+            <HugeiconsIcon icon={FileCodeIcon} strokeWidth={2} className="size-5" />
           ) : (
-            <Activity className="size-5" />
+            <HugeiconsIcon icon={ActivityIcon} strokeWidth={2} className="size-5" />
           )}
         </div>
         <h2 className="text-sm font-semibold">

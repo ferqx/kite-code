@@ -3,6 +3,7 @@
   "style": "new-york",
   "rsc": false,
   "tsx": true,
+  "iconLibrary": "hugeicons",
   "tailwind": { "css": "src/styles/globals.css", "baseColor": "neutral", "cssVariables": true },
   "aliases": { "components": "@/components", "ui": "@/components/ui", "utils": "@/lib/utils" }
 }

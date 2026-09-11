@@ -260,10 +260,10 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(client.getSnapshot().mcp?.servers).toEqual([]);
     failMcpResponse = false;
     await client.connect();
-    await client.newSession();
-    const first = client.getSnapshot().selected!;
-    await client.newSession();
-    const second = client.getSnapshot().selected!;
+    const first = await client.newSession();
+    await client.selectSession(first);
+    const second = await client.newSession();
+    await client.selectSession(second);
     const beforeReadFailureCloses = closes;
     const cachedDirectory = client.getSnapshot().directory;
     failDirectory = true;
