@@ -7,78 +7,20 @@
 验证：`bun run --cwd apps/kite-web typecheck`、`bun run --cwd apps/kite-web test`、
 `bun run --cwd apps/kite-web build`，以及1280×800、1024×768、390×844的Light/Dark真实Browser检查。
 
-## 产品气质
+## 共享会话页面
 
-Kite Web采用“Quiet Technical Workspace”：技术上精确，视觉上安静，阅读上温和。Kite的自有视觉签名是低对比度、单向流动的
-Wind Trails：只在品牌标记、空状态和等待状态表达空气与方向，不进入长正文背景，不用高亮粒子或大面积连续动画。它借鉴成熟AI产品共同的内容优先、低干扰、
-语义化状态和自适应布局原则，但不复制任何公司的Logo、字体、品牌色或trade dress。
+Web 与桌面共用 [kite-client-ui](../../../packages/kite-client-ui/README.md) 的主页面、侧栏、会话消息、控件和样式。暖中性色、间距、阅读宽度、消息折叠与窄屏目录在共享 owner 中维护，禁止在 Web 再写一套主页面或消息组件。Web 保留页面内 dark/light 切换，默认 dark；相同组件与布局只切换共享颜色变量。
 
-参考边界：
+共享页面与控件样式限定在 `.kite-client` 根下，通用控件规则不覆盖诊断标签的 Tailwind 样式；Agent Markdown 使用两端相同的 shadcn/typeset stylesheet、`typeset-chat` preset 与 Geist 字体，避免 Web preflight 与原生浏览器默认值造成两端差异。共享 CSS 只保留选择、溢出、链接和文件操作规则，不建立第二套正文排版。桌面常用与最小窗口、Web 1280 × 800、1024 × 768、390 × 844 均按实际 React 组件检查。
 
-- OpenAI Design Guidelines中的“技术精确与人性化温度”只作为排版和气质参考；不得使用其商标与品牌资产。
-- Fluent 2的Built for focus、平台自然适配、global/alias token分层与无障碍原则用于系统化约束。
-- Material 3的adaptive layout、component state与motion原则用于响应式和交互完整性；Kite不采用高饱和Expressive外观。
+Web 只读策略不注入新建、任务输入、审批、停止、配置和本地文件操作。目录点击或 Enter 直接加载消息，无标题搜索或二次确认；没有权限的操作不显示入口。窄屏目录使用同一个 Sidebar，展开时隔离背景焦点，Esc 关闭并返回开关。
 
-## 设计原则
+[Tailwind 入口](../src/styles/globals.css)同时扫描共享控件源码，Button／Textarea 的 shadcn/ui 来源与适配由[共享 owner](../../../packages/kite-client-ui/README.md#基础控件)维护。
 
-1. **内容先于容器**：Session History是主视觉，边框和卡片只用于表达真实分组。
-2. **层级来自空间**：优先用间距、字号、字重和surface层级，不用连续分割线制造后台管理感。
-3. **状态必须可读**：connected、running、waiting、failed、read-only同时使用文字、图标和语义色，不能只靠颜色。
-4. **密度服务扫描**：目录使用紧凑密度，正文使用舒适行高；同一页面不强迫所有区域共享一种密度。
-5. **渐进披露**：Thinking、Tool result与Checkpoint metadata可以折叠，但关键失败和当前状态不能隐藏。
-6. **确定性视图**：相同数据状态产生相同DOM层级，不使用随机布局、不可读Canvas或只在hover中出现的关键能力。
-7. **主题同源**：Light/Dark使用相同semantic token，不在组件中硬编码主题颜色。
+## Web 诊断与 API Docs
 
-## 信息架构
+这两个现有专题继续由 Web owner 维护，使用 [globals.css](../src/styles/globals.css) 的语义变量与现有基础控件；不因主页面共享扩大 Browser 数据范围或操作权限。日志与上下文仍按需读取，API Docs 保留独立路由。
 
-当前只读产品保持双栏，不为尚未实现的控制能力预留空Inspector：
-
-```text
-304px Workspace / Session directory | fluid Session header + History / Runtime logs tabs
-```
-
-- Desktop ≥ 1024px：304px Sidebar；中等宽度降为272px。
-- Mobile < 768px：Sidebar进入modal drawer；主Timeline保持单列。
-- Timeline正文最大宽度780px，长工具输出在自身容器内滚动。
-- Runtime logs正文最大宽度980px；摘要优先扫描，展开后显示事件含义、原始event type、sequence、时间、分类、状态与安全字段。
-- Model Context使用有真实prepared invocation消费者的临时右侧modal Inspector；不预留常驻通用Inspector栏，也不为未来Checkpoint/Run
-  控制能力增加空面板。
-
-## Semantic tokens
-
-组件只能消费语义名，不能直接消费品牌或灰阶编号。
-
-| Domain | Tokens | 用途 |
-| --- | --- | --- |
-| Surface | `canvas/sidebar/surface/surface-subtle/surface-raised/surface-selected/overlay` | 页面、导航、卡片、选中和modal遮罩 |
-| Text | `foreground/copy/muted-foreground/terminal-copy` | 标题、正文、辅助文字和代码输出 |
-| Stroke | `border/border-strong/ring` | 普通边界、选中边界和键盘焦点 |
-| Action | `accent/accent-foreground` | 品牌动作与选中强调；每屏避免多个竞争accent |
-| Brand atmosphere | `wind-line` | 空状态与等待状态中的低对比度风迹；不能承担状态或数据含义 |
-| Status | `running/info/warning/danger` | 运行、信息、降级和失败 |
-| Elevation | `shadow-soft` | 选中卡片与必要强调；普通页面不使用大面积阴影 |
-
-基础间距遵循4px网格；常用半径为8、10、12、16px。Pill只用于状态，不用于普通按钮或所有容器。
-
-顶栏与普通工具按钮统一为32px高、8–10px圆角和中性border；普通hover不能变成品牌色边框。品牌accent只用于选中、主动作、
-运行状态和Wind Trails，普通容器与次级按钮依靠surface和低对比度border建立层级。Light/Dark的canvas、sidebar与surface都带轻微
-青灰空气色相，不使用纯白、纯黑或大面积高饱和品牌底色。
-
-## Component grammar
-
-- **Product mark**：单色前景块，使用风线图形表达Kite，不使用渐变、霓虹或第三方AI品牌符号。
-- **Wind Trails**：最多五条装饰性SVG曲线，动画只改变dash offset，周期不短于12秒；必须`aria-hidden`、不接收指针事件，
-  `prefers-reduced-motion`下只保留静态底线。只允许出现在没有长内容竞争的空状态、加载状态或等待状态。
-- **Workspace trigger**：一行结构，图标、名称和数量对齐；展开不是独立卡片。
-- **Session row**：使用单行名称和紧凑双层信息，选中只使用surface和中性低对比度border，不增加侧边accent线；running额外显示状态色。名称固定单行ellipsis，item不得把
-  ScrollArea固有宽度撑大；完整名称继续由accessible name与`title`提供。选择Session必须push只包含opaque Session identity的规范SPA URL，
-  Browser back恢复原URL对应的History，不能依赖只存在于组件内的selection state。
-- **Header**：Session identity优先；连接状态是有文字的status chip；Docs与Theme保持次级。Browser session随页面生命周期自动清理，
-  不提供刷新后立即重建连接的手动Disconnect动作。
-- **User message**：使用轻量surface bubble，宽度不超过正文的88%。
-- **Agent message**：开放布局，减少重复容器，让长答案形成连续文档。
-- **Thinking/Tool**：Thinking使用subtle surface；Tool activity使用info tint；Tool result使用terminal surface。同一`tool_call_id`只显示一个
-  生命周期项，terminal必须替换queued/running，不得在完成后同时保留spinner；通用`Tool`标签不能覆盖已知的具体工具名。
 - **Session tabs**：History是默认阅读视图；Runtime logs是按需诊断视图。Tab必须使用`tablist/tab/tabpanel`语义并显示明确文字。
 - **Log row**：收起态显示sequence、event type、category、status、时间和摘要；展开态把Category、Status与Detail type分成独立字段，
   `unknown`显示为`Not reported`，不把内部枚举拼成一条classification文本；同时提供人类可读解释与原始字段名，长字段在自身
@@ -88,19 +30,6 @@ Wind Trails：只在品牌标记、空状态和等待状态表达空气与方向
   Inspector支持Escape、backdrop与Close按钮关闭，关闭后不保留第二份context state。
 - **Empty/Error**：一个图标、一个标题、一段说明、至多一个主要动作。
 
-## Agent-operable view contract
+## 可访问性与验证边界
 
-GUI未来允许Agent操控时，视图层必须保持：
-
-- 交互元素具备稳定role、accessible name和当前状态；图标按钮必须有`aria-label`。
-- 选择态使用`aria-current`，drawer使用`aria-expanded`，连接降级使用`role=status`。
-- 关键动作不能仅在hover后出现；颜色不是唯一状态信号。
-- loading、empty、error、selected、disabled和connected在DOM中有可读取的文本事实。
-- motion不改变事实顺序；`prefers-reduced-motion`下所有非必要动画近似关闭。
-- 不把Agent需要理解的数据画进Canvas，不使用坐标作为主要交互identity。
-
-## 非目标
-
-- 本阶段不新增Browser mutation、prompt输入、Session create、Run control或持久UI偏好。
-- 不引入第二套component framework、CSS-in-JS runtime、外部字体下载或远程设计资产。
-- 不为Desktop、mobile native、通用Inspector或未来控制面预建空抽象；Model Context Inspector只服务当前明确的诊断consumer。
+交互元素保留明确 role、可访问名称、焦点反馈与状态文字；选择态不只依靠颜色，长内容在自身区域滚动。主页面使用 HTML 预览优先流程，测试数据与真实服务证据分开报告。键盘、屏幕阅读器、文字放大与系统输入法各自验证，截图不构成完整无障碍或原生资格。

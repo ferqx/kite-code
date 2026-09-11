@@ -54,7 +54,7 @@ try {
   if (exit !== 0) throw new Error(`Rust paired service smoke failed (${exit}).`);
   model.assertComplete();
   console.log(
-    'Desktop Rust transport: streamed task, durable history, active EOF cleanup and successor read passed. No external Provider was used.',
+    'Desktop Rust transport: renderer reattachment during streaming, durable history, active EOF cleanup and successor read passed. No external Provider was used.',
   );
 } finally {
   model.stop();

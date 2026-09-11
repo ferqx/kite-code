@@ -155,19 +155,24 @@ describe('Web REST App lifecycle', () => {
         <CurrentPath />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText('Workspace one')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('Workspace one').length).toBeGreaterThan(0));
     expect((await screen.findAllByText('Session one')).length).toBeGreaterThan(0);
     expect(await screen.findByText('hello REST')).toBeTruthy();
     expect(await screen.findByText('Saved')).toBeTruthy();
     expect(screen.getByTestId('current-path').textContent).toBe('/sessions/session-one');
-    expect(
-      screen.getByRole('button', { name: `View ${LONG_SESSION_NAME}` }).getAttribute('title'),
-    ).toBe(LONG_SESSION_NAME);
+    expect(screen.getByRole('button', { name: new RegExp(LONG_SESSION_NAME) }).textContent).toBe(
+      LONG_SESSION_NAME,
+    );
     expect(screen.getByRole('link', { name: 'Open API documentation' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /disconnect/i })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: '任务输入' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '停止' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '模型与 Provider 设置' })).toBeNull();
     expect(
       screen.getByRole('tab', { name: 'Conversation history' }).getAttribute('aria-selected'),
     ).toBe('true');
+    expect(screen.getByRole('tabpanel', { name: 'Conversation history' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'Runtime logs' }));
     expect(await screen.findByText('user.message_appended')).toBeTruthy();
     fireEvent.click(screen.getByText('user.message_appended'));
@@ -195,7 +200,7 @@ describe('Web REST App lifecycle', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Conversation history' }));
     deferSessionOneLogs = true;
     fireEvent.click(screen.getByRole('tab', { name: 'Runtime logs' }));
-    fireEvent.click(screen.getByRole('button', { name: `View ${LONG_SESSION_NAME}` }));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(LONG_SESSION_NAME) }));
     expect(screen.getByTestId('current-path').textContent).toBe('/sessions/session-long');
     await waitFor(() =>
       expect(

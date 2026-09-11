@@ -12,6 +12,10 @@ import {
   type RuntimeStoredCommandResourceResult,
 } from './runtime-run';
 
+export type {
+  ListRuntimeLogSessionsRequest,
+  RuntimeLogSessionPage,
+} from '@kite-ai/runtime-contract';
 export {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
@@ -330,6 +334,8 @@ export interface RuntimeLogSessionReadPage {
 }
 export type RuntimeLogEventQuery = ListRuntimeLogEventsRequest;
 export interface RuntimeLogQueryPort<Event = unknown> {
+  /** Indexed metadata lookup when supported by the Store reader. */
+  getSession?(sessionId: string): RuntimeLogSessionRecord | null;
   listSessions(request: RuntimeLogSessionQuery): RuntimeLogSessionReadPage;
   listEvents(request: RuntimeLogEventQuery): RuntimeLogEventReadPage<Event>;
   close(): void;

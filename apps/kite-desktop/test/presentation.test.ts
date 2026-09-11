@@ -85,3 +85,106 @@ test('cancelled and rejected tools remain terminal after late progress or histor
     expect(projectEvent([], terminal)).toEqual(messages);
   }
 });
+
+test('tool details retain structured arguments and explicit failure without losing output', () => {
+  let messages = projectEvent([], {
+    type: 'tool.queued',
+    toolId: 'shell',
+    toolName: 'shell_execute',
+    presentation: 'standalone',
+    arguments: { command: 'bun test' },
+    summary: '运行测试',
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.finished',
+    toolId: 'shell',
+    presentation: 'standalone',
+    summary: '测试未通过',
+    result: { ok: false, exitCode: 1, stdout: 'one failed', stderr: 'failure detail' },
+  });
+  expect(messages[0]).toMatchObject({
+    status: 'failed',
+    toolName: 'shell_execute',
+    arguments: { command: 'bun test' },
+    settled: true,
+  });
+  expect(messages[0]?.text).toContain('one failed');
+  expect(messages[0]?.text).toContain('failure detail');
+});
+
+test('subagents keep explicit parent identity, stable steps, and terminal results over late progress', () => {
+  let messages = projectEvent([], {
+    type: 'subagent.started',
+    subagentId: 'child',
+    role: 'review',
+    name: '测试检查',
+  });
+  messages = projectEvent(messages, {
+    type: 'subagent.phase',
+    subagentId: 'child',
+    parentToolCallId: 'parent',
+    status: 'running',
+  });
+  for (const status of ['started', 'completed', 'started'] as const)
+    messages = projectEvent(messages, {
+      type: 'subagent.step',
+      subagentId: 'child',
+      stepId: 'step',
+      toolCallId: 'child-tool',
+      toolName: 'shell_execute',
+      status,
+      summary: '检查边界',
+    });
+  expect(messages[0]?.steps).toEqual([{ id: 'step', text: '检查边界', status: 'completed' }]);
+  messages = projectEvent(messages, {
+    type: 'subagent.completed',
+    subagentId: 'child',
+    summary: '检查已通过',
+    toolCallCount: 1,
+    durationMs: 100,
+  });
+  const terminal = messages;
+  messages = projectEvent(messages, {
+    type: 'subagent.phase',
+    subagentId: 'child',
+    parentToolCallId: 'parent',
+    status: 'suspended',
+  });
+  expect(messages).toBe(terminal);
+  expect(messages[0]).toMatchObject({
+    title: '测试检查',
+    parentToolCallId: 'parent',
+    text: '检查已通过',
+    status: 'completed',
+    settled: true,
+  });
+});
+
+test('approval receipt is distinct from tool success and repeated availability cannot reopen it', () => {
+  const interaction = {
+    kind: 'approval',
+    interactionId: 'approve',
+    sessionRevision: 1,
+    generation: 1,
+    grants: ['approve_once'],
+    command: 'git push',
+    owner: { kind: 'root_tool', toolCallId: 'tool' },
+  } as const;
+  let messages = projectEvent([], { type: 'interaction.available', interaction });
+  messages = projectEvent(messages, {
+    type: 'approval.granted',
+    interactionId: 'approve',
+    generation: 1,
+    owner: interaction.owner,
+  });
+  messages = projectEvent(messages, {
+    type: 'interaction.settled',
+    interactionId: 'approve',
+    sessionRevision: 2,
+    outcome: 'completed',
+  });
+  messages = projectEvent(messages, { type: 'interaction.available', interaction });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ text: 'git push', settled: true });
+  expect(messages[0]?.title).toBe('已批准本次命令，执行结果以工具记录为准');
+});

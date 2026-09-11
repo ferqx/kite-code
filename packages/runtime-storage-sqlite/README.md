@@ -62,3 +62,6 @@
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
 
 App Server 打开可变 Store 前，通过 [Session 文件 preflight](src/kite-session-runtime-file.ts) 只读检查现存格式；release restart 复用同一检查，失败时不停止旧实例。不兼容文件保持原样，不在普通启动迁移；absent preflight 不创建文件。
+
+
+当前启动先核对文件安全、格式与精确 schema，不扫描所有会话正文。Session snapshot 读取在同一只读事务内校验该会话的绑定、事件顺序／codec、snapshot checksum／revision、Run 与 receipt；损坏会话不阻止先列出目录。Artifact 内容由 typed reader 在访问时验证。完整 physical/FK 扫描保留于显式文件 preflight，不能在每个组合 reader 创建时重复执行。实现与测试见[事务与状态](docs/transactions-and-state.md)。

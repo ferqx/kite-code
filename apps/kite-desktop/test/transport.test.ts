@@ -12,7 +12,7 @@ const message = {
   },
 };
 
-test('send failure closes the owned connection without retrying an unknown mutation', async () => {
+test('send failure detaches the renderer without stopping tasks or retrying an unknown mutation', async () => {
   const calls: string[] = [];
   const invoke: DesktopInvoke = async <T>(command: string) => {
     calls.push(command);
@@ -22,7 +22,7 @@ test('send failure closes the owned connection without retrying an unknown mutat
   const connection = await desktopTransport(info, invoke).connect();
   await expect(connection.send(message)).rejects.toThrow();
   await connection.close();
-  expect(calls).toEqual(['runtime_send', 'runtime_close']);
+  expect(calls).toEqual(['runtime_send', 'runtime_detach']);
 });
 
 test('late receive from a closed connection cannot reach the client', async () => {

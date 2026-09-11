@@ -99,6 +99,16 @@
       ]
     },
     {
+      "id": "kite-client-ui",
+      "sources": ["packages/kite-client-ui/src/**", "packages/kite-client-ui/package.json"],
+      "authorities": [
+        "packages/kite-client-ui/README.md",
+        "apps/kite-desktop/docs/conversation-ui.md",
+        "apps/kite-web/docs/session-presentation.md",
+        "docs/handbook/clients/web/interface.md"
+      ]
+    },
+    {
       "id": "kite-web",
       "sources": ["apps/kite-web/src/**", "apps/kite-web/package.json"],
       "authorities": [
@@ -111,15 +121,13 @@
         "apps/kite-web/src/routing.tsx",
         "apps/kite-web/src/components/session/model-context-inspector.tsx",
         "apps/kite-web/src/components/session/session-log-list.tsx",
-        "apps/kite-web/src/components/session/session-sidebar.tsx",
         "apps/kite-web/package.json",
         "apps/kite-web/src/styles/**",
         "apps/kite-web/src/components/ui/**",
         "apps/kite-web/src/lib/**",
         "apps/kite-web/src/transport/**",
         "apps/kite-web/src/api-docs/**",
-        "apps/kite-web/src/presentation/**",
-        "apps/kite-web/src/components/timeline/**"
+        "apps/kite-web/src/presentation/**"
       ]
     },
     {
@@ -745,11 +753,7 @@
     },
     {
       "id": "web-history",
-      "sources": [
-        "apps/kite-web/src/components/session/session-sidebar.tsx",
-        "apps/kite-web/src/presentation/**",
-        "apps/kite-web/src/components/timeline/**"
-      ],
+      "sources": ["apps/kite-web/src/presentation/**"],
       "authorities": [
         "apps/kite-web/docs/session-presentation.md",
         "docs/handbook/clients/web/guides/conversation.md"

@@ -42,13 +42,15 @@ impl ServiceProcess {
             .env("NODE_ENV", "production")
             .env("KITE_CODE_HOME", runtime_root)
             .env("KITE_CODE_CONFIG_HOME", &profile)
-            .env("KITE_APP_SERVER_WORKSPACE", workspace)
             .env("KITE_APP_SERVER_BUILD_ID", build_id)
             .env("KITE_STANDALONE_EXECUTABLE", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if !workspace.as_os_str().is_empty() {
+            command.env("KITE_APP_SERVER_WORKSPACE", workspace);
+        }
         for key in environment_keys {
             if let Some(value) = std::env::var_os(key) {
                 command.env(key, value);
@@ -169,6 +171,14 @@ impl ServiceProcess {
             .await
             .ok_or_else(|| "连接已关闭。".to_string())??;
         Ok(frame)
+    }
+
+    pub async fn wait_for_receiver(&self) {
+        drop(self.output.lock().await);
+    }
+
+    pub fn finished(&self) -> bool {
+        self.done.borrow().is_some()
     }
 
     pub async fn close(&self) -> Result<(), String> {

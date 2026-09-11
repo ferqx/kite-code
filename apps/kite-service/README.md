@@ -17,6 +17,7 @@
 - `src/app-server-daemon.ts` 只增加显式 process owner、stable local endpoint、server control 和 Web listener；它不增加
   Session registry、Storage daemon 或 build replacement。
 - `src/composition.ts` 组合 application domain；transport 由 stdio parent 或 daemon endpoint owner 持有。
+- 会话目录与历史投影保留 Store 已记录的 completed／failed／cancelled；服务重启后缺少执行权仅使未收尾运行显示 recovery_required，不改写已知终态。
 - `bootstrap.ts` 打开 `kite-session.sqlite`，提供 multi-connection SQLite、Session execution fencing、revision CAS、
   effect receipt/recovery、checkpoint 与 typed Artifact backend。
 - 用户配置、Provider/model、MCP、Project approval 与 Workspace Trust 使用 owner-specific file lock、持锁重读和 atomic
@@ -112,3 +113,5 @@ App Server、Session/Store authority、daemon/Web、Trust、安全、恢复或re
 - [App Server endpoint state](docs/service-state.md)
 
 稳定生命周期首帧分流由 [lifecycle carrier](src/carrier/daemon-lifecycle.ts) 拥有，独立于 Runtime initialize。daemon 在 Store 初始化前取得 endpoint，在资源释放后清理 endpoint，空闲停止复用既有 mutation gate 与 Host activeOperations。
+
+桌面历史通过同一 Store 的有界目录、索引会话读取与快照投影，不依赖项目路径、Git 或模型初始化。可启动无执行工作区的 stdio App Server；历史只读与实际执行授权分开，契约见[本地 App Server](../../docs/active/app-server-local-runtime.md)，客户端编排见[历史与恢复](../kite-desktop/docs/history-and-recovery.md)。

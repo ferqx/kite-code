@@ -218,6 +218,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   #readingComplete = false;
   #resolveDone!: () => void;
   #unsubscribeSignals: (() => void)[] = [];
+  #pendingReads = new Set<Promise<unknown>>();
 
   constructor(options: RuntimeStdioCarrierOptions) {
     this.#options = options;
@@ -279,6 +280,9 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     this.#removeSignalHandlers();
     try {
       await this.#options.server.beginDraining();
+      await withDeadline(Promise.allSettled(this.#pendingReads), this.#drainDeadlineMs).catch(() =>
+        this.#diagnose('read_drain_timeout'),
+      );
       await this.#flushOutput();
     } finally {
       try {
@@ -309,6 +313,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
             const parsed = await this.#parseLine(line.subarray(0, payloadLength));
             length = 0;
             if (parsed === undefined) continue;
+            if (await this.#dispatchRead(parsed)) continue;
             if (await this.#handleHistory(parsed)) continue;
             if (await this.#handleAppControl(parsed)) continue;
             if (await this.#handleServerControl(parsed)) continue;
@@ -331,6 +336,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         const parsed = await this.#parseLine(line.subarray(0, payloadLength));
         if (
           parsed !== undefined &&
+          !(await this.#dispatchRead(parsed)) &&
           !(await this.#handleHistory(parsed)) &&
           !(await this.#handleAppControl(parsed)) &&
           !(await this.#handleServerControl(parsed))
@@ -340,6 +346,9 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     } catch {
       if (!this.#closed) await this.#failClosed('input_failure');
     } finally {
+      await withDeadline(Promise.allSettled(this.#pendingReads), this.#drainDeadlineMs).catch(() =>
+        this.#diagnose('read_drain_timeout'),
+      );
       this.#readingComplete = true;
     }
   }
@@ -362,6 +371,42 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       }
       return undefined;
     }
+  }
+
+  async #dispatchRead(value: unknown): Promise<boolean> {
+    const candidate = value as { readonly method?: unknown; readonly id?: unknown };
+    const method = candidate?.method;
+    if (
+      typeof method !== 'string' ||
+      !(
+        method.startsWith('history/') ||
+        [
+          'app/workspace_trust/query',
+          'app/provider_model/snapshot',
+          'app/mcp/snapshot',
+          'app/skills/catalog',
+          'app/execution/status',
+          'app/release/status',
+        ].includes(method)
+      )
+    )
+      return false;
+    // Reads have no ordering dependency on each other. A slow capability must not
+    // hold up History, cancellation, or the next frame. Mutations keep their existing gates.
+    if (this.#pendingReads.size >= RUNTIME_PROTOCOL_LIMITS.maxInFlightRequests) {
+      await this.#writeError(
+        typeof candidate.id === 'string' ? candidate.id : null,
+        'overloaded',
+      ).catch(() => this.#diagnose('stdout_failure'));
+      return true;
+    }
+    const pending = (
+      method.startsWith('history/') ? this.#handleHistory(value) : this.#handleAppControl(value)
+    )
+      .catch(() => this.#diagnose('read_failure'))
+      .finally(() => this.#pendingReads.delete(pending));
+    this.#pendingReads.add(pending);
+    return true;
   }
 
   async #handleHistory(value: unknown): Promise<boolean> {
@@ -415,8 +460,12 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         id: request.id,
         result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(response),
       });
-    } catch {
-      await this.#writeError(request.id, 'internal_error');
+    } catch (error) {
+      await this.#writeError(
+        request.id,
+        'internal_error',
+        readFailure(error, 'session_unavailable'),
+      );
     }
     return true;
   }
@@ -470,6 +519,11 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       await this.#writeError(
         request.id,
         error instanceof AppControlProtocolRequestError ? 'invalid_params' : 'internal_error',
+        request.method === 'app/workspace_trust/query'
+          ? readFailure(error, 'workspace_unavailable')
+          : request.method === 'app/provider_model/snapshot'
+            ? readFailure(error, 'configuration_unavailable')
+            : undefined,
       );
     }
     return true;
@@ -516,7 +570,11 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     return true;
   }
 
-  #writeError(id: string | null, code: keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS): Promise<void> {
+  #writeError(
+    id: string | null,
+    code: keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS,
+    detail?: ReturnType<typeof readFailure>,
+  ): Promise<void> {
     const messages: Record<keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS, string> = {
       parse_error: 'Parse error',
       invalid_request: 'Invalid request',
@@ -537,7 +595,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       error: RUNTIME_PROTOCOL_ERROR_SCHEMA_.parse({
         code: RUNTIME_PROTOCOL_ERROR_NUMBERS[code],
         message: messages[code],
-        data: { code },
+        data: { code, ...detail },
       }),
     });
   }
@@ -548,6 +606,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   }
 
   #writeProtocol(message: RuntimeProtocolMessage): Promise<void> {
+    if (this.#closed) return Promise.resolve();
     const operation = this.#outputTail.then(async () => {
       const encoded = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
       const accepted = await this.#options.stdout.write(encoded);
@@ -743,4 +802,22 @@ async function withDeadline<T>(operation: Promise<T>, deadlineMs: number): Promi
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+function readFailure(
+  error: unknown,
+  fallback: 'session_unavailable' | 'workspace_unavailable' | 'configuration_unavailable',
+) {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  const detailCode =
+    code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' || code === 'temporarily_unavailable'
+      ? 'temporarily_unavailable'
+      : code === 'session_not_found' ||
+          code === 'session_unavailable' ||
+          code === 'corrupt_event' ||
+          code === 'invalid_request'
+        ? code
+        : fallback;
+  return { detailCode, retryable: detailCode === 'temporarily_unavailable' };
 }

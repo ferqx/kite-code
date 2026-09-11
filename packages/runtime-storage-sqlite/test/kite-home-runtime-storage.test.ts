@@ -241,7 +241,7 @@ describe('global Kite Home RuntimeStorage owner', () => {
     ).toBe(0);
   });
 
-  test('deep-validates existing Workspace, snapshot, event, receipt, Run and Artifact facts', () => {
+  test('opens the directory without decoding history and validates a Session when its snapshot is read', () => {
     using database = preparedDatabase();
     const admitted = workspace('a', 'b');
     const first = createKiteHomeRuntimeStorageForConnection<Event, State>({
@@ -272,14 +272,23 @@ describe('global Kite Home RuntimeStorage owner', () => {
         "UPDATE runtime_snapshots SET state_checksum = 'corrupt' WHERE session_id = 'session-1'",
       )
       .run();
-    expect(() =>
-      createKiteHomeRuntimeStorageForConnection<Event, State>({
-        database,
-        codec,
-        stateSchemaVersion: 27,
-        formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
-      }),
-    ).toThrow('snapshot');
+    let decoded = 0;
+    const damaged = createKiteHomeRuntimeStorageForConnection<Event, State>({
+      database,
+      codec: {
+        ...codec,
+        decodeEvent: (json: string) => {
+          decoded++;
+          return codec.decodeEvent(json);
+        },
+      },
+      stateSchemaVersion: 27,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    });
+    expect(damaged.directory.listSessions({ limit: 10 }).entries).toHaveLength(1);
+    expect(decoded).toBe(0);
+    expect(() => damaged.storage.sessions.loadSnapshot('session-1')).toThrow('snapshot');
+    damaged.close();
   });
 });
 

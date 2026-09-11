@@ -28,7 +28,7 @@ export function desktopTransport(
       let writeTail = Promise.resolve();
       const close = () => {
         closed = true;
-        closePromise ??= call<void>('runtime_close', { connectionId: info.connectionId });
+        closePromise ??= call<void>('runtime_detach', { connectionId: info.connectionId });
         return closePromise;
       };
       return {

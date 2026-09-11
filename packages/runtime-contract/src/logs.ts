@@ -51,6 +51,7 @@ export interface RuntimeLogSessionCursor {
 }
 
 export interface ListRuntimeLogSessionsRequest {
+  readonly workspaceDigest?: string;
   readonly cursor?: RuntimeLogSessionCursor;
   readonly limit: number;
   readonly query?: string;
@@ -63,6 +64,12 @@ export interface RuntimeLogSessionEntry {
   readonly needsSmartName: boolean;
   readonly updatedAt: number;
   readonly lastSequence: number;
+  /** Persisted membership; reading history does not resolve a live filesystem path. */
+  readonly workspace?: {
+    readonly workspaceId: string;
+    readonly workspaceDigest: string;
+    readonly displayName: string;
+  };
   readonly model?: { readonly provider: string; readonly name: string };
 }
 
@@ -184,6 +191,10 @@ function assertSessionId(value: unknown): asserts value is string {
 }
 
 export function assertListRuntimeLogSessionsRequest(value: ListRuntimeLogSessionsRequest): void {
+  if (value.workspaceDigest !== undefined && !/^sha256:[a-f0-9]{64}$/u.test(value.workspaceDigest))
+    throw new RuntimeLogRequestValidationError(
+      'workspaceDigest must be a canonical SHA-256 digest.',
+    );
   assertPageLimit(
     value.limit,
     RUNTIME_LOG_SESSION_PAGE_MIN_LIMIT,

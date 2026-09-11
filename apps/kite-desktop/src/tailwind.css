@@ -1,0 +1,60 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./typeset.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@source "../../../packages/kite-client-ui/src";
+
+:root {
+  --font-geist: "Geist Variable", sans-serif;
+  --font-geist-mono: "Geist Mono Variable", monospace;
+}
+
+.typeset-chat {
+  --typeset-font-body: var(--font-geist);
+  --typeset-font-heading: var(--font-geist);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 14px;
+  --typeset-leading: 1.6;
+  --typeset-flow: 1em;
+}
+
+html[data-platform="macos"] .kite-client.shell {
+  --app-header-height: 60px;
+  --sidebar: #e8e8e3;
+}
+
+html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
+  --sidebar: #191c18;
+}
+
+html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
+  padding-block: 4px;
+}
+
+html[data-platform="macos"]
+  .kite-client
+  :is(.sidebar-header, .session-header)
+  > * {
+  transform: translateY(-9px);
+}
+
+html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-header {
+  padding-left: 80px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-ring: var(--input);
+  --color-destructive: #985349;
+  --color-secondary: var(--accent);
+  --color-secondary-foreground: var(--foreground);
+}

@@ -126,7 +126,10 @@ test('large durable history crosses frame boundaries and restores every response
           type: 'start_turn',
           sessionId,
           expectedRevision: revision,
-          input: `Respond for turn ${index}.`,
+          input:
+            index === 0
+              ? `Respond token=fixture-secret-value ${'long input '.repeat(40)}`
+              : `Respond for turn ${index}.`,
           phase: 'building',
         });
         if (started.status === 'applied') break;
@@ -162,6 +165,27 @@ test('large durable history crosses frame boundaries and restores every response
     await client.close();
     client = connect();
     await client.prepareAppControl();
+    const directory = await client.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'list_sessions',
+    });
+    if (directory.status !== 'ok') throw new Error('Missing restored directory');
+    expect(
+      directory.sessions?.find((session) => session.sessionId === sessionId)?.currentRun?.status,
+    ).toBe('completed');
+    const restored = await client.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'get_session_projection',
+      sessionId,
+    });
+    if (restored.status !== 'ok') throw new Error('Missing restored projection');
+    expect(restored.session?.currentRun?.status).toBe('completed');
+    const summaries = await client.history.listSessions({ limit: 10 });
+    const summary = summaries.entries.find((entry) => entry.sessionId === sessionId)!;
+    expect(summary.displayName).toContain('[redacted]');
+    expect(summary.displayName).not.toContain('fixture-secret-value');
+    expect(summary.displayName.length).toBeLessThanOrEqual(80);
+    expect(summary.workspace?.workspaceDigest).toBeDefined();
     const transcript = await client.history.loadSession(sessionId);
     expect(new TextEncoder().encode(JSON.stringify(transcript)).byteLength).toBeGreaterThan(
       RUNTIME_PROTOCOL_LIMITS.maxMessageBytes,

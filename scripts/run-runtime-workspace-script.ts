@@ -17,6 +17,7 @@ const WORKSPACES = [
   'packages/builtin-runtime',
   'apps/kite-cli',
   'apps/kite-service',
+  'packages/kite-client-ui',
   'apps/kite-web',
   'apps/kite-desktop',
 ] as const;

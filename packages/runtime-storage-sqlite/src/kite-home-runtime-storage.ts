@@ -10,6 +10,7 @@ import type {
   RuntimeSessionDeletionInput,
   RuntimeSessionInfo,
   RuntimeSessionModelRoute,
+  RuntimeSnapshotMetadata,
   RuntimeStorage,
   RuntimeTransactionInput,
   SessionStore,
@@ -35,6 +36,7 @@ import {
   createKiteHomeWriteTransactionPort,
   type KiteHomeWriteTransactionPort,
 } from './kite-home-write';
+import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 import type {
   InitialControllerTransactionPort,
@@ -50,6 +52,9 @@ export interface KiteHomeRuntimeStorageOwner<Event, State> extends AsyncDisposab
   };
   readonly admissions: KiteHomeWorkspaceAdmissionPort;
   readonly directory: KiteHomeDirectoryQueryPort;
+  openHistoryLogs(
+    currentEventTypes: readonly string[],
+  ): import('@kite-ai/runtime-host/storage').RuntimeLogQueryPort<Event>;
   readonly artifactStore: KiteHomeArtifactStore;
   authorityForWorkspace(workspaceId: string): SqliteWorkspaceAuthority;
   sessionCreationForWorkspace(
@@ -146,6 +151,10 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   };
   const admissions = Object.freeze(admissionPort);
   const directory: KiteHomeDirectoryQueryPort = Object.freeze({
+    listSessions(request: Parameters<KiteHomeDirectoryQueryPort['listSessions']>[0]) {
+      assertOpen();
+      return rawDirectory.listSessions(request);
+    },
     list() {
       assertOpen();
       return rawDirectory.list();
@@ -240,9 +249,12 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       );
     },
     loadSnapshot: <Loaded = State>(sessionId: string): Loaded | null =>
-      journalForSession(sessionId)?.sessions.loadSnapshot<Loaded>(sessionId) ?? null,
+      (readValidatedSnapshot(sessionId)?.state as Loaded | undefined) ?? null,
     loadSnapshotRecord: <Loaded = State>(sessionId: string) =>
-      journalForSession(sessionId)?.sessions.loadSnapshotRecord<Loaded>(sessionId) ?? null,
+      readValidatedSnapshot(sessionId) as {
+        state: Loaded;
+        metadata: RuntimeSnapshotMetadata;
+      } | null,
     getLastEventPosition: (sessionId: string) =>
       journalForSession(sessionId)?.sessions.getLastEventPosition(sessionId) ?? 0,
     listSessions(query = '', limit = 50): RuntimeSessionInfo[] {
@@ -416,8 +428,6 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   };
   Object.freeze(runs);
 
-  validateExistingFactsInReadSnapshot();
-
   const storage: KiteHomeRuntimeStorageOwner<Event, State>['storage'] = Object.freeze({
     adapterId: 'kite-home-sqlite',
     stateSchemaVersion: input.stateSchemaVersion,
@@ -439,6 +449,29 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
     storage,
     admissions,
     directory,
+    openHistoryLogs(currentEventTypes) {
+      assertOpen();
+      const logs = createSqliteRuntimeLogQueryPortFromDatabase_({
+        database: input.database,
+        codec: input.codec,
+        currentEventTypes,
+      });
+      return {
+        getSession(sessionId) {
+          assertOpen();
+          return logs.getSession!(sessionId);
+        },
+        listSessions(request) {
+          assertOpen();
+          return logs.listSessions(request);
+        },
+        listEvents(request) {
+          assertOpen();
+          return logs.listEvents(request);
+        },
+        close: () => logs.close(),
+      };
+    },
     artifactStore,
     authorityForWorkspace,
     sessionCreationForWorkspace: (workspaceId) =>
@@ -456,15 +489,8 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
     if (input.ownsDatabase) input.database.close(false);
   }
 
-  function validateExistingFacts(): void {
-    const workspaceRows = input.database
-      .query<{ workspace_id: string }, []>(
-        'SELECT workspace_id FROM workspaces ORDER BY workspace_id',
-      )
-      .all();
-    for (const row of workspaceRows) admissions.get(row.workspace_id);
-
-    const sessionRows = input.database
+  function validateSessionFacts(sessionId: string) {
+    const session = input.database
       .query<
         {
           session_id: string;
@@ -475,102 +501,99 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
           format_epoch: string;
           revision: number;
         },
-        []
+        [string]
       >(
         `SELECT session_id, workspace_id, project_id, workspace_digest,
                 state_schema, format_epoch, revision
-           FROM runtime_sessions ORDER BY session_id`,
+           FROM runtime_sessions WHERE session_id = ?`,
       )
-      .all();
-    for (const session of sessionRows) {
-      const workspace = admissions.get(session.workspace_id);
-      if (
-        !workspace ||
-        session.project_id !== workspace.projectId ||
-        session.workspace_digest !== workspace.workspaceDigest ||
-        session.state_schema !== input.stateSchemaVersion ||
-        session.format_epoch !== input.formatEpoch
-      ) {
-        throw new Error('Kite Home Runtime Session binding is invalid.');
-      }
-      const journal = journalForWorkspace(session.workspace_id);
-      const record = journal.sessions.loadSnapshotRecord<State>(session.session_id);
-      if (
-        !record ||
-        record.metadata.schemaVersion !== input.stateSchemaVersion ||
-        record.metadata.stateRevision !== session.revision
-      ) {
-        throw new Error('Kite Home Runtime rolling snapshot is incomplete.');
-      }
-      const identity = input.codec.sessionIdentity?.(record.state);
-      if (
-        !identity ||
-        identity.projectId !== workspace.projectId ||
-        identity.canonicalWorkspaceDigest !== workspace.workspaceDigest
-      ) {
-        throw new Error('Kite Home Runtime snapshot Workspace identity is invalid.');
-      }
-      const events = input.database
-        .query<{ sequence: number; schema_version: number; event_json: string }, [string]>(
-          `SELECT sequence, schema_version, event_json FROM runtime_events
+      .get(sessionId);
+    if (!session) return null;
+    const workspace = admissions.get(session.workspace_id);
+    if (
+      !workspace ||
+      session.project_id !== workspace.projectId ||
+      session.workspace_digest !== workspace.workspaceDigest ||
+      session.state_schema !== input.stateSchemaVersion ||
+      session.format_epoch !== input.formatEpoch
+    ) {
+      throw new Error('Kite Home Runtime Session binding is invalid.');
+    }
+    const journal = journalForWorkspace(session.workspace_id);
+    const record = journal.sessions.loadSnapshotRecord<State>(session.session_id);
+    if (
+      !record ||
+      record.metadata.schemaVersion !== input.stateSchemaVersion ||
+      record.metadata.stateRevision !== session.revision
+    ) {
+      throw new Error('Kite Home Runtime rolling snapshot is incomplete.');
+    }
+    const identity = input.codec.sessionIdentity?.(record.state);
+    if (
+      !identity ||
+      identity.projectId !== workspace.projectId ||
+      identity.canonicalWorkspaceDigest !== workspace.workspaceDigest
+    ) {
+      throw new Error('Kite Home Runtime snapshot Workspace identity is invalid.');
+    }
+    const events = input.database
+      .query<{ sequence: number; schema_version: number; event_json: string }, [string]>(
+        `SELECT sequence, schema_version, event_json FROM runtime_events
             WHERE session_id = ? ORDER BY sequence`,
-        )
-        .all(session.session_id);
-      for (const [index, event] of events.entries()) {
-        if (event.sequence !== index + 1 || event.schema_version !== input.stateSchemaVersion) {
-          throw new Error('Kite Home Runtime event sequence or schema is invalid.');
-        }
-        input.codec.decodeEvent(event.event_json);
+      )
+      .all(session.session_id);
+    for (const [index, event] of events.entries()) {
+      if (event.sequence !== index + 1 || event.schema_version !== input.stateSchemaVersion) {
+        throw new Error('Kite Home Runtime event sequence or schema is invalid.');
       }
-      const eventRevision =
-        journal.sessions
-          .loadEventsStrict(session.session_id)
-          .filter((event) => event.id <= record.metadata.eventPosition)
-          .at(-1)?.revision ?? 0;
-      input.codec.validateSnapshot?.({
-        state: record.state,
+      input.codec.decodeEvent(event.event_json, { sequence: event.sequence });
+    }
+    const eventRevision =
+      events.filter((event) => event.sequence <= record.metadata.eventPosition).at(-1)?.sequence ??
+      0;
+    input.codec.validateSnapshot?.({
+      state: record.state,
+      sessionId: session.session_id,
+      eventPosition: record.metadata.eventPosition,
+      stateRevision: record.metadata.stateRevision,
+      schemaVersion: record.metadata.schemaVersion,
+      eventRevision,
+    });
+    let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
+    for (;;) {
+      const page = journal.runs.list({
         sessionId: session.session_id,
-        eventPosition: record.metadata.eventPosition,
-        stateRevision: record.metadata.stateRevision,
-        schemaVersion: record.metadata.schemaVersion,
-        eventRevision,
+        ...(cursor ? { cursor } : {}),
+        limit: 200,
       });
-      let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
-      for (;;) {
-        const page = journal.runs.list({
-          sessionId: session.session_id,
-          ...(cursor ? { cursor } : {}),
-          limit: 200,
-        });
-        for (const run of page.entries) {
-          if (run.originSessionId !== undefined) continue;
-          const lookup = journal.commandReceipts.lookup({
-            scopeSessionId: session.session_id,
-            commandId: run.startCommandId,
-            requestDigest:
-              input.database
-                .query<{ request_digest: string }, [string, string]>(
-                  `SELECT request_digest FROM runtime_command_receipts
+      for (const run of page.entries) {
+        if (run.originSessionId !== undefined) continue;
+        const lookup = journal.commandReceipts.lookup({
+          scopeSessionId: session.session_id,
+          commandId: run.startCommandId,
+          requestDigest:
+            input.database
+              .query<{ request_digest: string }, [string, string]>(
+                `SELECT request_digest FROM runtime_command_receipts
                     WHERE scope_session_id = ? AND command_id = ? LIMIT 1`,
-                )
-                .get(session.session_id, run.startCommandId)?.request_digest ?? '',
-          });
-          if (lookup.status !== 'replay' || !lookup.receipt.resourceResult) {
-            throw new Error('Kite Home Runtime Run start receipt is missing.');
-          }
-          assertRuntimeRunStartResourceResult(lookup.receipt.resourceResult, run);
+              )
+              .get(session.session_id, run.startCommandId)?.request_digest ?? '',
+        });
+        if (lookup.status !== 'replay' || !lookup.receipt.resourceResult) {
+          throw new Error('Kite Home Runtime Run start receipt is missing.');
         }
-        if (!page.hasMore || !page.nextCursor) break;
-        cursor = page.nextCursor;
+        assertRuntimeRunStartResourceResult(lookup.receipt.resourceResult, run);
       }
+      if (!page.hasMore || !page.nextCursor) break;
+      cursor = page.nextCursor;
     }
     const activeDuplicates = input.database
-      .query<{ session_id: string }, []>(
+      .query<{ session_id: string }, [string]>(
         `SELECT session_id FROM runtime_runs
-          WHERE status IN ('queued', 'running', 'waiting')
+          WHERE session_id = ? AND status IN ('queued', 'running', 'waiting')
           GROUP BY session_id HAVING count(*) > 1 LIMIT 1`,
       )
-      .get();
+      .get(sessionId);
     if (activeDuplicates) throw new Error('Kite Home Runtime has multiple active Runs.');
 
     for (const receipt of input.database
@@ -581,12 +604,12 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
           workspace_id: string;
           request_digest: string;
         },
-        []
+        [string]
       >(
         `SELECT scope_session_id, command_id, workspace_id, request_digest
-           FROM runtime_command_receipts ORDER BY scope_session_id, command_id`,
+           FROM runtime_command_receipts WHERE scope_session_id = ? ORDER BY command_id`,
       )
-      .all()) {
+      .all(sessionId)) {
       const lookup = journalForWorkspace(receipt.workspace_id).commandReceipts.lookup({
         scopeSessionId: receipt.scope_session_id,
         commandId: receipt.command_id,
@@ -596,19 +619,22 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
         throw new Error('Kite Home Runtime command receipt is invalid.');
       }
     }
-    validateArtifactPayloadLengths(input.database);
+    return record;
   }
 
-  function validateExistingFactsInReadSnapshot(): void {
+  function readValidatedSnapshot(sessionId: string) {
+    assertOpen();
+    if (input.database.inTransaction) return validateSessionFacts(sessionId);
     input.database.run('BEGIN');
     try {
-      validateExistingFacts();
+      const record = validateSessionFacts(sessionId);
       input.database.run('COMMIT');
+      return record;
     } catch (error) {
       try {
         input.database.run('ROLLBACK');
       } catch {
-        /* SQLite may already have rolled back after an I/O or corruption fault. */
+        /* SQLite may already have rolled back. */
       }
       throw error;
     }
@@ -730,32 +756,5 @@ function assertListLimit(limit: number): void {
 function assertReceiptLookup(input: RuntimeCommandReceiptLookupInput): void {
   if (!input.scopeSessionId || !input.commandId || !/^[a-f0-9]{64}$/u.test(input.requestDigest)) {
     throw new TypeError('Runtime command receipt lookup is invalid.');
-  }
-}
-
-function validateArtifactPayloadLengths(database: Database): void {
-  const domains = [
-    ['model_artifacts', 'canonical_json'],
-    ['plan_artifacts', 'markdown'],
-    ['capability_artifacts', 'canonical_json'],
-    ['filesystem_preimage_artifacts', 'canonical_json'],
-    ['sandbox_preparation_artifacts', 'canonical_json'],
-    ['subagent_task_artifacts', 'canonical_json'],
-    ['subagent_lifecycle_artifacts', 'canonical_json'],
-    ['subagent_continuation_artifacts', 'canonical_json'],
-  ] as const;
-  for (const [table, payload] of domains) {
-    for (const row of database
-      .query<{ body: string; byte_length: number }, []>(
-        `SELECT ${payload} AS body, byte_length FROM ${table}`,
-      )
-      .iterate()) {
-      if (Buffer.byteLength(row.body, 'utf8') !== row.byte_length) {
-        throw new Error(`Kite Home ${table} payload length is invalid.`);
-      }
-      if (payload === 'canonical_json') {
-        JSON.parse(row.body);
-      }
-    }
   }
 }

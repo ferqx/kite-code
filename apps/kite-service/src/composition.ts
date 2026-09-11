@@ -6,6 +6,7 @@ import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-
 import type { NativeProviderCredentialClient } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import type { InteractionMode, RuntimeAccess } from '@kite-ai/runtime-contract';
+import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeServer } from '@kite-ai/runtime-server';
 import {
   createKiteInProcessAppControlComposition,
@@ -26,6 +27,8 @@ import {
   createRuntimeOperationGate,
   type RuntimeOperationGate,
 } from './runtime-application/operation-gate';
+import { createKiteRuntimeObserverHistoryClient } from './runtime-client/history-adapter';
+import { projectRuntimeClientText, projectRuntimeSessionTitle } from './runtime-client/safe-text';
 import type { SandboxBackend } from './sandbox/types';
 
 /** A Service-owned Runtime template. It contains no TUI, Store, or Host object. */
@@ -229,13 +232,44 @@ function createKiteServiceRuntimeCompositionUnchecked(
       : {}),
   });
   for (const workspace of workspaces) bindRuntimeModelControl(workspace);
-  const rawHistory = input.storageOwner
-    ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
-    : createKiteRuntimeHistory(input.checkpointPath);
+  const rawHistory = input.storageOwner?.openHistoryLogs
+    ? createKiteRuntimeObserverHistoryClient(() =>
+        input.storageOwner!.openHistoryLogs!(runtimeHostCurrentStateEventTypes()),
+      )
+    : input.storageOwner
+      ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
+      : createKiteRuntimeHistory(input.checkpointPath);
   const history: RuntimeHistoryClient = input.storageOwner?.readSnapshot
     ? Object.freeze({
         listSessions: (request: Parameters<RuntimeHistoryClient['listSessions']>[0]) =>
-          input.storageOwner!.readSnapshot!(() => rawHistory.listSessions(request)),
+          input.storageOwner!.readSnapshot!(async () => {
+            if (
+              input.appServerProtocol &&
+              input.storageOwner!.directory &&
+              !request.query?.trim()
+            ) {
+              const page = input.storageOwner!.directory!.listSessions(request);
+              return {
+                ...page,
+                entries: page.entries.map((entry) => ({
+                  ...entry,
+                  displayName: entry.needsSmartName
+                    ? projectRuntimeSessionTitle(entry.displayName)
+                    : projectRuntimeClientText(entry.displayName, 256),
+                  needsSmartName: entry.needsSmartName && entry.displayName === '新会话',
+                  ...(entry.workspace
+                    ? {
+                        workspace: {
+                          ...entry.workspace,
+                          displayName: projectRuntimeClientText(entry.workspace.displayName, 256),
+                        },
+                      }
+                    : {}),
+                })),
+              };
+            }
+            return rawHistory.listSessions(request);
+          }),
         listEvents: (request: Parameters<RuntimeHistoryClient['listEvents']>[0]) =>
           input.storageOwner!.readSnapshot!(() => rawHistory.listEvents(request)),
         loadSession: (sessionId: string, throughSequence?: number) =>

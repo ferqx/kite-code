@@ -2,13 +2,13 @@
 
 ## 定位
 
-浏览器只读 presentation owner，提供 React 路由、REST 数据接入、会话与诊断展示。
+浏览器只读 presentation owner，提供 React 路由、REST 数据接入与诊断。会话主页面与桌面端共同消费 [kite-client-ui](../../packages/kite-client-ui/README.md)，Web 入口按 Browser principal 的只读策略不提供写操作。
 
 产品行为见[WEB 手册](../../docs/handbook/clients/web/README.md)，不从另一客户端推导交互。
 
 ## 职责与边界
 
-唯一业务通道为 agent-api-client → agent-api-contract → 同源 App Server REST。组件只消费本地 presentation types。禁止依赖 Native、Host、Store、Protocol、SQLite、Node/Bun I/O 或 Service raw source。Web 不拥有 Runtime、数据库或第二 listener。
+唯一业务通道为 agent-api-client → agent-api-contract → 同源 App Server REST。端侧先投影为共享页面需要的展示数据；组件不直接消费传输协议。禁止依赖 Native、Host、Store、Protocol、SQLite、Node/Bun I/O 或 Service raw source。Web 不拥有 Runtime、数据库或第二 listener。
 
 ## 修改入口
 

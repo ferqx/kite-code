@@ -10,24 +10,31 @@
     "build:desktop": "tauri build --bundles app",
     "prepare:service": "bun run ../../scripts/release/prepare-desktop-service.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test test"
+    "test": "bun test --cwd ../.. apps/kite-desktop/test"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@kite-ai/kite-app-contract": "workspace:*",
+    "@kite-ai/kite-client-ui": "workspace:*",
     "@kite-ai/kite-local-runtime": "workspace:*",
     "@kite-ai/runtime-client": "workspace:*",
     "@kite-ai/runtime-contract": "workspace:*",
     "@kite-ai/runtime-protocol": "workspace:*",
-    "@kite-ai/kite-app-contract": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
     "@tauri-apps/cli": "^2.0.0",
+    "@types/jsdom": "^28.0.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.1.13",
     "typescript": "^5.9.3",
     "vite": "^7.1.7"
   }

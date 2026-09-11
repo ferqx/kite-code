@@ -17,3 +17,7 @@ Native 先通过 prepareAppControl 初始化协议连接，再进行 App Control
 安全 projector 将 Runtime facts 转为封闭 client events；Native presentation 和 Public Agent API 各有字段边界。日志、模型上下文和 Artifact 仅在相应读取入口暴露允许内容。
 
 失败沿实际 owner 返回；后台任务或进程 cleanup 未完成时，不凭 UI idle 开始另一执行。详细规则见[运行应用](runtime-application.md)、[恢复](service-resilience.md)、[API](agent-api.md)。验证：[Service tests](../test/)。
+
+Native 历史组合优先使用 storage owner 的 `openHistoryLogs` 与 `readSnapshot`，目录无搜索请求使用有界 Directory 摘要，搜索保持原 History adapter 语义。持久投影也供订阅初始快照使用，不为只读历史创建执行工作区。无执行工作区的 stdio 启动仍可读取 profile 历史；实际命令沿原授权边界执行。
+
+App Server 初始化不再解码 Store 中全部历史；按 Session snapshot 读取执行严格恢复校验，见[存储事务边界](../../../packages/runtime-storage-sqlite/docs/transactions-and-state.md#按会话恢复校验)。目录准备不初始化 Builtin tokenizer；模型实际计数时沿同一算法加载词表。

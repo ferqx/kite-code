@@ -487,6 +487,10 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
                 .strict()
                 .optional(),
               limit: safeRevision.min(1).max(100),
+              workspaceDigest: z
+                .string()
+                .regex(/^sha256:[a-f0-9]{64}$/u)
+                .optional(),
               query: shortText.max(256).optional(),
             })
             .strict(),
@@ -637,7 +641,21 @@ export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
     ]),
     message: z.string().min(1).max(256),
     data: z
-      .object({ code: RUNTIME_PROTOCOL_ERROR_CODE_SCHEMA_, retryable: z.boolean().optional() })
+      .object({
+        code: RUNTIME_PROTOCOL_ERROR_CODE_SCHEMA_,
+        retryable: z.boolean().optional(),
+        detailCode: z
+          .enum([
+            'workspace_unavailable',
+            'configuration_unavailable',
+            'temporarily_unavailable',
+            'session_not_found',
+            'session_unavailable',
+            'corrupt_event',
+            'invalid_request',
+          ])
+          .optional(),
+      })
       .strict(),
   })
   .strict()
@@ -1015,6 +1033,14 @@ const historySessionEntry = z
     sessionId: identifier,
     displayName: shortText,
     needsSmartName: z.boolean(),
+    workspace: z
+      .object({
+        workspaceId: z.string().min(1).max(256),
+        workspaceDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+        displayName: z.string().max(4096),
+      })
+      .strict()
+      .optional(),
     updatedAt: safeRevision,
     lastSequence: safeRevision,
     model: z.object({ provider: identifier, name: shortText }).strict().optional(),

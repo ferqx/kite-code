@@ -6,7 +6,7 @@ import {
   createKiteHomeRuntimeStorageForConnection,
   type KiteHomeRuntimeStorageOwner,
 } from './kite-home-runtime-storage';
-import { initializeKiteHomeStoreSchema } from './kite-home-store';
+import { assertKiteStoreIntegrity, initializeKiteHomeStoreSchema } from './kite-home-store';
 import { assertNoFollowDatabasePath, type SqliteRuntimeSnapshotCodec } from './preflight';
 
 /** Open the final `<Kite Home>/kite.sqlite` writer; no fallback basename or second DB is accepted. */
@@ -37,6 +37,7 @@ export function openKiteHomeRuntimeStorage<Event, State>(input: {
         )
         .get()?.count ?? 0;
     if (tableCount === 0) initializeKiteHomeStoreSchema(database);
+    assertKiteStoreIntegrity(database);
     database.run('PRAGMA journal_mode = WAL');
     database.run('PRAGMA synchronous = FULL');
     return createKiteHomeRuntimeStorageForConnection({

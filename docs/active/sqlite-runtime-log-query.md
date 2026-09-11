@@ -77,3 +77,8 @@ composition/focused evidence，KLSV1-07的三平台installed process/release qua
 旧 adapter 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。
 
 当前 Session Store 的文件打开、结构检查和会话恢复以[Storage 当前 owner](../../packages/runtime-storage-sqlite/README.md#当前数据库与执行所有权)为准；旧 standalone reader 的隔离快照规则不能代替它，也不能给普通 Browser 查询添加第二连接。
+
+Store 9 的 `openHistoryLogs` 在现有连接与只读快照内提供索引 `getSession` 和事件查询；单会话读取不扫描全局会话列表。目录分页使用 updatedAt/sessionId cursor 与持久 membership，不打开项目路径。标题 fallback 只取首条用户正文并由 Service 投影脱敏和限长，不写回命名。
+
+
+默认 Session Store 的普通启动使用精确 schema/marker 检查，不重复执行 SQLite physical/FK 全库扫描或解码全部历史。完整 physical/FK 检查仍供显式 release preflight 使用；Session snapshot 恢复按所选 sessionId 在同一 read snapshot 验证绑定、事件、snapshot、Run/receipt，不因其他会话的内容损坏阻塞目录。Artifact 在 typed read 时校验；目录成功不宣称全库内容健康。性能取舍见 [ADR-0183](../adr/0183-bounded-startup-validation.md)。

@@ -4,12 +4,20 @@
   "description": "Local main window may use only the paired Runtime transport and native project picker.",
   "windows": ["main"],
   "permissions": [
-    "allow-select-workspace",
+    "allow-pick-workspace",
+    "allow-list-projects",
+    "allow-activate-workspace",
+    "allow-check-workspace",
+    "allow-query-workspace-branch",
+    "allow-switch-workspace-branch",
     "allow-runtime-open",
+    "allow-runtime-status",
     "allow-runtime-send",
     "allow-runtime-receive",
     "allow-runtime-close",
+    "allow-runtime-detach",
     "allow-open-editor",
+    "core:window:allow-start-dragging",
     "dialog:allow-message"
   ]
 }

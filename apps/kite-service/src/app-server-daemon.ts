@@ -51,6 +51,7 @@ export async function runKiteAppServerDaemonMain(
   }
   const source = dependencies.environment ?? process.env;
   const environment = resolveKiteAppServerEnvironment(source);
+  const workspace = requiredAbsolute(source, 'KITE_APP_SERVER_WORKSPACE');
   const endpoint = resolveDaemonEndpoint(source);
   const webStaticRoot = preflightWebGatewayStaticAssets(
     requiredAbsolute(source, 'KITE_APP_SERVER_WEB_STATIC_ROOT'),
@@ -74,7 +75,7 @@ export async function runKiteAppServerDaemonMain(
     pid: process.pid,
     processStartIdentity,
     homeDigest: endpoint.homeDigest,
-    workspace: environment.workspace,
+    workspace,
     buildId: environment.buildId,
     startedAt,
     protocol: KITE_APP_SERVER_DAEMON_VERSION_,

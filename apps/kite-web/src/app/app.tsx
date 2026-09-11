@@ -1,24 +1,12 @@
-import {
-  BookOpen,
-  Circle,
-  History,
-  ListTree,
-  Menu,
-  MessageSquareText,
-  Moon,
-  Radio,
-  Sun,
-  Wind,
-} from 'lucide-react';
+import { SessionPage } from '@kite-ai/kite-client-ui';
+import { History, ListTree, MessageSquareText, Moon, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useMatch, useNavigate } from 'react-router';
 import { ModelContextInspector } from '@/components/session/model-context-inspector';
 import { SessionLogList, type WebLogState } from '@/components/session/session-log-list';
-import { SessionSidebar } from '@/components/session/session-sidebar';
-import { MessageList } from '@/components/timeline/message-list';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { WindTrails } from '@/components/ui/wind-trails';
+import { pageMessages, pageWorkspaces } from '@/presentation/page';
 import {
   initialWebPresentationState,
   selectedSession,
@@ -43,7 +31,6 @@ export function App(props: AppProps = {}) {
   const sessionRoute = useMatch('/sessions/:sessionId');
   const routeSessionId = sessionRoute?.params.sessionId ?? null;
   const [state, dispatch] = useReducer(webPresentationReducer, initialWebPresentationState);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [activeSessionView, setActiveSessionView] = useState<'history' | 'logs'>('history');
   const [logState, setLogState] = useState<WebLogState>('idle');
@@ -357,154 +344,97 @@ export function App(props: AppProps = {}) {
     navigate(`/sessions/${encodeURIComponent(sessionId)}`);
   };
 
+  const historyFailed = state.historyState === 'error' || state.historyState === 'unavailable';
+  const workspaceLabel =
+    state.workspaces.find((workspace) =>
+      workspace.sessions.some((item) => item.sessionId === state.selectedSessionId),
+    )?.label ?? '工作空间';
   return (
-    <main className="grid h-dvh min-h-0 grid-cols-[304px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-canvas max-lg:grid-cols-[272px_minmax(0,1fr)] max-md:grid-cols-1">
-      <div className="h-full min-h-0 overflow-hidden max-md:hidden">
-        <SessionSidebar
-          workspaces={state.workspaces}
-          selectedSessionId={state.selectedSessionId}
-          onSelect={openSession}
-          onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
-        />
-      </div>
-      {mobileSidebarOpen ? (
-        <div className="fixed inset-0 z-50 grid grid-cols-[min(86vw,320px)_1fr] md:hidden">
-          <SessionSidebar
-            workspaces={state.workspaces}
-            selectedSessionId={state.selectedSessionId}
-            onSelect={(sessionId) => {
-              openSession(sessionId);
-              setMobileSidebarOpen(false);
-            }}
-            onExpandWorkspace={(workspaceId) => void expandWorkspace(workspaceId)}
-          />
-          <button
-            type="button"
-            aria-label="Close workspace list"
-            className="bg-overlay backdrop-blur-sm"
-            onClick={() => setMobileSidebarOpen(false)}
-          />
-        </div>
-      ) : null}
-      <section className="flex min-h-0 flex-col bg-canvas">
-        <header className="flex h-16 shrink-0 items-center gap-2.5 border-b border-border bg-canvas/92 px-5 backdrop-blur-xl">
-          <Button
-            aria-label="Open workspace list"
-            aria-expanded={mobileSidebarOpen}
-            className="size-8 px-0 md:hidden"
-            onClick={() => setMobileSidebarOpen(true)}
-          >
-            <Menu className="size-4" />
-          </Button>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-[15px] font-semibold tracking-[-0.015em]">
-                {session?.displayName ?? 'Select a session'}
-              </h1>
-              {session ? (
-                <Badge
-                  className={
-                    session.status === 'running'
-                      ? 'border-running/25 bg-running/10 text-running'
-                      : 'capitalize'
-                  }
-                >
-                  {session.status}
-                </Badge>
-              ) : null}
-            </div>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              Local · {state.connection.status.replace('_', ' ')} · read only
-            </p>
-          </div>
-          <div className="flex h-8 items-center gap-2 rounded-[9px] border border-border/70 bg-surface/55 px-2.5 text-[11px] text-muted-foreground">
-            <Circle
-              className={
-                state.connection.status === 'connected'
-                  ? 'size-2.5 fill-running text-running'
-                  : 'size-2.5 fill-muted text-muted'
-              }
-            />
-            <span className="hidden sm:inline">{state.connection.status.replace('_', ' ')}</span>
-          </div>
+    <SessionPage
+      workspaces={pageWorkspaces(state.workspaces)}
+      selected={state.selectedSessionId ?? undefined}
+      workspaceLabel={workspaceLabel}
+      sessionLabel={session?.displayName ?? '选择会话'}
+      readingKey={state.selectedSessionId ?? 'directory'}
+      messages={pageMessages(state.messages)}
+      loading={state.historyState === 'loading' || state.connection.status === 'loading'}
+      connected={state.connection.status === 'connected'}
+      connectionLabel={`Local · ${state.connection.status.replace('_', ' ')} · read only`}
+      actions={{}}
+      readOnlyReason="只读访问 · 发送任务和处理交互请使用桌面端或 TUI"
+      onOpen={openSession}
+      onExpand={(id) => void expandWorkspace(id)}
+      headerActions={
+        <>
           <Button
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-            className="size-8 px-0"
             onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
           >
             {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
           </Button>
-          <Link
-            to="/api-docs"
-            aria-label="Open API documentation"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[9px] px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground"
-          >
-            <BookOpen className="size-3.5" />
-            <span className="max-sm:hidden">API docs</span>
+          <Link to="/api-docs" aria-label="Open API documentation">
+            API docs
           </Link>
-        </header>
-        {state.connection.status === 'unavailable' &&
-        (state.historyState === 'content' || state.historyState === 'empty') ? (
-          <div
-            role="status"
-            className="mx-6 mt-4 flex shrink-0 items-center gap-3 rounded-xl border border-warning/25 bg-warning/8 px-4 py-3 text-xs text-muted-foreground"
-          >
-            <Radio className="size-4 shrink-0 text-muted-foreground" />
-            <span>Automatic refresh is unavailable. Showing the latest REST snapshot.</span>
+        </>
+      }
+      notices={
+        state.connection.status === 'unavailable' && (
+          <div role="status" className="notice">
+            Automatic refresh is unavailable. Showing the latest REST snapshot.
           </div>
-        ) : null}
-        {state.selectedSessionId ? (
-          <SessionViewTabs value={activeSessionView} onChange={selectSessionView} />
-        ) : null}
-        {state.selectedSessionId && activeSessionView === 'history' ? (
-          <CheckpointStrip checkpoints={state.checkpoints} status={state.checkpointState} />
-        ) : null}
-        {state.selectedSessionId === null ? (
-          <DirectoryState
-            sessionCount={state.workspaces.reduce(
-              (total, workspace) => total + workspace.sessions.length,
-              0,
+        )
+      }
+      beforeConversation={
+        state.selectedSessionId && (
+          <>
+            <SessionViewTabs value={activeSessionView} onChange={selectSessionView} />
+            {activeSessionView === 'history' && (
+              <CheckpointStrip checkpoints={state.checkpoints} status={state.checkpointState} />
             )}
-            connection={state.connection.status}
-          />
-        ) : activeSessionView === 'history' ? (
-          <div
-            id="session-panel-history"
-            role="tabpanel"
-            aria-labelledby="session-tab-history"
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            <MessageList
-              messages={state.messages}
-              status={state.historyState}
-              reason={state.historyReason}
-              sessionName={session?.displayName}
-              onRetry={() => dispatch({ type: 'history_retry', generation: state.generation })}
-            />
-          </div>
-        ) : (
+          </>
+        )
+      }
+      historyPanel={
+        state.selectedSessionId
+          ? { id: 'session-panel-history', labelledBy: 'session-tab-history' }
+          : undefined
+      }
+      historyError={
+        historyFailed
+          ? {
+              title:
+                state.historyState === 'error' ? 'Could not load History' : 'History unavailable',
+              detail: state.historyReason ?? '无法读取会话，请重试。',
+              retry: () => dispatch({ type: 'history_retry', generation: state.generation }),
+            }
+          : undefined
+      }
+      diagnosticView={
+        state.selectedSessionId && activeSessionView === 'logs' ? (
           <SessionLogList
             entries={logEntries}
             status={logState}
             reason={logReason}
             throughSequence={logThroughSequence}
             onRefresh={() => void loadSessionLogs()}
-            onViewModelContext={(invocationId) => void openModelContext(invocationId)}
+            onViewModelContext={(id) => void openModelContext(id)}
           />
-        )}
-      </section>
-      {modelContextView ? (
-        <ModelContextInspector
-          key={modelContextView.invocationId}
-          invocationId={modelContextView.invocationId}
-          context={modelContextView.context}
-          status={modelContextView.status}
-          reason={modelContextView.reason}
-          onClose={closeModelContext}
-          onRetry={() => void openModelContext(modelContextView.invocationId)}
-        />
-      ) : null}
-    </main>
+        ) : undefined
+      }
+      overlays={
+        modelContextView && (
+          <ModelContextInspector
+            key={modelContextView.invocationId}
+            invocationId={modelContextView.invocationId}
+            context={modelContextView.context}
+            status={modelContextView.status}
+            reason={modelContextView.reason}
+            onClose={closeModelContext}
+            onRetry={() => void openModelContext(modelContextView.invocationId)}
+          />
+        )
+      }
+    />
   );
 }
 
@@ -580,45 +510,6 @@ function CheckpointStrip({
             </Badge>
           ))
         : null}
-    </div>
-  );
-}
-
-function DirectoryState({
-  sessionCount,
-  connection,
-}: {
-  readonly sessionCount: number;
-  readonly connection: string;
-}) {
-  const unavailable = connection === 'unavailable';
-  const loading = connection === 'loading' || connection === 'reconnecting';
-  return (
-    <div className="relative isolate grid min-h-0 flex-1 place-items-center overflow-hidden p-8 text-center">
-      <WindTrails className="opacity-70 [mask-image:radial-gradient(ellipse_at_center,black,transparent_72%)]" />
-      <div className="relative z-10 max-w-sm">
-        <div className="mx-auto mb-4 grid size-10 place-items-center rounded-xl border border-border/65 bg-surface/65 text-accent backdrop-blur-sm">
-          <Wind className="size-5" />
-        </div>
-        <h2 className="text-sm font-semibold">
-          {loading
-            ? 'Connecting to Kite Observer'
-            : unavailable
-              ? 'Observer unavailable'
-              : sessionCount === 0
-                ? 'No sessions available'
-                : 'Select a session'}
-        </h2>
-        <p className="mt-2 text-xs leading-6 text-muted-foreground">
-          {loading
-            ? 'Loading the read-only Workspace directory…'
-            : unavailable
-              ? 'Start the local Kite Service, then reopen its Web URL.'
-              : sessionCount === 0
-                ? 'Existing Workspace sessions will appear here when the server publishes them.'
-                : 'Choose an existing Session from the Workspace list to view its History.'}
-        </p>
-      </div>
     </div>
   );
 }

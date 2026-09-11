@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { KiteRoutes } from '@/routing';
 import '@/styles/globals.css';
+import '@kite-ai/kite-client-ui/style.css';
 import { createWebRestTransport } from '@/transport/client';
 import { createPageBoundFetch } from '@/transport/page-identity';
 

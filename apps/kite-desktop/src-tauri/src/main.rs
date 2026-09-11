@@ -1,11 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod editor;
+mod git;
 #[cfg(target_os = "macos")]
 mod macos;
 mod process;
+mod projects;
+mod renderer;
 
 use process::ServiceProcess;
+use renderer::RendererConnection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -47,22 +51,22 @@ struct DesktopState {
 struct DesktopInner {
     workspace: Option<PathBuf>,
     generation: u64,
-    process: Option<Arc<ServiceProcess>>,
+    process: Option<Arc<RendererConnection>>,
 }
 
 #[tauri::command]
-async fn select_workspace(
+async fn pick_workspace(
     app: tauri::AppHandle,
+    window: tauri::Window,
     state: State<'_, DesktopState>,
 ) -> Result<Option<String>, String> {
-    let mut inner = state.inner.lock().await;
-    if inner.process.is_some() {
-        return Err("请先断开当前项目。".into());
-    }
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_folder(move |folder| {
-        let _ = tx.send(folder);
-    });
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
     let Some(folder) = rx.await.map_err(|_| "文件夹选择未完成。")? else {
         return Ok(None);
     };
@@ -78,8 +82,87 @@ async fn select_workspace(
         .to_str()
         .ok_or("目录路径不是有效 Unicode。")?
         .to_string();
-    inner.workspace = Some(path);
+    let _inner = state.inner.lock().await;
+    projects::remember(
+        &app.path()
+            .app_data_dir()
+            .map_err(|_| "应用数据目录不可用。")?,
+        &path,
+    )?;
     Ok(Some(text))
+}
+
+#[tauri::command]
+async fn list_projects(app: tauri::AppHandle) -> Result<Vec<projects::ProjectDisplay>, String> {
+    projects::read_display(
+        &app.path()
+            .app_data_dir()
+            .map_err(|_| "应用数据目录不可用。")?,
+    )
+}
+
+#[tauri::command]
+async fn activate_workspace(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopState>,
+    path: String,
+) -> Result<String, String> {
+    let mut inner = state.inner.lock().await;
+    if inner.process.is_some() || state.quitting.load(Ordering::SeqCst) {
+        return Err("请先等待当前连接清理完成。".into());
+    }
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "应用数据目录不可用。")?;
+    let path = projects::known(&directory, &path)?;
+    projects::remember(&directory, &path)?;
+    let text = path.to_str().ok_or("项目路径不可用。")?.to_string();
+    inner.workspace = Some(path);
+    Ok(text)
+}
+
+#[tauri::command]
+async fn check_workspace(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    projects::known(
+        &app.path()
+            .app_data_dir()
+            .map_err(|_| "应用数据目录不可用。")?,
+        &path,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn query_workspace_branch(
+    app: tauri::AppHandle,
+    workspace: String,
+) -> Result<git::Snapshot, String> {
+    // Read-only Git inspection must not hold the transport/process lock.
+    let path = projects::known(
+        &app.path()
+            .app_data_dir()
+            .map_err(|_| "应用数据目录不可用。")?,
+        &workspace,
+    )?;
+    git::snapshot(&path).await
+}
+
+#[tauri::command]
+async fn switch_workspace_branch(
+    state: State<'_, DesktopState>,
+    expected: git::Snapshot,
+    branch: String,
+) -> Result<git::Snapshot, String> {
+    let inner = state.inner.lock().await;
+    if inner.process.is_some() || state.quitting.load(Ordering::SeqCst) {
+        return Err("请先关闭项目服务并等待清理完成。".into());
+    }
+    let path = inner.workspace.as_ref().ok_or("请先选择项目。")?;
+    if path.to_str() != Some(expected.workspace.as_str()) {
+        return Err("项目已切换，请重新读取分支。".into());
+    }
+    git::switch(path, &branch, &expected).await
 }
 
 #[tauri::command]
@@ -102,17 +185,59 @@ async fn open_editor(
 }
 
 #[tauri::command]
+async fn runtime_status(state: State<'_, DesktopState>) -> Result<RuntimeStatus, String> {
+    let inner = state.inner.lock().await;
+    Ok(RuntimeStatus {
+        workspace: inner
+            .workspace
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        connection_id: inner.process.as_ref().map(|_| inner.generation),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeStatus {
+    workspace: Option<String>,
+    connection_id: Option<u64>,
+}
+
+#[tauri::command]
 async fn runtime_open(
     app: tauri::AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<Opened, String> {
     let mut inner = state.inner.lock().await;
-    if state.quitting.load(Ordering::SeqCst) || inner.process.is_some() {
-        return Err("当前连接尚未释放。".into());
+    if state.quitting.load(Ordering::SeqCst) {
+        return Err("应用正在退出。".into());
     }
-    let workspace = inner.workspace.clone().ok_or("请先选择项目。")?;
-    if workspace.canonicalize().map_err(|_| "项目已不可用。")? != workspace {
-        return Err("项目路径发生变化，请重新选择。".into());
+    if inner.workspace.is_none() {
+        // Saved paths select the initial execution context, but need not exist to read history.
+        inner.workspace = projects::read(
+            &app.path()
+                .app_data_dir()
+                .map_err(|_| "应用数据目录不可用。")?,
+        )
+        .ok()
+        .and_then(|projects| projects.first().map(|project| PathBuf::from(&project.path)));
+    }
+    let workspace = inner.workspace.clone().unwrap_or_default();
+    if inner
+        .process
+        .as_ref()
+        .is_some_and(|process| process.finished())
+    {
+        inner.process = None;
+    }
+    if let Some(process) = inner.process.clone() {
+        inner.generation += 1;
+        process.attach(inner.generation).await?;
+        return Ok(Opened {
+            connection_id: inner.generation,
+            workspace: workspace.to_string_lossy().into(),
+            expected_server_version: process.server_version.clone(),
+        });
     }
     let resource = app
         .path()
@@ -171,15 +296,20 @@ async fn runtime_open(
     } else {
         config_root
     };
-    let process = Arc::new(ServiceProcess::spawn(
+    let service = ServiceProcess::spawn(
         &executable,
         &workspace,
         &home,
         &runtime_root,
         &manifest.build_id,
         &manifest.environment_keys,
-    )?);
+    )?;
+    let process = Arc::new(RendererConnection::new(
+        service,
+        manifest.expected_server_version.clone(),
+    ));
     inner.generation += 1;
+    process.attach(inner.generation).await?;
     inner.process = Some(process);
     Ok(Opened {
         connection_id: inner.generation,
@@ -214,7 +344,7 @@ fn ensure_private_directory(path: &std::path::Path, home: &std::path::Path) -> R
     }
 }
 
-async fn connection(state: &DesktopState, id: u64) -> Result<Arc<ServiceProcess>, String> {
+async fn connection(state: &DesktopState, id: u64) -> Result<Arc<RendererConnection>, String> {
     let inner = state.inner.lock().await;
     if id != inner.generation {
         return Err("连接已被替换。".into());
@@ -228,14 +358,20 @@ async fn runtime_send(
     connection_id: u64,
     frame: String,
 ) -> Result<(), String> {
-    connection(&state, connection_id).await?.send(frame).await
+    connection(&state, connection_id)
+        .await?
+        .send(connection_id, frame)
+        .await
 }
 #[tauri::command]
 async fn runtime_receive(
     state: State<'_, DesktopState>,
     connection_id: u64,
 ) -> Result<String, String> {
-    connection(&state, connection_id).await?.receive().await
+    connection(&state, connection_id)
+        .await?
+        .receive(connection_id)
+        .await
 }
 #[tauri::command]
 async fn runtime_close(state: State<'_, DesktopState>, connection_id: u64) -> Result<(), String> {
@@ -252,6 +388,18 @@ async fn runtime_close(state: State<'_, DesktopState>, connection_id: u64) -> Re
     result
 }
 
+#[tauri::command]
+async fn runtime_detach(state: State<'_, DesktopState>, connection_id: u64) -> Result<(), String> {
+    let inner = state.inner.lock().await;
+    if inner.generation != connection_id {
+        return Ok(());
+    }
+    if let Some(process) = &inner.process {
+        process.attach(0).await?;
+    }
+    Ok(())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -262,11 +410,18 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            select_workspace,
+            pick_workspace,
+            list_projects,
+            activate_workspace,
+            check_workspace,
+            query_workspace_branch,
+            switch_workspace_branch,
             runtime_open,
+            runtime_status,
             runtime_send,
             runtime_receive,
             runtime_close,
+            runtime_detach,
             open_editor
         ])
         .on_window_event(|window, event| {

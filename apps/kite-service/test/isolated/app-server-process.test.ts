@@ -12,13 +12,72 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createKiteAppServerClient } from '@kite-ai/kite-local-runtime/client';
+import {
+  createBunStdioChildRuntimeClientTransport,
+  createKiteAppServerClient,
+  kiteAppServerVersion,
+} from '@kite-ai/kite-local-runtime/client';
+import {
+  createAppServerProtocolConnection,
+  KITE_APP_SERVER_PROTOCOL_METHODS_,
+} from '@kite-ai/kite-local-runtime/client/protocol';
 import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteSessionAppServerStorageComposition } from '../../src/bootstrap';
 import { trustWorkspace } from '../../src/config/workspace-trust';
 
 describe('KASD parent-owned App Server process', () => {
+  test('opens application History without a project, valid model configuration, or Git', async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-neutral-history-')));
+    for (const name of ['home', 'runtime', 'config']) mkdirSync(join(root, name));
+    writeFileSync(join(root, 'config/kite-code.jsonc'), '{invalid model configuration');
+    const connection = createAppServerProtocolConnection(
+      createBunStdioChildRuntimeClientTransport({
+        argv: [
+          process.execPath,
+          join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+          'app-server',
+          'run-stdio',
+        ],
+        cwd: '/',
+        env: {
+          KITE_CODE_HOME: join(root, 'runtime'),
+          KITE_CODE_CONFIG_HOME: join(root, 'config'),
+          HOME: join(root, 'home'),
+          USERPROFILE: join(root, 'home'),
+          PATH: '/no-executables',
+          KITE_APP_SERVER_BUILD_ID: 'neutral-history',
+        },
+      }),
+      kiteAppServerVersion('neutral-history'),
+      { name: 'neutral-history', version: '1', instanceId: 'neutral' },
+      KITE_APP_SERVER_PROTOCOL_METHODS_,
+    );
+    try {
+      await connection.prepareAppControl();
+      expect(await connection.history.listSessions({ limit: 10 })).toEqual({
+        entries: [],
+        hasMore: false,
+      });
+      await expect(
+        connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'no-project',
+          type: 'create_session',
+          workspace: '/unselected',
+          bootstrapSessionId: 'must-not-exist',
+        }),
+      ).rejects.toThrow();
+      expect(await connection.history.listSessions({ limit: 10 })).toEqual({
+        entries: [],
+        hasMore: false,
+      });
+    } finally {
+      await connection.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   test('the same-build client composes Runtime, History and App Control over one child', async () => {
     const root = realpathSync.native(
       mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-server-client-')),

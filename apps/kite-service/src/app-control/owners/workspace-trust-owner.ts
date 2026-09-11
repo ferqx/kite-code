@@ -13,7 +13,9 @@ import type { WorkspaceTrustHandlerPort as AppWorkspaceTrustHandlerPort } from '
 function query(workspace: string, storePath?: string): WorkspaceTrustQueryResponse {
   const snapshot = getWorkspaceTrustSnapshot(workspace, storePath);
   if (!snapshot) {
-    throw new Error('Workspace identity is unavailable.');
+    throw Object.assign(new Error('Workspace identity is unavailable.'), {
+      code: 'workspace_unavailable',
+    });
   }
   const project = resolveProjectIdentity(snapshot.canonicalPath);
   return {

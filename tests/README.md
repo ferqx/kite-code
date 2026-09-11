@@ -10,6 +10,7 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 ## 目录归属
 
 - `packages/<owner>/test/`：单 package 行为与 contract。
+- `packages/kite-client-ui/test/`：两端共用页面的权限呈现、Markdown 安全、目录预览与阅读交互；已纳入默认 workspace 测试。两端 App 测试继续负责实际接入与命令边界，不为共享内部组件增加仅供跨包测试使用的公开导出。
 - `apps/kite-cli/test/`：CLI/TUI presentation、client preference、managed Native adapter与fake/client conformance；不得
   创建default Host/Store composition。
 - `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/

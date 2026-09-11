@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
-import { WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_ } from '@kite-ai/kite-app-contract';
+import {
+  type KiteAppControlClient,
+  WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+} from '@kite-ai/kite-app-contract';
 import {
   KITE_APP_SERVER_DAEMON_VERSION_,
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
+import type { RuntimeProtocolCommand } from '@kite-ai/runtime-protocol';
 import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
@@ -25,7 +29,7 @@ export interface KiteAppServerEnvironment {
   readonly runtimeRoot: string;
   readonly configRoot: string;
   readonly osHome: string;
-  readonly workspace: string;
+  readonly workspace?: string;
   readonly buildId: string;
 }
 
@@ -63,7 +67,9 @@ export function resolveKiteAppServerEnvironment(
         ? runtimeRoot
         : requiredAbsolute(source, 'KITE_CODE_CONFIG_HOME'),
     osHome: requiredAbsolute(source, process.platform === 'win32' ? 'USERPROFILE' : 'HOME'),
-    workspace: requiredAbsolute(source, 'KITE_APP_SERVER_WORKSPACE'),
+    ...(source.KITE_APP_SERVER_WORKSPACE
+      ? { workspace: requiredAbsolute(source, 'KITE_APP_SERVER_WORKSPACE') }
+      : {}),
     buildId: required(source, 'KITE_APP_SERVER_BUILD_ID'),
   });
 }
@@ -131,8 +137,7 @@ export function createKiteAppServerRuntimeOwner(
       ...(options.daemonProtocol ? { appServerDaemonProtocol: true } : {}),
       checkpointPath: databasePath,
       storageOwner,
-      workspaces: [{ workspace: environment.workspace }],
-      defaultWorkspace: environment.workspace,
+      ...(environment.workspace ? { workspaces: [{ workspace: environment.workspace }] } : {}),
       userConfigPath: join(environment.configRoot, 'kite-code.jsonc'),
       workspaceTrustStorePath: join(environment.configRoot, 'workspace-trust.jsonc'),
       userMcpConfigPath: join(environment.configRoot, 'mcp.json'),
@@ -144,19 +149,62 @@ export function createKiteAppServerRuntimeOwner(
     storageOwner.disposeStorage?.();
     throw error;
   }
-  const workspace = composition.appControl.admitWorkspace(environment.workspace);
-  const appControl = composition.appControl.gateway.forWorkspace(workspace);
+  const scopedAppControl = () => {
+    if (!environment.workspace) throw new Error('Select a Workspace before preparing execution.');
+    return composition.appControl.gateway.forWorkspace(
+      composition.appControl.admitWorkspace(environment.workspace),
+    );
+  };
+  // Opening the application's Store and History must not resolve a project path, config or Git.
+  // Scope is admitted only when an execution-related App operation is actually requested.
+  const appControl = Object.freeze<KiteAppControlClient>({
+    queryWorkspaceTrust: composition.appControl.gateway.discovery.queryWorkspaceTrust,
+    decideWorkspaceTrust: async (request) => scopedAppControl().decideWorkspaceTrust(request),
+    getProviderModelSnapshot: async (request) =>
+      scopedAppControl().getProviderModelSnapshot(request),
+    selectProviderModel: async (request) => scopedAppControl().selectProviderModel(request),
+    getMcpSnapshot: async (request) => scopedAppControl().getMcpSnapshot(request),
+    applyMcpAction: async (request) => scopedAppControl().applyMcpAction(request),
+    getSkillCatalog: async (request) => scopedAppControl().getSkillCatalog(request),
+    getExecutionStatus: async (request) => scopedAppControl().getExecutionStatus(request),
+    getReleaseStatus: composition.appControl.gateway.discovery.getReleaseStatus,
+  });
   const admission: RuntimeServerAdmissionPort = Object.freeze({
     authorize: async (request: RuntimeServerAdmissionInput) => {
-      if (request.operation === 'initialize' || request.operation === 'runtime/query') {
-        return { allowed: true as const, workspace: workspace.canonicalPath };
+      if (
+        request.operation === 'initialize' ||
+        request.operation === 'runtime/query' ||
+        request.operation === 'runtime/subscribe'
+      ) {
+        // The workspace field is not consumed by reads. No execution is admitted here.
+        return {
+          allowed: true as const,
+          workspace: environment.workspace ?? environment.runtimeRoot,
+        };
       }
+      if (!environment.workspace)
+        return { allowed: false as const, reason: 'unauthorized' as const };
+      const command = request.command as RuntimeProtocolCommand | undefined;
+      if (command?.type === 'cancel_turn' && storageOwner.ownsSessionExecution(command.sessionId))
+        return { allowed: true as const, workspace: environment.workspace };
       const trust = await composition.appControl.gateway.discovery.queryWorkspaceTrust({
         schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-        workspace: workspace.canonicalPath,
+        workspace: environment.workspace,
       });
+      if (command && 'sessionId' in command) {
+        const result = await composition.runtime.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId: command.sessionId,
+        });
+        if (
+          result.status !== 'ok' ||
+          result.session?.workspaceDigest !== trust.workspace.workspaceDigest
+        )
+          return { allowed: false as const, reason: 'unauthorized' as const };
+      }
       return trust.status === 'trusted'
-        ? { allowed: true as const, workspace: workspace.canonicalPath }
+        ? { allowed: true as const, workspace: trust.workspace.canonicalPath }
         : { allowed: false as const, reason: 'unauthorized' as const };
     },
   });

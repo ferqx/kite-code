@@ -1,4 +1,17 @@
 @import "tailwindcss";
+@import "./typeset.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@source "../../../../packages/kite-client-ui/src";
+
+.typeset-chat {
+  --typeset-font-body: var(--font-geist);
+  --typeset-font-heading: var(--font-geist);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 14px;
+  --typeset-leading: 1.6;
+  --typeset-flow: 1em;
+}
 
 @theme inline {
   --color-canvas: var(--canvas);
@@ -29,6 +42,8 @@
 
 :root {
   color-scheme: light;
+  --font-geist: "Geist Variable", sans-serif;
+  --font-geist-mono: "Geist Mono Variable", monospace;
   --canvas: oklch(0.982 0.005 165);
   --sidebar: oklch(0.962 0.008 165);
   --surface: oklch(0.996 0.003 165);

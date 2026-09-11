@@ -83,6 +83,10 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
   };
   readonly admissions: KiteHomeWorkspaceAdmissionPort;
   readonly directory: KiteHomeDirectoryQueryPort;
+  readonly openHistoryLogs: import('./kite-home-runtime-storage').KiteHomeRuntimeStorageOwner<
+    Event,
+    State
+  >['openHistoryLogs'];
   readonly artifactStore: KiteHomeArtifactStore;
   readonly authority: KiteSessionExecutionControl;
   readonly recovery: KiteSessionRecoveryPort;
@@ -512,6 +516,7 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     storage,
     admissions: base.admissions,
     directory: base.directory,
+    openHistoryLogs: base.openHistoryLogs,
     artifactStore,
     authority: executionControl,
     recovery,

@@ -155,6 +155,7 @@ describe('Runtime stdio carrier', () => {
     };
     const carrier = createCarrier({ input, output, appControl });
     input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
     input.pushText(
       `${JSON.stringify({
         jsonrpc: '2.0',
@@ -175,19 +176,121 @@ describe('Runtime stdio carrier', () => {
     expect(protocolFrames(output)[0]).toMatchObject({
       result: { capabilities: { methods: expect.arrayContaining(['app/release/status']) } },
     });
-    expect(protocolFrames(output)[1]).toMatchObject({
-      id: 'release',
-      result: {
-        method: 'app/release/status',
-        response: { schema: RELEASE_STATUS_RESPONSE_SCHEMA_, revision: 'release-1' },
-      },
-    });
-    expect(protocolFrames(output)[2]).toMatchObject({
-      id: 'malformed',
-      error: { data: { code: 'invalid_params' } },
-    });
+    expect(protocolFrames(output)).toContainEqual(
+      expect.objectContaining({
+        id: 'release',
+        result: {
+          method: 'app/release/status',
+          response: expect.objectContaining({
+            schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+            revision: 'release-1',
+          }),
+        },
+      }),
+    );
+    expect(protocolFrames(output)).toContainEqual(
+      expect.objectContaining({
+        id: 'malformed',
+        error: expect.objectContaining({ data: { code: 'invalid_params' } }),
+      }),
+    );
     input.close();
     await carrier.done;
+  });
+
+  test('a pending capability read cannot block History or Runtime frames', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let release!: () => void;
+    let calls = 0;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const unavailable = async (): Promise<never> => {
+      throw new Error('unused');
+    };
+    const appControl: KiteAppControlClient = {
+      queryWorkspaceTrust: unavailable,
+      decideWorkspaceTrust: unavailable,
+      getProviderModelSnapshot: unavailable,
+      selectProviderModel: unavailable,
+      getMcpSnapshot: unavailable,
+      applyMcpAction: unavailable,
+      getSkillCatalog: unavailable,
+      getExecutionStatus: unavailable,
+      getReleaseStatus: async () => {
+        calls++;
+        await held;
+        return {
+          schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+          revision: 'held',
+          active: true,
+          production: false,
+          capabilities: [],
+          execution: { admitted: false },
+        };
+      },
+    };
+    const carrier = createCarrier({
+      input,
+      output,
+      appControl,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: unavailable,
+        loadSession: unavailable,
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'slow',
+          method: 'app/release/status',
+          params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+        })}\n`,
+      );
+      input.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'history',
+          method: 'history/list_sessions',
+          params: { request: { limit: 10 } },
+        })}\n`,
+      );
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', id: 'ping', method: 'server/ping', params: {} })}\n`,
+      );
+      await eventually(() => protocolFrames(output).length === 3);
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({ id: 'history', result: { entries: [], hasMore: false } }),
+      );
+      expect(protocolFrames(output)).toContainEqual(expect.objectContaining({ id: 'ping' }));
+      expect(protocolFrames(output)).not.toContainEqual(expect.objectContaining({ id: 'slow' }));
+      for (let index = 0; index < 64; index++)
+        input.pushText(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: `bounded-${index}`,
+            method: 'app/release/status',
+            params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+          })}\n`,
+        );
+      await eventually(() => protocolFrames(output).length === 4);
+      expect(calls).toBe(64);
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({
+          id: 'bounded-63',
+          error: expect.objectContaining({ data: { code: 'overloaded' } }),
+        }),
+      );
+    } finally {
+      release();
+      input.close();
+      await carrier.done;
+    }
   });
 
   test('routes only provider credential writes and never echoes secret material', async () => {
@@ -415,6 +518,7 @@ function createCarrier(options: {
   readonly shutdownComposition?: () => void | Promise<void>;
   readonly appControl?: KiteAppControlClient;
   readonly credential?: NativeProviderCredentialClient;
+  readonly history?: import('@kite-ai/runtime-client').RuntimeHistoryClient;
 }) {
   const server = new RuntimeServer(
     { runtime: new FakeRuntime(), admission: allowAdmission },
@@ -434,6 +538,7 @@ function createCarrier(options: {
     shutdownComposition: options.shutdownComposition,
     appControl: options.appControl,
     credential: options.credential,
+    history: options.history,
   });
   return { ...carrier, server };
 }
@@ -623,9 +728,10 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
 }
 
 async function eventually(predicate: () => boolean): Promise<void> {
-  for (let index = 0; index < 100; index += 1) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
     if (predicate()) return;
-    await Promise.resolve();
+    await Bun.sleep(1);
   }
   throw new Error('Condition did not settle.');
 }

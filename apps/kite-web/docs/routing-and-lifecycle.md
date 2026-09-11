@@ -6,6 +6,8 @@ React Router Declarative Mode 管理 `/`、`/sessions/:sessionId` 和 `/api-docs
 
 document 持有一个生产 transport。route unmount 只停止页面工作，不能注销 browser session；pagehide 才清理。深链接 index shell 能建立相同只读访问，资产和 OpenAPI JSON 请求不创建新 session。
 
+点击目录中的会话或在会话行按 Enter 直接调用 Web 入口、push 会话 URL 并加载目标 History，无二次确认。方向键只移动焦点；浏览器前进／后退仍由 route 驱动。
+
 加载结果绑定当前 generation 和 Session。旧页面/旧会话结果不能覆盖新目标，错误不伪装成空数据。
 
 验证：[routing](../test/routing.test.tsx)、[app lifecycle](../test/app-lifecycle.test.tsx)。

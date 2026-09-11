@@ -242,11 +242,45 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
   };
 
   return Object.freeze({
+    getSession(sessionId: string) {
+      return run(() => {
+        const row = db
+          .query<
+            {
+              session_id: string;
+              name: string;
+              updated_at: number;
+              model_provider: string | null;
+              model_name: string | null;
+              last_sequence: number;
+            },
+            [string]
+          >(`SELECT s.session_id, s.name, s.updated_at, s.model_provider, s.model_name,
+          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence
+          FROM runtime_sessions s WHERE s.session_id = ?`)
+          .get(sessionId);
+        return row
+          ? {
+              sessionId: row.session_id,
+              name: row.name,
+              updatedAt: row.updated_at,
+              lastSequence: row.last_sequence,
+              ...(row.model_provider && row.model_name
+                ? { model: { provider: row.model_provider, name: row.model_name } }
+                : {}),
+            }
+          : null;
+      });
+    },
     listSessions(request: RuntimeLogSessionQuery): RuntimeLogSessionReadPage {
       return run(() => {
         assertListRuntimeLogSessionsRequest(request);
         const filters: string[] = [];
         const args: (string | number)[] = [];
+        if (request.workspaceDigest) {
+          filters.push('s.workspace_digest = ?');
+          args.push(request.workspaceDigest);
+        }
         if (request.query?.trim()) {
           filters.push("s.name LIKE ? ESCAPE '\\' COLLATE NOCASE");
           args.push(`%${request.query.trim().replace(/[\\%_]/gu, '\\$&')}%`);

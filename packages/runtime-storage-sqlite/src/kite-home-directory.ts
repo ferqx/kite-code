@@ -1,4 +1,9 @@
 import type { Database } from 'bun:sqlite';
+import {
+  assertListRuntimeLogSessionsRequest,
+  type ListRuntimeLogSessionsRequest,
+  type RuntimeLogSessionPage,
+} from '@kite-ai/runtime-host/storage';
 import { assertKiteHomeStoreSchema } from './kite-home-store';
 
 export interface KiteHomeDirectorySession {
@@ -17,6 +22,8 @@ export interface KiteHomeDirectoryWorkspace {
 export interface KiteHomeDirectoryQueryPort {
   /** Path-free projection from the current Store 9 transaction authority. */
   list(): readonly KiteHomeDirectoryWorkspace[];
+  /** Keyset-paged metadata from the same Store, without restoring Runtime projections. */
+  listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionPage;
 }
 
 export interface KiteHomeDirectoryQueryOptions {
@@ -91,6 +98,77 @@ export function createKiteHomeDirectoryQuery(
   );
 
   return Object.freeze({
+    listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionPage {
+      assertListRuntimeLogSessionsRequest(request);
+      const filters: string[] = [];
+      const values: (string | number)[] = [];
+      if (request.workspaceDigest) {
+        filters.push('s.workspace_digest = ?');
+        values.push(request.workspaceDigest);
+      }
+      if (request.cursor) {
+        filters.push('(s.updated_at < ? OR (s.updated_at = ? AND s.session_id < ?))');
+        values.push(request.cursor.updatedAt, request.cursor.updatedAt, request.cursor.sessionId);
+      }
+      if (request.query?.trim()) {
+        filters.push("s.name LIKE ? ESCAPE '\\' COLLATE NOCASE");
+        values.push(`%${request.query.trim().replace(/[\\%_]/gu, '\\$&')}%`);
+      }
+      values.push(request.limit + 1);
+      const rows = database
+        .query<
+          {
+            session_id: string;
+            name: string;
+            needs_smart_name: number;
+            updated_at: number;
+            last_sequence: number;
+            workspace_id: string;
+            workspace_digest: string;
+            display_name: string;
+          },
+          (string | number)[]
+        >(`
+        SELECT s.session_id,
+          substr(COALESCE(NULLIF(s.name, ''), (
+            SELECT CASE WHEN json_type(e.event_json, '$.content') = 'text'
+              THEN json_extract(e.event_json, '$.content') ELSE '' END
+            FROM runtime_events e WHERE e.session_id = s.session_id
+              AND json_extract(e.event_json, '$.type') = 'user.message_appended'
+            ORDER BY e.sequence ASC LIMIT 1
+          ), ''), 1, 256) AS name,
+          (s.name = '') AS needs_smart_name,
+          s.updated_at,
+          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e
+            WHERE e.session_id = s.session_id), 0) AS last_sequence,
+          w.workspace_id, w.workspace_digest, w.display_name
+        FROM runtime_sessions s JOIN workspaces w ON w.workspace_id = s.workspace_id
+        ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
+        ORDER BY s.updated_at DESC, s.session_id DESC LIMIT ?
+      `)
+        .all(...values);
+      const entries = rows.slice(0, request.limit).map((row) => ({
+        sessionId: row.session_id,
+        displayName: row.name || '新会话',
+        needsSmartName: !!row.needs_smart_name,
+        updatedAt: row.updated_at,
+        lastSequence: row.last_sequence,
+        workspace: {
+          workspaceId: row.workspace_id,
+          workspaceDigest: row.workspace_digest,
+          displayName: row.display_name,
+        },
+      }));
+      const hasMore = rows.length > request.limit;
+      const last = entries.at(-1);
+      return {
+        entries,
+        hasMore,
+        ...(hasMore && last
+          ? { nextCursor: { updatedAt: last.updatedAt, sessionId: last.sessionId } }
+          : {}),
+      };
+    },
     list() {
       return Object.freeze(
         listWorkspaces.all(maxWorkspaces).map((workspace) =>

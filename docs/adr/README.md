@@ -2,6 +2,8 @@
 
 accepted 表示当时已接受，不表示全文仍定义当前行为。当前完整结论见[开发入口](../development/README.md)和[产品手册](../handbook/README.md)。仅在追溯设计理由时定向读取。失效记录提炼后删除，历史通过 Git 保留。
 
+- [ADR-0181：桌面页面重接保留原生 Service protocol peer](0181-desktop-renderer-reattachment.md)
+
 - [ADR-0001: Runtime Kernel is the state-transition authority](0001-runtime-kernel.md)
 - [ADR-0002: PlanningState replaces plan-reviewed boolean](0002-plan-lifecycle.md)
 - [ADR-0003: Auto-review is policy-gated and feature-flagged](0003-auto-review-policy.md)
@@ -134,3 +136,7 @@ accepted 表示当时已接受，不表示全文仍定义当前行为。当前�
 - [ADR-0176：稳定 Daemon 生命周期协议与显式重启](0176-stable-daemon-lifecycle-and-explicit-restart.md)
 - [ADR-0177：桌面客户端采用 Tauri 并复用现有 App Server](0177-tauri-desktop-client.md)
 - [ADR-0178：桌面 macOS 退出先确认并等待服务清理](0178-desktop-macos-termination.md)
+- [ADR-0179：Web 与桌面共用会话页面](0179-shared-web-desktop-conversation-page.md)
+- [ADR-0180：桌面新对话准备与本地环境选择](0180-desktop-new-conversation-context.md)
+- [ADR-0182：桌面历史读取独立于执行项目](0182-neutral-desktop-history.md)
+- [ADR-0183：启动只做结构检查，按会话读取做恢复校验](0183-bounded-startup-validation.md)

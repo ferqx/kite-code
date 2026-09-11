@@ -13,3 +13,5 @@ checkpoint metadata 可展示，不代表任意客户端获准恢复。真正恢
 修改查询需同时核对结果字段、排序、访问限制和实际消费者；不因新增 UI 字段返回 raw Store event。规范见[日志查询](../../../docs/active/sqlite-runtime-log-query.md)、[私有 Artifact](../../../docs/active/private-artifact-storage.md)。
 
 验证：[log query](../test/log-query.test.ts)、[checkpoint query](../test/workspace-checkpoint-query.test.ts)、[artifacts](../test/kite-home-artifacts.test.ts)。
+
+当前 Store 9 的目录分页与索引会话读取共用已打开的 SQLite connection，不访问项目文件系统；完整跨包契约见[SQLite Runtime Log](../../../docs/active/sqlite-runtime-log-query.md)。

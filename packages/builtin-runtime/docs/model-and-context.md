@@ -19,3 +19,5 @@ Gateway 组织 model invocation identity、resource preparation、attempt 与 re
 context compaction 通过独立的预算、预检、摘要和验证机制生成后续输入；手动/自动入口和开关分开。reset 先检查完整上下文是否安全，再清 active checkpoint，不删除历史。实现见[manual compaction](../src/model/context-compaction-manual.ts)及 Service 的[compaction service](../../../apps/kite-service/src/runtime/session/context-compaction-service.ts)。
 
 验证入口：[模型测试](../test/)、[Host context compilation](../../runtime-host/test/context-compilation.test.ts)。更精确的 Provider 和证据规则见[模型边界](../../../docs/active/model-provider-boundary.md)、[私有 Artifact](../../../docs/active/private-artifact-storage.md)。
+
+[token counter](../src/model/token-counter.ts)保留同步 cl100k_base 计数语义，但通过可被 standalone bundler 收录的 literal require 在首次计数时加载词表；应用只浏览目录时不支付模型词表初始化成本，不引入另一份计数缓存或近似算法。

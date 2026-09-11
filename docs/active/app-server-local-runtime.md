@@ -15,6 +15,12 @@
 
 macOS Cocoa Quit 通过原生 delegate 适配进入绑定主窗口的确认；确认后先关闭 stdin，清理完成才允许事件循环退出。重复退出请求不得提前取得退出许可；崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。
 
+桌面只读 `runtime_status` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtime_open` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。原生 renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；设计取舍见 [ADR-0181](../adr/0181-desktop-renderer-reattachment.md)。
+
+桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；会话投影与订阅初始快照沿同一 Store 只读快照读取，不解析失效项目路径、不创建 Workspace context 或执行 authority。显式执行仍须激活与授权当前 Workspace，跨工作区命令被拒绝。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
+
+桌面[新对话准备](../../apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
+
 ```text
 default:
 TUI/CLI build X -- parent-owned stdio --> App Server build X
@@ -38,6 +44,8 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 ## Authority
 
 桌面模型配置使用既有 Native Provider write 和 App Control model selection；凭据只进入精确写入接口，结果未知先查询且不重放。计划审核由 Service 同时向实时与 History 投影封闭的有界 review 正文和截断标记，参与稳定交互身份比对；没有新增 Store、进程或业务重试队列。
+
+桌面设置中的 MCP 状态、认证／取消认证／重连及 Skills 目录复用已存在的 App Control 方法；请求绑定完整 Workspace identity 和 Server revision，操作未知时不重放，Browser principal 不取得该控制能力。具体页面与验证范围见[扩展设置](../../apps/kite-desktop/docs/extensions.md)。
 
 桌面变更阅读复用已提交文件工具记录与终态输出。原生编辑器跳转绑定当前连接，校验项目内普通文件后仅启动固定编辑器；不会把事件中的路径当成任意本机访问权限。Store 与活动 Bridge 的工作区摘要保持同 revision 一致，恢复验证覆盖真实写入、测试及继续会话。
 
@@ -131,3 +139,5 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
 桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。断线后的桌面 ready 立即失效，丢失 mutation 回执明确提示结果未知并要求检查实际会话与文件。
+
+Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。

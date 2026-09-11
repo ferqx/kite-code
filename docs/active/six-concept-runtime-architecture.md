@@ -35,6 +35,8 @@ Agent → Capability → Policy → Execution → Verification
 
 桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过受限 Tauri IPC 连接 Rust-owned 服务；不能导入 Native I/O、Host、Store 或 Service concrete source。当前实现与验证限制见[桌面 owner](../../apps/kite-desktop/README.md)。
 
+Web 与桌面共同消费[共享 React 页面](../../packages/kite-client-ui/README.md)。共享包不依赖任何 Runtime、协议、Host、Native 或 app workspace；两个入口只注入各自真实数据与已授权操作。页面复用不扩大 Browser principal 权限，也不将展示状态提升为执行权威。
+
 ## Client Contract 与 SPI
 
 `@kite-ai/runtime-contract` 是 client-facing 的 App semantic contract，不是 wire protocol。command、query、可序列化 subscription spec、封闭 client event 与 projection 分别位于独立模块；presentation/capability/observability 只携带中立数据。Contract 不包含 Kernel state、Host lifecycle、Provider handle、SQLite 类型、wire envelope 或 TUI block。
@@ -43,11 +45,11 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server 与 Local Service client contract：十七个workspace、一个当前 concrete composition
+## Runtime Server 与 Local Service client contract：十八个workspace、一个当前 concrete composition
 
-Runtime package Gate当前检查十七个workspace（含 private Web 与 Desktop App）：`agent-api-contract`、`agent-api-client`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
+Runtime package Gate当前检查十八个workspace（含 private Web、Desktop App 与共享 UI）：`agent-api-contract`、`agent-api-client`、`runtime-contract`、`runtime-protocol`、`runtime-server`、
 `runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
-`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli`、private `apps/kite-service`、`apps/kite-web`与`apps/kite-desktop`。核心graph不把Web App算作
+`runtime-storage-sqlite`、`builtin-runtime`、`apps/kite-cli`、private `apps/kite-service`、`apps/kite-web`、`apps/kite-desktop`与`kite-client-ui`。核心graph不把Web App算作
 Runtime composition owner；它们不是可互换Runtime。依赖和authority必须
 保持下列层级：
 
@@ -67,7 +69,9 @@ runtime-storage-sqlite ───────────────────
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
 apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + contract
 apps/kite-service ─────────────────────────────────────────→ agent-api-contract + app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
-apps/kite-web ─────────────────────────────────────────────→ agent-api-client + agent-api-contract
+kite-client-ui ────────────────────────────────────────────→ ∅（仅 React 与 Markdown 等展示依赖）
+apps/kite-web ─────────────────────────────────────────────→ agent-api-client + agent-api-contract + kite-client-ui
+apps/kite-desktop ─────────────────────────────────────────→ app-contract + local-runtime + client + contract + protocol + kite-client-ui
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 Runtime Protocol V2（JSON-RPC 2.0）DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
@@ -259,7 +263,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
 - `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
-- `check:runtime-packages`：十七个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
+- `check:runtime-packages`：十八个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
 

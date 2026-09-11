@@ -218,6 +218,10 @@ function findCurrentSession(
   source: RuntimeLogQuerySource,
   sessionId: string,
 ): RuntimeLogSessionEntry | undefined {
+  const indexed = withLogs(source, (reader) =>
+    reader.getSession ? { entry: reader.getSession(sessionId) } : undefined,
+  );
+  if (indexed) return indexed.entry ? mapLogSession(indexed.entry) : undefined;
   return allCurrentSessions(source).find((entry) => entry.sessionId === sessionId);
 }
 
@@ -283,6 +287,10 @@ export function createKiteRuntimeHistoryClient(
 ): RuntimeHistoryClient {
   return Object.freeze({
     async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
+      if (request.workspaceDigest)
+        return withLogs(logs, (reader) =>
+          createKiteRuntimePagedHistoryClient(reader).listSessions(request),
+        );
       return mergedSessionPage(logs, request, compatibility);
     },
     async listEvents(request: ListRuntimeLogEventsRequest) {
@@ -303,7 +311,10 @@ export function createKiteRuntimeHistoryClient(
         }
         session = findCurrentSession(logs, sessionId);
       }
-      if (!session) throw new Error(`Runtime session was not found: ${sessionId}`);
+      if (!session)
+        throw Object.assign(new Error(`Runtime session was not found: ${sessionId}`), {
+          code: 'session_not_found',
+        });
       if (throughSequence !== undefined) {
         if (
           !Number.isSafeInteger(throughSequence) ||

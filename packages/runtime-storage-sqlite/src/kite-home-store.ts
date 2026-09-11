@@ -576,14 +576,18 @@ export function assertKiteSessionStoreSchema(database: Database): void {
   assertExactKiteStoreSchema(database, kiteSessionStoreProfile());
 }
 
-function assertExactKiteStoreSchema(database: Database, profile: ExactKiteStoreProfile): void {
-  database.run('PRAGMA foreign_keys = ON');
+/** Full physical/FK inspection belongs to file preflight, not each composed reader. */
+export function assertKiteStoreIntegrity(database: Database): void {
   const quickCheck = database.query<{ quick_check: string }, []>('PRAGMA quick_check').get();
   if (quickCheck?.quick_check !== 'ok') fail('SQLite quick_check failed.');
   const foreignKeyErrors = database
     .query<Record<string, unknown>, []>('PRAGMA foreign_key_check')
     .all();
   if (foreignKeyErrors.length !== 0) fail('SQLite foreign_key_check failed.');
+}
+
+function assertExactKiteStoreSchema(database: Database, profile: ExactKiteStoreProfile): void {
+  database.run('PRAGMA foreign_keys = ON');
 
   const tables = database
     .query<{ name: string }, []>(

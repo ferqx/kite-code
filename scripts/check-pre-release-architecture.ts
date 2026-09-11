@@ -220,7 +220,9 @@ function inspectSource(path: string): void {
         specifier === '@kite-ai/agent-api-client' ||
         specifier.startsWith('@kite-ai/agent-api-client/') ||
         specifier === '@kite-ai/agent-api-contract' ||
-        specifier.startsWith('@kite-ai/agent-api-contract/');
+        specifier.startsWith('@kite-ai/agent-api-contract/') ||
+        specifier === '@kite-ai/kite-client-ui' ||
+        specifier === '@kite-ai/kite-client-ui/style.css';
       const forbidden =
         specifier === 'node' ||
         specifier.startsWith('node:') ||

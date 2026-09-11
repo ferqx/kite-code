@@ -1,5 +1,9 @@
 import type {
+  AppMcpActionResponse,
+  AppMcpServer,
+  AppMcpSnapshot,
   ProviderModelSnapshot,
+  SkillCatalogSnapshot,
   WorkspaceTrustQueryResponse,
 } from '@kite-ai/kite-app-contract';
 import {
@@ -7,26 +11,69 @@ import {
   KITE_APP_SERVER_PROTOCOL_METHODS_,
   type KiteAppServerConnection,
 } from '@kite-ai/kite-local-runtime/client/protocol';
+import { RuntimeClientError } from '@kite-ai/runtime-client';
 import type {
   RuntimeApprovalInteraction,
   RuntimeCommand,
   RuntimeInputInteraction,
   RuntimeInteractionResponse,
+  RuntimeLogSessionCursor,
+  RuntimeLogSessionPage,
   RuntimePlanReviewInteraction,
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
 import { invoke } from '@tauri-apps/api/core';
 import { type ProviderInput, saveProvider } from './models';
-import { type Message, projectEvent } from './presentation';
+import { isActiveRun, type Message, projectEvent } from './presentation';
 import { type DesktopConnectionInfo, type DesktopInvoke, desktopTransport } from './transport';
 
+export interface DesktopProject {
+  path: string;
+  directoryMissing?: boolean;
+  lastOpenedAt: number;
+}
+export interface BranchSnapshot {
+  workspace: string;
+  repository: boolean;
+  root: string | null;
+  current: string | null;
+  head: string | null;
+  branches: readonly string[];
+  dirty: boolean;
+  canSwitch: boolean;
+}
+class CommandResultUnknown extends Error {}
+
+export type DesktopSessionSummary = Pick<
+  RuntimeSessionProjection,
+  'sessionId' | 'displayName' | 'workspace' | 'workspaceDigest' | 'updatedAt'
+> &
+  Partial<
+    Pick<RuntimeSessionProjection, 'revision' | 'lifecycle' | 'currentRun' | 'interactionQueue'>
+  > & {
+    workspaceName?: string;
+    workspaceId?: string;
+  };
+
 export interface DesktopView {
+  projects?: readonly DesktopProject[];
+  directory?: readonly DesktopSessionSummary[];
+  directoryCursors?: Readonly<Record<string, RuntimeLogSessionCursor>>;
+  directoryLoading?: readonly string[];
+  directoryErrors?: Readonly<Record<string, string>>;
+  projectError?: string;
+  modelError?: string;
+  branchError?: string;
+  branch?: BranchSnapshot;
   workspace: string;
   connected: boolean;
   error?: string;
+  commandError?: string;
   trust?: WorkspaceTrustQueryResponse;
   models?: ProviderModelSnapshot;
-  sessions: readonly RuntimeSessionProjection[];
+  mcp?: AppMcpSnapshot;
+  skills?: SkillCatalogSnapshot;
+  sessions: readonly DesktopSessionSummary[];
   selected?: string;
   messages: readonly Message[];
   projection?: RuntimeSessionProjection;
@@ -52,8 +99,18 @@ export class DesktopClient {
   #connection?: KiteAppServerConnection;
   #connectionId?: number;
   #selection?: AbortController;
+  #mcpRead = 0;
+  #skillsRead = 0;
   #unsubscribe?: () => void;
   #admitted = new Set<string>();
+  #connecting?: Promise<void>;
+  #recovering?: Promise<void>;
+  #wakeRecovery?: () => void;
+  #workspacePreparation?: Promise<void>;
+  #directoryRead = 0;
+  #recoveryGeneration = 0;
+  #branchRead = 0;
+  #modelRead = 0;
   getSnapshot = () => this.#view;
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener);
@@ -66,7 +123,7 @@ export class DesktopClient {
     for (const listener of this.#listeners) listener();
   }
   report(error: unknown) {
-    this.#publish({ error: error instanceof Error ? error.message : String(error) });
+    this.#publish({ error: messageOf(error) });
   }
   clearError() {
     this.#publish({ error: undefined });
@@ -74,11 +131,178 @@ export class DesktopClient {
 
   async openProject() {
     if (this.#connection) throw new Error('请先断开当前项目。');
-    const selected = await this.call<string | null>('select_workspace');
-    if (selected) await this.connect();
+    const selected = await this.pickProject();
+    if (selected) await this.activateProject(selected);
   }
-  async connect() {
-    if (this.#connection) await this.disconnect();
+  async refreshProjects() {
+    const projects = await this.call<DesktopProject[]>('list_projects');
+    this.#publish({ projects });
+  }
+  hasNativeConnection() {
+    return this.#connectionId !== undefined;
+  }
+  async restoreWorkspace() {
+    if (this.#connection?.status === 'active') {
+      await this.#workspacePreparation;
+      return;
+    }
+    const status = await this.call<{ workspace: string | null; connectionId: number | null }>(
+      'runtime_status',
+    );
+    if (this.getSnapshot().connected) return;
+    this.#publish({ workspace: status.workspace ?? '' });
+    await this.connect();
+    await this.#workspacePreparation;
+  }
+  async pickProject() {
+    const path = await this.call<string | null>('pick_workspace');
+    if (path) await this.refreshProjects();
+    return path;
+  }
+  async activateProject(path: string) {
+    if (this.#connection) {
+      if (this.#view.workspace !== path) throw new Error('请先断开当前项目。');
+    } else {
+      await this.call<string>('activate_workspace', { path });
+      await this.refreshProjects();
+      await this.connect();
+    }
+    await this.#workspacePreparation;
+    // Explicit project selection is consent for this workspace. Startup and
+    // reconnect only read trust; associated external roots still need consent.
+    const trust = this.#view.trust;
+    if (trust?.status === 'unknown' && trust.canDecide && !trust.externalReadScope.roots.length)
+      await this.trustProject();
+  }
+  async checkProject(workspace: string) {
+    // Native query validates the explicitly registered canonical directory without activating it.
+    return this.call<void>('check_workspace', { path: workspace });
+  }
+  async refreshBranch() {
+    const read = ++this.#branchRead;
+    const workspace = this.#view.workspace;
+    if (!workspace) return;
+    try {
+      const branch = await this.call<BranchSnapshot>('query_workspace_branch', { workspace });
+      if (this.#view.workspace === workspace && read === this.#branchRead)
+        this.#publish({ branch, branchError: undefined });
+      return branch;
+    } catch (error) {
+      if (this.#view.workspace === workspace && read === this.#branchRead)
+        this.#publish({ branch: undefined, branchError: messageOf(error) });
+      throw error;
+    }
+  }
+  async hasActiveTasks() {
+    if (this.#connection?.status !== 'active') return this.hasNativeConnection();
+    const result = await this.#connection.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'list_sessions',
+    });
+    if (result.status !== 'ok' || !result.sessions || result.sessions.length >= 1000) return true;
+    return result.sessions.some(isActiveRun);
+  }
+  async switchBranch(name: string) {
+    const expected = this.#view.branch;
+    if (!expected || expected.workspace !== this.#view.workspace)
+      throw new Error('请先刷新当前项目分支。');
+    if (expected.current === name) return;
+    if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
+    const connection = this.#requireConnection();
+    const directory = await connection.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'list_sessions',
+    });
+    if (directory.status !== 'ok' || !directory.sessions || directory.sessions.length >= 1000)
+      throw new Error('无法完整确认任务状态，暂时不能切换分支。');
+    if (
+      directory.sessions.some(
+        (session) =>
+          session.workspaceDigest === this.#view.trust?.workspace.workspaceDigest &&
+          isActiveRun(session),
+      )
+    )
+      throw new Error('项目中有运行或等待中的任务，请先结束任务再切换分支。');
+    const actual = await this.refreshBranch();
+    if (!actual || !sameEnvironment(expected, actual))
+      throw new Error('项目或分支已改变，请重新选择。');
+    if (!actual.canSwitch) throw new Error('请打开 Git 仓库根目录后切换分支。');
+    if (actual.dirty) throw new Error('工作区有未提交或未跟踪的改动，请先处理后再切换分支。');
+    if (!actual.branches.includes(name)) throw new Error('所选本地分支已不存在，请刷新后重试。');
+    await this.disconnect();
+    this.#publish({ branch: undefined });
+    let failure: unknown;
+    try {
+      const branch = await this.call<BranchSnapshot>('switch_workspace_branch', {
+        expected: actual,
+        branch: name,
+      });
+      this.#publish({ branch });
+    } catch (error) {
+      failure = error;
+    }
+    // Always query the actual environment. Never retry or undo the Git mutation.
+    try {
+      await this.refreshBranch();
+    } catch (error) {
+      failure ??= error;
+    }
+    try {
+      await this.connect();
+      await this.#workspacePreparation;
+    } catch (error) {
+      failure ??= error;
+    }
+    if (failure) throw failure;
+  }
+  async prepareNewConversation() {
+    const connection = this.#requireConnection();
+    const workspace = this.#view.workspace;
+    const expected = this.#view.branch;
+    // Git is an optional project capability, not a precondition for general work.
+    await this.checkProject(workspace);
+    const actual = expected?.repository
+      ? await this.refreshBranch().catch(() => undefined)
+      : undefined;
+    if (expected && actual && !sameEnvironment(expected, actual))
+      throw new Error('项目或分支已改变，已更新显示，请检查后重新发送。');
+    const trust = await readWithDeadline(
+      connection.app.queryWorkspaceTrust({
+        schema: 'kite.app.workspace-trust.query-request.v1',
+        workspace,
+      }),
+    );
+    if (this.#connection !== connection || this.#view.workspace !== workspace)
+      throw new Error('项目连接已改变，请重新检查。');
+    this.#publish({ trust });
+    if (trust.status !== 'trusted') throw new Error('请先确认工作区信任。');
+    const previousModel = this.#view.models?.selected;
+    const models = await this.refreshModels();
+    const selected = models.selected;
+    if (
+      !selected ||
+      !models.providers.some(
+        (provider) => provider.provider === selected.provider && provider.readiness === 'ready',
+      )
+    )
+      throw new Error('请先配置可用的模型。');
+    if (previousModel?.provider !== selected.provider || previousModel?.name !== selected.name)
+      throw new Error('模型配置已改变，已更新显示，请检查后重新发送。');
+  }
+  connect(): Promise<void> {
+    if (this.#connection?.status === 'active')
+      return this.#view.selected && !this.#view.ready
+        ? this.refreshSessions().then(() => this.selectSession(this.#view.selected!))
+        : Promise.resolve();
+    if (this.#connecting) return this.#connecting;
+    this.#connecting = this.#connect().finally(() => {
+      this.#connecting = undefined;
+    });
+    return this.#connecting;
+  }
+  async #connect() {
+    const selected = this.#view.selected;
+    await this.#detach();
     const info = await this.call<DesktopConnectionInfo>('runtime_open');
     const connection = createAppServerProtocolConnection(
       desktopTransport(info, this.call),
@@ -97,6 +321,7 @@ export class DesktopClient {
             sessions: [],
             messages: [],
             projection: undefined,
+            branch: undefined,
             ready: false,
             loadingSession: false,
           }
@@ -106,48 +331,111 @@ export class DesktopClient {
       if (this.#connection !== connection) return;
       const snapshot = connection.snapshotStore.getSnapshot();
       const session = this.#view.selected ? snapshot.sessions[this.#view.selected] : undefined;
+      const runFinished =
+        isActiveRun(this.#view.projection) &&
+        !!session?.projection &&
+        !isActiveRun(session.projection);
       this.#publish({
         connected: connection.status === 'active',
         ready: connection.status === 'active' && (session?.ready ?? false),
-        projection: session?.projection,
-        ...(connection.status === 'closed'
-          ? { error: '连接已关闭。提交结果可能未知，请检查会话后明确重连。' }
-          : {}),
+        ...(session?.projection ? { projection: session.projection } : {}),
+        // Refresh known summaries in place; live output must not move a clicked row.
+        sessions: this.#view.sessions.map((item) => {
+          const updated = snapshot.sessions[item.sessionId]?.projection;
+          return updated && updated.revision >= (item.revision ?? 0) ? updated : item;
+        }),
       });
+      if (connection.status === 'closed' || connection.status === 'disconnected') this.#recover();
+      if (runFinished && connection.status === 'active')
+        void this.refreshSessions().catch((error) => this.report(error));
     });
     try {
       await connection.prepareAppControl();
-      const trust = await connection.app.queryWorkspaceTrust({
-        schema: 'kite.app.workspace-trust.query-request.v1',
-        workspace: info.workspace,
-      });
-      const models = await connection.app.getProviderModelSnapshot({
-        schema: 'kite.app.provider-model.snapshot-request.v1',
-        workspace: trust.workspace,
-      });
-      this.#publish({ connected: true, trust, models });
-      await this.refreshSessions();
-      if (this.#view.selected) await this.selectSession(this.#view.selected);
     } catch (error) {
-      await this.disconnect().catch(() => undefined);
+      await this.#detach().catch(() => undefined);
       throw error;
     }
+    this.#publish({ connected: true });
+    // Independent read capabilities cannot tear down a healthy protocol peer.
+    await this.refreshDirectory().catch(() => undefined);
+    this.#workspacePreparation = this.#prepareWorkspace(connection);
+    if (selected && this.#view.selected === selected && !this.#view.loadingSession)
+      await this.selectSession(selected).catch((error) => {
+        if (connection.status === 'active') this.report(error);
+      });
   }
-  async disconnect() {
+  async #prepareWorkspace(connection: KiteAppServerConnection) {
+    const workspace = this.#view.workspace;
+    if (!workspace) return;
+    const branch = this.refreshBranch().catch(() => undefined);
+    try {
+      const trust = await readWithDeadline(
+        connection.app.queryWorkspaceTrust({
+          schema: 'kite.app.workspace-trust.query-request.v1',
+          workspace,
+        }),
+      );
+      if (this.#connection !== connection) return;
+      this.#publish({ trust, projectError: undefined });
+      this.#updateSessions(connection);
+    } catch (error) {
+      if (this.#connection === connection && connection.status === 'active')
+        this.#publish({ projectError: messageOf(error) });
+      return;
+    } finally {
+      await branch;
+    }
+    await this.refreshModels().catch(() => undefined);
+  }
+  #recover() {
+    if (this.#recovering) return;
+    const generation = this.#recoveryGeneration;
+    this.#recovering = (async () => {
+      let attempt = 0;
+      while (generation === this.#recoveryGeneration) {
+        const delay = [250, 1000, 3000][Math.min(attempt++, 2)]!;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, delay);
+          this.#wakeRecovery = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        this.#wakeRecovery = undefined;
+        if (generation !== this.#recoveryGeneration) return;
+        if (this.#connection?.status === 'active') return;
+        try {
+          await this.connect();
+          if (this.getSnapshot().connected) return;
+        } catch {
+          // Reattachment is internal. Retain content and retry with capped backoff;
+          // only explicit user actions report their outcome, and writes are never replayed.
+        }
+      }
+    })().finally(() => {
+      this.#recovering = undefined;
+    });
+  }
+  async #detach() {
     this.#selection?.abort();
     this.#unsubscribe?.();
+    this.#unsubscribe = undefined;
     const connection = this.#connection;
     this.#connection = undefined;
-    this.#connectionId = undefined;
     this.#admitted.clear();
-    this.#publish({
-      connected: false,
-      ready: false,
-      loadingSession: false,
-      trust: undefined,
-      models: undefined,
-    });
-    await connection?.close();
+    this.#publish({ connected: false, ready: false, loadingSession: false });
+    if (connection) await connection.close();
+  }
+  async disconnect() {
+    ++this.#recoveryGeneration;
+    this.#wakeRecovery?.();
+    await this.#recovering;
+    const connectionId = this.#connectionId;
+    await this.#detach();
+    this.#connectionId = undefined;
+    this.#publish({ trust: undefined, models: undefined, mcp: undefined, skills: undefined });
+    // Only an explicit project/branch switch or exit owns process shutdown.
+    if (connectionId !== undefined) await this.call<void>('runtime_close', { connectionId });
   }
   #requireConnection() {
     if (this.#connection?.status !== 'active') throw new Error('请先连接项目。');
@@ -175,39 +463,204 @@ export class DesktopClient {
     });
     if (result.status !== 'trusted') throw new Error(`工作区信任未生效：${result.outcome}`);
   }
+  async refreshDirectory(more = false) {
+    const connection = this.#requireConnection();
+    const read = ++this.#directoryRead;
+    // Saved text links persisted membership to the native picker. No project I/O is needed.
+    const paths = new Map(
+      await Promise.all(
+        (this.#view.projects ?? []).map(
+          async (project) => [await pathDigest(project.path), project.path] as const,
+        ),
+      ),
+    );
+    const cursors = this.#view.directoryCursors ?? {};
+    const scopes = more ? Object.keys(cursors) : ['', ...paths.keys()];
+    if (this.#connection !== connection || read !== this.#directoryRead) return;
+    this.#publish({ directoryLoading: scopes.map((scope) => paths.get(scope) ?? scope) });
+    const failures: unknown[] = [];
+    const load = async (scope: string) => {
+      const label = paths.get(scope) ?? scope;
+      try {
+        let page: RuntimeLogSessionPage;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            page = await readWithDeadline(
+              connection.history.listSessions({
+                limit: 100,
+                ...(scope ? { workspaceDigest: scope } : {}),
+                ...(more && cursors[scope] ? { cursor: cursors[scope] } : {}),
+              }),
+            );
+            break;
+          } catch (error) {
+            if (
+              attempt ||
+              connection.status !== 'active' ||
+              (error instanceof RuntimeClientError && error.protocol?.data.retryable === false)
+            )
+              throw error;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+        if (this.#connection !== connection || read !== this.#directoryRead) return;
+        const sessions: DesktopSessionSummary[] = page.entries.map((entry) => ({
+          sessionId: entry.sessionId,
+          displayName: entry.displayName,
+          updatedAt: new Date(entry.updatedAt).toISOString(),
+          workspaceDigest: entry.workspace?.workspaceDigest,
+          workspaceId: entry.workspace?.workspaceId,
+          workspaceName: entry.workspace?.displayName,
+          workspace: entry.workspace ? paths.get(entry.workspace.workspaceDigest) : undefined,
+        }));
+        const byId = new Map(sessions.map((session) => [session.sessionId, session]));
+        const previous = this.#view.directory ?? [];
+        const known = new Set(previous.map((session) => session.sessionId));
+        const nextCursors = { ...this.#view.directoryCursors };
+        const errors = { ...this.#view.directoryErrors };
+        delete errors[label];
+        if (page.nextCursor) nextCursors[scope] = page.nextCursor;
+        else delete nextCursors[scope];
+        this.#publish({
+          directoryErrors: errors,
+          directoryCursors: nextCursors,
+          directory: [
+            ...sessions.filter((session) => !known.has(session.sessionId)),
+            ...previous.flatMap(
+              (session) =>
+                byId.get(session.sessionId) ??
+                (more || page.hasMore || (scope && session.workspaceDigest !== scope)
+                  ? [session]
+                  : []),
+            ),
+          ],
+        });
+        this.#updateSessions(connection);
+      } catch (error) {
+        failures.push(error);
+        if (
+          this.#connection === connection &&
+          connection.status === 'active' &&
+          read === this.#directoryRead
+        )
+          this.#publish({
+            directoryErrors: { ...this.#view.directoryErrors, [label]: messageOf(error) },
+          });
+      } finally {
+        if (this.#connection === connection && read === this.#directoryRead)
+          this.#publish({
+            directoryLoading: this.#view.directoryLoading?.filter((key) => key !== label),
+          });
+      }
+    };
+    // Each worker advances independently; one slow space cannot hold the next space behind it.
+    // Bound outstanding RPCs below the protocol request limit even with many saved projects.
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(8, scopes.length) }, async () => {
+        while (
+          next < scopes.length &&
+          this.#connection === connection &&
+          read === this.#directoryRead
+        )
+          await load(scopes[next++]!);
+      }),
+    );
+    if (scopes.length && failures.length === scopes.length) throw failures[0];
+  }
+  #updateSessions(connection: KiteAppServerConnection) {
+    if (this.#connection !== connection) return;
+    this.#publish({
+      sessions: (this.#view.directory ?? []).filter(
+        (session) =>
+          session.workspaceDigest !== undefined &&
+          session.workspaceDigest === this.#view.trust?.workspace.workspaceDigest,
+      ),
+    });
+  }
   async refreshSessions() {
     const connection = this.#requireConnection();
-    const result = await connection.runtime.query({
-      schema: 'kite.runtime-query.v1',
-      type: 'list_sessions',
-    });
-    if (result.status !== 'ok' || !result.sessions) throw new Error('会话目录暂时不可用。');
-    if (this.#connection === connection)
-      this.#publish({
-        sessions: result.sessions.filter(
-          (session) =>
-            session.workspaceDigest !== undefined &&
-            session.workspaceDigest === this.#view.trust?.workspace.workspaceDigest,
-        ),
-      });
+    await this.refreshDirectory();
+    this.#updateSessions(connection);
   }
   async openFile(path: string, editor: 'vscode' | 'zed' | 'textedit') {
     this.#requireConnection();
     await this.call('open_editor', { connectionId: this.#connectionId, path, editor });
   }
   async refreshModels() {
+    const read = ++this.#modelRead;
     const connection = this.#requireConnection();
     const workspace = this.#view.trust?.workspace;
     if (!workspace) throw new Error('尚未读取工作区。');
-    const models = await connection.app.getProviderModelSnapshot({
-      schema: 'kite.app.provider-model.snapshot-request.v1',
-      workspace,
-    });
-    if (this.#connection === connection) this.#publish({ models });
+    let models: ProviderModelSnapshot;
+    try {
+      models = await readWithDeadline(
+        connection.app.getProviderModelSnapshot({
+          schema: 'kite.app.provider-model.snapshot-request.v1',
+          workspace,
+        }),
+      );
+    } catch (error) {
+      if (
+        this.#connection === connection &&
+        connection.status === 'active' &&
+        read === this.#modelRead
+      )
+        this.#publish({ modelError: messageOf(error) });
+      throw error;
+    }
+    if (this.#connection === connection && read === this.#modelRead)
+      this.#publish({ models, modelError: undefined });
     return models;
   }
   async configureProvider(input: ProviderInput) {
     await saveProvider(this.#requireConnection(), input, () => this.refreshModels());
+  }
+  async refreshMcp() {
+    await this.#workspacePreparation;
+    const read = ++this.#mcpRead;
+    const connection = this.#requireConnection();
+    const workspace = this.#view.trust?.workspace;
+    if (!workspace) throw new Error('尚未读取工作区。');
+    const mcp = await connection.app.getMcpSnapshot({
+      schema: 'kite.app.mcp.snapshot-request.v1',
+      workspace,
+    });
+    if (this.#connection === connection && read === this.#mcpRead) this.#publish({ mcp });
+  }
+  async refreshSkills() {
+    await this.#workspacePreparation;
+    const read = ++this.#skillsRead;
+    const connection = this.#requireConnection();
+    const workspace = this.#view.trust?.workspace;
+    if (!workspace) throw new Error('尚未读取工作区。');
+    const skills = await connection.app.getSkillCatalog({
+      schema: 'kite.app.skill-catalog.request.v1',
+      workspace,
+    });
+    if (this.#connection === connection && read === this.#skillsRead) this.#publish({ skills });
+  }
+  async runMcpAction(server: AppMcpServer, type: 'login' | 'reconnect' | 'cancel_auth') {
+    const connection = this.#requireConnection();
+    const workspace = this.#view.mcp?.workspace;
+    if (!workspace) throw new Error('请先刷新 MCP 状态。');
+    ++this.#mcpRead;
+    let response: AppMcpActionResponse;
+    try {
+      response = await connection.app.applyMcpAction({
+        schema: 'kite.app.mcp.action-request.v1',
+        workspace,
+        action: { type, key: server.key, expectedRevision: server.revision },
+      });
+    } catch {
+      if (this.#connection !== connection) return;
+      await this.refreshMcp().catch(() => undefined);
+      throw new Error('MCP 操作结果未知，请检查状态后再决定是否重试。');
+    }
+    if (this.#connection !== connection) return;
+    this.#publish({ mcp: response.snapshot });
+    if (response.outcome !== 'applied')
+      throw new Error(`MCP 操作未确认生效（${response.outcome}），请检查最新状态。`);
   }
   async selectModel(provider: string, name: string) {
     const connection = this.#requireConnection();
@@ -233,13 +686,16 @@ export class DesktopClient {
   }
   async #command(command: RuntimeCommand) {
     const connection = this.#requireConnection();
+    this.#publish({ commandError: undefined });
     let receipt: Awaited<ReturnType<typeof connection.runtime.command>>;
     try {
       receipt = await connection.runtime.command(command);
     } catch {
-      throw new Error(
-        '操作提交结果未知。请明确重连并检查会话与实际文件，再决定是否继续；不会自动重发。',
+      const error = new CommandResultUnknown(
+        '操作提交结果未知。请检查会话与实际文件，再决定是否继续；不会自动重发。',
       );
+      this.#publish({ commandError: error.message });
+      throw error;
     }
     if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay')
       throw new Error(`操作未执行：${receipt.code}`);
@@ -248,27 +704,36 @@ export class DesktopClient {
   async newSession() {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const sessionId = crypto.randomUUID();
-    await this.#command({
-      schema: 'kite.runtime-command.v1',
-      commandId: crypto.randomUUID(),
-      type: 'create_session',
-      workspace: this.#view.workspace,
-      bootstrapSessionId: sessionId,
-    });
+    try {
+      await this.#command({
+        schema: 'kite.runtime-command.v1',
+        commandId: crypto.randomUUID(),
+        type: 'create_session',
+        workspace: this.#view.workspace,
+        bootstrapSessionId: sessionId,
+      });
+    } catch (error) {
+      if (error instanceof CommandResultUnknown) {
+        this.#publish({ selected: sessionId, messages: [], projection: undefined, ready: false });
+      }
+      throw error;
+    }
     this.#admitted.add(sessionId);
     await this.selectSession(sessionId);
     await this.refreshSessions();
   }
   async selectSession(sessionId: string) {
     const connection = this.#requireConnection();
+    if (this.#view.selected === sessionId && this.#view.ready && !this.#view.loadingSession) return;
     this.#selection?.abort();
     const controller = new AbortController();
     this.#selection = controller;
+    const sameSelection = this.#view.selected === sessionId;
     this.#publish({
       selected: sessionId,
-      messages: [],
+      messages: sameSelection ? this.#view.messages : [],
       ready: false,
-      projection: undefined,
+      projection: sameSelection ? this.#view.projection : undefined,
       error: undefined,
       loadingSession: true,
     });
@@ -280,7 +745,7 @@ export class DesktopClient {
     const loadingTimeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
-      rejectTimeout(new Error('会话加载超时，请检查连接后重试。'));
+      rejectTimeout(new Error('会话加载超时，请重新加载会话。'));
     }, 20_000);
     try {
       const result = await Promise.race([
@@ -292,16 +757,35 @@ export class DesktopClient {
         deadline,
       ]);
       if (controller.signal.aborted || this.#connection !== connection) return;
-      if (
-        result.status !== 'ok' ||
-        !result.session?.workspaceDigest ||
-        result.session.workspaceDigest !== this.#view.trust?.workspace.workspaceDigest
-      )
-        throw new Error('会话不属于当前项目或已不可用，请刷新目录。');
-      const notifications = await connection.runtime.subscribeReadyWithGeneration({
-        spec: { scope: 'session', sessionId, includeEphemeral: true },
-        signal: controller.signal,
-      });
+      if (result.status !== 'ok' || !result.session?.workspaceDigest)
+        throw new Error('会话已不可用，请刷新目录。');
+      if (!this.#view.directory?.some((session) => session.sessionId === sessionId)) {
+        const matches = await Promise.all(
+          (this.#view.projects ?? []).map(async (project) =>
+            (await pathDigest(project.path)) === result.session!.workspaceDigest
+              ? project.path
+              : undefined,
+          ),
+        );
+        if (controller.signal.aborted || this.#connection !== connection) return;
+        this.#publish({
+          directory: [
+            ...(this.#view.directory ?? []),
+            {
+              ...result.session,
+              workspace: matches.find((path) => path !== undefined),
+              workspaceId: result.session.workspaceDigest,
+            },
+          ],
+        });
+      }
+      const notifications = await Promise.race([
+        connection.runtime.subscribeReadyWithGeneration({
+          spec: { scope: 'session', sessionId, includeEphemeral: true },
+          signal: controller.signal,
+        }),
+        deadline,
+      ]);
       const transcript = await Promise.race([connection.history.loadSession(sessionId), deadline]);
       if (controller.signal.aborted) return;
       let messages: readonly Message[] = [];
@@ -321,13 +805,13 @@ export class DesktopClient {
             if (event) this.#publish({ messages: projectEvent(this.#view.messages, event) });
           }
         } catch (error) {
-          if (!controller.signal.aborted) this.report(error);
+          if (!controller.signal.aborted && connection.status === 'active') this.report(error);
         }
       })();
     } catch (error) {
       if (!timedOut && controller.signal.aborted) return;
       controller.abort();
-      if (timedOut) throw new Error('会话加载超时，请检查连接后重试。');
+      if (timedOut) throw new Error('会话加载超时，请重新加载会话。');
       throw error;
     } finally {
       clearTimeout(loadingTimeout);
@@ -337,6 +821,8 @@ export class DesktopClient {
   async send(input: string) {
     const sessionId = this.#view.selected;
     if (!sessionId || !input.trim()) return;
+    if (this.#view.projection?.workspaceDigest !== this.#view.trust?.workspace.workspaceDigest)
+      throw new Error('请先选择此会话的工作目录再继续任务。');
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     if (!this.#admitted.has(sessionId)) {
       await this.#command({
@@ -438,5 +924,50 @@ export class DesktopClient {
       interaction,
       response,
     });
+  }
+}
+
+function sameEnvironment(left: BranchSnapshot, right: BranchSnapshot) {
+  return (
+    left.workspace === right.workspace &&
+    left.repository === right.repository &&
+    left.root === right.root &&
+    left.current === right.current &&
+    left.head === right.head
+  );
+}
+
+function messageOf(error: unknown) {
+  if (error instanceof RuntimeClientError) {
+    const detail = error.protocol?.data.detailCode;
+    if (detail)
+      return {
+        workspace_unavailable: '工作目录已不存在或无法访问',
+        configuration_unavailable: '模型配置无法读取',
+        temporarily_unavailable: '历史存储正忙，稍后将重新读取',
+        session_not_found: '会话记录不存在',
+        session_unavailable: '历史存储无法读取',
+        corrupt_event: '会话中的历史记录损坏',
+        invalid_request: '历史读取请求无效',
+      }[detail];
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+async function pathDigest(path: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path));
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function readWithDeadline<T>(read: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('读取超时，已保留现有内容。')), 10_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

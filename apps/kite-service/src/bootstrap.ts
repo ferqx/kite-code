@@ -870,6 +870,10 @@ export function suppressCompatibleKiteSession(checkpointPath: string, sessionId:
 }
 
 export interface KiteRuntimeStorageOwner {
+  readonly directory?: import('@kite-ai/runtime-storage-sqlite').KiteHomeDirectoryQueryPort;
+  readonly openHistoryLogs?: (
+    currentEventTypes: readonly string[],
+  ) => RuntimeLogQueryPort<RuntimeEvent>;
   readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
   /** Store 9-only dedicated Artifact tables; legacy owners omit this port. */
   readonly artifactStore?: KiteHomeArtifactStore;
@@ -985,6 +989,10 @@ function createInjectedStoreLogQueryPort(
     listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionReadPage {
       assertOpen();
       assertListRuntimeLogSessionsRequest(request);
+      if (request.workspaceDigest)
+        throw Object.assign(new Error('Workspace filtering requires an indexed Store reader.'), {
+          code: 'invalid_request',
+        });
       const candidates = readSessionRows(request.query ?? '')
         .map((entry) => {
           const model = storage.sessions.getSessionModelRoute(entry.threadId);
@@ -1456,6 +1464,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
     const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
     const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
     const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
+    const preserveRunStatus =
+      ownsExecution || (storedRun !== undefined && isSettledStoredRun(storedRun));
     return Object.freeze({
       schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId: threadId,
@@ -1487,7 +1497,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
               initialTurnId: storedRun.runId,
               activeTurnId: snapshot.turn.turnId,
               ...(activeTask === undefined ? {} : { taskId: activeTask.taskId }),
-              status: ownsExecution
+              status: preserveRunStatus
                 ? storedRun.status === 'unknown'
                   ? ('recovery_required' as const)
                   : storedRun.status
@@ -1496,7 +1506,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
               ...(activeInteraction === undefined
                 ? {}
                 : { activeInteractionId: activeInteraction.interactionId }),
-              ...(ownsExecution
+              ...(preserveRunStatus
                 ? storedRun.terminal === undefined
                   ? {}
                   : { outcome: { ...storedRun.terminal } }
@@ -1719,7 +1729,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
       return Object.freeze({
         recoverSession: router.recoverSession.bind(router),
         inspectCommand: router.inspectCommand.bind(router),
-        query: router.query.bind(router),
+        query: (query: RuntimeQuery) =>
+          owner.readSnapshot && query.type === 'get_session_projection'
+            ? Promise.resolve(owner.readSnapshot(() => queryStoredProjection(query.sessionId)))
+            : router.query(query),
         shutdownSession: router.shutdownSession.bind(router),
         close: async () => {
           interactionBroker.close('Runtime owner closed.');
@@ -1750,6 +1763,17 @@ export function createKiteMultiWorkspaceRuntimeServer(
       return Promise.resolve(appServerCommandFailure(command, error));
     }
   };
+  function queryStoredProjection(sessionId: string): RuntimeQueryResult {
+    const projection = projectStoredSession(sessionId);
+    return projection
+      ? {
+          status: 'ok',
+          queryType: 'get_session_projection',
+          revision: projection.revision,
+          session: projection,
+        }
+      : { status: 'not_found', queryType: 'get_session_projection', code: 'session_not_found' };
+  }
   const runHostQuery = (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
     if (!owner.readSnapshot) return host.query(query);
     const direct = owner.readSnapshot(() => {
@@ -1768,21 +1792,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
             .filter((projection) => projection !== undefined),
         };
       }
-      if (query.type === 'get_session_projection') {
-        const projection = projectStoredSession(query.sessionId);
-        return projection
-          ? {
-              status: 'ok' as const,
-              queryType: query.type,
-              revision: projection.revision,
-              session: projection,
-            }
-          : {
-              status: 'not_found' as const,
-              queryType: query.type,
-              code: 'session_not_found' as const,
-            };
-      }
+      if (query.type === 'get_session_projection') return queryStoredProjection(query.sessionId);
       if (query.type === 'list_checkpoints') {
         const snapshot = owner.loadCurrentSnapshot(query.sessionId);
         if (!snapshot) {

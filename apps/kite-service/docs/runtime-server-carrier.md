@@ -48,7 +48,7 @@ lifecycle，也不授权调用方在响应丢失时重放stop。
 ## Parent-owned stdio
 
 stdio carrier是Service-owned code。KASD-02的内部`app-server run-stdio`是首个真实process owner：parent显式提供profile root、config root、
-Workspace和build identity，Server只打开该profile的`kite-session.sqlite`，不发现managed Service且不是daemon。旧test/internal composition
+可选执行 Workspace 和 build identity，Server只打开该profile的`kite-session.sqlite`，不发现managed Service且不是daemon。旧test/internal composition
 仍必须提供isolated admission与nondefault Store。
 
 stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diagnostic。carrier primitive中的EOF仍只释放logical connection；
@@ -92,3 +92,5 @@ ADR-0166批准；仍不存在remote/LAN `kite server --web`或把Browser cookie�
 
 `bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/agent-api/context.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts`。
 这些local结果不构成KLSV1-07 Windows/三平台或全部PTY evidence。
+
+初始化后的 History 与明确只读辅助请求独立完成，最多 64 个待处理读取；超限返回 overloaded，stdout 仍串行且有背压。慢模型或项目查询不占据下一条历史／控制消息的输入处理。读取失败返回稳定 detailCode 与 retryable，不泄漏 SQLite 或路径错误；EOF 使用原有有界 drain，不增加进程或重放队列。

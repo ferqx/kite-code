@@ -306,7 +306,7 @@ describe('multi-connection Kite Session Runtime storage', () => {
     }
   });
 
-  test('deep-validates a concurrent open from one stable SQLite read snapshot', () => {
+  test('validates each Session read from one stable SQLite snapshot while another writer commits', () => {
     const fixture = createFixture(['session-1', 'session-2']);
     const writer = openOwner(fixture.path);
     try {
@@ -328,6 +328,8 @@ describe('multi-connection Kite Session Runtime storage', () => {
         },
       });
       try {
+        expect(mutated).toBe(false);
+        expect(reader.storage.sessions.loadSnapshot<State>('session-2')?.revision).toBe(0);
         expect(mutated).toBe(true);
         expect(reader.storage.sessions.loadSnapshot<State>('session-2')?.revision).toBe(1);
       } finally {

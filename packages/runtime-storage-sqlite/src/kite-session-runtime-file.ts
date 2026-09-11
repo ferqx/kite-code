@@ -6,6 +6,7 @@ import {
 } from './kite-home-runtime-file';
 import {
   assertKiteSessionStoreSchema,
+  assertKiteStoreIntegrity,
   initializeKiteSessionStoreIfNeeded,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
@@ -27,7 +28,7 @@ export class KiteSessionStoreOpenError extends Error {
 export function openKiteSessionStoreDatabase(databasePath: string): Database {
   const path = assertCanonicalKiteDatabasePath(databasePath, 'kite-session.sqlite');
   assertNoFollowDatabasePath(path);
-  validateKiteSessionStoreDatabase(path);
+  inspectKiteSessionStoreDatabase(path, false);
   ensurePrivateDatabaseFile(path);
   const database = new Database(
     path,
@@ -84,8 +85,12 @@ function isStoreFormatFailure(error: unknown): boolean {
   return code !== 'SQLITE_BUSY' && code !== 'SQLITE_LOCKED';
 }
 
-/** Read-only compatibility preflight used before stopping an old owner or opening mutable storage. */
+/** Full read-only integrity preflight used before a release stops an old owner. */
 export function validateKiteSessionStoreDatabase(databasePath: string): void {
+  inspectKiteSessionStoreDatabase(databasePath, true);
+}
+
+function inspectKiteSessionStoreDatabase(databasePath: string, fullIntegrity: boolean): void {
   const path = assertCanonicalKiteDatabasePath(databasePath, 'kite-session.sqlite');
   assertNoFollowDatabasePath(path);
   if (!existsSync(path)) return;
@@ -104,6 +109,7 @@ export function validateKiteSessionStoreDatabase(databasePath: string): void {
       .get();
     if (tables?.count === 0) return;
     assertKiteSessionStoreSchema(database);
+    if (fullIntegrity) assertKiteStoreIntegrity(database);
   } catch (error) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';

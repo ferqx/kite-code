@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-detach"
+description = "Enables the runtime_detach command without any pre-configured scope."
+commands.allow = ["runtime_detach"]
+
+[[permission]]
+identifier = "deny-runtime-detach"
+description = "Denies the runtime_detach command without any pre-configured scope."
+commands.deny = ["runtime_detach"]

@@ -40,6 +40,8 @@ read logical connection，Trust/store暂时不可用时返回503且不把旧Trus
 并发read在进入异步admission前占用context有界slot；admission返回后还要复核context未被logout/generation/Worker drain撤销。撤销先移除context
 并等待这些in-flight检查收敛再关闭private connection，因此迟到的`admitted`不能越过更新后的Trust或replacement事实。
 
+桌面客户端的显式添加／选择项目动作即工作区授权，由 `DesktopClient.activateProject` 使用现有 App Control revision CAS decision 记录；项目列表、启动及普通重连不是授权依据。仅工作区内访问无需重复提示，存在关联 external-read roots 时仍显示确切路径并单独确认。失败、冲突或未知回执不自动重放，不在 renderer 另存授权位；具体工具执行授权保持不变。TUI 与 CLI 的确认策略不变。
+
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. canonicalize Workspace并解析关联external-read roots，形成`externalReadScopeDigest`。

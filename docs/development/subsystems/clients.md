@@ -4,6 +4,8 @@ TUI 使用 Native Runtime 和终端投影，Web 使用 Public REST 与页面状�
 
 开发中的 [Tauri 桌面客户端](../../../apps/kite-desktop/README.md)已接入纯 TypeScript Client、受限 IPC 与 Rust-owned 配套服务，完成本机构建、服务链路和阶段 0 原生窗口验收；剩余开发与发布能力仍按[实施计划](../../plans/desktop-client.md)验收，不扩大 Web 权限。
 
+Web 与桌面共用 [React 会话页面](../../../packages/kite-client-ui/README.md)，端侧入口分别负责协议、路由、宿主与已授权操作；共享页面不拥有执行或传输权威。
+
 ## 深入顺序与协作
 
 | 专题 | 负责说明 |

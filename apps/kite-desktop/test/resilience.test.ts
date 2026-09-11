@@ -19,7 +19,7 @@ import { createMockModelServer } from '../../../tests/tui-system/harness/fixture
 import { DesktopClient } from '../src/client';
 import type { DesktopInvoke } from '../src/transport';
 
-test('lost start-turn receipt preserves the actual file effect and reconnect does not replay it', async () => {
+test('lost receipt survives repeated internal recovery failures without replay or connection notices', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-lost-receipt-')));
   for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
   const workspace = join(root, 'workspace');
@@ -60,13 +60,29 @@ test('lost start-turn receipt preserves the actual file effect and reconnect doe
   let generation = 0;
   let startCommands = 0;
   let lostReceipt: unknown;
+  let recoveryFailures = 0;
   const carriers = new Map<
     number,
     { connection: RuntimeClientConnection; messages: AsyncIterator<unknown> }
   >();
   const call: DesktopInvoke = async <T>(command: string, args?: Record<string, unknown>) => {
-    if (command === 'select_workspace') return workspace as T;
+    if (command === 'pick_workspace') return workspace as T;
+    if (command === 'activate_workspace') return workspace as T;
+    if (command === 'list_projects') return [{ path: workspace, lastOpenedAt: 1 }] as T;
+    if (command === 'query_workspace_branch')
+      return {
+        workspace,
+        repository: false,
+        root: null,
+        current: null,
+        head: null,
+        branches: [],
+        dirty: false,
+        canSwitch: false,
+      } as T;
     if (command === 'runtime_open') {
+      if (generation > 0 && recoveryFailures++ < 3)
+        throw new Error('injected temporary service startup failure');
       const connection = await createBunStdioChildRuntimeClientTransport({
         argv: [
           process.execPath,
@@ -117,13 +133,20 @@ test('lost start-turn receipt preserves the actual file effect and reconnect doe
       }
       return JSON.stringify(message) as T;
     } else if (command === 'runtime_close') await carrier.connection.close();
+    else if (command === 'runtime_detach' || command === 'check_workspace') return undefined as T;
     else throw new Error(`Unexpected IPC ${command}`);
     return undefined as T;
   };
   const client = new DesktopClient(call);
+  const observedErrors: string[] = [];
+  const unsubscribe = client.subscribe(() => {
+    const error = client.getSnapshot().error;
+    if (error) observedErrors.push(error);
+  });
   try {
     await client.openProject();
     await client.trustProject();
+    await client.prepareNewConversation();
     await client.newSession();
     const sessionId = client.getSnapshot().selected;
     let failed = false;
@@ -137,7 +160,16 @@ test('lost start-turn receipt preserves the actual file effect and reconnect doe
     expect(client.getSnapshot().connected).toBe(false);
     expect(client.getSnapshot().ready).toBe(false);
     expect(client.getSnapshot().error).toContain('未知');
-    await client.connect();
+    const recoveryDeadline = Date.now() + 12_000;
+    while (
+      (!client.getSnapshot().ready || client.getSnapshot().loadingSession) &&
+      Date.now() < recoveryDeadline
+    )
+      await Bun.sleep(10);
+    expect(client.getSnapshot().commandError).toContain('未知');
+    expect(recoveryFailures).toBe(4);
+    expect(client.getSnapshot().error ?? '').not.toMatch(/injected|连接中断/);
+    expect(observedErrors.join('\n')).not.toMatch(/injected|连接中断/);
     expect(client.getSnapshot().selected).toBe(sessionId);
     expect(client.getSnapshot().ready).toBe(true);
     expect(
@@ -152,7 +184,16 @@ test('lost start-turn receipt preserves the actual file effect and reconnect doe
     expect(client.getSnapshot().messages.filter((message) => message.changeConfirmed)).toHaveLength(
       1,
     );
+    await carriers.get(generation)!.connection.close();
+    const closedDeadline = Date.now() + 2000;
+    while (client.getSnapshot().connected && Date.now() < closedDeadline) await Bun.sleep(10);
+    expect(client.getSnapshot().connected).toBe(false);
+    const attemptsBeforeShutdown = recoveryFailures;
+    await client.disconnect();
+    await Bun.sleep(350);
+    expect(recoveryFailures).toBe(attemptsBeforeShutdown);
   } finally {
+    unsubscribe();
     await client.disconnect();
     await Promise.all([...carriers.values()].map((carrier) => carrier.connection.close()));
     model.stop();

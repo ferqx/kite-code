@@ -95,6 +95,51 @@ describe('Kite Home Store Directory query', () => {
     );
   });
 
+  test('pages more than a thousand histories with persisted membership and no project filesystem', () => {
+    using database = new Database(':memory:', { strict: true });
+    initializeKiteHomeStoreSchema(database);
+    insertWorkspace(database, 'workspace-missing', '/does/not/exist', 'Document work', 'd');
+    for (let index = 0; index < 1005; index++) {
+      insertSession(
+        database,
+        `session-${String(index).padStart(4, '0')}`,
+        'workspace-missing',
+        `Document ${index}`,
+        Math.floor(index / 2),
+      );
+    }
+    const directory = createKiteHomeDirectoryQuery(database);
+    const seen = new Set<string>();
+    let cursor: { updatedAt: number; sessionId: string } | undefined;
+    let pages = 0;
+    do {
+      const page = directory.listSessions({ limit: 100, ...(cursor ? { cursor } : {}) });
+      expect(page.entries.length).toBeLessThanOrEqual(100);
+      expect(JSON.stringify(page)).not.toContain('/does/not/exist');
+      for (const entry of page.entries) {
+        expect(seen.has(entry.sessionId)).toBe(false);
+        expect(entry.workspace?.workspaceId).toBe('workspace-missing');
+        seen.add(entry.sessionId);
+      }
+      cursor = page.nextCursor;
+      expect(page.hasMore).toBe(!!cursor);
+      pages++;
+    } while (cursor);
+    expect(seen.size).toBe(1005);
+    expect(pages).toBe(11);
+    insertWorkspace(database, 'other', '/other', 'Other', 'a');
+    insertSession(database, 'other-newest', 'other', 'Other newest', 9000);
+    const scoped = directory.listSessions({
+      limit: 100,
+      workspaceDigest: `sha256:${'d'.repeat(64)}`,
+    });
+    expect(scoped.entries).toHaveLength(100);
+    expect(
+      scoped.entries.every((entry) => entry.workspace?.workspaceId === 'workspace-missing'),
+    ).toBe(true);
+    expect(scoped.hasMore).toBe(true);
+  });
+
   test('uses the first durable user message when a Session has no persisted name', () => {
     using database = new Database(':memory:', { strict: true });
     initializeKiteHomeStoreSchema(database);
@@ -131,7 +176,7 @@ function insertWorkspace(
       canonicalPath,
       `sha256:${digestSeed.repeat(64)}`,
       `project-${digestSeed}`,
-      `digest-${digestSeed}`,
+      `sha256:${digestSeed.repeat(64)}`,
       displayName,
     );
 }
@@ -154,7 +199,11 @@ function insertSession(
       sessionId,
       workspaceId,
       `project-${workspaceId}`,
-      `digest-${workspaceId}`,
+      (
+        database
+          .query('SELECT workspace_digest FROM workspaces WHERE workspace_id = ?')
+          .get(workspaceId) as { workspace_digest: string }
+      ).workspace_digest,
       name,
       updatedAt,
     );

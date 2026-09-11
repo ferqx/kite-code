@@ -24,3 +24,12 @@ storage owner 使用 AsyncLocalStorage 传递本次 execution handle。runWithEx
 start 对应 Run、command receipt、事件与 State 的关联更新必须在所属事务一致提交；后续 activation、interaction、terminal 同步 Run 索引，不能绕过 Store writer 直接改查询投影。
 
 验证：[mutation](../test/kite-session-mutation.test.ts)、[storage](../test/isolated/kite-session-runtime-storage.test.ts)、[run store](../test/run-store.test.ts)。
+
+
+## 按会话恢复校验
+
+schema assertion 检查表、列、索引、DDL、marker 与 epoch；SQLite physical/FK 全库检查属于显式 preflight，不是每个 reader 的初始化步骤。普通 Session Store 打开执行无写入的结构 preflight 后打开唯一 writer connection，不解码全部 Session 或 Artifact。
+
+`loadSnapshot`／`loadSnapshotRecord` 在一次 read snapshot 内校验目标 Session 的 Workspace binding、snapshot checksum／identity／revision、事件 schema／连续顺序、Run start receipt 与 active Run 唯一性。已有事务内复用其快照，未开启事务时在本层创建并关闭只读事务；并发 writer 的提交只能在下一次读取观察到。不持久化“已验证”标记，不用校验缓存掩盖后续内容变化。Artifact 的长度、JSON 与业务完整性继续由所属读取边界负责。
+
+[全局 owner 回归](../test/kite-home-runtime-storage.test.ts)覆盖目录读取不解码历史以及损坏 snapshot 在访问时拒绝；[Session 并发回归](../test/isolated/kite-session-runtime-storage.test.ts)在校验中让另一连接提交，核对每次读取只观察一个一致版本。

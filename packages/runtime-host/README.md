@@ -95,3 +95,5 @@
 
 - [命令、Mailbox 与持久回执](docs/commands-mailbox.md)
 - [Prepared execution、Attempt 与清理](docs/execution-lifecycle.md)
+
+内部 RuntimeLogQueryPort 提供索引 `getSession`，用于只读历史加载，避免扫描全局列表。该 port 不授予 SessionStore 写入能力。

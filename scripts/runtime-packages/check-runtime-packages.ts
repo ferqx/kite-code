@@ -18,6 +18,7 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/builtin-runtime', 'packages/builtin-runtime'],
   ['@kite-ai/kite-cli', 'apps/kite-cli'],
   ['@kite-ai/kite-service', 'apps/kite-service'],
+  ['@kite-ai/kite-client-ui', 'packages/kite-client-ui'],
   ['@kite-ai/kite-web', 'apps/kite-web'],
   ['@kite-ai/kite-desktop', 'apps/kite-desktop'],
 ] as const);
@@ -66,9 +67,15 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-storage-sqlite',
   ],
   // The Browser is a private presentation application. It consumes only the
-  // typed HTTP client and public DTO contract; UI/tooling remains app-local.
-  '@kite-ai/kite-web': ['@kite-ai/agent-api-client', '@kite-ai/agent-api-contract'],
+  // typed HTTP client/public DTOs and the host-independent shared page.
+  '@kite-ai/kite-client-ui': [],
+  '@kite-ai/kite-web': [
+    '@kite-ai/agent-api-client',
+    '@kite-ai/agent-api-contract',
+    '@kite-ai/kite-client-ui',
+  ],
   '@kite-ai/kite-desktop': [
+    '@kite-ai/kite-client-ui',
     '@kite-ai/kite-local-runtime',
     '@kite-ai/runtime-client',
     '@kite-ai/runtime-contract',
@@ -796,7 +803,8 @@ function validateExternalDependency(
     isUiPackage(dependency) &&
     owner !== '@kite-ai/kite-cli' &&
     owner !== '@kite-ai/kite-web' &&
-    owner !== '@kite-ai/kite-desktop'
+    owner !== '@kite-ai/kite-desktop' &&
+    owner !== '@kite-ai/kite-client-ui'
   ) {
     addViolation(
       violations,
@@ -833,7 +841,8 @@ function validateExternalImport(
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi' ||
       owner === '@kite-ai/kite-web' ||
-      owner === '@kite-ai/kite-desktop'
+      owner === '@kite-ai/kite-desktop' ||
+      owner === '@kite-ai/kite-client-ui'
     ) {
       addViolation(
         violations,

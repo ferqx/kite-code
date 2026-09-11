@@ -2,7 +2,7 @@
 
 产品预期：[更新与连接](../../../docs/handbook/clients/web/guides/updates-and-connection.md)。唯一生产 adapter：[transport/client](../src/transport/client.ts)。
 
-Browser adapter 只消费 browser-safe agent-api-client → agent-api-contract，不导入 Native、Host、Store、Protocol、SQLite 或 Service raw source。组件只消费本地 presentation type。
+Browser adapter 只消费 browser-safe agent-api-client → agent-api-contract，不导入 Native、Host、Store、Protocol、SQLite 或 Service raw source。Web 本地 presentation 经[页面投影](../src/presentation/page.ts)转换后交给共享 React 页面；组件不直接消费 REST DTO。
 
 同源 `/v1` 验证 browser principal 能力；workspaces 独立分页，首个 workspace 可预取 Sessions，其余展开读取。Session 选择读取 history 与 checkpoint metadata，logs 独立按需读取。
 
