@@ -22,7 +22,7 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 空间标题右侧的新对话按钮仅在端侧提供 `actions.newWorkspaceSession` 时显示；独立于展开按钮，调用已有项目选择流程，不自行创建会话。Composer 保持既有边界，聚焦不叠加描边；禁用原生 resize 手柄，输入使用 14 px Regular 与字体正常行高，避免空白新行的光标随固定行高放大。其他控件保留键盘焦点反馈。
 
-目录默认展示空间名称与会话标题；会话行最右侧用 Spinner 表示 `running`，用 Badge 文案“待用户输入”表示 `waiting` 或已有 `pendingInteractions`，后者优先。`idle` 与 `completed` 不显示行内状态。会话数量、完整状态和更新时间移入详情浮层。工作台继续按自己的汇总语境展示状态，不在空间名称后追加空闲或完成状态。宿主的提交中状态只禁用会发生冲突的操作，不传染为会话目录的视觉禁用；会话切换由宿主按目标 sessionId 保持消息归属。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应回归见 [共享目录测试](test/reading.test.tsx)和 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
+目录默认展示空间名称与会话标题；每个空间按会话 `updatedAt` 倒序排列后再分批展示；相同时间保持原有相对顺序，缺失或无效时间排在末尾，宿主提供新时间后重新排序。首次展开显示 5 条会话，末尾“展开更多”使用辅助文本色，每次追加展示 10 条，不足 10 条时展示剩余部分。收起该空间即重置为 5 条，其他空间的展开数量不受影响。展示数量由 Sidebar 的空间组件持有，复用宿主已有目录数据；端侧数据读取与后续页入口保持原有边界。会话行最右侧用 Spinner 表示 `running`，用 Badge 文案“待用户输入”表示 `waiting` 或已有 `pendingInteractions`，后者优先。`idle` 与 `completed` 不显示行内状态。会话数量、完整状态和更新时间移入详情浮层。工作台继续按自己的汇总语境展示状态，不在空间名称后追加空闲或完成状态。宿主的提交中状态只禁用会发生冲突的操作，不传染为会话目录的视觉禁用；会话切换由宿主按目标 sessionId 保持消息归属。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应回归见 [共享目录测试](test/reading.test.tsx)和 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
 
 ## 数据与权限
 

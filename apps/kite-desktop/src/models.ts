@@ -23,7 +23,9 @@ export async function saveProvider(
   input: ProviderInput,
   refresh: () => Promise<ProviderModelSnapshot>,
 ): Promise<void> {
-  let result: Awaited<ReturnType<KiteAppServerConnection['credential']['writeProviderCredential']>>;
+  let result:
+    | Awaited<ReturnType<KiteAppServerConnection['credential']['writeProviderCredential']>>
+    | undefined;
   try {
     result = await connection.credential.writeProviderCredential({
       schema: 'kite.local-runtime-credential-request.v1',
@@ -35,14 +37,22 @@ export async function saveProvider(
       ...(input.modelName.trim() ? { modelName: input.modelName.trim() } : {}),
     });
   } catch {
-    await refresh().catch(() => undefined);
-    throw new Error('配置提交结果未知。请刷新并检查当前配置，再决定是否重新保存。');
+    // A missing receipt cannot be resolved by a later read. Never replay the write.
+    result = undefined;
   } finally {
     input.apiKey = '';
   }
-  await refresh();
-  if (result.outcome === 'outcome_unknown')
-    throw new Error('配置提交结果未知。已查询当前配置，请检查后再决定是否重新保存。');
+  const refreshed = await refresh().then(
+    () => true,
+    () => false,
+  );
+  if (!result || result.outcome === 'outcome_unknown')
+    throw new Error(
+      refreshed
+        ? '配置提交结果未知。已查询当前配置，请检查后再决定是否重新保存。'
+        : '配置提交结果未知，刷新配置也未成功。请刷新并检查当前配置，再决定是否重新保存。',
+    );
   if (result.outcome !== 'applied')
     throw new Error(errors[result.errorCode ?? ''] ?? '配置未保存，请检查当前状态。');
+  if (!refreshed) throw new Error('配置已保存，但刷新失败。请刷新配置后选择模型，无需重复保存。');
 }

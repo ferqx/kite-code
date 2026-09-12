@@ -13,6 +13,11 @@ const disclosureClosedIcon = new URL('./assets/disclosure-closed.svg', import.me
 const avatarIcon = new URL('./assets/avatar-local.svg', import.meta.url).href;
 const ellipsisIcon = new URL('./assets/ellipsis.svg', import.meta.url).href;
 
+function updatedTime(value?: string) {
+  const time = Date.parse(value ?? '');
+  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+}
+
 export function sessionTime(value?: string) {
   if (!value) return '';
   const date = new Date(value);
@@ -45,9 +50,12 @@ function Workspace({
   onNewSession?: (workspaceId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(props.defaultExpanded ?? workspace.state === 'loaded');
+  const [visibleCount, setVisibleCount] = useState(5);
   const list = useRef<HTMLElement>(null);
   const id = useId();
-  const sessions = workspace.sessions;
+  const sessions = [...workspace.sessions]
+    .sort((a, b) => updatedTime(b.updatedAt) - updatedTime(a.updatedAt))
+    .slice(0, visibleCount);
   return (
     <section className="workspace-group">
       <Tooltip>
@@ -59,6 +67,7 @@ function Workspace({
               aria-controls={id}
               onClick={() => {
                 setExpanded(!expanded);
+                if (expanded) setVisibleCount(5);
                 if (!expanded && workspace.state === 'idle') props.onExpand?.(workspace.id);
               }}
             >
@@ -165,6 +174,15 @@ function Workspace({
               </Tooltip>
             );
           })}
+          {workspace.sessions.length > visibleCount && (
+            <Button
+              variant="ghost"
+              className="session-row session-load-more"
+              onClick={() => setVisibleCount((count) => count + 10)}
+            >
+              展开更多
+            </Button>
+          )}
           {!sessions.length && workspace.state === 'loaded' && (
             <p className="empty-list">还没有会话。</p>
           )}

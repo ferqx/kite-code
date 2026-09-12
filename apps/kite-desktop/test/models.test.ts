@@ -110,3 +110,61 @@ test('credential rejection does not masquerade as a successful configuration', a
     ),
   ).rejects.toThrow('拒绝了密钥');
 });
+
+test.each([
+  ['outcome_unknown', '配置提交结果未知'],
+  ['rejected', '拒绝了密钥'],
+  ['applied', '配置已保存，但刷新失败'],
+] as const)('a failed refresh preserves the %s write outcome', async (outcome, expected) => {
+  const value = input();
+  let writes = 0;
+  let reads = 0;
+  await expect(
+    saveProvider(
+      {
+        credential: {
+          async writeProviderCredential(request) {
+            writes++;
+            return {
+              schema: 'kite.local-runtime-credential-result.v1',
+              operation: request.operation,
+              mutationId: request.mutationId,
+              outcome,
+              ...(outcome === 'rejected' ? { errorCode: 'credential_unavailable' as const } : {}),
+            };
+          },
+        },
+      },
+      value,
+      async () => {
+        reads++;
+        expect(value.apiKey).toBe('');
+        throw new Error('snapshot transport failed');
+      },
+    ),
+  ).rejects.toThrow(expected);
+  expect(writes).toBe(1);
+  expect(reads).toBe(1);
+});
+
+test('a lost write response releases the secret before querying recovery state', async () => {
+  const value = input();
+  let secretDuringRefresh: string | undefined;
+  await expect(
+    saveProvider(
+      {
+        credential: {
+          async writeProviderCredential() {
+            throw new Error('lost receipt');
+          },
+        },
+      },
+      value,
+      async () => {
+        secretDuringRefresh = value.apiKey;
+        throw new Error('snapshot unavailable');
+      },
+    ),
+  ).rejects.toThrow('配置提交结果未知');
+  expect(secretDuringRefresh).toBe('');
+});

@@ -11,7 +11,7 @@ import {
   createMockModelServer,
   type MockResponse,
 } from '../../../tests/tui-system/harness/fixtures';
-import { DesktopClient } from '../src/client';
+import { CommandResultUnknown, DesktopClient } from '../src/client';
 import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 // Real Service, with response gates at the renderer IPC boundary. No private client state is patched.
@@ -45,6 +45,8 @@ async function fixture(responses: MockResponse[] = []) {
   let nextSubscriptionGate: ReturnType<typeof gate> | undefined;
   let nextFailure: 'temporary' | 'unauthorized' | 'missing' | undefined;
   let nextGate: ReturnType<typeof gate> | undefined;
+  let nextCreationGate: ReturnType<typeof gate> | undefined;
+  const lostCreations = new Set<unknown>();
   const allGates: ReturnType<typeof gate>[] = [];
   const gated = new Map<unknown, ReturnType<typeof gate>>();
   const failures = new Map<unknown, NonNullable<typeof nextFailure>>();
@@ -101,6 +103,15 @@ async function fixture(responses: MockResponse[] = []) {
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
       if (
+        message.method === 'runtime/command' &&
+        message.params?.command?.type === 'create_session' &&
+        nextCreationGate
+      ) {
+        gated.set(message.id, nextCreationGate);
+        lostCreations.add(message.id);
+        nextCreationGate = undefined;
+      }
+      if (
         (nextLiveFailure === 'projection' &&
           message.method === 'runtime/query' &&
           message.params.query.type === 'get_session_projection') ||
@@ -135,6 +146,16 @@ async function fixture(responses: MockResponse[] = []) {
         waiting.arrive();
         await waiting.released;
       }
+      if (lostCreations.delete(message.id))
+        return JSON.stringify({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32603,
+            message: 'fixture lost creation receipt',
+            data: { code: 'internal_error' },
+          },
+        }) as T;
       const failure = failures.get(message.id);
       if (failure) {
         failures.delete(message.id);
@@ -187,6 +208,11 @@ async function fixture(responses: MockResponse[] = []) {
       allGates.push(nextGate);
       return nextGate;
     },
+    holdUnknownCreation() {
+      nextCreationGate = gate();
+      allGates.push(nextCreationGate);
+      return nextCreationGate;
+    },
     async close() {
       for (const pending of allGates) pending.release();
       for (const pending of gated.values()) pending.release();
@@ -217,6 +243,71 @@ async function waitFor(check: () => boolean) {
     await Bun.sleep(10);
   }
 }
+
+test.each([
+  false,
+  true,
+])('an unknown creation cannot replace a newer selection (return to original: %s)', async (returnToOriginal) => {
+  const f = await fixture();
+  try {
+    const held = f.holdUnknownCreation();
+    const creation = f.client.newSession().catch((error: unknown) => error);
+    await held.arrived;
+    const reading = f.client.selectSession(f.a);
+    const returning = returnToOriginal ? f.client.selectSession(f.b) : undefined;
+    held.release();
+    const error = await creation;
+    await Promise.all([reading, returning]);
+    expect(error).toBeInstanceOf(CommandResultUnknown);
+    if (!(error instanceof CommandResultUnknown)) throw new Error('Expected an unknown receipt');
+    expect(error.sessionId).toBeDefined();
+    const selected = returnToOriginal ? f.b : f.a;
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected,
+      projection: { sessionId: selected },
+      ready: true,
+      hasLoadedHistory: true,
+    });
+    await f.client.refreshSessions();
+    expect(
+      f.client.getSnapshot().sessions.filter((s) => s.sessionId === error.sessionId),
+    ).toHaveLength(1);
+    expect(f.client.getSnapshot().selected).toBe(selected);
+    f.model.assertComplete();
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('an unknown creation detaches the previous reading subscription without stopping its run', async () => {
+  const f = await fixture([
+    { message: { content_chunks: ['first ', 'later ', 'finished'] }, chunk_delay: 200 },
+  ]);
+  try {
+    await f.client.send('Keep running while a new conversation is created.');
+    await waitFor(() => f.client.getSnapshot().messages.some((m) => m.role === 'assistant'));
+    const held = f.holdUnknownCreation();
+    const creation = f.client.newSession().catch((error: unknown) => error);
+    await held.arrived;
+    held.release();
+    const error = await creation;
+    if (!(error instanceof CommandResultUnknown)) throw new Error('Expected an unknown receipt');
+    expect(f.client.getSnapshot().selected).toBe(error.sessionId);
+    await Bun.sleep(800);
+    expect(f.client.getSnapshot().messages).toEqual([]);
+    expect(f.client.getSnapshot().ready).toBe(false);
+    await f.client.selectSession(f.b);
+    await waitFor(() =>
+      f.client.getSnapshot().messages.some((m) => m.role === 'assistant' && m.settled),
+    );
+    expect(f.client.getSnapshot().messages.find((m) => m.role === 'assistant')?.text).toBe(
+      'first later finished',
+    );
+    f.model.assertComplete();
+  } finally {
+    await f.close();
+  }
+}, 20_000);
 
 test('cached empty history appears before calibration and duplicate selections share one request', async () => {
   const f = await fixture();

@@ -946,6 +946,13 @@ test('200 rows support keyboard navigation without search or a background reorde
   const first = document.querySelector<HTMLButtonElement>('.session-row')!;
   await act(() => first.focus());
   await key(first, 'End');
+  expect(document.activeElement?.textContent).toBe('展开更多');
+  await key(document.activeElement!, 'ArrowUp');
+  expect(document.activeElement?.textContent).toContain('工作 4');
+  expect(document.querySelectorAll('.session-row:not(.session-load-more)')).toHaveLength(5);
+  for (let page = 0; page < 20; page++) await click(button('展开更多'));
+  await act(() => first.focus());
+  await key(first, 'End');
   expect(document.activeElement?.textContent).toContain('工作 199');
   expect(client.selectedIds).toEqual([]);
   await key(document.activeElement!, 'Enter');
@@ -1121,6 +1128,88 @@ test('question and truncated plan stay above the composer without enabling inval
   expect(input().value).toBe('保留会话草稿');
 });
 
+test.each([
+  'input',
+  'plan_review',
+] as const)('%s drafts survive navigation and failures without leaking to another interaction', async (kind) => {
+  const client = new UiClient();
+  const interaction =
+    kind === 'input'
+      ? {
+          kind,
+          interactionId: 'draft-question',
+          sessionRevision: 1,
+          question: '请补充要求',
+          allowFreeText: true,
+        }
+      : {
+          kind,
+          interactionId: 'draft-plan',
+          sessionRevision: 1,
+          plan: { planId: 'p', version: 1, structuralDigest: 'digest' },
+          review: { text: '完整计划', truncated: false },
+        };
+  const first = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    interactionQueue: {
+      revision: 1,
+      activeInteractionId: interaction.interactionId,
+      interactions: [interaction],
+    },
+  } as RuntimeSessionProjection;
+  client.view = {
+    ...client.view,
+    projection: first,
+    sessions: [first, { ...first, sessionId: 's1', displayName: '另一个问题' }],
+  };
+  client.respondInput = async () => {
+    throw new Error('回答提交失败');
+  };
+  client.respondPlan = async () => {
+    throw new Error('计划提交失败');
+  };
+  await render(<App client={client} />);
+  const label = kind === 'input' ? '回答问题' : '计划修改要求';
+  const answer = () => document.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
+  await write(answer(), '先核对现有文档，再提供完整的复现步骤。');
+  await write(input(), '主输入框草稿');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(answer().value).toBe('');
+  await write(answer(), '另一会话的回答');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
+  expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
+  expect(input().value).toBe('主输入框草稿');
+  await click(button(kind === 'input' ? '提交回答' : '提交修改要求'));
+  expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
+  await click(button('工作台'));
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
+  expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
+  const next = { ...interaction, interactionId: 'next-interaction' };
+  await act(() =>
+    client.update({
+      projection: {
+        ...first,
+        interactionQueue: {
+          revision: 2,
+          activeInteractionId: next.interactionId,
+          interactions: [next],
+        },
+      },
+    }),
+  );
+  expect(answer().value).toBe('');
+  await act(() => client.update({ projection: first }));
+  expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
+  client.respondInput = async () => {};
+  client.respondPlan = async () => {};
+  await click(button(kind === 'input' ? '提交回答' : '提交修改要求'));
+  expect(answer().value).toBe('');
+  expect(input().value).toBe('主输入框草稿');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(answer().value).toBe('另一会话的回答');
+});
+
 test('file changes open beside the conversation, keep drafts and close before switching sessions', async () => {
   const client = new UiClient();
   client.view.messages = [
@@ -1214,4 +1303,28 @@ test('settings consumes MCP and Skill facts and issues only an explicit MCP acti
   await click(button('Skills'));
   expect(document.querySelector('.extension-card')?.textContent).toContain('检查已有实现');
   expect(document.body.textContent).not.toContain('安装 Skill');
+});
+
+test('opening a projection without updatedAt preserves the directory time and sorted position', async () => {
+  const client = new UiClient(2);
+  const latest = { ...client.view.sessions[0]!, updatedAt: '2026-09-12T10:00:00Z' };
+  const older = { ...client.view.sessions[1]!, updatedAt: '2026-09-11T10:00:00Z' };
+  client.view.directory = [older, latest];
+  client.view.sessions = [older, latest];
+  client.selectSession = async (id: string) => {
+    const { updatedAt: _, ...projection } = { ...latest, revision: 2 };
+    client.update({
+      selected: id,
+      sessions: [older, projection],
+      projection: projection as RuntimeSessionProjection,
+      messages: [],
+    });
+  };
+  await render(<App client={client} />);
+  const titles = () =>
+    Array.from(document.querySelectorAll('.session-row strong')).map((row) => row.textContent);
+  expect(titles()).toEqual(['工作 0', '工作 1']);
+  await click(button('工作 0'));
+  expect(titles()).toEqual(['工作 0', '工作 1']);
+  expect(client.view.directory[1]?.updatedAt).toBe('2026-09-12T10:00:00Z');
 });

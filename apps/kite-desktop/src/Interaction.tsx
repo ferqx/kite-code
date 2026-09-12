@@ -2,7 +2,6 @@ import type {
   RuntimeInputInteraction,
   RuntimePlanReviewInteraction,
 } from '@kite-ai/runtime-contract';
-import { useState } from 'react';
 import type { DesktopClient } from './client';
 
 export function Interaction({
@@ -10,15 +9,18 @@ export function Interaction({
   sessionId,
   interaction,
   disabled,
+  text,
+  onTextChange,
   act,
 }: {
   client: DesktopClient;
   sessionId: string;
   interaction: RuntimeInputInteraction | RuntimePlanReviewInteraction;
   disabled: boolean;
+  text: string;
+  onTextChange: (text: string) => void;
   act: (action: () => Promise<unknown>) => Promise<void>;
 }) {
-  const [text, setText] = useState('');
   return (
     <section className="notice" aria-label={interaction.kind === 'input' ? '补充问题' : '计划审核'}>
       <strong>
@@ -49,7 +51,7 @@ export function Interaction({
               <textarea
                 aria-label="回答问题"
                 value={text}
-                onChange={(event) => setText(event.target.value)}
+                onChange={(event) => onTextChange(event.target.value)}
                 disabled={disabled}
                 maxLength={8192}
               />
@@ -107,7 +109,7 @@ export function Interaction({
           <textarea
             aria-label="计划修改要求"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => onTextChange(event.target.value)}
             disabled={disabled}
             maxLength={8192}
           />

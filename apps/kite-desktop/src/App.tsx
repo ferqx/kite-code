@@ -97,6 +97,7 @@ export function App({ client }: { client: DesktopClient }) {
     projection?.interactionQueue.interactions.find(
       (item) => item.interactionId === projection?.interactionQueue.activeInteractionId,
     );
+  const interactionDraftKey = `${draftKey}\0interaction:${interaction ? interaction.interactionId : ''}`;
   const act = useCallback(
     async (action: () => Promise<unknown>) => {
       if (busyRef.current) return;
@@ -329,7 +330,7 @@ export function App({ client }: { client: DesktopClient }) {
       lifecycle: current.lifecycle,
       currentRun: current.currentRun,
       interactionQueue: current.interactionQueue,
-      updatedAt: current.updatedAt,
+      updatedAt: current.updatedAt ?? session.updatedAt,
     };
   });
   if (startup !== 'ready')
@@ -556,7 +557,20 @@ export function App({ client }: { client: DesktopClient }) {
             sessionId={selected}
             interaction={interaction}
             disabled={busy || !ready || loadingSession || stopping}
-            act={act}
+            text={drafts[interactionDraftKey] ?? ''}
+            onTextChange={(text) =>
+              setDrafts((values) => ({ ...values, [interactionDraftKey]: text }))
+            }
+            act={(action) =>
+              act(async () => {
+                await action();
+                setDrafts((values) => {
+                  const next = { ...values };
+                  delete next[interactionDraftKey];
+                  return next;
+                });
+              })
+            }
           />
         ) : (
           !workbenchView &&

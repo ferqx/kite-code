@@ -24,6 +24,10 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 ## 消息与交互
 
+补充问题的自由回答和计划修改意见与主输入草稿共用 App 的进程内草稿 owner，额外按 interactionId 隔离。切换会话、进入新对话或工作台再返回时恢复同一交互的输入；不同会话和下一道问题不沿用旧回答。提交失败保留原文，成功回答、反馈或取消后只清理对应交互草稿，不清理主输入和其他会话草稿。Interaction 只消费受控文本，不再将草稿放在随导航卸载的组件内。完整页面刷新与应用退出后的恢复不在此承诺范围。
+
+Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后读取的结果；刷新失败不覆盖明确拒绝或未知写入结果，已确认写入则提示仅刷新配置。所有路径均在写入结束后、刷新开始前清空临时密钥，不重放写入。[配置回归](../test/models.test.ts)覆盖回执丢失、明确未知、拒绝和已保存与刷新失败的组合；实际配置和继续任务另由真实 Service 的[开发闭环测试](../test/development.test.ts)验证。
+
 [投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留结构化参数、stdout/stderr、明确失败／拒绝／取消和文件证据，默认折叠长输出；退出码只在 Shell 的真实结果中显示。
 
 子代理保留服务提供的名称、状态、结果和稳定 stepId。存在 `parentToolCallId` 且父工具可见时显示在父工具下；否则保留明确来源的独立摘要，不按邻近模型回复猜测父关系。当前没有独立子代理详情或子代理控制。审批回执表达命令已批准或已拒绝；批准不等于工具成功，工具终态仍独立显示。
@@ -55,6 +59,8 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 ## 设计功能同步
 
+2026-09-12 交互草稿与导航回执核对：浏览器使用生产 App 和隔离数据复现并确认补充回答在切换后恢复；760 × 540 下 Tab 可到达提交按钮，交互区滚动不遮挡主输入与停止。草稿隔离、失败保留和成功清理规则已原位同步至 [Figma 计划与问题样例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4208-578)的交互注释；迟到创建回执不得覆盖更新阅读选择的规则同步至[日常会话侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)与[新会话侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4096-1965)。注释已回读确认，没有改变 Figma 页面结构，也不宣称静态原型实现了运行时草稿存储。命令和旧订阅隔离由[真实 Service 回归](../test/session-calibration.test.ts)验证；本轮未复验 Electron 原生窗口。
+
 2026-09-12 Electron 原生标题栏同步：真实 `hiddenInset` 窗口验证后，侧栏 header 保持 52 px 高，交通灯使用宿主配置的 x=13、y=19，kite 标识从 x=80 开始，32 px 收起按钮位于 x=188、y=10；不再对 header 内容附加向上位移。[Figma Sidebar 主组件](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4025-18427)已原位同步，[日常任务画面的实例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)继承相同标题区，新对话入口从 y=60 开始。主组件 metadata 与两处页面上下文渲染均核对通过；Figma 的隔离实例导出会漏掉越过实例左边界的继承层，不作为页面视觉证据。
 
 连续的 `read_file`、`search_content`、`search_files` 与 `read_mcp_resource` 使用共享[探索记录](../../../packages/kite-client-ui/src/ToolExploration.tsx)，沿用 TUI 聚合思路。只合并相邻且类型明确的只读记录，不跨正文、独立命令或子代理父工具边界；摘要统计操作次数，避免把重复读取称为不同文件。进行中默认展示最近 5 项，可展开全部；完成后默认折叠，用户主动展开／收起优先并随阅读状态保留。失败、拒绝或取消不会被统计为全部成功；明细保留参数、输出和路径。Web Public History 缺少明确工具类型时保留独立记录，不从 label 推导类型。
@@ -62,3 +68,7 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 子代理继续复用正文样式并保留来源、真实状态及已取得步骤；没有发送／接收事实时不宣称“已收到”，不提供没有独立历史接口支撑的详情导航。文件变更的右侧副层见[文件与编辑器](results-and-editor.md)，MCP／Skills 设置接入见[扩展设置](extensions.md)。
 
 2026-09-09 本轮通过共享 UI 7 项、桌面 24 项、Web 13 项及 Service 扩展 owner 5 项回归。HTML 测试数据预览核对桌面 1440 × 960／760 × 540 副层开关、Esc 焦点返回、输入可达与设置分类；Web 390 × 844 无横向溢出，点击即进入且不提供输入、文件副层或扩展管理。窗口改变的初始化监听同步当前媒体查询，避免挂载时遗漏尺寸变化。类型、构建与边界检查通过；本轮没有更新原生窗口、系统输入法或真实 MCP 认证资格。
+
+2026-09-12 空间列表分批展示：共享侧栏默认显示 5 条，点击“展开更多”每次追加 10 条，收起空间重置；浏览器以 28 条隔离会话核对默认数量、追加与重置，按钮计算颜色为辅助色 `#666`。共享和桌面回归覆盖空间隔离、尾页与键盘导航。Figma 的[日常侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)、[工作台侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20967)和[新对话侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4096-1965)已保存分页交互注释，共享组件的底部展开控件已回读确认；新增的三条示例会话在最终回读中缺失，因此五条默认会话的视觉同步与最终渲染复核尚未完成，不能以此前截图认定设计同步全部通过。
+
+会话列表按更新时间倒序排序后再分批展示；相同时间保持输入顺序，缺失或无效时间排在末尾。2026-09-12 已将排序规则追加到上述三个 Figma 侧栏的分页注释并回读确认，本次仅同步交互语义；上一段的五条示例会话视觉同步限制仍保留。对应共享目录测试覆盖时区换算、同时间顺序、更新时间变化以及排序后的展开与重置。

@@ -448,3 +448,105 @@ test('exploration stays on its side of replies and preserves explicit user foldi
   expect(first.getAttribute('aria-expanded')).toBe('false');
   expect(document.querySelectorAll('.exploration-summary')[1]?.textContent).toContain('读取 2 次');
 });
+
+test('workspace sessions reveal five then ten at a time and reset independently on collapse', async () => {
+  const sessions = Array.from({ length: 28 }, (_, index) => ({
+    sessionId: `session-${index}`,
+    displayName: `会话 ${index + 1}`,
+    status: 'idle',
+  }));
+  await render(
+    <Sidebar
+      workspaces={[
+        { id: 'a', label: '空间 A', sessions, sessionCount: 28, state: 'loaded' },
+        { id: 'b', label: '空间 B', sessions, sessionCount: 28, state: 'loaded' },
+        {
+          id: 'c',
+          label: '空间 C',
+          sessions: sessions.slice(0, 5),
+          sessionCount: 5,
+          state: 'loaded',
+        },
+      ]}
+      actions={{}}
+      connectionLabel=""
+      onOpen={() => {}}
+    />,
+  );
+  const groups = Array.from(document.querySelectorAll<HTMLElement>('.workspace-group'));
+  const rows = (index: number) =>
+    groups[index]!.querySelectorAll('.session-row:not(.session-load-more)');
+  const more = () => groups[0]!.querySelector<HTMLButtonElement>('.session-load-more')!;
+  expect(rows(0)).toHaveLength(5);
+  expect(rows(1)).toHaveLength(5);
+  expect(groups[2]!.querySelector('.session-load-more')).toBeNull();
+  await click(more());
+  expect(rows(0)).toHaveLength(15);
+  expect(rows(1)).toHaveLength(5);
+  await click(more());
+  expect(rows(0)).toHaveLength(25);
+  await click(more());
+  expect(rows(0)).toHaveLength(28);
+  expect(more()).toBeNull();
+  await click(button('空间 A'));
+  expect(groups[0]!.querySelector('.sidebar-sessions')?.hasAttribute('hidden')).toBe(true);
+  await click(button('空间 A'));
+  expect(rows(0)).toHaveLength(5);
+  expect(more().textContent?.trim()).toBe('展开更多');
+  await click(more());
+  expect(rows(0)).toHaveLength(15);
+});
+
+test('workspace sorts by latest timestamp before paging and responds to updated directory data', async () => {
+  const sessions = [
+    { sessionId: 'missing', displayName: '缺少时间', status: 'idle' },
+    ...Array.from({ length: 7 }, (_, index) => ({
+      sessionId: `s${index}`,
+      displayName: `会话 ${index}`,
+      status: 'idle',
+      updatedAt: `2026-09-12T0${index}:00:00Z`,
+    })),
+    {
+      sessionId: 'tie',
+      displayName: '相同时间',
+      status: 'idle',
+      updatedAt: '2026-09-12T14:00:00+08:00',
+    },
+    { sessionId: 'invalid', displayName: '无效时间', status: 'idle', updatedAt: 'invalid' },
+  ];
+  const original = sessions.map((session) => session.sessionId);
+  const page = () => (
+    <Sidebar
+      workspaces={[
+        { id: 'a', label: '空间', sessions, sessionCount: sessions.length, state: 'loaded' },
+      ]}
+      actions={{}}
+      connectionLabel=""
+      onOpen={() => {}}
+    />
+  );
+  const titles = () =>
+    Array.from(document.querySelectorAll('.session-row strong')).map((row) => row.textContent);
+  await render(page());
+  expect(titles()).toEqual(['会话 6', '相同时间', '会话 5', '会话 4', '会话 3']);
+  await click(button('展开更多'));
+  expect(titles()).toEqual([
+    '会话 6',
+    '相同时间',
+    '会话 5',
+    '会话 4',
+    '会话 3',
+    '会话 2',
+    '会话 1',
+    '会话 0',
+    '缺少时间',
+    '无效时间',
+  ]);
+  expect(sessions.map((session) => session.sessionId)).toEqual(original);
+  sessions[1] = { ...sessions[1]!, updatedAt: '2026-09-13T00:00:00Z' };
+  await act(() => root!.render(page()));
+  expect(titles()[0]).toBe('会话 0');
+  await click(button('空间'));
+  await click(button('空间'));
+  expect(titles()).toEqual(['会话 0', '会话 6', '相同时间', '会话 5', '会话 4']);
+});

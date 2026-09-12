@@ -744,6 +744,9 @@ export class DesktopClient {
   }
   async newSession(): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
+    const connection = this.#requireConnection();
+    const selection = this.#selection;
+    const selected = this.#view.selected;
     const sessionId = crypto.randomUUID();
     try {
       await this.#command({
@@ -756,13 +759,24 @@ export class DesktopClient {
     } catch (error) {
       if (error instanceof CommandResultUnknown) {
         error.sessionId = sessionId;
-        this.#publish({
-          selected: sessionId,
-          messages: [],
-          projection: undefined,
-          ready: false,
-          hasLoadedHistory: false,
-        });
+        // A late receipt belongs to this creation, not to a newer reading selection.
+        if (
+          this.#connection === connection &&
+          this.#selection === selection &&
+          this.#view.selected === selected
+        ) {
+          this.#selection?.abort();
+          this.#selectionLoad = undefined;
+          this.#calibratedSelection = undefined;
+          this.#publish({
+            selected: sessionId,
+            messages: [],
+            projection: undefined,
+            ready: false,
+            loadingSession: false,
+            hasLoadedHistory: false,
+          });
+        }
       }
       throw error;
     }

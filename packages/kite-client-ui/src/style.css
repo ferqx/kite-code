@@ -265,6 +265,10 @@ body {
   .session-row.selected {
     background: var(--sidebar-accent);
   }
+  .session-load-more {
+    justify-content: flex-start;
+    color: var(--muted-foreground);
+  }
   .empty-list {
     font-size: inherit;
     color: var(--muted-foreground);
