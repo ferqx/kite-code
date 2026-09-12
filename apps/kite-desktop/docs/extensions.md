@@ -8,6 +8,6 @@ MCP 展示真实来源、配置状态、健康状态、认证状态、安全连�
 
 Skills 只展示实际目录中的名称、描述、来源、available／disabled／invalid 与诊断。当前没有安装接口，因此不提供安装按钮，也不把目录中的可用状态解释为任务已经使用该 Skill。MCP 添加、移除、启停、项目来源批准和专用模型诊断本轮未接入；没有不可用按钮占位。
 
-Web 只读入口不提供这组 App Control 操作；共享页面不因此扩大 Browser principal 权限。本轮未新增协议、IPC、配置存储或凭据 owner。
+Web 只读入口不提供这组 App Control 操作；共享页面不因此扩大 Browser principal 权限。扩展功能沿用既有 App Control、配置存储与凭据 owner；Electron 迁移只把桌面调用接到具名 preload bridge，没有新增业务协议或凭据 authority。
 
-验证：[桌面 UI](../test/ui.test.tsx)核对真实状态展示、显式认证按钮及安装入口缺席；[协议导航回归](../test/navigation.test.ts)连接真实 App Server，核对两类快照、操作拒绝、丢失回执不重放和项目隔离；Service 的 [MCP owner](../../kite-service/test/isolated/app-control/mcp-owner.test.ts)与 [Skill owner](../../kite-service/test/isolated/app-control/skill-catalog-owner.test.ts)覆盖 CAS、动作分发、未知结果及目录隔离。HTML 测试数据预览不证明真实外部 Server 或新桌面入口已完成系统认证；既有包内 OAuth 原生证据见[原生验收](native-validation.md)。
+验证：[桌面 UI](../test/ui.test.tsx)核对真实状态展示、显式认证按钮及安装入口缺席；[协议导航回归](../test/navigation.test.ts)连接真实 App Server，核对两类快照、操作拒绝、丢失回执不重放和项目隔离；Service 的 [MCP owner](../../kite-service/test/isolated/app-control/mcp-owner.test.ts)与 [Skill owner](../../kite-service/test/isolated/app-control/skill-catalog-owner.test.ts)覆盖 CAS、动作分发、未知结果及目录隔离。HTML 测试数据预览不证明真实外部 Server 或 Electron 窗口已完成系统认证；[原生验收](native-validation.md)中的包内 OAuth 结果属于迁移前 Tauri 与配套 Service 的历史证据，不能替代 Electron 认证流程验收。

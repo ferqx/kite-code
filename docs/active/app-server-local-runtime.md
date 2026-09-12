@@ -2,20 +2,21 @@
 
 状态：active
 
-读取时机：修改TUI/CLI本机连接、App Server进程、Session Store fencing、显式daemon/Web、profile或release升级语义时。
+读取时机：修改TUI/CLI/Electron桌面本机连接、App Server进程、Session Store fencing、显式daemon/Web、profile或release升级语义时。
 
 验证：`bun run typecheck`、`bun test tests/release/app-server-client.test.ts tests/release/app-server-daemon.test.ts`、
-`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
+`bun run --cwd apps/kite-desktop test`、`bun run test:desktop:native`、`bun run release:build`、`bun run release:verify`、
+`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
 ## 当前拓扑
 
-开发中的 [Tauri 桌面客户端](../../apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Rust 持有 stdio 进程，WebView 复用环境无关 TypeScript client；当前已通过阶段 0 本机原生验收，后续开发和发布仍按[计划](../plans/desktop-client.md)推进。下图列出既有正式入口。
+开发中的 [Electron 桌面客户端](../../apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Electron main 持有 stdio 进程，沙箱 renderer 通过冻结的具名 preload bridge 复用环境无关 TypeScript client。host 与 renderer 构建和分层测试已经接入，packaged 原生窗口已通过[本机自动验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)；迁移前 Tauri 的阶段 0 结果不自动成为 Electron 资格。下图列出既有正式入口。
 
-桌面宿主在编译时固定已验证 candidate 的 build ID、服务摘要及 release owner 提供的环境变量名白名单；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。debug 使用现有 checkout digest 规则隔离 source profile，打包版使用用户 canonical profile；数据目录校验类型、owner 并限制为私有权限。其 Rust carrier 的队列、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
+`prepare:service` 复用 release owner 验证 candidate，只提取当前目标的 stdio Service 与 `desktop.json`。`build:electron` 要求该清单存在，并把 candidate build ID、服务摘要、expected server version 与环境变量名白名单编入 main bundle；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。开发包使用现有 checkout digest 规则隔离 source profile，打包版使用用户 canonical profile；数据目录校验类型、owner 并限制为私有权限。Electron carrier 的单消费者、16 帧有界队列、1 MiB 帧、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
 
-macOS Cocoa Quit 通过原生 delegate 适配进入绑定主窗口的确认；确认后先关闭 stdin，清理完成才允许事件循环退出。重复退出请求不得提前取得退出许可；崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。
+Electron `before-quit` 进入绑定主窗口的确认；确认后先关闭 stdin，Service 清理完成才再次退出。重复退出请求不得提前取得退出许可；窗口关闭只隐藏应用。崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。上述生命周期仍须 packaged Electron 原生场景确认。
 
-桌面只读 `runtime_status` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtime_open` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。原生 renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；设计取舍见 [ADR-0181](../adr/0181-desktop-renderer-reattachment.md)。
+桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [ADR-0184](../adr/0184-electron-desktop-runtime-host.md)。
 
 桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；会话投影与订阅初始快照沿同一 Store 只读快照读取，不解析失效项目路径、不创建 Workspace context 或执行 authority。显式执行仍须激活与授权当前 Workspace，跨工作区命令被拒绝。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
 

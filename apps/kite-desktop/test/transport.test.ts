@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { type DesktopInvoke, desktopTransport } from '../src/transport';
+import type { DesktopRuntimeBridge } from '../src/transport';
+import { desktopTransport } from '../src/transport';
 
 const info = { connectionId: 7, workspace: '/project', expectedServerVersion: 'test' };
 const message = {
@@ -14,12 +15,19 @@ const message = {
 
 test('send failure detaches the renderer without stopping tasks or retrying an unknown mutation', async () => {
   const calls: string[] = [];
-  const invoke: DesktopInvoke = async <T>(command: string) => {
-    calls.push(command);
-    if (command === 'runtime_send') throw new Error('pipe broke');
-    return undefined as T;
+  const bridge: DesktopRuntimeBridge = {
+    async runtimeSend() {
+      calls.push('runtime_send');
+      throw new Error('pipe broke');
+    },
+    async runtimeReceive() {
+      throw new Error('not used');
+    },
+    async runtimeDetach() {
+      calls.push('runtime_detach');
+    },
   };
-  const connection = await desktopTransport(info, invoke).connect();
+  const connection = await desktopTransport(info, bridge).connect();
   await expect(connection.send(message)).rejects.toThrow();
   await connection.close();
   expect(calls).toEqual(['runtime_send', 'runtime_detach']);
@@ -30,9 +38,14 @@ test('late receive from a closed connection cannot reach the client', async () =
   const pending = new Promise<string>((done) => {
     resolve = done;
   });
-  const invoke: DesktopInvoke = async <T>(command: string) =>
-    (command === 'runtime_receive' ? await pending : undefined) as T;
-  const connection = await desktopTransport(info, invoke).connect();
+  const bridge: DesktopRuntimeBridge = {
+    async runtimeSend() {},
+    async runtimeReceive() {
+      return pending;
+    },
+    async runtimeDetach() {},
+  };
+  const connection = await desktopTransport(info, bridge).connect();
   const iterator = connection.messages()[Symbol.asyncIterator]();
   const received = iterator.next();
   await connection.close();

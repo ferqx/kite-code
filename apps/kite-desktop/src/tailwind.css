@@ -38,8 +38,19 @@ html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
   padding-block: 4px;
 }
 
-html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) > * {
-  transform: translateY(-5px);
+html[data-platform="macos"] .kite-client .app-header {
+  -webkit-app-region: drag;
+}
+
+html[data-platform="macos"]
+  .kite-client
+  .app-header
+  :is(button, a, input, select, textarea, label, summary, [role="button"], [role="link"]) {
+  -webkit-app-region: no-drag;
+}
+
+html[data-platform="macos"] .kite-client .sidebar-header {
+  padding-left: 80px;
 }
 
 html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-header {

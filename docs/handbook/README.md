@@ -25,7 +25,7 @@ Kite Code 帮助你在工作区内理解代码、执行任务、检查结果并�
 
 不同入口能力不同，见[能力对照](capabilities.md)。未来客户端不会因为共享产品名称就自动拥有 TUI 的操作或 Web 的限制。
 
-[Tauri 桌面客户端](clients/desktop/README.md)处于开发验证阶段，尚未作为正式入口发布；[首版计划](../plans/desktop-client.md)保留未交付能力和验收项。当前正式入口能力仍以上述手册为准。
+[Electron 桌面客户端](clients/desktop/README.md)处于开发验证阶段，尚未作为正式入口发布；[原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)记录当前宿主的本机自动验证与剩余范围，[首版计划](../plans/desktop-client.md)保留其余未交付能力。当前正式入口能力仍以上述手册为准，迁移前 Tauri 的历史原生结果不自动成为 Electron 资格。
 
 ## 功能全景
 

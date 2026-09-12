@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { runElectronPairedServiceSmoke } from '../../apps/kite-desktop/test/host-paired-service';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-smoke-')));
@@ -32,29 +33,13 @@ try {
     }),
     { mode: 0o600 },
   );
-  const child = Bun.spawn(
-    [
-      'cargo',
-      'test',
-      '--manifest-path',
-      resolve('apps/kite-desktop/src-tauri/Cargo.toml'),
-      '--test',
-      'paired_service',
-      '--',
-      '--ignored',
-      '--nocapture',
-    ],
-    {
-      env: { ...process.env, KITE_DESKTOP_SMOKE_HOME: home },
-      stdout: 'inherit',
-      stderr: 'inherit',
-    },
-  );
-  const exit = await child.exited;
-  if (exit !== 0) throw new Error(`Rust paired service smoke failed (${exit}).`);
+  const result = await runElectronPairedServiceSmoke({
+    home,
+    workspace: join(home, 'workspace'),
+  });
   model.assertComplete();
   console.log(
-    'Desktop Rust transport: renderer reattachment during streaming, durable history, active EOF cleanup and successor read passed. No external Provider was used.',
+    `Desktop Electron transport: renderer reattachment during streaming, durable history, active EOF cleanup and successor read passed (${Math.round(result.startupMilliseconds)}ms to initial directory). No external Provider was used.`,
   );
 } finally {
   model.stop();

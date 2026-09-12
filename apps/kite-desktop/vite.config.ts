@@ -4,6 +4,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  base: './',
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   build: { target: 'es2022' },

@@ -22,27 +22,19 @@ import type {
   RuntimePlanReviewInteraction,
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
-import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import type {
+  BranchSnapshot,
+  DesktopConfirmOptions,
+  DesktopProject,
+  DesktopRuntimeStatus,
+  KiteDesktopBridge,
+} from './bridge';
 import { type ProviderInput, saveProvider } from './models';
 import { isActiveRun, type Message, projectEvent } from './presentation';
-import { type DesktopConnectionInfo, type DesktopInvoke, desktopTransport } from './transport';
+import { type DesktopConnectionInfo, desktopTransport } from './transport';
 
-export interface DesktopProject {
-  path: string;
-  directoryMissing?: boolean;
-  lastOpenedAt: number;
-}
-export interface BranchSnapshot {
-  workspace: string;
-  repository: boolean;
-  root: string | null;
-  current: string | null;
-  head: string | null;
-  branches: readonly string[];
-  dirty: boolean;
-  canSwitch: boolean;
-}
+export type { BranchSnapshot, DesktopProject } from './bridge';
+
 class CommandResultUnknown extends Error {}
 
 export type DesktopSessionSummary = Pick<
@@ -83,9 +75,9 @@ export interface DesktopView {
 }
 
 export class DesktopClient {
-  private readonly call: DesktopInvoke;
-  constructor(call: DesktopInvoke = invoke) {
-    this.call = call;
+  readonly #bridge?: KiteDesktopBridge;
+  constructor(bridge?: KiteDesktopBridge) {
+    this.#bridge = bridge;
   }
 
   #view: DesktopView = {
@@ -119,10 +111,16 @@ export class DesktopClient {
       this.#listeners.delete(listener);
     };
   };
+  #native() {
+    const bridge = this.#bridge ?? (typeof window === 'undefined' ? undefined : window.kiteDesktop);
+    if (!bridge) throw new Error('Desktop 宿主接口不可用。');
+    return bridge;
+  }
   handleHeaderMouseDown(clickCount: 1 | 2) {
-    return clickCount === 2
-      ? invoke<void>('animated_toggle_maximize')
-      : getCurrentWindow().startDragging();
+    return clickCount === 2 ? this.#native().toggleWindowMaximize() : Promise.resolve();
+  }
+  confirm(options: DesktopConfirmOptions) {
+    return this.#native().showConfirm(options);
   }
   #publish(change: Partial<DesktopView>) {
     this.#view = { ...this.#view, ...change };
@@ -141,7 +139,7 @@ export class DesktopClient {
     if (selected) await this.activateProject(selected);
   }
   async refreshProjects() {
-    const projects = await this.call<DesktopProject[]>('list_projects');
+    const projects = await this.#native().listProjects();
     this.#publish({ projects });
   }
   hasNativeConnection() {
@@ -152,16 +150,14 @@ export class DesktopClient {
       await this.#workspacePreparation;
       return;
     }
-    const status = await this.call<{ workspace: string | null; connectionId: number | null }>(
-      'runtime_status',
-    );
+    const status: DesktopRuntimeStatus = await this.#native().runtimeStatus();
     if (this.getSnapshot().connected) return;
     this.#publish({ workspace: status.workspace ?? '' });
     await this.connect();
     await this.#workspacePreparation;
   }
   async pickProject() {
-    const path = await this.call<string | null>('pick_workspace');
+    const path = await this.#native().pickWorkspace();
     if (path) await this.refreshProjects();
     return path;
   }
@@ -169,7 +165,7 @@ export class DesktopClient {
     if (this.#connection) {
       if (this.#view.workspace !== path) throw new Error('请先断开当前项目。');
     } else {
-      await this.call<string>('activate_workspace', { path });
+      await this.#native().activateWorkspace(path);
       await this.refreshProjects();
       await this.connect();
     }
@@ -182,14 +178,14 @@ export class DesktopClient {
   }
   async checkProject(workspace: string) {
     // Native query validates the explicitly registered canonical directory without activating it.
-    return this.call<void>('check_workspace', { path: workspace });
+    return this.#native().checkWorkspace(workspace);
   }
   async refreshBranch() {
     const read = ++this.#branchRead;
     const workspace = this.#view.workspace;
     if (!workspace) return;
     try {
-      const branch = await this.call<BranchSnapshot>('query_workspace_branch', { workspace });
+      const branch = await this.#native().queryWorkspaceBranch(workspace);
       if (this.#view.workspace === workspace && read === this.#branchRead)
         this.#publish({ branch, branchError: undefined });
       return branch;
@@ -239,10 +235,7 @@ export class DesktopClient {
     this.#publish({ branch: undefined });
     let failure: unknown;
     try {
-      const branch = await this.call<BranchSnapshot>('switch_workspace_branch', {
-        expected: actual,
-        branch: name,
-      });
+      const branch = await this.#native().switchWorkspaceBranch(actual, name);
       this.#publish({ branch });
     } catch (error) {
       failure = error;
@@ -309,9 +302,9 @@ export class DesktopClient {
   async #connect() {
     const selected = this.#view.selected;
     await this.#detach();
-    const info = await this.call<DesktopConnectionInfo>('runtime_open');
+    const info: DesktopConnectionInfo = await this.#native().runtimeOpen();
     const connection = createAppServerProtocolConnection(
-      desktopTransport(info, this.call),
+      desktopTransport(info, this.#native()),
       info.expectedServerVersion,
       { name: 'kite-desktop', version: '0.1.0', instanceId: crypto.randomUUID() },
       KITE_APP_SERVER_PROTOCOL_METHODS_,
@@ -441,7 +434,7 @@ export class DesktopClient {
     this.#connectionId = undefined;
     this.#publish({ trust: undefined, models: undefined, mcp: undefined, skills: undefined });
     // Only an explicit project/branch switch or exit owns process shutdown.
-    if (connectionId !== undefined) await this.call<void>('runtime_close', { connectionId });
+    if (connectionId !== undefined) await this.#native().runtimeClose(connectionId);
   }
   #requireConnection() {
     if (this.#connection?.status !== 'active') throw new Error('请先连接项目。');
@@ -591,7 +584,7 @@ export class DesktopClient {
   }
   async openFile(path: string, editor: 'vscode' | 'zed' | 'textedit') {
     this.#requireConnection();
-    await this.call('open_editor', { connectionId: this.#connectionId, path, editor });
+    await this.#native().openEditor(this.#connectionId!, path, editor);
   }
   async refreshModels() {
     const read = ++this.#modelRead;

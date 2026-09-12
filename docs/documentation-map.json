@@ -941,7 +941,8 @@
       "id": "desktop-client",
       "sources": [
         "apps/kite-desktop/src/**",
-        "apps/kite-desktop/src-tauri/**",
+        "apps/kite-desktop/electron/**",
+        "apps/kite-desktop/scripts/**",
         "apps/kite-desktop/package.json",
         "apps/kite-desktop/vite.config.ts",
         "apps/kite-desktop/tsconfig.json",

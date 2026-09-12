@@ -1,5 +1,16 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "types": ["bun", "vite/client"] },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts"]
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "vite.config.ts",
+    "electron/**/*.ts",
+    "scripts/**/*.ts"
+  ]
 }

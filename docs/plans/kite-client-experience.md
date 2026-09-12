@@ -299,11 +299,13 @@ Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、
 
 本阶段已同步[桌面手册](../handbook/clients/desktop/README.md)与[desktop owner](../../apps/kite-desktop/README.md)，已交付事实归位，本文继续保留后续设计。过度设计检查通过；桌面测试 24 项通过，类型、构建、文档和相关边界检查通过，构建仍提示约 550 KB 的单包体积。
 
-此前设计轮次只修改设计稿和需求文档；第一阶段已将[两栏主界面](../../apps/kite-desktop/src/App.tsx)和 HTML 标题改为 kite。[原生窗口配置](../../apps/kite-desktop/src-tauri/tauri.conf.json)与安装包旧展示名仍待统一，不能据此改动存储、服务身份或安装标识。
+此前设计轮次只修改设计稿和需求文档；第一阶段已将[两栏主界面](../../apps/kite-desktop/src/App.tsx)和 HTML 标题改为 kite。当前 [Electron 窗口配置](../../apps/kite-desktop/electron/main.ts)与开发包也使用 kite 展示名；迁移继续复用原 `dev.kite-code.desktop` userData 目录、Service identity 与数据边界，展示名统一不改动这些 authority。
 
 桌面展示层负责布局、选择、展开、草稿和阅读位置；任务、Run、交互、子代理关系、工具记录、结果证据与连接状态继续沿 Runtime Client 和现有服务 owner 核实。工作台搜索、阅读位置保存和子代理详情需要的数据，在实际实现前查明生产来源、刷新和失败行为。通用日常任务的文件工作区与权限承载也需按具体流程实现，不能从画面中的“个人工作区”推导已有无项目执行能力。
 
 Figma 变量、自动布局、8 个基础组件族和 5 个布局／场景组件族共同维护设计层结构；业务画面应使用组件实例，新增状态先判断能否扩展既有组件 API，避免重新复制会话、审批、Composer、子代理或产出结构。这仍是设计稿的组件权威，不表示桌面代码已经完成同名 React 组件拆分。原生窗口、中文输入法、键盘焦点、滚动、主题以及长列表性能仍须在客户端中验证。正式签名、公证和分发按[首版计划](desktop-client.md)的既有安排延后。
+
+2026-09-12 Electron 标题区同步（iteration_complete）：真实 `hiddenInset` 窗口确认 52 px header、x=13/y=19 交通灯、x=80 kite 标识和 x=188/y=10 的 32 px 收起按钮无碰撞后，[Figma Sidebar 主组件](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4025-18427)已原位更新，[日常任务实例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)继承同一结构。同步没有新增页面、组件族、变量、宿主协议或交互状态；主组件 metadata 与页面上下文渲染核对通过。
 
 本阶段导航纠正（iteration_complete）：按用户最新要求删除会话标题搜索和预览确认。两端共用的页面点击会话直接调用现有加载入口；共享 UI 5 项、桌面 22 项、Web 13 项回归与全仓类型检查通过，两端 HTML 测试数据页面复核直接切换。此前记录的预览／继续只属于被本次替代的交互。
 
@@ -345,4 +347,4 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 ## 本地启动性能
 
-状态：in_progress（主要启动瓶颈已优化；新构建产物首次运行仍超出 300ms，完整 Tauri 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [ADR-0183](../adr/0183-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把分段计时或并发负载下的样本当作系统启动硬实时保证。
+状态：in_progress（主要 Service 启动瓶颈已优化；迁移前新构建产物首次运行仍超出 300ms，完整 Electron 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [ADR-0183](../adr/0183-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把迁移前分段计时或并发负载下的样本当作 Electron 系统启动硬实时保证。

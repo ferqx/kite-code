@@ -1,5 +1,4 @@
 import { Button, SessionPage } from '@kite-ai/kite-client-ui';
-import { confirm } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import appIcon from '../app-icon.svg';
 import type { DesktopClient } from './client';
@@ -127,7 +126,8 @@ export function App({ client }: { client: DesktopClient }) {
     if (target !== current.workspace && (current.connected || client.hasNativeConnection())) {
       if (
         (await client.hasActiveTasks()) &&
-        !(await confirm('切换执行项目将停止当前服务中的任务，已有修改不会撤销。', {
+        !(await client.confirm({
+          message: '切换执行项目将停止当前服务中的任务，已有修改不会撤销。',
           title: '切换执行项目？',
           kind: 'warning',
           okLabel: '停止并继续',

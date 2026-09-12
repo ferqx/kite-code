@@ -15,7 +15,11 @@ function createFixture(): string {
   fixtureRoots.push(root);
   cpSync(join(process.cwd(), 'package.json'), join(root, 'package.json'));
   cpSync(join(process.cwd(), 'packages'), join(root, 'packages'), { recursive: true });
-  cpSync(join(process.cwd(), 'apps'), join(root, 'apps'), { recursive: true });
+  cpSync(join(process.cwd(), 'apps'), join(root, 'apps'), {
+    recursive: true,
+    filter: (source) =>
+      !/(?:^|[\\/])(?:node_modules|dist|dist-electron|service|out)(?:[\\/]|$)/u.test(source),
+  });
   cpSync(join(process.cwd(), 'scripts'), join(root, 'scripts'), { recursive: true });
   cpSync(join(process.cwd(), 'tests'), join(root, 'tests'), { recursive: true });
   return root;
@@ -48,6 +52,17 @@ describe('runtime workspace package gate', () => {
     expect(analysis.violations).toEqual([]);
     expect(analysis.packages).toHaveLength(18);
     expect(analysis.compositionRoots).toEqual(['apps/kite-service/src/bootstrap.ts']);
+  });
+
+  test('keeps renderer code behind the Electron preload boundary', () => {
+    const root = createFixture();
+    const renderer = join(root, 'apps/kite-desktop/src/electron-boundary-probe.ts');
+    writeFileSync(renderer, "import { ipcRenderer } from 'electron';\nvoid ipcRenderer;\n");
+    expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
+    writeFileSync(renderer, "import '../electron/host';\n");
+    expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
+    writeFileSync(renderer, "import 'node:fs';\n");
+    expectViolation(root, 'FORBIDDEN_NODE_IMPORT');
   });
 
   test('rejects package cycles even when the new edge is declared', () => {

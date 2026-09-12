@@ -17,7 +17,7 @@ import {
 import type { RuntimeClientConnection } from '@kite-ai/runtime-client';
 import { createMockModelServer } from '../../../tests/tui-system/harness/fixtures';
 import { DesktopClient } from '../src/client';
-import type { DesktopInvoke } from '../src/transport';
+import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 test('lost receipt survives repeated internal recovery failures without replay or connection notices', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-lost-receipt-')));
@@ -65,7 +65,7 @@ test('lost receipt survives repeated internal recovery failures without replay o
     number,
     { connection: RuntimeClientConnection; messages: AsyncIterator<unknown> }
   >();
-  const call: DesktopInvoke = async <T>(command: string, args?: Record<string, unknown>) => {
+  const call: DesktopTestCall = async <T>(command: string, args?: Record<string, unknown>) => {
     if (command === 'pick_workspace') return workspace as T;
     if (command === 'activate_workspace') return workspace as T;
     if (command === 'list_projects') return [{ path: workspace, lastOpenedAt: 1 }] as T;
@@ -137,7 +137,7 @@ test('lost receipt survives repeated internal recovery failures without replay o
     else throw new Error(`Unexpected IPC ${command}`);
     return undefined as T;
   };
-  const client = new DesktopClient(call);
+  const client = new DesktopClient(createTestDesktopBridge(call));
   const observedErrors: string[] = [];
   const unsubscribe = client.subscribe(() => {
     const error = client.getSnapshot().error;

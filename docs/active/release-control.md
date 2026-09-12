@@ -25,7 +25,7 @@ workflow定义、本机单平台结果或artifact上传都不能替代三平台�
 
 `release:build`编译`kite`、`kite-tui`、`kite-service`和Web payload，并生成strict manifest、逐文件SHA-256、archive sidecar、
 release notes与known limitations。manifest中的CLI/TUI/Service/Web slot必须绑定exact identity；Coordinator/Worker/Gateway slot必须为null，
-archive不得出现对应executable/launcher。
+archive不得出现对应executable/launcher。Web payload 的静态资源白名单包含当前共享 UI 使用的 WOFF2 字体；文件仍作为 manifest 条目逐一校验，不允许任意路径或类型。
 
 默认CLI/TUI connector从同一immutable candidate固定解析`kite-service app-server run-stdio`。source固定当前Bun与checkout entrypoint；
 installed固定launcher-pinned candidate。两者把同一个build ID交给client/child并在initialize校验exact server version/capabilities；
@@ -44,7 +44,7 @@ NODE/BUN injection不得跨边界。profile、Workspace、build、Web asset root
 
 ## 安装、升级、回滚、卸载
 
-开发中的 Tauri 桌面端通过[服务准备脚本](../../scripts/release/prepare-desktop-service.ts)消费既有 verified candidate，仅提取当前 macOS stdio 服务制品，并把 candidate ID、服务摘要、expected server version 和环境变量名白名单固定到宿主构建输入。该脚本不改动安装器或 active pointer，不额外分发 CLI/TUI/Web。桌面 `.app` 的本机构建不等于正式签名、公证、升级或平台发布资格；相关限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+开发中的 Electron 桌面端通过[服务准备脚本](../../scripts/release/prepare-desktop-service.ts)消费既有 verified candidate，仅把当前 macOS stdio Service 与 `desktop.json` 提取到 `apps/kite-desktop/service`。`build:electron` 要求清单存在，并把 candidate ID、服务摘要、expected server version 和环境变量名白名单编入 `main.cjs`；运行时不从可替换的资源清单选择版本。`build:desktop` 组合 Vite renderer、Electron main/preload 与官方 `@electron/packager`，当前 macOS arm64 输出为 `apps/kite-desktop/out/kite-darwin-arm64/kite.app`。这些脚本不改动安装器或 active pointer，不额外分发 CLI/TUI/Web；本机 `.app` 构建不等于正式签名、公证、升级或平台发布资格，相关限制见[桌面 owner](../../apps/kite-desktop/README.md)。
 
 安装器只接受显式archive/prefix。prefix不能是filesystem root、用户home、repo root、symlink/reparse point或未标记的非空目录。
 每个candidate物化到immutable `releases/<candidateId>`；stable launcher、唯一`active` pointer、managed marker、`.candidate-id`

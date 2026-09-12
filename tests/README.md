@@ -232,8 +232,14 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 ## 桌面客户端验证
 
-`apps/kite-desktop/test` 归属桌面 owner，已加入默认测试发现；验证累计文本/持久终态与 IPC 关闭、发送失败不重试等语义。`bun run typecheck` 与 runtime package gate 包含桌面 workspace；renderer 只允许 `kite-local-runtime/client/protocol`，禁止 Node/Bun 和 Native I/O 根入口。
+`apps/kite-desktop/test` 归属桌面 owner，已加入默认测试发现。页面与 client 测试验证累计文本、持久终态、导航、恢复与发送失败不重试；bridge/preload 测试固定具名方法和 channel，不暴露通用 `ipcRenderer`。Electron host 测试分别覆盖 IPC 来源与封闭参数、项目/Git/编辑器、Service 制品与进程、窗口生命周期，以及 renderer initialize 复用、旧代次隔离和订阅清理。
 
-`bun run test:desktop:native` 是显式原生测试，需先准备编译服务与 Rust。它使用隔离 home/workspace、本地模型 fixture 和真实 Rust carrier，验证同包握手、信任、流式任务、历史、活动模型 EOF 清理及新进程读取；不调用外部 Provider，也不证明 WebView IPC、隐藏窗口或工具进程树崩溃清理。
+`bun run typecheck` 与 runtime package gate 包含桌面 workspace。renderer 只允许 `kite-local-runtime/client/protocol` 及 browser-safe contracts，禁止 Electron、Node/Bun、Host、Store、Service concrete source 和 Native I/O 根入口；Node/Electron 依赖只存在于 main/preload owner。
 
-原生 `.app` 的目录选择、流式、关窗、重连、确认退出和工具进程树崩溃清理已通过本机验收，准确制品与范围见[原生验收](../apps/kite-desktop/docs/native-validation.md)。该证据不替代正式发布与其他平台资格。文档结构测试中的子进程检查移至 `tests/isolated/scripts/docs-structure.test.ts`；普通 workspace/契约导航读取仍在 `tests/integration/docs-structure.test.ts`，原断言保持。
+`bun run test:desktop:native` 是显式配套 Service smoke，需先执行 `prepare:service`。它使用隔离 home/workspace、本地模型 fixture、真实 `DesktopHost` 与同 candidate stdio Service，验证配对 initialize、流式执行中的 renderer 重接、持久历史、活动模型 EOF 清理及后继进程读取；不调用外部 Provider，也不证明 Electron preload、原生窗口、目录对话框、隐藏/激活或工具进程树崩溃清理。
+
+`build:desktop` 构建 renderer 与 main/preload，再由官方 Electron Packager 生成 macOS `.app`。[packaged window smoke](../apps/kite-desktop/scripts/native-smoke.ts)用于在隔离 home/app data/workspace 下驱动真实制品，核对沙箱 bridge、IPC/Service、流式刷新重接、隐藏/激活和确认退出；只有脚本实际通过并登记准确制品后才能形成 Electron 原生资格。当前该结果仍 pending。迁移前 Tauri `.app` 的本机证据保留在[原生验收](../apps/kite-desktop/docs/native-validation.md)，不替代 Electron 或正式发布与其他平台资格。
+
+文档结构测试中的子进程检查位于 `tests/isolated/scripts/docs-structure.test.ts`；普通 workspace/契约导航读取仍在 `tests/integration/docs-structure.test.ts`，原断言保持。
+
+桌面 Electron 安装包的显式窗口验收入口为 `bun run test:desktop:window`（先构建 `build:desktop`），通过隔离的源码外 `.app`、preload 与本机模型检查流式重接、隐藏恢复和退出；原生对话框由 fixture 代答，系统输入法和人工窗口操作资格见[桌面原生记录](../apps/kite-desktop/docs/native-validation.md)。

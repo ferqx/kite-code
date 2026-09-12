@@ -26,21 +26,21 @@
 
 主界面不展示本地服务的连接状态、重连／断开操作或未就绪提示。恢复期间保留已读消息、空间列表与草稿，禁止使用旧 ready 发送；内部连接错误不写入正文提示，也不冒充项目、目录或模型错误。未知命令结果仍明确提示用户检查实际效果，不以恢复成功掩盖未知结果。首次启动失败仍在独立启动页处理，恢复机制不绕过制品验证，也不自动替换损坏的安装文件。
 
-客户端 transport close 只调用 `runtime_detach`，取消旧页面的接收与订阅，不关闭 Service stdin。只有明确执行项目／分支切换与退出才关闭自有 Service。宿主已有健康 Service 时复用；确已退出才允许重新启动，不能承诺恢复已停止的执行。命令回执丢失仍保留“结果未知”提示，自动恢复不会重放创建、发送、审批、配置或 Git 命令。
+客户端 transport close 只调用 `runtimeDetach`，取消旧页面的接收与订阅，不关闭 Service stdin。只有明确执行项目／分支切换与退出才调用 `runtimeClose` 关闭自有 Service。宿主已有健康 Service 时复用；确已退出才允许重新启动，不能承诺恢复已停止的执行。命令回执丢失仍保留“结果未知”提示，自动恢复不会重放创建、发送、审批、配置或 Git 命令。
 
 ## 验证
 
-[导航集成测试](../test/navigation.test.ts)使用真实 Service 验证失效目录和模型配置下读取历史、跨空间只读与执行限制、局部失败和旧响应隔离；[恢复测试](../test/resilience.test.ts)验证写入后丢失回执的自动恢复与不重放；[原生配套测试](../src-tauri/tests/paired_service.rs)覆盖流式执行中 detach 与 reattach。SQLite [目录测试](../../../packages/runtime-storage-sqlite/test/kite-home-directory.test.ts)覆盖超过千条记录的有界分页、稳定 membership 与空间过滤。测试不替代新版窗口及系统输入法的人工验收。
+[导航集成测试](../test/navigation.test.ts)使用真实 Service 验证失效目录和模型配置下读取历史、跨空间只读与执行限制、局部失败和旧响应隔离；[恢复测试](../test/resilience.test.ts)验证写入后丢失回执的自动恢复与不重放；[配套 Service 测试](../test/host-paired-service.ts)驱动 Electron host 与真实 stdio Service，[renderer 连接测试](../test/host-renderer-connection.test.ts)覆盖 detach、reattach、initialize 复用和旧代次隔离。SQLite [目录测试](../../../packages/runtime-storage-sqlite/test/kite-home-directory.test.ts)覆盖超过千条记录的有界分页、稳定 membership 与空间过滤。这些测试不替代 Electron 窗口、preload 与系统输入法的原生验收。
 
-本地目录的存在状态由 `list_projects` 读取时查询，不写入项目偏好。目录缺失只让空间名称使用次级文字色，不显示“尚未关联本地目录”常驻提示，也不据此禁用会话。返回已连接窗口只更新本地目录状态，不重新查询会话目录；历史目录在连接、新建与所订阅运行结束时更新，未订阅的外部变化可能延迟到下次目录读取。
+本地目录的存在状态由 `listProjects` 读取时查询，不写入项目偏好。目录缺失只让空间名称使用次级文字色，不显示“尚未关联本地目录”常驻提示，也不据此禁用会话。返回已连接窗口只更新本地目录状态，不重新查询会话目录；历史目录在连接、新建与所订阅运行结束时更新，未订阅的外部变化可能延迟到下次目录读取。
 
 
 ## 启动预算与验证边界
 
 连接与首屏目录的目标预算为 300ms。启动链路只打开和核对 Store 文件、格式与结构，读取有界目录；完整会话恢复检查按目标 Session 在同一 SQLite read snapshot 内完成，Artifact 内容由所属 reader 在访问时校验。显式 release preflight 仍执行完整 SQLite physical/FK 检查，不把此全库维护工作重复放进各个 reader 构造函数。跨包约束见[SQLite Runtime Log](../../../docs/active/sqlite-runtime-log-query.md)。
 
-原生宿主仍逐次校验完整 Service SHA-256，使用 sha2 支持的加速实现；开发构建也优化该依赖，未跳过摘要核对或改成未经校验的文件缓存。Builtin 的 tokenizer 在第一次计数时加载，历史浏览不初始化词表。
+Electron 宿主在每次新建配套进程前读取并校验完整 Service SHA-256；摘要与 expected server version 来自构建时编入 main bundle 的已验证清单，不从运行时资源清单换版本，也不改成未经校验的文件缓存。Builtin 的 tokenizer 在第一次计数时加载，历史浏览不初始化词表。
 
-2026-09-11 本机 macOS 开发构建使用本地数据库的隔离副本测量：268,935,168 字节、2 个空间、85 个会话、24,889 条事件。原链路的程序摘要校验约 2,593ms，进程启动到 initialize 约 5,415ms，目录查询约 5ms。优化后空闲环境下 5 次“完整程序校验 → 新建 Service → initialize → 100 条首屏目录返回”为 231、187、190、194、190ms；同一 Service 的 renderer 重接与目录读取为 3、3、3、3、6ms。新进程测量复用了 OS 文件页缓存，不等于清空系统缓存后的磁盘冷启动。刚构建的 Service 在无并发浏览器操作时首次运行仍观测到 611ms；并发启动浏览器的一次观测达到 650ms。因此首次运行尚未满足 300ms 目标，不能把已热缓存的新进程样本当作全部冷启动资格。
+2026-09-11 Tauri 开发构建曾使用本地数据库的隔离副本测量：268,935,168 字节、2 个空间、85 个会话、24,889 条事件。优化后空闲环境下 5 次“完整程序校验 → 新建 Service → initialize → 100 条首屏目录返回”为 231、187、190、194、190ms；同一 Service 的 renderer 重接与目录读取为 3、3、3、3、6ms。新进程测量复用了 OS 文件页缓存，不等于清空系统缓存后的磁盘冷启动；当时刚构建的 Service 在无并发浏览器操作时首次运行仍观测到 611ms，并发启动浏览器的一次观测达到 650ms。这些数字只说明 Service 与历史负载的既有基线，不能当作 Electron 冷启动或端到端资格。
 
-另用实际 App／共享组件与 85 条隔离展示数据，在内置浏览器两次 requestAnimationFrame 后核对 85 行已提交，观测为 47ms。此项与原生服务计时分开，不能相加并宣称已经取得 Tauri 从系统启动到窗口绘制完成的端到端资格。[原生配套测试](../src-tauri/tests/paired_service.rs)持续输出其隔离 fixture 的完整摘要校验至首屏目录耗时，并继续验证真实执行、重接与清理。
+另用实际 App／共享组件与 85 条隔离展示数据，在内置浏览器两次 requestAnimationFrame 后核对 85 行已提交，观测为 47ms。此项与原生服务计时分开，不能相加并宣称已经取得 Electron 从系统启动到窗口绘制完成的端到端资格。当前 [host lifecycle 测试](../test/host-lifecycle.test.ts)、[配套 Service fixture](../test/host-paired-service.ts)与待完成的 packaged Electron smoke 分别核对宿主、真实执行和窗口链路；成功证据取得前，300ms 端到端目标仍未满足。

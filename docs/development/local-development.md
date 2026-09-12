@@ -8,8 +8,9 @@
 | Web 完整环境 | `bun run server` | 构建资源、启动显式 daemon、打印地址 |
 | Web 资源热开发 | `bun run --cwd apps/kite-web dev` | 仅 Vite，不替代后端启动 |
 | CLI | `bun run agent run --workspace . --task "任务"` | 信任与配置仍须满足 |
-| 桌面开发 | `bun run desktop` | 先按[桌面 owner](../../apps/kite-desktop/README.md)准备 Rust/Xcode 与配套服务；当前处于阶段 0 验证 |
-| 桌面原生服务测试 | `bun run test:desktop:native` | Rust 在隔离 home/workspace 下调用编译服务与本地模型 fixture，不调用外部 Provider |
+| 桌面开发 | `bun run desktop` | 先按[桌面 owner](../../apps/kite-desktop/README.md)准备 verified 配套服务；脚本编译 Electron host，再启动 Vite 与 Electron，不需要 Rust/Tauri |
+| 桌面配套服务 smoke | `bun run test:desktop:native` | Electron host 在隔离 home/workspace 下调用真实配套服务与本地模型 fixture，验证重接、历史和 EOF 清理，不调用外部 Provider |
+| Electron 制品窗口 smoke | `bun run test:desktop:window` | 先完成 `build:desktop`；在源码目录外驱动 packaged macOS `.app`，当前本机结果和剩余范围见[原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收) |
 | 默认测试 | `bun run test` | 使用仓库测试 runner |
 | TUI 系统测试 | `bun run test:tui:system` | PTY 场景，按修改选择定向场景 |
 | 类型检查 | `bun run typecheck` | 根与 workspace |

@@ -3,20 +3,19 @@ import {
   RUNTIME_PROTOCOL_LIMITS,
   safeDecodeRuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
-import { invoke } from '@tauri-apps/api/core';
+import type { DesktopConnectionInfo, KiteDesktopBridge } from './bridge';
 
-export interface DesktopConnectionInfo {
-  connectionId: number;
-  workspace: string;
-  expectedServerVersion: string;
-}
+export type { DesktopConnectionInfo } from './bridge';
 
-export type DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+export type DesktopRuntimeBridge = Pick<
+  KiteDesktopBridge,
+  'runtimeSend' | 'runtimeReceive' | 'runtimeDetach'
+>;
 
 /** Pull one bounded frame per IPC call: no UI timers or unbounded event queue. */
 export function desktopTransport(
   info: DesktopConnectionInfo,
-  call: DesktopInvoke = invoke,
+  bridge: DesktopRuntimeBridge,
 ): RuntimeClientTransport {
   let used = false;
   return {
@@ -28,7 +27,7 @@ export function desktopTransport(
       let writeTail = Promise.resolve();
       const close = () => {
         closed = true;
-        closePromise ??= call<void>('runtime_detach', { connectionId: info.connectionId });
+        closePromise ??= bridge.runtimeDetach(info.connectionId);
         return closePromise;
       };
       return {
@@ -41,7 +40,7 @@ export function desktopTransport(
             return Promise.reject(new Error('消息超过大小限制。'));
           const sending = writeTail.then(async () => {
             if (closed) throw new Error('连接已关闭。');
-            await call<void>('runtime_send', { connectionId: info.connectionId, frame });
+            await bridge.runtimeSend(info.connectionId, frame);
           });
           writeTail = sending.catch(() => {
             void close().catch(() => undefined);
@@ -51,9 +50,7 @@ export function desktopTransport(
         async *messages() {
           try {
             while (!closed) {
-              const frame = await call<string>('runtime_receive', {
-                connectionId: info.connectionId,
-              });
+              const frame = await bridge.runtimeReceive(info.connectionId);
               if (closed) return;
               if (
                 new TextEncoder().encode(frame).byteLength > RUNTIME_PROTOCOL_LIMITS.maxMessageBytes

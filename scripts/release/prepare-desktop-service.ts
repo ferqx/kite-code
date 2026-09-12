@@ -20,7 +20,7 @@ const entry = candidate.manifest.releaseSlots.service;
 if (!entry.entrypoint || !entry.identity) throw new Error('Candidate has no paired service.');
 const bytes = candidate.files.get(entry.entrypoint);
 if (!bytes) throw new Error('Verified candidate service is missing.');
-const directory = resolve('apps/kite-desktop/src-tauri/service');
+const directory = resolve('apps/kite-desktop/service');
 mkdirSync(directory, { recursive: true });
 writeFileSync(resolve(directory, 'kite-service'), bytes);
 chmodSync(resolve(directory, 'kite-service'), 0o755);

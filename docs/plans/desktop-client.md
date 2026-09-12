@@ -2,6 +2,8 @@
 
 状态：阶段 0、1 及阶段 2 的本机 macOS 稳定性验收已完成；用户确认暂缓正式发布。本文保留延后的签名、公证与分发实施依据；已交付事实与验证归位 desktop owner。
 
+2026-09-12 桌面宿主已改为 Electron；本文中的 Tauri/Rust 选型、阶段 0 与原生结果只保留为迁移前设计和证据。当前架构、构建与宿主验收由[desktop owner](../../apps/kite-desktop/README.md)和[原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)维护；未依赖宿主的产品体验目标与延后发布范围继续有效。
+
 ## 首轮验证后的日常体验方向
 
 2026-09-07 用户确认初始首轮验证完毕，后续进入日常体验开发，并要求客户端功能与日常交互体验对标 Codex。当前工作对象为桌面客户端；首版验收范围是起点，首版中暂缓的功能不构成后续对标的永久上限。正式发布仍按既有安排延后。
@@ -61,9 +63,9 @@
 
 Tauri 官方提供 [Rust/Core 与 WebView 进程分工](https://v2.tauri.app/concept/process-model/)、[sidecar 打包](https://v2.tauri.app/develop/sidecar/)和 [IPC capability](https://v2.tauri.app/security/capabilities/)机制。采用这些机制不意味着现有服务制品、沙箱、凭据或退出行为已经通过 Tauri 验证，也不承诺整个应用的安装体积与一个空 Tauri 壳相同。
 
-## 技术边界与验证方向
+## 技术边界与验证方向（Tauri 历史）
 
-当前已采用以下组合；本机原生窗口 IPC 与生命周期验收已完成，正式发布资格仍按后续阶段验证：
+迁移前曾采用以下组合，并完成当时宿主的本机原生窗口、IPC 与生命周期验收；这些结果不授予 Electron 或正式发布资格：
 
 ```text
 React presentation / desktop adapter
@@ -76,7 +78,7 @@ React presentation / desktop adapter
 
 这里的 typed client 运行在桌面 WebView 的客户端适配层，Rust 拥有操作系统资源。Rust 不运行 TypeScript，不重写 Runtime Client 的领域状态机，也不新增一个仅为运行 client 的 Node/Bun 中转进程。浏览器 Web 的依赖与权限保持现状。
 
-已新增 `apps/kite-desktop`，内部组织前端 presentation、桌面 adapter/transport 与 `src-tauri` 宿主。只有接入证明需要时，才在现有 Native owner 下分离可安全构建的协议组合入口；现有 TUI/CLI 接口继续工作，不能依赖对含 Node/Bun 模块的根导出进行偶然 tree-shaking。Kernel 不依赖桌面或其他 workspace。
+当时的 `apps/kite-desktop` 组织前端 presentation、桌面 adapter/transport 与 Tauri 宿主。当前宿主已迁到 [Electron host](../../apps/kite-desktop/electron/host.ts)，renderer 仍只消费可安全构建的协议组合入口；现有 TUI/CLI 接口继续工作，不能依赖对含 Node/Bun 模块的根导出进行偶然 tree-shaking。Kernel 不依赖桌面或其他 workspace。
 
 Rust 宿主固定服务 executable、build、profile、canonical workspace 与环境，WebView 只能通过已注册的桌面能力操作当前连接。IPC 不暴露任意 executable、shell、环境变量、数据库、凭据读取或任意路径访问；外部编辑器跳转使用校验后的明确文件目标。Tauri capability 约束本地窗口入口，Service 继续校验协议、信任与授权；两者不互相替代。工具输出、Markdown 和链接按不可信内容渲染，不授予远程页面本机 IPC 权限。
 

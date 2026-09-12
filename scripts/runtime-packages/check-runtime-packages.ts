@@ -295,6 +295,9 @@ function loadPackages(root: string, violations: RuntimePackageViolation[]): Pack
     }
 
     const sourceFiles = collectFiles(join(absolutePath, 'src'), /\.[cm]?[jt]sx?$/);
+    if (expectedName === '@kite-ai/kite-desktop') {
+      sourceFiles.push(...collectFiles(join(absolutePath, 'electron'), /\.[cm]?[jt]sx?$/));
+    }
     const testFiles = collectFiles(join(absolutePath, 'test'), /\.(test|spec)\.[cm]?[jt]sx?$/);
     if (sourceFiles.length === 0) {
       addViolation(
@@ -582,6 +585,19 @@ function validateImports(
         continue;
       }
       edge.targetFile = target;
+      if (
+        edge.owner.name === '@kite-ai/kite-desktop' &&
+        isInside(join(edge.owner.absolutePath, 'src'), edge.source) &&
+        !isInside(join(edge.owner.absolutePath, 'src'), target) &&
+        /\.[cm]?[jt]sx?$/u.test(target)
+      ) {
+        addViolation(
+          violations,
+          'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+          'Desktop renderer must not import Electron host or build code.',
+          sourcePath,
+        );
+      }
       if (!isInside(edge.owner.absolutePath, target)) {
         addViolation(
           violations,
@@ -841,7 +857,8 @@ function validateExternalImport(
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi' ||
       owner === '@kite-ai/kite-web' ||
-      owner === '@kite-ai/kite-desktop' ||
+      (owner === '@kite-ai/kite-desktop' &&
+        !isInside(join(edge.owner.absolutePath, 'electron'), edge.source)) ||
       owner === '@kite-ai/kite-client-ui'
     ) {
       addViolation(
@@ -861,9 +878,26 @@ function validateExternalImport(
     }
     return;
   }
+  if (
+    owner === '@kite-ai/kite-desktop' &&
+    specifier === 'electron' &&
+    isInside(join(edge.owner.absolutePath, 'src'), edge.source)
+  ) {
+    addViolation(
+      violations,
+      'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+      'Desktop renderer must access native capabilities through the preload bridge.',
+      sourcePath,
+    );
+  }
   const dependency = externalPackageName(specifier);
   if (!dependency) return;
-  if (!edge.owner.manifest.dependencies?.[dependency]) {
+  const electronRuntime =
+    owner === '@kite-ai/kite-desktop' &&
+    dependency === 'electron' &&
+    isInside(join(edge.owner.absolutePath, 'electron'), edge.source) &&
+    edge.owner.manifest.devDependencies?.electron;
+  if (!edge.owner.manifest.dependencies?.[dependency] && !electronRuntime) {
     addViolation(
       violations,
       'UNDECLARED_EXTERNAL_DEPENDENCY',

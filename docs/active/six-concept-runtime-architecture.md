@@ -33,7 +33,7 @@ Agent → Capability → Policy → Execution → Verification
 | Execution | Runtime Host lifecycle + Builtin concrete mechanisms + App composition | ack 后执行一次，形成 receipt/unknown/terminal，并完成 cleanup |
 | Verification | Builtin verifier + Kernel verification domain | 从 Receipt/Artifact/注入 port 形成 evidence，由 Kernel 决定通过、修复、重规划、补偿或 waiver |
 
-桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过受限 Tauri IPC 连接 Rust-owned 服务；不能导入 Native I/O、Host、Store 或 Service concrete source。当前实现与验证限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过冻结的具名 preload bridge 连接 Electron main-owned 配套 Service；不能导入 Electron、Node/Bun、Native I/O、Host、Store 或 Service concrete source。Electron 主进程单独拥有窗口、项目/Git/编辑器和 stdio lifecycle，不取得 Runtime 业务 authority。当前实现与验证限制见[桌面 owner](../../apps/kite-desktop/README.md)。
 
 Web 与桌面共同消费[共享 React 页面](../../packages/kite-client-ui/README.md)。共享包不依赖任何 Runtime、协议、Host、Native 或 app workspace；两个入口只注入各自真实数据与已授权操作。页面复用不扩大 Browser principal 权限，也不将展示状态提升为执行权威。
 

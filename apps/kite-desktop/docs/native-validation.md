@@ -1,6 +1,10 @@
 # 桌面原生验收
 
-2026-09-07 在 macOS 26.6.2 / arm64、Xcode 26.6、Bun 1.4.0、Rust 1.98.1、Tauri 2.11.5 完成。宿主来自 `feat/tauri-desktop` 当前未提交构建；这是本机开发验收，不是正式签名、公证或跨平台发布资格。
+> **证据范围：**下列 2026-09-07 与 2026-09-11 结果来自已经退役的 Tauri 宿主，只保留为迁移前行为与 Service 证据。它们不证明当前 Electron 的 `.app`、preload/IPC、窗口、renderer 重接、退出或崩溃清理已经通过。当前 Electron 的独立制品身份、已通过场景与剩余验证见[本机迁移验收](#electron-本机迁移验收)。
+
+## Tauri 历史验收
+
+2026-09-07 在 macOS 26.6.2 / arm64、Xcode 26.6、Bun 1.4.0、Rust 1.98.1、Tauri 2.11.5 完成。宿主来自当时的 `feat/tauri-desktop` 未提交构建；这是旧宿主的本机开发验收，不是 Electron、正式签名、公证或跨平台发布资格。
 
 ## 阶段 0：制品与隔离
 
@@ -34,7 +38,7 @@ Rust carrier 回归另以真实持续输出进程验证接收端停读时仍可�
 ## 本轮修复的原生差异
 
 - `tauri-plugin-dialog` 将浏览器 `confirm` 替换为异步调用。原同步判断会把 Promise 当作批准，且缺少消息权限；现在使用显式 `confirm` API、精确消息权限并等待结果。
-- macOS 默认 Quit 直接进入 Cocoa termination，不能仅靠 Tauri `ExitRequested` 覆盖。现在通过[本机退出适配](../src-tauri/src/macos.rs)将 `applicationShouldTerminate:` 路由回同一 Tauri 确认/清理流程；不新增第二套 Service lifecycle。确认框明确绑定并显示主窗口，真正完成清理后才允许退出事件循环。
+- macOS 默认 Quit 直接进入 Cocoa termination，不能仅靠 Tauri `ExitRequested` 覆盖。当时的本机退出适配将 `applicationShouldTerminate:` 路由回同一 Tauri 确认/清理流程；没有新增第二套 Service lifecycle。确认框明确绑定并显示主窗口，真正完成清理后才允许退出事件循环。旧源码已随宿主迁移删除，本段只描述历史修复。
 - 项目切换清除旧选择；同项目重连重新建立所选会话订阅。已有会话加载有显式提示和 20 秒超时，失败时释放订阅。
 - 工具取消/拒绝事件作为持久终态处理，迟到进度不能恢复“进行中”；没有正文的工具型模型响应不显示假的“正在思考”。
 
@@ -85,10 +89,40 @@ Rust carrier 回归另以真实持续输出进程验证接收端停读时仍可�
 另一个程序预先创建的 bearer 测试项在包内 executable 读取时未完成系统授权，这个跨程序导入场景仍未验证，不能据自身 OAuth 成功推断已有凭据可无提示迁移。上述 MCP 场景均使用开发配置 `sandbox.enabled=false`，不授予[正式执行平台](../../../docs/active/execution-platform-support.md)的 MCP 网络资格。
 
 
-## 后续重复验证
+## Tauri 证据的重复条件
 
 准备和构建命令见 [desktop owner](../README.md)。重复原生验收需要用户授权的辅助功能、屏幕录制及自动化权限，并与用户串行使用测试窗口。只操作隔离应用；在发送键盘事件前确认焦点，英文 fixture 输入使用粘贴避免中文输入法候选影响。等实际状态或控件出现，不把一次 AX click 返回当作异步业务完成。
 
 macOS Quit Apple event 在 termination 被拦截时可返回“用户已取消”错误；必须继续核实应用中的确认框和最终进程退出，不能单独用该 AppleScript 退出码判断验收失败。
 
-升级 Tauri/tao/rfd 或调整 native delegate、窗口、IPC 与退出逻辑时，重新执行这些原生场景。只改展示时复用仍有效的服务证据，补充受影响的窗口验证。后续完整恢复、大会话、正式安装升级、签名/公证与其他平台仍按[首版计划](../../../docs/plans/desktop-client.md)推进。
+历史 Tauri 分支若升级 Tauri/tao/rfd 或调整 native delegate、窗口、IPC 与退出逻辑，需重新执行这些原生场景。当前 Electron 实现不能通过重跑旧宿主测试取得资格。只改展示时可复用仍有效的 Service 证据，但必须补充受影响的 Electron 窗口验证。
+
+## Electron 本机迁移验收
+
+2026-09-12 在 macOS 26.6.2 / arm64、Bun 1.4.0、Electron 44.3.0 完成当前开发包的自动原生验收。构建输出为 `apps/kite-desktop/out/kite-darwin-arm64/kite.app`；[窗口 smoke](../scripts/native-smoke.ts)将整个应用复制到源码目录之外的随机临时目录后启动，运行不依赖 checkout、另装 Bun 或 PATH 中的 Service。
+
+本次制品身份：
+
+- 配套 candidate：`70e2e25ef6717b23d8740398`。
+- Electron main SHA-256：`701aa440628aed337af7ff5d200e5e07690bdda62c2edd8383324941ec393413`。
+- `app.asar` SHA-256：`a0572b8510b05684354d6502b8e3b46fecbc5be7bca4e206f182a8ed22609441`。
+- 包内 Service SHA-256：`43a90598aa92b48d6f1b19b708f95cb7ad879b128dc0dc004c7ed4af9d394966`。
+
+macOS 的 `app.getPath('home')` 不受 shell HOME 覆盖，packaged Electron 也不执行普通 `-r` 启动隔离脚本。因此窗口 smoke 使用 `--inspect-brk` 在生产入口执行前暂停，通过测试调试器设置临时 home、appData 和 userData 后恢复；这些设置没有写入产品，也没有增加测试环境开关。测试工作区、配置和本机模型服务均隔离，目录选择与确认框的返回值由测试调试器代答，不调用真实外部 Provider，不验证用户点击系统对话框的过程。
+
+| 实际验证 | 结果与边界 |
+| --- | --- |
+| `bun run test:desktop:native` | 真实 Electron host + compiled Service 完成 exact initialize、首屏目录、流中 detach/reattach、旧 receive 取消、复用 RPC id 的代次隔离、持久历史、活动执行 EOF 清理及后继 Service 读取。一次冷样本为 1193ms，后续样本 219ms；均只覆盖摘要校验至初始目录，不是系统点击至窗口绘制计时，也不承诺所有启动小于 300ms |
+| `bun run test:desktop:window` | 源码外 `.app` 完成真实 preload/IPC、添加项目与信任、本机模型流式、运行中关窗隐藏与重新激活、刷新后递增 connection generation 并继续展示同一回复；model fixture 未发生任务重放 |
+| renderer 权限 | 实际窗口的 sandbox/contextIsolation 均为 true，nodeIntegration 为 false；页面只有具名 bridge，没有 `require` 或 `process`。封闭参数、主 frame 身份和路径边界另由 host 专项测试验证 |
+| 退出 | 取消退出保留窗口与连接，确认退出等待自有 Service 收尾并以 0 退出。原生消息框由 fixture 代答，其 UI 与辅助功能操作尚未人工验收 |
+| 标题栏与显示 | OS 级单窗口截图确认 52px header 内的交通灯与 kite 标识互不重叠；展开与收起态保留 80px 控件区，交通灯位置为 x=13/y=19；真实 bridge 最大化和还原通过。截图输出为 `out/electron-native-window.png` 与 renderer 截图 `out/electron-native-smoke.png` |
+| host 压力与错误 | 桌面 54 项测试通过；其中真实子进程验证无人读取的满输出队列仍能通过 EOF 正常退出，非法 UTF-8/超限帧会关闭自有服务；项目/Git/editor/manifest 的拒绝路径由对应 host 测试覆盖 |
+
+构建集成修复了 Bun 将源码 `__dirname` 固化到安装包、导致 preload 缺失的问题，当前从 `app.getAppPath()` 定位打包资源。标题栏修正了 Tauri 的偏移量在 Electron 中造成的交通灯／标识重叠。正式包只包含构建代码、页面资源与配套服务，不包含开发依赖和 source maps。
+
+当前仍未重做系统中文输入法、用户操作目录／消息对话框、实际鼠标拖拽和标题栏双击、快速拉伸、外部编辑器及完整系统认证的人工验收；本轮也没有取得 Electron 主进程崩溃下工具进程树的 OS 级资格。它们不能从 DOM、主进程方法或 Tauri 历史证据推断。正式签名、公证、下载后 Gatekeeper、签名包升级、自动更新与其他平台不在本轮资格范围内。
+
+### 开发窗口白屏修复
+
+2026-09-12 补验 Vite 开发入口：原 CSP 的 `default-src self` 阻止 React Refresh 内联初始化，导致开发页面无法挂载。Electron 现在只在开发模式的 `script-src` 中允许内联脚本，打包模式仍限定自身脚本。在隔离 home/appData 的真实 Electron 开发窗口中，首次加载与刷新均显示新对话页面，具名 preload bridge 可用，React Refresh 初始化函数存在，页面及控制台错误为零。此项是开发入口证据，不更新上文已记录安装包的制品身份。

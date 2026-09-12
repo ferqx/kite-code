@@ -9,7 +9,7 @@ import {
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeClientConnection } from '@kite-ai/runtime-client';
 import { DesktopClient } from '../src/client';
-import type { DesktopInvoke } from '../src/transport';
+import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 test('desktop reads across projects, isolates execution, and ignores a superseded selection', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-navigation-')));
@@ -61,7 +61,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   let observed!: () => void;
   let held = Promise.resolve();
   let received = Promise.resolve();
-  const call: DesktopInvoke = async <T>(command: string, args?: Record<string, unknown>) => {
+  const call: DesktopTestCall = async <T>(command: string, args?: Record<string, unknown>) => {
     if (command === 'runtime_status') return { workspace, connectionId: generation || null } as T;
     if (command === 'pick_workspace') return workspace as T;
     if (command === 'activate_workspace') return workspace as T;
@@ -199,7 +199,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     } else throw new Error(`Unexpected IPC ${command}`);
     return undefined as T;
   };
-  let client = new DesktopClient(call);
+  let client = new DesktopClient(createTestDesktopBridge(call));
   try {
     await client.refreshProjects();
     await client.restoreWorkspace();
@@ -361,7 +361,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     // or creating/replaying a session. Native tests verify same-process attach.
     const previousClient = client;
     const beforeRestoreMessages = client.getSnapshot().messages;
-    client = new DesktopClient(call);
+    client = new DesktopClient(createTestDesktopBridge(call));
     const beforeRestore = closes;
     const beforeRestoreCreations = creations;
     await client.restoreWorkspace();

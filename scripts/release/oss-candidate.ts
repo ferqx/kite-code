@@ -388,7 +388,7 @@ async function buildWebReleaseAssets(outputDirectory: string): Promise<Map<strin
       if (
         path !== 'index.html' &&
         path !== 'api-docs/openapi.json' &&
-        !/^assets\/[A-Za-z0-9_-]+\.(?:css|js)$/u.test(path)
+        !/^assets\/[A-Za-z0-9_-]+\.(?:css|js|woff2)$/u.test(path)
       ) {
         throw new Error(`Web release asset is outside the fixed allowlist: ${path}`);
       }
