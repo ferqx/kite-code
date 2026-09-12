@@ -843,6 +843,28 @@ export class DesktopClient {
       rejectTimeout(new Error('会话加载超时，请重新加载会话。'));
     }, 20_000);
     try {
+      // Durable history is a read boundary of its own. A broken live projection
+      // or subscription must not prevent the first reading of saved messages.
+      let messages = await Promise.race([
+        this.#readHistory(connection, sessionId, this.#view.messages, controller.signal),
+        deadline,
+      ]);
+      if (
+        controller.signal.aborted ||
+        this.#connection !== connection ||
+        this.#selection !== controller
+      )
+        return;
+      // History is already authorized for the requested Session by the Service.
+      // Directory membership can label reading; only fresh projection below
+      // establishes the workspace identity needed for interactive readiness.
+      this.#historyWorkspaceDigest ??= listedDigest;
+      this.#historyConnection = connection;
+      this.#publish({
+        messages: messages.messages,
+        interactionMode: messages.interactionMode,
+        hasLoadedHistory: true,
+      });
       const result = await Promise.race([
         connection.runtime.query({
           schema: 'kite.runtime-query.v1',
@@ -890,10 +912,16 @@ export class DesktopClient {
         }),
         deadline,
       ]);
-      const messages = await Promise.race([
-        this.#readHistory(connection, sessionId, this.#view.messages, controller.signal),
-        deadline,
-      ]);
+      // The initial subscription contains a current snapshot, not every event
+      // since the History read. If that watermark advanced, calibrate once more
+      // while the established subscription buffers all subsequent events.
+      const subscribed = connection.snapshotStore.getSnapshot().sessions[sessionId];
+      if (subscribed && subscribed.projection.revision > messages.throughSequence) {
+        messages = await Promise.race([
+          this.#readHistory(connection, sessionId, this.#view.messages, controller.signal),
+          deadline,
+        ]);
+      }
       if (
         controller.signal.aborted ||
         this.#connection !== connection ||

@@ -18,6 +18,8 @@ connection/subscription/broker binding；quiesce、cancel、drain与dispose只�
 
 并发 Shell 的 [State runner](../src/bootstrap/runtime/state-runner.ts) 在事务提交后同步把整批事件放入原有发布队列，再让异步消费者逐条读取。不能由各个工具的异步 generator 逐条入队，否则一个事务中间可能插入兄弟工具的更高 revision，导致 Bridge 的顺序校验失败并中断后续模型调用。异步 effect preparation 返回时也重新核对 State revision；后台工具已推进 State 时，丢弃旧决定并重新调度，不能使用旧的 stop 决定退出。确定性回归见 [State runner acknowledgement](../test/runtime/state-runner-ack.test.ts)，包含事务交错、工具收尾期间准备完成与模型继续执行。
 
+[Turn coordinator](../src/bootstrap/runtime/turn-coordinator.ts) 显式持有 State runner iterator：消费者提前关闭或投影失败时，先提交当前 Turn 的错误取消与 unknown 结果，再中止本地 Provider I/O、关闭 iterator 并等待原有有界清理，最后释放 runner。后台 Shell 用实际执行 Promise 集合承担收尾，不在消费者离开后继续占用失去 owner 的运行状态。日志记录已提交终态；持久提交失败仍停止本地 I/O，不能伪造成功或清理确认。[coordinator 回归](../test/runtime/runtime-session-coordinator.test.ts)覆盖提前关闭与真实 Bridge 投影故障，[并发取消回归](../test/runtime/concurrent-shell-cancel.test.ts)覆盖前台与后台工具的清理等待。
+
 当前 source/release 默认组合 App Server 多连接 Session Store。默认 stdio child 不创建 HTTP listener；显式 daemon 在同一进程中组合 loopback Web、Agent API 与 static/API Docs，并在 shutdown 时关闭。Coordinator、per-Workspace Worker 与独立 Web Gateway 进程不是普通启动拓扑；不要把 daemon Web 归类为 legacy Service。实际入口见 [daemon owner](../src/app-server-daemon.ts)。
 
 子Agent在工具审批前挂起时，continuation中的blocked参数必须使用同一次解析得到的`pendingRequest.args`，与Kernel审批绑定和持久工具调用一致。原始模型参数仅保留在模型消息中；被schema移除的字段不能重新进入审批或恢复执行，也不能通过放宽digest校验补救。Shell审批等待时child Driver已清理，已批准的child工具由Host先执行，再恢复child模型循环；取消此窗口必须停止Host工具并保持父Run取消，不能为尚未恢复的Driver制造第二次清理事实。
@@ -44,6 +46,8 @@ mutation仍由同一Worker owner处理；`workspaceTemplateFor`直到配置ready
 MCP readiness。它不创建configuration-only第二Worker或placeholder execution backend，未完成配置的Runtime请求保持unavailable。
 
 ## App Control、History 与 mutation
+
+设置交互模式仍校验 Session 与 expectedRevision；目标模式已生效时，在原有命令事务提交 snapshot 回执，不新增模式事件或推进 revision，不能把客户端确认当前权限当作内部故障。实际改变模式才写入 `interaction_mode.changed`。验证见 [coordinator 命令回归](../test/runtime/runtime-session-coordinator.test.ts)。
 
 [计划正文 projector](../src/runtime-client/plan-review.ts)从已保存的计划正文与步骤生成脱敏、有界的 review。实时交互与历史事件复用同一函数；Contract/Protocol 严格校验 text/truncated，交互结算继续绑定计划 identity 与 Session revision。超限明确标记，不暴露 Artifact/Store 句柄。验证见[计划正文测试](../test/runtime-plan-review.test.ts)。
 

@@ -4,7 +4,7 @@
 Session facts 留在 `kite-session.sqlite`。新进程 resume 前必须按 durable generation、lease、cleanup 与 effect outcome 完成接管，
 不能从旧 PID 是否存在推断执行结果。
 
-运行日志的 completed 必须有持久 Turn 完成事实。客户端事件投影失败或消费者提前关闭执行流时，generator 的 finally 也会运行；若 Turn 尚未完成，不得仅因流已关闭就写出成功的 session.end／terminal.json。[日志组合回归](../test/isolated/session-logger/composition.test.ts)覆盖该提前关闭场景，日志只报告失败，不代替 Runtime 的终态、清理或恢复决定。
+运行日志的 completed 必须有持久 Turn 完成事实。客户端事件投影失败或消费者提前关闭执行流时，generator 的 finally 也会运行；若 Turn 尚未完成，不得仅因流已关闭就写出成功的 session.end／terminal.json。[日志组合回归](../test/isolated/session-logger/composition.test.ts)覆盖该提前关闭场景，Turn owner 同时负责将未完成执行收束为 error cancellation 与 unknown 结果，并在释放 runner 前中止、等待 Provider 有界清理；未确认的外部结果不自动重放。日志只记录持久事实，不代替 Runtime 的终态、清理或恢复决定。
 
 显式 daemon 由 `kite server start/status/stop` 管理。start 只创建当前 profile 的 owner-only endpoint；status/stop 不隐式 spawn。
 普通 client 或 Browser 断开不停止 daemon。stop 关闭 Web admission，取消 daemon 持有的 active Turn，完成 bounded drain 后清理 exact

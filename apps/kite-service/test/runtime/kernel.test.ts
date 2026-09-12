@@ -2043,6 +2043,10 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
     (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
   )) {
     events.push(event);
+    // The execution owner now joins tool cleanup before returning. The fixture
+    // acknowledges cancellation when its durable terminal arrives, not after
+    // the runner has already released its ownership.
+    if (event.type === 'turn.aborted') releaseRunningShell();
   }
 
   expect(events.map((event) => event.type)).toEqual(
@@ -2053,7 +2057,6 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
   expect(kernel.getState().tools.calls['shell-2']?.status).toBe('rejected');
   expect(kernel.getState().interactions.kind).toBe('idle');
 
-  releaseRunningShell();
   await runningShellSettled;
   kernel.close();
 });

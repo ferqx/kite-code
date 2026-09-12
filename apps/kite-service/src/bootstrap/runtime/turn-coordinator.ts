@@ -315,6 +315,9 @@ export async function* executeRuntimeTurn(
   };
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   let runCancelled = false;
+  let stateRunner: AsyncGenerator<RuntimeEvent> | undefined;
+  let runnerFailed = false;
+  let runnerCompleted = false;
   let runDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let deadlineCancellationEvents: RuntimeEvent[] = [];
   let deadlineEventsYielded = false;
@@ -345,6 +348,37 @@ export async function* executeRuntimeTurn(
     } finally {
       // A fenced/failed durable cancellation must still stop local Provider I/O.
       // Only successfully committed events above may be published as terminal facts.
+      abortExecution(reason);
+    }
+  };
+  const interruptClosedStream = (): void => {
+    const state = kernel.getState();
+    if (state.turn.status !== 'active') return;
+    const reason = 'Runtime execution stream closed before a durable Turn terminal.';
+    runCancelled = true;
+    exitStatus = 'fatal';
+    try {
+      const events = kernel.processEventBatch([
+        {
+          type: 'run.error',
+          message: reason,
+          recoverable: false,
+          turnId: state.turn.turnId,
+          outcome: {
+            version: 1,
+            status: 'unknown',
+            reasonCode: 'unknown',
+            knownExternalEffects: 'unknown',
+            safeRetry: false,
+            recoveryEntry: 'reconcile',
+            pendingVerification: false,
+          },
+        },
+        ...eventsForRunCancellation(state, reason, 'error'),
+      ]);
+      for (const event of events) collector.recordRuntime(event);
+    } finally {
+      // Stop local I/O even if this owner can no longer commit a terminal.
       abortExecution(reason);
     }
   };
@@ -729,7 +763,7 @@ export async function* executeRuntimeTurn(
           : undefined,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
-    for await (const event of runStateRuntimeLoop(
+    stateRunner = runStateRuntimeLoop(
       kernel,
       executor,
       provider,
@@ -752,7 +786,24 @@ export async function* executeRuntimeTurn(
           : effect,
       executionSignal,
       (state) => projectRuntimeSchedulerFacts(state, modelInvocationRuntime.builtinToolCatalog),
-    )) {
+      (error) => {
+        if (executionSignal.aborted) return;
+        runnerFailed = true;
+        // This is an execution failure, not user cancellation or a waiver of
+        // unknown effects. The catch below persists the classified failure.
+        runCancelled = true;
+        abortExecution(error instanceof Error ? error.message : String(error));
+      },
+    );
+    // Own iterator closure explicitly: abort incomplete work before returning
+    // the runner, so its finally can drain Provider cleanup before releasing it.
+    for (;;) {
+      const step = await stateRunner.next();
+      if (step.done) {
+        runnerCompleted = true;
+        break;
+      }
+      const event = step.value;
       collector.recordRuntime(event);
       let abortReasonAfterProjection: string | undefined;
       if (event.type === 'approval.rejected' && event.failure?.kind === 'approval_rejected') {
@@ -815,7 +866,7 @@ export async function* executeRuntimeTurn(
       yield* deadlineCancellationEvents;
     }
   } catch (error) {
-    if (executionSignal.aborted) {
+    if (executionSignal.aborted && !runnerFailed) {
       exitStatus = 'aborted';
       if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
         externalCancellationEventsYielded = true;
@@ -868,29 +919,42 @@ export async function* executeRuntimeTurn(
         modelFailureResolution?.terminalOutcome ??
         failedTerminalOutcome(failure.failure, { knownExternalEffects }),
     };
-    const aborted: RuntimeEvent = {
-      type: 'turn.aborted',
-      turnId: failure.turnId,
-      reason: errorEvent.message,
-      cause: 'error',
-    };
-    const terminalEvents = kernel.processEventBatch([errorEvent, aborted]);
+    const terminalEvents = kernel.processEventBatch([
+      errorEvent,
+      ...eventsForRunCancellation(kernel.getState(), errorEvent.message, 'error'),
+    ]);
+    runCancelled = true;
+    abortExecution(errorEvent.message);
     for (const event of terminalEvents) {
       collector.recordRuntime(event);
       yield event;
     }
   } finally {
-    if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
-    input.signal?.removeEventListener('abort', forwardExternalAbort);
-    input.registerRunCancellation?.(null);
-    input.registerCommittedCommandCancellation?.(null);
-    // IteratorClose (for example a failed client-event projection) bypasses
-    // the loop's terminal check. Closing a stream is not evidence that its
-    // still-active Turn completed successfully.
-    await collector.finalize(
-      exitStatus === 'completed' && kernel.getState().turn.status !== 'completed'
-        ? 'fatal'
-        : exitStatus,
-    );
+    try {
+      interruptClosedStream();
+    } finally {
+      try {
+        await stateRunner?.return(undefined);
+        if (!runnerCompleted && hasPendingSubagentProviderRecovery(kernel.getState())) {
+          const recovery = await reconcilePendingSubagentProviders(
+            kernel.getState().turn.abortCause === 'user' ? 'preserve_user_cancellation' : 'unknown',
+          );
+          for (const event of recovery.events) collector.recordRuntime(event);
+        }
+      } finally {
+        if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
+        input.signal?.removeEventListener('abort', forwardExternalAbort);
+        input.registerRunCancellation?.(null);
+        input.registerCommittedCommandCancellation?.(null);
+        // IteratorClose (for example a failed client-event projection) bypasses
+        // the loop's terminal check. Closing a stream is not evidence that its
+        // still-active Turn completed successfully.
+        await collector.finalize(
+          exitStatus === 'completed' && kernel.getState().turn.status !== 'completed'
+            ? 'fatal'
+            : exitStatus,
+        );
+      }
+    }
   }
 }

@@ -27,6 +27,7 @@ import type { RuntimeSnapshotCodec } from '../../../../packages/runtime-host/src
 import { createStateStorageForTest } from '../../../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarness } from '../../../../tests/helpers/model-invocation';
 import type { InstalledKiteRuntimeComposition } from '../../src/bootstrap/model-runtime-composition';
+import { createCliRuntimeBridge } from '../../src/bootstrap/runtime/CliRuntimeBridge';
 import {
   createRuntimeSessionCoordinatorBinding,
   type RuntimeSessionCoordinatorIdentity,
@@ -632,19 +633,23 @@ describe('retained TUI session coordinator', () => {
         }),
       ]);
       expect(coordinator.getInteractionModeState().interactionMode).toBe('auto');
-      expect(() =>
-        coordinator.commitInteractionModeCommand(
-          {
-            schema: RUNTIME_COMMAND_SCHEMA_,
-            commandId: 'command_mode_duplicate',
-            type: 'set_interaction_mode',
-            sessionId,
-            expectedRevision: coordinator.getState().revision,
-            mode: 'auto',
-          },
-          commandEvidence(sessionId, 'command_mode_duplicate'),
-        ),
-      ).toThrow('no-op');
+      const unchangedRevision = coordinator.getState().revision;
+      const unchanged = coordinator.commitInteractionModeCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_mode_duplicate',
+          type: 'set_interaction_mode',
+          sessionId,
+          expectedRevision: unchangedRevision,
+          mode: 'auto',
+        },
+        commandEvidence(sessionId, 'command_mode_duplicate'),
+      );
+      expect(unchanged.events).toEqual([]);
+      expect(unchanged.receipt.commandId).toBe('command_mode_duplicate');
+      expect(unchanged.receipt.committedRevision).toBe(unchangedRevision);
+      expect(coordinator.getState().revision).toBe(unchangedRevision);
+      expect(coordinator.getInteractionModeState().interactionMode).toBe('auto');
       expect(() =>
         coordinator.commitInteractionModeCommand(
           {
@@ -683,7 +688,7 @@ describe('retained TUI session coordinator', () => {
           },
           commandEvidence(sessionId, 'command_mode_wrong_value'),
         ),
-      ).toThrow('invalid or a no-op');
+      ).toThrow('invalid');
     } finally {
       await access.close();
       fixture.storage.close();
@@ -1139,6 +1144,143 @@ describe('retained TUI session coordinator', () => {
     } finally {
       modelEffects.createContextCompactor = originalCreateContextCompactor;
       gateway.invoke = originalInvoke;
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('closing a consumer before execution persists an interrupted terminal instead of leaving a running Turn', async () => {
+    const sessionId = 'retained-consumer-closed';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure(identity(sessionId));
+    if (fixture.runtime.status !== 'available') throw new Error('test model runtime unavailable');
+    try {
+      const stream = coordinator.executeTurn(
+        {
+          task: 'The consumer closes after the durable Turn starts.',
+          userId: 'tui-user',
+          threadId: sessionId,
+          workspace: retainedWorkspace,
+          recoveryIdentityKey: 'a'.repeat(64),
+          config: config(),
+          model: createChatModel(config()),
+          modelInvocationRuntime: { ...fixture.runtime, builtinToolCatalog },
+          capabilityExecution,
+          interactionMode: 'accept_edits',
+          phase: 'building',
+          sandboxBackend: 'none',
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      );
+      for await (const event of stream) {
+        if (event.type === 'turn.started') break;
+      }
+      expect(coordinator.isTurnActive()).toBe(false);
+      expect(coordinator.getState().turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
+      expect(coordinator.getState().terminalOutcome).toMatchObject({
+        status: 'unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      });
+      expect(
+        fixture.store.sessions
+          .loadEventsStrict(sessionId)
+          .some(({ event }) => event.type === 'run.error'),
+      ).toBe(true);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a projection failure settles the durable Turn and leaves the same bridge queryable', async () => {
+    const sessionId = 'retained-bridge-projection-failure';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createCliRuntimeBridge(
+      {
+        sessionId,
+        userId: 'tui-user',
+        workspace: retainedWorkspace,
+        projectIdentity: {
+          ...resolveProjectIdentity(retainedWorkspace),
+          projectId: 'project_retained_coordinator',
+        },
+        checkpointPath: join(fixture.root, 'runtime.db'),
+        config: config(),
+        interactionMode: 'accept_edits',
+        shellExecutor: async ({ command }) => ({
+          ok: true,
+          command,
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        }),
+        sandboxBackend: 'none',
+        skillOptions: {
+          userKiteCodeSkillsDir: join(fixture.root, 'user-skills'),
+          userAgentsSkillsDir: join(fixture.root, 'agent-skills'),
+          projectKiteCodeSkillsDir: join(fixture.root, 'project-skills'),
+          projectAgentsSkillsDir: join(fixture.root, 'project-agent-skills'),
+        },
+        initialSkillActivations: [],
+      },
+      capabilityExecution,
+      () => ({ ...fixture.runtime, builtinToolCatalog }),
+      () => 'a'.repeat(64),
+      access,
+    );
+    const controller = new AbortController();
+    const originalRevision = coordinator.revisionForEvent;
+    let injected = false;
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const inspected = await bridge.inspectCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('start was not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committed.activation?.((event) => published.push(event));
+      // Corrupt the consumer's event-metadata lookup, not the durable journal.
+      coordinator.revisionForEvent = () => {
+        injected = true;
+        return undefined;
+      };
+      await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      expect(injected).toBe(true);
+      expect(controller.signal.aborted).toBe(true);
+      expect(coordinator.isTurnActive()).toBe(false);
+      expect(coordinator.getState().turn.status).toBe('aborted');
+      expect(coordinator.getState().terminalOutcome).toMatchObject({
+        status: 'unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      });
+      expect(published.at(-1)).toMatchObject({
+        durability: 'durable',
+        revision: coordinator.getState().revision,
+      });
+      await expect(
+        bridge.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId,
+        }),
+      ).resolves.toMatchObject({
+        status: 'ok',
+        session: { revision: coordinator.getState().revision },
+      });
+    } finally {
+      coordinator.revisionForEvent = originalRevision;
+      await bridge.close();
       await access.close();
       fixture.storage.close();
       rmSync(fixture.root, { recursive: true, force: true });

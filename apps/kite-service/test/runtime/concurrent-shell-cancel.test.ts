@@ -293,3 +293,139 @@ describe('concurrent shell bounded cancellation', () => {
     kernel.close();
   });
 });
+
+test.each([
+  1, 2,
+])('consumer closure joins cleanup before releasing a %i-tool runner', async (toolCount) => {
+  const initial = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId: `closed-stream-${toolCount}`,
+    userId: 'u',
+    workspace: '/',
+  });
+  for (let ordinal = 0; ordinal < toolCount; ordinal++) {
+    const toolCallId = `shell-${ordinal}`;
+    initial.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'same-model',
+      ordinal,
+      name: 'shell_execute',
+      args: { command: 'cat fixture' },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      ...canonicalShellInvocationFacts('cat fixture'),
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.tools.queue = [...initial.tools.queue, toolCallId];
+  }
+  const kernel = new AgentKernel({
+    store: openStateStoreForTest(':memory:'),
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const controller = new AbortController();
+  let cleanupFinished = false;
+  let modelCalls = 0;
+  const stream = runStateRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type === 'call_model') {
+        modelCalls++;
+        return [];
+      }
+      if (effect.type !== 'run_tools') return [];
+      emit?.({ type: 'tool.started', toolCallId: effect.toolCallIds[0]! });
+      await new Promise<void>((resolve) => {
+        if (controller.signal.aborted) resolve();
+        else controller.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      await Bun.sleep(25);
+      cleanupFinished = true;
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    10_000,
+    undefined,
+    controller.signal,
+    (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
+  );
+  try {
+    for await (const event of stream) {
+      if (event.type === 'tool.started') {
+        controller.abort('consumer failed');
+        break;
+      }
+    }
+    expect(cleanupFinished).toBe(true);
+    expect(modelCalls).toBe(0);
+  } finally {
+    controller.abort();
+    await stream.return(undefined);
+    kernel.close();
+  }
+});
+
+test('one failed background tool aborts and joins its sibling before propagating the failure', async () => {
+  const initial = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId: 'failed-sibling',
+    userId: 'u',
+    workspace: '/',
+  });
+  for (let ordinal = 0; ordinal < 2; ordinal++) {
+    const toolCallId = `shell-${ordinal}`;
+    initial.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'same-model',
+      ordinal,
+      name: 'shell_execute',
+      args: { command: 'cat fixture' },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      ...canonicalShellInvocationFacts('cat fixture'),
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.tools.queue = [...initial.tools.queue, toolCallId];
+  }
+  const kernel = new AgentKernel({
+    store: openStateStoreForTest(':memory:'),
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const controller = new AbortController();
+  let siblingCleaned = false;
+  const stream = runStateRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type !== 'run_tools') return [];
+      if (effect.toolCallIds[0] === 'shell-1')
+        throw new Error('injected sibling execution failure');
+      emit?.({ type: 'tool.started', toolCallId: 'shell-0' });
+      await new Promise<void>((resolve) =>
+        controller.signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+      await Bun.sleep(25);
+      siblingCleaned = true;
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    10000,
+    undefined,
+    controller.signal,
+    (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
+    () => controller.abort('sibling failed'),
+  );
+  const execution = (async () => {
+    for await (const _event of stream) {
+    }
+  })();
+  try {
+    await expect(execution).rejects.toThrow('injected sibling execution failure');
+    expect(siblingCleaned).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+  } finally {
+    controller.abort();
+    await execution.catch(() => {});
+    kernel.close();
+  }
+});

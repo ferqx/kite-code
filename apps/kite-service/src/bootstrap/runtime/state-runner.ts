@@ -267,6 +267,7 @@ async function* executeEffectWithStreaming(
   let deferred: { reason: string; retryAfterMs: number } | undefined;
   let failure: unknown;
   let acceptingEvents = true;
+  let cleanupDeadlineAt: number | undefined;
 
   const enqueue = (
     events: RuntimeEvent[],
@@ -363,7 +364,6 @@ async function* executeEffectWithStreaming(
   try {
     let emitted = false;
     let cancellationIncomplete = false;
-    let cleanupDeadlineAt: number | undefined;
     while (!settled || pending.length > 0) {
       if (pending.length === 0) {
         const waitForWake = new Promise<void>((resolve) => {
@@ -500,6 +500,13 @@ async function* executeEffectWithStreaming(
     return { applied: true, emitted: true };
   } finally {
     closeEventChannel();
+    // An abandoned consumer must not release a foreground effect while its
+    // aborted Provider is still cleaning up. Late persistence is rejected above.
+    if (!settled && signal?.aborted)
+      await waitForPromiseOrTimeout(
+        execution,
+        Math.max(0, (cleanupDeadlineAt ?? Date.now() + ABORT_CLEANUP_GRACE_MS) - Date.now()),
+      );
   }
 }
 
@@ -535,12 +542,13 @@ export async function* runStateRuntimeLoop(
   ) => Promise<RuntimeEffect> | RuntimeEffect,
   signal?: AbortSignal,
   schedulerFacts?: (state: Readonly<RuntimeState>) => SchedulerFacts,
+  onFailure?: (error: unknown) => void,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
   const backgroundEvents: RuntimeEvent[] = [];
   const backgroundGroups = new Map<string, number>();
-  let backgroundCount = 0;
+  const backgroundExecutions = new Set<Promise<void>>();
   let backgroundFailure: unknown;
   let backgroundNoProgressRevision: number | undefined;
   let wakeBackground: (() => void) | undefined;
@@ -551,13 +559,13 @@ export async function* runStateRuntimeLoop(
   const waitForBackground = () =>
     backgroundEvents.length > 0 ||
     backgroundFailure ||
-    (backgroundCount === 0 && backgroundNoProgressRevision !== undefined)
+    (backgroundExecutions.size === 0 && backgroundNoProgressRevision !== undefined)
       ? Promise.resolve()
       : new Promise<void>((resolve) => {
           wakeBackground = resolve;
         });
   const consumeSettledBackgroundNoProgress = () => {
-    if (backgroundCount > 0 || backgroundNoProgressRevision === undefined) return false;
+    if (backgroundExecutions.size > 0 || backgroundNoProgressRevision === undefined) return false;
     const candidateRevision = backgroundNoProgressRevision;
     backgroundNoProgressRevision = undefined;
     return kernel.getState().revision === candidateRevision;
@@ -568,9 +576,9 @@ export async function* runStateRuntimeLoop(
     reservationIds: string[],
   ) => {
     const lease = kernel.beginEffect(effect);
-    backgroundCount += 1;
     backgroundGroups.set(group, (backgroundGroups.get(group) ?? 0) + 1);
-    void (async () => {
+    let execution!: Promise<void>;
+    execution = (async () => {
       const stream = executeEffectWithStreaming(
         kernel,
         executor,
@@ -591,7 +599,7 @@ export async function* runStateRuntimeLoop(
             // main loop must wait for the complete background set and compare revisions again.
             if (
               !step.value.emitted &&
-              backgroundCount === 1 &&
+              backgroundExecutions.size === 1 &&
               kernel.getState().revision === lease.expectedRevision
             )
               backgroundNoProgressRevision = lease.expectedRevision;
@@ -602,13 +610,14 @@ export async function* runStateRuntimeLoop(
         backgroundFailure ??= error;
       } finally {
         kernel.releaseEffect?.(lease);
-        backgroundCount -= 1;
+        backgroundExecutions.delete(execution);
         const remaining = (backgroundGroups.get(group) ?? 1) - 1;
         if (remaining > 0) backgroundGroups.set(group, remaining);
         else backgroundGroups.delete(group);
         signalBackground();
       }
     })();
+    backgroundExecutions.add(execution);
   };
   const drainBackgroundEffects = async function* (): AsyncGenerator<
     RuntimeEvent,
@@ -617,7 +626,7 @@ export async function* runStateRuntimeLoop(
     let cancellationIncomplete:
       | Extract<RuntimeEvent, { type: 'runtime.cancellation_diagnostic' }>
       | undefined;
-    while (backgroundCount > 0 || backgroundEvents.length > 0) {
+    while (backgroundExecutions.size > 0 || backgroundEvents.length > 0) {
       if (backgroundEvents.length === 0) {
         // Every background executor receives the same signal and has its own
         // bounded post-abort cleanup grace. Once cancellation is observed we
@@ -676,7 +685,7 @@ export async function* runStateRuntimeLoop(
       // A running shell may overlap only with shell siblings from the same
       // model response and task. Other tools, model calls and completion wait.
       if (
-        backgroundCount > 0 &&
+        backgroundExecutions.size > 0 &&
         !(
           effect.type === 'request_tool_approval' ||
           (effect.type === 'run_tools' && overlapsRunningShell)
@@ -838,7 +847,7 @@ export async function* runStateRuntimeLoop(
               const timer = setTimeout(finish, remainingMs);
               if (signal?.aborted) finish();
               else signal?.addEventListener('abort', finish, { once: true });
-              if (backgroundCount > 0) void waitForBackground().then(finish);
+              if (backgroundExecutions.size > 0) void waitForBackground().then(finish);
             });
             if (signal?.aborted) return;
             continue;
@@ -947,7 +956,7 @@ export async function* runStateRuntimeLoop(
             signalBackground();
           });
           while (!resolved) {
-            if (backgroundCount === 0) {
+            if (backgroundExecutions.size === 0) {
               const waited = await waitForPromiseOrAbort(requested, signal);
               if (waited === ABORTED_WAIT) {
                 yield* drainBackgroundEffects();
@@ -1091,7 +1100,18 @@ export async function* runStateRuntimeLoop(
       if (!outcome.applied) continue;
     }
     throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
+  } catch (error) {
+    // Failure during next() must stop siblings before this iterator can finish
+    // unwinding. The caller cannot observe the rejection until finally settles.
+    onFailure?.(error);
+    throw error;
   } finally {
-    kernel.releaseRunner(runnerId);
+    // The Turn owner aborts its signal before closing this iterator. Join the
+    // existing bounded cleanup paths before releasing the Session runner.
+    try {
+      await Promise.all(backgroundExecutions);
+    } finally {
+      kernel.releaseRunner(runnerId);
+    }
   }
 }

@@ -874,3 +874,114 @@ describe('bounded Runtime cancellation', () => {
     }
   });
 });
+
+test.each([
+  1, 2,
+])('closing a live consumer stops %i governed shells and persists an unknown terminal', async (count) => {
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-consumer-closed-shells-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = `consumer-closed-shells-${count}`;
+  const model = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: Array.from({ length: count }, (_, index) => ({
+          id: `shell-${index}`,
+          name: 'shell_execute',
+          args: { command: 'cat fixture.txt' },
+        })),
+      }),
+    },
+  ]);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort('fixture did not reach closure'), 5000);
+  let started = 0;
+  let cleaned = 0;
+  let closed = false;
+  try {
+    for await (const event of runTestRuntimeAgent(
+      {
+        task: 'Read the fixture in parallel.',
+        threadId,
+        userId: 'test',
+        workspace,
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
+        model,
+        phase: 'building',
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+        sandboxBackend: 'seatbelt',
+        signal: controller.signal,
+        shellExecutor: async (input) => {
+          started++;
+          input.onProgress?.(`started ${started}`, 'stdout');
+          await new Promise<void>((resolve) => {
+            if (input.signal?.aborted) resolve();
+            else input.signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          await Bun.sleep(25);
+          cleaned++;
+          return {
+            ok: false,
+            command: input.command,
+            exitCode: 130,
+            stdout: '',
+            stderr: 'cancelled',
+            terminationReason: 'cancelled',
+            processCleanup: {
+              confirmedExited: true,
+              gracefulRequested: true,
+              forced: false,
+              unconfirmedDescendantCount: 0,
+            },
+          };
+        },
+      },
+      {
+        requestAction: async (effect, state) => {
+          const pending = state.pendingApprovals.get(effect.interactionId);
+          if (!pending) throw new Error('Expected approval');
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            generation: pending.generation,
+            grant: 'approve_once',
+          };
+        },
+      },
+    )) {
+      if (event.type === 'tool.progress' && started === count) {
+        closed = true;
+        break;
+      }
+    }
+    expect(closed).toBe(true);
+    expect(started).toBe(count);
+    expect(cleaned).toBe(count);
+    const store = openStateStoreForTest(storePath);
+    try {
+      const state = store.loadSnapshot<RuntimeState>(threadId)!;
+      expect(state.turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
+      expect(state.terminalOutcome).toMatchObject({
+        status: 'unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      });
+      expect(Object.values(state.tools.calls).every((call) => call.status === 'cancelled')).toBe(
+        true,
+      );
+    } finally {
+      store.close();
+    }
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+}, 10000);

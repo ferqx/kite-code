@@ -139,6 +139,6 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
-桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 只停止客户端后续分页，不中断已发出的服务读取、不新增协议方法。桌面可以先展示当前连接内的有界正文缓存，但操作资格必须等待新订阅与完整历史校准，缓存不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。断线后的桌面 ready 立即失效，丢失 mutation 回执明确提示结果未知并要求检查实际会话与文件。
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 只停止客户端后续分页，不中断已发出的服务读取、不新增协议方法。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。断线后的桌面 ready 立即失效，丢失 mutation 回执明确提示结果未知并要求检查实际会话与文件。
 
 Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。

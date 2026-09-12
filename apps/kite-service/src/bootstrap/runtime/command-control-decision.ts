@@ -38,8 +38,14 @@ export function commitInteractionModeCommand(
 ): CommittedControlCommand {
   const state = session.getState() as RuntimeState;
   assertCommandSession(state, command.sessionId, command.expectedRevision, evidence);
-  if (!isInteractionMode(command.mode) || state.mode === command.mode) {
-    throw new Error('Runtime interaction mode command is invalid or a no-op.');
+  if (!isInteractionMode(command.mode)) {
+    throw new Error('Runtime interaction mode command is invalid.');
+  }
+  if (state.mode === command.mode) {
+    return Object.freeze({
+      receipt: session.commitCommandSnapshot(evidence),
+      events: Object.freeze([]),
+    });
   }
   const changedAt = committedAtIso(evidence.committedAt);
   const committed = session.commitCommandBatch(

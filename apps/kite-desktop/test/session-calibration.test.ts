@@ -41,6 +41,8 @@ async function fixture(responses: MockResponse[] = []) {
   );
   let generation = 0;
   let historyRequests = 0;
+  let nextLiveFailure: 'projection' | 'subscription' | undefined;
+  let nextSubscriptionGate: ReturnType<typeof gate> | undefined;
   let nextFailure: 'temporary' | 'unauthorized' | 'missing' | undefined;
   let nextGate: ReturnType<typeof gate> | undefined;
   const allGates: ReturnType<typeof gate>[] = [];
@@ -98,6 +100,19 @@ async function fixture(responses: MockResponse[] = []) {
     const carrier = carriers.get(args?.connectionId as number)!;
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
+      if (
+        (nextLiveFailure === 'projection' &&
+          message.method === 'runtime/query' &&
+          message.params.query.type === 'get_session_projection') ||
+        (nextLiveFailure === 'subscription' && message.method === 'runtime/subscribe')
+      ) {
+        failures.set(message.id, 'temporary');
+        nextLiveFailure = undefined;
+      }
+      if (message.method === 'runtime/subscribe' && nextSubscriptionGate) {
+        gated.set(message.id, nextSubscriptionGate);
+        nextSubscriptionGate = undefined;
+      }
       if (message.method === 'history/load_session') {
         historyRequests++;
         if (nextGate) {
@@ -153,6 +168,14 @@ async function fixture(responses: MockResponse[] = []) {
     a,
     b,
     model,
+    holdSubscription() {
+      nextSubscriptionGate = gate();
+      allGates.push(nextSubscriptionGate);
+      return nextSubscriptionGate;
+    },
+    failLiveRead(kind: 'projection' | 'subscription') {
+      nextLiveFailure = kind;
+    },
     get historyRequests() {
       return historyRequests;
     },
@@ -486,3 +509,75 @@ test('an explicit new-session send keeps its target while another cached selecti
     await f.close();
   }
 }, 20_000);
+
+test.each([
+  'projection',
+  'subscription',
+] as const)('first history stays readable when live %s fails', async (kind) => {
+  const f = await fixture([{ message: { content: 'Saved before the live failure.' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Keep this history readable.');
+    await waitFor(() =>
+      f.client
+        .getSnapshot()
+        .messages.some((m) => m.text === 'Saved before the live failure.' && m.settled),
+    );
+    await f.client.selectSession(f.b);
+    await f.client.disconnect();
+    await f.client.connect();
+    f.failLiveRead(kind);
+    await expect(f.client.selectSession(f.a)).rejects.toThrow('fixture history failure');
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected: f.a,
+      hasLoadedHistory: true,
+      loadingSession: false,
+      ready: false,
+    });
+    expect(
+      f.client.getSnapshot().messages.some((m) => m.text === 'Saved before the live failure.'),
+    ).toBe(true);
+    await expect(f.client.send('must not send while uncalibrated')).rejects.toThrow('同步');
+    await f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().ready).toBe(true);
+    expect(f.model.getRequestCount()).toBe(1);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('a subscription that never becomes ready times out without hiding first-read history', async () => {
+  const f = await fixture([{ message: { content: 'Readable during live outage.' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Save this before the outage.');
+    await waitFor(() =>
+      f.client
+        .getSnapshot()
+        .messages.some((m) => m.text === 'Readable during live outage.' && m.settled),
+    );
+    await f.client.selectSession(f.b);
+    await f.client.disconnect();
+    await f.client.connect();
+    const held = f.holdSubscription();
+    const loading = f.client.selectSession(f.a);
+    const timeout = expect(loading).rejects.toThrow('会话加载超时');
+    await held.arrived;
+    expect(f.client.getSnapshot()).toMatchObject({ hasLoadedHistory: true, ready: false });
+    expect(
+      f.client.getSnapshot().messages.some((m) => m.text === 'Readable during live outage.'),
+    ).toBe(true);
+    await timeout;
+    expect(f.client.getSnapshot()).toMatchObject({
+      hasLoadedHistory: true,
+      loadingSession: false,
+      ready: false,
+    });
+    held.release();
+    await f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().ready).toBe(true);
+    expect(f.model.getRequestCount()).toBe(1);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
