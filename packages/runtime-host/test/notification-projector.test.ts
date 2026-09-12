@@ -33,7 +33,7 @@ describe('NotificationProjector durable subscriptions', () => {
     projector.close();
   });
 
-  test('accepts the same-revision queued-to-running Run activation', () => {
+  test('delivers same-revision Run activation to an existing subscriber without replaying events', async () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry);
     const running = activeProjection('activation', 1);
@@ -41,17 +41,89 @@ describe('NotificationProjector durable subscriptions', () => {
       ...durable('activation', 1),
       projection: {
         kind: 'work',
+        event: {
+          type: 'user.message',
+          messageId: 'message-1',
+          kind: 'task',
+          text: 'original event',
+        },
         session: {
           ...running,
           currentRun: { ...running.currentRun!, status: 'queued' },
         },
       },
     });
+    const iterator = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'activation' } })
+      [Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toMatchObject({
+      projection: { session: { currentRun: { status: 'queued' } } },
+    });
     projector.publish({
       ...durable('activation', 1),
       projection: { kind: 'work', session: running },
     });
+    expect(
+      await Promise.race([iterator.next(), Bun.sleep(100).then(() => 'missing')]),
+    ).toMatchObject({
+      value: {
+        revision: 1,
+        projection: { kind: 'snapshot', session: { currentRun: { status: 'running' } } },
+      },
+    });
+    const replay = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'activation', afterRevision: 0 } })
+      [Symbol.asyncIterator]();
+    expect((await replay.next()).value).toMatchObject({
+      projection: {
+        event: { type: 'user.message', text: 'original event' },
+        session: { currentRun: { status: 'running' } },
+      },
+    });
+    await replay.return?.();
+    await iterator.return?.();
     expect(registry.projection('activation')?.currentRun?.status).toBe('running');
+    projector.close();
+  });
+
+  test('rejects a changed event at a retained revision before altering live or replay projection', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    const session = activeProjection('event-drift', 1);
+    const original = {
+      ...durable('event-drift', 1),
+      projection: {
+        kind: 'turn' as const,
+        session,
+        event: {
+          type: 'user.message' as const,
+          kind: 'task' as const,
+          messageId: 'message-1',
+          text: 'original',
+        },
+      },
+    };
+    projector.publish(original);
+    for (const next of [session, { ...session, model: { provider: 'test', name: 'model' } }]) {
+      expect(() =>
+        projector.publish({
+          ...original,
+          projection: {
+            ...original.projection,
+            session: next,
+            event: { ...original.projection.event, text: 'different' },
+          },
+        }),
+      ).toThrow('event diverged');
+    }
+    expect(registry.projection('event-drift')?.model).toBeUndefined();
+    const replay = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'event-drift', afterRevision: 0 } })
+      [Symbol.asyncIterator]();
+    expect((await replay.next()).value).toMatchObject({
+      projection: { event: { text: 'original' } },
+    });
+    await replay.return?.();
     projector.close();
   });
 
@@ -104,6 +176,7 @@ describe('NotificationProjector durable subscriptions', () => {
             runId: 'run-1',
             initialTurnId: 'turn-1',
             activeTurnId: 'turn-1',
+            taskId: 'work-1',
             status: 'cancelled',
             revision: 1,
           },

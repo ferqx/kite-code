@@ -1,4 +1,7 @@
-import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
+import {
+  isRuntimeSessionProjectionEnrichment,
+  type RuntimeSessionProjection,
+} from '@kite-ai/runtime-contract';
 import { SessionMailbox } from '../session-mailbox';
 
 export type SessionProjectionChange =
@@ -25,12 +28,7 @@ export class SessionRegistry {
     if (current && current.revision > projection.revision) return 'unchanged';
     if (current && current.revision === projection.revision) {
       if (canonicalProjection(current) !== canonicalProjection(projection)) {
-        const stableCurrent = withoutModel(current);
-        const stableProjection = withoutModel(projection);
-        if (
-          canonicalProjection(stableCurrent) !== canonicalProjection(stableProjection) &&
-          !isExecutionLifecycleEnrichment(stableCurrent, stableProjection)
-        ) {
+        if (!isRuntimeSessionProjectionEnrichment(current, projection)) {
           throw new Error('Runtime Session projection diverged at the same revision.');
         }
         const enriched =
@@ -80,48 +78,6 @@ export class SessionRegistry {
   #emit(change: SessionProjectionChange): void {
     for (const listener of this.#listeners) listener(change);
   }
-}
-
-function isExecutionLifecycleEnrichment(
-  current: RuntimeSessionProjection,
-  next: RuntimeSessionProjection,
-): boolean {
-  const currentRun = current.currentRun;
-  const nextRun = next.currentRun;
-  if (!currentRun || !nextRun || currentRun.runId !== nextRun.runId) return false;
-  const activation = currentRun.status === 'queued' && nextRun.status === 'running';
-  const cleanup =
-    ['queued', 'running', 'waiting'].includes(currentRun.status) &&
-    ['completed', 'cancelled', 'failed'].includes(nextRun.status);
-  const taskEnrichment =
-    current.activeTask === undefined &&
-    next.activeTask !== undefined &&
-    currentRun.taskId === undefined &&
-    nextRun.taskId === next.activeTask.taskId;
-  if (!activation && !cleanup && !taskEnrichment) return false;
-  const expected: RuntimeSessionProjection = {
-    ...current,
-    ...(taskEnrichment ? { activeTask: next.activeTask } : {}),
-    currentRun: nextRun,
-  };
-  return stableSerializeIgnoringUndefined(expected) === stableSerializeIgnoringUndefined(next);
-}
-
-function stableSerializeIgnoringUndefined(value: unknown): string {
-  if (value === undefined) return '';
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableSerializeIgnoringUndefined).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableSerializeIgnoringUndefined(record[key])}`)
-    .join(',')}}`;
-}
-
-function withoutModel(projection: RuntimeSessionProjection): RuntimeSessionProjection {
-  const { model: _model, ...stable } = projection;
-  return stable;
 }
 
 function canonicalProjection(projection: RuntimeSessionProjection): string {

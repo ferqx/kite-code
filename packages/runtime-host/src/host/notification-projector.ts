@@ -82,6 +82,15 @@ export class NotificationProjector {
       ) {
         throw new Error('Durable Runtime notification identity is inconsistent');
       }
+      const history = this.#history.get(notification.sessionId) ?? [];
+      const priorEvent = history.find((entry) => entry.revision === notification.revision)
+        ?.projection.event;
+      if (
+        priorEvent !== undefined &&
+        notification.projection.event !== undefined &&
+        !sameJson(priorEvent, notification.projection.event)
+      )
+        throw new Error('Runtime durable event diverged at the same revision.');
       if (this.#registry.commitProjection(notification.projection.session) === 'unchanged') {
         this.#observeDurableTerminal(notification);
         // A historical Session can be registered by the query used to prepare
@@ -104,9 +113,18 @@ export class NotificationProjector {
         return;
       }
       this.#observeDurableTerminal(notification);
-      const history = this.#history.get(notification.sessionId) ?? [];
       if (history.at(-1)?.revision === notification.revision) {
-        history[history.length - 1] = notification;
+        const previous = history[history.length - 1]!;
+        history[history.length - 1] =
+          notification.projection.event === undefined && previous.projection.event !== undefined
+            ? {
+                ...previous,
+                projection: {
+                  ...previous.projection,
+                  session: this.#registry.projection(notification.sessionId)!,
+                },
+              }
+            : notification;
       } else {
         history.push(notification);
       }
@@ -296,7 +314,16 @@ export class NotificationProjector {
     notification: Extract<RuntimeNotification, { durability: 'durable' }>,
   ): void {
     if (subscriber.lastRevision !== undefined) {
-      if (notification.revision <= subscriber.lastRevision) return;
+      if (notification.revision < subscriber.lastRevision) return;
+      // Registry already validated a changed same-revision enrichment. Forward
+      // its snapshot without replaying the event attached to the original revision.
+      if (notification.revision === subscriber.lastRevision) {
+        this.#enqueue(
+          subscriber,
+          snapshotNotification(this.#registry.projection(notification.sessionId)!),
+        );
+        return;
+      }
       if (notification.revision !== subscriber.lastRevision + 1) {
         const projection = this.#registry.projection(notification.sessionId);
         if (projection) this.#enqueue(subscriber, snapshotNotification(projection));
@@ -538,4 +565,23 @@ function closedEphemeralRunKey(sessionId: string, runId: string): string {
 
 function isTerminalRunStatus(status: string): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right))
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => sameJson(entry, right[index]))
+    );
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a).filter((key) => a[key] !== undefined);
+  return (
+    keys.length === Object.keys(b).filter((key) => b[key] !== undefined).length &&
+    keys.every((key) => sameJson(a[key], b[key]))
+  );
 }

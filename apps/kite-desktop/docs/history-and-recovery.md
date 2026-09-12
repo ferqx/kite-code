@@ -36,7 +36,6 @@
 
 本地目录的存在状态由 `listProjects` 读取时查询，不写入项目偏好。目录缺失只让空间名称使用次级文字色，不显示“尚未关联本地目录”常驻提示，也不据此禁用会话。返回已连接窗口只更新本地目录状态，不重新查询会话目录；历史目录在连接、新建与所订阅运行结束时更新，未订阅的外部变化可能延迟到下次目录读取。
 
-
 ## 启动预算与验证边界
 
 连接与首屏目录的目标预算为 300ms。启动链路只打开和核对 Store 文件、格式与结构，读取有界目录；完整会话恢复检查按目标 Session 在同一 SQLite read snapshot 内完成，Artifact 内容由所属 reader 在访问时校验。显式 release preflight 仍执行完整 SQLite physical/FK 检查，不把此全库维护工作重复放进各个 reader 构造函数。跨包约束见[SQLite Runtime Log](../../../docs/active/sqlite-runtime-log-query.md)。
@@ -48,6 +47,8 @@ Electron 宿主在每次新建配套进程前读取并校验完整 Service SHA-2
 另用实际 App／共享组件与 85 条隔离展示数据，在内置浏览器两次 requestAnimationFrame 后核对 85 行已提交，观测为 47ms。此项与原生服务计时分开，不能相加并宣称已经取得 Electron 从系统启动到窗口绘制完成的端到端资格。当前 [host lifecycle 测试](../test/host-lifecycle.test.ts)、[配套 Service fixture](../test/host-paired-service.ts)与待完成的 packaged Electron smoke 分别核对宿主、真实执行和窗口链路；成功证据取得前，300ms 端到端目标仍未满足。
 
 ## 会话正文缓存与校准
+
+当前选择的校准结果同时绑定 AbortController 与 Runtime subscription generation。已校准会话出现 durable gap、失去 ready 或订阅 generation 更换时，立即失效操作资格，保留正文并复用原有 20 秒 `selectSession` 校准。History 读取期间如果 generation 再次变化，在同一加载期限内重新建立历史上界；同一代次之后的实时事件由订阅缓冲并按原有消息身份折叠。普通同代次快照更新不触发完整重读；失败不恢复 ready，也不清除仍有读取权限的正文。共享 Client 的 resync 标记不充当第二份历史水位或自动命令重放开关。[校准回归](../test/session-calibration.test.ts)在真实 Service 的 renderer 边界丢弃一条用户消息，验证自动补读、期间禁止操作、恢复后不重复，以及普通目录刷新不重读正文。
 
 [DesktopClient](../src/client.ts)拥有当前阅读快照与[非当前历史缓存](../src/session-cache.ts)。缓存条目按连接内 sessionId 读取，保存已核对的 workspaceDigest、消息引用、已加载标记及估算体积。take 将条目移交当前视图，离开时保存最新快照；流式更新不复制缓存或反复估算体积。缓存不保存操作权限、原始事件、React 元素或 DOM。草稿和阅读状态继续由原 UI owner 管理，正文淘汰不删除它们。
 
@@ -85,3 +86,5 @@ Chromium 152 对实际 App 做弱引用与 GC 检查：依次离开 100 个 500 
 隔离渲染后，以同一 projectHistory 处理 5,000 事件（含 500×4 KiB 工具输出），初投影／相同内容校准约 302 / 331ms，事件循环探针最大间隔 11.6ms，Long Tasks 观测中无超过 50ms 的任务。单个 2 MiB 工具输出另测投影 0.1ms、相同内容比较 0.6ms；单事件内部不能抢占，这个样本不构成任意超大事件的上限保证。复验使用实际 [历史投影](../src/history-projection.ts)、[校准集成回归](../test/session-calibration.test.ts)的隔离 Service 和上述数据规模、时序与采样方法；临时预览不作为生产路由或第二套 renderer 交付。
 
 Figma 已同步并核验[首次加载](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4736)、[缓存命中／后台校准](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4772)及[校准失败](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4808)。校准和失败态保留输入区域、禁用发送；重试进入校准，再回到实时就绪态。原型中的自动过渡用于状态演示，不是产品新增的定时器。
+
+2026-09-12 实时消息缺口恢复复验后，既有校准／失败画面保持不变；[Figma 画布外流程说明](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4469-160)同步了缺口触发、保留正文、禁用发送、补读后恢复及失败重试。首次加载画面未改动，技术代次信息不进入产品状态行。

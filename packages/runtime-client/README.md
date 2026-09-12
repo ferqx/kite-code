@@ -12,6 +12,11 @@
 - 维护 Session/index/ephemeral 的 observable snapshot，使用 connection generation 隔离旧连接消息，并在 index reset end 原子替换 session 列表。
 - Store mutation返回`applied`后notification才进入consumer queue；ignored、same-revision divergence、durable gap或ephemeral sequence
   gap均不dispatch原event。`resync_required`把Session置为not-ready并在同connection复用既有subscription重新订阅，不重放mutation。
+- 自动重订阅失败时关闭该订阅的本地 iterator，让客户端结束等待并显示恢复入口；旧 connection generation 的恢复任务
+  不关闭或重复激活替代连接。durable gap 在收到缺口的当次通知就失效 ready；恢复后的 projection ready 不证明正文已经补齐，
+  Native presentation owner 仍须按 subscription generation 重新校准完整 History。
+- 同 revision 的 model 与封闭 Run lifecycle enrichment 按 Contract 的共享规则接受；Run/Turn/interaction/revision 等稳定身份
+  与其他 Session 字段漂移仍触发 resync，不能用宽松整对象替换覆盖真实冲突。
 - connection generation 变化时清空旧 generation 的 Session/stream snapshot，使所有旧 `ready` 与 revision
   立即失效；只有新 generation 的 authoritative reset/replay 与 subscription ready 边界可以重新建立 Session。
   新 Server 可以合法建立 revision 更低的当前投影，Client 不得在 resubscribe 前用 stale revision 发命令。
@@ -34,7 +39,7 @@
 - transport timeout 不等于取消 Runtime command；mutation retry 必须复用原 command ID。
 - reconnect 只恢复登记的 subscription，绝不自动重放 mutation。
 - Session index 仅在同一连接 generation 内的 reset begin/upsert/end 边界原子替换；乱序、旧连接和同 revision
-  不同投影均被拒绝或标记 resync。Server 的短期 notification replay 只帮助断线恢复，不是完整 history。
+  超出既定 enrichment 规则的投影差异均被拒绝或标记 resync。Server 的短期 notification replay 只帮助断线恢复，不是完整 history。
 - History adapter/protocol adapter与control transport正交；Client facade可以同时暴露两者。History不通过Server
   notification retention，也不让Client取得raw Runtime event或Store authority。
 - Native descriptor/discovery/process、WebSocket/History/App Control connector contract 位于

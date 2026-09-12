@@ -162,6 +162,7 @@ Runtime Host 按职责分为 `host/`、`lifecycle/`、`execution/`、`kernel-ada
 - 在 Provider work 前完成 attempt acknowledgement；
 - 管理 cancellation、cleanup barrier、effect lease 与 restart recovery；
 - 对 durable notification 保留 revision history，对 gap 返回 snapshot；ephemeral stream 使用 monotonic sequence；
+- 同 revision 的 model／封闭 Run lifecycle enrichment 由 Runtime Contract 定义，Host 与 Client 一致判定；已有 subscriber 收到无事件快照，retained replay 保留原始 event，事件内容漂移不得改写已发布事实。完整正文在订阅缺口后仍由 History 校准，projection 就绪不替代消息完整性；
 - 只翻译 Kernel facts，不解释具体工具结果、Prompt、Skill 或 MCP 业务语义；
 - 使用冻结 snapshot 创建一个 capability execution port，不提供 registry-taking alternate factory。
 

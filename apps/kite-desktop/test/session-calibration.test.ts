@@ -41,6 +41,7 @@ async function fixture(responses: MockResponse[] = []) {
   );
   let generation = 0;
   let historyRequests = 0;
+  let droppedEvent: string | undefined;
   let nextLiveFailure: 'projection' | 'subscription' | undefined;
   let nextSubscriptionGate: ReturnType<typeof gate> | undefined;
   let nextFailure: 'temporary' | 'unauthorized' | 'missing' | undefined;
@@ -137,7 +138,21 @@ async function fixture(responses: MockResponse[] = []) {
       }
       await carrier.connection.send(message);
     } else if (command === 'runtime_receive') {
-      const item = await carrier.messages.next();
+      let item = await carrier.messages.next();
+      const eventType = (value: unknown) => {
+        const frame = value as {
+          method?: string;
+          params?: { message?: { durability?: string; event?: { type?: string } } };
+        };
+        return frame.method === 'runtime/subscription' &&
+          frame.params?.message?.durability === 'durable'
+          ? frame.params.message.event?.type
+          : undefined;
+      };
+      if (!item.done && droppedEvent && eventType(item.value) === droppedEvent) {
+        droppedEvent = undefined;
+        item = await carrier.messages.next();
+      }
       if (item.done) throw new Error('closed');
       const message = item.value as { id?: unknown };
       const waiting = gated.get(message.id);
@@ -189,6 +204,9 @@ async function fixture(responses: MockResponse[] = []) {
     a,
     b,
     model,
+    dropLiveEvent(type: string) {
+      droppedEvent = type;
+    },
     holdSubscription() {
       nextSubscriptionGate = gate();
       allGates.push(nextSubscriptionGate);
@@ -672,3 +690,46 @@ test('a subscription that never becomes ready times out without hiding first-rea
     await f.close();
   }
 }, 30_000);
+
+test('a live durable gap reloads omitted messages before restoring selected-session readiness', async () => {
+  const f = await fixture([{ message: { content: 'answer after gap' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    const before = f.historyRequests;
+    const held = f.holdHistory();
+    f.dropLiveEvent('user.message');
+    await f.client.send('message omitted from live delivery');
+    await Promise.race([
+      held.arrived,
+      Bun.sleep(2000).then(() => {
+        throw new Error('Gap did not trigger history calibration');
+      }),
+    ]);
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected: f.a,
+      ready: false,
+      hasLoadedHistory: true,
+    });
+    held.release();
+    await waitFor(
+      () =>
+        f.client.getSnapshot().ready &&
+        f.client
+          .getSnapshot()
+          .messages.some((message) => message.text === 'answer after gap' && message.settled),
+    );
+    expect(
+      f.client
+        .getSnapshot()
+        .messages.filter((message) => message.text === 'message omitted from live delivery'),
+    ).toHaveLength(1);
+    expect(f.historyRequests).toBeGreaterThan(before);
+    const after = f.historyRequests;
+    await f.client.refreshDirectory();
+    await Bun.sleep(30);
+    expect(f.historyRequests).toBe(after);
+    f.model.assertComplete();
+  } finally {
+    await f.close();
+  }
+}, 20_000);

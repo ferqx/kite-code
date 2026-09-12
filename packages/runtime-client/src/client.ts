@@ -865,9 +865,18 @@ export class RuntimeClient implements AsyncDisposable {
           () => undefined,
         );
       }
-      if (this.#subscriptions.has(state.id) && !this.#closed) {
+      if (
+        generation === this.#connectionGeneration &&
+        this.#subscriptions.has(state.id) &&
+        !this.#closed
+      ) {
         await this.#activateSubscription(state);
       }
+    } catch {
+      // A failed replacement has no live source. End its iterator so the
+      // consumer can report/recalibrate instead of waiting indefinitely.
+      // A replacement connection owns its own subscription activation.
+      if (generation === this.#connectionGeneration) await this.#closeSubscription(state, false);
     } finally {
       state.resyncing = false;
     }

@@ -257,8 +257,8 @@ export function projectRuntimeClientEvent(
       };
     case 'provider.action_started':
       // `started` means the recovery interaction is now waiting on its user
-      // decision; it is not a settlement. The bridge still publishes this
-      // durable revision as an event-less notification.
+      // decision; it is not a settlement. The bridge projects availability
+      // from the exact post-event interaction queue at this revision.
       return undefined;
     case 'provider.action_completed':
       return settled(event.interactionId, context.sessionRevision, 'completed');

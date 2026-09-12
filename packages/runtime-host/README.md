@@ -50,6 +50,8 @@
 
 ## 关键不变量
 
+- NotificationProjector 对同 revision 的合法 metadata enrichment 向已有 subscriber 发布 event-free snapshot，短期 replay 保留该 revision 已确认的原 event。同一有界 retained revision 的 event 内容漂移在更新 registry 前拒绝，不能使 live 与 replay 看到不同事实；真正 projection 冲突仍拒绝。允许的字段变化由 Runtime Contract 唯一定义，完整消息仍由 History 恢复。
+
 - Provider work 前必须完成 durable attempt acknowledgement。
 - Effect lease的global revision fence在dispatch前保持严格：stale Model preparation/attempt-start不得执行。精确Model invocation已经dispatch后，同一active Turn内无关的user control revision可以与其stream/retry/terminal evidence并发；Host只接受匹配live invocation的封闭Model/Tool/resource批次，Turn终止、invocation替换或identity漂移后仍拒绝迟到结果。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。

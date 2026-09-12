@@ -331,27 +331,36 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             return {
               receipt,
               activation: async (publish) => {
-                if (pending && this.#pendingInteraction !== pending) {
-                  throw new Error(
-                    'Runtime interaction activation no longer owns its pending waiter.',
-                  );
-                }
-                if (pending) this.#pendingInteraction = undefined;
-                this.#revision = receipt.revision;
-                this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
-                if (pending) {
-                  const resolution = this.#interactionBroker.resolve(
-                    pending.brokerIdentity,
-                    committed.descriptor,
-                  );
-                  if (resolution !== 'resolved') {
-                    throw new Error(`Runtime interaction broker resolution failed: ${resolution}`);
+                try {
+                  if (pending && this.#pendingInteraction !== pending) {
+                    throw new Error(
+                      'Runtime interaction activation no longer owns its pending waiter.',
+                    );
                   }
-                } else {
-                  this.#activePublish = publish;
+                  if (pending) this.#pendingInteraction = undefined;
+                  this.#revision = receipt.revision;
+                  this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
+                  if (pending) {
+                    const resolution = this.#interactionBroker.resolve(
+                      pending.brokerIdentity,
+                      committed.descriptor,
+                    );
+                    if (resolution !== 'resolved') {
+                      throw new Error(
+                        `Runtime interaction broker resolution failed: ${resolution}`,
+                      );
+                    }
+                  } else {
+                    this.#activePublish = publish;
+                  }
+                } catch (error) {
+                  // The pending field was cleared before publication. Release
+                  // this exact waiter as well as any accepted recovered resume.
+                  if (pending) this.#interactionBroker.reject(pending.brokerIdentity, error);
+                  this.#failActivation(coordinator, publish, error);
                 }
               },
-              ...(pending
+              ...(pending || coordinator.getState().turn.status !== 'active'
                 ? {}
                 : {
                     preparedExecution: this.#preparedInteractionResume(
@@ -401,17 +410,27 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             return {
               receipt,
               activation: async (publish) => {
-                this.#activeRunConfig = admittedConfig;
-                coordinator.activateStartTurnRun?.(committed.descriptor.turnId);
-                this.#revision = receipt.revision;
-                this.#activePublish = publish;
-                this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn', {
-                  runId: committed.descriptor.turnId,
-                  ...(committed.descriptor.taskId === undefined
-                    ? {}
-                    : { taskId: committed.descriptor.taskId }),
-                  turnId: committed.descriptor.turnId,
-                });
+                try {
+                  this.#activeRunConfig = admittedConfig;
+                  coordinator.activateStartTurnRun?.(committed.descriptor.turnId);
+                  this.#revision = receipt.revision;
+                  this.#activePublish = publish;
+                  this.#publishCommittedEvents(
+                    committed.events,
+                    receipt.revision,
+                    publish,
+                    'turn',
+                    {
+                      runId: committed.descriptor.turnId,
+                      ...(committed.descriptor.taskId === undefined
+                        ? {}
+                        : { taskId: committed.descriptor.taskId }),
+                      turnId: committed.descriptor.turnId,
+                    },
+                  );
+                } catch (error) {
+                  this.#failActivation(coordinator, publish, error);
+                }
               },
               preparedExecution: this.#preparedStart(
                 command,
@@ -806,31 +825,53 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     identity: Readonly<{ runId?: string; taskId?: string; turnId?: string }> = {},
   ): void {
     this.#flushActivePresentation();
+    const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+    if (!coordinator) throw new Error('Runtime committed event coordinator is unavailable.');
     const firstRevision = finalRevision - events.length + 1;
     for (const [index, event] of events.entries()) {
       const revision = firstRevision + index;
-      const projectedEvent = safelyProjectRuntimeEvent(event, revision);
-      const eventState = this.#runtimeSessionCoordinator
-        .get(this.#input.sessionId)
-        ?.stateForEvent?.(event);
-      if (!eventState || eventState.revision !== revision) {
+      if (
+        coordinator.revisionForEvent?.(event) !== revision ||
+        coordinator.stateForEvent?.(event)?.revision !== revision
+      )
         throw new Error('Runtime committed event State projection is unavailable.');
+    }
+    // Generator delivery and command activation may interleave. Both consume
+    // this one commit-ordered queue; a later generator yield is already delivered.
+    for (const event of coordinator.takeCommittedEventsThrough(finalRevision)) {
+      const eventState = coordinator.stateForEvent?.(event);
+      const revision = coordinator.revisionForEvent?.(event);
+      if (revision === undefined || !eventState || eventState.revision !== revision)
+        throw new Error('Runtime committed event State projection is unavailable.');
+      const session = this.#projection(revision, eventState);
+      let projectedEvent = projectRuntimeClientEvent(event, { sessionRevision: revision });
+      if (event.type === 'provider.action_started') {
+        const interaction = session.interactionQueue.interactions.find(
+          (item) => item.interactionId === event.interactionId,
+        );
+        if (interaction) projectedEvent = { type: 'interaction.available', interaction };
       }
+      if (projectedEvent?.type === 'run.terminal' && session.currentRun)
+        projectedEvent = { ...projectedEvent, runId: session.currentRun.runId };
+      const runId = identity.runId ?? session.currentRun?.runId;
+      const taskId = identity.taskId ?? session.activeTask?.taskId ?? session.currentRun?.taskId;
+      const turnId = identity.turnId ?? session.currentRun?.activeTurnId;
       publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
         sessionId: this.#input.sessionId,
         revision,
-        ...(identity.runId === undefined ? {} : { runId: identity.runId }),
-        ...(identity.taskId === undefined ? {} : { taskId: identity.taskId }),
-        ...(identity.turnId === undefined ? {} : { turnId: identity.turnId }),
+        ...(runId === undefined ? {} : { runId }),
+        ...(taskId === undefined ? {} : { taskId }),
+        ...(turnId === undefined ? {} : { turnId }),
         projection: {
           kind,
-          session: this.#projection(revision, eventState),
+          session,
           ...(projectedEvent === undefined ? {} : { event: projectedEvent }),
         },
       });
     }
+    this.#revision = Math.max(this.#revision, finalRevision);
   }
 
   async shutdownSession(
@@ -985,50 +1026,50 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     signal: AbortSignal,
     requestAbort: (reason: string) => void,
   ): Promise<void> {
-    coordinator.updateSandboxAvailable(appSandboxBackendAvailable(this.#input.sandboxBackend));
     const publish = this.#activePublish;
-    if (!publish) throw new Error('Runtime CLI command activation is unavailable.');
     let publishedRevision = this.#revision;
     let sequence = 0;
     const presentation = new RuntimePresentationFrame();
     this.#activePresentationFrame = presentation;
-    const executionState = coordinator.getState();
-    const lifecycle = coordinator.session.getLifecycleProjection();
-    const presentationRunId = lifecycle.currentRun?.runId ?? execution.precommittedStart?.turnId;
-    if (!presentationRunId) {
-      throw new Error('Runtime turn execution has no accepted Run identity.');
-    }
-    const presentationTaskId =
-      lifecycle.activeTask?.taskId ??
-      lifecycle.currentRun?.taskId ??
-      execution.precommittedStart?.taskId;
-    const presentationWorkId = presentationTaskId ?? presentationRunId;
-    const presentationTurnId =
-      lifecycle.currentRun?.activeTurnId ??
-      executionState.turn.turnId ??
-      execution.precommittedStart?.turnId;
-    if (!presentationTurnId) {
-      throw new Error('Runtime turn execution has no accepted Turn identity.');
-    }
-    const publishPresentation = (event: RuntimeEvent): void => {
-      const notification = projectRuntimeEphemeralNotification(event, {
-        sessionId: this.#input.sessionId,
-        workId: presentationWorkId,
-        runId: presentationRunId,
-        ...(presentationTaskId === undefined ? {} : { taskId: presentationTaskId }),
-        turnId: presentationTurnId,
-        actorId: 'runtime-agent',
-        attemptId: execution.operationId,
-        streamId: execution.operationId,
-        sequence: sequence + 1,
-      });
-      if (!notification) {
-        throw new Error('Runtime presentation frame emitted a non-ephemeral event.');
-      }
-      sequence += 1;
-      publish(notification);
-    };
     try {
+      coordinator.updateSandboxAvailable(appSandboxBackendAvailable(this.#input.sandboxBackend));
+      if (!publish) throw new Error('Runtime CLI command activation is unavailable.');
+      const executionState = coordinator.getState();
+      const lifecycle = coordinator.session.getLifecycleProjection();
+      const presentationRunId = lifecycle.currentRun?.runId ?? execution.precommittedStart?.turnId;
+      if (!presentationRunId) {
+        throw new Error('Runtime turn execution has no accepted Run identity.');
+      }
+      const presentationTaskId =
+        lifecycle.activeTask?.taskId ??
+        lifecycle.currentRun?.taskId ??
+        execution.precommittedStart?.taskId;
+      const presentationWorkId = presentationTaskId ?? presentationRunId;
+      const presentationTurnId =
+        lifecycle.currentRun?.activeTurnId ??
+        executionState.turn.turnId ??
+        execution.precommittedStart?.turnId;
+      if (!presentationTurnId) {
+        throw new Error('Runtime turn execution has no accepted Turn identity.');
+      }
+      const publishPresentation = (event: RuntimeEvent): void => {
+        const notification = projectRuntimeEphemeralNotification(event, {
+          sessionId: this.#input.sessionId,
+          workId: presentationWorkId,
+          runId: presentationRunId,
+          ...(presentationTaskId === undefined ? {} : { taskId: presentationTaskId }),
+          turnId: presentationTurnId,
+          actorId: 'runtime-agent',
+          attemptId: execution.operationId,
+          streamId: execution.operationId,
+          sequence: sequence + 1,
+        });
+        if (!notification) {
+          throw new Error('Runtime presentation frame emitted a non-ephemeral event.');
+        }
+        sequence += 1;
+        publish(notification);
+      };
       const generator = coordinator.executeTurn(
         {
           task: execution.task,
@@ -1080,42 +1121,15 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         presentation.flush();
         const eventRevision = coordinator.revisionForEvent?.(event);
         const eventState = coordinator.stateForEvent?.(event);
-        if (
-          eventRevision === undefined ||
-          eventRevision <= publishedRevision ||
-          !eventState ||
-          eventState.revision !== eventRevision
-        ) {
+        if (eventRevision === undefined || !eventState || eventState.revision !== eventRevision) {
           throw new Error('Runtime event revision was unavailable or out of order.');
         }
-        let projectedEvent = projectRuntimeClientEvent(event, {
-          sessionRevision: eventRevision,
-        });
-        const stableRun = coordinator.session.getLifecycleProjection().currentRun;
-        if (stableRun && projectedEvent && projectedEvent.type === 'run.terminal') {
-          projectedEvent = { ...projectedEvent, runId: stableRun.runId };
-        }
-        // `provider.action_started` advances State before the authoritative pending interaction
-        // is projected. Publishing an event-less revision here would race the older
-        // `provider.action_required` identity against the next user response. Let the action
-        // provider publish the exact revision with `interaction.available` instead.
-        if (event.type === 'provider.action_started' && projectedEvent === undefined) continue;
-        this.#revision = eventRevision;
-        publishedRevision = this.#revision;
-        publish({
-          schema: RUNTIME_NOTIFICATION_SCHEMA_,
-          durability: 'durable',
-          sessionId: this.#input.sessionId,
-          revision: this.#revision,
+        this.#publishCommittedEvents([event], eventRevision, publish, 'turn', {
           runId: presentationRunId,
           ...(presentationTaskId === undefined ? {} : { taskId: presentationTaskId }),
           turnId: presentationTurnId,
-          projection: {
-            kind: 'turn',
-            session: this.#projection(eventRevision, eventState),
-            event: projectedEvent,
-          },
         });
+        publishedRevision = Math.max(publishedRevision, this.#revision);
       }
     } catch (error) {
       this.#closeUncertainActiveTurn(coordinator, error, signal);
@@ -1131,7 +1145,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       this.#activePublish = undefined;
       const terminalState = coordinator.getState();
       this.#revision = terminalState.revision;
-      if (this.#revision >= publishedRevision) {
+      if (publish && this.#revision >= publishedRevision) {
         publish({
           schema: RUNTIME_NOTIFICATION_SCHEMA_,
           durability: 'durable',
@@ -1144,10 +1158,38 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     }
   }
 
+  #failActivation(
+    coordinator: RuntimeSessionCoordinator,
+    publish: (notification: RuntimeNotification) => void,
+    error: unknown,
+  ): never {
+    // Commit is durable, but Host does not dispatch after failed activation.
+    try {
+      this.#closeUncertainActiveTurn(coordinator, error);
+      this.#revision = coordinator.getState().revision;
+      try {
+        publish({
+          schema: RUNTIME_NOTIFICATION_SCHEMA_,
+          durability: 'durable',
+          sessionId: this.#input.sessionId,
+          revision: this.#revision,
+          projection: { kind: 'work', session: this.#projection() },
+        });
+      } catch {
+        // A failed publisher must not replace the original activation error.
+        // The persisted terminal remains available to query and History.
+      }
+    } finally {
+      this.#activePublish = undefined;
+      this.#activeRunConfig = undefined;
+    }
+    throw error;
+  }
+
   #closeUncertainActiveTurn(
     coordinator: RuntimeSessionCoordinator,
     error: unknown,
-    signal: AbortSignal,
+    signal?: AbortSignal,
   ): void {
     const state = coordinator.getState();
     if (state.turn.status !== 'active') return;
@@ -1171,7 +1213,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         type: 'turn.aborted',
         turnId: state.turn.turnId,
         reason: 'Runtime presentation or bridge closure could not be confirmed.',
-        cause: signal.aborted ? 'user' : 'error',
+        cause: signal?.aborted ? 'user' : 'error',
       },
     ]);
   }
@@ -1259,28 +1301,8 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         for (const clientId of this.#interactionClientIds(this.#input.sessionId)) {
           waiter.attach(clientId);
         }
-        const priorRevision = this.#revision;
-        this.#revision = state.revision;
-        this.#pendingInteraction = {
-          effect,
-          interaction,
-          commandCommit,
-          brokerIdentity,
-        };
-        if (state.revision > priorRevision) {
-          this.#flushActivePresentation();
-          publish({
-            schema: RUNTIME_NOTIFICATION_SCHEMA_,
-            durability: 'durable',
-            sessionId: this.#input.sessionId,
-            revision: state.revision,
-            projection: {
-              kind: 'interaction',
-              session: this.#projection(),
-              event: { type: 'interaction.available', interaction },
-            },
-          });
-        }
+        this.#pendingInteraction = { effect, interaction, commandCommit, brokerIdentity };
+        this.#publishCommittedEvents([], state.revision, publish, 'turn');
         return waiter.wait();
       },
     });
@@ -1304,26 +1326,11 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     const taskId = lifecycle?.activeTask?.taskId ?? lifecycle?.currentRun?.taskId;
     const turnId = lifecycle?.currentRun?.activeTurnId ?? coordinator?.getState().turn.turnId;
     const events = coordinator?.control.cancelRun(reason) ?? [];
-    for (const event of events) {
-      const revision = coordinator?.revisionForEvent?.(event);
-      const eventState = coordinator?.stateForEvent?.(event);
-      if (revision === undefined || !eventState || eventState.revision !== revision) {
-        throw new Error('Runtime cancellation event State projection is unavailable.');
-      }
-      this.#revision = revision;
-      publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_,
-        durability: 'durable',
-        sessionId: this.#input.sessionId,
-        revision,
+    if (events.length > 0 && coordinator) {
+      this.#publishCommittedEvents(events, coordinator.getState().revision, publish, 'turn', {
         ...(runId === undefined ? {} : { runId }),
         ...(taskId === undefined ? {} : { taskId }),
         ...(turnId === undefined ? {} : { turnId }),
-        projection: {
-          kind: 'turn',
-          session: this.#projection(revision, eventState),
-          event: projectRuntimeClientEvent(event, { sessionRevision: revision }),
-        },
       });
     }
   }
@@ -1491,12 +1498,4 @@ function receiptFromStored(
     sessionId: receipt.targetSessionId,
     revision: receipt.committedRevision,
   };
-}
-
-function safelyProjectRuntimeEvent(event: RuntimeEvent, revision: number) {
-  try {
-    return projectRuntimeClientEvent(event, { sessionRevision: revision });
-  } catch {
-    return { type: 'unavailable' as const, reason: 'redacted' as const };
-  }
 }

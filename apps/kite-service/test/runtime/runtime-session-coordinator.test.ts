@@ -30,6 +30,7 @@ import type { InstalledKiteRuntimeComposition } from '../../src/bootstrap/model-
 import { createCliRuntimeBridge } from '../../src/bootstrap/runtime/CliRuntimeBridge';
 import {
   createRuntimeSessionCoordinatorBinding,
+  type RuntimeSessionCoordinatorAccess,
   type RuntimeSessionCoordinatorIdentity,
 } from '../../src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { createAppRuntimeEffectExecutor } from '../../src/bootstrap/runtime/runtime-effect-coordinator';
@@ -434,6 +435,46 @@ function createFixture(
     storage,
     root,
   };
+}
+
+function createFixtureBridge(
+  sessionId: string,
+  fixture: ReturnType<typeof createFixture>,
+  access: RuntimeSessionCoordinatorAccess,
+) {
+  return createCliRuntimeBridge(
+    {
+      sessionId,
+      userId: 'tui-user',
+      workspace: retainedWorkspace,
+      projectIdentity: {
+        ...resolveProjectIdentity(retainedWorkspace),
+        projectId: 'project_retained_coordinator',
+      },
+      checkpointPath: join(fixture.root, 'runtime.db'),
+      config: config(),
+      interactionMode: 'accept_edits',
+      shellExecutor: async ({ command }) => ({
+        ok: true,
+        command,
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      }),
+      sandboxBackend: 'none',
+      skillOptions: {
+        userKiteCodeSkillsDir: join(fixture.root, 'user-skills'),
+        userAgentsSkillsDir: join(fixture.root, 'agent-skills'),
+        projectKiteCodeSkillsDir: join(fixture.root, 'project-skills'),
+        projectAgentsSkillsDir: join(fixture.root, 'project-agent-skills'),
+      },
+      initialSkillActivations: [],
+    },
+    capabilityExecution,
+    () => ({ ...fixture.runtime, builtinToolCatalog }),
+    () => 'a'.repeat(64),
+    access,
+  );
 }
 
 function dependencies(
@@ -1196,44 +1237,474 @@ describe('retained TUI session coordinator', () => {
     }
   });
 
+  test('failed start activation settles its accepted Turn before Host dispatch', async () => {
+    const sessionId = 'retained-start-activation-failure';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const inspected = await bridge.inspectCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('Start not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId));
+      await expect(
+        committed.activation?.(() => {
+          throw new Error('Injected activation failure');
+        }),
+      ).rejects.toThrow('Injected activation failure');
+      expect(coordinator.isTurnActive()).toBe(false);
+      expect(coordinator.getState().turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
+      expect(coordinator.getState().terminalOutcome?.safeRetry).toBe(false);
+      expect(fixture.store.sessions.loadEventsStrict(sessionId).at(-1)?.event.type).toBe(
+        'turn.aborted',
+      );
+      const projection = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId,
+      });
+      expect(projection.status).toBe('ok');
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['reject', 'none'],
+    ['approve_once', 'none'],
+    ['approve_once', 'activation'],
+    ['approve_once', 'setup'],
+  ] as const)('a recovered approval %s with %s failure preserves receipt and Turn ownership', async (decision, failure) => {
+    const sessionId = `retained-recovered-approval-${decision}-${failure}`;
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      // Persist an approval without a process-local broker waiter, as on recovery.
+      coordinator.control.processEventBatch([
+        {
+          type: 'tool.queued',
+          toolCallId: 'approval-shell',
+          name: 'shell_execute',
+          args: { command: 'printf retained' },
+        },
+        {
+          type: 'approval.requested',
+          interactionId: 'recovered-approval',
+          toolCallId: 'approval-shell',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          owner: { kind: 'root_tool', toolCallId: 'approval-shell' },
+          approval: {
+            scope: 'once',
+            cwd: retainedWorkspace,
+            threadId: sessionId,
+            tool: 'shell_execute',
+            command: 'printf retained',
+            risk: 'execute_code',
+            approvalHash: 'retained-approval-hash',
+            summary: 'Run a retained fixture command.',
+            reason: 'Recovered approval fixture.',
+            expectedEffects: [],
+            grantOptions: ['approve_once'],
+            recommendedGrant: 'approve_once',
+          },
+        },
+      ]);
+      await bridge.recoverSession(sessionId, () => {});
+      const query = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId,
+      });
+      if (query.status !== 'ok' || !query.session) throw new Error('Projection unavailable');
+      const interaction = query.session.interactionQueue?.interactions[0];
+      if (interaction?.kind !== 'approval') throw new Error('Approval unavailable');
+      const commandId = `recovered-${decision}`;
+      const inspected = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'respond_interaction',
+          commandId,
+          sessionId,
+          expectedRevision: query.session.revision,
+          interaction,
+          response: { kind: 'approval', decision },
+        },
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('Approval response not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId, commandId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      if (failure === 'activation') {
+        await expect(
+          committed.activation?.(() => {
+            throw new Error('Recovered activation failure');
+          }),
+        ).rejects.toThrow('Recovered activation failure');
+        expect(coordinator.getState().turn).toMatchObject({
+          status: 'aborted',
+          abortCause: 'error',
+        });
+        expect(coordinator.getState().terminalOutcome?.safeRetry).toBe(false);
+        expect(fixture.store.sessions.loadEventsStrict(sessionId).at(-1)?.event.type).toBe(
+          'turn.aborted',
+        );
+        return;
+      }
+      await committed.activation?.((notification) => published.push(notification));
+      if (failure === 'setup') {
+        const original = coordinator.session.getLifecycleProjection;
+        coordinator.session.getLifecycleProjection = () => ({});
+        const controller = new AbortController();
+        try {
+          await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+            controller.abort(reason),
+          );
+        } finally {
+          coordinator.session.getLifecycleProjection = original;
+        }
+        expect(coordinator.isTurnActive()).toBe(false);
+        expect(coordinator.getState().turn).toMatchObject({
+          status: 'aborted',
+          abortCause: 'error',
+        });
+        expect(coordinator.getState().terminalOutcome?.safeRetry).toBe(false);
+        expect(fixture.store.sessions.loadEventsStrict(sessionId).at(-1)?.event.type).toBe(
+          'turn.aborted',
+        );
+        return;
+      }
+      expect(committed.receipt).toMatchObject({ status: 'applied', commandId, sessionId });
+      expect(published.at(-1)).toMatchObject({
+        durability: 'durable',
+        revision: coordinator.getState().revision,
+      });
+      if (decision === 'reject') {
+        expect(coordinator.getState().pendingApprovals.size).toBe(0);
+        expect(committed.preparedExecution).toBeUndefined();
+        expect(coordinator.getState().turn).toMatchObject({
+          status: 'aborted',
+          abortCause: 'user',
+        });
+        expect(fixture.store.sessions.loadEventsStrict(sessionId).at(-1)?.event.type).toBe(
+          'turn.aborted',
+        );
+      } else {
+        expect(coordinator.getState().pendingApprovals.get('recovered-approval')?.status).toBe(
+          'authorized_queued',
+        );
+        expect(committed.preparedExecution?.execution).toMatchObject({
+          sessionId,
+          operationId: commandId,
+          committedRevision: committed.receipt.revision,
+        });
+        expect(coordinator.getState().turn.status).toBe('active');
+      }
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('an early recovered-provider failure publishes the canonical terminal without a generic closure', async () => {
+    const sessionId = 'retained-canonical-recovery-failure';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const inspected = await bridge.inspectCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('Start not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committed.activation?.((notification) => published.push(notification));
+      // A restored provider handle becomes visible after admission. Recovery
+      // cannot confirm it, so Kernel supplies canonical failure metadata.
+      Object.assign(coordinator.getState().capabilities.invocations, {
+        'canonical-invocation': {
+          invocationId: 'canonical-invocation',
+          toolCallId: 'canonical-tool',
+          capabilityId: 'builtin:task',
+          capabilityRevision: '2'.repeat(64),
+          argumentsDigest: '3'.repeat(64),
+          authorizationDigest: '4'.repeat(64),
+          admissionDigest: '5'.repeat(64),
+          effectiveEffectsDigest: '6'.repeat(64),
+          receiptRequirement: 'control_receipt',
+          status: 'running',
+          recordedAt: '2026-08-25T00:00:00.000Z',
+          startedAt: '2026-08-25T00:00:00.000Z',
+          attemptsStarted: 1,
+          subagentProviderLifecycle: {
+            attempt: 1,
+            purpose: 'start',
+            childInvocationId: 'audit-child-invocation',
+            taskArtifact: {
+              artifactId: `pa_${'7'.repeat(64)}`,
+              kind: 'subagent_task',
+              integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+              byteLength: 128,
+            },
+            dispatchIntentDigest: `sha256:${'c'.repeat(64)}`,
+            status: 'handle_recorded',
+            recordedAt: '2026-08-25T00:00:00.000Z',
+            handleArtifact: {
+              artifactId: `pa_${'9'.repeat(64)}`,
+              kind: 'subagent_handle',
+              integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+              byteLength: 256,
+            },
+            handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
+            handleRecordedAt: '2026-08-25T00:00:00.000Z',
+          },
+        },
+      });
+      const controller = new AbortController();
+      await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      const errors = fixture.store.sessions
+        .loadEventsStrict(sessionId)
+        .filter(({ event }) => event.type === 'run.error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.event).toMatchObject({
+        type: 'run.error',
+        message: 'Subagent Provider crash recovery could not be confirmed.',
+      });
+      expect(published).toContainEqual(
+        expect.objectContaining({
+          durability: 'durable',
+          projection: expect.objectContaining({
+            event: expect.objectContaining({ type: 'run.terminal' }),
+          }),
+        }),
+      );
+      expect(coordinator.getState().turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
+      expect(coordinator.isTurnActive()).toBe(false);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('control activation publishes an already-committed background event before its newer revision', async () => {
+    const sessionId = 'retained-control-publication-order';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const start = await bridge.inspectCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        { targetSessionId: sessionId },
+      );
+      if (start.kind !== 'accepted') throw new Error('Start not accepted');
+      const committed = await start.decision.commit(commandEvidence(sessionId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committed.activation?.((notification) => published.push(notification));
+      // Background execution commits before its generator gets its next turn.
+      // Keep that exact event pending while the command mailbox admits a control.
+      coordinator.control.processEventBatch([
+        {
+          type: 'tool.queued',
+          toolCallId: 'background-shell',
+          name: 'shell_execute',
+          args: { command: 'printf background' },
+        },
+      ]);
+      const controlId = 'control-after-background-commit';
+      const control = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'set_interaction_mode',
+          commandId: controlId,
+          sessionId,
+          expectedRevision: coordinator.getState().revision,
+          mode: 'auto',
+        },
+        { targetSessionId: sessionId },
+      );
+      if (control.kind !== 'accepted') throw new Error('Control not accepted');
+      const changed = await control.decision.commit(commandEvidence(sessionId, controlId));
+      await changed.activation?.((notification) => published.push(notification));
+      expect(
+        published
+          .filter((notification) => notification.durability === 'durable')
+          .map((notification) => notification.revision),
+      ).toEqual([1, 2, 3, 4]);
+      expect(published[2]).toMatchObject({
+        revision: 3,
+        projection: { event: { type: 'tool.queued', toolId: 'background-shell' } },
+      });
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('live pending approval activation failure releases the runner waiter', async () => {
+    const sessionId = 'retained-live-pending-activation-failure';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    const originalExecuteTurn = coordinator.executeTurn;
+    let runPromise: Promise<void> | undefined;
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const inspectedStart = await bridge.inspectCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        { targetSessionId: sessionId },
+      );
+      if (inspectedStart.kind !== 'accepted') throw new Error('Start not accepted');
+      const committedStart = await inspectedStart.decision.commit(commandEvidence(sessionId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committedStart.activation?.((notification) => published.push(notification));
+
+      coordinator.control.processEventBatch([
+        {
+          type: 'tool.queued',
+          toolCallId: 'live-approval-shell',
+          name: 'shell_execute',
+          args: { command: 'printf live' },
+        },
+        {
+          type: 'approval.requested',
+          interactionId: 'live-approval',
+          toolCallId: 'live-approval-shell',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          owner: { kind: 'root_tool', toolCallId: 'live-approval-shell' },
+          approval: {
+            scope: 'once',
+            cwd: retainedWorkspace,
+            threadId: sessionId,
+            tool: 'shell_execute',
+            command: 'printf live',
+            risk: 'execute_code',
+            approvalHash: 'live-approval-hash',
+            summary: 'Run live fixture command.',
+            reason: 'Live waiter fixture.',
+            expectedEffects: [],
+            grantOptions: ['approve_once'],
+            recommendedGrant: 'approve_once',
+          },
+        },
+      ]);
+
+      coordinator.executeTurn = async function* (_input, provider) {
+        await provider.requestAction(
+          {
+            type: 'request_tool_approval',
+            interactionId: 'live-approval',
+            toolCallId: 'live-approval-shell',
+          },
+          coordinator.getState() as RuntimeState,
+          {
+            commit: (action, evidence, expectedRevision) =>
+              coordinator.commitInteractionCommand!({
+                action,
+                sessionId,
+                interactionId: 'live-approval',
+                expectedRevision,
+                effectType: 'request_tool_approval',
+                reservationReconciliationEvents: [],
+                sandboxAvailable: coordinator.getSandboxAvailable() === true,
+                evidence,
+              }),
+          },
+        );
+      };
+
+      const execution = committedStart.preparedExecution?.execution;
+      if (!execution) throw new Error('Prepared execution unavailable');
+      runPromise = execution.run(new AbortController().signal, () => undefined);
+
+      // #runTurn starts the generator synchronously, so the broker waiter is
+      // installed before the prepared execution returns its pending Promise.
+      const query = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId,
+      });
+      if (query.status !== 'ok' || !query.session) throw new Error('Projection unavailable');
+      const interaction = query.session.interactionQueue?.interactions[0];
+      if (interaction?.kind !== 'approval') throw new Error('Live approval unavailable');
+      const commandId = 'live-approve-once';
+      const inspected = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'respond_interaction',
+          commandId,
+          sessionId,
+          expectedRevision: query.session.revision,
+          interaction,
+          response: { kind: 'approval', decision: 'approve_once' },
+        },
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('Live approval response not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId, commandId));
+      expect(committed.preparedExecution).toBeUndefined();
+      await expect(
+        committed.activation?.(() => {
+          throw new Error('Injected live activation failure');
+        }),
+      ).rejects.toThrow('Injected live activation failure');
+
+      const settled = await Promise.race([
+        runPromise.then(
+          () => 'resolved' as const,
+          () => 'rejected' as const,
+        ),
+        Bun.sleep(500).then(() => 'timed_out' as const),
+      ]);
+      expect(settled).toBe('resolved');
+      expect(coordinator.getState().turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
+      expect(coordinator.getState().terminalOutcome).toMatchObject({
+        status: 'unknown',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      });
+    } finally {
+      coordinator.executeTurn = originalExecuteTurn;
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   test('a projection failure settles the durable Turn and leaves the same bridge queryable', async () => {
     const sessionId = 'retained-bridge-projection-failure';
     const fixture = createFixture(sessionId);
     const access = fixture.binding.access();
     const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
-    const bridge = createCliRuntimeBridge(
-      {
-        sessionId,
-        userId: 'tui-user',
-        workspace: retainedWorkspace,
-        projectIdentity: {
-          ...resolveProjectIdentity(retainedWorkspace),
-          projectId: 'project_retained_coordinator',
-        },
-        checkpointPath: join(fixture.root, 'runtime.db'),
-        config: config(),
-        interactionMode: 'accept_edits',
-        shellExecutor: async ({ command }) => ({
-          ok: true,
-          command,
-          exitCode: 0,
-          stdout: '',
-          stderr: '',
-        }),
-        sandboxBackend: 'none',
-        skillOptions: {
-          userKiteCodeSkillsDir: join(fixture.root, 'user-skills'),
-          userAgentsSkillsDir: join(fixture.root, 'agent-skills'),
-          projectKiteCodeSkillsDir: join(fixture.root, 'project-skills'),
-          projectAgentsSkillsDir: join(fixture.root, 'project-agent-skills'),
-        },
-        initialSkillActivations: [],
-      },
-      capabilityExecution,
-      () => ({ ...fixture.runtime, builtinToolCatalog }),
-      () => 'a'.repeat(64),
-      access,
-    );
+    const bridge = createFixtureBridge(sessionId, fixture, access);
     const controller = new AbortController();
     const originalRevision = coordinator.revisionForEvent;
     let injected = false;

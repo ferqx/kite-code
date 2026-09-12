@@ -61,6 +61,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 - `CliRuntimeBridge`不维护`#running/#activeWork`影子生命周期；admission读取Coordinator，投影读取committed
   Task与Store Run。bridge/presentation异常若发生在active Turn内，会原子持久化unknown outcome与`turn.aborted`，使Store Run进入
   recovery-required边界；缺少真实Turn identity的`run.error`不会伪造Run id进入Client。
+  已提交 start／审批的 activation 和执行前 setup 同样受故障收尾覆盖；审批发布失败释放准确 broker waiter，恢复拒绝不会调度已终止的 Turn。
+  后台与控制命令共用 Coordinator 已有 canonical 待发布队列，按确切 revision 通知；细节与回归见[Runtime application](docs/runtime-application.md)。
 - 模型选择保存成功后只更新desired config；active Run继续使用`start_turn` admission时冻结的完整配置与真实Provider route，
   下一Run才解析desired config。Runtime投影在active期间保持该Run的model identity，不能让Header先于Provider request切换。
 - Kernel event到Runtime Client的投影使用穷尽coverage表；每个event必须明确归类为client-visible、internal-only、

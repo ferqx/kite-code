@@ -483,9 +483,13 @@ export async function* executeRuntimeTurn(
               knownExternalEffects: 'none',
             }),
           };
-          kernel.processEvent(event);
-          collector.recordRuntime(event);
-          yield event;
+          for (const applied of kernel.processEventBatch([
+            event,
+            ...eventsForRunCancellation(kernel.getState(), event.message, 'error'),
+          ])) {
+            collector.recordRuntime(applied);
+            yield applied;
+          }
           return;
         }
       } else {
@@ -499,10 +503,12 @@ export async function* executeRuntimeTurn(
           ).toISOString(),
           budget: LIMITED_RESOURCE_BUDGET_,
         };
-        kernel.processEvent(event);
-        collector.recordRuntime(event);
+        const applied = kernel.processEventBatch([event]);
         scheduleRunDeadline(event.deadlineAt);
-        yield event;
+        for (const accepted of applied) {
+          collector.recordRuntime(accepted);
+          yield accepted;
+        }
       }
     }
     const activeBudget = kernel.getState().resourceBudget;
@@ -520,9 +526,13 @@ export async function* executeRuntimeTurn(
           recoverable: false,
           turnId: kernel.getState().turn.turnId,
         };
-        kernel.processEvent(event);
-        collector.recordRuntime(event);
-        yield event;
+        for (const applied of kernel.processEventBatch([
+          event,
+          ...eventsForRunCancellation(kernel.getState(), event.message, 'error'),
+        ])) {
+          collector.recordRuntime(applied);
+          yield applied;
+        }
         return;
       }
     }
@@ -564,9 +574,13 @@ export async function* executeRuntimeTurn(
           recoverable: false,
           turnId: kernel.getState().turn.turnId,
         };
-        kernel.processEvent(event);
-        collector.recordRuntime(event);
-        yield event;
+        for (const applied of kernel.processEventBatch([
+          event,
+          ...eventsForRunCancellation(kernel.getState(), event.message, 'error'),
+        ])) {
+          collector.recordRuntime(applied);
+          yield applied;
+        }
         return;
       }
     }
@@ -601,9 +615,10 @@ export async function* executeRuntimeTurn(
             taskId: placeholder.taskId,
             reason: 'Replaced Plan Mode placeholder with the submitted task.',
           };
-          kernel.processEvent(cancelled);
-          collector.recordRuntime(cancelled);
-          yield cancelled;
+          for (const applied of kernel.processEventBatch([cancelled])) {
+            collector.recordRuntime(applied);
+            yield applied;
+          }
         }
 
         if (input.phase === 'planning' && !getActiveTask(kernel.getState())) {
@@ -613,9 +628,10 @@ export async function* executeRuntimeTurn(
             userGoal: input.userGoal ?? input.task,
             turnId: kernel.getState().turn.turnId,
           };
-          kernel.processEvent(taskStarted);
-          collector.recordRuntime(taskStarted);
-          yield taskStarted;
+          for (const applied of kernel.processEventBatch([taskStarted])) {
+            collector.recordRuntime(applied);
+            yield applied;
+          }
         }
 
         if (input.phase === 'planning') {
@@ -626,9 +642,10 @@ export async function* executeRuntimeTurn(
               taskId: activeTask.taskId,
               source: 'user_command',
             };
-            kernel.processEvent(entered);
-            collector.recordRuntime(entered);
-            yield entered;
+            for (const applied of kernel.processEventBatch([entered])) {
+              collector.recordRuntime(applied);
+              yield applied;
+            }
           }
         }
 
@@ -675,13 +692,16 @@ export async function* executeRuntimeTurn(
                 recoverable: false,
                 turnId: kernel.getState().turn.turnId,
               };
-              kernel.processEvent(failed);
-              collector.recordRuntime(failed);
-              yield failed;
+              for (const applied of kernel.processEventBatch([
+                failed,
+                ...eventsForRunCancellation(kernel.getState(), failed.message, 'error'),
+              ])) {
+                collector.recordRuntime(applied);
+                yield applied;
+              }
               return;
             }
-            kernel.processEvents(evaluation.events);
-            for (const event of evaluation.events) {
+            for (const event of kernel.processEventBatch(evaluation.events)) {
               collector.recordRuntime(event);
               yield event;
             }
@@ -700,9 +720,10 @@ export async function* executeRuntimeTurn(
       getFeatureFlags(input.config).mcpProviderAction,
     );
     for (const event of admissionEvents) {
-      kernel.processEvent(event);
-      collector.recordRuntime(event);
-      yield event;
+      for (const applied of kernel.processEventBatch([event])) {
+        collector.recordRuntime(applied);
+        yield applied;
+      }
     }
 
     const executorDependencies: RuntimeExecutorDependencies = {
@@ -847,9 +868,13 @@ export async function* executeRuntimeTurn(
           recoverable: false,
           turnId: kernel.getState().turn.turnId,
         };
-        kernel.processEvent(event);
-        collector.recordRuntime(event);
-        yield event;
+        for (const applied of kernel.processEventBatch([
+          event,
+          ...eventsForRunCancellation(kernel.getState(), event.message, 'error'),
+        ])) {
+          collector.recordRuntime(applied);
+          yield applied;
+        }
         return;
       }
     }

@@ -52,6 +52,8 @@
 
 Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录与当前信任身份分组核对；摘要不赋予授权，不需要暴露 workspace 路径。
 
+同一 Session revision 的投影允许更新 model 元数据，以及已接受 Run 的排队到运行、活动到终态或缺省 Task 关联补齐；Host 与 Client 共用[投影补齐判定](src/projection-enrichment.ts)。这些更新不产生新消息版本；初始／当前 Turn、Run revision、已有 Task、interaction identity 及其他稳定 Session 字段必须保持一致。终态只在允许的 cleanup 更新中补齐 outcome，不能借元数据更新回退或替换运行身份。该纯规则不读取或写入 Store，也不增加协议字段。
+
 成功文件操作的 `tool.file_changed` 可携带有界 `path` 展示字段。客户端按 toolId 关联既有终态输出，路径不是任意文件读取或打开授权；本机宿主执行外部跳转前必须重新核实其工作区边界。
 
 - 所有客户端数据保持普通 JSON-safe 数据。

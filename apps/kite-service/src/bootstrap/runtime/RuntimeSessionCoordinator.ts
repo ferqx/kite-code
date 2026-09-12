@@ -125,6 +125,8 @@ export interface RuntimeSessionCoordinator {
   getState(): Readonly<RuntimeState>;
   /** Exact persisted revision assigned to one event yielded by this coordinator. */
   revisionForEvent?(event: RuntimeEvent): number | undefined;
+  /** Drain the existing canonical commit queue in revision order for Bridge publication. */
+  takeCommittedEventsThrough(revision: number): readonly RuntimeEvent[];
   /** Exact post-event State retained for current-process notification projection. */
   stateForEvent?(event: RuntimeEvent): Readonly<RuntimeState> | undefined;
   getStateRuntimeStorage(): StateRuntimeStorage;
@@ -435,20 +437,14 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   }
 
   revisionForEvent(event: RuntimeEvent): number | undefined {
-    const direct = this.#eventRevisions.get(event);
-    if (direct !== undefined) {
-      const pendingIndex = this.#pendingEventRevisions.findIndex(
-        (candidate) => candidate.revision === direct,
-      );
-      if (pendingIndex >= 0) this.#pendingEventRevisions.splice(pendingIndex, 1);
-      return direct;
-    }
-    const identity = runtimeEventRevisionIdentity(event);
-    const index = this.#pendingEventRevisions.findIndex(
-      (candidate) => runtimeEventRevisionIdentity(candidate.event) === identity,
-    );
-    if (index < 0) return undefined;
-    return this.#pendingEventRevisions.splice(index, 1)[0]!.revision;
+    return this.#eventRevisions.get(event);
+  }
+
+  takeCommittedEventsThrough(revision: number): readonly RuntimeEvent[] {
+    const end = this.#pendingEventRevisions.findIndex((pending) => pending.revision > revision);
+    return this.#pendingEventRevisions
+      .splice(0, end < 0 ? this.#pendingEventRevisions.length : end)
+      .map((pending) => pending.event);
   }
 
   stateForEvent(event: RuntimeEvent): Readonly<RuntimeState> | undefined {
@@ -1049,26 +1045,6 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       this.#lastRecordedEventRevision = revision;
     }
   }
-}
-
-function runtimeEventRevisionIdentity(event: RuntimeEvent): string {
-  const record = event as unknown as Readonly<Record<string, unknown>>;
-  const identityKeys = [
-    'toolCallId',
-    'invocationId',
-    'turnId',
-    'taskId',
-    'interactionId',
-    'messageId',
-    'reservationId',
-    'compactionId',
-    'reviewId',
-    'requestId',
-  ] as const;
-  const identity = identityKeys.flatMap((key) =>
-    typeof record[key] === 'string' ? [`${key}:${record[key]}`] : [],
-  );
-  return `${event.type}\0${identity.join('\0')}`;
 }
 
 class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAccess {

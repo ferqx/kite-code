@@ -3,6 +3,7 @@ import type {
   RuntimeNotification,
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
+import { isRuntimeSessionProjectionEnrichment } from '@kite-ai/runtime-contract';
 
 export interface ObservableSnapshot<T> {
   getSnapshot(): T;
@@ -151,7 +152,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       if (compared === 'diverged') return 'resync_required';
       if (compared === 'newer') {
         pending.sessions.set(input.session.sessionId, {
-          projection: input.session,
+          projection: retainModel(current?.projection, input.session),
           subscriptionGeneration: input.subscriptionGeneration,
           ready: false,
           historyResyncRequired: false,
@@ -176,7 +177,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       sessions: {
         ...this.#snapshot.sessions,
         [input.session.sessionId]: {
-          projection: input.session,
+          projection: retainModel(existing?.projection, input.session),
           subscriptionGeneration: input.subscriptionGeneration,
           ready: true,
           historyResyncRequired: existing?.historyResyncRequired ?? false,
@@ -269,9 +270,12 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       sessions: {
         ...this.#snapshot.sessions,
         [sessionId]: {
-          projection: compared === 'newer' ? notification.projection.session : current!.projection,
+          projection:
+            compared === 'newer'
+              ? retainModel(current?.projection, notification.projection.session)
+              : current!.projection,
           subscriptionGeneration: input.subscriptionGeneration,
-          ready: input.ready ?? current?.ready ?? false,
+          ready: !hasGap && (input.ready ?? current?.ready ?? false),
           historyResyncRequired: input.reset || hasGap || current?.historyResyncRequired === true,
         },
       },
@@ -462,13 +466,25 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
   }
 }
 
+function retainModel(
+  current: RuntimeSessionProjection | undefined,
+  next: RuntimeSessionProjection,
+): RuntimeSessionProjection {
+  return current?.revision === next.revision &&
+    next.model === undefined &&
+    current.model !== undefined
+    ? { ...next, model: current.model }
+    : next;
+}
+
 function compareProjection(
   current: RuntimeSessionProjection | undefined,
   next: RuntimeSessionProjection,
 ): 'newer' | 'older' | 'equal' | 'diverged' {
   if (!current || next.revision > current.revision) return 'newer';
   if (next.revision < current.revision) return 'older';
-  return canonical(next) === canonical(current) ? 'equal' : 'diverged';
+  if (canonical(next) === canonical(current)) return 'equal';
+  return isRuntimeSessionProjectionEnrichment(current, next) ? 'newer' : 'diverged';
 }
 
 function canonical(value: unknown): string {
@@ -476,6 +492,7 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   const record = value as Readonly<Record<string, unknown>>;
   return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
     .join(',')}}`;

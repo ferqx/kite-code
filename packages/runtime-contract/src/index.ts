@@ -11,6 +11,7 @@ export * from './logs';
 export * from './notifications';
 export * from './observability';
 export * from './presentation';
+export * from './projection-enrichment';
 export * from './projections';
 export * from './queries';
 export * from './validation';

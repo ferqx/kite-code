@@ -18,7 +18,11 @@ connection/subscription/broker binding；quiesce、cancel、drain与dispose只�
 
 并发 Shell 的 [State runner](../src/bootstrap/runtime/state-runner.ts) 在事务提交后同步把整批事件放入原有发布队列，再让异步消费者逐条读取。不能由各个工具的异步 generator 逐条入队，否则一个事务中间可能插入兄弟工具的更高 revision，导致 Bridge 的顺序校验失败并中断后续模型调用。异步 effect preparation 返回时也重新核对 State revision；后台工具已推进 State 时，丢弃旧决定并重新调度，不能使用旧的 stop 决定退出。确定性回归见 [State runner acknowledgement](../test/runtime/state-runner-ack.test.ts)，包含事务交错、工具收尾期间准备完成与模型继续执行。
 
+[RuntimeSessionCoordinator](../src/bootstrap/runtime/RuntimeSessionCoordinator.ts) 保留每个 canonical event 的确切 post-event State，并由 Bridge 的命令 activation、runner 消费和取消路径共同按 revision 排空原有待发布队列。控制命令不能越过后台已提交、尚未被 generator 读取的事件；generator 之后交出已发布对象时不重复通知。所有 event 都来自 Kernel 接受的 batch，不再以 event type／部分 identity 猜测原始对象的 revision。Provider action 的 `started` 在相同确切 State 上投影当前 interaction availability，不能先发布空事件版本再补发同版本交互。[coordinator 回归](../test/runtime/runtime-session-coordinator.test.ts)同时验证控制命令交错与 canonical 失败事件。
+
 [Turn coordinator](../src/bootstrap/runtime/turn-coordinator.ts) 显式持有 State runner iterator：消费者提前关闭或投影失败时，先提交当前 Turn 的错误取消与 unknown 结果，再中止本地 Provider I/O、关闭 iterator 并等待原有有界清理，最后释放 runner。后台 Shell 用实际执行 Promise 集合承担收尾，不在消费者离开后继续占用失去 owner 的运行状态。日志记录已提交终态；持久提交失败仍停止本地 I/O，不能伪造成功或清理确认。[coordinator 回归](../test/runtime/runtime-session-coordinator.test.ts)覆盖提前关闭与真实 Bridge 投影故障，[并发取消回归](../test/runtime/concurrent-shell-cancel.test.ts)覆盖前台与后台工具的清理等待。
+
+提交 start 或恢复审批回执后，如果 activation 失败，Host 不会 dispatch；Bridge 必须在丢失执行 owner 前持久结束已接受 Turn。审批路径还须按捕获的 broker identity 释放准确 waiter，不能因清空 pending 字段后发布失败而永久挂起。执行前的模型／投影初始化也属于同一故障收尾范围。已恢复审批被拒绝后不再为已经终止的 Turn 准备 resume。提前退出的已分类执行故障与错误取消在同一 batch 提交，保留原始 canonical failure，不能再被通用的消费者关闭错误覆盖。
 
 当前 source/release 默认组合 App Server 多连接 Session Store。默认 stdio child 不创建 HTTP listener；显式 daemon 在同一进程中组合 loopback Web、Agent API 与 static/API Docs，并在 shutdown 时关闭。Coordinator、per-Workspace Worker 与独立 Web Gateway 进程不是普通启动拓扑；不要把 daemon Web 归类为 legacy Service。实际入口见 [daemon owner](../src/app-server-daemon.ts)。
 

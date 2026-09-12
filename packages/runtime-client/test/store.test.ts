@@ -67,6 +67,54 @@ describe('Runtime Snapshot Store', () => {
     expect(store.getSnapshot().sessions['session-1']?.historyResyncRequired).toBeTrue();
   });
 
+  test('accepts same-revision lifecycle and model enrichment but rejects stable-field divergence', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    const queued: RuntimeSessionProjection = {
+      ...projection('session-1', 1),
+      currentRun: {
+        runId: 'run-1',
+        initialTurnId: 'turn-1',
+        activeTurnId: 'turn-1',
+        status: 'queued',
+        revision: 1,
+      },
+    };
+    const apply = (session: RuntimeSessionProjection) =>
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: durable(session),
+        ready: true,
+      });
+    expect(apply(queued)).toBe('applied');
+    const running: RuntimeSessionProjection = {
+      ...queued,
+      currentRun: { ...queued.currentRun!, status: 'running' },
+    };
+    expect(
+      apply({ ...running, currentRun: { ...running.currentRun!, activeTurnId: 'other-turn' } }),
+    ).toBe('resync_required');
+    expect(apply({ ...running, currentRun: { ...running.currentRun!, revision: 2 } })).toBe(
+      'resync_required',
+    );
+    expect(apply(running)).toBe('applied');
+    expect(store.getSnapshot().sessions['session-1']).toMatchObject({
+      ready: true,
+      projection: { currentRun: { status: 'running' } },
+    });
+    const selectedModel = { provider: 'test', name: 'model' };
+    expect(apply({ ...running, model: selectedModel })).toBe('applied');
+    const completed: RuntimeSessionProjection = {
+      ...running,
+      currentRun: { ...running.currentRun!, status: 'completed' },
+    };
+    expect(apply(completed)).toBe('applied');
+    expect(store.getSnapshot().sessions['session-1']?.projection.model).toEqual(selectedModel);
+    expect(apply(running)).toBe('resync_required');
+    expect(apply({ ...completed, workspace: '/different' })).toBe('resync_required');
+  });
+
   test('drops a prior connection projection before accepting an older replacement snapshot', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-old' });

@@ -112,7 +112,10 @@ export class DesktopClient {
     connection: KiteAppServerConnection;
     promise: Promise<void>;
   };
-  #calibratedSelection?: AbortController;
+  #calibratedSelection?: {
+    readonly controller: AbortController;
+    readonly subscriptionGeneration: number;
+  };
   readonly #historyCache = new SessionHistoryCache();
   #historyConnection?: KiteAppServerConnection;
   #historyWorkspaceDigest?: string;
@@ -359,6 +362,16 @@ export class DesktopClient {
       if (this.#connection !== connection) return;
       const snapshot = connection.snapshotStore.getSnapshot();
       const session = this.#view.selected ? snapshot.sessions[this.#view.selected] : undefined;
+      const calibrated = this.#calibratedSelection;
+      const resyncSession =
+        this.#view.selected &&
+        session &&
+        calibrated &&
+        calibrated?.controller === this.#selection &&
+        (!session.ready || session.subscriptionGeneration !== calibrated.subscriptionGeneration)
+          ? this.#view.selected
+          : undefined;
+      if (resyncSession) this.#calibratedSelection = undefined;
       const runFinished =
         isActiveRun(this.#view.projection) &&
         !!session?.projection &&
@@ -372,7 +385,8 @@ export class DesktopClient {
         ready:
           connection.status === 'active' &&
           this.#calibratedSelection !== undefined &&
-          this.#calibratedSelection === this.#selection &&
+          this.#calibratedSelection.controller === this.#selection &&
+          this.#calibratedSelection.subscriptionGeneration === session?.subscriptionGeneration &&
           !this.#selection?.signal.aborted &&
           (session?.ready ?? false),
         ...(session?.projection ? { projection: session.projection } : {}),
@@ -381,6 +395,22 @@ export class DesktopClient {
           ? this.#view.sessions
           : sessions,
       });
+      if (resyncSession) {
+        // A replacement subscription restores projection, not omitted message events.
+        // Retain the body and reuse the existing bounded selection calibration once.
+        void (this.#selectionLoad?.promise ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(() => {
+            if (
+              this.#connection === connection &&
+              this.#selection === calibrated?.controller &&
+              !this.#selection?.signal.aborted
+            )
+              return this.selectSession(resyncSession);
+            return undefined;
+          })
+          .catch((error) => this.report(error));
+      }
       if (connection.status === 'closed' || connection.status === 'disconnected') this.#recover();
       if (runFinished && connection.status === 'active')
         void this.refreshSessions().catch((error) => this.report(error));
@@ -929,12 +959,21 @@ export class DesktopClient {
       // The initial subscription contains a current snapshot, not every event
       // since the History read. If that watermark advanced, calibrate once more
       // while the established subscription buffers all subsequent events.
-      const subscribed = connection.snapshotStore.getSnapshot().sessions[sessionId];
-      if (subscribed && subscribed.projection.revision > messages.throughSequence) {
+      let subscribed = connection.snapshotStore.getSnapshot().sessions[sessionId];
+      while (
+        subscribed &&
+        (!subscribed.ready || subscribed.projection.revision > messages.throughSequence)
+      ) {
         messages = await Promise.race([
           this.#readHistory(connection, sessionId, this.#view.messages, controller.signal),
           deadline,
         ]);
+        const current = connection.snapshotStore.getSnapshot().sessions[sessionId];
+        // Later events in the same subscription are buffered. A resync during
+        // this read invalidates that guarantee and needs a new history boundary.
+        if (current?.ready && current.subscriptionGeneration === subscribed.subscriptionGeneration)
+          break;
+        subscribed = current;
       }
       if (
         controller.signal.aborted ||
@@ -944,7 +983,11 @@ export class DesktopClient {
         return;
       const session = connection.snapshotStore.getSnapshot().sessions[sessionId];
       this.#historyConnection = connection;
-      this.#calibratedSelection = controller;
+      if (!session?.ready) throw new Error('会话订阅尚未恢复，请重新加载会话。');
+      this.#calibratedSelection = {
+        controller,
+        subscriptionGeneration: session.subscriptionGeneration,
+      };
       this.#publish({
         messages: messages.messages,
         interactionMode: messages.interactionMode,

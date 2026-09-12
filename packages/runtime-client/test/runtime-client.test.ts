@@ -348,6 +348,120 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('a failed automatic resubscribe closes its iterator instead of leaving a live waiter', async () => {
+    let subscriptions = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('resync-failure')));
+      if (message.method === 'runtime/subscribe') {
+        subscriptions++;
+        if (subscriptions > 1) throw new Error('injected resubscribe send failure');
+        target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+      }
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    const iterator = client
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1' } })
+      [Symbol.asyncIterator]();
+    try {
+      await until(() => subscriptions === 1);
+      connection.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 1,
+          session: session('session-1', 1),
+        }),
+      );
+      await expect(iterator.next()).resolves.toMatchObject({ done: false });
+      connection.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 3,
+          session: session('session-1', 3),
+        }),
+      );
+      let ended = false;
+      const finished = iterator.next().then((step) => {
+        ended = step.done === true;
+      });
+      await until(() => ended);
+      await finished;
+      expect(subscriptions).toBe(2);
+      expect(client.snapshotStore.getSnapshot().status).toBe('active');
+    } finally {
+      await iterator.return?.();
+      await client.close();
+    }
+  });
+
+  test('an old resync cannot activate a second subscription after explicit reconnect', async () => {
+    const first = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('resync-old')));
+      if (message.method === 'runtime/subscribe')
+        target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+      // Hold the unsubscribe receipt so reconnect crosses the resync boundary.
+    });
+    const second = respondingConnection('resync-new');
+    const client = new RuntimeClient({
+      transport: transport(first, second),
+      clientInfo: clientInfo(),
+    });
+    const iterator = client
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1' } })
+      [Symbol.asyncIterator]();
+    try {
+      await until(() => first.requests('runtime/subscribe').length === 1);
+      first.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 1,
+          session: session('session-1', 1),
+        }),
+      );
+      await iterator.next();
+      first.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 3,
+          session: session('session-1', 3),
+        }),
+      );
+      await until(() => first.requests('runtime/unsubscribe').length === 1);
+      await client.reconnect();
+      await tick();
+      expect(second.requests('runtime/subscribe')).toHaveLength(1);
+      expect(second.requests('runtime/unsubscribe')).toHaveLength(0);
+      expect(second.requests('runtime/command')).toHaveLength(0);
+      second.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 1,
+          session: session('session-1', 1),
+        }),
+      );
+      await expect(iterator.next()).resolves.toMatchObject({ done: false, value: { revision: 1 } });
+    } finally {
+      await iterator.return?.();
+      await client.close();
+    }
+  });
+
   test('explicit reconnect increments generation and restores subscriptions without replaying mutations', async () => {
     const first = respondingConnection('server-1');
     const second = respondingConnection('server-2');
