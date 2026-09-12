@@ -30,6 +30,7 @@ export interface DirectoryProps {
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
   busy?: boolean;
+  mutationBusy?: boolean;
   defaultExpanded?: boolean;
   onLoadMore?: () => void;
   onOpen?: (id: string) => void;
@@ -80,7 +81,7 @@ function Workspace({
                 size="icon-sm"
                 aria-label={`在 ${workspace.label} 中新建对话`}
                 title="新对话"
-                disabled={props.busy}
+                disabled={props.busy || props.mutationBusy}
                 onClick={() => props.onNewSession?.(workspace.id)}
               >
                 <img src={newConversationIcon} alt="" width={16} height={16} />
@@ -200,7 +201,7 @@ export function Sidebar({
             <Button
               className="new-session"
               variant="ghost"
-              disabled={props.busy}
+              disabled={props.busy || props.mutationBusy}
               onClick={actions.newSession}
             >
               <img

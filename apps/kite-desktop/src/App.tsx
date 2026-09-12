@@ -1,13 +1,22 @@
-import { Button, SessionPage } from '@kite-ai/kite-client-ui';
+import { Button, type Message, SessionPage } from '@kite-ai/kite-client-ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import appIcon from '../app-icon.svg';
-import type { DesktopClient } from './client';
+import { CommandResultUnknown, type DesktopClient } from './client';
 import { Interaction } from './Interaction';
 import { isActiveRun } from './presentation';
 import { Settings } from './Settings';
 import './startup.css';
 
 const navigationKey = 'kite.desktop.navigation';
+type FirstSubmission = {
+  phase: 'preparing' | 'sending' | 'failed' | 'unknown';
+  text: string;
+  visibleUntil: number;
+  navigation: number;
+  baselineUserIds: readonly string[];
+  sessionId?: string;
+  uncertainty?: 'create' | 'turn';
+};
 function readNavigation(): { workspace: string; sessionId?: string } | undefined {
   try {
     const value = JSON.parse(window.sessionStorage.getItem(navigationKey) ?? 'null');
@@ -45,12 +54,19 @@ export function App({ client }: { client: DesktopClient }) {
     directory: directorySnapshot,
   } = view;
   const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [selectingSession, setSelectingSession] = useState<string>();
+  const [newConversationPermission, setNewConversationPermission] = useState<
+    'accept_edits' | 'auto' | 'full'
+  >('auto');
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
   const [startupAttempt, setStartupAttempt] = useState(0);
   const busyRef = useRef(false);
+  const submittingRef = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newConversation, setNewConversation] = useState(!selected);
+  const [firstSubmission, setFirstSubmission] = useState<FirstSubmission>();
   const [workbenchView, setWorkbenchView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
@@ -65,9 +81,8 @@ export function App({ client }: { client: DesktopClient }) {
   const selectedWorkspace =
     selectedSession?.workspace ??
     (projection?.workspaceDigest === view.trust?.workspace.workspaceDigest ? workspace : undefined);
-  const draftKey = preparing
-    ? 'new-conversation'
-    : `${selectedWorkspace ?? selectedSession?.workspaceId ?? ''}\0${selected}`;
+  const readingWorkspace = selectedWorkspace ?? selectedSession?.workspaceId ?? workspace;
+  const draftKey = preparing ? 'new-conversation' : `${readingWorkspace}\0${selected}`;
   const draft = drafts[draftKey] ?? '';
   const stopping =
     isActiveRun(projection) &&
@@ -106,30 +121,63 @@ export function App({ client }: { client: DesktopClient }) {
     [act, client, editor],
   );
   const openSession = (id: string) => {
-    navigationRevision.current++;
+    const revision = ++navigationRevision.current;
     setWorkbenchView(false);
     setNewConversation(false);
+    setSelectingSession(id);
     // Selection has its own abort/generation owner; a second selection may supersede it.
     void client
       .selectSession(id)
       .then(() => {
         const current = client.getSnapshot();
+        if (navigationRevision.current !== revision || current.selected !== id || !current.ready)
+          return;
+        setFirstSubmission((submission) =>
+          submission?.phase === 'unknown' &&
+          submission.uncertainty === 'create' &&
+          submission.sessionId === id
+            ? { ...submission, phase: 'failed', uncertainty: undefined }
+            : submission,
+        );
         rememberNavigation(
           current.directory?.find((session) => session.sessionId === current.selected)?.workspace ??
             current.workspace,
           current.selected,
         );
       })
-      .catch((error) => client.report(error));
+      .catch((error) => client.report(error))
+      .finally(() => setSelectingSession((current) => (current === id ? undefined : current)));
   };
   const newSession = () => {
     if (!busyRef.current) {
       navigationRevision.current++;
       setWorkbenchView(false);
       setNewConversation(true);
+      setFirstSubmission((submission) =>
+        submission?.phase === 'unknown' ? submission : undefined,
+      );
       rememberNavigation(workspace);
     }
   };
+  useEffect(() => {
+    const pending = firstSubmission;
+    if (!pending || pending.sessionId !== selected) return;
+    if (
+      !view.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          message.text === pending.text &&
+          !pending.baselineUserIds.includes(message.id),
+      )
+    )
+      return;
+    const delay = pending.phase === 'failed' ? 0 : Math.max(0, pending.visibleUntil - Date.now());
+    const timer = window.setTimeout(() => {
+      client.clearError();
+      setFirstSubmission(undefined);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [client, firstSubmission, selected, view.messages]);
   const activateForWork = async (target: string) => {
     await client.checkProject(target);
     const current = client.getSnapshot();
@@ -152,8 +200,10 @@ export function App({ client }: { client: DesktopClient }) {
   };
   const chooseProject = (path?: string) =>
     void act(async () => {
+      const revision = navigationRevision.current;
       const target = path ?? (await client.pickProject());
       if (!target || !(await activateForWork(target))) return;
+      if (navigationRevision.current !== revision) return;
       navigationRevision.current++;
       setNewConversation(true);
       rememberNavigation(target);
@@ -216,12 +266,59 @@ export function App({ client }: { client: DesktopClient }) {
       : active
         ? (projection?.model ?? view.models?.selected)
         : (view.models?.selected ?? projection?.model);
+  const submissionInFlight =
+    !!firstSubmission &&
+    firstSubmission.phase !== 'failed' &&
+    (firstSubmission.sessionId
+      ? !preparing && firstSubmission.sessionId === selected
+      : preparing && firstSubmission.navigation === navigationRevision.current);
   const canSubmit =
     !busy &&
+    !submitting &&
+    !submissionInFlight &&
+    (preparing || selectingSession === undefined) &&
     connected &&
     (preparing
       ? !!workspace && !!view.models?.selected && view.trust?.status === 'trusted'
       : ready && !loadingSession && !!selected && !!selectedWorkspace);
+  const submissionVisible =
+    !!firstSubmission &&
+    (firstSubmission.sessionId
+      ? !preparing && firstSubmission.sessionId === selected
+      : preparing && firstSubmission.navigation === navigationRevision.current);
+  const optimisticMessage: Message | undefined = submissionVisible
+    ? {
+        id: 'client:first-submission',
+        role: 'user',
+        text: firstSubmission.text,
+        settled: firstSubmission.phase === 'failed' || firstSubmission.phase === 'unknown',
+        delivery:
+          firstSubmission.phase === 'failed'
+            ? 'failed'
+            : firstSubmission.phase === 'unknown'
+              ? 'unknown'
+              : 'sending',
+      }
+    : undefined;
+  const optimisticRuntimeIndex = optimisticMessage
+    ? view.messages.findIndex(
+        (message) =>
+          message.role === 'user' &&
+          message.text === optimisticMessage.text &&
+          !firstSubmission?.baselineUserIds.includes(message.id),
+      )
+    : -1;
+  const displayedMessages = optimisticMessage
+    ? preparing
+      ? [optimisticMessage]
+      : optimisticRuntimeIndex < 0
+        ? [...view.messages, optimisticMessage]
+        : view.messages.map((message, index) =>
+            index === optimisticRuntimeIndex ? optimisticMessage : message,
+          )
+    : workbenchView || preparing
+      ? []
+      : view.messages;
   const liveSessions = new Map(view.sessions.map((session) => [session.sessionId, session]));
   const directory = (directorySnapshot ?? view.sessions).map((session) => {
     const current = liveSessions.get(session.sessionId);
@@ -313,11 +410,18 @@ export function App({ client }: { client: DesktopClient }) {
       workspaceLabel={workspaceName}
       sessionLabel={selectedSession?.displayName || (selected ? '新会话' : '开始一项工作')}
       readingKey={draftKey}
-      messages={workbenchView || preparing ? [] : view.messages}
-      loading={!workbenchView && !preparing && loadingSession && !view.hasLoadedHistory}
+      messages={displayedMessages}
+      loading={
+        !optimisticMessage &&
+        !workbenchView &&
+        !preparing &&
+        loadingSession &&
+        !view.hasLoadedHistory
+      }
       connected={connected}
       connectionLabel=""
-      busy={busy}
+      busy={busy || (submitting && !preparing && selectedWorkspace !== workspace)}
+      mutationBusy={submitting || firstSubmission?.phase === 'unknown'}
       onHeaderMouseDown={(clickCount) =>
         void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
       }
@@ -361,7 +465,7 @@ export function App({ client }: { client: DesktopClient }) {
                         `分离 HEAD · ${view.branch.head?.slice(0, 7) ?? '未知'}`),
                   }
                 : undefined,
-              busy,
+              busy: busy || submitting,
               onProject: chooseProject,
               onAddProject: openProject,
               onBranch: (name) => void act(() => client.switchBranch(name)),
@@ -381,7 +485,7 @@ export function App({ client }: { client: DesktopClient }) {
               )}
             </div>
           )}
-          {!busy && view.trust && view.trust.status !== 'trusted' && (
+          {view.trust && view.trust.status !== 'trusted' && (
             <section className="notice trust-notice">
               <strong>
                 {view.trust.externalReadScope.roots.length
@@ -472,53 +576,200 @@ export function App({ client }: { client: DesktopClient }) {
               stopping: !!stopping,
               cancelDisabled: busy || !ready || loadingSession,
               model: model ? `${model.provider} / ${model.name}` : undefined,
+              models: view.models?.providers.flatMap((provider) =>
+                provider.models.map((item) => ({ provider: provider.provider, name: item.name })),
+              ),
+              modelDisabled: busy || !connected || !view.models,
+              onModelChange: (provider, name) => void act(() => client.selectModel(provider, name)),
+              permission: preparing ? newConversationPermission : (view.interactionMode ?? 'auto'),
+              permissionDisabled:
+                busy || submitting || (!preparing && (!selected || !ready || loadingSession)),
+              onPermissionChange: (permission) => {
+                if (preparing) {
+                  setNewConversationPermission(permission);
+                  return;
+                }
+                if (selected)
+                  void act(async () => {
+                    await client.setInteractionMode(selected, permission);
+                  });
+              },
+              submitStatus:
+                (loadingSession || (!preparing && selectingSession !== undefined)) &&
+                view.hasLoadedHistory
+                  ? '正在校准会话，暂时无法发送'
+                  : submissionVisible && firstSubmission.phase === 'unknown'
+                    ? '发送结果待确认，请检查会话状态'
+                    : submissionVisible && firstSubmission.phase !== 'failed'
+                      ? '正在发送消息'
+                      : undefined,
               onSettings: () => setSettingsOpen(true),
               onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
               onSend:
                 canSubmit && !active
                   ? () => {
+                      if (submittingRef.current) return;
+                      submittingRef.current = true;
+                      setSubmitting(true);
                       const submitted = draft;
                       const submittedNavigation = navigationRevision.current;
-                      void act(async () => {
+                      const baselineUserIds = view.messages
+                        .filter((message) => message.role === 'user')
+                        .map((message) => message.id);
+                      const restoreDraft = (key: string) =>
+                        setDrafts((values) => ({
+                          ...values,
+                          [key]: values[key] ? `${submitted}\n${values[key]}` : submitted,
+                        }));
+                      const retryingFirst =
+                        firstSubmission?.phase === 'failed' &&
+                        firstSubmission.sessionId === selected;
+                      const abandonPendingSend = () => {
+                        restoreDraft(draftKey);
+                        if (retryingFirst)
+                          setFirstSubmission({
+                            ...firstSubmission,
+                            phase: 'failed',
+                            text: submitted,
+                          });
+                      };
+                      if (preparing) {
+                        setFirstSubmission({
+                          phase: 'preparing',
+                          text: submitted,
+                          visibleUntil: Date.now() + 300,
+                          navigation: submittedNavigation,
+                          baselineUserIds,
+                        });
+                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                      } else if (retryingFirst) {
+                        setFirstSubmission({
+                          ...firstSubmission,
+                          phase: 'sending',
+                          text: submitted,
+                          visibleUntil: Date.now() + 300,
+                          baselineUserIds,
+                        });
+                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                      } else {
+                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                      }
+                      client.clearError();
+                      void (async () => {
                         let submittedKey = draftKey;
                         let targetSession = selected;
-                        if (preparing) {
-                          await client.prepareNewConversation();
-                          targetSession = await client.newSession();
-                          const current = client.getSnapshot();
-                          submittedKey = `${current.workspace}\0${targetSession}`;
-                          setDrafts((values) => ({
-                            ...values,
-                            [submittedKey]: values[draftKey] ?? submitted,
-                            [draftKey]: '',
-                          }));
-                          if (navigationRevision.current === submittedNavigation) {
-                            const selection = client.selectSession(targetSession);
-                            setNewConversation(false);
-                            rememberNavigation(current.workspace, targetSession);
-                            await selection;
-                          }
-                        }
-                        if (!preparing) {
-                          targetSession = selected;
-                          if (selectedWorkspace !== client.getSnapshot().workspace) {
-                            if (!selectedWorkspace || !(await activateForWork(selectedWorkspace)))
-                              return;
-                            await client.selectSession(selected!);
-                          }
-                        }
+                        let sessionCreated = !preparing;
                         try {
+                          if (preparing) {
+                            await client.prepareNewConversation();
+                            targetSession = await client.newSession();
+                            sessionCreated = true;
+                            await client.setInteractionMode(
+                              targetSession,
+                              newConversationPermission,
+                            );
+                            setFirstSubmission({
+                              phase: 'sending',
+                              text: submitted,
+                              visibleUntil: Date.now() + 300,
+                              navigation: submittedNavigation,
+                              baselineUserIds,
+                              sessionId: targetSession,
+                            });
+                            const current = client.getSnapshot();
+                            submittedKey = `${current.workspace}\0${targetSession}`;
+                            setDrafts((values) => ({
+                              ...values,
+                              [submittedKey]: values[draftKey] ?? '',
+                              [draftKey]: '',
+                            }));
+                            if (navigationRevision.current === submittedNavigation) {
+                              const selection = client.selectSession(targetSession);
+                              setNewConversation(false);
+                              rememberNavigation(current.workspace, targetSession);
+                              await selection;
+                            }
+                          }
+                          if (!preparing) {
+                            targetSession = selected;
+                            if (selectedWorkspace !== client.getSnapshot().workspace) {
+                              if (
+                                !selectedWorkspace ||
+                                !(await activateForWork(selectedWorkspace))
+                              ) {
+                                abandonPendingSend();
+                                return;
+                              }
+                              if (navigationRevision.current !== submittedNavigation) {
+                                abandonPendingSend();
+                                return;
+                              }
+                              await client.selectSession(selected!);
+                            }
+                          }
                           await client.send(submitted, targetSession);
+                        } catch (error) {
+                          if (error instanceof CommandResultUnknown) {
+                            if (error.commandType === 'resume_session') {
+                              restoreDraft(draftKey);
+                              if (retryingFirst)
+                                setFirstSubmission({
+                                  ...firstSubmission,
+                                  phase: 'failed',
+                                  text: submitted,
+                                  uncertainty: undefined,
+                                });
+                              client.report(error);
+                              return;
+                            }
+                            const current = client.getSnapshot();
+                            targetSession = sessionCreated ? targetSession : error.sessionId;
+                            if (targetSession) {
+                              submittedKey = `${current.workspace}\0${targetSession}`;
+                              if (navigationRevision.current === submittedNavigation) {
+                                setNewConversation(false);
+                                rememberNavigation(current.workspace, targetSession);
+                              }
+                            }
+                            setFirstSubmission({
+                              phase: 'unknown',
+                              text: submitted,
+                              visibleUntil: Date.now(),
+                              navigation: submittedNavigation,
+                              baselineUserIds,
+                              sessionId: targetSession,
+                              uncertainty: sessionCreated ? 'turn' : 'create',
+                            });
+                            if (!sessionCreated && targetSession)
+                              setDrafts((values) => ({
+                                ...values,
+                                [submittedKey]: values[draftKey]
+                                  ? `${submitted}\n${values[draftKey]}`
+                                  : submitted,
+                                [draftKey]: '',
+                              }));
+                            client.report(error);
+                            return;
+                          }
+                          if (preparing || retryingFirst) {
+                            setFirstSubmission({
+                              phase: 'failed',
+                              text: submitted,
+                              visibleUntil: Date.now(),
+                              navigation: submittedNavigation,
+                              baselineUserIds,
+                              sessionId: sessionCreated ? targetSession : undefined,
+                            });
+                          }
+                          restoreDraft(sessionCreated && targetSession ? submittedKey : draftKey);
+                          client.report(error);
                         } finally {
+                          submittingRef.current = false;
+                          setSubmitting(false);
                           if (preparing)
                             void client.refreshSessions().catch((error) => client.report(error));
                         }
-                        setDrafts((values) => ({
-                          ...values,
-                          [submittedKey]:
-                            values[submittedKey] === submitted ? '' : (values[submittedKey] ?? ''),
-                        }));
-                      });
+                      })();
                     }
                   : undefined,
               onCancel: () =>

@@ -4,7 +4,7 @@ import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { App } from '../src/App';
-import { DesktopClient, type DesktopView } from '../src/client';
+import { CommandResultUnknown, DesktopClient, type DesktopView } from '../src/client';
 import { Settings } from '../src/Settings';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
@@ -14,6 +14,7 @@ const globals = {
   navigator: dom.window.navigator,
   HTMLElement: dom.window.HTMLElement,
   HTMLInputElement: dom.window.HTMLInputElement,
+  HTMLSelectElement: dom.window.HTMLSelectElement,
   HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
   Event: dom.window.Event,
   CustomEvent: dom.window.CustomEvent,
@@ -66,6 +67,8 @@ class UiClient extends DesktopClient {
   sentTargets: Array<string | undefined> = [];
   cancelled = 0;
   approvals = 0;
+  selectedModels: string[] = [];
+  selectedModes: Array<{ sessionId: string; mode: 'accept_edits' | 'auto' | 'full' }> = [];
   mcpActions: string[] = [];
   created = 0;
   override async refreshProjects() {}
@@ -113,6 +116,7 @@ class UiClient extends DesktopClient {
       selected: 's0',
       sessions,
       projection: sessions[0],
+      interactionMode: 'auto',
       messages: [],
       ready: true,
       loadingSession: false,
@@ -137,7 +141,15 @@ class UiClient extends DesktopClient {
         revision: '1',
         selected: { provider: 'test', name: 'model' },
         providers: [
-          { provider: 'test', type: 'openai-compatible', readiness: 'ready', models: [] },
+          {
+            provider: 'test',
+            type: 'openai-compatible',
+            readiness: 'ready',
+            models: [
+              { provider: 'test', name: 'model', isDefault: true },
+              { provider: 'test', name: 'model-fast', isDefault: false },
+            ],
+          },
         ],
       },
       trust: {
@@ -189,6 +201,14 @@ class UiClient extends DesktopClient {
   override async cancel() {
     this.cancelled++;
   }
+  override async selectModel(provider: string, name: string) {
+    this.selectedModels.push(`${provider}/${name}`);
+    this.update({ models: { ...this.view.models!, selected: { provider, name } } });
+  }
+  override async setInteractionMode(sessionId: string, mode: 'accept_edits' | 'auto' | 'full') {
+    this.selectedModes.push({ sessionId, mode });
+    if (this.view.projection?.sessionId === sessionId) this.update({ interactionMode: mode });
+  }
   override async respondApproval() {
     this.approvals++;
   }
@@ -228,6 +248,15 @@ async function click(element: HTMLElement) {
     element.click();
   });
 }
+async function choose(element: HTMLSelectElement, value: string) {
+  await act(() => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value')!.set!.call(
+      element,
+      value,
+    );
+    element.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  });
+}
 async function key(element: Element, value: string, options: KeyboardEventInit = {}) {
   await act(async () => {
     element.dispatchEvent(
@@ -262,6 +291,47 @@ test('startup hides the main page until preparation settles and does not return 
   await act(() => client.update({ connected: false, ready: false }));
   expect(document.querySelector('[aria-label="kite 启动页"]')).toBeNull();
   expect(input().value).toBe('保留草稿');
+});
+
+test('composer selects a configured model and changes the current session permission', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+
+  const model = document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!;
+  expect([...model.options].map((option) => option.text)).toEqual(['model', 'model-fast']);
+  await choose(model, 'test\0model-fast');
+  expect(client.selectedModels).toEqual(['test/model-fast']);
+
+  const permission = document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!;
+  expect([...permission.options].map((option) => option.text)).toEqual(['Ask', 'Auto', 'Full']);
+  await choose(permission, 'accept_edits');
+  expect(client.selectedModes).toEqual([{ sessionId: 's0', mode: 'accept_edits' }]);
+  expect(permission.value).toBe('accept_edits');
+});
+
+test('new conversation applies its selected permission before sending the first message', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  expect(client.selectedModes).toEqual([]);
+  await write(input(), '使用所选权限');
+  await key(input(), 'Enter');
+  expect(client.selectedModes).toEqual([{ sessionId: 'created-1', mode: 'full' }]);
+  expect(client.sent).toEqual(['使用所选权限']);
+});
+
+test('new conversation does not send when its selected permission cannot be applied', async () => {
+  const client = new UiClient();
+  client.setInteractionMode = async () => {
+    throw new Error('权限切换失败');
+  };
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '不能越过权限失败');
+  await key(input(), 'Enter');
+  expect(client.sent).toEqual([]);
+  expect(input().value).toBe('不能越过权限失败');
 });
 
 test('startup failure offers a retry and accepts an empty directory without creating a session', async () => {
@@ -358,12 +428,44 @@ test('global new conversation preserves existing drafts, appends suggestions and
   expect(client.created).toBe(1);
   expect(client.sent).toHaveLength(1);
   expect(document.querySelector('[aria-label="新对话"]')).toBeNull();
+  expect(input().value).toBe('');
+  expect(document.querySelectorAll('[aria-label="用户消息"]')).toHaveLength(1);
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('正在发送');
+  await write(input(), '发送期间写下的新草稿');
   await act(() => reject(new Error('首次发送失败')));
-  expect(input().value).toBe('我的新需求\n研究与理解资料：');
+  expect(input().value).toBe('我的新需求\n研究与理解资料：\n发送期间写下的新草稿');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('发送失败');
+  await write(input(), '改写后的新需求');
   client.sendResult = async () => {};
   await click(button('发送'));
   expect(client.created).toBe(1);
   expect(input().value).toBe('');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
+    '改写后的新需求',
+  );
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).not.toContain(
+    '我的新需求',
+  );
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('正在发送');
+  await act(() =>
+    client.update({
+      messages: [
+        {
+          id: 'runtime-user',
+          role: 'user',
+          text: '改写后的新需求',
+          settled: true,
+        },
+        { id: 'first-reply', role: 'assistant', text: '已经收到', settled: false },
+      ],
+    }),
+  );
+  expect(
+    Array.from(document.querySelectorAll('.message')).map((message) => message.textContent),
+  ).toEqual([expect.stringContaining('改写后的新需求'), expect.stringContaining('已经收到')]);
+  await act(() => Bun.sleep(320));
+  expect(document.querySelectorAll('[aria-label="用户消息"]')).toHaveLength(1);
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).not.toContain('正在发送');
 });
 
 test('first send keeps existing session navigation available and stays bound to the created session', async () => {
@@ -393,6 +495,230 @@ test('first send keeps existing session navigation available and stays bound to 
 
   await act(() => finish());
   expect(client.sentTargets).toEqual(['created-1']);
+});
+
+test('first send keeps its draft stable before the created session reaches the directory', async () => {
+  class DelayedDirectoryClient extends UiClient {
+    letSelectionFinish?: () => void;
+
+    override async newSession(): Promise<string> {
+      this.created++;
+      return `created-${this.created}`;
+    }
+
+    override async selectSession(id: string) {
+      this.selectedIds.push(id);
+      this.update({
+        selected: id,
+        projection: undefined,
+        messages: [],
+        hasLoadedHistory: false,
+        loadingSession: true,
+      });
+      await new Promise<void>((resolve) => {
+        this.letSelectionFinish = resolve;
+      });
+    }
+  }
+
+  const client = new DelayedDirectoryClient();
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '目录刷新前也要保持稳定');
+  await key(input(), 'Enter');
+
+  expect(document.querySelector('[aria-label="新对话"]')).toBeNull();
+  expect(input().value).toBe('');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
+    '目录刷新前也要保持稳定',
+  );
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('正在发送');
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('正在加载会话历史');
+
+  await act(() => client.letSelectionFinish?.());
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('从一个想法开始');
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('描述你的目标');
+});
+
+test('first send stays out of another session while conversation preparation is pending', async () => {
+  const client = new UiClient();
+  let finishPreparation!: () => void;
+  client.prepareNewConversation = () =>
+    new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '只属于新会话');
+  await key(input(), 'Enter');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('只属于新会话');
+  await click(button('工作 1'));
+  expect(document.querySelector('[aria-label="用户消息"]')).toBeNull();
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('只属于新会话');
+  await act(async () => {
+    finishPreparation();
+    await Bun.sleep(10);
+  });
+});
+
+test('draft typed while the first conversation is being created migrates to that session', async () => {
+  const client = new UiClient();
+  let finishPreparation!: () => void;
+  client.prepareNewConversation = () =>
+    new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '先发送这一条');
+  await key(input(), 'Enter');
+  await write(input(), '创建期间继续写的草稿');
+  await act(async () => {
+    finishPreparation();
+    await Bun.sleep(10);
+  });
+  expect(input().value).toBe('创建期间继续写的草稿');
+  expect(client.sent).toEqual(['先发送这一条']);
+});
+
+test('unknown create receipt binds recovery to the generated session without creating twice', async () => {
+  class UnknownCreateClient extends UiClient {
+    override async newSession(): Promise<string> {
+      this.created++;
+      const created = session(`created-${this.created}`);
+      this.update({
+        selected: created.sessionId,
+        sessions: [...this.view.sessions, created],
+        projection: undefined,
+        messages: [],
+        ready: false,
+      });
+      const error = new CommandResultUnknown('创建结果未知');
+      error.sessionId = created.sessionId;
+      throw error;
+    }
+
+    override async selectSession(id: string) {
+      await super.selectSession(id);
+      this.update({ ready: true, loadingSession: false });
+    }
+  }
+
+  const client = new UnknownCreateClient();
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '保持同一个会话');
+  await key(input(), 'Enter');
+  expect(client.created).toBe(1);
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
+    '发送结果待确认',
+  );
+  expect(input().value).toBe('保持同一个会话');
+  expect(button('发送').disabled).toBe(true);
+  await click(button('重新加载会话'));
+  expect(client.selectedIds.at(-1)).toBe('created-1');
+  expect(client.created).toBe(1);
+  expect(button('发送').disabled).toBe(false);
+  client.sendResult = async () => {
+    throw new CommandResultUnknown('恢复结果未知', 'resume_session');
+  };
+  await click(button('发送'));
+  expect(input().value).toBe('保持同一个会话');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain('发送失败');
+  expect(button('发送').disabled).toBe(false);
+});
+
+test('unknown turn receipt cannot be retried until runtime state reconciles it', async () => {
+  const client = new UiClient();
+  client.sendResult = async () => {
+    throw new CommandResultUnknown('发送结果未知');
+  };
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await write(input(), '不要重复执行');
+  await key(input(), 'Enter');
+  expect(input().value).toBe('');
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
+    '发送结果待确认',
+  );
+  expect(button('发送').disabled).toBe(true);
+  await act(() =>
+    client.update({
+      messages: [
+        { id: 'accepted', role: 'user', text: '不要重复执行', settled: true },
+        { id: 'reply', role: 'assistant', text: '已经开始', settled: false },
+      ],
+    }),
+  );
+  await act(() => Bun.sleep(10));
+  expect(document.querySelectorAll('[aria-label="用户消息"]')).toHaveLength(1);
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).not.toContain(
+    '发送结果待确认',
+  );
+});
+
+test('an older identical user message cannot clear an unknown turn receipt', async () => {
+  const client = new UiClient();
+  client.view = {
+    ...client.view,
+    messages: [{ id: 'old-user', role: 'user', text: '相同要求', settled: true }],
+  };
+  client.sendResult = async () => {
+    throw new CommandResultUnknown('发送结果未知');
+  };
+  await render(<App client={client} />);
+  await write(input(), '相同要求');
+  await key(input(), 'Enter');
+  expect(document.querySelectorAll('[aria-label="用户消息"]')[1]?.textContent).toContain(
+    '发送结果待确认',
+  );
+  expect(button('发送').disabled).toBe(true);
+  await click(document.querySelector<HTMLButtonElement>('.session-row[aria-current="page"]')!);
+  expect(button('发送').disabled).toBe(true);
+  expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
+    '发送结果待确认',
+  );
+  await act(() =>
+    client.update({
+      messages: [
+        { id: 'old-user', role: 'user', text: '相同要求', settled: true },
+        { id: 'new-user', role: 'user', text: '相同要求', settled: true },
+      ],
+    }),
+  );
+  await act(() => Bun.sleep(10));
+  await write(input(), '下一条不同要求');
+  expect(button('发送').disabled).toBe(false);
+});
+
+test('unknown resume receipt keeps the draft and does not claim that a turn was sent', async () => {
+  const client = new UiClient();
+  client.sendResult = async () => {
+    throw new CommandResultUnknown('恢复结果未知', 'resume_session');
+  };
+  await render(<App client={client} />);
+  await write(input(), '恢复后再发送');
+  await key(input(), 'Enter');
+  expect(input().value).toBe('恢复后再发送');
+  expect(document.querySelector('[aria-label="用户消息"]')).toBeNull();
+  expect(document.body.textContent).not.toContain('发送结果待确认');
+  expect(button('发送').disabled).toBe(false);
+});
+
+test('retyping identical text during a successful send preserves it as the next draft', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  client.sendResult = () =>
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  await render(<App client={client} />);
+  await write(input(), '相同草稿');
+  await key(input(), 'Enter');
+  expect(input().value).toBe('');
+  await write(input(), '相同草稿');
+  await act(() => finish());
+  expect(input().value).toBe('相同草稿');
 });
 
 test('project and branch menus apply choices immediately, keep the new draft and restore keyboard focus', async () => {

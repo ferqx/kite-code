@@ -40,7 +40,14 @@ import { type DesktopConnectionInfo, desktopTransport } from './transport';
 
 export type { BranchSnapshot, DesktopProject } from './bridge';
 
-class CommandResultUnknown extends Error {}
+export class CommandResultUnknown extends Error {
+  readonly commandType?: RuntimeCommand['type'];
+  constructor(message: string, commandType?: RuntimeCommand['type']) {
+    super(message);
+    this.commandType = commandType;
+  }
+  sessionId?: string;
+}
 
 export type DesktopSessionSummary = Pick<
   RuntimeSessionProjection,
@@ -75,6 +82,7 @@ export interface DesktopView {
   selected?: string;
   messages: readonly Message[];
   projection?: RuntimeSessionProjection;
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
   ready: boolean;
   loadingSession: boolean;
   hasLoadedHistory: boolean;
@@ -150,7 +158,7 @@ export class DesktopClient {
     this.#publish({ error: messageOf(error) });
   }
   clearError() {
-    this.#publish({ error: undefined });
+    this.#publish({ error: undefined, commandError: undefined });
   }
 
   async openProject() {
@@ -725,6 +733,7 @@ export class DesktopClient {
     } catch {
       const error = new CommandResultUnknown(
         '操作提交结果未知。请检查会话与实际文件，再决定是否继续；不会自动重发。',
+        command.type,
       );
       this.#publish({ commandError: error.message });
       throw error;
@@ -746,6 +755,7 @@ export class DesktopClient {
       });
     } catch (error) {
       if (error instanceof CommandResultUnknown) {
+        error.sessionId = sessionId;
         this.#publish({
           selected: sessionId,
           messages: [],
@@ -818,6 +828,7 @@ export class DesktopClient {
         : (usableCache?.hasLoadedHistory ?? false),
       ready: false,
       projection: sameSelection ? this.#view.projection : undefined,
+      interactionMode: sameSelection ? this.#view.interactionMode : undefined,
       error: undefined,
       loadingSession: true,
     });
@@ -894,6 +905,7 @@ export class DesktopClient {
       this.#calibratedSelection = controller;
       this.#publish({
         messages: messages.messages,
+        interactionMode: messages.interactionMode,
         hasLoadedHistory: true,
         projection: session?.projection,
         ready: session?.ready ?? false,
@@ -938,7 +950,11 @@ export class DesktopClient {
   ) {
     const transcript = await connection.history.loadSession(sessionId, undefined, { signal });
     const messages = await projectHistory(transcript.events, previous, signal);
-    return { messages, throughSequence: transcript.session.lastSequence };
+    return {
+      messages,
+      interactionMode: transcript.interactionMode,
+      throughSequence: transcript.session.lastSequence,
+    };
   }
 
   async #followSelection(
@@ -969,7 +985,11 @@ export class DesktopClient {
           notification.durability === 'ephemeral'
             ? notification.event
             : notification.projection.event;
-        if (event) this.#publish({ messages: projectEvent(this.#view.messages, event) });
+        if (event)
+          this.#publish({
+            messages: projectEvent(this.#view.messages, event),
+            ...(event.type === 'interaction_mode.changed' ? { interactionMode: event.mode } : {}),
+          });
       }
       if (
         !controller.signal.aborted &&
@@ -1032,6 +1052,24 @@ export class DesktopClient {
       input,
       phase: 'building',
     });
+  }
+  async setInteractionMode(sessionId: string, mode: 'accept_edits' | 'auto' | 'full') {
+    const connection = this.#requireConnection();
+    const result = await connection.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'get_session_projection',
+      sessionId,
+    });
+    if (result.status !== 'ok' || !result.session) throw new Error('会话当前不可用。');
+    await this.#command({
+      schema: 'kite.runtime-command.v1',
+      commandId: crypto.randomUUID(),
+      type: 'set_interaction_mode',
+      sessionId,
+      expectedRevision: result.session.revision,
+      mode,
+    });
+    if (this.#view.selected === sessionId) this.#publish({ interactionMode: mode });
   }
   async cancel() {
     if (!this.#view.ready || this.#view.loadingSession)

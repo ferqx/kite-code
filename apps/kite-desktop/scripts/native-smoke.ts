@@ -138,6 +138,10 @@ try {
     expression: `globalThis.__kiteNativeSmoke = require('electron');
 const register = __kiteNativeSmoke.ipcMain.handle.bind(__kiteNativeSmoke.ipcMain);
 __kiteNativeSmoke.ipcMain.handle = (channel, listener) => register(channel, async (...args) => {
+  if (channel === 'kite:desktop:runtime-send' && globalThis.__kiteDelayFirstSend) {
+    globalThis.__kiteDelayFirstSend = false;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
   const result = await listener(...args);
   if (channel === 'kite:desktop:runtime-receive' && globalThis.__kiteDelayHistory &&
       result.ok && typeof result.value === 'string' && JSON.parse(result.value).result?.type === 'history_session_page') {
@@ -194,15 +198,79 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     ),
     { sandbox: true, contextIsolation: true, nodeIntegration: false },
   );
-  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  const primaryNewConversation = page.getByRole('button', { name: '新对话', exact: true });
+  const newConversationOpacity = await primaryNewConversation.evaluate(
+    (button: HTMLButtonElement) => {
+      const enabled = getComputedStyle(button).opacity;
+      button.disabled = true;
+      const disabled = getComputedStyle(button).opacity;
+      button.disabled = false;
+      return { enabled, disabled };
+    },
+  );
+  assert.deepEqual(
+    newConversationOpacity,
+    { enabled: '1', disabled: '1' },
+    'temporary project activation must not flash the primary new-conversation action',
+  );
+  await primaryNewConversation.click();
   // Exercise the real UI/preload/IPC flow, stubbing only the native picker response.
   await page.getByRole('button', { name: '项目空间', exact: true }).click();
   await page.getByRole('menuitem', { name: '添加项目…', exact: true }).click();
   await page
     .getByRole('textbox', { name: '任务输入' })
     .fill('Verify the Electron packaged client.');
+  const composerBeforeFirstSend = await page.locator('.composer').boundingBox();
+  await main('globalThis.__kiteDelayFirstSend = true');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.getByText('正在发送…', { exact: true }).waitFor();
+  const pendingGeometry = await page.evaluate(() => {
+    const bubble = document.querySelector('.message.user')!.getBoundingClientRect();
+    const status = document.querySelector('.delivery-status')!.getBoundingClientRect();
+    return {
+      bubbleBottom: bubble.bottom,
+      statusTop: status.top,
+      statusBottom: status.bottom,
+    };
+  });
+  assert.ok(
+    pendingGeometry.statusTop >= pendingGeometry.bubbleBottom,
+    'delivery status must render below the user bubble',
+  );
+  assert.ok(
+    pendingGeometry.statusBottom > pendingGeometry.bubbleBottom,
+    'delivery status must render outside the user bubble box',
+  );
+  assert.equal(await page.getByRole('textbox', { name: '任务输入' }).inputValue(), '');
+  assert.deepEqual(
+    await page.locator('.composer').boundingBox(),
+    composerBeforeFirstSend,
+    'optimistic first send must not move or resize the composer',
+  );
+  mkdirSync(join(root, 'out'), { recursive: true });
+  await page.screenshot({ path: join(root, 'out/electron-first-send-pending.png') });
   await page.getByText('Electron streaming', { exact: false }).waitFor({ timeout: 30_000 });
+  await page.getByText('正在回复…', { exact: true }).waitFor();
+  const respondingGeometry = await page.evaluate(() => {
+    const message = document
+      .querySelector('.message.assistant.responding')!
+      .getBoundingClientRect();
+    const status = document.querySelector('.response-status')!.getBoundingClientRect();
+    return {
+      messageBottom: message.bottom,
+      statusTop: status.top,
+      statusBottom: status.bottom,
+    };
+  });
+  assert.ok(
+    respondingGeometry.statusTop >= respondingGeometry.messageBottom,
+    'reply status must render below the assistant message',
+  );
+  assert.ok(
+    respondingGeometry.statusBottom > respondingGeometry.messageBottom,
+    'reply status must render outside the assistant message box',
+  );
+  await page.screenshot({ path: join(root, 'out/electron-agent-responding.png') });
   const beforeReload = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].close()');
   assert.equal(await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isVisible()'), false);
@@ -214,6 +282,101 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   await page
     .getByText('Electron streaming survives reload complete.', { exact: false })
     .waitFor({ timeout: 30_000 });
+  assert.equal(await page.getByText('正在回复…', { exact: true }).count(), 0);
+  assert.equal(await page.locator('.message-copy').count(), 2);
+  assert.deepEqual(
+    await page.locator('.message-copy').evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element);
+        const box = element.getBoundingClientRect();
+        return {
+          width: box.width,
+          height: box.height,
+          paddingBlock: `${style.paddingTop} ${style.paddingBottom}`,
+          paddingInline: `${style.paddingLeft} ${style.paddingRight}`,
+          borderRadius: style.borderRadius,
+        };
+      }),
+    ),
+    [
+      {
+        width: 24,
+        height: 24,
+        paddingBlock: '0px 0px',
+        paddingInline: '0px 0px',
+        borderRadius: '6px',
+      },
+      {
+        width: 24,
+        height: 24,
+        paddingBlock: '0px 0px',
+        paddingInline: '0px 0px',
+        borderRadius: '6px',
+      },
+    ],
+  );
+  assert.deepEqual(
+    await page
+      .locator('.message-copy')
+      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).opacity)),
+    ['0', '0'],
+  );
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          const state = globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] };
+          state.__kiteCopiedTexts ??= [];
+          state.__kiteCopiedTexts.push(text);
+        },
+      },
+    });
+  });
+  for (const selector of ['.message.assistant', '.message.user']) {
+    const messageBox = await page.locator(selector).boundingBox();
+    const copyBox = await page.locator(`${selector} .message-copy`).boundingBox();
+    assert.ok(messageBox && copyBox);
+    await page.mouse.move(
+      messageBox.x + messageBox.width / 2,
+      messageBox.y + messageBox.height / 2,
+    );
+    await page.mouse.move(copyBox.x + copyBox.width / 2, copyBox.y + copyBox.height / 2, {
+      steps: 12,
+    });
+    await page.waitForTimeout(150);
+    assert.equal(
+      await page
+        .locator(`${selector} .message-copy`)
+        .evaluate((element) => getComputedStyle(element).opacity),
+      '1',
+      `${selector} copy action must remain visible along a real pointer path`,
+    );
+    await page.mouse.down();
+    await page.mouse.up();
+  }
+  assert.deepEqual(
+    await page.evaluate(
+      () => (globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] }).__kiteCopiedTexts,
+    ),
+    ['Electron streaming survives reload complete.', 'Verify the Electron packaged client.'],
+  );
+  assert.equal(await page.getByRole('button', { name: '已复制消息', exact: true }).count(), 2);
+  const copyGeometry = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.message.user, .message.assistant')].map(
+      (message) => {
+        const copy = message.querySelector<HTMLElement>('.message-copy')!;
+        const messageBox = message.getBoundingClientRect();
+        const copyBox = copy.getBoundingClientRect();
+        return { messageBottom: messageBox.bottom, copyTop: copyBox.top };
+      },
+    ),
+  );
+  assert.ok(
+    copyGeometry.every(({ messageBottom, copyTop }) => copyTop >= messageBottom),
+    'copy actions must render below their completed message boxes',
+  );
+  await page.screenshot({ path: join(root, 'out/electron-message-copy-actions.png') });
   const afterReload = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   assert.equal(afterReload.workspace, beforeReload.workspace);
   assert.ok(afterReload.connectionId! > beforeReload.connectionId!);
@@ -248,9 +411,12 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     await Bun.sleep(10);
   assert.equal(await main('globalThis.__kiteHistoryHeld'), true);
   assert.equal(await input.inputValue(), 'Cached draft stays editable.');
-  assert.equal(
-    await page.getByRole('button', { name: '发送消息', exact: true }).isDisabled(),
-    true,
+  assert.deepEqual(
+    await page.locator('.composer-action').evaluate((element: HTMLButtonElement) => ({
+      disabled: element.disabled,
+      label: element.getAttribute('aria-label'),
+    })),
+    { disabled: true, label: '发送消息：正在校准会话，暂时无法发送' },
   );
   await input.fill('Still editable during calibration.');
   await page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
@@ -267,6 +433,29 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     'Electron cached switch with 2s history delay:',
     JSON.stringify({ firstFrameMs: cached.elapsed, messages: 2 }),
   );
+  const conversationGeometry = await page.evaluate(() => {
+    const reading = document.querySelector('.reading-column')!.getBoundingClientRect();
+    const composer = document.querySelector('.composer')!.getBoundingClientRect();
+    return {
+      reading: { x: reading.x, width: reading.width },
+      composer: { x: composer.x, width: composer.width },
+    };
+  });
+  await page.getByRole('button', { name: '文件变更', exact: true }).click();
+  await page.getByRole('complementary', { name: '文件变更' }).waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const reading = document.querySelector('.reading-column')!.getBoundingClientRect();
+      const composer = document.querySelector('.composer')!.getBoundingClientRect();
+      return {
+        reading: { x: reading.x, width: reading.width },
+        composer: { x: composer.x, width: composer.width },
+      };
+    }),
+    conversationGeometry,
+    'opening file changes must not move or resize the reading column or composer',
+  );
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
   const header = await page.locator('.app-header').boundingBox();
   const brand = await page.locator('.sidebar-header .brand').boundingBox();
   assert.equal(header?.height, 52);
@@ -285,7 +474,6 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isMaximized()'),
     false,
   );
-  mkdirSync(join(root, 'out'), { recursive: true });
   await page.screenshot({ path: join(root, 'out/electron-native-smoke.png') });
   const windowId = String(
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getMediaSourceId()'),

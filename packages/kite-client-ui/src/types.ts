@@ -3,6 +3,8 @@ export interface Message {
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;
+  /** Client-local delivery state used before the runtime projection owns the message. */
+  readonly delivery?: 'sending' | 'failed' | 'unknown';
   readonly changedFile?: string;
   readonly changeConfirmed?: boolean;
   readonly toolResult?: {

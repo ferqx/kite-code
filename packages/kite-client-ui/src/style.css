@@ -191,6 +191,9 @@ body {
   .primary-navigation .button:hover:not(:disabled) {
     background: var(--sidebar-accent);
   }
+  .primary-navigation .new-session:disabled {
+    opacity: 1;
+  }
   .primary-navigation .button span {
     flex: 1;
     text-align: left;
@@ -378,6 +381,7 @@ body {
     overflow: auto;
     padding: 28px 28px 16px;
     overflow-anchor: none;
+    scrollbar-gutter: stable;
   }
   .message,
   input,
@@ -394,6 +398,7 @@ body {
     max-width: 844px;
     width: 100%;
     margin-inline: auto;
+    position: relative;
   }
   .reading-column {
     overflow: hidden;
@@ -420,12 +425,74 @@ body {
     min-width: 0;
   }
   .message.user {
+    position: relative;
     margin-left: auto;
     background: var(--accent);
     border-radius: 12px;
     padding: 12px 16px;
     max-width: 85%;
     width: fit-content;
+  }
+  .message.user.sending {
+    opacity: 0.78;
+  }
+  .message.user.failed {
+    border: 1px solid #bd8e85;
+  }
+  .message.assistant {
+    position: relative;
+  }
+  .delivery-status {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 2px;
+    color: var(--muted-foreground);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .response-status {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 2px;
+    color: var(--muted-foreground);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .message-copy {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
+    margin-top: 2px;
+    padding: 0;
+    border-radius: 6px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted-foreground);
+    opacity: 0;
+    transition:
+      background-color 120ms,
+      opacity 120ms;
+  }
+  .message:hover .message-copy,
+  .message:focus-within .message-copy {
+    opacity: 1;
+  }
+  .message-copy::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    height: 2px;
+  }
+  .message.user .message-copy {
+    right: 0;
+    left: auto;
   }
   .user-text,
   .system pre {
@@ -571,6 +638,45 @@ body {
     justify-content: space-between;
     gap: 12px;
   }
+  .composer-options {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 4px;
+  }
+  .composer-select {
+    position: relative;
+    min-width: 0;
+  }
+  .composer-select select {
+    max-width: 220px;
+    min-height: 28px;
+    padding: 3px 24px 3px 8px;
+    border: 0;
+    border-radius: 7px;
+    background-color: transparent;
+    color: var(--muted-foreground);
+    font: inherit;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .composer-select select:hover:not(:disabled),
+  .composer-select select:focus-visible {
+    background-color: var(--accent);
+    color: var(--foreground);
+  }
+  .composer-select select:focus-visible {
+    outline: 1px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .composer-select select:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
+  .permission-select select {
+    max-width: 92px;
+  }
   .composer-action {
     flex: none;
     padding: 0;
@@ -624,6 +730,10 @@ body {
     margin-top: 12px;
   }
   .interaction-area {
+    position: absolute;
+    inset: auto 0 calc(100% + 12px);
+    width: 100%;
+    z-index: 2;
     max-height: min(34vh, 360px);
     overflow: auto;
   }
@@ -904,29 +1014,20 @@ body {
   min-width: 0;
 }
 .kite-client .context-panel {
+  position: absolute;
+  z-index: 10;
+  right: 12px;
+  top: 8px;
   width: 360px;
-  flex-shrink: 0;
-  align-self: flex-start;
-  max-height: calc(100% - 32px);
+  max-height: calc(100% - 210px);
   overflow: auto;
-  margin: 16px 20px 16px 0;
+  margin: 0;
   padding: 20px;
   border-radius: 12px;
   background: var(--sidebar);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 18px #20221e22;
   overflow-wrap: anywhere;
-}
-.kite-client .session-body:has(> .context-panel) > .session-view {
-  margin-right: 20px;
-}
-.kite-client .session-body:has(> .context-panel) .reading-column,
-.kite-client .session-body:has(> .context-panel) .bottom-controls {
-  max-width: 708px;
-}
-.kite-client .session-body:has(> .context-panel) .conversation {
-  padding-inline: 48px;
-}
-.kite-client .session-body:has(> .context-panel) .conversation-footer {
-  padding-inline: 48px;
 }
 .kite-client .context-heading,
 .kite-client .settings-section-heading {
@@ -1026,27 +1127,8 @@ body {
   padding-left: 20px;
 }
 @media (max-width: 1180px) {
-  .kite-client .session-body:has(> .context-panel) > .session-view {
-    margin-right: 0;
-  }
-  .kite-client .session-body:has(> .context-panel) .reading-column,
-  .kite-client .session-body:has(> .context-panel) .bottom-controls {
-    max-width: 844px;
-  }
-  .kite-client .session-body:has(> .context-panel) .conversation,
-  .kite-client .session-body:has(> .context-panel) .conversation-footer {
-    padding-inline: 28px;
-  }
   .kite-client .context-panel {
-    position: absolute;
-    z-index: 10;
-    right: 12px;
-    top: 8px;
     width: min(360px, calc(100% - 24px));
-    max-height: calc(100% - 210px);
-    margin: 0;
-    border: 1px solid var(--border);
-    box-shadow: 0 4px 18px #20221e22;
   }
 }
 
@@ -1244,7 +1326,7 @@ body {
   flex-shrink: 0;
 }
 .kite-client .context-trigger:hover:not(:disabled),
-.kite-client .context-trigger[aria-expanded='true'] {
+.kite-client .context-trigger[aria-expanded="true"] {
   background: var(--border);
 }
 .kite-client .context-environment {
@@ -1274,7 +1356,7 @@ body {
   text-align: left;
   overflow-wrap: anywhere;
 }
-.kite-client .context-menu .button[aria-checked='true'] {
+.kite-client .context-menu .button[aria-checked="true"] {
   background: var(--accent);
 }
 .kite-client .context-menu small {
@@ -1285,7 +1367,7 @@ body {
 .kite-client .new-conversation-page .composer {
   position: relative;
 }
-[data-theme='dark']
+[data-theme="dark"]
   .kite-client
   :where(.context-trigger, .context-environment, .new-session, .space-new-session)
   img {

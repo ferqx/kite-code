@@ -10,6 +10,8 @@ Web 不重现 TUI Static、Thought 聚合与 scrollback。共享结果含义，�
 
 验证：[presentation reducer](../test/presentation-reducer.test.ts)、[共享目录与阅读回归](../../../packages/kite-client-ui/test/reading.test.tsx)。视觉规则见[设计系统](ui-design-system.md)。
 
+按轮复制由共享 Conversation 根据正文与 settled 状态提供；剪贴板操作仅复制页面已有文本，不增加 Runtime 写权限。流式助手正文下显示“正在回复”，落定后移除。
+
 ## 当前差异：取消与未知状态丢失
 
 [transport.runStatus](../src/transport/client.ts) 将 Run 的 failed、cancelled、unknown 都投影为 failed；工具取消也被降为 ok=false 的 tool_result，[共享页面投影](../src/presentation/page.ts) 仍只按 ok 映射 completed/failed。当前 Web 无法完整表达 Public contract 中的取消与未知结果；不能将该投影作为已知失败、可安全重试的证据。

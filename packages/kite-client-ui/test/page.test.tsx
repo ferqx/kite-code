@@ -65,6 +65,100 @@ test('the same page renders granted operations while an unavailable send stays d
   expect(html).toMatch(/<button[^>]*aria-label="发送消息"[^>]*disabled=""/);
 });
 
+test('new and running conversations share one composer prompt', () => {
+  for (const active of [false, true]) {
+    const html = renderToStaticMarkup(
+      <SessionPage
+        {...base}
+        newConversation={
+          active
+            ? undefined
+            : {
+                projects: [],
+                workspace: '/workspace',
+                busy: false,
+                onProject: () => {},
+                onAddProject: () => {},
+                onBranch: () => {},
+                onRefreshBranch: () => {},
+              }
+        }
+        composer={{
+          draft: '',
+          onChange: () => {},
+          active,
+          stopping: false,
+          disabled: false,
+        }}
+      />,
+    );
+    expect(html).toContain('placeholder="描述你想完成的工作…"');
+    expect(html).not.toContain('可以先写下下一步要求');
+  }
+});
+
+test('the primary new-conversation navigation exposes its stable style hook while disabled', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage {...base} busy actions={{ newSession: () => {} }} />,
+  );
+  expect(html).toMatch(/class="[^"]*new-session[^"]*"[^>]*disabled=""/);
+});
+
+test('an optimistic first message replaces loading and welcome content', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[
+        {
+          id: 'optimistic',
+          role: 'user',
+          text: '正在提交的首条消息',
+          settled: false,
+          delivery: 'sending',
+        },
+      ]}
+      loading={false}
+      composer={{
+        draft: '',
+        onChange: () => {},
+        active: false,
+        stopping: false,
+        disabled: false,
+      }}
+    />,
+  );
+  expect(html).toContain('正在提交的首条消息');
+  expect(html).toContain('正在发送');
+  expect(html).not.toContain('从一个想法开始');
+  expect(html).not.toContain('描述你的目标');
+  expect(html).not.toContain('正在加载会话历史');
+  expect(html).not.toContain('class="welcome"');
+});
+
+test('an unsettled assistant message exposes reply activity outside its content', () => {
+  const streaming = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[
+        {
+          id: 'streaming',
+          role: 'assistant',
+          text: '已经生成的部分',
+          settled: false,
+        },
+      ]}
+    />,
+  );
+  expect(streaming).toContain('aria-busy="true"');
+  expect(streaming).toContain('class="message assistant responding"');
+  expect(streaming).toContain('class="response-status" role="status">正在回复…');
+  expect(streaming).toContain('已经生成的部分');
+
+  const settled = renderToStaticMarkup(<SessionPage {...base} />);
+  expect(settled).not.toContain('正在回复');
+  expect(settled).not.toContain('response-status');
+});
+
 test('workbench reuses the shared shell and groups only facts present in session summaries', () => {
   const html = renderToStaticMarkup(
     <SessionPage

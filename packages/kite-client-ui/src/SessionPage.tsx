@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from './Composer';
 import { Conversation, type ReadingState } from './Conversation';
 import { FileChanges } from './FileChanges';
@@ -27,6 +27,7 @@ export interface SessionPageProps {
   connected: boolean;
   connectionLabel: string;
   busy?: boolean;
+  mutationBusy?: boolean;
   actions: PageActions;
   onOpen?: (id: string) => void;
   onExpand?: (id: string) => void;
@@ -52,6 +53,11 @@ export interface SessionPageProps {
 export function SessionPage({ messages, fileChanges, ...props }: SessionPageProps) {
   // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<HTMLTextAreaElement>(null);
+  const focusComposerAfterCommit = useCallback(() => {
+    if (typeof requestAnimationFrame === 'function')
+      requestAnimationFrame(() => composerInput.current?.focus());
+    else queueMicrotask(() => composerInput.current?.focus());
+  }, []);
   const focusComposerOnClose = useRef(false);
   const [narrow, setNarrow] = useState(
     () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 600px)').matches,
@@ -111,10 +117,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     return () => {
       if (focusComposerOnClose.current) {
         focusComposerOnClose.current = false;
-        composerInput.current?.focus();
+        focusComposerAfterCommit();
       } else toggle.current?.focus();
     };
-  }, [narrow, sidebarOpen]);
+  }, [focusComposerAfterCommit, narrow, sidebarOpen]);
   const open = (id: string) => {
     if (!props.onOpen) return;
     props.onOpen(id);
@@ -223,6 +229,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           workspaces={props.workspaces}
           selected={props.selected}
           busy={props.busy}
+          mutationBusy={props.mutationBusy}
           actions={{
             ...props.actions,
             newWorkspaceSession: props.actions.newWorkspaceSession
@@ -232,7 +239,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                     focusComposerOnClose.current = true;
                     setSidebarOpen(false);
                   }
-                  composerInput.current?.focus();
+                  focusComposerAfterCommit();
                 }
               : undefined,
             newSession: props.actions.newSession
@@ -242,7 +249,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                     focusComposerOnClose.current = true;
                     setSidebarOpen(false);
                   }
-                  composerInput.current?.focus();
+                  focusComposerAfterCommit();
                 }
               : undefined,
           }}
@@ -290,13 +297,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   id={props.historyPanel?.id}
                   aria-labelledby={props.historyPanel?.labelledBy}
                 >
-                  {props.newConversation && props.composer ? (
+                  {props.newConversation && props.composer && !messages.length ? (
                     <NewConversationWelcome
                       onSuggest={(value) => {
                         props.composer!.onChange(
                           props.composer!.draft ? `${props.composer!.draft}\n${value}` : value,
                         );
-                        composerInput.current?.focus();
+                        focusComposerAfterCommit();
                       }}
                     />
                   ) : props.historyError ? (

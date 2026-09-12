@@ -169,6 +169,46 @@ test('select all stays in visible message text and leaves editable fields to the
   expect(after.defaultPrevented).toBe(false);
 });
 
+test('settled user and Agent messages copy their original text', async () => {
+  const copied: string[] = [];
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (text: string) => copied.push(text) },
+  });
+  await render(
+    <Conversation
+      messages={[
+        { id: 'u', role: 'user', text: '用户原文', settled: true },
+        { id: 'a1', role: 'assistant', text: '**Agent** 第一段', settled: true },
+        { id: 'tool:t', role: 'tool', text: '工具输出不复制', settled: true },
+        { id: 'a2', role: 'assistant', text: 'Agent 第二段', settled: true },
+        { id: 'u2', role: 'user', text: '下一轮', settled: true },
+        { id: 'stream', role: 'assistant', text: '流式内容', settled: false },
+        {
+          id: 'pending',
+          role: 'user',
+          text: '发送未定',
+          settled: false,
+          delivery: 'sending',
+        },
+      ]}
+      loading={false}
+      connected
+      selected
+      saveReading={() => {}}
+    />,
+  );
+  expect(document.querySelectorAll('.message-copy')).toHaveLength(3);
+  expect(document.querySelectorAll('.message.assistant .message-copy')).toHaveLength(1);
+  expect(document.querySelector('.message.assistant.responding .message-copy')).toBeNull();
+  expect(document.querySelector('.message.user.sending .message-copy')).toBeNull();
+
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="复制本轮用户消息"]')!);
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!);
+  expect(copied).toEqual(['用户原文', '**Agent** 第一段\n\nAgent 第二段']);
+  expect(document.querySelectorAll('[aria-label="已复制消息"]')).toHaveLength(2);
+});
+
 test('Markdown renders code and tables without executing HTML, loading images or enabling unsafe links', async () => {
   const paths: string[] = [];
   await render(

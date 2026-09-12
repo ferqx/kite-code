@@ -1,3 +1,5 @@
+import { Copy01Icon, CopyCheckIcon, CopyXIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MessageContent } from './MessageContent';
 import { statusLabel } from './status';
@@ -16,12 +18,34 @@ const MessageItem = memo(function MessageItem({
   expanded,
   onToggle,
   openFile,
+  copyText,
+  copyRole,
 }: {
   message: Message;
   expanded: boolean;
   onToggle: (id: string, open: boolean) => void;
   openFile?: (path: string) => void;
+  copyText?: string;
+  copyRole?: 'user' | 'assistant';
 }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyLabel =
+    copyState === 'copied'
+      ? '已复制消息'
+      : copyState === 'failed'
+        ? '复制失败，请重试'
+        : copyRole === 'user'
+          ? '复制本轮用户消息'
+          : '复制本轮Agent回复';
+  const copyMessage = async () => {
+    if (!copyText) return;
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  };
   if (message.role === 'thinking')
     return (
       <article className="message tool">
@@ -115,13 +139,56 @@ const MessageItem = memo(function MessageItem({
     );
   return (
     <article
-      className={`message ${message.role}`}
+      className={`message ${message.role}${message.delivery ? ` ${message.delivery}` : ''}${
+        message.role === 'assistant' && !message.settled ? ' responding' : ''
+      }`}
       aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
     >
       {message.role === 'assistant' ? (
-        <MessageContent text={message.text || '正在思考…'} openFile={openFile} />
+        <>
+          {message.text && <MessageContent text={message.text} openFile={openFile} />}
+          {!message.settled && (
+            <small className="response-status" role="status">
+              正在回复…
+            </small>
+          )}
+        </>
       ) : (
-        <p className="user-text">{message.text}</p>
+        <>
+          <p className="user-text">{message.text}</p>
+          {message.delivery && (
+            <small
+              className="delivery-status"
+              role={message.delivery === 'sending' ? 'status' : 'alert'}
+            >
+              {message.delivery === 'sending'
+                ? '正在发送…'
+                : message.delivery === 'failed'
+                  ? '发送失败，可在输入框中重试'
+                  : '发送结果待确认，请检查会话状态'}
+            </small>
+          )}
+        </>
+      )}
+      {copyText && (
+        <Button
+          className="message-copy"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={copyLabel}
+          title={copyLabel}
+          onClick={copyMessage}
+        >
+          <HugeiconsIcon
+            icon={
+              copyState === 'copied'
+                ? CopyCheckIcon
+                : copyState === 'failed'
+                  ? CopyXIcon
+                  : Copy01Icon
+            }
+          />
+        </Button>
       )}
     </article>
   );
@@ -254,6 +321,25 @@ export function Conversation({
       return !message.parentToolCallId || !toolIds.has(message.parentToolCallId);
     return message.role === 'tool' || !message.settled || !!message.text;
   });
+  const assistantRoundCopies = new Map<string, string>();
+  let round: Message[] = [];
+  const finishRound = () => {
+    const replies = round.filter(
+      (message): message is Message & { role: 'assistant' } =>
+        message.role === 'assistant' && !!message.text,
+    );
+    if (replies.length && round.every((message) => message.settled))
+      assistantRoundCopies.set(
+        replies.at(-1)!.id,
+        replies.map((message) => message.text).join('\n\n'),
+      );
+    round = [];
+  };
+  for (const message of shown) {
+    if (message.role === 'user') finishRound();
+    else round.push(message);
+  }
+  finishRound();
   // Contiguous explicit read-only calls share a display group; never cross a reply,
   // command, or child-owner boundary and never rewrite the underlying messages.
   const groups: Message[][] = [];
@@ -275,7 +361,13 @@ export function Conversation({
         ref={viewport}
         className="conversation"
         aria-label="会话消息"
-        aria-busy={loading}
+        aria-busy={
+          loading ||
+          messages.some(
+            (message) =>
+              message.delivery === 'sending' || (message.role === 'assistant' && !message.settled),
+          )
+        }
         onScroll={() => {
           const element = viewport.current;
           if (!element || loading || restore.current) return;
@@ -320,6 +412,15 @@ export function Conversation({
                     expanded={!!expanded[message.id]}
                     onToggle={onToggle}
                     openFile={openFile}
+                    copyText={
+                      message.role === 'user' &&
+                      message.settled &&
+                      !message.delivery &&
+                      message.text
+                        ? message.text
+                        : assistantRoundCopies.get(message.id)
+                    }
+                    copyRole={message.role === 'user' ? 'user' : 'assistant'}
                   />
                   {message.role === 'tool' &&
                     children
