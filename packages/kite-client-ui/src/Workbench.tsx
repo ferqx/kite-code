@@ -1,3 +1,4 @@
+import { ScrollArea } from './components/ui/scroll-area';
 import { sessionStatusLabel } from './status';
 import type { SessionSummary, WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -64,13 +65,11 @@ export function Workbench({ workspaces, onOpen }: WorkbenchProps) {
   const progressing = sessions.filter((session) => ['queued', 'running'].includes(session.status));
   const recent = sessions.filter((session) => !progressing.includes(session));
   return (
-    <section className="workbench" aria-label="工作台">
-      <div className="workbench-filters">
-        <span className="workbench-filter-active">全部</span>
-        <span className="workbench-sort">最近更新</span>
-      </div>
-      <Section title="正在推进" sessions={progressing} onOpen={onOpen} />
-      <Section title="最近会话" sessions={recent} onOpen={onOpen} />
-    </section>
+    <ScrollArea className="workbench-scroll">
+      <section className="workbench" aria-label="工作台">
+        <Section title="正在推进" sessions={progressing} onOpen={onOpen} />
+        <Section title="最近会话" sessions={recent} onOpen={onOpen} />
+      </section>
+    </ScrollArea>
   );
 }

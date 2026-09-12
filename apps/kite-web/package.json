@@ -18,7 +18,6 @@
     "@kite-ai/agent-api-contract": "workspace:*",
     "@kite-ai/kite-client-ui": "workspace:*",
     "@radix-ui/react-collapsible": "^1.1.12",
-    "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tooltip": "^1.2.8",
     "react": "19.2.7",
     "react-dom": "19.2.7",

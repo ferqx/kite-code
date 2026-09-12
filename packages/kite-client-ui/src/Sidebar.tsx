@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { Badge } from './components/ui/badge';
+import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { sessionStatusLabel } from './status';
@@ -37,7 +38,6 @@ export interface DirectoryProps {
   busy?: boolean;
   mutationBusy?: boolean;
   defaultExpanded?: boolean;
-  onLoadMore?: () => void;
   onOpen?: (id: string) => void;
   onExpand?: (id: string) => void;
 }
@@ -249,21 +249,18 @@ export function Sidebar({
         <span>空间</span>
       </div>
       <TooltipProvider delayDuration={500} skipDelayDuration={300}>
-        <div className="workspace-directory">
-          {props.workspaces.map((workspace) => (
-            <Workspace
-              key={workspace.id}
-              {...props}
-              workspace={workspace}
-              onNewSession={actions.newWorkspaceSession}
-            />
-          ))}
-          {props.onLoadMore && (
-            <Button disabled={props.busy} onClick={props.onLoadMore}>
-              加载更早的会话
-            </Button>
-          )}
-        </div>
+        <ScrollArea className="workspace-directory">
+          <div className="workspace-directory-content">
+            {props.workspaces.map((workspace) => (
+              <Workspace
+                key={workspace.id}
+                {...props}
+                workspace={workspace}
+                onNewSession={actions.newWorkspaceSession}
+              />
+            ))}
+          </div>
+        </ScrollArea>
       </TooltipProvider>
       <div className="sidebar-utilities">
         <div className="connection">

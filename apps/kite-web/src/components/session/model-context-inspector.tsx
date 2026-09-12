@@ -11,10 +11,10 @@ import {
   Wrench01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
+import { ScrollArea, ScrollBar } from '@kite-ai/kite-client-ui';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type { WebModelContextPart, WebModelContextSnapshot } from '@/presentation/types';
 
@@ -98,32 +98,35 @@ export function ModelContextInspector({
 
         {status === 'loaded' && context ? (
           <>
-            <div
-              role="tablist"
-              aria-label="Model context sections"
-              className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 pt-2"
-            >
-              {INSPECTOR_TABS.map(({ id, label, icon }) => (
-                <button
-                  key={id}
-                  id={`model-context-tab-${id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === id}
-                  aria-controls={`model-context-panel-${id}`}
-                  className={cn(
-                    'flex h-8 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[10px] font-medium transition-colors',
-                    tab === id
-                      ? 'border-accent text-foreground'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                  onClick={() => setTab(id)}
-                >
-                  <HugeiconsIcon icon={icon} strokeWidth={2} className="size-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
+            <ScrollArea className="shrink-0 border-b border-border">
+              <div
+                role="tablist"
+                aria-label="Model context sections"
+                className="flex w-max min-w-full gap-1 px-4 pt-2"
+              >
+                {INSPECTOR_TABS.map(({ id, label, icon }) => (
+                  <button
+                    key={id}
+                    id={`model-context-tab-${id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === id}
+                    aria-controls={`model-context-panel-${id}`}
+                    className={cn(
+                      'flex h-8 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[10px] font-medium transition-colors',
+                      tab === id
+                        ? 'border-accent text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                    onClick={() => setTab(id)}
+                  >
+                    <HugeiconsIcon icon={icon} strokeWidth={2} className="size-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
             <ScrollArea className="min-h-0 flex-1">
               <div
                 id={`model-context-panel-${tab}`}

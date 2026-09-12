@@ -42,6 +42,8 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html).toContain('aria-label="收起侧栏"');
   expect(html).not.toContain('data-tauri-drag-region');
   expect(html).toContain('<strong>Session</strong>');
+  expect(html).not.toContain('加载更早的会话');
+  expect(html).toContain('data-radix-scroll-area-viewport');
   expect(html.match(/<header/g)).toHaveLength(1);
 });
 
@@ -189,6 +191,9 @@ test('workbench reuses the shared shell and groups only facts present in session
     />,
   );
   expect(html).toContain('aria-label="工作台"');
+  expect(html).toContain('data-radix-scroll-area-viewport');
+  expect(html).not.toContain('>全部<');
+  expect(html).not.toContain('最近更新');
   expect(html).toContain('需要确认');
   expect(html).toContain('正在测试');
   expect(html).toContain('需要恢复');

@@ -474,6 +474,9 @@ test('workspace sessions reveal five then ten at a time and reset independently 
     />,
   );
   const groups = Array.from(document.querySelectorAll<HTMLElement>('.workspace-group'));
+  expect(
+    document.querySelector('.workspace-directory [data-radix-scroll-area-viewport]'),
+  ).not.toBeNull();
   const rows = (index: number) =>
     groups[index]!.querySelectorAll('.session-row:not(.session-load-more)');
   const more = () => groups[0]!.querySelector<HTMLButtonElement>('.session-load-more')!;

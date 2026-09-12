@@ -401,11 +401,6 @@ export function App({ client }: { client: DesktopClient }) {
           })),
       }))}
       defaultExpanded
-      onLoadMore={
-        Object.keys(view.directoryCursors ?? {}).length
-          ? () => void act(() => client.refreshDirectory(true))
-          : undefined
-      }
       onExpand={() => void act(() => client.refreshSessions())}
       selected={workbenchView || preparing ? undefined : selected}
       workspaceLabel={workspaceName}

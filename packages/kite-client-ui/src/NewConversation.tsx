@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { ScrollArea } from './components/ui/scroll-area';
 import { Button } from './ui';
 
 export interface NewConversationProps {
@@ -102,11 +103,11 @@ function ContextMenu(props: {
         <span>{props.label}</span>
       </Button>
       {open && (
-        <div
+        <ScrollArea
           ref={menu}
           id={id}
           className="context-menu"
-          style={{ width }}
+          style={{ width, height: Math.min(280, (props.options.length + 1) * 40 + 12) }}
           role="menu"
           aria-label={props.name}
           onMouseDown={(event) => {
@@ -143,28 +144,30 @@ function ContextMenu(props: {
             buttons[next]?.focus();
           }}
         >
-          {props.options.map((option) => (
+          <div className="context-menu-content">
+            {props.options.map((option) => (
+              <Button
+                key={option.value}
+                className="ghost"
+                role="menuitemradio"
+                aria-checked={option.value === props.selected}
+                onClick={() => choose(() => props.onSelect(option.value))}
+              >
+                <span>
+                  {option.label}
+                  {option.detail && <small>{option.detail}</small>}
+                </span>
+              </Button>
+            ))}
             <Button
-              key={option.value}
-              className="ghost"
-              role="menuitemradio"
-              aria-checked={option.value === props.selected}
-              onClick={() => choose(() => props.onSelect(option.value))}
+              className="ghost context-menu-action"
+              role="menuitem"
+              onClick={() => choose(props.action.run)}
             >
-              <span>
-                {option.label}
-                {option.detail && <small>{option.detail}</small>}
-              </span>
+              {props.action.label}
             </Button>
-          ))}
-          <Button
-            className="ghost context-menu-action"
-            role="menuitem"
-            onClick={() => choose(props.action.run)}
-          >
-            {props.action.label}
-          </Button>
-        </div>
+          </div>
+        </ScrollArea>
       )}
     </div>
   );

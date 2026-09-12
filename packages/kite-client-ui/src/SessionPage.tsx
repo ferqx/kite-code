@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from './Composer';
 import { Conversation, type ReadingState } from './Conversation';
+import { ScrollArea } from './components/ui/scroll-area';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
@@ -32,7 +33,6 @@ export interface SessionPageProps {
   onOpen?: (id: string) => void;
   onExpand?: (id: string) => void;
   defaultExpanded?: boolean;
-  onLoadMore?: () => void;
   composer?: ComposerProps;
   readOnlyReason?: string;
   notices?: ReactNode;
@@ -257,7 +257,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           activePage={props.workbench ? 'workbench' : 'conversation'}
           onExpand={props.onExpand}
           defaultExpanded={props.defaultExpanded}
-          onLoadMore={props.onLoadMore}
           onOpen={props.onOpen ? open : undefined}
         />
       </aside>
@@ -365,21 +364,28 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             </footer>
           </div>
           {changesOpen && (
-            <aside className="context-panel" id="session-file-changes" aria-label="文件变更">
-              <div className="context-heading">
-                <h2>文件变更</h2>
-                <Button
-                  className="ghost"
-                  onClick={() => {
-                    setChangesKey(undefined);
-                    changesToggle.current?.focus();
-                  }}
-                >
-                  关闭
-                </Button>
+            <ScrollArea
+              className="context-panel"
+              id="session-file-changes"
+              role="complementary"
+              aria-label="文件变更"
+            >
+              <div className="context-panel-content">
+                <div className="context-heading">
+                  <h2>文件变更</h2>
+                  <Button
+                    className="ghost"
+                    onClick={() => {
+                      setChangesKey(undefined);
+                      changesToggle.current?.focus();
+                    }}
+                  >
+                    关闭
+                  </Button>
+                </div>
+                <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
               </div>
-              <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
-            </aside>
+            </ScrollArea>
           )}
         </div>
       </main>

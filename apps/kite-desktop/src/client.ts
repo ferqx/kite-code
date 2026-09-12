@@ -20,7 +20,6 @@ import type {
   RuntimeCommand,
   RuntimeInputInteraction,
   RuntimeInteractionResponse,
-  RuntimeLogSessionCursor,
   RuntimeLogSessionPage,
   RuntimePlanReviewInteraction,
   RuntimeSessionProjection,
@@ -63,7 +62,6 @@ export type DesktopSessionSummary = Pick<
 export interface DesktopView {
   projects?: readonly DesktopProject[];
   directory?: readonly DesktopSessionSummary[];
-  directoryCursors?: Readonly<Record<string, RuntimeLogSessionCursor>>;
   directoryLoading?: readonly string[];
   directoryErrors?: Readonly<Record<string, string>>;
   projectError?: string;
@@ -86,6 +84,26 @@ export interface DesktopView {
   ready: boolean;
   loadingSession: boolean;
   hasLoadedHistory: boolean;
+}
+
+export async function readCompleteSessionDirectory(
+  readPage: (cursor?: RuntimeLogSessionPage['nextCursor']) => Promise<RuntimeLogSessionPage>,
+): Promise<RuntimeLogSessionPage['entries'][number][]> {
+  const entries: RuntimeLogSessionPage['entries'][number][] = [];
+  let cursor: RuntimeLogSessionPage['nextCursor'];
+  for (;;) {
+    const page = await readPage(cursor);
+    entries.push(...page.entries);
+    if (!page.hasMore) return entries;
+    if (
+      !page.nextCursor ||
+      (cursor &&
+        page.nextCursor.updatedAt === cursor.updatedAt &&
+        page.nextCursor.sessionId === cursor.sessionId)
+    )
+      throw new Error('会话目录分页未继续前进。');
+    cursor = page.nextCursor;
+  }
 }
 
 export class DesktopClient {
@@ -533,7 +551,7 @@ export class DesktopClient {
     });
     if (result.status !== 'trusted') throw new Error(`工作区信任未生效：${result.outcome}`);
   }
-  async refreshDirectory(more = false) {
+  async refreshDirectory() {
     const connection = this.#requireConnection();
     const read = ++this.#directoryRead;
     // Saved text links persisted membership to the native picker. No project I/O is needed.
@@ -544,37 +562,39 @@ export class DesktopClient {
         ),
       ),
     );
-    const cursors = this.#view.directoryCursors ?? {};
-    const scopes = more ? Object.keys(cursors) : ['', ...paths.keys()];
+    const scopes = ['', ...paths.keys()];
     if (this.#connection !== connection || read !== this.#directoryRead) return;
     this.#publish({ directoryLoading: scopes.map((scope) => paths.get(scope) ?? scope) });
     const failures: unknown[] = [];
     const load = async (scope: string) => {
       const label = paths.get(scope) ?? scope;
       try {
-        let page: RuntimeLogSessionPage;
-        for (let attempt = 0; ; attempt++) {
-          try {
-            page = await readWithDeadline(
-              connection.history.listSessions({
-                limit: 100,
-                ...(scope ? { workspaceDigest: scope } : {}),
-                ...(more && cursors[scope] ? { cursor: cursors[scope] } : {}),
-              }),
-            );
-            break;
-          } catch (error) {
-            if (
-              attempt ||
-              connection.status !== 'active' ||
-              (error instanceof RuntimeClientError && error.protocol?.data.retryable === false)
-            )
-              throw error;
-            await new Promise((resolve) => setTimeout(resolve, 250));
+        const entries = await readCompleteSessionDirectory(async (cursor) => {
+          let page: RuntimeLogSessionPage;
+          for (let attempt = 0; ; attempt++) {
+            try {
+              page = await readWithDeadline(
+                connection.history.listSessions({
+                  limit: 100,
+                  ...(scope ? { workspaceDigest: scope } : {}),
+                  ...(cursor ? { cursor } : {}),
+                }),
+              );
+              break;
+            } catch (error) {
+              if (
+                attempt ||
+                connection.status !== 'active' ||
+                (error instanceof RuntimeClientError && error.protocol?.data.retryable === false)
+              )
+                throw error;
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
           }
-        }
+          return page;
+        });
         if (this.#connection !== connection || read !== this.#directoryRead) return;
-        const sessions: DesktopSessionSummary[] = page.entries.map((entry) => ({
+        const sessions: DesktopSessionSummary[] = entries.map((entry) => ({
           sessionId: entry.sessionId,
           displayName: entry.displayName,
           updatedAt: new Date(entry.updatedAt).toISOString(),
@@ -586,22 +606,16 @@ export class DesktopClient {
         const byId = new Map(sessions.map((session) => [session.sessionId, session]));
         const previous = this.#view.directory ?? [];
         const known = new Set(previous.map((session) => session.sessionId));
-        const nextCursors = { ...this.#view.directoryCursors };
         const errors = { ...this.#view.directoryErrors };
         delete errors[label];
-        if (page.nextCursor) nextCursors[scope] = page.nextCursor;
-        else delete nextCursors[scope];
         this.#publish({
           directoryErrors: errors,
-          directoryCursors: nextCursors,
           directory: [
             ...sessions.filter((session) => !known.has(session.sessionId)),
             ...previous.flatMap(
               (session) =>
                 byId.get(session.sessionId) ??
-                (more || page.hasMore || (scope && session.workspaceDigest !== scope)
-                  ? [session]
-                  : []),
+                (scope && session.workspaceDigest !== scope ? [session] : []),
             ),
           ],
         });

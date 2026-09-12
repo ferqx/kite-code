@@ -8,11 +8,11 @@ import {
   ScanSearchIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { ScrollArea } from '@kite-ai/kite-client-ui';
 import * as CollapsiblePrimitive from '@radix-ui/react-collapsible';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type { WebSessionLogEntry } from '@/presentation/types';
 
