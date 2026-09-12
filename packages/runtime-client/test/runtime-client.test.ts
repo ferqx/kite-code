@@ -134,13 +134,18 @@ describe('RuntimeClient protocol state machine', () => {
     'stalled',
     'snapshot-drift',
     'overlap',
+    'aborted-before',
+    'aborted-response',
   ] as const)('pins paginated History and rejects invalid continuation: %s', async (scenario) => {
     let pages = 0;
+    const controller = new AbortController();
+    if (scenario === 'aborted-before') controller.abort();
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize') {
         target.push(result(message.id, initializeResult('history-pages')));
       } else if (message.method === 'history/load_session') {
         pages++;
+        if (scenario === 'aborted-response') controller.abort();
         if (pages === 1) expect(message.params.page).toEqual({});
         else expect(message.params.page).toEqual({ afterSequence: 1, throughSequence: 2 });
         const sequence = pages === 1 || scenario === 'overlap' ? 1 : 2;
@@ -180,6 +185,13 @@ describe('RuntimeClient protocol state machine', () => {
       history: 'protocol',
     });
     try {
+      if (scenario.startsWith('aborted-')) {
+        await expect(
+          client.history!.loadSession('history-pages', undefined, { signal: controller.signal }),
+        ).rejects.toThrow();
+        expect(pages).toBe(scenario === 'aborted-before' ? 0 : 1);
+        return;
+      }
       if (scenario === 'valid') {
         const transcript = await client.history!.loadSession('history-pages');
         expect(transcript.records.map((record) => record.sequence)).toEqual([1, 2]);

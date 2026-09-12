@@ -116,6 +116,7 @@ class UiClient extends DesktopClient {
       messages: [],
       ready: true,
       loadingSession: false,
+      hasLoadedHistory: true,
       branch: {
         workspace: '/project',
         repository: true,
@@ -289,6 +290,7 @@ test('after startup can focus and draft before a project exists; setup preserves
     connected: false,
     ready: false,
     loadingSession: false,
+    hasLoadedHistory: false,
     sessions: [],
     messages: [],
   };
@@ -701,6 +703,27 @@ test('waiting approval retains the composer, sends only the chosen response, and
   expect(button('停止').disabled).toBe(true);
   expect(document.querySelector<HTMLButtonElement>('.session-row')?.disabled).toBe(true);
   expect(button('仅批准这一次').disabled).toBe(true);
+});
+
+test('cached history stays readable while calibrating, including cached empty history', async () => {
+  const client = new UiClient();
+  client.view = {
+    ...client.view,
+    ready: false,
+    loadingSession: true,
+    hasLoadedHistory: true,
+    messages: [{ id: 'saved', role: 'assistant', text: '已经读取的正文', settled: true }],
+  };
+  await render(<App client={client} />);
+  expect(document.querySelector('.conversation')?.textContent).toContain('已经读取的正文');
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('正在加载会话历史');
+  await write(input(), '继续写草稿');
+  expect(button('发送').disabled).toBe(true);
+  await act(() => client.update({ messages: [] }));
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('正在加载会话历史');
+  await act(() => client.update({ hasLoadedHistory: false }));
+  expect(document.querySelector('.conversation')?.textContent).toContain('正在加载会话历史');
+  expect(input().value).toBe('继续写草稿');
 });
 
 test('history loading cannot submit even if subscription readiness has arrived first', async () => {

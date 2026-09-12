@@ -32,45 +32,55 @@ function rememberNavigation(workspace: string, sessionId?: string) {
 
 export function App({ client }: { client: DesktopClient }) {
   const view = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  // Do not retain message histories in long-lived navigation callbacks.
+  const {
+    selected,
+    projection,
+    workspace,
+    connected,
+    ready,
+    loadingSession,
+    projects,
+    directoryErrors,
+    directory: directorySnapshot,
+  } = view;
   const [busy, setBusy] = useState(false);
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
   const [startupAttempt, setStartupAttempt] = useState(0);
   const busyRef = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [newConversation, setNewConversation] = useState(!view.selected);
+  const [newConversation, setNewConversation] = useState(!selected);
   const [workbenchView, setWorkbenchView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
-  const preparing = newConversation || !view.selected;
+  const preparing = newConversation || !selected;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState<'vscode' | 'zed' | 'textedit'>('vscode');
   const [stopRequest, setStopRequest] = useState<{ key: string; runId: string }>();
   const dialog = useRef<HTMLDialogElement>(null);
-  const selectedSession = (view.directory ?? view.sessions).find(
-    (session) => session.sessionId === view.selected,
+  const selectedSession = (directorySnapshot ?? view.sessions).find(
+    (session) => session.sessionId === selected,
   );
   const selectedWorkspace =
     selectedSession?.workspace ??
-    (view.projection?.workspaceDigest === view.trust?.workspace.workspaceDigest
-      ? view.workspace
-      : undefined);
+    (projection?.workspaceDigest === view.trust?.workspace.workspaceDigest ? workspace : undefined);
   const draftKey = preparing
     ? 'new-conversation'
-    : `${selectedWorkspace ?? selectedSession?.workspaceId ?? ''}\0${view.selected}`;
+    : `${selectedWorkspace ?? selectedSession?.workspaceId ?? ''}\0${selected}`;
   const draft = drafts[draftKey] ?? '';
   const stopping =
-    isActiveRun(view.projection) &&
+    isActiveRun(projection) &&
     stopRequest?.key === draftKey &&
-    stopRequest.runId === view.projection?.currentRun?.runId;
+    stopRequest.runId === projection?.currentRun?.runId;
   const workspaceName =
-    (preparing ? view.workspace : (selectedWorkspace ?? '')).split('/').filter(Boolean).pop() ||
+    (preparing ? workspace : (selectedWorkspace ?? '')).split('/').filter(Boolean).pop() ||
     selectedSession?.workspaceName ||
     '本地空间';
   const interaction =
     !preparing &&
-    view.projection?.interactionQueue.interactions.find(
-      (item) => item.interactionId === view.projection?.interactionQueue.activeInteractionId,
+    projection?.interactionQueue.interactions.find(
+      (item) => item.interactionId === projection?.interactionQueue.activeInteractionId,
     );
   const act = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -117,7 +127,7 @@ export function App({ client }: { client: DesktopClient }) {
       navigationRevision.current++;
       setWorkbenchView(false);
       setNewConversation(true);
-      rememberNavigation(view.workspace);
+      rememberNavigation(workspace);
     }
   };
   const activateForWork = async (target: string) => {
@@ -197,23 +207,23 @@ export function App({ client }: { client: DesktopClient }) {
     };
   }, [client, startup]);
   useEffect(() => {
-    if (!view.connected) setStopRequest(undefined);
-  }, [view.connected]);
-  const active = !preparing && isActiveRun(view.projection);
+    if (!connected) setStopRequest(undefined);
+  }, [connected]);
+  const active = !preparing && isActiveRun(projection);
   const model =
-    !preparing && selectedWorkspace !== view.workspace
-      ? view.projection?.model
+    !preparing && selectedWorkspace !== workspace
+      ? projection?.model
       : active
-        ? (view.projection?.model ?? view.models?.selected)
-        : (view.models?.selected ?? view.projection?.model);
+        ? (projection?.model ?? view.models?.selected)
+        : (view.models?.selected ?? projection?.model);
   const canSubmit =
     !busy &&
-    view.connected &&
+    connected &&
     (preparing
-      ? !!view.workspace && !!view.models?.selected && view.trust?.status === 'trusted'
-      : view.ready && !view.loadingSession && !!view.selected && !!selectedWorkspace);
+      ? !!workspace && !!view.models?.selected && view.trust?.status === 'trusted'
+      : ready && !loadingSession && !!selected && !!selectedWorkspace);
   const liveSessions = new Map(view.sessions.map((session) => [session.sessionId, session]));
-  const directory = (view.directory ?? view.sessions).map((session) => {
+  const directory = (directorySnapshot ?? view.sessions).map((session) => {
     const current = liveSessions.get(session.sessionId);
     if (!current || (current.revision ?? 0) < (session.revision ?? 0)) return session;
     return {
@@ -259,21 +269,21 @@ export function App({ client }: { client: DesktopClient }) {
     <SessionPage
       workspaces={[
         ...new Set([
-          ...(view.projects ?? []).map((project) => project.path),
-          ...(view.workspace ? [view.workspace] : []),
+          ...(projects ?? []).map((project) => project.path),
+          ...(workspace ? [workspace] : []),
           ...directory
             .map((session) => session.workspace ?? session.workspaceId)
             .filter((id): id is string => !!id),
         ]),
       ].map((path) => ({
         id: path,
-        muted: view.projects?.find((project) => project.path === path)?.directoryMissing,
+        muted: projects?.find((project) => project.path === path)?.directoryMissing,
         label:
           directory.find((session) => session.workspaceId === path)?.workspaceName ??
           (path.split('/').filter(Boolean).pop() || path),
-        state: view.directoryErrors?.[path]
+        state: directoryErrors?.[path]
           ? 'unavailable'
-          : view.directory !== undefined
+          : directorySnapshot !== undefined
             ? 'loaded'
             : 'loading',
         sessionCount: directory.filter(
@@ -299,19 +309,19 @@ export function App({ client }: { client: DesktopClient }) {
           : undefined
       }
       onExpand={() => void act(() => client.refreshSessions())}
-      selected={workbenchView || preparing ? undefined : view.selected}
+      selected={workbenchView || preparing ? undefined : selected}
       workspaceLabel={workspaceName}
-      sessionLabel={selectedSession?.displayName || (view.selected ? '新会话' : '开始一项工作')}
+      sessionLabel={selectedSession?.displayName || (selected ? '新会话' : '开始一项工作')}
       readingKey={draftKey}
       messages={workbenchView || preparing ? [] : view.messages}
-      loading={!workbenchView && !preparing && view.loadingSession && view.messages.length === 0}
-      connected={view.connected}
+      loading={!workbenchView && !preparing && loadingSession && !view.hasLoadedHistory}
+      connected={connected}
       connectionLabel=""
       busy={busy}
       onHeaderMouseDown={(clickCount) =>
         void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
       }
-      onOpen={view.connected ? openSession : undefined}
+      onOpen={connected ? openSession : undefined}
       actions={{
         newSession,
         newWorkspaceSession: (id) => chooseProject(id),
@@ -320,10 +330,10 @@ export function App({ client }: { client: DesktopClient }) {
           setWorkbenchView(true);
         },
         settings: () => setSettingsOpen(true),
-        openFile: view.connected && selectedWorkspace === view.workspace ? openFile : undefined,
+        openFile: connected && selectedWorkspace === workspace ? openFile : undefined,
       }}
       fileChanges={
-        !workbenchView && !preparing && view.selected
+        !workbenchView && !preparing && selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
@@ -331,16 +341,15 @@ export function App({ client }: { client: DesktopClient }) {
         !workbenchView && preparing
           ? {
               projects: [
-                ...(view.projects ?? []),
-                ...(view.workspace &&
-                !view.projects?.some((project) => project.path === view.workspace)
-                  ? [{ path: view.workspace, lastOpenedAt: 0 }]
+                ...(projects ?? []),
+                ...(workspace && !projects?.some((project) => project.path === workspace)
+                  ? [{ path: workspace, lastOpenedAt: 0 }]
                   : []),
               ].map((project) => ({
                 path: project.path,
                 label: project.path.split('/').filter(Boolean).pop() || project.path,
               })),
-              workspace: view.workspace,
+              workspace: workspace,
               branch: view.branch
                 ? {
                     current: view.branch.current ?? undefined,
@@ -362,18 +371,14 @@ export function App({ client }: { client: DesktopClient }) {
       }
       notices={
         <>
-          {(view.commandError || (view.connected && view.error)) && (
+          {(view.commandError || (connected && view.error)) && (
             <div className="notice error" role="alert">
               <span>{view.commandError || view.error}</span>
-              {!preparing &&
-                view.connected &&
-                view.selected &&
-                !view.loadingSession &&
-                !view.ready && (
-                  <Button disabled={busy} onClick={() => openSession(view.selected!)}>
-                    重新加载会话
-                  </Button>
-                )}
+              {!preparing && connected && selected && !loadingSession && !ready && (
+                <Button disabled={busy} onClick={() => openSession(selected!)}>
+                  重新加载会话
+                </Button>
+              )}
             </div>
           )}
           {!busy && view.trust && view.trust.status !== 'trusted' && (
@@ -406,16 +411,16 @@ export function App({ client }: { client: DesktopClient }) {
         </>
       }
       interaction={
-        !workbenchView && interaction && interaction.kind === 'approval' && view.selected ? (
+        !workbenchView && interaction && interaction.kind === 'approval' && selected ? (
           <section className="notice" aria-label="工具审批">
             <strong>{interaction.title || '工具需要你的批准'}</strong>
             <p>{interaction.summary}</p>
             {interaction.command && <pre className="interaction-text">{interaction.command}</pre>}
             <div className="actions">
               <Button
-                disabled={busy || !view.ready || view.loadingSession || stopping}
+                disabled={busy || !ready || loadingSession || stopping}
                 onClick={() =>
-                  void act(() => client.respondApproval(view.selected!, interaction, 'reject'))
+                  void act(() => client.respondApproval(selected!, interaction, 'reject'))
                 }
               >
                 拒绝本次
@@ -424,15 +429,13 @@ export function App({ client }: { client: DesktopClient }) {
                 className="primary"
                 disabled={
                   busy ||
-                  !view.ready ||
-                  view.loadingSession ||
+                  !ready ||
+                  loadingSession ||
                   stopping ||
                   !interaction.grants.includes('approve_once')
                 }
                 onClick={() =>
-                  void act(() =>
-                    client.respondApproval(view.selected!, interaction, 'approve_once'),
-                  )
+                  void act(() => client.respondApproval(selected!, interaction, 'approve_once'))
                 }
               >
                 仅批准这一次
@@ -442,19 +445,19 @@ export function App({ client }: { client: DesktopClient }) {
         ) : !workbenchView &&
           interaction &&
           (interaction.kind === 'input' || interaction.kind === 'plan_review') &&
-          view.selected ? (
+          selected ? (
           <Interaction
             key={`${draftKey}:${interaction.interactionId}`}
             client={client}
-            sessionId={view.selected}
+            sessionId={selected}
             interaction={interaction}
-            disabled={busy || !view.ready || view.loadingSession || stopping}
+            disabled={busy || !ready || loadingSession || stopping}
             act={act}
           />
         ) : (
           !workbenchView &&
           !preparing &&
-          view.projection?.currentRun?.status === 'waiting' && (
+          projection?.currentRun?.status === 'waiting' && (
             <p className="notice">任务正在等待尚未支持的扩展或验证交互，可以停止任务并检查结果。</p>
           )
         )
@@ -467,7 +470,7 @@ export function App({ client }: { client: DesktopClient }) {
               disabled: false,
               active,
               stopping: !!stopping,
-              cancelDisabled: busy || !view.ready || view.loadingSession,
+              cancelDisabled: busy || !ready || loadingSession,
               model: model ? `${model.provider} / ${model.name}` : undefined,
               onSettings: () => setSettingsOpen(true),
               onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
@@ -478,7 +481,7 @@ export function App({ client }: { client: DesktopClient }) {
                       const submittedNavigation = navigationRevision.current;
                       void act(async () => {
                         let submittedKey = draftKey;
-                        let targetSession = view.selected;
+                        let targetSession = selected;
                         if (preparing) {
                           await client.prepareNewConversation();
                           targetSession = await client.newSession();
@@ -497,11 +500,11 @@ export function App({ client }: { client: DesktopClient }) {
                           }
                         }
                         if (!preparing) {
-                          targetSession = view.selected;
+                          targetSession = selected;
                           if (selectedWorkspace !== client.getSnapshot().workspace) {
                             if (!selectedWorkspace || !(await activateForWork(selectedWorkspace)))
                               return;
-                            await client.selectSession(view.selected!);
+                            await client.selectSession(selected!);
                           }
                         }
                         try {
@@ -520,8 +523,8 @@ export function App({ client }: { client: DesktopClient }) {
                   : undefined,
               onCancel: () =>
                 void act(async () => {
-                  if (busy || !view.ready || view.loadingSession || stopping) return;
-                  const runId = view.projection?.currentRun?.runId;
+                  if (busy || !ready || loadingSession || stopping) return;
+                  const runId = projection?.currentRun?.runId;
                   if (!runId) return;
                   setStopRequest({ key: draftKey, runId });
                   try {
@@ -547,7 +550,7 @@ export function App({ client }: { client: DesktopClient }) {
               <Button onClick={() => dialog.current?.close()}>关闭</Button>
             </div>
             <Settings
-              key={view.workspace}
+              key={workspace}
               client={client}
               view={view}
               busy={busy}

@@ -126,3 +126,12 @@ macOS 的 `app.getPath('home')` 不受 shell HOME 覆盖，packaged Electron 也
 ### 开发窗口白屏修复
 
 2026-09-12 补验 Vite 开发入口：原 CSP 的 `default-src self` 阻止 React Refresh 内联初始化，导致开发页面无法挂载。Electron 现在只在开发模式的 `script-src` 中允许内联脚本，打包模式仍限定自身脚本。在隔离 home/appData 的真实 Electron 开发窗口中，首次加载与刷新均显示新对话页面，具名 preload bridge 可用，React Refresh 初始化函数存在，页面及控制台错误为零。此项是开发入口证据，不更新上文已记录安装包的制品身份。
+
+
+### 会话缓存合并复验
+
+2026-09-12 将缓存实现适配至 `el` 的 Electron bridge、工作台及首次创建／阅读分离流程后，重新打包并运行[原生窗口 smoke](../scripts/native-smoke.ts)。本次 `app.asar` SHA-256 为 `40179359dfcf004afda2309b41adecc087d83f37414f557d29075c5ac95140f9`，Electron main 为 `c7fe76f7042ccb4a4bcaf9528ee45cbf0da7cdadee460e9bfc61c32d41026c8f`；配套 Service 沿用 candidate `70e2e25ef6717b23d8740398`。以上更新仅对应本次制品，前文摘要保留为换型验收时的记录。
+
+源码外的实际 `.app` 使用真实 preload、封闭 IPC 与配套 Service 建立两个会话。测试调试器只延迟其中一次 history page 响应 2 秒：切回首个会话后，两次 animation frame 探针在 9.5ms 读到已缓存的用户／助手正文，未出现整页加载；旧草稿恢复且可以继续编辑，发送保持禁用，校准完成后恢复。延迟位于通过身份与参数校验后的 IPC 返回边界，不改变产品 bridge，也未给 renderer 开放额外能力。这个单次短会话样本不是 500 消息／30 次 p95 资格，不能替代[换型前的性能记录](history-and-recovery.md#缓存性能验证)。
+
+同次 smoke 继续通过沙箱／contextIsolation、隐藏恢复、流式刷新重接、标题栏最大化与还原、取消退出和确认退出；模型请求未重放。原生目录选择与确认框仍由 fixture 代答，人工系统输入法等既有边界不变。[校准回归](../test/session-calibration.test.ts)另验证：当前缓存校准期间，明确发送到新创建会话的请求仍保持原目标，而当前阅读会话不能提前发送或审批。

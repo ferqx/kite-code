@@ -49,7 +49,8 @@ export interface SessionPageProps {
 }
 
 /** The single production conversation page for both hosts. No host/protocol imports. */
-export function SessionPage(props: SessionPageProps) {
+export function SessionPage({ messages, fileChanges, ...props }: SessionPageProps) {
+  // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<HTMLTextAreaElement>(null);
   const focusComposerOnClose = useRef(false);
   const [narrow, setNarrow] = useState(
@@ -57,7 +58,7 @@ export function SessionPage(props: SessionPageProps) {
   );
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [changesKey, setChangesKey] = useState<string>();
-  const changesOpen = changesKey === props.readingKey && props.fileChanges !== undefined;
+  const changesOpen = changesKey === props.readingKey && fileChanges !== undefined;
   const changesToggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (changesKey !== undefined && changesKey !== props.readingKey) setChangesKey(undefined);
@@ -181,7 +182,7 @@ export function SessionPage(props: SessionPageProps) {
             )}
           </div>
           {props.headerActions}
-          {props.fileChanges !== undefined && (
+          {fileChanges !== undefined && (
             <Button
               ref={changesToggle}
               className="ghost"
@@ -307,7 +308,7 @@ export function SessionPage(props: SessionPageProps) {
                   ) : (
                     <Conversation
                       key={props.readingKey}
-                      messages={props.messages}
+                      messages={messages}
                       loading={props.loading}
                       selected={!!props.selected}
                       emptyState={
@@ -370,7 +371,7 @@ export function SessionPage(props: SessionPageProps) {
                   关闭
                 </Button>
               </div>
-              <FileChanges messages={props.fileChanges!} openFile={props.actions.openFile} />
+              <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
             </aside>
           )}
         </div>

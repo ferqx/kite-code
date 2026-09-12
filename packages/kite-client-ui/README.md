@@ -45,3 +45,5 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 [只读探索](src/ToolExploration.tsx)只按显式工具身份聚合相邻记录，保留失败和真实输出；不猜测 Web 的工具 label。宿主提供 `fileChanges` 时，共享页面展示[文件变更副层](src/FileChanges.tsx)，默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。副层只用页面内状态，无额外存储或运行 authority。
 
 空间摘要的可选 `muted` 仅控制名称的次级文字色，不禁用展开或会话操作。Desktop 用它表示本地目录缺失；共享组件不访问本地文件系统，Web 未提供该标记时保持原样。
+
+共享 SessionPage 的常驻窗口监听与导航回调不持有消息正文或文件变更的历史 props；messages/fileChanges 独立传给当前阅读组件，避免端侧淘汰缓存后首次正文仍被闭包保留。桌面缓存与校准由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)负责，Web 数据获取机制不变。

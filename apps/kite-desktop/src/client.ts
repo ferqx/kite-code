@@ -11,7 +11,10 @@ import {
   KITE_APP_SERVER_PROTOCOL_METHODS_,
   type KiteAppServerConnection,
 } from '@kite-ai/kite-local-runtime/client/protocol';
-import { RuntimeClientError } from '@kite-ai/runtime-client';
+import {
+  RuntimeClientError,
+  type RuntimeClientNotificationWithGeneration,
+} from '@kite-ai/runtime-client';
 import type {
   RuntimeApprovalInteraction,
   RuntimeCommand,
@@ -29,8 +32,10 @@ import type {
   DesktopRuntimeStatus,
   KiteDesktopBridge,
 } from './bridge';
+import { projectHistory } from './history-projection';
 import { type ProviderInput, saveProvider } from './models';
 import { isActiveRun, type Message, projectEvent } from './presentation';
+import { SessionHistoryCache } from './session-cache';
 import { type DesktopConnectionInfo, desktopTransport } from './transport';
 
 export type { BranchSnapshot, DesktopProject } from './bridge';
@@ -72,6 +77,7 @@ export interface DesktopView {
   projection?: RuntimeSessionProjection;
   ready: boolean;
   loadingSession: boolean;
+  hasLoadedHistory: boolean;
 }
 
 export class DesktopClient {
@@ -87,11 +93,21 @@ export class DesktopClient {
     messages: [],
     ready: false,
     loadingSession: false,
+    hasLoadedHistory: false,
   };
   #listeners = new Set<() => void>();
   #connection?: KiteAppServerConnection;
   #connectionId?: number;
   #selection?: AbortController;
+  #selectionLoad?: {
+    sessionId: string;
+    connection: KiteAppServerConnection;
+    promise: Promise<void>;
+  };
+  #calibratedSelection?: AbortController;
+  readonly #historyCache = new SessionHistoryCache();
+  #historyConnection?: KiteAppServerConnection;
+  #historyWorkspaceDigest?: string;
   #mcpRead = 0;
   #skillsRead = 0;
   #unsubscribe?: () => void;
@@ -123,6 +139,10 @@ export class DesktopClient {
     return this.#native().showConfirm(options);
   }
   #publish(change: Partial<DesktopView>) {
+    if (
+      Object.entries(change).every(([key, value]) => this.#view[key as keyof DesktopView] === value)
+    )
+      return;
     this.#view = { ...this.#view, ...change };
     for (const listener of this.#listeners) listener();
   }
@@ -323,6 +343,7 @@ export class DesktopClient {
             branch: undefined,
             ready: false,
             loadingSession: false,
+            hasLoadedHistory: false,
           }
         : {}),
     });
@@ -334,15 +355,23 @@ export class DesktopClient {
         isActiveRun(this.#view.projection) &&
         !!session?.projection &&
         !isActiveRun(session.projection);
+      const sessions = this.#view.sessions.map((item) => {
+        const updated = snapshot.sessions[item.sessionId]?.projection;
+        return updated && updated.revision >= (item.revision ?? 0) ? updated : item;
+      });
       this.#publish({
         connected: connection.status === 'active',
-        ready: connection.status === 'active' && (session?.ready ?? false),
+        ready:
+          connection.status === 'active' &&
+          this.#calibratedSelection !== undefined &&
+          this.#calibratedSelection === this.#selection &&
+          !this.#selection?.signal.aborted &&
+          (session?.ready ?? false),
         ...(session?.projection ? { projection: session.projection } : {}),
         // Refresh known summaries in place; live output must not move a clicked row.
-        sessions: this.#view.sessions.map((item) => {
-          const updated = snapshot.sessions[item.sessionId]?.projection;
-          return updated && updated.revision >= (item.revision ?? 0) ? updated : item;
-        }),
+        sessions: sessions.every((item, index) => item === this.#view.sessions[index])
+          ? this.#view.sessions
+          : sessions,
       });
       if (connection.status === 'closed' || connection.status === 'disconnected') this.#recover();
       if (runFinished && connection.status === 'active')
@@ -417,6 +446,10 @@ export class DesktopClient {
   }
   async #detach() {
     this.#selection?.abort();
+    this.#selectionLoad = undefined;
+    this.#calibratedSelection = undefined;
+    this.#historyCache.clear();
+    this.#historyConnection = undefined;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     const connection = this.#connection;
@@ -713,23 +746,76 @@ export class DesktopClient {
       });
     } catch (error) {
       if (error instanceof CommandResultUnknown) {
-        this.#publish({ selected: sessionId, messages: [], projection: undefined, ready: false });
+        this.#publish({
+          selected: sessionId,
+          messages: [],
+          projection: undefined,
+          ready: false,
+          hasLoadedHistory: false,
+        });
       }
       throw error;
     }
     this.#admitted.add(sessionId);
     return sessionId;
   }
-  async selectSession(sessionId: string) {
-    const connection = this.#requireConnection();
-    if (this.#view.selected === sessionId && this.#view.ready && !this.#view.loadingSession) return;
+  selectSession(sessionId: string): Promise<void> {
+    const connection = this.#connection;
+    if (connection?.status !== 'active') return Promise.reject(new Error('请先连接项目。'));
+    if (
+      this.#selectionLoad?.sessionId === sessionId &&
+      this.#selectionLoad.connection === connection
+    )
+      return this.#selectionLoad.promise;
+    if (this.#view.selected === sessionId && this.#view.ready && !this.#view.loadingSession)
+      return Promise.resolve();
+    const promise = this.#loadSelection(sessionId, connection).finally(() => {
+      if (this.#selectionLoad?.promise === promise) this.#selectionLoad = undefined;
+    });
+    this.#selectionLoad = { sessionId, connection, promise };
+    return promise;
+  }
+
+  async #loadSelection(sessionId: string, connection: KiteAppServerConnection) {
+    const sameSelection = this.#view.selected === sessionId;
+    // Take first, so the target does not compete with the departing view for the inactive budget.
+    const cached = sameSelection ? undefined : this.#historyCache.take(sessionId);
+    if (
+      !sameSelection &&
+      this.#view.selected &&
+      this.#view.hasLoadedHistory &&
+      this.#historyConnection === connection &&
+      this.#historyWorkspaceDigest
+    ) {
+      this.#historyCache.save(
+        this.#view.selected,
+        this.#historyWorkspaceDigest,
+        this.#view.messages,
+      );
+    }
     this.#selection?.abort();
     const controller = new AbortController();
     this.#selection = controller;
-    const sameSelection = this.#view.selected === sessionId;
+    this.#calibratedSelection = undefined;
+    const listedDigest = this.#view.directory?.find(
+      (item) => item.sessionId === sessionId,
+    )?.workspaceDigest;
+    const usableCache =
+      cached && (!listedDigest || listedDigest === cached.workspaceDigest) ? cached : undefined;
+    this.#historyWorkspaceDigest = sameSelection
+      ? this.#historyWorkspaceDigest
+      : usableCache?.workspaceDigest;
+    this.#historyConnection = sameSelection
+      ? this.#historyConnection
+      : usableCache
+        ? connection
+        : undefined;
     this.#publish({
       selected: sessionId,
-      messages: sameSelection ? this.#view.messages : [],
+      messages: sameSelection ? this.#view.messages : (usableCache?.messages ?? []),
+      hasLoadedHistory: sameSelection
+        ? this.#view.hasLoadedHistory
+        : (usableCache?.hasLoadedHistory ?? false),
       ready: false,
       projection: sameSelection ? this.#view.projection : undefined,
       error: undefined,
@@ -755,8 +841,17 @@ export class DesktopClient {
         deadline,
       ]);
       if (controller.signal.aborted || this.#connection !== connection) return;
-      if (result.status !== 'ok' || !result.session?.workspaceDigest)
-        throw new Error('会话已不可用，请刷新目录。');
+      if (result.status === 'not_found')
+        throw new InvalidHistoryIdentity('会话已不可用，请刷新目录。');
+      if (result.status !== 'ok') throw new Error('会话暂时无法更新，请重新加载会话。');
+      if (!result.session?.workspaceDigest)
+        throw new InvalidHistoryIdentity('会话所属空间不可用，请刷新目录。');
+      if (
+        this.#historyWorkspaceDigest &&
+        this.#historyWorkspaceDigest !== result.session.workspaceDigest
+      )
+        throw new InvalidHistoryIdentity('会话所属空间已改变，请重新加载会话。');
+      this.#historyWorkspaceDigest = result.session.workspaceDigest;
       if (!this.#view.directory?.some((session) => session.sessionId === sessionId)) {
         const matches = await Promise.all(
           (this.#view.projects ?? []).map(async (project) =>
@@ -784,41 +879,123 @@ export class DesktopClient {
         }),
         deadline,
       ]);
-      const transcript = await Promise.race([connection.history.loadSession(sessionId), deadline]);
-      if (controller.signal.aborted) return;
-      let messages: readonly Message[] = [];
-      for (const event of transcript.events) messages = projectEvent(messages, event);
+      const messages = await Promise.race([
+        this.#readHistory(connection, sessionId, this.#view.messages, controller.signal),
+        deadline,
+      ]);
+      if (
+        controller.signal.aborted ||
+        this.#connection !== connection ||
+        this.#selection !== controller
+      )
+        return;
       const session = connection.snapshotStore.getSnapshot().sessions[sessionId];
-      this.#publish({ messages, projection: session?.projection, ready: session?.ready ?? false });
-      void (async () => {
-        try {
-          for await (const { notification, connectionGeneration } of notifications) {
-            if (controller.signal.aborted || connectionGeneration !== connection.generation)
-              continue;
-            if (!('durability' in notification) || notification.sessionId !== sessionId) continue;
-            const event =
-              notification.durability === 'ephemeral'
-                ? notification.event
-                : notification.projection.event;
-            if (event) this.#publish({ messages: projectEvent(this.#view.messages, event) });
-          }
-        } catch (error) {
-          if (!controller.signal.aborted && connection.status === 'active') this.report(error);
-        }
-      })();
+      this.#historyConnection = connection;
+      this.#calibratedSelection = controller;
+      this.#publish({
+        messages: messages.messages,
+        hasLoadedHistory: true,
+        projection: session?.projection,
+        ready: session?.ready ?? false,
+      });
+      void this.#followSelection(
+        connection,
+        controller,
+        sessionId,
+        notifications,
+        messages.throughSequence,
+      );
     } catch (error) {
-      if (!timedOut && controller.signal.aborted) return;
+      if (
+        this.#selection !== controller ||
+        this.#connection !== connection ||
+        (!timedOut && controller.signal.aborted)
+      )
+        return;
       controller.abort();
+      this.#calibratedSelection = undefined;
+      if (invalidatesHistory(error)) {
+        this.#historyWorkspaceDigest = undefined;
+        this.#historyConnection = undefined;
+        this.#publish({ messages: [], hasLoadedHistory: false, projection: undefined });
+      }
+      this.#publish({ ready: false });
       if (timedOut) throw new Error('会话加载超时，请重新加载会话。');
+      if (this.#view.hasLoadedHistory)
+        throw new Error(`会话更新失败，已保留已读内容。${messageOf(error)}`);
       throw error;
     } finally {
       clearTimeout(loadingTimeout);
       if (this.#selection === controller) this.#publish({ loadingSession: false });
     }
   }
+  // Kept outside the subscription closure so full transcripts and old snapshots can be collected.
+  async #readHistory(
+    connection: KiteAppServerConnection,
+    sessionId: string,
+    previous: readonly Message[],
+    signal: AbortSignal,
+  ) {
+    const transcript = await connection.history.loadSession(sessionId, undefined, { signal });
+    const messages = await projectHistory(transcript.events, previous, signal);
+    return { messages, throughSequence: transcript.session.lastSequence };
+  }
+
+  async #followSelection(
+    connection: KiteAppServerConnection,
+    controller: AbortController,
+    sessionId: string,
+    notifications: AsyncIterable<RuntimeClientNotificationWithGeneration>,
+    throughSequence: number,
+  ) {
+    try {
+      for await (const { notification, connectionGeneration } of notifications) {
+        if (
+          controller.signal.aborted ||
+          this.#selection !== controller ||
+          this.#connection !== connection
+        )
+          return;
+        if (
+          connectionGeneration !== connection.generation ||
+          !('durability' in notification) ||
+          notification.sessionId !== sessionId
+        )
+          continue;
+        // Durable revisions are source-record sequences; ephemeral sequence numbers are stream-local.
+        if (notification.durability === 'durable' && notification.revision <= throughSequence)
+          continue;
+        const event =
+          notification.durability === 'ephemeral'
+            ? notification.event
+            : notification.projection.event;
+        if (event) this.#publish({ messages: projectEvent(this.#view.messages, event) });
+      }
+      if (
+        !controller.signal.aborted &&
+        this.#connection === connection &&
+        this.#selection === controller
+      )
+        throw new Error('会话订阅已结束，请重新加载会话。');
+    } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        this.#connection === connection &&
+        this.#selection === controller
+      ) {
+        this.#calibratedSelection = undefined;
+        this.#publish({ ready: false });
+        this.report(error);
+      }
+    }
+  }
+
   async send(input: string, targetSessionId?: string) {
     const sessionId = targetSessionId ?? this.#view.selected;
     if (!sessionId || !input.trim()) return;
+    // Explicit creation targets remain independent of the current reading selection.
+    if (sessionId === this.#view.selected && (!this.#view.ready || this.#view.loadingSession))
+      throw new Error('会话尚未同步完成，请稍后再试。');
     const trust = this.#view.trust;
     if (trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const trustedWorkspaceDigest = trust.workspace.workspaceDigest;
@@ -857,6 +1034,8 @@ export class DesktopClient {
     });
   }
   async cancel() {
+    if (!this.#view.ready || this.#view.loadingSession)
+      throw new Error('会话尚未同步完成，请稍后再试。');
     const projection = this.#view.projection;
     const run = projection?.currentRun;
     if (!projection || !run) return;
@@ -976,4 +1155,15 @@ async function readWithDeadline<T>(read: Promise<T>): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+class InvalidHistoryIdentity extends Error {}
+
+function invalidatesHistory(error: unknown): boolean {
+  if (error instanceof InvalidHistoryIdentity) return true;
+  if (!(error instanceof RuntimeClientError)) return false;
+  return (
+    error.protocol?.data.detailCode === 'session_not_found' ||
+    error.protocol?.data.code === 'unauthorized'
+  );
 }

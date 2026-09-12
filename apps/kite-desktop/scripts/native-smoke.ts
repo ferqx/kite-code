@@ -29,6 +29,7 @@ model.setResponses([
     message: { content_chunks: ['Electron streaming', ' survives reload', ' complete.'] },
     chunk_delay: 800,
   },
+  { message: { content: 'Second Electron session complete.' } },
 ]);
 writeFileSync(
   join(home, '.kite-code/kite-code.jsonc'),
@@ -135,6 +136,18 @@ try {
   const isolated = await command('Debugger.evaluateOnCallFrame', {
     callFrameId,
     expression: `globalThis.__kiteNativeSmoke = require('electron');
+const register = __kiteNativeSmoke.ipcMain.handle.bind(__kiteNativeSmoke.ipcMain);
+__kiteNativeSmoke.ipcMain.handle = (channel, listener) => register(channel, async (...args) => {
+  const result = await listener(...args);
+  if (channel === 'kite:desktop:runtime-receive' && globalThis.__kiteDelayHistory &&
+      result.ok && typeof result.value === 'string' && JSON.parse(result.value).result?.type === 'history_session_page') {
+    globalThis.__kiteDelayHistory = false;
+    globalThis.__kiteHistoryHeld = true;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    globalThis.__kiteHistoryHeld = false;
+  }
+  return result;
+});
 __kiteNativeSmoke.app.setPath('home', ${JSON.stringify(home)});
 __kiteNativeSmoke.app.setPath('appData', ${JSON.stringify(appData)});
 __kiteNativeSmoke.app.setPath('userData', ${JSON.stringify(join(appData, 'dev.kite-code.desktop'))});
@@ -204,6 +217,56 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   const afterReload = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   assert.equal(afterReload.workspace, beforeReload.workspace);
   assert.ok(afterReload.connectionId! > beforeReload.connectionId!);
+  // Keep the real packaged renderer, preload and Service; delay one history response only.
+  const input = page.getByRole('textbox', { name: '任务输入' });
+  await input.fill('Cached draft stays editable.');
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await input.fill('Create a second Electron session.');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.getByText('Second Electron session complete.', { exact: false }).waitFor();
+  await main('globalThis.__kiteDelayHistory = true');
+  const cached = await page.evaluate(async () => {
+    const row = [...document.querySelectorAll<HTMLButtonElement>('.session-row')].find((element) =>
+      element.textContent?.includes('Verify the Electron packaged client.'),
+    );
+    if (!row) throw new Error('First session row is missing');
+    const started = performance.now();
+    row.click();
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    return {
+      elapsed: performance.now() - started,
+      text: document.querySelector('.conversation')?.textContent,
+    };
+  });
+  assert.ok(cached.text?.includes('Electron streaming survives reload complete.'));
+  assert.ok(!cached.text?.includes('正在加载会话历史'));
+  assert.ok(cached.elapsed < 2000, 'cached text must precede the delayed history response');
+  const historyDeadline = Date.now() + 5000;
+  while (!(await main('globalThis.__kiteHistoryHeld')) && Date.now() < historyDeadline)
+    await Bun.sleep(10);
+  assert.equal(await main('globalThis.__kiteHistoryHeld'), true);
+  assert.equal(await input.inputValue(), 'Cached draft stays editable.');
+  assert.equal(
+    await page.getByRole('button', { name: '发送消息', exact: true }).isDisabled(),
+    true,
+  );
+  await input.fill('Still editable during calibration.');
+  await page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
+  await page.waitForFunction(
+    () => !document.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]')?.disabled,
+  );
+  assert.equal(await input.inputValue(), 'Still editable during calibration.');
+  assert.ok(
+    (await page.locator('.conversation').innerText()).includes(
+      'Electron streaming survives reload complete.',
+    ),
+  );
+  console.log(
+    'Electron cached switch with 2s history delay:',
+    JSON.stringify({ firstFrameMs: cached.elapsed, messages: 2 }),
+  );
   const header = await page.locator('.app-header').boundingBox();
   const brand = await page.locator('.sidebar-header .brand').boundingBox();
   assert.equal(header?.height, 52);
@@ -252,7 +315,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   browser = undefined;
   assert.equal(await exited, 0);
   console.log(
-    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, hide/reopen and confirmed exit passed. Native dialog responses were stubbed; no external Provider was used.',
+    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching with delayed calibration, hide/reopen and confirmed exit passed. Native dialog responses were stubbed; no external Provider was used.',
   );
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];

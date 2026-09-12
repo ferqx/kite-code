@@ -164,12 +164,13 @@ export class RuntimeClient implements AsyncDisposable {
               }
               return result;
             },
-            loadSession: async (sessionId, throughSequence) => {
+            loadSession: async (sessionId, throughSequence, options) => {
               const records: RuntimeHistorySessionTranscript['records'][number][] = [];
               let afterSequence: number | undefined;
               let snapshotSequence = throughSequence;
               let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
               for (;;) {
+                options?.signal?.throwIfAborted();
                 const result = await this.#request('history/load_session', {
                   sessionId,
                   page: {
@@ -179,6 +180,7 @@ export class RuntimeClient implements AsyncDisposable {
                       : { throughSequence: snapshotSequence }),
                   },
                 });
+                options?.signal?.throwIfAborted();
                 if (
                   !('type' in result) ||
                   result.type !== 'history_session_page' ||

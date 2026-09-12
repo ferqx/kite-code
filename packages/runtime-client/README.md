@@ -19,7 +19,7 @@
   `subscribe({ spec, signal? })`。每个订阅拥有独立有界队列，Abort 或 iterator `return()` 会释放远端订阅。
   Abort 的本地释放立即生效；与连接关闭并发时，远端 unsubscribe 失败不会产生未处理的异步错误，也不会重试。
 - 定义 framing-neutral transport 和只读、exact DTO 的 `RuntimeHistoryClient` 接口；`loadSession` 返回完整
-  closed transcript。App可以继续注入独立history adapter；parent-owned App Server client也可显式选择
+  closed transcript，可选读取取消及其分页边界见[请求与历史](docs/requests-and-history.md)。App可以继续注入独立history adapter；parent-owned App Server client也可显式选择
   `history: 'protocol'`，在同一条已initialize的logical connection上发送三个exact History request。
 - 提供仅供Native App connector组合的closed `requestApp(method, request)` seam：方法名来自Protocol enum，
   响应必须回显同一method；语义payload仍由上层`kite-app-contract`逐方法codec拥有。`expectedServer`可要求

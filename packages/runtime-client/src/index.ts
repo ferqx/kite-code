@@ -41,5 +41,6 @@ export interface RuntimeHistoryClient {
   loadSession(
     sessionId: string,
     throughSequence?: number,
+    options?: { readonly signal?: AbortSignal },
   ): Promise<RuntimeHistorySessionTranscript>;
 }
