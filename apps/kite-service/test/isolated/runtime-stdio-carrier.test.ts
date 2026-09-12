@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { PassThrough } from 'node:stream';
 import {
   type KiteAppControlClient,
   RELEASE_STATUS_REQUEST_SCHEMA_,
@@ -30,6 +31,26 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe('Runtime stdio carrier', () => {
+  test('closing an idle Node input releases the logical connection without another request', async () => {
+    const input = new PassThrough();
+    const output = new FakeOutput();
+    const carrier = createCarrier({ input, output });
+    input.write(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    // The receive loop is now waiting for a new request on a still-open pipe.
+    await Bun.sleep(0);
+    const closing = carrier.connection.close('test_disconnect');
+    const result = await Promise.race([
+      closing.then(() => 'closed'),
+      Bun.sleep(100).then(() => 'timeout'),
+    ]);
+    input.end();
+    await closing;
+    await carrier.done;
+    expect(result).toBe('closed');
+    expect(carrier.server.connectionCount).toBe(0);
+  });
+
   test('the concrete writable adapter flushes only after write callbacks complete', async () => {
     let completeWrite: ((error?: Error | null) => void) | undefined;
     const output = createNodeRuntimeStdioOutput({

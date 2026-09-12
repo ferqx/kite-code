@@ -771,8 +771,21 @@ function parseErrorResponse(): RuntimeProtocolMessage {
 
 function chunkIterator(input: RuntimeStdioInput): AsyncIterator<Uint8Array> {
   const stream = input as ReadableStream<Uint8Array>;
-  if (typeof stream.getReader !== 'function')
-    return (input as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+  if (typeof stream.getReader !== 'function') {
+    const source = input as AsyncIterable<Uint8Array> & { destroy?: () => void };
+    const iterator = source[Symbol.asyncIterator]();
+    if (typeof source.destroy !== 'function') return iterator;
+    return {
+      next: () => iterator.next(),
+      return: async () => {
+        // Node's iterator.return() queues behind a pending next(). Destroy the
+        // owned pipe/socket first so closing a failed peer never needs another
+        // client request to wake its read loop and release connection accounting.
+        source.destroy?.();
+        return (await iterator.return?.()) ?? { done: true, value: undefined };
+      },
+    };
+  }
   const reader = stream.getReader();
   return {
     next: async () => {

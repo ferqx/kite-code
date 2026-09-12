@@ -119,18 +119,23 @@ export class RendererConnection {
 
       const controller = new AbortController();
       const changed = this.#waitForChange(prepared.version);
-      const outcome = await Promise.race([
-        this.#service.receive(controller.signal).then(
-          (frame) => ({ kind: 'frame' as const, frame }),
-          (error: unknown) => ({ kind: 'error' as const, error }),
-        ),
+      const receiving = this.#service.receive(controller.signal).then(
+        (frame) => ({ kind: 'frame' as const, frame }),
+        (error: unknown) => ({ kind: 'error' as const, error }),
+      );
+      let outcome = await Promise.race([
+        receiving,
         changed.promise.then(() => ({ kind: 'changed' as const })),
       ]);
       changed.cancel();
       if (outcome.kind === 'changed') {
         controller.abort();
-        await this.#service.waitForReceiver();
-        continue;
+        // Cancellation may race a frame that the Service already handed us.
+        // Accept that frame before switching generations: dropping initialize
+        // here leaves every later renderer waiting on an in-flight reply that
+        // has already been consumed, and dropping a subscribe reply leaks it.
+        outcome = await receiving;
+        if (outcome.kind === 'error') continue;
       }
       controller.abort();
       if (outcome.kind === 'error') throw asError(outcome.error);

@@ -236,7 +236,16 @@ async function* executeEffectWithStreaming(
   lease: StateRuntimeEffectLease,
   reservationIds: string[] = [],
   signal?: AbortSignal,
+  publishBatch?: (events: readonly RuntimeEvent[]) => void,
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
+  const forward = (events: readonly RuntimeEvent[]): readonly RuntimeEvent[] => {
+    if (!publishBatch) return events;
+    // Background generators must enqueue the whole committed transaction
+    // synchronously. Yielding its events one at a time lets a sibling publish
+    // a later revision between two events from this same transaction.
+    publishBatch(events);
+    return [];
+  };
   // A lease can become stale after async preparation or while another durable
   // fact is applied. Never enter any executor once the journal is corrupt;
   // report a non-applied attempt so the outer loop schedules the hard block.
@@ -395,7 +404,7 @@ async function* executeEffectWithStreaming(
           try {
             const applied = kernel.applyLateResourceReconciliation([event]);
             pendingEvent.resolve?.(applied);
-            if (applied) yield* kernel.getLastAppliedEvents();
+            if (applied) yield* forward(kernel.getLastAppliedEvents());
           } catch (error) {
             if (!pendingEvent.reject) throw error;
             pendingEvent.reject(error);
@@ -403,7 +412,7 @@ async function* executeEffectWithStreaming(
         } else if (events.length === 1 && isEphemeralEffectEvent(event)) {
           const applied = kernel.isEffectEventCurrent(lease, event);
           pendingEvent.resolve?.(applied);
-          if (applied) yield event;
+          if (applied) yield* forward([event]);
         } else {
           if (events.some((candidate) => candidate.type === 'runtime.cancellation_diagnostic')) {
             cancellationIncomplete = true;
@@ -427,7 +436,7 @@ async function* executeEffectWithStreaming(
                 : kernel.applyEffectResult(lease, events, pendingEvent.requiredEffectLease);
             pendingEvent.resolve?.(applied);
             if (applied) {
-              yield* kernel.getLastAppliedEvents();
+              yield* forward(kernel.getLastAppliedEvents());
             }
           } catch (error) {
             if (!pendingEvent.reject) throw error;
@@ -442,7 +451,7 @@ async function* executeEffectWithStreaming(
       if (failure instanceof DescendantResourceAdmissionError) {
         const terminalEvents = resourceAdmissionTerminalEvents(kernel.getState(), failure.reason);
         kernel.applyEffectResult(lease, terminalEvents);
-        yield* kernel.getLastAppliedEvents();
+        yield* forward(kernel.getLastAppliedEvents());
         return { applied: true, emitted: true };
       }
       if (reservationIds.length > 0) {
@@ -470,7 +479,7 @@ async function* executeEffectWithStreaming(
             reconciled.length > 0 &&
             kernel.applyLateResourceReconciliation(reconciled)
           ) {
-            yield* reconciled;
+            yield* forward(reconciled);
           }
           return { applied: false, emitted };
         }
@@ -485,7 +494,7 @@ async function* executeEffectWithStreaming(
         if (unknownEvents.length > 0) kernel.applyEffectResult(lease, unknownEvents);
         throw error;
       }
-      yield* kernel.getLastAppliedEvents();
+      yield* forward(kernel.getLastAppliedEvents());
     }
     if (!emitted) return { applied: true, emitted: false };
     return { applied: true, emitted: true };
@@ -562,7 +571,17 @@ export async function* runStateRuntimeLoop(
     backgroundCount += 1;
     backgroundGroups.set(group, (backgroundGroups.get(group) ?? 0) + 1);
     void (async () => {
-      const stream = executeEffectWithStreaming(kernel, executor, lease, reservationIds, signal);
+      const stream = executeEffectWithStreaming(
+        kernel,
+        executor,
+        lease,
+        reservationIds,
+        signal,
+        (events) => {
+          backgroundEvents.push(...events);
+          signalBackground();
+        },
+      );
       try {
         while (true) {
           const step = await stream.next();
@@ -578,8 +597,6 @@ export async function* runStateRuntimeLoop(
               backgroundNoProgressRevision = lease.expectedRevision;
             break;
           }
-          backgroundEvents.push(step.value);
-          signalBackground();
         }
       } catch (error) {
         backgroundFailure ??= error;
@@ -633,6 +650,10 @@ export async function* runStateRuntimeLoop(
       let effect = kernel.selectPendingEffects(state, facts)[0] ?? { type: 'stop' as const };
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
+      // Preparation yields even for synchronous adapters. A background Shell
+      // can finish in that gap, replacing a waiting/stop decision with the next
+      // model call. Never execute (or stop on) a decision from an older State.
+      if (effectState.revision !== state.revision) continue;
       facts = schedulerFacts?.(effectState);
       const currentEffect = kernel.selectPendingEffects(effectState, facts)[0] ?? {
         type: 'stop' as const,

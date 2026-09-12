@@ -472,3 +472,247 @@ describe('State runner effect acknowledgements', () => {
     expect(emitted).toEqual([]);
   });
 });
+
+test('reschedules a stale stop after background shell finishes during preparation', async () => {
+  let state = initialState();
+  const call = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'model-1',
+    name: 'shell_execute',
+    args: { command: 'first' },
+    status: 'queued',
+    effectClass: 'read_only',
+    sideEffect: false,
+    createdAtTurnId: state.turn.turnId,
+  } as const;
+  state = {
+    ...state,
+    tools: {
+      ...state.tools,
+      calls: { 'shell-1': call, 'shell-2': { ...call, toolCallId: 'shell-2' } },
+      queue: ['shell-1', 'shell-2'],
+    },
+  };
+  let phase: 'tool' | 'waiting' | 'model' | 'done' = 'tool';
+  let lastEvents: RuntimeEvent[] = [];
+  let releaseShell!: () => void;
+  const shellMayFinish = new Promise<void>((resolve) => {
+    releaseShell = resolve;
+  });
+  let released!: () => void;
+  const shellReleased = new Promise<void>((resolve) => {
+    released = resolve;
+  });
+  let modelCalls = 0;
+  const kernel: RuntimeStateSessionPort = {
+    getState: () => state,
+    processEvent: () => ({ status: 'applied', eventId: 'unused' }),
+    processEventBatch: () => [],
+    getLastAppliedEvents: () => lastEvents,
+    selectPendingEffects: () =>
+      phase === 'tool'
+        ? [{ type: 'run_tools', toolCallIds: ['shell-1'] }]
+        : phase === 'model'
+          ? [{ type: 'call_model' }]
+          : [{ type: 'stop' }],
+    acquireRunner: () => 'runner',
+    releaseRunner: () => {},
+    beginEffect: (effect) => ({
+      effectId: `effect-${phase}`,
+      effect,
+      expectedRevision: state.revision,
+      turnId: state.turn.turnId,
+    }),
+    releaseEffect: () => released(),
+    isEffectEventCurrent: () => true,
+    applyEffectEvent: (_lease, event) => {
+      state = { ...state, revision: state.revision + 1 };
+      lastEvents = [event];
+      return true;
+    },
+    applyEffectResult: () => true,
+    applyLateResourceReconciliation: () => false,
+    applyAction: () => ({
+      status: 'stale',
+      reason: 'unused',
+      telemetry: { type: 'runtime.action_ignored', reason: 'unused' },
+    }),
+  };
+  const traits = {
+    resourceScopes: [{ kind: 'process' as const, key: 'model-1' }],
+    access: 'read' as const,
+    conflictKeys: [],
+    isolation: 'shared' as const,
+    causalGroup: 'model-1',
+    interactionBarrier: false,
+    leaseFenceRequired: false,
+    concurrencyGroup: 'parallel-read',
+  };
+  for await (const _event of runStateRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type === 'run_tools') {
+        phase = 'waiting';
+        emit?.({
+          type: 'tool.started',
+          toolCallId: 'shell-1',
+          createdAt: new Date().toISOString(),
+        });
+        await shellMayFinish;
+        state = { ...state, revision: state.revision + 1 };
+        phase = 'model';
+        return [];
+      }
+      if (effect.type === 'call_model') {
+        modelCalls++;
+        phase = 'done';
+      }
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    10,
+    async (effect) => {
+      if (effect.type === 'stop' && phase === 'waiting') {
+        releaseShell();
+        await shellReleased;
+      }
+      return effect;
+    },
+    undefined,
+    () => ({
+      traits: { 'shell-1': traits, 'shell-2': traits },
+      approval: {
+        'shell-1': { allowed: true, requiresApproval: false },
+        'shell-2': { allowed: true, requiresApproval: false },
+      },
+    }),
+  )) {
+  }
+  expect(modelCalls).toBe(1);
+}, 2000);
+
+test('concurrent shell publication retains transaction order across multi-event batches', async () => {
+  let state = initialState();
+  const call = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'model-1',
+    name: 'shell_execute',
+    args: { command: 'fixture' },
+    status: 'queued',
+    effectClass: 'read_only',
+    sideEffect: false,
+    createdAtTurnId: state.turn.turnId,
+  } as const;
+  state = {
+    ...state,
+    tools: {
+      ...state.tools,
+      calls: { 'shell-1': call, 'shell-2': { ...call, toolCallId: 'shell-2' } },
+      queue: ['shell-1', 'shell-2'],
+    },
+  };
+  const pending = new Set(['shell-1', 'shell-2']);
+  const completed = new Set<string>();
+  let modelCalls = 0;
+  const revisions = new WeakMap<RuntimeEvent, number>();
+  let last: readonly RuntimeEvent[] = [];
+  let secondCommitted!: () => void;
+  const secondBatch = new Promise<void>((resolve) => {
+    secondCommitted = resolve;
+  });
+  const apply = (events: RuntimeEvent[]) => {
+    for (const event of events) {
+      state = { ...state, revision: state.revision + 1 };
+      revisions.set(event, state.revision);
+      if (event.type === 'tool.finished') completed.add(event.toolCallId);
+    }
+    last = events;
+    if (events.some((event) => event.type === 'tool.finished' && event.toolCallId === 'shell-2'))
+      secondCommitted();
+    return true;
+  };
+  const kernel: RuntimeStateSessionPort = {
+    getState: () => state,
+    processEvent: () => ({ status: 'applied', eventId: 'unused' }),
+    processEventBatch: () => [],
+    getLastAppliedEvents: () => last,
+    selectPendingEffects: () =>
+      pending.size
+        ? [{ type: 'run_tools', toolCallIds: [[...pending][0]!] }]
+        : completed.size === 2 && modelCalls === 0
+          ? [{ type: 'call_model' }]
+          : [{ type: 'stop' }],
+    acquireRunner: () => 'runner',
+    releaseRunner: () => {},
+    beginEffect: (effect) => {
+      if (effect.type === 'run_tools') pending.delete(effect.toolCallIds[0]!);
+      return {
+        effectId: crypto.randomUUID(),
+        effect,
+        expectedRevision: state.revision,
+        turnId: state.turn.turnId,
+      };
+    },
+    isEffectEventCurrent: () => true,
+    applyEffectEvent: (_lease, event) => apply([event]),
+    applyEffectResult: (_lease, events) => apply(events),
+    applyLateResourceReconciliation: () => false,
+    applyAction: () => ({
+      status: 'stale',
+      reason: 'unused',
+      telemetry: { type: 'runtime.action_ignored', reason: 'unused' },
+    }),
+  };
+  const traits = {
+    resourceScopes: [{ kind: 'process' as const, key: 'model-1' }],
+    access: 'read' as const,
+    conflictKeys: [],
+    isolation: 'shared' as const,
+    causalGroup: 'model-1',
+    interactionBarrier: false,
+    leaseFenceRequired: false,
+    concurrencyGroup: 'parallel-read',
+  };
+  const finished = (toolCallId: string): RuntimeEvent => ({
+    type: 'tool.finished',
+    toolCallId,
+    name: 'shell_execute',
+    result: { ok: true, command: 'fixture', exitCode: 0, stdout: '', stderr: '' },
+  });
+  const seen: number[] = [];
+  for await (const event of runStateRuntimeLoop(
+    kernel,
+    async (effect, _state, _emit, context) => {
+      if (effect.type === 'call_model') {
+        modelCalls++;
+        return [];
+      }
+      if (effect.type !== 'run_tools') return [];
+      const id = effect.toolCallIds[0]!;
+      if (id === 'shell-1') {
+        await context!.persistEvents([{ type: 'tool.started', toolCallId: id }]);
+        await secondBatch;
+        await context!.persistEvents([finished(id)]);
+      } else {
+        await context!.persistEvents([{ type: 'tool.started', toolCallId: id }, finished(id)]);
+      }
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    10,
+    undefined,
+    undefined,
+    () => ({
+      traits: { 'shell-1': traits, 'shell-2': traits },
+      approval: {
+        'shell-1': { allowed: true, requiresApproval: false },
+        'shell-2': { allowed: true, requiresApproval: false },
+      },
+    }),
+  )) {
+    seen.push(revisions.get(event)!);
+    await Bun.sleep(0);
+  }
+  expect(seen).toEqual([1, 2, 3, 4]);
+  expect(modelCalls).toBe(1);
+}, 2000);

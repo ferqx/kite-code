@@ -48,6 +48,52 @@ function ollamaConfig(extra = ''): string {
 }
 
 describe('session logger composition', () => {
+  test('an abandoned active Runtime stream is never logged as completed', async () => {
+    const root = mkdtempSync(join(process.cwd(), '.openpx-abandoned-runtime-'));
+    const previousHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = root;
+    try {
+      const stream = runTestRuntimeAgent(
+        {
+          task: 'fixture',
+          userId: 'u',
+          threadId: 'abandoned-runtime',
+          workspace: root,
+          openStateRuntimeStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
+          config: {
+            apiKey: 'fixture',
+            baseURL: 'https://example.invalid',
+            modelName: 'fixture',
+            providerName: 'fixture',
+            providerType: 'openai-compatible',
+            sandbox: { enabled: false },
+          },
+          model: createMockModel([{ message: aiMessage({ content: 'Not reached.' }) }]),
+          sandboxBackend: 'unknown',
+          frontend: 'abandoned-runtime',
+          sessionLoggingPolicy: { ...CONTENT_ARTIFACT_POLICY, mode: 'metadata' },
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      );
+      for await (const event of stream) {
+        if (event.type === 'turn.started') break;
+      }
+      const directory = sessionLogDir('abandoned-runtime', 'abandoned-runtime');
+      expect(JSON.parse(readFileSync(join(directory, 'terminal.json'), 'utf8'))).toMatchObject({
+        runOutcome: 'fatal',
+      });
+      const records = readFileSync(join(directory, 'events.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(records.at(-1)).toMatchObject({ eventType: 'session.end', status: 'error' });
+    } finally {
+      if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('passes the complete resolved retention and capacity policy into the writer', async () => {
     let receivedPolicy: SessionLoggingPolicy | undefined;
     const collector = new SessionLogCollector(

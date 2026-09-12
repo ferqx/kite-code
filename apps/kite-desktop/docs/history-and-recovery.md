@@ -28,6 +28,8 @@
 
 客户端 transport close 只调用 `runtimeDetach`，取消旧页面的接收与订阅，不关闭 Service stdin。只有明确执行项目／分支切换与退出才调用 `runtimeClose` 关闭自有 Service。宿主已有健康 Service 时复用；确已退出才允许重新启动，不能承诺恢复已停止的执行。命令回执丢失仍保留“结果未知”提示，自动恢复不会重放创建、发送、审批、配置或 Git 命令。
 
+[renderer 连接 owner](../electron/runtime/renderer-connection.ts)在接收取消与 Service 帧同时完成时，先处理已经取得的帧再切换代次。已消费的 initialize 回执必须更新原 peer 的初始化事实，迟到的 subscribe 回执继续释放旧订阅；不能把“取消先唤醒”当作“没有收到帧”，否则会把初始化永久留在等待状态，使重复重接也无法恢复。[连接回归](../test/host-renderer-connection.test.ts)以确定的取消／回执交错验证这一边界，仍复用同一 Service，不重发初始化或业务命令。
+
 ## 验证
 
 [导航集成测试](../test/navigation.test.ts)使用真实 Service 验证失效目录和模型配置下读取历史、跨空间只读与执行限制、局部失败和旧响应隔离；[恢复测试](../test/resilience.test.ts)验证写入后丢失回执的自动恢复与不重放；[配套 Service 测试](../test/host-paired-service.ts)驱动 Electron host 与真实 stdio Service，[renderer 连接测试](../test/host-renderer-connection.test.ts)覆盖 detach、reattach、initialize 复用和旧代次隔离。SQLite [目录测试](../../../packages/runtime-storage-sqlite/test/kite-home-directory.test.ts)覆盖超过千条记录的有界分页、稳定 membership 与空间过滤。这些测试不替代 Electron 窗口、preload 与系统输入法的原生验收。

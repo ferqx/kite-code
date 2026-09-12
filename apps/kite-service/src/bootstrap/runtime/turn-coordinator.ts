@@ -884,6 +884,13 @@ export async function* executeRuntimeTurn(
     input.signal?.removeEventListener('abort', forwardExternalAbort);
     input.registerRunCancellation?.(null);
     input.registerCommittedCommandCancellation?.(null);
-    await collector.finalize(exitStatus);
+    // IteratorClose (for example a failed client-event projection) bypasses
+    // the loop's terminal check. Closing a stream is not evidence that its
+    // still-active Turn completed successfully.
+    await collector.finalize(
+      exitStatus === 'completed' && kernel.getState().turn.status !== 'completed'
+        ? 'fatal'
+        : exitStatus,
+    );
   }
 }

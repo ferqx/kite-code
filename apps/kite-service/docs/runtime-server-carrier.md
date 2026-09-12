@@ -55,6 +55,8 @@ stdin/stdout使用UTF-8 JSONL且stdout只承载Protocol；stderr只有fixed diag
 `app-server run-stdio` process owner观察该EOF后立即执行Server drain、active Turn cancel/cleanup、Session generation release和composition
 dispose。SIGINT/SIGTERM走同一idempotent shutdown。非法UTF-8、overlong/invalid JSON与stdout failure fail closed。
 
+Server 主动关闭 logical connection 时，stdio carrier 先销毁它拥有的 Node 输入流，再结束 iterator；Web ReadableStream 则沿 reader.cancel 取消读取。不能只等待 Node iterator.return，因为它会排在尚未收到数据的 next 后面，让已失效的连接一直等待客户端再发一条消息。此取消只作用于当前 pipe/socket，保证连接计数与 parent-owned shutdown 可以收尾；不扩大到其他 daemon 客户端或重放任务。[stdio 回归](../test/isolated/runtime-stdio-carrier.test.ts)用保持打开且空闲的真实 Node stream 核对关闭无需新请求。
+
 显式`app-server run-daemon`复用同一JSONL logical-message carrier，但listener是独立owner-only Unix socket或Windows named pipe；
 每条socket connection拥有一个carrier/Runtime Server connection并共享daemon composition。Client EOF只释放该connection，不触发
 `cancelAll`或dispose。daemon只额外声明exact`server/status|server/shutdown`，parent-owned stdio不声明；shutdown response仍走同一JSON-RPC

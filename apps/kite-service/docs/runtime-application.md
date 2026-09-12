@@ -16,6 +16,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 
+并发 Shell 的 [State runner](../src/bootstrap/runtime/state-runner.ts) 在事务提交后同步把整批事件放入原有发布队列，再让异步消费者逐条读取。不能由各个工具的异步 generator 逐条入队，否则一个事务中间可能插入兄弟工具的更高 revision，导致 Bridge 的顺序校验失败并中断后续模型调用。异步 effect preparation 返回时也重新核对 State revision；后台工具已推进 State 时，丢弃旧决定并重新调度，不能使用旧的 stop 决定退出。确定性回归见 [State runner acknowledgement](../test/runtime/state-runner-ack.test.ts)，包含事务交错、工具收尾期间准备完成与模型继续执行。
+
 当前 source/release 默认组合 App Server 多连接 Session Store。默认 stdio child 不创建 HTTP listener；显式 daemon 在同一进程中组合 loopback Web、Agent API 与 static/API Docs，并在 shutdown 时关闭。Coordinator、per-Workspace Worker 与独立 Web Gateway 进程不是普通启动拓扑；不要把 daemon Web 归类为 legacy Service。实际入口见 [daemon owner](../src/app-server-daemon.ts)。
 
 子Agent在工具审批前挂起时，continuation中的blocked参数必须使用同一次解析得到的`pendingRequest.args`，与Kernel审批绑定和持久工具调用一致。原始模型参数仅保留在模型消息中；被schema移除的字段不能重新进入审批或恢复执行，也不能通过放宽digest校验补救。Shell审批等待时child Driver已清理，已批准的child工具由Host先执行，再恢复child模型循环；取消此窗口必须停止Host工具并保持父Run取消，不能为尚未恢复的Driver制造第二次清理事实。

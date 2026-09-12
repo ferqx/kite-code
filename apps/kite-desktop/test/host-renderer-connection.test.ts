@@ -162,3 +162,48 @@ test('renderer reload cancels old receive and unsubscribes the old page', async 
     params: { subscriptionId: 'subscription-1' },
   });
 });
+
+test('reattach preserves initialize received while the old receiver is being cancelled', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  await connection.send(
+    1,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'old-init',
+      method: 'initialize',
+      params: { protocolVersion: 2 },
+    }),
+  );
+  const abandoned = connection.receive(1).catch((error) => error);
+  await Bun.sleep(0);
+  const attaching = connection.attach(2);
+  await Promise.resolve();
+  service.feed({
+    jsonrpc: '2.0',
+    id: 'desktop-native-initialize',
+    result: { protocolVersion: 2, serverInfo: { version: 'server-v1', instanceId: 'same' } },
+  });
+  await attaching;
+  await abandoned;
+  await connection.send(
+    2,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'new-init',
+      method: 'initialize',
+      params: { protocolVersion: 2 },
+    }),
+  );
+  const receiving = connection.receive(2).catch((error) => error);
+  const result = await Promise.race([receiving, Bun.sleep(100).then(() => 'timeout')]);
+  await connection.attach(0);
+  await receiving;
+  expect(result).not.toBe('timeout');
+  expect(JSON.parse(result)).toMatchObject({
+    id: 'new-init',
+    result: { serverInfo: { instanceId: 'same' } },
+  });
+  expect(service.sent).toHaveLength(1);
+});
