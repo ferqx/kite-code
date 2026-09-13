@@ -1,13 +1,20 @@
-import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import electron from 'electron';
 import { createServer } from 'vite';
 
 const root = resolve(import.meta.dir, '..');
-if (!existsSync(resolve(root, 'service/desktop.json'))) {
-  throw new Error(
-    '配套 Runtime Host 尚未准备。请先执行 bun run --cwd apps/kite-desktop prepare:service。',
-  );
+const servicePreparation = Bun.spawn(
+  [process.execPath, 'run', resolve(root, '../../scripts/release/prepare-desktop-service.ts')],
+  {
+    cwd: resolve(root, '../..'),
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  },
+);
+const servicePreparationExitCode = await servicePreparation.exited;
+if (servicePreparationExitCode !== 0) {
+  throw new Error(`配套 Runtime Host 准备失败（退出码 ${servicePreparationExitCode}）。`);
 }
 await import('./build-electron');
 const server = await createServer({

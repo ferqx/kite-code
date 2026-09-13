@@ -352,15 +352,10 @@ export function App(props: AppProps = {}) {
   };
 
   const historyFailed = state.historyState === 'error' || state.historyState === 'unavailable';
-  const workspaceLabel =
-    state.workspaces.find((workspace) =>
-      workspace.sessions.some((item) => item.sessionId === state.selectedSessionId),
-    )?.label ?? '工作空间';
   return (
     <SessionPage
       workspaces={pageWorkspaces(state.workspaces)}
       selected={state.selectedSessionId ?? undefined}
-      workspaceLabel={workspaceLabel}
       sessionLabel={session?.displayName ?? '选择会话'}
       readingKey={state.selectedSessionId ?? 'directory'}
       messages={pageMessages(state.messages)}

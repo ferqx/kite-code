@@ -1,23 +1,25 @@
-import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
-import { type Message, projectEvent } from './presentation';
+import type { RuntimeHistorySessionTranscript } from '@kite-ai/runtime-contract';
+import { type Message, projectEventWithIdentity } from './presentation';
 
 /** Yield between bounded batches without publishing partial historical pages. */
 export async function projectHistory(
-  events: readonly RuntimeClientEvent[],
+  records: RuntimeHistorySessionTranscript['records'],
   previous: readonly Message[],
   signal: AbortSignal,
 ): Promise<readonly Message[]> {
   let messages: readonly Message[] = [];
   let started = performance.now();
   let count = 0;
-  for (const event of events) {
-    signal.throwIfAborted();
-    messages = projectEvent(messages, event);
-    if (++count === 200 || performance.now() - started >= 8) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  for (const record of records) {
+    for (const event of record.events) {
       signal.throwIfAborted();
-      started = performance.now();
-      count = 0;
+      messages = projectEventWithIdentity(messages, event, record.identity);
+      if (++count === 200 || performance.now() - started >= 8) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        signal.throwIfAborted();
+        started = performance.now();
+        count = 0;
+      }
     }
   }
   const byId = new Map(previous.map((message) => [message.id, message]));

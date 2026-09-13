@@ -1,6 +1,7 @@
 import { Copy01Icon, CopyCheckIcon, CopyXIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
 import { statusLabel } from './status';
 import { isExploration, ToolExploration } from './ToolExploration';
@@ -20,6 +21,7 @@ const MessageItem = memo(function MessageItem({
   openFile,
   copyText,
   copyRole,
+  writeClipboardText,
 }: {
   message: Message;
   expanded: boolean;
@@ -27,6 +29,7 @@ const MessageItem = memo(function MessageItem({
   openFile?: (path: string) => void;
   copyText?: string;
   copyRole?: 'user' | 'assistant';
+  writeClipboardText?: (text: string) => Promise<void>;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyLabel =
@@ -40,7 +43,8 @@ const MessageItem = memo(function MessageItem({
   const copyMessage = async () => {
     if (!copyText) return;
     try {
-      await navigator.clipboard.writeText(copyText);
+      if (writeClipboardText) await writeClipboardText(copyText);
+      else await navigator.clipboard.writeText(copyText);
       setCopyState('copied');
     } catch {
       setCopyState('failed');
@@ -202,6 +206,7 @@ export function Conversation({
   initialReading,
   saveReading,
   openFile,
+  writeClipboardText,
   emptyState,
 }: {
   messages: readonly Message[];
@@ -211,9 +216,10 @@ export function Conversation({
   initialReading?: ReadingState;
   saveReading: (state: ReadingState) => void;
   openFile?: (path: string) => void;
+  writeClipboardText?: (text: string) => Promise<void>;
   emptyState?: { title: string; detail: string };
 }) {
-  const viewport = useRef<HTMLElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
@@ -321,25 +327,20 @@ export function Conversation({
       return !message.parentToolCallId || !toolIds.has(message.parentToolCallId);
     return message.role === 'tool' || !message.settled || !!message.text;
   });
-  const assistantRoundCopies = new Map<string, string>();
-  let round: Message[] = [];
-  const finishRound = () => {
-    const replies = round.filter(
-      (message): message is Message & { role: 'assistant' } =>
-        message.role === 'assistant' && !!message.text,
-    );
-    if (replies.length && round.every((message) => message.settled))
-      assistantRoundCopies.set(
-        replies.at(-1)!.id,
-        replies.map((message) => message.text).join('\n\n'),
-      );
-    round = [];
-  };
+  const finalReplyByTurn = new Map<string, Message>();
   for (const message of shown) {
-    if (message.role === 'user') finishRound();
-    else round.push(message);
+    if (
+      message.role === 'assistant' &&
+      message.turnId &&
+      message.settled &&
+      message.finalReply &&
+      message.text
+    )
+      finalReplyByTurn.set(message.turnId, message);
   }
-  finishRound();
+  const assistantTurnCopies = new Map(
+    [...finalReplyByTurn.values()].map((message) => [message.id, message.text]),
+  );
   // Contiguous explicit read-only calls share a display group; never cross a reply,
   // command, or child-owner boundary and never rewrite the underlying messages.
   const groups: Message[][] = [];
@@ -357,23 +358,31 @@ export function Conversation({
   }
   return (
     <div className="conversation-container">
-      <section
-        ref={viewport}
+      <ScrollArea
         className="conversation"
-        aria-label="会话消息"
-        aria-busy={
-          loading ||
-          messages.some(
-            (message) =>
-              message.delivery === 'sending' || (message.role === 'assistant' && !message.settled),
-          )
-        }
-        onScroll={() => {
-          const element = viewport.current;
-          if (!element || loading || restore.current) return;
-          const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
-          reading.current = { top: element.scrollTop, follow, expanded: reading.current.expanded };
-          setFollowing(follow);
+        viewportRef={viewport}
+        viewportClassName="conversation-viewport"
+        viewportProps={{
+          role: 'region',
+          'aria-label': '会话消息',
+          'aria-busy':
+            loading ||
+            messages.some(
+              (message) =>
+                message.delivery === 'sending' ||
+                (message.role === 'assistant' && !message.settled),
+            ),
+          onScroll: () => {
+            const element = viewport.current;
+            if (!element || loading || restore.current) return;
+            const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
+            reading.current = {
+              top: element.scrollTop,
+              follow,
+              expanded: reading.current.expanded,
+            };
+            setFollowing(follow);
+          },
         }}
       >
         <div className="reading-column">
@@ -412,13 +421,14 @@ export function Conversation({
                     expanded={!!expanded[message.id]}
                     onToggle={onToggle}
                     openFile={openFile}
+                    writeClipboardText={writeClipboardText}
                     copyText={
                       message.role === 'user' &&
                       message.settled &&
                       !message.delivery &&
                       message.text
                         ? message.text
-                        : assistantRoundCopies.get(message.id)
+                        : assistantTurnCopies.get(message.id)
                     }
                     copyRole={message.role === 'user' ? 'user' : 'assistant'}
                   />
@@ -439,7 +449,7 @@ export function Conversation({
             })
           )}
         </div>
-      </section>
+      </ScrollArea>
       {!following && !loading && (
         <Button
           className="jump-latest"

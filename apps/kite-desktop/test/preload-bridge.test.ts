@@ -39,6 +39,7 @@ test('preload exposes only frozen named methods with fixed channels and payloads
   await bridge.runtimeDetach(7);
   await bridge.runtimeClose(7);
   await bridge.openEditor(7, 'src/main.ts', 'vscode');
+  await bridge.writeClipboardText('Agent 最终回复');
   await bridge.toggleWindowMaximize();
   await bridge.showConfirm({
     message: '继续？',
@@ -73,6 +74,10 @@ test('preload exposes only frozen named methods with fixed channels and payloads
     {
       channel: DESKTOP_IPC_CHANNELS.openEditor,
       payload: { connectionId: 7, path: 'src/main.ts', editor: 'vscode' },
+    },
+    {
+      channel: DESKTOP_IPC_CHANNELS.writeClipboardText,
+      payload: { text: 'Agent 最终回复' },
     },
     { channel: DESKTOP_IPC_CHANNELS.toggleWindowMaximize, payload: undefined },
     {

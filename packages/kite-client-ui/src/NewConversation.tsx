@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Folder01Icon, GitBranchIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { type ComponentProps, useEffect, useId, useRef, useState } from 'react';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Button } from './ui';
 
@@ -30,16 +32,10 @@ export function NewConversationWelcome({ onSuggest }: { onSuggest: (value: strin
   );
 }
 
-const icons = {
-  folder: new URL('./assets/folder.svg', import.meta.url).href,
-  local: new URL('./assets/local.svg', import.meta.url).href,
-  branch: new URL('./assets/branch.svg', import.meta.url).href,
-};
-
 function ContextMenu(props: {
   name: string;
   label: string;
-  icon: string;
+  icon: ComponentProps<typeof HugeiconsIcon>['icon'];
   selected?: string;
   options: readonly { value: string; label: string; detail?: string }[];
   disabled: boolean;
@@ -99,7 +95,7 @@ function ContextMenu(props: {
           }
         }}
       >
-        <img src={props.icon} alt="" width={16} height={16} />
+        <HugeiconsIcon icon={props.icon} />
         <span>{props.label}</span>
       </Button>
       {open && (
@@ -181,7 +177,7 @@ export function NewConversationContext(props: NewConversationProps) {
         label={
           props.projects.find((project) => project.path === props.workspace)?.label ?? '选择项目'
         }
-        icon={icons.folder}
+        icon={Folder01Icon}
         selected={props.workspace}
         options={props.projects.map((project) => ({
           value: project.path,
@@ -192,15 +188,11 @@ export function NewConversationContext(props: NewConversationProps) {
         onSelect={props.onProject}
         action={{ label: '添加项目…', run: props.onAddProject }}
       />
-      <span className="context-environment">
-        <img src={icons.local} alt="" width={16} height={16} />
-        本地
-      </span>
       {props.workspace && props.branch?.repository !== false && (
         <ContextMenu
           name="分支"
           label={props.branch?.label ?? (props.busy ? '正在读取分支…' : '分支暂不可用')}
-          icon={icons.branch}
+          icon={GitBranchIcon}
           selected={props.branch?.current}
           options={props.branch?.branches.map((branch) => ({ value: branch, label: branch })) ?? []}
           disabled={props.busy}

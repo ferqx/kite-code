@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { projectEvent } from '../src/presentation';
+import { projectEvent, projectEventWithIdentity } from '../src/presentation';
 
 test('confirmed file changes retain the matching durable diff regardless of event arrival order', () => {
   const changed = {
@@ -42,7 +42,11 @@ test('confirmed file changes retain the matching durable diff regardless of even
 });
 
 test('cumulative text and a late delta cannot duplicate or overwrite durable output', () => {
-  let messages = projectEvent([], { type: 'model.text_delta', requestId: 'r1', text: 'Hello' });
+  let messages = projectEventWithIdentity(
+    [],
+    { type: 'model.text_delta', requestId: 'r1', text: 'Hello' },
+    { turnId: 'turn-1' },
+  );
   messages = projectEvent(messages, {
     type: 'model.text_delta',
     requestId: 'r1',
@@ -62,7 +66,12 @@ test('cumulative text and a late delta cannot duplicate or overwrite durable out
     requestId: 'r1',
     text: 'Hello world!',
   });
-  expect(messages[0]).toMatchObject({ text: 'Final answer', settled: true });
+  expect(messages[0]).toMatchObject({
+    text: 'Final answer',
+    settled: true,
+    turnId: 'turn-1',
+    finalReply: true,
+  });
 });
 
 test('cancelled and rejected tools remain terminal after late progress or history replay', () => {

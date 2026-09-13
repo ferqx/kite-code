@@ -27,7 +27,7 @@ body,
 
 html[data-platform="macos"] .kite-client.shell {
   --app-header-height: 52px;
-  --sidebar: #ededed;
+  --sidebar: #f5f5f5;
 }
 
 html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
@@ -38,13 +38,13 @@ html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
   padding-block: 4px;
 }
 
-html[data-platform="macos"] .kite-client .app-header {
+html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
   -webkit-app-region: drag;
 }
 
 html[data-platform="macos"]
   .kite-client
-  .app-header
+  :is(.sidebar-header, .session-header)
   :is(button, a, input, select, textarea, label, summary, [role="button"], [role="link"]) {
   -webkit-app-region: no-drag;
 }

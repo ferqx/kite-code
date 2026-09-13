@@ -10,6 +10,15 @@ import type { Message } from '../src/types';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
 });
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(dom.window, 'ResizeObserver', {
+  configurable: true,
+  value: TestResizeObserver,
+});
 const globals = {
   window: dom.window,
   document: dom.window.document,
@@ -21,7 +30,9 @@ const globals = {
   CustomEvent: dom.window.CustomEvent,
   Node: dom.window.Node,
   Element: dom.window.Element,
+  DOMRect: dom.window.DOMRect,
   getComputedStyle: dom.window.getComputedStyle,
+  ResizeObserver: TestResizeObserver,
   IS_REACT_ACT_ENVIRONMENT: true,
 };
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -67,12 +78,11 @@ async function click(element: HTMLElement) {
     element.click();
   });
 }
-test('one application header moves the sidebar toggle between its visual regions', async () => {
+test('full-height sibling panels move the sidebar toggle into the middle header when closed', async () => {
   const windowClicks: number[] = [];
   await render(
     <SessionPage
       workspaces={[]}
-      workspaceLabel="Workspace"
       sessionLabel="Session title"
       readingKey="workspace/session"
       messages={[]}
@@ -83,14 +93,17 @@ test('one application header moves the sidebar toggle between its visual regions
       onHeaderMouseDown={(clickCount) => windowClicks.push(clickCount)}
     />,
   );
-  expect(document.querySelectorAll('header')).toHaveLength(1);
-  expect(document.querySelector('.session-header')?.textContent).toContain('Session title');
-  const sidebar = document.querySelector<HTMLElement>('.sidebar')!;
-  expect(sidebar.hidden).toBe(false);
+  expect(document.querySelectorAll('header')).toHaveLength(2);
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(2);
+  expect(document.querySelectorAll('[role="separator"]')).toHaveLength(1);
+  expect(document.querySelector('.session-header')?.textContent).toBe('Session t…');
+  expect(document.querySelector('.breadcrumb strong')?.getAttribute('title')).toBe('Session title');
+  expect(document.querySelector<HTMLElement>('.sidebar')).not.toBeNull();
   await click(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!);
-  expect(sidebar.hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>('.sidebar')).toBeNull();
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(1);
   await click(document.querySelector<HTMLButtonElement>('[aria-label="展开侧栏"]')!);
-  expect(sidebar.hidden).toBe(false);
+  expect(document.querySelector<HTMLElement>('.sidebar')).not.toBeNull();
   expect(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')).not.toBeNull();
   const header = document.querySelector<HTMLElement>('.session-header')!;
   header.dispatchEvent(
@@ -173,17 +186,51 @@ test('settled user and Agent messages copy their original text', async () => {
   const copied: string[] = [];
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
-    value: { writeText: async (text: string) => copied.push(text) },
+    value: { writeText: async () => Promise.reject(new Error('browser clipboard unavailable')) },
   });
   await render(
     <Conversation
       messages={[
         { id: 'u', role: 'user', text: '用户原文', settled: true },
-        { id: 'a1', role: 'assistant', text: '**Agent** 第一段', settled: true },
-        { id: 'tool:t', role: 'tool', text: '工具输出不复制', settled: true },
-        { id: 'a2', role: 'assistant', text: 'Agent 第二段', settled: true },
+        {
+          id: 'a1',
+          turnId: 'turn-1',
+          role: 'assistant',
+          text: '**Agent** 工具前说明',
+          settled: true,
+          finalReply: false,
+        },
+        {
+          id: 'tool:t',
+          turnId: 'turn-1',
+          role: 'tool',
+          text: '工具输出不复制',
+          settled: true,
+        },
+        {
+          id: 'a2',
+          turnId: 'turn-1',
+          role: 'assistant',
+          text: 'Agent 最终回复',
+          settled: true,
+          finalReply: true,
+        },
+        {
+          id: 'extra',
+          turnId: 'turn-1',
+          role: 'assistant',
+          text: '同一 turn 的非最终文本',
+          settled: true,
+          finalReply: false,
+        },
         { id: 'u2', role: 'user', text: '下一轮', settled: true },
-        { id: 'stream', role: 'assistant', text: '流式内容', settled: false },
+        {
+          id: 'stream',
+          turnId: 'turn-2',
+          role: 'assistant',
+          text: '流式内容',
+          settled: false,
+        },
         {
           id: 'pending',
           role: 'user',
@@ -196,6 +243,9 @@ test('settled user and Agent messages copy their original text', async () => {
       connected
       selected
       saveReading={() => {}}
+      writeClipboardText={async (text) => {
+        copied.push(text);
+      }}
     />,
   );
   expect(document.querySelectorAll('.message-copy')).toHaveLength(3);
@@ -205,7 +255,7 @@ test('settled user and Agent messages copy their original text', async () => {
 
   await click(document.querySelector<HTMLButtonElement>('[aria-label="复制本轮用户消息"]')!);
   await click(document.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!);
-  expect(copied).toEqual(['用户原文', '**Agent** 第一段\n\nAgent 第二段']);
+  expect(copied).toEqual(['用户原文', 'Agent 最终回复']);
   expect(document.querySelectorAll('[aria-label="已复制消息"]')).toHaveLength(2);
 });
 
@@ -257,7 +307,8 @@ test('scrolling history stops live follow; returning to a conversation restores 
     onProject: () => {},
   };
   await render(<Conversation {...props} messages={messages} />);
-  const viewport = document.querySelector<HTMLElement>('.conversation')!;
+  const viewport = document.querySelector<HTMLElement>('.conversation-viewport')!;
+  expect(viewport.hasAttribute('data-radix-scroll-area-viewport')).toBe(true);
   Object.defineProperties(viewport, {
     scrollHeight: { configurable: true, value: 2000 },
     clientHeight: { configurable: true, value: 500 },
@@ -285,7 +336,7 @@ test('scrolling history stops live follow; returning to a conversation restores 
   await act(() =>
     root!.render(<Conversation {...props} initialReading={saved} messages={updated} />),
   );
-  expect(document.querySelector<HTMLElement>('.conversation')!.scrollTop).toBe(200);
+  expect(document.querySelector<HTMLElement>('.conversation-viewport')!.scrollTop).toBe(200);
   expect(document.querySelector('details')?.open).toBe(true);
   await click(button('回到最新消息'));
   expect(document.querySelector('.jump-latest')).toBeNull();
@@ -474,6 +525,7 @@ test('workspace sessions reveal five then ten at a time and reset independently 
     />,
   );
   const groups = Array.from(document.querySelectorAll<HTMLElement>('.workspace-group'));
+  expect(groups[0]!.querySelector('[data-icon="folder-open"]')).not.toBeNull();
   expect(
     document.querySelector('.workspace-directory [data-radix-scroll-area-viewport]'),
   ).not.toBeNull();
@@ -492,8 +544,10 @@ test('workspace sessions reveal five then ten at a time and reset independently 
   expect(rows(0)).toHaveLength(28);
   expect(more()).toBeNull();
   await click(button('空间 A'));
+  expect(groups[0]!.querySelector('[data-icon="folder-closed"]')).not.toBeNull();
   expect(groups[0]!.querySelector('.sidebar-sessions')?.hasAttribute('hidden')).toBe(true);
   await click(button('空间 A'));
+  expect(groups[0]!.querySelector('[data-icon="folder-open"]')).not.toBeNull();
   expect(rows(0)).toHaveLength(5);
   expect(more().textContent?.trim()).toBe('展开更多');
   await click(more());

@@ -33,7 +33,7 @@ import type {
 } from './bridge';
 import { projectHistory } from './history-projection';
 import { type ProviderInput, saveProvider } from './models';
-import { isActiveRun, type Message, projectEvent } from './presentation';
+import { isActiveRun, type Message, projectEventWithIdentity } from './presentation';
 import { SessionHistoryCache } from './session-cache';
 import { type DesktopConnectionInfo, desktopTransport } from './transport';
 
@@ -166,6 +166,9 @@ export class DesktopClient {
   }
   confirm(options: DesktopConfirmOptions) {
     return this.#native().showConfirm(options);
+  }
+  copyText(text: string) {
+    return this.#native().writeClipboardText(text);
   }
   #publish(change: Partial<DesktopView>) {
     if (
@@ -1048,7 +1051,7 @@ export class DesktopClient {
     signal: AbortSignal,
   ) {
     const transcript = await connection.history.loadSession(sessionId, undefined, { signal });
-    const messages = await projectHistory(transcript.events, previous, signal);
+    const messages = await projectHistory(transcript.records, previous, signal);
     return {
       messages,
       interactionMode: transcript.interactionMode,
@@ -1086,7 +1089,9 @@ export class DesktopClient {
             : notification.projection.event;
         if (event)
           this.#publish({
-            messages: projectEvent(this.#view.messages, event),
+            messages: projectEventWithIdentity(this.#view.messages, event, {
+              turnId: notification.turnId,
+            }),
             ...(event.type === 'interaction_mode.changed' ? { interactionMode: event.mode } : {}),
           });
       }
@@ -1204,15 +1209,36 @@ export class DesktopClient {
       response: { kind: 'approval', decision },
     });
   }
-  async respondInput(sessionId: string, interaction: RuntimeInputInteraction, value?: string) {
+  async respondInput(
+    sessionId: string,
+    interaction: RuntimeInputInteraction,
+    value?: string,
+    answers?: Readonly<Record<string, string>>,
+  ) {
     if (this.#view.selected !== sessionId || !this.#view.ready)
       throw new Error('问题所属会话已改变，请重新查看。');
     if (
       value !== undefined &&
       (!value.trim() ||
-        (!interaction.allowFreeText && !interaction.options?.some((option) => option.id === value)))
+        (!interaction.allowFreeText &&
+          !interaction.options?.some((option) => option.id === value || option.label === value)))
     )
       throw new Error('请选择有效选项或填写回答。');
+    if (answers !== undefined) {
+      const questions = interaction.questions ?? [];
+      if (
+        questions.length === 0 ||
+        Object.keys(answers).length !== questions.length ||
+        questions.some((question) => {
+          const answer = answers[question.id];
+          return (
+            !answer?.trim() ||
+            (!question.allowFreeText && !question.options?.some((option) => option.id === answer))
+          );
+        })
+      )
+        throw new Error('请完成全部问题后再提交。');
+    }
     await this.#command({
       schema: 'kite.runtime-command.v1',
       commandId: crypto.randomUUID(),
@@ -1220,7 +1246,10 @@ export class DesktopClient {
       sessionId,
       expectedRevision: interaction.sessionRevision,
       interaction,
-      response: value === undefined ? { kind: 'input_cancel' } : { kind: 'text', value },
+      response:
+        value === undefined
+          ? { kind: 'input_cancel' }
+          : { kind: 'text', value, ...(answers === undefined ? {} : { answers }) },
     });
   }
   async respondPlan(

@@ -13,7 +13,6 @@ const base: SessionPageProps = {
     },
   ],
   selected: 's',
-  workspaceLabel: 'Workspace',
   sessionLabel: 'Session',
   readingKey: 'w/s',
   messages: [
@@ -44,7 +43,20 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html).toContain('<strong>Session</strong>');
   expect(html).not.toContain('加载更早的会话');
   expect(html).toContain('data-radix-scroll-area-viewport');
-  expect(html.match(/<header/g)).toHaveLength(1);
+  expect(html.match(/<header/g)).toHaveLength(2);
+  expect(html).toContain('data-slot="resizable-panel-group"');
+  expect(html.match(/ data-panel(?:=|>)/g)).toHaveLength(2);
+  expect(html.match(/role="separator"/g)).toHaveLength(1);
+});
+
+test('the session header limits long labels to ten visible characters', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage {...base} sessionLabel="请测试一次 ask_user 多问题交互" />,
+  );
+  expect(html).toContain('<strong title="请测试一次 ask_user 多问题交互">请测试一次 ask…</strong>');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} sessionLabel="正好十个字符标题呀哦" />),
+  ).toContain('>正好十个字符标题呀哦</strong>');
 });
 
 test('the same page renders granted operations while an unavailable send stays disabled', () => {
@@ -96,6 +108,8 @@ test('new and running conversations share one composer prompt', () => {
     );
     expect(html).toContain('placeholder="描述你想完成的工作…"');
     expect(html).not.toContain('可以先写下下一步要求');
+    expect(html).not.toContain('Enter 发送');
+    expect(html).not.toContain('仅保留草稿');
   }
 });
 
@@ -205,4 +219,23 @@ test('workbench reuses the shared shell and groups only facts present in session
   expect(html).toContain('最近会话');
   expect(html).toContain('aria-label="主要导航"');
   expect(html).not.toContain('任务输入');
+});
+
+test('scheduled tasks is a first-class page below workbench without inventing saved tasks', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      selected={undefined}
+      actions={{ workbench: () => {}, scheduledTasks: () => {} }}
+      scheduledTasks={{ tasks: [], workspaces: base.workspaces }}
+    />,
+  );
+  expect(html).toContain('aria-label="安排任务"');
+  expect(html).toContain('<span>工作台</span>');
+  expect(html).toContain('<span>安排任务</span>');
+  expect(html.indexOf('<span>工作台</span>')).toBeLessThan(html.indexOf('<span>安排任务</span>'));
+  expect(html).toContain('还没有安排任务');
+  expect(html).toContain('创建第一个任务');
+  expect(html).not.toContain('每日检查 CI');
+  expect(html).not.toContain('conversation-footer');
 });

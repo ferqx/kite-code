@@ -6,7 +6,11 @@
 
 Web 与 Tauri 桌面共用的 React 会话页面 owner。两个生产入口均调用 [SessionPage](src/SessionPage.tsx)，共用[侧栏](src/Sidebar.tsx)、[工作台](src/Workbench.tsx)、[会话阅读](src/Conversation.tsx)、[输入区](src/Composer.tsx)、[Markdown](src/MessageContent.tsx)和[样式](src/style.css)。不从某一 app 导入页面，不维护另一份 Web／Desktop 主界面。全局“新对话”与“工作台”复用同一组左对齐主导航行样式；工作台只按宿主给出的运行状态组织“正在推进”和“最近会话”，没有主题归属和时间条件数据时不显示伪筛选，也不从标题推断。
 
-页面顶部只有一个横跨窗口的 `app-header`，内部按 236 px 侧栏和会话区分成两个 52 px 高的视觉段。侧栏段使用侧栏背景，显示 kite 标识并把收起按钮放在右侧；会话段显示页面或会话标题及端侧操作。侧栏关闭后展开按钮进入会话段。两个视觉段共同承担 Tauri 原生拖拽区域，不建立两套 header；窄屏展开侧栏时仍保留同一顶栏并让右侧段不可交互。
+界面图标统一由 `@hugeicons/core-free-icons` 与 `@hugeicons/react` 提供，不在共享客户端内维护页面专用 SVG asset；品牌图形、用户内容图片和纯 CSS 状态标记不属于该约束。
+
+桌面端可在“工作台”下提供[安排任务](src/ScheduledTasks.tsx)入口。共享页面负责空态和任务列表；点击“新建任务”或“创建第一个任务”后，名称、任务说明、项目、频率和本地／独立 worktree 运行环境表单在最右侧的[通用侧栏容器](src/RightSidebar.tsx)中打开，任务页仍保留在主区域。页面只消费宿主显式提供的任务事实与操作；没有持久化和后台执行 owner 时仍可填写表单，但保存保持禁用并说明限制，不在浏览器状态中伪造可运行任务。
+
+页面外壳使用 shadcn Resizable 组合全高同级栏：左侧导航栏、中间页面栏，以及按需出现的最右辅助栏。左栏默认 236 px、范围 200–420 px；右栏默认 380 px、范围 300–640 px；中栏最小 360 px。相邻栏之间都可拖拽调整宽度。每栏自行包含 52 px 标题区和余下内容区，左栏收起后展开按钮进入中栏标题区；会话 header 只显示会话标题，不重复所属空间。标题最多展示 10 个 Unicode 字符，超长标题的第 10 位为省略号，完整值保留在提示和无障碍名称中。窄屏左栏继续作为覆盖抽屉，不改变中栏内容 owner。
 
 Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 HTML，外层统一使用 shadcn/typeset 的 `typeset typeset-chat`。正文不增加 padding 或独立最大宽度，与消息阅读列使用相同可用宽度。Web 与 Desktop 各自在 Tailwind 入口加载同一上游 Typeset stylesheet 和 Geist／Geist Mono 字体；共享样式只保留链接、文件操作、内容宽度选择和代码／表格溢出等功能规则，不维护第二套标题、列表、代码、引用或表格排版。
 
@@ -30,7 +34,9 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 [展示类型](src/types.ts)只包含页面使用的数据，不导入 Runtime、Public API、Native 或 TUI 类型。端侧投影将真实数据转换为这些字段；缺失数据不能从名称或相邻消息补造。共享组件保留展开和阅读位置；服务状态、订阅与恢复由端侧现有 owner 管理。
 
-入口通过已授权的回调提供页面操作：`actions` 决定新建、配置、连接和本地文件打开；`composer` 仅由允许输入的入口提供，不渲染输入框上方的独立状态行，发送／停止回调仍受实时连接、信任和运行状态约束。操作缺席时不显示对应入口，本地文件路径退化为文字。没有并列的权限布尔值与操作注册表，也不在共享页面中判断平台名称。此处控制 UI 可用操作，服务端授权保持最终权威。
+[`AskQuestionnaire`](src/AskQuestionnaire.tsx)基于 `@shadcn/react/questionnaire` 提供补充问题的共享表单结构、原生单选、自由输入、快捷键和必答校验。组件只接收通用问题数据与提交／取消回调，不导入 Runtime 类型；交互队列、回答传输、取消含义和草稿生命周期继续由端侧 owner 负责。
+
+入口通过已授权的回调提供页面操作：`actions` 决定新建、配置、连接和本地文件打开；`composer` 仅由允许输入的入口提供，不渲染输入框上方的独立状态行，发送／停止回调仍受实时连接、信任和运行状态约束。`interaction` 存在时 `SessionPage` 隐藏 Composer 的提示词输入、模型和权限控件，只呈现当前交互与会话级停止按钮；共享层不复制草稿，交互移除后由同一个端侧 `composer` props 恢复原值。操作缺席时不显示对应入口，本地文件路径退化为文字。没有并列的权限布尔值与操作注册表，也不在共享页面中判断平台名称。此处控制 UI 可用操作，服务端授权保持最终权威。
 
 [Web 入口](../../apps/kite-web/src/app/app.tsx)只提供只读导航，保留 REST、路由、轮询与诊断 owner；[桌面入口](../../apps/kite-desktop/src/App.tsx)提供当前已授权的任务操作和原生宿主适配。诊断、信任、审批和原生辅助面板经具名位置接入；共享页负责它们与会话、输入区的布局，不拥有另一套执行状态。
 
@@ -44,7 +50,7 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 `bun run --cwd packages/kite-client-ui test`、`typecheck`，两端的 `test`、`typecheck`、`build`，以及根 `check:runtime-packages`。共享包没有独立打包产物，`build` 核对类型，最终页面由两个 app 的 Vite 构建消费。[权限回归](test/page.test.tsx)核对只读与可操作页面；[桌面 UI 回归](../../apps/kite-desktop/test/ui.test.tsx)覆盖发送、中文组词、审批、停止和阅读位置；[Web 生命周期](../../apps/kite-web/test/app-lifecycle.test.tsx)覆盖只读接入、导航与诊断。
 
-[只读探索](src/ToolExploration.tsx)只按显式工具身份聚合相邻记录，保留失败和真实输出；不猜测 Web 的工具 label。宿主提供 `fileChanges` 时，共享页面展示[文件变更副层](src/FileChanges.tsx)，默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。副层只用页面内状态，无额外存储或运行 authority。
+[只读探索](src/ToolExploration.tsx)只按显式工具身份聚合相邻记录，保留失败和真实输出；不猜测 Web 的工具 label。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
 
 空间摘要的可选 `muted` 仅控制名称的次级文字色，不禁用展开或会话操作。Desktop 用它表示本地目录缺失；共享组件不访问本地文件系统，Web 未提供该标记时保持原样。
 

@@ -541,6 +541,71 @@ test('a cached waiting interaction remains non-actionable until fresh history an
   }
 }, 20_000);
 
+test('one ask_user call projects and settles every question with stable ownership', async () => {
+  const f = await fixture([
+    {
+      message: {
+        tool_calls: [
+          {
+            id: 'batch-question',
+            name: 'ask_user',
+            args: {
+              questions: [
+                {
+                  question: 'Choose a language',
+                  options: [
+                    { label: 'TypeScript', description: 'Typed code', recommended: true },
+                    { label: 'Python', description: 'Scripts', recommended: false },
+                  ],
+                },
+                {
+                  question: 'Choose a database',
+                  options: [
+                    { label: 'Postgres', description: 'Server database', recommended: true },
+                    { label: 'SQLite', description: 'Local database', recommended: false },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    {
+      expectedRequest: {
+        toolResults: [{ toolCallId: 'batch-question', contentIncludes: ['TypeScript', 'SQLite'] }],
+      },
+      message: { content: 'Both questions answered.' },
+    },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Ask both questions in one call.');
+    await waitFor(
+      () => f.client.getSnapshot().projection?.interactionQueue.interactions[0]?.kind === 'input',
+    );
+    const interaction = f.client.getSnapshot().projection!.interactionQueue.interactions[0]!;
+    if (interaction.kind !== 'input') throw new Error('Expected a batch question');
+    expect(interaction.questions?.map((question) => question.id)).toEqual(['q1', 'q2']);
+    expect(interaction.questions?.map((question) => question.question)).toEqual([
+      'Choose a language',
+      'Choose a database',
+    ]);
+    await f.client.respondInput(f.a, interaction, 'q1: TypeScript\nq2: SQLite', {
+      q1: 'q1-o1',
+      q2: 'q2-o2',
+    });
+    await waitFor(() =>
+      f.client
+        .getSnapshot()
+        .messages.some((message) => message.text === 'Both questions answered.' && message.settled),
+    );
+    f.model.assertComplete();
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
 test('cached approval requires fresh calibration before an external file write can be approved', async () => {
   const f = await fixture();
   const path = resolve(f.client.getSnapshot().workspace, '../home/approved.txt');

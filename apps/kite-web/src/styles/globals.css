@@ -58,6 +58,8 @@
   --muted-foreground: oklch(0.51 0.015 215);
   --border: oklch(0.9 0.012 185);
   --border-strong: oklch(0.74 0.035 175);
+  --scrollbar-thumb: #b8b8b8;
+  --scrollbar-thumb-hover: #999;
   --accent: oklch(0.55 0.105 170);
   --accent-foreground: oklch(0.99 0.005 170);
   --running: oklch(0.55 0.13 155);
@@ -92,6 +94,8 @@
   --muted-foreground: oklch(0.67 0.014 195);
   --border: oklch(0.3 0.016 210 / 0.68);
   --border-strong: oklch(0.48 0.045 175 / 0.82);
+  --scrollbar-thumb: #62665b;
+  --scrollbar-thumb-hover: #7a7f72;
   --accent: oklch(0.71 0.12 165);
   --accent-foreground: oklch(0.16 0.025 165);
   --running: oklch(0.73 0.14 155);
@@ -130,8 +134,26 @@ a {
 }
 
 * {
-  scrollbar-color: var(--muted) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 :focus-visible {

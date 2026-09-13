@@ -53,6 +53,7 @@ export interface KiteDesktopBridge {
   runtimeDetach(connectionId: number): Promise<void>;
   runtimeClose(connectionId: number): Promise<void>;
   openEditor(connectionId: number, path: string, editor: DesktopEditor): Promise<void>;
+  writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
   showConfirm(options: DesktopConfirmOptions): Promise<boolean>;
 }
@@ -71,6 +72,7 @@ export const DESKTOP_IPC_CHANNELS = {
   runtimeDetach: 'kite:desktop:runtime-detach',
   runtimeClose: 'kite:desktop:runtime-close',
   openEditor: 'kite:desktop:open-editor',
+  writeClipboardText: 'kite:desktop:write-clipboard-text',
   toggleWindowMaximize: 'kite:desktop:toggle-window-maximize',
   showConfirm: 'kite:desktop:show-confirm',
 } as const satisfies Record<keyof KiteDesktopBridge, string>;

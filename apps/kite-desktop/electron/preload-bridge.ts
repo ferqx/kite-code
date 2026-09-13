@@ -35,6 +35,7 @@ export function createPreloadBridge(call: DesktopIpcInvoke): Readonly<KiteDeskto
     runtimeClose: (connectionId) => invoke(DESKTOP_IPC_CHANNELS.runtimeClose, { connectionId }),
     openEditor: (connectionId, path, editor) =>
       invoke(DESKTOP_IPC_CHANNELS.openEditor, { connectionId, path, editor }),
+    writeClipboardText: (text) => invoke(DESKTOP_IPC_CHANNELS.writeClipboardText, { text }),
     toggleWindowMaximize: () => invoke(DESKTOP_IPC_CHANNELS.toggleWindowMaximize),
     showConfirm: (options) => invoke(DESKTOP_IPC_CHANNELS.showConfirm, options),
   } satisfies KiteDesktopBridge);

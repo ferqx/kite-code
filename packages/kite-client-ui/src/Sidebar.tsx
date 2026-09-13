@@ -1,3 +1,13 @@
+import {
+  Add01Icon,
+  CalendarClockIcon,
+  Folder01Icon,
+  Folder02Icon,
+  Home03Icon,
+  MoreHorizontalIcon,
+  UserCircleIcon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { useId, useRef, useState } from 'react';
 import { Badge } from './components/ui/badge';
 import { ScrollArea } from './components/ui/scroll-area';
@@ -6,13 +16,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './comp
 import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
-
-const newConversationIcon = new URL('./assets/new-chat.svg', import.meta.url).href;
-const workbenchIcon = new URL('./assets/sidebar-workbench.svg', import.meta.url).href;
-const disclosureOpenIcon = new URL('./assets/disclosure-open.svg', import.meta.url).href;
-const disclosureClosedIcon = new URL('./assets/disclosure-closed.svg', import.meta.url).href;
-const avatarIcon = new URL('./assets/avatar-local.svg', import.meta.url).href;
-const ellipsisIcon = new URL('./assets/ellipsis.svg', import.meta.url).href;
 
 function updatedTime(value?: string) {
   const time = Date.parse(value ?? '');
@@ -71,11 +74,9 @@ function Workspace({
                 if (!expanded && workspace.state === 'idle') props.onExpand?.(workspace.id);
               }}
             >
-              <img
-                src={expanded ? disclosureOpenIcon : disclosureClosedIcon}
-                alt=""
-                width={16}
-                height={16}
+              <HugeiconsIcon
+                data-icon={expanded ? 'folder-open' : 'folder-closed'}
+                icon={expanded ? Folder02Icon : Folder01Icon}
               />
               <span className="nav-copy">
                 <strong className={workspace.muted ? 'space-name-muted' : undefined}>
@@ -93,7 +94,7 @@ function Workspace({
                 disabled={props.busy || props.mutationBusy}
                 onClick={() => props.onNewSession?.(workspace.id)}
               >
-                <img src={newConversationIcon} alt="" width={16} height={16} />
+                <HugeiconsIcon icon={Add01Icon} />
               </Button>
             )}
           </div>
@@ -197,6 +198,7 @@ export interface PageActions {
   newSession?: () => void;
   newWorkspaceSession?: (workspaceId: string) => void;
   workbench?: () => void;
+  scheduledTasks?: () => void;
   settings?: () => void;
   connection?: { label: string; run: () => void };
   openFile?: (path: string) => void;
@@ -209,11 +211,11 @@ export function Sidebar({
 }: DirectoryProps & {
   actions: PageActions;
   connectionLabel: string;
-  activePage?: 'conversation' | 'workbench';
+  activePage?: 'conversation' | 'workbench' | 'scheduledTasks';
 }) {
   return (
     <>
-      {(actions.newSession || actions.workbench) && (
+      {(actions.newSession || actions.workbench || actions.scheduledTasks) && (
         <nav className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
             <Button
@@ -222,13 +224,7 @@ export function Sidebar({
               disabled={props.busy || props.mutationBusy}
               onClick={actions.newSession}
             >
-              <img
-                data-icon="inline-start"
-                src={newConversationIcon}
-                alt=""
-                width={16}
-                height={16}
-              />
+              <HugeiconsIcon data-icon="inline-start" icon={Add01Icon} />
               <span>新对话</span>
             </Button>
           )}
@@ -239,8 +235,19 @@ export function Sidebar({
               aria-current={activePage === 'workbench' ? 'page' : undefined}
               onClick={actions.workbench}
             >
-              <img data-icon="inline-start" src={workbenchIcon} alt="" width={16} height={16} />
+              <HugeiconsIcon data-icon="inline-start" icon={Home03Icon} />
               <span>工作台</span>
+            </Button>
+          )}
+          {actions.scheduledTasks && (
+            <Button
+              variant="ghost"
+              className={activePage === 'scheduledTasks' ? 'selected' : undefined}
+              aria-current={activePage === 'scheduledTasks' ? 'page' : undefined}
+              onClick={actions.scheduledTasks}
+            >
+              <HugeiconsIcon data-icon="inline-start" icon={CalendarClockIcon} />
+              <span>安排任务</span>
             </Button>
           )}
         </nav>
@@ -273,12 +280,12 @@ export function Sidebar({
         </div>
         {actions.settings && (
           <Button className="profile-card" onClick={actions.settings}>
-            <img src={avatarIcon} alt="" width={28} height={28} />
+            <HugeiconsIcon className="profile-avatar" icon={UserCircleIcon} />
             <span>
               <strong>本地用户</strong>
               <small>个人工作区</small>
             </span>
-            <img src={ellipsisIcon} alt="更多操作" width={16} height={16} />
+            <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
           </Button>
         )}
       </div>

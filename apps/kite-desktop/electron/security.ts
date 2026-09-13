@@ -39,6 +39,11 @@ export function pathPayload(value: unknown): { path: string } {
   return { path: boundedString(record.path, 8192) };
 }
 
+export function clipboardTextPayload(value: unknown): { text: string } {
+  const record = exactRecord(value, ['text']);
+  return { text: boundedString(record.text, 1_048_576) };
+}
+
 export function workspacePayload(value: unknown): { workspace: string } {
   const record = exactRecord(value, ['workspace']);
   return { workspace: boundedString(record.workspace, 8192) };

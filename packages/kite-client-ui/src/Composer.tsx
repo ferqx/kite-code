@@ -1,8 +1,7 @@
+import { ArrowDown01Icon, ArrowUp01Icon, SquareStopIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { type ReactNode, type Ref, useRef } from 'react';
 import { Button, Textarea } from './ui';
-
-const sendIcon = new URL('./assets/send.svg', import.meta.url).href;
-const stopIcon = new URL('./assets/stop.svg', import.meta.url).href;
 
 export interface ComposerProps {
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -26,7 +25,9 @@ export interface ComposerProps {
   permission?: 'accept_edits' | 'auto' | 'full';
   onPermissionChange?: (permission: 'accept_edits' | 'auto' | 'full') => void;
   permissionDisabled?: boolean;
+  permissionPending?: boolean;
   submitStatus?: string;
+  promptHidden?: boolean;
 }
 export function Composer(props: ComposerProps) {
   const composing = useRef(false);
@@ -39,11 +40,15 @@ export function Composer(props: ComposerProps) {
     : props.model
       ? `current\0${props.model}`
       : '';
+  if (props.promptHidden) {
+    return null;
+  }
   return (
     <>
       {props.context}
       <form
         className="composer"
+        data-permission-pending={props.permissionPending || undefined}
         onSubmit={(event) => {
           event.preventDefault();
           if (canSend && !composing.current) props.onSend?.();
@@ -104,6 +109,7 @@ export function Composer(props: ComposerProps) {
                     </optgroup>
                   ))}
                 </select>
+                <HugeiconsIcon className="composer-select-icon" icon={ArrowDown01Icon} />
               </label>
             ) : props.onSettings ? (
               <Button className="ghost model-button" onClick={props.onSettings}>
@@ -129,20 +135,21 @@ export function Composer(props: ComposerProps) {
                   <option value="auto">Auto</option>
                   <option value="full">Full</option>
                 </select>
+                <HugeiconsIcon className="composer-select-icon" icon={ArrowDown01Icon} />
               </label>
             )}
           </div>
           {props.active ? (
             props.onCancel && (
               <Button
-                className="primary composer-action"
+                className="primary composer-action stop-action"
                 size="icon-sm"
                 aria-label={props.stopping ? '正在停止…' : '停止任务'}
                 title={props.stopping ? '正在停止…' : '停止任务'}
                 onClick={props.onCancel}
                 disabled={props.stopping || props.cancelDisabled}
               >
-                <img src={stopIcon} alt="" width={16} height={16} />
+                <HugeiconsIcon icon={SquareStopIcon} />
               </Button>
             )
           ) : (
@@ -154,7 +161,7 @@ export function Composer(props: ComposerProps) {
               title={props.submitStatus || '发送消息'}
               disabled={!canSend}
             >
-              <img src={sendIcon} alt="" width={16} height={16} />
+              <HugeiconsIcon icon={ArrowUp01Icon} />
             </Button>
           )}
         </div>
@@ -164,9 +171,6 @@ export function Composer(props: ComposerProps) {
           {props.submitStatus}
         </span>
       )}
-      <p className="hint">
-        Enter 发送 · Shift+Enter 换行{props.active && ' · 当前执行期间仅保留草稿'}
-      </p>
     </>
   );
 }

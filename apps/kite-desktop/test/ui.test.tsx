@@ -8,6 +8,15 @@ import { CommandResultUnknown, DesktopClient, type DesktopView } from '../src/cl
 import { Settings } from '../src/Settings';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(dom.window, 'ResizeObserver', {
+  configurable: true,
+  value: TestResizeObserver,
+});
 const globals = {
   window: dom.window,
   document: dom.window.document,
@@ -18,9 +27,14 @@ const globals = {
   HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
   Event: dom.window.Event,
   CustomEvent: dom.window.CustomEvent,
+  FormData: dom.window.FormData,
   Node: dom.window.Node,
   Element: dom.window.Element,
+  DOMRect: dom.window.DOMRect,
   getComputedStyle: dom.window.getComputedStyle,
+  ResizeObserver: TestResizeObserver,
+  requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+  cancelAnimationFrame: (id: number) => clearTimeout(id),
   IS_REACT_ACT_ENVIRONMENT: true,
 };
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -249,12 +263,13 @@ async function click(element: HTMLElement) {
   });
 }
 async function choose(element: HTMLSelectElement, value: string) {
-  await act(() => {
+  await act(async () => {
     Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value')!.set!.call(
       element,
       value,
     );
     element.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await Promise.resolve();
   });
 }
 async function key(element: Element, value: string, options: KeyboardEventInit = {}) {
@@ -284,7 +299,10 @@ test('startup hides the main page until preparation settles and does not return 
   await act(() => {
     window.dispatchEvent(new dom.window.Event('focus'));
   });
-  await act(() => finish());
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   expect(document.querySelector('[aria-label="kite 启动页"]')).toBeNull();
   expect(document.querySelectorAll('.session-row')).toHaveLength(2);
   await write(input(), '保留草稿');
@@ -307,6 +325,56 @@ test('composer selects a configured model and changes the current session permis
   await choose(permission, 'accept_edits');
   expect(client.selectedModes).toEqual([{ sessionId: 's0', mode: 'accept_edits' }]);
   expect(permission.value).toBe('accept_edits');
+});
+
+test('the desktop sidebar can be reopened after it is collapsed', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+
+  await click(button('收起侧栏'));
+  expect(document.querySelector('.client-sidebar-panel')).toBeNull();
+
+  const reopen = button('展开侧栏');
+  expect(reopen.closest('.session-header')).not.toBeNull();
+  await click(reopen);
+
+  expect(document.querySelector('.client-sidebar-panel')).not.toBeNull();
+  expect(button('收起侧栏').getAttribute('aria-expanded')).toBe('true');
+});
+
+test('permission submission keeps disabled composer selectors visually steady', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  client.setInteractionMode = async (sessionId, mode) => {
+    client.selectedModes.push({ sessionId, mode });
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    client.update({ interactionMode: mode });
+  };
+  await render(<App client={client} />);
+
+  await choose(
+    document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!,
+    'accept_edits',
+  );
+  const composer = document.querySelector<HTMLFormElement>('.composer')!;
+  expect(composer.dataset.permissionPending).toBe('true');
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!.disabled).toBe(
+    true,
+  );
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!.disabled).toBe(
+    true,
+  );
+
+  await act(() => finish());
+  expect(composer.dataset.permissionPending).toBeUndefined();
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!.disabled).toBe(
+    false,
+  );
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!.disabled).toBe(
+    false,
+  );
 });
 
 test('new conversation applies its selected permission before sending the first message', async () => {
@@ -402,7 +470,9 @@ test('global new conversation preserves existing drafts, appends suggestions and
   await write(input(), '已有会话草稿');
   const primaryNavigation = button('新对话').closest('.primary-navigation');
   expect(primaryNavigation).not.toBeNull();
-  expect(primaryNavigation?.querySelector('button:last-child')?.textContent).toBe('工作台');
+  expect(
+    [...(primaryNavigation?.querySelectorAll('button') ?? [])].map((item) => item.textContent),
+  ).toEqual(['新对话', '工作台', '安排任务']);
   await click(button('新对话'));
   expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
   expect(document.querySelector('.breadcrumb')?.textContent).toBe('新对话');
@@ -466,6 +536,28 @@ test('global new conversation preserves existing drafts, appends suggestions and
   await act(() => Bun.sleep(320));
   expect(document.querySelectorAll('[aria-label="用户消息"]')).toHaveLength(1);
   expect(document.querySelector('[aria-label="用户消息"]')?.textContent).not.toContain('正在发送');
+});
+
+test('scheduled tasks opens below workbench and exposes an honest creation draft', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+  await click(button('安排任务'));
+  expect(document.querySelector('[aria-label="安排任务"]')).not.toBeNull();
+  expect(document.querySelector('.breadcrumb')?.textContent).toBe('安排任务');
+  expect(document.body.textContent).toContain('还没有安排任务');
+  await click(button('创建第一个任务'));
+  expect(document.querySelector('.right-sidebar[aria-label="新建安排任务"]')).not.toBeNull();
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(3);
+  expect(document.querySelectorAll('[role="separator"]')).toHaveLength(2);
+  expect(document.querySelector('[aria-label="安排任务"]')).not.toBeNull();
+  expect(document.querySelector<HTMLInputElement>('[aria-label="名称"]')).not.toBeNull();
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="任务说明"]')).not.toBeNull();
+  expect(document.body.textContent).toContain('详情');
+  expect(document.body.textContent).toContain('频率');
+  expect(button('保存任务').disabled).toBe(true);
+  expect(document.body.textContent).toContain('尚未接入任务保存与后台运行');
+  await click(button('工作台'));
+  expect(document.querySelector('[aria-label="工作台"]')).not.toBeNull();
 });
 
 test('first send keeps existing session navigation available and stays bound to the created session', async () => {
@@ -842,7 +934,7 @@ test('space new conversation icon targets that project without toggling its list
   const trigger = document.querySelector<HTMLButtonElement>(
     '[aria-label="在 another 中新建对话"]',
   )!;
-  expect(trigger.querySelector('img')).not.toBeNull();
+  expect(trigger.querySelector('svg')).not.toBeNull();
   expect(trigger.dataset.slot).toBe('button');
   expect(
     trigger.closest('.space-heading')?.querySelector('.space-row')?.getAttribute('aria-expanded'),
@@ -995,7 +1087,7 @@ test('empty, IME, Shift+Enter and repeated submit cannot issue unintended turns;
   expect(input().value).toBe('');
 });
 
-test('waiting approval retains the composer, sends only the chosen response, and uses one stop control', async () => {
+test('waiting approval hides the prompt input and stop control while preserving its draft', async () => {
   const client = new UiClient();
   const approval = {
     kind: 'approval',
@@ -1006,36 +1098,43 @@ test('waiting approval retains the composer, sends only the chosen response, and
     owner: { kind: 'root_tool', toolCallId: 'tool' },
     command: 'echo approved',
   } as const;
-  client.view = {
-    ...client.view,
-    projection: {
-      ...session('s0'),
-      currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
-      interactionQueue: { revision: 1, activeInteractionId: 'approval', interactions: [approval] },
-    },
-  };
+  const running = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'running', revision: 1 },
+  } as RuntimeSessionProjection;
+  client.view = { ...client.view, projection: running };
   await render(<App client={client} />);
-  expect(document.querySelectorAll('form.composer')).toHaveLength(1);
-  expect(
-    Array.from(document.querySelectorAll('button')).filter((item) =>
-      item.getAttribute('aria-label')?.startsWith('停止'),
-    ),
-  ).toHaveLength(1);
   await write(input(), '稍后的要求');
-  await key(input(), 'Enter');
+  await act(() =>
+    client.update({
+      projection: {
+        ...running,
+        currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 2 },
+        interactionQueue: {
+          revision: 1,
+          activeInteractionId: 'approval',
+          interactions: [approval],
+        },
+      },
+    }),
+  );
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
+  expect(document.querySelector('form.composer')).toBeNull();
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
   expect(client.sent).toEqual([]);
   await click(button('仅批准这一次'));
   expect(client.approvals).toBe(1);
   expect(client.cancelled).toBe(0);
-  await click(button('停止'));
-  expect(client.cancelled).toBe(1);
-  expect(button('正在停止…').disabled).toBe(true);
-  expect(button('仅批准这一次').disabled).toBe(true);
-  expect(input().value).toBe('稍后的要求');
   await act(() => client.update({ connected: false, ready: false }));
-  expect(button('停止').disabled).toBe(true);
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
   expect(document.querySelector<HTMLButtonElement>('.session-row')?.disabled).toBe(true);
   expect(button('仅批准这一次').disabled).toBe(true);
+  await act(() =>
+    client.update({
+      projection: { ...running, interactionQueue: { revision: 2, interactions: [] } },
+    }),
+  );
+  expect(input().value).toBe('稍后的要求');
 });
 
 test('cached history stays readable while calibrating, including cached empty history', async () => {
@@ -1075,32 +1174,36 @@ test('question and truncated plan stay above the composer without enabling inval
   const client = new UiClient();
   const projection = {
     ...session('s0'),
-    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'running', revision: 1 },
   } as const;
-  client.view = {
-    ...client.view,
-    projection: {
-      ...projection,
-      interactionQueue: {
-        revision: 1,
-        activeInteractionId: 'question',
-        interactions: [
-          {
-            kind: 'input',
-            interactionId: 'question',
-            sessionRevision: 1,
-            question: '使用哪个方案？',
-            allowFreeText: true,
-            options: [{ id: 'a', label: '方案 A' }],
-          },
-        ],
-      },
-    },
-  };
+  client.view = { ...client.view, projection };
   await render(<App client={client} />);
+  await write(input(), '保留会话草稿');
+  await act(() =>
+    client.update({
+      projection: {
+        ...projection,
+        currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 2 },
+        interactionQueue: {
+          revision: 1,
+          activeInteractionId: 'question',
+          interactions: [
+            {
+              kind: 'input',
+              interactionId: 'question',
+              sessionRevision: 1,
+              question: '使用哪个方案？',
+              allowFreeText: true,
+              options: [{ id: 'a', label: '方案 A' }],
+            },
+          ],
+        },
+      },
+    }),
+  );
   expect(document.querySelector('.interaction-area [aria-label="补充问题"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="回答问题"]')).not.toBeNull();
-  await write(input(), '保留会话草稿');
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
   await act(() =>
     client.update({
       projection: {
@@ -1124,8 +1227,202 @@ test('question and truncated plan stay above the composer without enabling inval
   expect(document.querySelector('.interaction-area [aria-label="计划审核"]')).not.toBeNull();
   expect(button('批准 · Auto').disabled).toBe(true);
   expect(button('批准 · Accept Edits').disabled).toBe(true);
-  expect(button('停止').disabled).toBe(false);
-  expect(input().value).toBe('保留会话草稿');
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
+});
+
+test('ask questionnaire submits a selected option through the input interaction', async () => {
+  const client = new UiClient();
+  const submissions: Array<{
+    value: string | undefined;
+    answers: Readonly<Record<string, string>> | undefined;
+  }> = [];
+  const projection = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    interactionQueue: {
+      revision: 1,
+      activeInteractionId: 'question',
+      interactions: [
+        {
+          kind: 'input',
+          interactionId: 'question',
+          sessionRevision: 1,
+          title: '需要确认',
+          summary: '选择最符合预期的处理方式。',
+          question: '使用哪个方案？',
+          allowFreeText: true,
+          options: [
+            { id: 'a', label: '方案 A', description: '保持当前范围' },
+            { id: 'b', label: '方案 B', description: '扩大处理范围' },
+          ],
+          questions: [
+            {
+              id: 'q1',
+              question: '使用哪个方案？',
+              allowFreeText: true,
+              options: [
+                { id: 'q1-o1', label: '方案 A', description: '保持当前范围' },
+                { id: 'q1-o2', label: '方案 B', description: '扩大处理范围' },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  } as RuntimeSessionProjection;
+  client.view = { ...client.view, projection };
+  client.respondInput = async (_sessionId, _interaction, value, answers) => {
+    submissions.push({ value, answers });
+  };
+
+  await render(<App client={client} />);
+  expect(document.querySelector('.ask-questionnaire')).not.toBeNull();
+  expect(document.querySelector('fieldset legend')?.textContent).toBe('使用哪个方案？');
+  expect(document.querySelector('.ask-questionnaire-description')?.textContent).toBe(
+    '选择最符合预期的处理方式。',
+  );
+  expect(document.querySelector('.ask-questionnaire-shortcut')).toBeNull();
+  expect(document.querySelector('.ask-questionnaire')?.textContent).not.toContain('保持当前范围');
+  const optionInfo = document.querySelector<HTMLButtonElement>(
+    '[aria-label="查看 方案 A 的详细信息"]',
+  );
+  expect(optionInfo).not.toBeNull();
+  expect(button('提交回答').disabled).toBe(true);
+  expect(submissions).toEqual([]);
+  await click(document.querySelectorAll<HTMLInputElement>('[name="q1"]')[1]!);
+  await click(button('提交回答'));
+  expect(submissions).toEqual([{ value: '方案 B', answers: { q1: 'q1-o2' } }]);
+});
+
+test('ask questionnaire preserves a single free-text answer as semantic input', async () => {
+  const client = new UiClient();
+  const answers: Array<string | undefined> = [];
+  const projection = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    interactionQueue: {
+      revision: 1,
+      activeInteractionId: 'question',
+      interactions: [
+        {
+          kind: 'input',
+          interactionId: 'question',
+          sessionRevision: 1,
+          question: '还有什么要求？',
+          allowFreeText: true,
+          options: [{ id: 'q1-o1', label: '没有其他要求' }],
+        },
+      ],
+    },
+  } as RuntimeSessionProjection;
+  client.view = { ...client.view, projection };
+  client.respondInput = async (_sessionId, _interaction, value) => {
+    answers.push(value);
+  };
+
+  await render(<App client={client} />);
+  await write(document.querySelector<HTMLInputElement>('[aria-label="回答问题"]')!, '保留现有接口');
+  await click(button('提交回答'));
+  expect(answers).toEqual(['保留现有接口']);
+});
+
+test('legacy single-choice input submits its label when free text is disabled', async () => {
+  const client = new UiClient();
+  const answers: Array<string | undefined> = [];
+  const projection = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    interactionQueue: {
+      revision: 1,
+      activeInteractionId: 'question',
+      interactions: [
+        {
+          kind: 'input',
+          interactionId: 'question',
+          sessionRevision: 1,
+          question: '继续吗？',
+          allowFreeText: false,
+          options: [{ id: 'continue', label: '继续' }],
+        },
+      ],
+    },
+  } as RuntimeSessionProjection;
+  client.view = { ...client.view, projection };
+  client.respondInput = async (_sessionId, _interaction, value) => {
+    answers.push(value);
+  };
+
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLInputElement>('[name="answer"]')!);
+  await click(button('提交回答'));
+  expect(answers).toEqual(['继续']);
+});
+
+test('ask questionnaire submits every answer under its stable question id', async () => {
+  const client = new UiClient();
+  const submissions: Array<{
+    value: string | undefined;
+    answers: Readonly<Record<string, string>> | undefined;
+  }> = [];
+  const projection = {
+    ...session('s0'),
+    currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 1 },
+    interactionQueue: {
+      revision: 1,
+      activeInteractionId: 'batch-question',
+      interactions: [
+        {
+          kind: 'input',
+          interactionId: 'batch-question',
+          sessionRevision: 1,
+          question: '第一题？',
+          allowFreeText: true,
+          questions: [
+            {
+              id: 'q1',
+              question: '第一题？',
+              allowFreeText: true,
+              options: [{ id: 'q1-o1', label: '答案一' }],
+            },
+            {
+              id: 'q2',
+              question: '第二题？',
+              allowFreeText: false,
+              options: [{ id: 'q2-o1', label: '答案二' }],
+            },
+          ],
+        },
+      ],
+    },
+  } as RuntimeSessionProjection;
+  client.view = { ...client.view, projection };
+  client.respondInput = async (_sessionId, _interaction, value, answers) => {
+    submissions.push({ value, answers });
+  };
+
+  await render(<App client={client} />);
+  expect(document.querySelector('.ask-questionnaire-progress')?.textContent).toBe('问题 1 / 2');
+  expect(document.querySelector('button[type="submit"]')).toBeNull();
+  await click(button('下一题'));
+  expect(document.querySelector('.ask-questionnaire-progress')?.textContent).toBe('问题 2 / 2');
+  expect(button('提交回答').disabled).toBe(true);
+  await click(button('上一题'));
+  expect(document.querySelector('.ask-questionnaire-progress')?.textContent).toBe('问题 1 / 2');
+  await click(document.querySelector<HTMLInputElement>('[name="q1"]')!);
+  expect(document.querySelector<HTMLInputElement>('[aria-label="回答：第一题？"]')?.value).toBe('');
+  await click(button('下一题'));
+  expect(document.querySelector('.ask-questionnaire-progress')?.textContent).toBe('问题 2 / 2');
+  expect(button('提交回答').disabled).toBe(true);
+  await click(document.querySelector<HTMLInputElement>('[name="q2"]')!);
+  expect(button('提交回答').disabled).toBe(false);
+  await click(button('提交回答'));
+  expect(submissions).toEqual([
+    {
+      value: '第一题？: 答案一\n第二题？: 答案二',
+      answers: { q1: 'q1-o1', q2: 'q2-o1' },
+    },
+  ]);
 });
 
 test.each([
@@ -1160,7 +1457,11 @@ test.each([
   } as RuntimeSessionProjection;
   client.view = {
     ...client.view,
-    projection: first,
+    projection: {
+      ...first,
+      currentRun: { ...first.currentRun!, status: 'running' },
+      interactionQueue: { revision: 0, interactions: [] },
+    },
     sessions: [first, { ...first, sessionId: 's1', displayName: '另一个问题' }],
   };
   client.respondInput = async () => {
@@ -1170,16 +1471,18 @@ test.each([
     throw new Error('计划提交失败');
   };
   await render(<App client={client} />);
+  await write(input(), '主输入框草稿');
+  await act(() => client.update({ projection: first }));
   const label = kind === 'input' ? '回答问题' : '计划修改要求';
   const answer = () => document.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
   await write(answer(), '先核对现有文档，再提供完整的复现步骤。');
-  await write(input(), '主输入框草稿');
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
   expect(answer().value).toBe('');
   await write(answer(), '另一会话的回答');
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
   expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
-  expect(input().value).toBe('主输入框草稿');
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
   await click(button(kind === 'input' ? '提交回答' : '提交修改要求'));
   expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
   await click(button('工作台'));
@@ -1205,9 +1508,31 @@ test.each([
   client.respondPlan = async () => {};
   await click(button(kind === 'input' ? '提交回答' : '提交修改要求'));
   expect(answer().value).toBe('');
-  expect(input().value).toBe('主输入框草稿');
+  expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
   expect(answer().value).toBe('另一会话的回答');
+  await act(() =>
+    client.update({
+      projection: {
+        ...first,
+        sessionId: 's1',
+        currentRun: { ...first.currentRun!, status: 'running' },
+        interactionQueue: { revision: 3, interactions: [] },
+      },
+    }),
+  );
+  expect(input().value).toBe('');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
+  await act(() =>
+    client.update({
+      projection: {
+        ...first,
+        currentRun: { ...first.currentRun!, status: 'running' },
+        interactionQueue: { revision: 3, interactions: [] },
+      },
+    }),
+  );
+  expect(input().value).toBe('主输入框草稿');
 });
 
 test('file changes open beside the conversation, keep drafts and close before switching sessions', async () => {
@@ -1228,11 +1553,15 @@ test('file changes open beside the conversation, keep drafts and close before sw
   await write(input(), '保留我的草稿');
   await click(button('文件变更'));
   expect(document.querySelector('[aria-label="文件变更"]')).not.toBeNull();
+  expect(document.querySelector('[role="tab"]')?.textContent).toBe('文件变更');
+  expect(document.querySelector('.right-sidebar')).not.toBeNull();
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(3);
+  expect(document.querySelectorAll('[role="separator"]')).toHaveLength(2);
   expect(input().value).toBe('保留我的草稿');
   expect(document.querySelector('dialog')).toBeNull();
   await click(document.querySelector<HTMLButtonElement>('.results .file-link')!);
   expect(client.openedFiles).toEqual(['notes.md']);
-  await click(button('关闭'));
+  await click(document.querySelector<HTMLButtonElement>('.right-sidebar-close')!);
   expect(document.activeElement).toBe(button('文件变更'));
   await click(button('文件变更'));
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);

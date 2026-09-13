@@ -1,8 +1,12 @@
 export interface Message {
   readonly id: string;
+  /** Stable Runtime Turn ownership used for per-turn presentation actions. */
+  readonly turnId?: string;
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;
+  /** A settled model response with no following tool calls is the Turn's final reply. */
+  readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
   readonly changedFile?: string;

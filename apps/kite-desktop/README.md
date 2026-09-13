@@ -17,7 +17,7 @@
 [新对话、项目与分支](docs/new-conversation.md)说明全局准备页、首次发送创建会话、已打开项目列表和立即生效的本地分支选择；共享 UI 只呈现选择数据，原生宿主负责目录与 Git。
 
 - [React 入口](src/main.tsx)装配[App](src/App.tsx)，[客户端适配](src/client.ts)消费 Runtime Client、App Control 与 History；[投影](src/presentation.ts)按请求身份保留累计正文与持久终态。
-- [具名 bridge](src/bridge.ts)定义 renderer 可见的完整 API；[preload](electron/preload.ts)只通过 `contextBridge` 暴露冻结的 `window.kiteDesktop`，[IPC owner](electron/ipc.ts)逐通道核实主窗口 frame 与封闭参数。renderer 不取得 `ipcRenderer`、任意 channel、Node 或 Electron 对象。
+- [具名 bridge](src/bridge.ts)定义 renderer 可见的完整 API；[preload](electron/preload.ts)只通过 `contextBridge` 暴露冻结的 `window.kiteDesktop`，[IPC owner](electron/ipc.ts)逐通道核实主窗口 frame 与封闭参数。复制消息通过最大 1 MiB 的纯文本通道交给 Electron 主进程写入系统剪贴板，不依赖打包页的 Web Clipboard API。renderer 不取得 `ipcRenderer`、任意 channel、Node 或 Electron 对象。
 - [桌面 transport](src/transport.ts)每次 IPC 只拉取一个有界 Runtime frame；[Electron 宿主](electron/host.ts)只启动构建时固定、运行时校验过的配套服务，[stdio 进程](electron/runtime/service-process.ts)使用单消费者和 16 帧有界输出队列。
 - [页面重接](electron/runtime/renderer-connection.ts)保留同一 Service protocol peer，页面刷新或 renderer 进程退出只 detach 旧代次；新页面恢复订阅和历史，不清理运行中的任务。传输代次与 UI 导航恢复见[新对话 owner](docs/new-conversation.md#页面刷新与连接恢复)。
 - renderer 只导入 `kite-local-runtime/client/protocol` 的环境无关组合，不使用 Node/Bun、Host、Store 或 Web REST。
@@ -30,13 +30,13 @@
 环境需要 Bun 和 macOS；Electron 与官方 `@electron/packager` 已由 workspace 依赖锁定，不需要 Rust、Cargo 或 Tauri 开发依赖。开发用配套服务也不从 PATH 寻找服务或连接 daemon。
 
 1. 仓库根执行 `bun install`。
-2. 执行 `bun run --cwd apps/kite-desktop prepare:service`；可在脚本后提供已验证 candidate archive，复用 release owner 的构建/校验和服务 identity。
-3. `bun run --cwd apps/kite-desktop dev` 先把 Electron main/preload 编译到 `dist-electron`，再启动 Vite 与 Electron 开发窗口。
+2. `bun run --cwd apps/kite-desktop dev` 先从当前工作树自动构建并校验配套 Runtime Host，再把该 Host 的精确 identity 编译进 Electron main/preload，最后启动 Vite 与 Electron 开发窗口。
+3. 只需单独刷新配套服务时可执行 `bun run --cwd apps/kite-desktop prepare:service`；可在脚本后提供已验证 candidate archive，复用 release owner 的构建/校验和服务 identity。
 4. `bun run --cwd apps/kite-desktop build:desktop` 依次构建 renderer、Electron host，并用官方 Electron Packager 生成当前 macOS arm64 制品 `apps/kite-desktop/out/kite-darwin-arm64/kite.app`。
 
 开发窗口的 CSP 允许 Vite 注入的 React Refresh 内联初始化脚本；打包窗口的 `script-src` 只允许自身资源。修改开发加载方式后须验证真实 Electron 开发窗口的首次渲染和刷新，打包窗口 smoke 不覆盖 Vite 注入路径。
 
-`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包采用现有 checkout digest 的 source profile，打包版使用用户 canonical profile 保存持久数据；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
+`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 每次启动都先调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包采用现有 checkout digest 的 source profile，打包版使用用户 canonical profile 保存持久数据；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
 
 检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
 

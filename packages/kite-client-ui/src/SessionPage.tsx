@@ -1,26 +1,34 @@
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from './Composer';
 import { Conversation, type ReadingState } from './Conversation';
-import { ScrollArea } from './components/ui/scroll-area';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
   type NewConversationProps,
   NewConversationWelcome,
 } from './NewConversation';
+import { RightSidebar } from './RightSidebar';
+import { ScheduledTaskEditor, ScheduledTasks, type ScheduledTasksProps } from './ScheduledTasks';
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, WorkspaceSummary } from './types';
 import { Button } from './ui';
 import { Workbench } from './Workbench';
 
-const collapseSidebarIcon = new URL('./assets/sidebar-collapse.svg', import.meta.url).href;
-const expandSidebarIcon = new URL('./assets/sidebar-expand.svg', import.meta.url).href;
+const SESSION_HEADER_LABEL_LIMIT = 10;
+
+function sessionHeaderLabel(label: string): string {
+  const characters = Array.from(label);
+  if (characters.length <= SESSION_HEADER_LABEL_LIMIT) return label;
+  return `${characters.slice(0, SESSION_HEADER_LABEL_LIMIT - 1).join('')}…`;
+}
 
 export interface SessionPageProps {
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
-  workspaceLabel: string;
   sessionLabel: string;
   readingKey: string;
   messages: readonly Message[];
@@ -47,6 +55,8 @@ export interface SessionPageProps {
   fileChanges?: readonly Message[];
   newConversation?: NewConversationProps;
   workbench?: boolean;
+  scheduledTasks?: ScheduledTasksProps;
+  writeClipboardText?: (text: string) => Promise<void>;
 }
 
 /** The single production conversation page for both hosts. No host/protocol imports. */
@@ -65,10 +75,19 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [changesKey, setChangesKey] = useState<string>();
   const changesOpen = changesKey === props.readingKey && fileChanges !== undefined;
+  const [scheduledEditorOpen, setScheduledEditorOpen] = useState(false);
+  const rightSidebarOpen = changesOpen || (scheduledEditorOpen && !!props.scheduledTasks);
   const changesToggle = useRef<HTMLButtonElement>(null);
+  const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
+  const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
+    queueMicrotask(() => control.current?.focus());
+  }, []);
   useEffect(() => {
     if (changesKey !== undefined && changesKey !== props.readingKey) setChangesKey(undefined);
   }, [changesKey, props.readingKey]);
+  useEffect(() => {
+    if (!props.scheduledTasks) setScheduledEditorOpen(false);
+  }, [props.scheduledTasks]);
   const readings = useRef<Record<string, ReadingState>>({});
   const sidebar = useRef<HTMLElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -87,9 +106,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         toggle.current?.focus();
         return;
       }
-      if (changesOpen) {
+      if (rightSidebarOpen) {
         setChangesKey(undefined);
-        changesToggle.current?.focus();
+        setScheduledEditorOpen(false);
+        focusControlAfterCommit(changesOpen ? changesToggle : scheduledEditorToggle);
         return;
       }
       if (narrow) {
@@ -99,7 +119,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     };
     window.addEventListener('keydown', cancel);
     return () => window.removeEventListener('keydown', cancel);
-  }, [narrow, sidebarOpen, changesOpen]);
+  }, [narrow, sidebarOpen, changesOpen, rightSidebarOpen, focusControlAfterCommit]);
   useEffect(() => {
     if (typeof matchMedia === 'undefined') return;
     const media = matchMedia('(max-width: 600px)');
@@ -126,86 +146,39 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     props.onOpen(id);
     if (narrow) setSidebarOpen(false);
   };
-  return (
-    <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging; interactive descendants remain excluded. */}
-      <header
-        className="app-header"
-        onMouseDown={(event) => {
-          if (
-            event.button !== 0 ||
-            (event.detail !== 1 && event.detail !== 2) ||
-            (event.target as HTMLElement).closest(
-              'button, a, input, select, textarea, label, summary, [role="button"], [role="link"]',
-            )
-          )
-            return;
-          event.preventDefault();
-          props.onHeaderMouseDown?.(event.detail);
-        }}
-      >
-        {sidebarOpen && (
-          <div className="sidebar-header">
-            <strong className="brand">kite</strong>
-            <Button
-              ref={toggle}
-              className="ghost sidebar-toggle"
-              size="icon-sm"
-              aria-expanded={sidebarOpen}
-              aria-label="收起侧栏"
-              title="收起侧栏"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <img src={collapseSidebarIcon} alt="" width={16} height={16} />
-            </Button>
-          </div>
-        )}
-        <div className="session-header" inert={narrow && sidebarOpen}>
-          {!sidebarOpen && (
-            <Button
-              ref={toggle}
-              className="ghost sidebar-toggle"
-              size="icon-sm"
-              aria-expanded={sidebarOpen}
-              aria-label="展开侧栏"
-              title="展开侧栏"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <img src={expandSidebarIcon} alt="" width={16} height={16} />
-            </Button>
-          )}
-          <div className="breadcrumb">
-            {props.workbench ? (
-              <strong>工作台</strong>
-            ) : props.newConversation ? (
-              <strong>新对话</strong>
-            ) : (
-              <>
-                <span>{props.workspaceLabel}</span>
-                <span aria-hidden="true">/</span>
-                <strong>{props.sessionLabel}</strong>
-              </>
-            )}
-          </div>
-          {props.headerActions}
-          {fileChanges !== undefined && (
-            <Button
-              ref={changesToggle}
-              className="ghost"
-              aria-expanded={changesOpen}
-              aria-controls="session-file-changes"
-              onClick={() => setChangesKey(changesOpen ? undefined : props.readingKey)}
-            >
-              {changesOpen ? '收起变更' : '文件变更'}
-            </Button>
-          )}
-        </div>
+  const handleHeaderMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+    if (
+      event.button !== 0 ||
+      (event.detail !== 1 && event.detail !== 2) ||
+      (event.target as HTMLElement).closest(
+        'button, a, input, select, textarea, label, summary, [role="button"], [role="link"]',
+      )
+    )
+      return;
+    event.preventDefault();
+    props.onHeaderMouseDown?.(event.detail);
+  };
+  const sidebarPanel = (
+    <div className={`client-sidebar-panel ${narrow ? 'narrow' : ''}`}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
+      <header className="sidebar-header" onMouseDown={handleHeaderMouseDown}>
+        <strong className="brand">kite</strong>
+        <Button
+          ref={toggle}
+          className="ghost sidebar-toggle"
+          size="icon-sm"
+          aria-expanded={sidebarOpen}
+          aria-label="收起侧栏"
+          title="收起侧栏"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <HugeiconsIcon icon={PanelLeftCloseIcon} />
+        </Button>
       </header>
       <aside
         ref={sidebar}
         className="sidebar"
         aria-label="空间与会话"
-        hidden={!sidebarOpen}
         {...(narrow && sidebarOpen ? { role: 'dialog', 'aria-modal': true } : {})}
         onKeyDown={(event) => {
           if (!narrow || event.key !== 'Tab') return;
@@ -254,12 +227,236 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               : undefined,
           }}
           connectionLabel={props.connectionLabel}
-          activePage={props.workbench ? 'workbench' : 'conversation'}
+          activePage={
+            props.scheduledTasks ? 'scheduledTasks' : props.workbench ? 'workbench' : 'conversation'
+          }
           onExpand={props.onExpand}
           defaultExpanded={props.defaultExpanded}
           onOpen={props.onOpen ? open : undefined}
         />
       </aside>
+    </div>
+  );
+  const rightSidebarPanel = changesOpen ? (
+    <RightSidebar
+      id="session-file-changes"
+      label="文件变更"
+      tabs={[
+        {
+          value: 'changes',
+          label: '文件变更',
+          content: <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />,
+        },
+      ]}
+      onClose={() => {
+        setChangesKey(undefined);
+        focusControlAfterCommit(changesToggle);
+      }}
+    />
+  ) : scheduledEditorOpen && props.scheduledTasks ? (
+    <RightSidebar
+      label="新建安排任务"
+      title="新建"
+      onClose={() => {
+        setScheduledEditorOpen(false);
+        focusControlAfterCommit(scheduledEditorToggle);
+      }}
+    >
+      <ScheduledTaskEditor
+        props={props.scheduledTasks}
+        onClose={() => {
+          setScheduledEditorOpen(false);
+          focusControlAfterCommit(scheduledEditorToggle);
+        }}
+      />
+    </RightSidebar>
+  ) : null;
+  return (
+    <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
+      <ResizablePanelGroup
+        key={`${narrow ? 'narrow' : sidebarOpen ? 'navigation' : 'content'}-${rightSidebarOpen ? 'details' : 'plain'}`}
+        id="client-layout"
+        orientation="horizontal"
+        className="client-panels"
+      >
+        {!narrow && sidebarOpen && (
+          <>
+            <ResizablePanel id="navigation" defaultSize="236px" minSize="200px" maxSize="420px">
+              {sidebarPanel}
+            </ResizablePanel>
+            <ResizableHandle id="navigation-resize" withHandle />
+          </>
+        )}
+        <ResizablePanel id="content" minSize="360px">
+          <div className="client-main-panel" inert={narrow && sidebarOpen}>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
+            <header className="session-header" onMouseDown={handleHeaderMouseDown}>
+              {!sidebarOpen && (
+                <Button
+                  ref={toggle}
+                  className="ghost sidebar-toggle"
+                  size="icon-sm"
+                  aria-expanded={sidebarOpen}
+                  aria-label="展开侧栏"
+                  title="展开侧栏"
+                  onClick={() => setSidebarOpen(true)}
+                >
+                  <HugeiconsIcon icon={PanelLeftOpenIcon} />
+                </Button>
+              )}
+              <div className="breadcrumb">
+                {props.scheduledTasks ? (
+                  <strong>安排任务</strong>
+                ) : props.workbench ? (
+                  <strong>工作台</strong>
+                ) : props.newConversation ? (
+                  <strong>新对话</strong>
+                ) : (
+                  <strong title={props.sessionLabel}>
+                    {sessionHeaderLabel(props.sessionLabel)}
+                  </strong>
+                )}
+              </div>
+              {props.headerActions}
+              {fileChanges !== undefined && (
+                <Button
+                  ref={changesToggle}
+                  className="ghost"
+                  aria-expanded={changesOpen}
+                  aria-controls="session-file-changes"
+                  onClick={() => setChangesKey(changesOpen ? undefined : props.readingKey)}
+                >
+                  {changesOpen ? '收起变更' : '文件变更'}
+                </Button>
+              )}
+            </header>
+            <main
+              className={
+                props.newConversation
+                  ? 'new-conversation-page'
+                  : props.scheduledTasks
+                    ? 'scheduled-tasks-page'
+                    : props.workbench
+                      ? 'workbench-page'
+                      : undefined
+              }
+            >
+              {props.notices}
+              <div className="session-body">
+                <div className="session-view">
+                  {props.beforeConversation}
+                  {props.scheduledTasks ? (
+                    <ScheduledTasks
+                      {...props.scheduledTasks}
+                      onNewTask={(trigger) => {
+                        scheduledEditorToggle.current = trigger;
+                        setScheduledEditorOpen(true);
+                      }}
+                    />
+                  ) : props.workbench ? (
+                    <Workbench
+                      workspaces={props.workspaces}
+                      onOpen={props.onOpen ? open : undefined}
+                    />
+                  ) : (
+                    (props.diagnosticView ?? (
+                      <section
+                        className="history-panel"
+                        role={props.historyPanel ? 'tabpanel' : undefined}
+                        id={props.historyPanel?.id}
+                        aria-labelledby={props.historyPanel?.labelledBy}
+                      >
+                        {props.newConversation && props.composer && !messages.length ? (
+                          <NewConversationWelcome
+                            onSuggest={(value) => {
+                              props.composer!.onChange(
+                                props.composer!.draft
+                                  ? `${props.composer!.draft}\n${value}`
+                                  : value,
+                              );
+                              focusComposerAfterCommit();
+                            }}
+                          />
+                        ) : props.historyError ? (
+                          <section className="notice error" role="alert">
+                            <strong>{props.historyError.title}</strong>
+                            <p>{props.historyError.detail}</p>
+                            <Button onClick={props.historyError.retry}>重试</Button>
+                          </section>
+                        ) : (
+                          <Conversation
+                            key={props.readingKey}
+                            messages={messages}
+                            loading={props.loading}
+                            selected={!!props.selected}
+                            emptyState={
+                              !props.composer
+                                ? {
+                                    title: props.selected
+                                      ? '暂无消息'
+                                      : props.workspaces.length
+                                        ? '选择会话'
+                                        : '暂无可查看的会话',
+                                    detail: props.selected
+                                      ? '当前会话没有可展示的历史消息。'
+                                      : '从左侧空间中点击会话即可加载消息。',
+                                  }
+                                : undefined
+                            }
+                            connected={props.connected}
+                            initialReading={readings.current[props.readingKey]}
+                            saveReading={(state) => {
+                              readings.current[props.readingKey] = state;
+                            }}
+                            openFile={props.actions.openFile}
+                            writeClipboardText={props.writeClipboardText}
+                          />
+                        )}
+                      </section>
+                    ))
+                  )}
+                  {!props.workbench && !props.scheduledTasks && (
+                    <footer className="conversation-footer">
+                      <div className="bottom-controls">
+                        {props.interaction && (
+                          <div className="interaction-area">{props.interaction}</div>
+                        )}
+                        {props.composer ? (
+                          <Composer
+                            {...props.composer}
+                            promptHidden={!!props.interaction}
+                            inputRef={composerInput}
+                            context={
+                              props.newConversation && (
+                                <NewConversationContext {...props.newConversation} />
+                              )
+                            }
+                          />
+                        ) : (
+                          props.readOnlyReason && (
+                            <p className="hint" role="status">
+                              {props.readOnlyReason}
+                            </p>
+                          )
+                        )}
+                      </div>
+                    </footer>
+                  )}
+                </div>
+              </div>
+            </main>
+          </div>
+        </ResizablePanel>
+        {rightSidebarPanel && (
+          <>
+            <ResizableHandle id="details-resize" withHandle />
+            <ResizablePanel id="details" defaultSize="380px" minSize="300px" maxSize="640px">
+              {rightSidebarPanel}
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+      {narrow && sidebarOpen && sidebarPanel}
       {narrow && sidebarOpen && (
         <button
           type="button"
@@ -272,123 +469,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           }}
         />
       )}
-      <main
-        className={
-          props.newConversation
-            ? 'new-conversation-page'
-            : props.workbench
-              ? 'workbench-page'
-              : undefined
-        }
-        inert={narrow && sidebarOpen}
-      >
-        {props.notices}
-        <div className="session-body">
-          <div className="session-view">
-            {props.beforeConversation}
-            {props.workbench ? (
-              <Workbench workspaces={props.workspaces} onOpen={props.onOpen ? open : undefined} />
-            ) : (
-              (props.diagnosticView ?? (
-                <section
-                  className="history-panel"
-                  role={props.historyPanel ? 'tabpanel' : undefined}
-                  id={props.historyPanel?.id}
-                  aria-labelledby={props.historyPanel?.labelledBy}
-                >
-                  {props.newConversation && props.composer && !messages.length ? (
-                    <NewConversationWelcome
-                      onSuggest={(value) => {
-                        props.composer!.onChange(
-                          props.composer!.draft ? `${props.composer!.draft}\n${value}` : value,
-                        );
-                        focusComposerAfterCommit();
-                      }}
-                    />
-                  ) : props.historyError ? (
-                    <section className="notice error" role="alert">
-                      <strong>{props.historyError.title}</strong>
-                      <p>{props.historyError.detail}</p>
-                      <Button onClick={props.historyError.retry}>重试</Button>
-                    </section>
-                  ) : (
-                    <Conversation
-                      key={props.readingKey}
-                      messages={messages}
-                      loading={props.loading}
-                      selected={!!props.selected}
-                      emptyState={
-                        !props.composer
-                          ? {
-                              title: props.selected
-                                ? '暂无消息'
-                                : props.workspaces.length
-                                  ? '选择会话'
-                                  : '暂无可查看的会话',
-                              detail: props.selected
-                                ? '当前会话没有可展示的历史消息。'
-                                : '从左侧空间中点击会话即可加载消息。',
-                            }
-                          : undefined
-                      }
-                      connected={props.connected}
-                      initialReading={readings.current[props.readingKey]}
-                      saveReading={(state) => {
-                        readings.current[props.readingKey] = state;
-                      }}
-                      openFile={props.actions.openFile}
-                    />
-                  )}
-                </section>
-              ))
-            )}
-            <footer className="conversation-footer">
-              <div className="bottom-controls">
-                {props.interaction && <div className="interaction-area">{props.interaction}</div>}
-                {props.composer ? (
-                  <Composer
-                    {...props.composer}
-                    inputRef={composerInput}
-                    context={
-                      props.newConversation && <NewConversationContext {...props.newConversation} />
-                    }
-                  />
-                ) : (
-                  props.readOnlyReason && (
-                    <p className="hint" role="status">
-                      {props.readOnlyReason}
-                    </p>
-                  )
-                )}
-              </div>
-            </footer>
-          </div>
-          {changesOpen && (
-            <ScrollArea
-              className="context-panel"
-              id="session-file-changes"
-              role="complementary"
-              aria-label="文件变更"
-            >
-              <div className="context-panel-content">
-                <div className="context-heading">
-                  <h2>文件变更</h2>
-                  <Button
-                    className="ghost"
-                    onClick={() => {
-                      setChangesKey(undefined);
-                      changesToggle.current?.focus();
-                    }}
-                  >
-                    关闭
-                  </Button>
-                </div>
-                <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
-              </div>
-            </ScrollArea>
-          )}
-        </div>
-      </main>
       {props.overlays}
     </div>
   );

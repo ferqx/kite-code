@@ -12,11 +12,20 @@ export function projectEvent(
   messages: readonly Message[],
   event: RuntimeClientEvent,
 ): readonly Message[] {
+  return projectEventWithIdentity(messages, event);
+}
+
+export function projectEventWithIdentity(
+  messages: readonly Message[],
+  event: RuntimeClientEvent,
+  identity: Readonly<{ turnId?: string }> = {},
+): readonly Message[] {
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;
     const previous = messages.find((message) => message.id === id);
     const change: Message = {
       ...(previous ?? { id, role: 'tool', text: event.summary ?? '文件已变更', settled: false }),
+      ...(identity.turnId ? { turnId: identity.turnId } : {}),
       changeConfirmed: true,
       ...(event.path ? { changedFile: event.path } : {}),
     };
@@ -146,6 +155,7 @@ export function projectEvent(
         role: 'assistant',
         text: event.summary ?? '',
         settled: true,
+        finalReply: event.toolCallCount === 0,
       };
       break;
     case 'tool.queued':
@@ -206,6 +216,7 @@ export function projectEvent(
     default:
       return messages;
   }
+  if (identity.turnId) next = { ...next, turnId: identity.turnId };
   const index = messages.findIndex((message) => message.id === next.id);
   if (index < 0) return [...messages, next];
   const previous = messages[index]!;

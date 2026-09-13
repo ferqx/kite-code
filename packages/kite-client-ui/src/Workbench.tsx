@@ -3,8 +3,6 @@ import { sessionStatusLabel } from './status';
 import type { SessionSummary, WorkspaceSummary } from './types';
 import { Button } from './ui';
 
-const statusDotIcon = new URL('./assets/status-dot.svg', import.meta.url).href;
-
 interface WorkbenchProps {
   workspaces: readonly WorkspaceSummary[];
   onOpen?: (id: string) => void;
@@ -46,7 +44,7 @@ function Section({
                 </small>
               </span>
               {session.pendingInteractions || session.status === 'running' ? (
-                <img className="workbench-status-dot" src={statusDotIcon} alt="有新状态" />
+                <span className="workbench-status-dot" role="img" aria-label="有新状态" />
               ) : null}
             </Button>
           );

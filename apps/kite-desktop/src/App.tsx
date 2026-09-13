@@ -54,6 +54,7 @@ export function App({ client }: { client: DesktopClient }) {
     directory: directorySnapshot,
   } = view;
   const [busy, setBusy] = useState(false);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectingSession, setSelectingSession] = useState<string>();
   const [newConversationPermission, setNewConversationPermission] = useState<
@@ -68,6 +69,7 @@ export function App({ client }: { client: DesktopClient }) {
   const [newConversation, setNewConversation] = useState(!selected);
   const [firstSubmission, setFirstSubmission] = useState<FirstSubmission>();
   const [workbenchView, setWorkbenchView] = useState(false);
+  const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
   const preparing = newConversation || !selected;
@@ -88,10 +90,6 @@ export function App({ client }: { client: DesktopClient }) {
     isActiveRun(projection) &&
     stopRequest?.key === draftKey &&
     stopRequest.runId === projection?.currentRun?.runId;
-  const workspaceName =
-    (preparing ? workspace : (selectedWorkspace ?? '')).split('/').filter(Boolean).pop() ||
-    selectedSession?.workspaceName ||
-    '本地空间';
   const interaction =
     !preparing &&
     projection?.interactionQueue.interactions.find(
@@ -124,6 +122,7 @@ export function App({ client }: { client: DesktopClient }) {
   const openSession = (id: string) => {
     const revision = ++navigationRevision.current;
     setWorkbenchView(false);
+    setScheduledTasksView(false);
     setNewConversation(false);
     setSelectingSession(id);
     // Selection has its own abort/generation owner; a second selection may supersede it.
@@ -153,6 +152,7 @@ export function App({ client }: { client: DesktopClient }) {
     if (!busyRef.current) {
       navigationRevision.current++;
       setWorkbenchView(false);
+      setScheduledTasksView(false);
       setNewConversation(true);
       setFirstSubmission((submission) =>
         submission?.phase === 'unknown' ? submission : undefined,
@@ -206,6 +206,8 @@ export function App({ client }: { client: DesktopClient }) {
       if (!target || !(await activateForWork(target))) return;
       if (navigationRevision.current !== revision) return;
       navigationRevision.current++;
+      setWorkbenchView(false);
+      setScheduledTasksView(false);
       setNewConversation(true);
       rememberNavigation(target);
     });
@@ -317,7 +319,7 @@ export function App({ client }: { client: DesktopClient }) {
         : view.messages.map((message, index) =>
             index === optimisticRuntimeIndex ? optimisticMessage : message,
           )
-    : workbenchView || preparing
+    : workbenchView || scheduledTasksView || preparing
       ? []
       : view.messages;
   const liveSessions = new Map(view.sessions.map((session) => [session.sessionId, session]));
@@ -402,14 +404,14 @@ export function App({ client }: { client: DesktopClient }) {
       }))}
       defaultExpanded
       onExpand={() => void act(() => client.refreshSessions())}
-      selected={workbenchView || preparing ? undefined : selected}
-      workspaceLabel={workspaceName}
+      selected={workbenchView || scheduledTasksView || preparing ? undefined : selected}
       sessionLabel={selectedSession?.displayName || (selected ? '新会话' : '开始一项工作')}
       readingKey={draftKey}
       messages={displayedMessages}
       loading={
         !optimisticMessage &&
         !workbenchView &&
+        !scheduledTasksView &&
         !preparing &&
         loadingSession &&
         !view.hasLoadedHistory
@@ -427,18 +429,25 @@ export function App({ client }: { client: DesktopClient }) {
         newWorkspaceSession: (id) => chooseProject(id),
         workbench: () => {
           navigationRevision.current++;
+          setScheduledTasksView(false);
           setWorkbenchView(true);
+        },
+        scheduledTasks: () => {
+          navigationRevision.current++;
+          setWorkbenchView(false);
+          setScheduledTasksView(true);
         },
         settings: () => setSettingsOpen(true),
         openFile: connected && selectedWorkspace === workspace ? openFile : undefined,
       }}
+      writeClipboardText={(text) => client.copyText(text)}
       fileChanges={
-        !workbenchView && !preparing && selected
+        !workbenchView && !scheduledTasksView && !preparing && selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
       newConversation={
-        !workbenchView && preparing
+        !workbenchView && !scheduledTasksView && preparing
           ? {
               projects: [
                 ...(projects ?? []),
@@ -511,7 +520,11 @@ export function App({ client }: { client: DesktopClient }) {
         </>
       }
       interaction={
-        !workbenchView && interaction && interaction.kind === 'approval' && selected ? (
+        !workbenchView &&
+        !scheduledTasksView &&
+        interaction &&
+        interaction.kind === 'approval' &&
+        selected ? (
           <section className="notice" aria-label="工具审批">
             <strong>{interaction.title || '工具需要你的批准'}</strong>
             <p>{interaction.summary}</p>
@@ -543,6 +556,7 @@ export function App({ client }: { client: DesktopClient }) {
             </div>
           </section>
         ) : !workbenchView &&
+          !scheduledTasksView &&
           interaction &&
           (interaction.kind === 'input' || interaction.kind === 'plan_review') &&
           selected ? (
@@ -556,12 +570,31 @@ export function App({ client }: { client: DesktopClient }) {
             onTextChange={(text) =>
               setDrafts((values) => ({ ...values, [interactionDraftKey]: text }))
             }
+            answers={
+              interaction.kind === 'input' && interaction.questions
+                ? Object.fromEntries(
+                    interaction.questions.map((question) => [
+                      question.id,
+                      drafts[`${interactionDraftKey}\0answer:${question.id}`] ?? '',
+                    ]),
+                  )
+                : undefined
+            }
+            onAnswerChange={(questionId, value) =>
+              setDrafts((values) => ({
+                ...values,
+                [`${interactionDraftKey}\0answer:${questionId}`]: value,
+              }))
+            }
             act={(action) =>
               act(async () => {
                 await action();
                 setDrafts((values) => {
                   const next = { ...values };
                   delete next[interactionDraftKey];
+                  for (const key of Object.keys(next)) {
+                    if (key.startsWith(`${interactionDraftKey}\0answer:`)) delete next[key];
+                  }
                   return next;
                 });
               })
@@ -569,6 +602,7 @@ export function App({ client }: { client: DesktopClient }) {
           />
         ) : (
           !workbenchView &&
+          !scheduledTasksView &&
           !preparing &&
           projection?.currentRun?.status === 'waiting' && (
             <p className="notice">任务正在等待尚未支持的扩展或验证交互，可以停止任务并检查结果。</p>
@@ -576,7 +610,7 @@ export function App({ client }: { client: DesktopClient }) {
         )
       }
       composer={
-        workbenchView
+        workbenchView || scheduledTasksView
           ? undefined
           : {
               draft,
@@ -593,15 +627,18 @@ export function App({ client }: { client: DesktopClient }) {
               permission: preparing ? newConversationPermission : (view.interactionMode ?? 'auto'),
               permissionDisabled:
                 busy || submitting || (!preparing && (!selected || !ready || loadingSession)),
+              permissionPending: permissionSubmitting,
               onPermissionChange: (permission) => {
                 if (preparing) {
                   setNewConversationPermission(permission);
                   return;
                 }
-                if (selected)
-                  void act(async () => {
-                    await client.setInteractionMode(selected, permission);
+                if (selected) {
+                  setPermissionSubmitting(true);
+                  void act(() => client.setInteractionMode(selected, permission)).finally(() => {
+                    setPermissionSubmitting(false);
                   });
+                }
               },
               submitStatus:
                 (loadingSession || (!preparing && selectingSession !== undefined)) &&
@@ -797,6 +834,25 @@ export function App({ client }: { client: DesktopClient }) {
             }
       }
       workbench={workbenchView || undefined}
+      scheduledTasks={
+        scheduledTasksView
+          ? {
+              tasks: [],
+              workspaces: [
+                ...new Set([
+                  ...(projects ?? []).map((project) => project.path),
+                  ...(workspace ? [workspace] : []),
+                ]),
+              ].map((path) => ({
+                id: path,
+                label: path.split('/').filter(Boolean).pop() || path,
+                state: 'loaded' as const,
+                sessionCount: 0,
+                sessions: [],
+              })),
+            }
+          : undefined
+      }
       overlays={
         settingsOpen && (
           <dialog

@@ -1,8 +1,15 @@
-import { type BrowserWindow, dialog, type IpcMain, type IpcMainInvokeEvent } from 'electron';
+import {
+  type BrowserWindow,
+  clipboard,
+  dialog,
+  type IpcMain,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import { DESKTOP_IPC_CHANNELS, type DesktopIpcChannel, type DesktopIpcResult } from '../src/bridge';
 import type { DesktopHost } from './host';
 import {
   assertTrustedIpc,
+  clipboardTextPayload,
   confirmPayload,
   connectionPayload,
   editorPayload,
@@ -96,6 +103,10 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
   handle(DESKTOP_IPC_CHANNELS.openEditor, (_event, payload) => {
     const { connectionId, path, editor } = editorPayload(payload);
     return options.host.openEditor(connectionId, path, editor);
+  });
+  handle(DESKTOP_IPC_CHANNELS.writeClipboardText, (_event, payload) => {
+    const { text } = clipboardTextPayload(payload);
+    clipboard.writeText(text);
   });
   handle(DESKTOP_IPC_CHANNELS.toggleWindowMaximize, (_event, payload) => {
     noPayload(payload);

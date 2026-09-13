@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { projectHistory } from '../src/history-projection';
-import { projectEvent } from '../src/presentation';
+import { projectEventWithIdentity } from '../src/presentation';
 
 const event = (index: number): RuntimeClientEvent => ({
   type: 'user.message',
@@ -9,13 +9,21 @@ const event = (index: number): RuntimeClientEvent => ({
   text: `message ${index}`,
   kind: 'task',
 });
+const record = (index: number) => ({
+  sequence: index,
+  events: [event(index)],
+  identity: { turnId: `turn-${index}` },
+});
 
 test('unchanged calibration preserves array and changed calibration reuses identical messages', async () => {
   const signal = new AbortController().signal;
-  const events = [event(1), event(2)];
-  const original = events.reduce(projectEvent, [] as Parameters<typeof projectEvent>[0]);
-  expect(await projectHistory(events, original, signal)).toBe(original);
-  const changed = await projectHistory([...events, event(3)], original, signal);
+  const records = [record(1), record(2)];
+  const original = records.reduce(
+    (messages, item) => projectEventWithIdentity(messages, item.events[0]!, item.identity),
+    [] as Parameters<typeof projectEventWithIdentity>[0],
+  );
+  expect(await projectHistory(records, original, signal)).toBe(original);
+  const changed = await projectHistory([...records, record(3)], original, signal);
   expect(changed).toHaveLength(3);
   expect(changed[0]).toBe(original[0]);
   expect(changed[1]).toBe(original[1]);
@@ -31,7 +39,7 @@ test('large historical projection yields and superseding it stops before publica
   }, 0);
   await expect(
     projectHistory(
-      Array.from({ length: 5000 }, (_, index) => event(index)),
+      Array.from({ length: 5000 }, (_, index) => record(index)),
       [],
       controller.signal,
     ),

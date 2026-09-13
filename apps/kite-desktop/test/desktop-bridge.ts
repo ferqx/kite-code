@@ -19,6 +19,7 @@ export function createTestDesktopBridge(call: DesktopTestCall): KiteDesktopBridg
     runtimeDetach: (connectionId) => call('runtime_detach', { connectionId }),
     runtimeClose: (connectionId) => call('runtime_close', { connectionId }),
     openEditor: (connectionId, path, editor) => call('open_editor', { connectionId, path, editor }),
+    writeClipboardText: (text) => call('write_clipboard_text', { text }),
     toggleWindowMaximize: () => call('animated_toggle_maximize'),
     showConfirm: (options) => call('show_confirm', { ...options }),
   };
