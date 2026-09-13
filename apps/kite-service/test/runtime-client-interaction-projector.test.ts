@@ -59,6 +59,41 @@ describe('Runtime client interaction projector', () => {
       }),
     ).toMatchObject({ kind: 'input', question: '[redacted]' });
 
+    const batchInput = state({
+      interactions: {
+        kind: 'awaiting_user_input',
+        interactionId: 'input-batch',
+        toolCallId: 'tool-1',
+        request: {
+          question: 'First?',
+          allow_free_text: true,
+          options: [],
+          questions: [
+            { id: 'q1', question: 'First?', allow_free_text: true, options: [] },
+            {
+              id: 'q2',
+              question: 'Second?',
+              allow_free_text: false,
+              options: [{ id: 'q2-o1', label: 'Second answer' }],
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      projectRuntimeClientInteraction(batchInput, {
+        type: 'request_user_input',
+        interactionId: 'input-batch',
+        toolCallId: 'tool-1',
+      }),
+    ).toMatchObject({
+      kind: 'input',
+      questions: [
+        { id: 'q1', question: 'First?' },
+        { id: 'q2', question: 'Second?', options: [{ id: 'q2-o1' }] },
+      ],
+    });
+
     const plan = state({
       interactions: {
         kind: 'awaiting_review',
@@ -174,7 +209,15 @@ describe('Runtime client interaction projector', () => {
         kind: 'awaiting_user_input',
         interactionId: 'input-1',
         toolCallId: 'tool-1',
-        request: { question: 'Question', allow_free_text: true, options: [] },
+        request: {
+          question: 'Question',
+          allow_free_text: true,
+          options: [],
+          questions: [
+            { id: 'q1', question: 'First?', allow_free_text: true, options: [] },
+            { id: 'q2', question: 'Second?', allow_free_text: true, options: [] },
+          ],
+        },
       },
     });
     const inputEffect = {
@@ -191,6 +234,24 @@ describe('Runtime client interaction projector', () => {
         response: { kind: 'text', value: 'answer' },
       }),
     ).toEqual({ type: 'input', interactionId: 'input-1', text: 'answer' });
+
+    expect(
+      mapRuntimeInteractionResponseToUserAction({
+        state: input,
+        effect: inputEffect,
+        interaction: inputInteraction,
+        response: {
+          kind: 'text',
+          value: 'q1: first\nq2: second',
+          answers: { q1: 'first', q2: 'second' },
+        },
+      }),
+    ).toEqual({
+      type: 'input',
+      interactionId: 'input-1',
+      text: 'q1: first\nq2: second',
+      answers: { q1: 'first', q2: 'second' },
+    });
     expect(
       mapRuntimeInteractionResponseToUserAction({
         state: input,

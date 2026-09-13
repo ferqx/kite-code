@@ -1761,7 +1761,13 @@ function interactionCommandForAction(
         ...base,
         interaction,
         response:
-          action.type === 'input' ? { kind: 'text', value: action.text } : { kind: 'input_cancel' },
+          action.type === 'input'
+            ? {
+                kind: 'text',
+                value: action.text,
+                ...(action.answers === undefined ? {} : { answers: action.answers }),
+              }
+            : { kind: 'input_cancel' },
       };
     }
     case 'plan_review': {

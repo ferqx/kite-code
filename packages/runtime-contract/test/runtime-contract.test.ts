@@ -168,6 +168,16 @@ describe('runtime contract package boundary', () => {
       response: { kind: 'input_cancel' },
     };
     expect(isRuntimeCommand(inputCancel)).toBe(true);
+    expect(
+      isRuntimeCommand({
+        ...inputCancel,
+        response: {
+          kind: 'text',
+          value: 'q1: one\nq2: two',
+          answers: { q1: 'one', q2: 'two' },
+        },
+      }),
+    ).toBe(true);
     expect(isRuntimeCommand({ ...inputCancel, response: { kind: 'text', value: '' } })).toBe(false);
     expect(isRuntimeCommand({ ...command, response: { kind: 'input_cancel' } })).toBe(false);
 
@@ -645,6 +655,15 @@ describe('runtime contract package boundary', () => {
         question: 'Choose one',
         allowFreeText: false,
         options: [{ id: 'one', label: 'One', description: 'The first option' }],
+        questions: [
+          { id: 'q1', question: 'First?', allowFreeText: true },
+          {
+            id: 'q2',
+            question: 'Second?',
+            allowFreeText: false,
+            options: [{ id: 'two', label: 'Two' }],
+          },
+        ],
       }),
     ).toBe(true);
   });

@@ -189,6 +189,28 @@ export function projectRuntimeClientEvent(
               ? { description: projectRuntimeClientText(option.description, 1_024) }
               : {}),
           })),
+          ...(event.request.questions === undefined
+            ? {}
+            : {
+                questions: event.request.questions.map((question, index) => ({
+                  id: question.id ?? `q${index + 1}`,
+                  question: projectRuntimeClientText(question.question, 4_000),
+                  allowFreeText: question.allow_free_text ?? event.request.allow_free_text,
+                  ...(question.options.length === 0
+                    ? {}
+                    : {
+                        options: question.options.map((option) => ({
+                          id: option.id,
+                          label: projectRuntimeClientText(option.label, 512),
+                          ...(option.description
+                            ? {
+                                description: projectRuntimeClientText(option.description, 1_024),
+                              }
+                            : {}),
+                        })),
+                      }),
+                })),
+              }),
         },
       };
     case 'user_input.answered':

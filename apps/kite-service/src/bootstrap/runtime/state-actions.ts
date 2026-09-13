@@ -736,6 +736,20 @@ export function eventsForRuntimeAction(
       return userInputCancelledEvents(interaction, action.reason);
     }
     if (action.type !== 'input') return [];
+    const semanticAnswers =
+      action.answers === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(action.answers).map(([questionId, value]) => {
+              const question = interaction.request.questions?.find(
+                (candidate) => candidate.id === questionId,
+              );
+              return [
+                questionId,
+                question?.options.find((option) => option.id === value)?.label ?? value,
+              ];
+            }),
+          );
     return [
       {
         type: 'user_input.answered',
@@ -752,11 +766,11 @@ export function eventsForRuntimeAction(
           ok: true,
           command: '',
           exitCode: 0,
-          stdout: JSON.stringify({ answer: action.text, answers: action.answers }),
+          stdout: JSON.stringify({ answer: action.text, answers: semanticAnswers }),
           stderr: '',
           userInput: {
             answer: action.text,
-            ...(action.answers === undefined ? {} : { answers: action.answers }),
+            ...(semanticAnswers === undefined ? {} : { answers: semanticAnswers }),
           },
         },
       },

@@ -38,6 +38,46 @@ test('keeps interactive and Subagent lifecycle facts client-visible', () => {
   }
 });
 
+test('projects every ask_user question through the event path', () => {
+  const projected = projectRuntimeClientEvent(
+    {
+      type: 'user_input.requested',
+      interactionId: 'interaction-1',
+      toolCallId: 'tool-1',
+      request: {
+        question: 'Language?',
+        options: [{ id: 'q1-o1', label: 'TypeScript' }],
+        allow_free_text: true,
+        questions: [
+          {
+            id: 'q1',
+            question: 'Language?',
+            options: [{ id: 'q1-o1', label: 'TypeScript' }],
+            allow_free_text: true,
+          },
+          {
+            id: 'q2',
+            question: 'Database?',
+            options: [{ id: 'q2-o1', label: 'SQLite' }],
+            allow_free_text: true,
+          },
+        ],
+      },
+    } as RuntimeEvent,
+    { sessionRevision: 3 },
+  );
+
+  expect(projected).toMatchObject({
+    type: 'input.requested',
+    interaction: {
+      questions: [
+        { id: 'q1', question: 'Language?', options: [{ id: 'q1-o1', label: 'TypeScript' }] },
+        { id: 'q2', question: 'Database?', options: [{ id: 'q2-o1', label: 'SQLite' }] },
+      ],
+    },
+  });
+});
+
 test('projects every client-visible Kernel event into a valid accepted presentation envelope', () => {
   const coverage = runtimeClientEventCoverageEntries();
   const visibleTypes = [...coverage.entries()]

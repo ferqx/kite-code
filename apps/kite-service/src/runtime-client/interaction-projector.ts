@@ -98,6 +98,21 @@ export function projectRuntimeClientInteraction(
           ? {}
           : { description: projectRuntimeClientText(option.description, 1_024) }),
       }));
+      const questions = interaction.request.questions?.map((question, index) => {
+        const questionOptions = question.options.map((option) => ({
+          id: option.id,
+          label: projectRuntimeClientText(option.label, 512),
+          ...(option.description === undefined
+            ? {}
+            : { description: projectRuntimeClientText(option.description, 1_024) }),
+        }));
+        return {
+          id: question.id ?? `q${index + 1}`,
+          question: projectRuntimeClientText(question.question, 4_000),
+          allowFreeText: question.allow_free_text ?? interaction.request.allow_free_text,
+          ...(questionOptions.length === 0 ? {} : { options: questionOptions }),
+        };
+      });
       return validInteraction({
         kind: 'input',
         interactionId: interaction.interactionId,
@@ -105,6 +120,7 @@ export function projectRuntimeClientInteraction(
         question: projectRuntimeClientText(interaction.request.question, 4_000),
         allowFreeText: interaction.request.allow_free_text,
         ...(options.length === 0 ? {} : { options }),
+        ...(questions === undefined ? {} : { questions }),
       });
     }
     case 'request_plan_review': {
@@ -555,8 +571,21 @@ export function mapRuntimeInteractionResponseToUserAction(input: {
         grant: input.response.decision,
       };
     case 'input':
+      if (
+        input.response.kind === 'text' &&
+        input.response.answers !== undefined &&
+        !answersMatchQuestions(expected, input.response.answers)
+      )
+        return null;
       return input.response.kind === 'text'
-        ? { type: 'input', interactionId: expected.interactionId, text: input.response.value }
+        ? {
+            type: 'input',
+            interactionId: expected.interactionId,
+            text: input.response.value,
+            ...(input.response.answers === undefined
+              ? {}
+              : { answers: { ...input.response.answers } }),
+          }
         : input.response.kind === 'input_cancel'
           ? { type: 'cancel', interactionId: expected.interactionId }
           : null;
@@ -614,6 +643,22 @@ export function mapRuntimeInteractionResponseToUserAction(input: {
             instruction: input.response.detail,
           };
   }
+}
+
+function answersMatchQuestions(
+  interaction: Extract<RuntimeClientInteraction, { kind: 'input' }>,
+  answers: Readonly<Record<string, string>>,
+): boolean {
+  if (!interaction.questions || Object.keys(answers).length !== interaction.questions.length)
+    return false;
+  return interaction.questions.every((question) => {
+    const answer = answers[question.id];
+    return (
+      typeof answer === 'string' &&
+      answer.trim().length > 0 &&
+      (question.allowFreeText || question.options?.some((option) => option.id === answer) === true)
+    );
+  });
 }
 
 function mapProviderResponse(

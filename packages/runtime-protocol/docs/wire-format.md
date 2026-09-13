@@ -1,6 +1,6 @@
 # 协议编码、版本与传输边界
 
-入口：[codecs](../src/codecs.ts)、[mappers](../src/mappers.ts)、[limits](../src/limits.ts)、[generation](../src/generation.ts)。本包将 Runtime contract 编成严格、browser-safe、framing-neutral wire，不执行命令。
+入口：[codecs](../src/codecs.ts)、[mappers](../src/mappers.ts)、[limits](../src/limits.ts)、[generation](../src/generation.ts)。本包将 Runtime contract 编成严格、browser-safe、framing-neutral wire，不执行命令。用户输入交互保留可选的有序 `questions`，每题携带稳定 ID；批量回答通过 text response 的可选 `answers` 映射原子提交，映射键必须回指投影中的题目 ID。
 
 请求、回执、通知和查询结果必须通过对应 codec。exact version、允许字段、大小限制和错误形状由该包决定；不能让未知字段进入 raw Runtime event。Service carrier 处理实际 framing 与传输，Protocol 不创建 socket 或进程。
 

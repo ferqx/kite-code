@@ -1810,6 +1810,51 @@ describe('InputBlock', () => {
     expect(frame.match(/Choose a scope/g)).toHaveLength(1);
   });
 
+  test('submits option ids for validation and semantic text for Agent context', async () => {
+    const submitted: unknown[] = [];
+    let resolved: { answer: string; answers?: Record<string, string> } | undefined;
+    const provider = fakeProvider();
+    provider.setActionSink((action) => {
+      submitted.push(action);
+    });
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'scope',
+          question: 'Choose a scope',
+          options: [{ id: 'small', label: 'Small' }],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { stdin } = render(
+      <InputBlock
+        interactionId="ask-scope"
+        question={question}
+        provider={provider}
+        onResolved={(answer, answers) => {
+          resolved = { answer, answers };
+        }}
+      />,
+    );
+
+    stdin.write('\r');
+    for (let attempt = 0; attempt < 50 && resolved === undefined; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(submitted).toContainEqual({
+      type: 'input',
+      interactionId: 'ask-scope',
+      text: 'Choose a scope: Small',
+      answers: { scope: 'small' },
+    });
+    expect(resolved).toEqual({
+      answer: 'Choose a scope: Small',
+      answers: { scope: 'Small' },
+    });
+  });
+
   test('hides the multi-question test prefix from the current title', () => {
     const question = fakeQuestion({
       questions: [

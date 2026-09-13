@@ -246,6 +246,52 @@ describe('runtime user actions', () => {
     expect(toolFinished.result.stdout.length).toBeGreaterThan(200);
   });
 
+  test('keeps option ids in the answered fact but projects labels to the model result', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
+    state.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'expected',
+      toolCallId: 'ask',
+      request: {
+        question: 'Language?',
+        options: [{ id: 'q1-o1', label: 'TypeScript' }],
+        allow_free_text: true,
+        questions: [
+          {
+            id: 'q1',
+            question: 'Language?',
+            options: [{ id: 'q1-o1', label: 'TypeScript' }],
+          },
+        ],
+      },
+    };
+
+    const events = eventsForRuntimeAction(state, {
+      type: 'input',
+      interactionId: 'expected',
+      text: 'TypeScript',
+      answers: { q1: 'q1-o1' },
+    });
+
+    expect(events[0]).toMatchObject({
+      type: 'user_input.answered',
+      answers: { q1: 'q1-o1' },
+    });
+    expect(events[1]).toMatchObject({
+      type: 'tool.finished',
+      result: { userInput: { answer: 'TypeScript', answers: { q1: 'TypeScript' } } },
+    });
+    if (events[1]?.type !== 'tool.finished') throw new Error('Expected tool.finished event');
+    expect(events[1].result.stdout).toBe(
+      JSON.stringify({ answer: 'TypeScript', answers: { q1: 'TypeScript' } }),
+    );
+  });
+
   test('cancels a matching user-input interaction into a tool completion', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',

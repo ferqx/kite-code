@@ -344,13 +344,23 @@ function MultiQuestionWizard({
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
         if (opt) {
-          const next = { ...answers, [curId]: opt.label };
+          const next = { ...answers, [curId]: opt.id };
           setAnswers(next);
           advanceStep(next);
         }
       }
     },
   );
+
+  function semanticAnswersFor(currentAnswers: Record<string, string>) {
+    return Object.fromEntries(
+      items.map((item, index) => {
+        const id = item.id ?? String(index);
+        const value = currentAnswers[id]!;
+        return [id, item.options?.find((option) => option.id === value)?.label ?? value];
+      }),
+    );
+  }
 
   function advanceStep(currentAnswers: Record<string, string>) {
     if (step < total - 1) {
@@ -359,9 +369,13 @@ function MultiQuestionWizard({
       setFreeText('');
     } else {
       // 最后一步 → 提交 / Final step → submit
-      const summary = Object.entries(currentAnswers)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join('; ');
+      const currentSemanticAnswers = semanticAnswersFor(currentAnswers);
+      const summary = items
+        .map((item, index) => {
+          const id = item.id ?? String(index);
+          return `${item.question}: ${currentSemanticAnswers[id]}`;
+        })
+        .join('\n');
       if (submitting) return;
       setSubmitting(true);
       setSubmissionFailure(undefined);
@@ -375,7 +389,7 @@ function MultiQuestionWizard({
         .then((accepted) => {
           if (!accepted) throw new Error('Input submission was not accepted.');
           setDone(true);
-          onResolved(summary, currentAnswers);
+          onResolved(summary, currentSemanticAnswers);
         })
         .catch((error: unknown) =>
           setSubmissionFailure(classifyInteractionSubmissionFailure(error)),
@@ -429,7 +443,7 @@ function MultiQuestionWizard({
           <Text bold color={t.success}>
             ✓ {translate('input.submitted')}
           </Text>
-          {Object.entries(answers).map(([id, val], i) => (
+          {Object.entries(semanticAnswersFor(answers)).map(([id, val], i) => (
             <Text key={`${id}-${i}`} color={t.muted}>
               {id}: {val}
             </Text>

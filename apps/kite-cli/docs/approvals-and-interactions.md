@@ -12,6 +12,8 @@ snapshot 用完整 queue 替换本地 Map，空 queue 可以清除旧交互；�
 
 计划批准由单次 plan.approved.executionMode 固定计划执行方式与展示，不在之前发额外 mode change 破坏审核 identity。问答已完成步骤不在恢复时重开，嵌套 Esc 由对应 owner 返回。
 
+结构化问答在客户端提交 `question id -> option id | free text` 供 Service 对当前交互校验；Service 的持久回答事实保留该内部身份，投给模型和历史的工具结果使用问题、选项文案或自由输入原文。TUI 与 Desktop 遵循同一边界，不把 `q1-o1` 等位置编号作为 Agent 的语义答案。
+
 验证：[问答 PTY](../../../tests/tui-system/scenarios/ask-user-esc.test.ts)、相关 approval/plan/interaction tests，及 Native facade conformance。布局与语言规则见[本地化](tui-localization.md)。
 
 ## 当前差异：Esc 提交态

@@ -683,6 +683,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
       'question',
       'allowFreeText',
       'options',
+      'questions',
       'plan',
       'review',
       'provider',
@@ -721,12 +722,13 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           presentKeys(
             value,
             ['kind', 'interactionId', 'sessionRevision', 'question', 'allowFreeText'],
-            ['title', 'summary', 'options'],
+            ['title', 'summary', 'options', 'questions'],
           ),
         ) &&
         isBoundedUserText(value.question) &&
         typeof value.allowFreeText === 'boolean' &&
-        (!Object.hasOwn(value, 'options') || isInputOptions(value.options))
+        (!Object.hasOwn(value, 'options') || isInputOptions(value.options)) &&
+        (!Object.hasOwn(value, 'questions') || isInputQuestions(value.questions))
       );
     case 'plan_review':
       return (
@@ -1598,6 +1600,26 @@ function isInputOptions(value: unknown): boolean {
         isIdentifier(option.id) &&
         isBoundedUserText(option.label) &&
         (!Object.hasOwn(option, 'description') || isBoundedUserText(option.description)),
+    )
+  );
+}
+
+function isInputQuestions(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) return false;
+  const ids = value.map((question) => (isRecord(question) ? question.id : undefined));
+  return (
+    new Set(ids).size === ids.length &&
+    value.every(
+      (question) =>
+        isRecord(question) &&
+        hasExactKeys(
+          question,
+          presentKeys(question, ['id', 'question', 'allowFreeText'], ['options']),
+        ) &&
+        isIdentifier(question.id) &&
+        isBoundedUserText(question.question) &&
+        typeof question.allowFreeText === 'boolean' &&
+        (!Object.hasOwn(question, 'options') || isInputOptions(question.options)),
     )
   );
 }

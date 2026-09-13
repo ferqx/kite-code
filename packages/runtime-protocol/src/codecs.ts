@@ -121,6 +121,31 @@ const interaction = z.discriminatedUnion('kind', [
         )
         .max(256)
         .optional(),
+      questions: z
+        .array(
+          z
+            .object({
+              id: identifier,
+              question: inputText,
+              allowFreeText: z.boolean(),
+              options: z
+                .array(
+                  z
+                    .object({ id: identifier, label: shortText, description: shortText.optional() })
+                    .strict(),
+                )
+                .max(256)
+                .optional(),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(3)
+        .refine(
+          (questions) =>
+            new Set(questions.map((question) => question.id)).size === questions.length,
+        )
+        .optional(),
     })
     .strict(),
   z
@@ -159,7 +184,16 @@ const interaction = z.discriminatedUnion('kind', [
 ]);
 export type RuntimeProtocolInteraction = z.infer<typeof interaction>;
 
-const textResponse = z.object({ kind: z.literal('text'), value: inputText }).strict();
+const textResponse = z
+  .object({
+    kind: z.literal('text'),
+    value: inputText,
+    answers: z
+      .record(identifier, inputText)
+      .refine((answers) => Object.keys(answers).length >= 1 && Object.keys(answers).length <= 3)
+      .optional(),
+  })
+  .strict();
 const inputCancelResponse = z.object({ kind: z.literal('input_cancel') }).strict();
 const approvalResponse = z
   .object({

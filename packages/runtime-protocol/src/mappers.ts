@@ -223,6 +223,16 @@ function mapInteraction(interaction: RuntimeClientInteraction): RuntimeClientInt
         ...(interaction.options === undefined
           ? {}
           : { options: interaction.options.map((option) => ({ ...option })) }),
+        ...(interaction.questions === undefined
+          ? {}
+          : {
+              questions: interaction.questions.map((question) => ({
+                ...question,
+                ...(question.options === undefined
+                  ? {}
+                  : { options: question.options.map((option) => ({ ...option })) }),
+              })),
+            }),
       };
     case 'plan_review':
       return {

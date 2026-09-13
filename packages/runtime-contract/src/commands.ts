@@ -52,7 +52,12 @@ export interface CancelTurnCommand extends RuntimeSessionCommandBase {
 }
 
 export type RuntimeInteractionResponse =
-  | { readonly kind: 'text'; readonly value: string }
+  | {
+      readonly kind: 'text';
+      readonly value: string;
+      /** Question ID to answer mapping for an atomic multi-question response. */
+      readonly answers?: Readonly<Record<string, string>>;
+    }
   /** Explicit input dismissal; never overload an empty text answer. */
   | { readonly kind: 'input_cancel' }
   | {
@@ -357,7 +362,11 @@ function isRuntimeInteractionResponse(value: unknown): value is RuntimeInteracti
   if (!isRecord(value) || typeof value.kind !== 'string') return false;
   switch (value.kind) {
     case 'text':
-      return hasExactKeys(value, ['kind', 'value']) && isBoundedUserText(value.value);
+      return (
+        hasExactKeys(value, optionalKeys(value, ['kind', 'value'], ['answers'])) &&
+        isBoundedUserText(value.value) &&
+        (!Object.hasOwn(value, 'answers') || isInputAnswers(value.answers))
+      );
     case 'input_cancel':
       return hasExactKeys(value, ['kind']);
     case 'approval':
@@ -395,6 +404,16 @@ function isRuntimeInteractionResponse(value: unknown): value is RuntimeInteracti
     default:
       return false;
   }
+}
+
+function isInputAnswers(value: unknown): value is Readonly<Record<string, string>> {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length >= 1 &&
+    entries.length <= 3 &&
+    entries.every(([questionId, answer]) => isIdentifier(questionId) && isBoundedUserText(answer))
+  );
 }
 
 function responseMatchesInteraction(

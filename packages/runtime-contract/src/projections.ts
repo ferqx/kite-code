@@ -78,11 +78,22 @@ export interface RuntimeInputInteraction extends RuntimeInteractionBase {
   readonly kind: 'input';
   readonly question: string;
   readonly allowFreeText: boolean;
-  readonly options?: readonly {
-    readonly id: string;
-    readonly label: string;
-    readonly description?: string;
-  }[];
+  readonly options?: readonly RuntimeInputOption[];
+  /** Ordered batch questions. IDs are the stable ownership keys used by `answers`. */
+  readonly questions?: readonly RuntimeInputQuestion[];
+}
+
+export interface RuntimeInputOption {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface RuntimeInputQuestion {
+  readonly id: string;
+  readonly question: string;
+  readonly allowFreeText: boolean;
+  readonly options?: readonly RuntimeInputOption[];
 }
 
 export interface RuntimePlanReviewInteraction extends RuntimeInteractionBase {
@@ -154,7 +165,8 @@ export function sameRuntimeClientInteractionIdentity(
         right.kind === 'input' &&
         left.question === right.question &&
         left.allowFreeText === right.allowFreeText &&
-        sameInputOptions(left.options, right.options)
+        sameInputOptions(left.options, right.options) &&
+        sameInputQuestions(left.questions, right.questions)
       );
     case 'plan_review':
       return (
@@ -179,6 +191,23 @@ export function sameRuntimeClientInteractionIdentity(
         left.verification.revision === right.verification.revision
       );
   }
+}
+
+function sameInputQuestions(
+  left: RuntimeInputInteraction['questions'],
+  right: RuntimeInputInteraction['questions'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.length === right.length &&
+    left.every(
+      (question, index) =>
+        question.id === right[index]?.id &&
+        question.question === right[index]?.question &&
+        question.allowFreeText === right[index]?.allowFreeText &&
+        sameInputOptions(question.options, right[index]?.options),
+    )
+  );
 }
 
 function sameInputOptions(
