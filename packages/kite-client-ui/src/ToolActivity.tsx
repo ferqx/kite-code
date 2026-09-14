@@ -2,13 +2,13 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   BookOpen01Icon,
+  BotIcon,
   Edit02Icon,
   File01Icon,
   FileSearchIcon,
   Folder01Icon,
   Globe02Icon,
   Search01Icon,
-  Task01Icon,
   TerminalIcon,
   UserQuestion01Icon,
   Wrench01Icon,
@@ -103,6 +103,7 @@ function toolTarget(message: Message): string | undefined {
 function resultPreview(message: Message): string | undefined {
   if (message.approval?.reason && ['rejected', 'awaiting_user'].includes(message.approval.state))
     return message.approval.reason;
+  if (message.toolName === 'read_file') return undefined;
   if (message.toolResult?.terminationReason === 'timed_out') return '执行超时';
   if (message.toolResult?.terminationReason === 'cancelled') return '执行已取消';
   if (message.toolResult?.terminationReason === 'sandbox_denied') return '执行被沙箱拒绝';
@@ -140,7 +141,7 @@ function toolIcon(message: Message) {
     case 'web_fetch':
       return Globe02Icon;
     case 'task':
-      return Task01Icon;
+      return BotIcon;
     case 'ask_user':
       return UserQuestion01Icon;
     case 'list_mcp_resources':
@@ -315,7 +316,11 @@ export function ToolActivity({
   onToggle,
   openFile,
   renderChildren,
+  expandedItems,
+  onToggleItem,
 }: {
+  expandedItems?: Readonly<Record<string, boolean>>;
+  onToggleItem?: (id: string, open: boolean) => void;
   messages: readonly Message[];
   expanded?: boolean;
   onToggle: (open: boolean) => void;
@@ -455,16 +460,29 @@ export function ToolActivity({
       )}
       {!open &&
         grouped &&
-        issues.map((item) => (
-          <p className="tool-step-preview" key={item.id}>
-            {toolTarget(item)} · {resultPreview(item)}
-          </p>
-        ))}
+        issues
+          .filter((item) => resultPreview(item))
+          .map((item) => (
+            <p className="tool-step-preview" key={item.id}>
+              {toolTarget(item)} · {resultPreview(item)}
+            </p>
+          ))}
       {open && grouped && (
         <div className="tool-activity-steps">
-          {messages.map((item) => (
-            <ToolRow key={item.id} message={item} openFile={openFile} />
-          ))}
+          {messages.map((item) =>
+            item.toolName === 'shell_execute' ? (
+              <ToolActivity
+                key={item.id}
+                messages={[item]}
+                expanded={expandedItems?.[item.id]}
+                onToggle={(next) => onToggleItem?.(item.id, next)}
+                openFile={openFile}
+                renderChildren={renderChildren}
+              />
+            ) : (
+              <ToolRow key={item.id} message={item} openFile={openFile} />
+            ),
+          )}
         </div>
       )}
       {open && shell && <ShellOutput message={message} />}

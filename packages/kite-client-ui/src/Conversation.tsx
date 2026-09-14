@@ -462,6 +462,8 @@ export function Conversation({
                     key={activityKey}
                     messages={group}
                     expanded={expanded[activityKey]}
+                    expandedItems={expanded}
+                    onToggleItem={onToggle}
                     onToggle={(open) => onToggle(activityKey, open)}
                     openFile={openFile}
                     renderChildren={(toolCallId, taskExpanded) =>

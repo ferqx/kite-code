@@ -17,6 +17,7 @@ body {
   --destructive: #a13e3e;
   --attention-background: #f5e6c8;
   --attention-foreground: #714700;
+  --conversation-text-size: 14px;
   --scrollbar-thumb: #b8b8b8;
   --scrollbar-thumb-hover: #999;
 }
@@ -1424,6 +1425,14 @@ body {
   }
 }
 
+@media (width < 48rem) {
+  .kite-client {
+    --conversation-text-size: 15.75px;
+  }
+}
+.kite-client .typeset-chat {
+  font-size: var(--conversation-text-size);
+}
 .kite-client .typeset-chat :is(p, li) {
   width: fit-content;
   max-width: 100%;
@@ -1547,7 +1556,8 @@ body {
 .kite-client .tool-activity {
   margin: 8px 0;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--conversation-text-size);
+  font-family: var(--font-geist, inherit);
 }
 .kite-client .tool-activity-summary {
   display: flex;
@@ -1587,8 +1597,8 @@ body {
 }
 .kite-client .tool-activity-kind-icon,
 .kite-client .tool-step-icon {
-  width: 18px;
-  height: 18px;
+  width: 1em;
+  height: 1em;
   flex-shrink: 0;
   color: inherit;
 }
@@ -1599,12 +1609,15 @@ body {
   overflow-wrap: anywhere;
 }
 .kite-client .tool-command {
-  font-size: 13px;
+  font-size: inherit;
+}
+.kite-client .tool-activity-steps > .tool-activity {
+  margin: 0;
 }
 .kite-client .tool-activity-state,
 .kite-client .tool-step-status,
 .kite-client .tool-approval {
-  font-size: 12px;
+  font-size: inherit;
   line-height: 18px;
   color: inherit;
 }

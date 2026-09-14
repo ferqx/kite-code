@@ -484,7 +484,8 @@ test('tool activity keeps failures visible and groups adjacent tools without raw
     ),
   );
   expect(document.querySelectorAll('.tool-activity')).toHaveLength(2);
-  expect(document.querySelector('.tool-activity-step')?.textContent).toContain('读取失败');
+  expect(document.querySelector('.tool-step-status')?.textContent).toBe('失败');
+  expect(document.querySelector('.tool-step-preview')).toBeNull();
   expect(document.querySelector('.tool-activity-step')?.textContent).toContain('a.ts');
   expect(document.querySelector('.shell-activity .tool-activity-summary')?.textContent).toContain(
     '运行',
@@ -1234,4 +1235,73 @@ test('file tools retain their approval state and the service refusal reason', as
     Array.from(document.querySelectorAll('.tool-step-preview')).map((item) => item.textContent),
   ).toEqual(['文件超出授权范围，请选择项目内文件。', '文件超出授权范围，请选择项目内文件。']);
   expect(document.querySelector('.tool-diff-toggle')).toBeNull();
+});
+
+test('an exploration shell opens its output and keeps its disclosure when the group is folded', async () => {
+  const messages: Message[] = [
+    {
+      id: 'tool:ls',
+      role: 'tool',
+      toolName: 'shell_execute',
+      arguments: { command: 'ls -la' },
+      presentation: 'exploration',
+      presentationGroupId: 'inspect',
+      settled: true,
+      status: 'completed',
+      text: '',
+      toolResult: { ok: true, stdout: 'total 8\npackage.json', stderr: '', exitCode: 0 },
+    },
+    {
+      id: 'tool:find',
+      role: 'tool',
+      toolName: 'search_files',
+      arguments: { pattern: '*.json' },
+      presentation: 'exploration',
+      presentationGroupId: 'inspect',
+      settled: true,
+      status: 'completed',
+      text: '',
+    },
+  ];
+  await render(
+    <Conversation loading={false} selected connected saveReading={() => {}} messages={messages} />,
+  );
+  const group = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+  await click(group);
+  const command = document.querySelector<HTMLButtonElement>(
+    '.shell-activity .tool-activity-summary',
+  )!;
+  expect(command.tagName).toBe('BUTTON');
+  await click(command);
+  expect(document.querySelector('.shell-output pre')?.textContent).toContain('package.json');
+  expect(document.querySelector('.shell-result')?.textContent).toContain('退出码 0');
+  await click(group);
+  expect(document.querySelector('.shell-output')).toBeNull();
+  await click(group);
+  expect(document.querySelector('.shell-output pre')?.textContent).toContain('package.json');
+});
+
+test('a failed file read keeps its failure status without a redundant error paragraph', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:missing',
+          role: 'tool',
+          toolName: 'read_file',
+          arguments: { path: 'missing.txt' },
+          settled: true,
+          status: 'failed',
+          text: 'File not found.',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-step-status')?.textContent).toBe('失败');
+  expect(document.querySelector('.tool-step-preview')).toBeNull();
+  expect(document.body.textContent).not.toContain('File not found.');
 });
