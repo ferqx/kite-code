@@ -347,6 +347,9 @@ describe('SubAgentRunner integration', () => {
     try {
       const result = await runSubAgent(input);
       expect(result.ok).toBe(true);
+      expect(events.find((event) => event.type === 'start')?.data).toMatchObject({
+        parentToolCallId: 'parent-task-call',
+      });
       const invocation = Object.values(
         modelInvocationHarness(input).getState().modelInvocations,
       )[0];

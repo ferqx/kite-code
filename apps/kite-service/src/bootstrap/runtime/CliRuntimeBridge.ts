@@ -78,6 +78,11 @@ export interface CliRuntimeBridgeInput {
   readonly projectIdentity: ProjectIdentity;
   readonly checkpointPath: string;
   readonly config: AgentConfig;
+  /** Resolve a client-selected Session route without exposing Provider credentials on the wire. */
+  readonly resolveModelConfig?: (route: {
+    readonly provider: string;
+    readonly name: string;
+  }) => AgentConfig;
   readonly shellExecutor: ShellExecutor;
   readonly gitBroker?: GitBroker;
   readonly interactionMode: InteractionMode;
@@ -272,14 +277,20 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       ) {
         return terminal(this.#rejected(command, 'invalid_session'));
       }
-      return this.#snapshotDecision((coordinator) => ({
-        activate: () => {
-          this.#created = true;
-          this.#closed = false;
-          this.#revision = coordinator.getState().revision;
-        },
-        releaseOnFailure: true,
-      }));
+      return this.#snapshotDecision(
+        (coordinator) => ({
+          activate: () => {
+            if (command.model) {
+              this.#desiredConfig = this.#resolveModelConfig(command.model);
+            }
+            this.#created = true;
+            this.#closed = false;
+            this.#revision = coordinator.getState().revision;
+          },
+          releaseOnFailure: true,
+        }),
+        command.model,
+      );
     }
     if (!this.#created || this.#closed) {
       return terminal(this.#rejected(command, 'session_unavailable'));
@@ -395,7 +406,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       if (hasPendingSubagentProviderRecovery(coordinator.getState())) {
         return terminal(this.#rejected(command, 'runtime_busy'));
       }
-      const admittedConfig = this.#desiredConfig;
+      const admittedConfig = command.model
+        ? this.#resolveModelConfig(command.model)
+        : this.#desiredConfig;
       return {
         kind: 'accepted',
         decision: {
@@ -407,6 +420,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
               this.#startSkillPlanningContext(command, admittedConfig),
             );
             const receipt = receiptFromStored(committed.receipt);
+            if (command.model) {
+              this.#desiredConfig = admittedConfig;
+            }
             return {
               receipt,
               activation: async (publish) => {
@@ -571,6 +587,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       readonly activate: () => void;
       readonly releaseOnFailure?: boolean;
     },
+    sessionModelRoute?: { readonly provider: string; readonly name: string },
   ): RuntimeHostCommandInspection {
     return {
       kind: 'accepted',
@@ -581,7 +598,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           const coordinator = existing ?? this.#ensureCoordinator();
           const committed = afterCommit(coordinator);
           try {
-            const receipt = receiptFromStored(coordinator.session.commitCommandSnapshot(evidence));
+            const receipt = receiptFromStored(
+              coordinator.session.commitCommandSnapshot(evidence, sessionModelRoute),
+            );
             return { receipt, activation: async () => committed.activate() };
           } catch (error) {
             if (!existing && committed.releaseOnFailure) {
@@ -1380,6 +1399,16 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       ...(lifecycle.activeTask === undefined ? {} : { activeTask: lifecycle.activeTask }),
       ...(currentRun === undefined ? {} : { currentRun }),
     };
+  }
+
+  #resolveModelConfig(route: { readonly provider: string; readonly name: string }): AgentConfig {
+    if (this.#input.resolveModelConfig) return this.#input.resolveModelConfig(route);
+    if (
+      route.provider === this.#desiredConfig.providerName &&
+      route.name === this.#desiredConfig.modelName
+    )
+      return this.#desiredConfig;
+    throw new Error(`Model route '${route.provider}/${route.name}' is unavailable.`);
   }
 
   #rejected(

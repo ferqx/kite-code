@@ -954,6 +954,10 @@ export function createAppSharedChildToolDispatcher(input: {
             // this canonical admission fact prevents the Client projector
             // from guessing that from the namespaced runtimeToolCallId.
             presentation: 'hidden' as const,
+            presentationOwner: {
+              subagentId: childInput.subagentId,
+              parentToolCallId,
+            },
             ...(childInput.binding
               ? {
                   bindingId: childInput.binding.bindingId,

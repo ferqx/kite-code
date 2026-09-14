@@ -139,6 +139,65 @@ test('freezes the active Run model and applies a selected model to the next Run'
   }
 }, 30_000);
 
+test('binds independent model routes to Sessions in the same Workspace', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-session-models-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const modelA = createMockModelServer();
+  const modelB = createMockModelServer();
+  const inputA = runtimeInput(workspace, modelA.baseURL, 'model-a');
+  const inputB = runtimeInput(workspace, modelB.baseURL, 'model-b');
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: join(root, 'kite-session.sqlite'),
+    workspaces: [
+      {
+        ...inputA,
+        resolveModelConfig: (route: { readonly provider: string; readonly name: string }) => {
+          if (route.provider === inputA.config.providerName && route.name === 'model-a')
+            return inputA.config;
+          if (route.provider === inputB.config.providerName && route.name === 'model-b')
+            return inputB.config;
+          throw new Error('unknown model route');
+        },
+      },
+    ],
+  });
+  const runtime = client(owner, admission(workspace), 'session-model-client');
+  try {
+    for (const [sessionId, model] of [
+      ['session-model-a', { provider: inputA.config.providerName, name: 'model-a' }],
+      ['session-model-b', { provider: inputB.config.providerName, name: 'model-b' }],
+    ] as const) {
+      await runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: `create-${sessionId}`,
+        type: 'create_session',
+        workspace,
+        bootstrapSessionId: sessionId,
+        model,
+      });
+      await expect(
+        runtime.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId,
+        }),
+      ).resolves.toMatchObject({ status: 'ok', session: { sessionId, model } });
+      expect(owner.storage.sessions.getSessionModelRoute(sessionId)).toEqual(model);
+    }
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    modelA.stop();
+    modelB.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(resolve(root), { recursive: true, force: true });
+  }
+});
+
 test('a second App Server reads another Host Session without acquiring or cancelling it', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-app-server-read-only-'));
   const workspace = join(root, 'workspace');

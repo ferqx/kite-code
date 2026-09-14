@@ -109,6 +109,33 @@ describe('State event codec', () => {
     ).toThrow('read-only compatibility data');
   });
 
+  test('validates child tool presentation owners without exposing id conventions', () => {
+    const queued = {
+      type: 'tool.queued',
+      toolCallId: 'opaque-runtime-tool',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      presentation: 'hidden',
+      presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
+    } as const;
+    expect(() => assertCurrentRuntimeEvent(queued)).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...queued,
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: '' },
+      }),
+    ).toThrow('presentation owner is invalid');
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'tool.failed',
+        toolCallId: 'opaque-runtime-tool',
+        presentation: 'hidden',
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
+        failure: { kind: 'tool_error', message: 'missing' },
+      }),
+    ).not.toThrow();
+  });
+
   test('keeps approval batch and session-clear facts exact and receipt-safe', () => {
     const commandIdentity = {
       sessionId: 'session-1',
@@ -251,7 +278,12 @@ describe('State event codec', () => {
     expect(() =>
       assertCurrentRuntimeEventForWrite({
         type: 'subagent.started',
-        subagent: { id: 'child-1', role: 'explore', name: 'Inspect callers' },
+        subagent: {
+          id: 'child-1',
+          role: 'explore',
+          name: 'Inspect callers',
+          parentToolCallId: 'task-1',
+        },
       }),
     ).not.toThrow();
   });

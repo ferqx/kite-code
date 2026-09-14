@@ -42,6 +42,7 @@ describe('runtime contract package boundary', () => {
       type: 'create_session',
       workspace: '/workspace',
       bootstrapSessionId: 'session-1',
+      model: { provider: 'openai', name: 'gpt-session' },
     };
     expect(isRuntimeCommand(command)).toBe(true);
     expect(isRuntimeCommand({ ...command, schema: 'future' })).toBe(false);
@@ -70,6 +71,10 @@ describe('runtime contract package boundary', () => {
         input: 'First line\nSecond line\twith indentation',
       }),
     ).toBe(true);
+    expect(isRuntimeCommand({ ...command, model: { provider: '', name: 'model' } })).toBe(false);
+    expect(
+      isRuntimeCommand({ ...command, model: { provider: 'openai', name: 'model', extra: true } }),
+    ).toBe(false);
     expect(
       isRuntimeCommand({
         schema: RUNTIME_COMMAND_SCHEMA_,
@@ -345,12 +350,40 @@ describe('runtime contract package boundary', () => {
         type: 'tool.queued',
         toolId: 'tool-1',
         presentationGroupId: 'model-message-1',
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
         summary: 'Queued.',
       }),
     ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'tool.queued',
+        toolId: 'tool-1',
+        presentation: 'hidden',
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: '' },
+        arguments: {},
+        summary: 'Queued.',
+      }),
+    ).toBe(false);
+    for (const event of [
+      {
+        type: 'tool.failed',
+        toolId: 'tool-1',
+        presentation: 'hidden',
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
+        summary: 'Failed.',
+      },
+      {
+        type: 'tool.cancelled',
+        toolId: 'tool-1',
+        presentation: 'hidden',
+        presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
+      },
+    ]) {
+      expect(isRuntimeClientEvent(event)).toBe(true);
+    }
     expect(
       isRuntimeClientEvent({
         type: 'tool.queued',
@@ -467,9 +500,19 @@ describe('runtime contract package boundary', () => {
         subagentId: 'subagent-1',
         role: 'explore',
         name: 'Inspect the runtime',
+        parentToolCallId: 'task-call-1',
         concurrencyGroupId: 'subagent-batch:tool-1',
       }),
     ).toBe(true);
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        parentToolCallId: '',
+      }),
+    ).toBe(false);
     expect(
       isRuntimeClientEvent({
         type: 'subagent.started',

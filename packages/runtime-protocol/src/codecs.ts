@@ -32,6 +32,9 @@ const shortText = z.string().max(8_192).refine(noForbiddenControls);
 const approvalCommand = z.string().max(16_384).refine(noForbiddenControls);
 const runtimeToolDisplayName = z.enum(RUNTIME_TOOL_DISPLAY_NAMES_);
 const runtimeToolPresentation = z.enum(RUNTIME_TOOL_PRESENTATIONS_);
+const toolPresentationOwner = z
+  .object({ subagentId: identifier, parentToolCallId: identifier })
+  .strict();
 const displayLabel = z.string().min(1).max(512).refine(noForbiddenControls);
 const inputText = z
   .string()
@@ -296,6 +299,7 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
       ...commandBase,
       type: z.literal('create_session'),
       bootstrapSessionId: identifier.optional(),
+      model: z.object({ provider: identifier, name: inputText }).strict().optional(),
     })
     .strict(),
   z
@@ -312,6 +316,7 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
       type: z.literal('start_turn'),
       input: inputText,
       phase: z.enum(['planning', 'building']).optional(),
+      model: z.object({ provider: identifier, name: inputText }).strict().optional(),
       initialSkills: z
         .array(z.object({ skillId: identifier, input: jsonRecord }).strict())
         .max(64)
@@ -1248,6 +1253,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('tool.queued'),
       toolId: identifier,
       presentationGroupId: identifier.optional(),
+      presentationOwner: toolPresentationOwner.optional(),
       toolName: runtimeToolDisplayName.optional(),
       displayLabel: displayLabel.optional(),
       presentation: runtimeToolPresentation,
@@ -1274,6 +1280,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       toolName: runtimeToolDisplayName.optional(),
       displayLabel: displayLabel.optional(),
       presentation: runtimeToolPresentation,
+      presentationOwner: toolPresentationOwner.optional(),
       result: toolResult,
       summary: shortText,
     })
@@ -1283,6 +1290,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('tool.failed'),
       toolId: identifier,
       presentation: runtimeToolPresentation,
+      presentationOwner: toolPresentationOwner.optional(),
       summary: shortText,
     })
     .strict(),
@@ -1291,6 +1299,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('tool.rejected'),
       toolId: identifier,
       presentation: runtimeToolPresentation,
+      presentationOwner: toolPresentationOwner.optional(),
       summary: shortText,
     })
     .strict(),
@@ -1299,6 +1308,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('tool.cancelled'),
       toolId: identifier,
       presentation: runtimeToolPresentation,
+      presentationOwner: toolPresentationOwner.optional(),
       summary: shortText.optional(),
     })
     .strict(),
@@ -1422,6 +1432,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       subagentId: identifier,
       role: z.enum(['explore', 'plan', 'code', 'review']),
       name: shortText,
+      parentToolCallId: identifier.optional(),
       concurrencyGroupId: identifier.optional(),
     })
     .strict(),

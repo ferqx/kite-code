@@ -1044,6 +1044,12 @@ describe('executeTestRuntimeTools', () => {
           event.type === 'tool.queued' && event.name === 'read_file',
       );
       expect(childQueued?.toolCallId.startsWith('subagent-tool:')).toBe(true);
+      if (!childStarted) throw new Error('Expected the child start event.');
+      expect(childStarted?.subagent).toMatchObject({ parentToolCallId: 'task' });
+      expect(childQueued?.presentationOwner).toEqual({
+        subagentId: childStarted.subagent.id,
+        parentToolCallId: 'task',
+      });
       const invocationRecordedIndex = events.findIndex(
         (event) =>
           event.type === 'capability.invocation_recorded' &&

@@ -1417,6 +1417,7 @@ function normalizeToolTerminalEvent(
     ...event,
     createdAt,
     ...(call?.presentation === undefined ? {} : { presentation: call.presentation }),
+    ...(call?.presentationOwner === undefined ? {} : { presentationOwner: call.presentationOwner }),
     outcome: outcomeWithLineage,
   } as unknown as KernelEvent;
 }

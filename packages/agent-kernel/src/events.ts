@@ -38,6 +38,7 @@ import type {
   AgentSubagentTaskArtifactRef as StateSubagentTaskArtifactRef,
   AgentToolApprovalPayload as StateToolApprovalPayload,
   AgentToolPresentation as StateToolPresentation,
+  AgentToolPresentationOwner as StateToolPresentationOwner,
   AgentToolResultMeta as StateToolResultMeta,
   AgentUserInputPayload as StateUserInputPayload,
 } from './state';
@@ -638,6 +639,7 @@ type ToolEffectClass =
   | 'external_side_effect'
   | 'unknown';
 type ToolPresentation = StateToolPresentation;
+type ToolPresentationOwner = StateToolPresentationOwner;
 type InteractionMode = 'accept_edits' | 'auto' | 'full';
 type UserInputResult = { answer: string; answers?: Record<string, string> };
 
@@ -690,6 +692,7 @@ type SubAgentStartPayload =
       id: string;
       role: SubAgentRole;
       name: string;
+      parentToolCallId?: string;
       concurrencyGroupId?: string;
     }
   | {
@@ -697,6 +700,7 @@ type SubAgentStartPayload =
       id: string;
       role: SubAgentRole;
       task: string;
+      parentToolCallId?: string;
       concurrencyGroupId?: string;
     };
 type SubAgentStepPayload = {
@@ -1164,6 +1168,8 @@ type StateEventMap = ResourceBudgetEventMap &
       classificationReason?: string;
       /** Kernel admission fact consumed by the Runtime Client projector. */
       presentation?: ToolPresentation;
+      /** Presentation-only owner for internal child tools; never inferred from the tool id. */
+      presentationOwner?: ToolPresentationOwner;
       bindingId?: string;
       capabilityId?: string;
       capabilityRevision?: string;
@@ -1193,6 +1199,7 @@ type StateEventMap = ResourceBudgetEventMap &
       name: string;
       /** Preserved from the admitted Tool fact for terminal projection. */
       presentation?: ToolPresentation;
+      presentationOwner?: ToolPresentationOwner;
       result: {
         ok: boolean;
         command: string;
@@ -1218,6 +1225,7 @@ type StateEventMap = ResourceBudgetEventMap &
       failure: ClassifiedFailure;
       /** Preserved from the admitted Tool fact for terminal projection. */
       presentation?: ToolPresentation;
+      presentationOwner?: ToolPresentationOwner;
     };
     'tool.rejected': {
       type: 'tool.rejected';
@@ -1228,6 +1236,7 @@ type StateEventMap = ResourceBudgetEventMap &
       outcome?: ToolOutcome;
       /** Preserved from the admitted Tool fact for terminal projection. */
       presentation?: ToolPresentation;
+      presentationOwner?: ToolPresentationOwner;
     };
     'tool.cancelled': {
       type: 'tool.cancelled';
@@ -1237,6 +1246,7 @@ type StateEventMap = ResourceBudgetEventMap &
       outcome?: ToolOutcome;
       /** Preserved from the admitted Tool fact for terminal projection. */
       presentation?: ToolPresentation;
+      presentationOwner?: ToolPresentationOwner;
     };
     'tool.retry_recorded': {
       type: 'tool.retry_recorded';

@@ -304,6 +304,9 @@ export async function executeSubagentStartWithCoreToolAdapter(
       id,
       role: normalizedInput.role.role,
       name: input.name,
+      ...(input.modelInvocationParentToolCallId
+        ? { parentToolCallId: input.modelInvocationParentToolCallId }
+        : {}),
     },
   });
   return executeCoreSubagentToolAdapter(normalizedInput, {

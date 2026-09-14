@@ -301,6 +301,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     insertEvents: eventStore.insertEvents,
     encodeSnapshot: snapshotStore.encode,
     persistSnapshot: snapshotStore.persist,
+    setSessionModelRoute: sessionMetadata.setModelRouteInTransaction,
     receiptWriter: receipts.writer,
     readSessionBinding: runtimeBinding,
     readCommandReceipt: receipts.readExact,

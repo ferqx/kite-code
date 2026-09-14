@@ -427,7 +427,7 @@ class ServerConnection implements RuntimeServerConnection {
   ): Promise<void> {
     const decision = await this.#authorize(request, request.params.clientInfo);
     if (!decision.allowed) {
-      await this.#sendError(request.id, 'unauthorized', releasePermit);
+      await this.#sendError(request.id, decision.reason ?? 'unauthorized', releasePermit);
       return;
     }
     this.#clientInfo = request.params.clientInfo;
@@ -486,7 +486,7 @@ class ServerConnection implements RuntimeServerConnection {
   ): Promise<void> {
     const decision = await this.#authorize(request);
     if (!decision.allowed) {
-      await this.#sendError(request.id, 'unauthorized', releasePermit);
+      await this.#sendError(request.id, decision.reason ?? 'unauthorized', releasePermit);
       return;
     }
     const command = mapProtocolCommandToRuntimeCommand(request.params.command, {
@@ -516,7 +516,7 @@ class ServerConnection implements RuntimeServerConnection {
   ): Promise<void> {
     const decision = await this.#authorize(request);
     if (!decision.allowed) {
-      await this.#sendError(request.id, 'unauthorized', releasePermit);
+      await this.#sendError(request.id, decision.reason ?? 'unauthorized', releasePermit);
       return;
     }
     const result = mapRuntimeQueryResultToProtocol(
@@ -544,7 +544,7 @@ class ServerConnection implements RuntimeServerConnection {
     const decision = await this.#authorize(request);
     if (!decision.allowed) {
       this.#releaseSubscription();
-      await this.#sendError(request.id, 'unauthorized', releasePermit);
+      await this.#sendError(request.id, decision.reason ?? 'unauthorized', releasePermit);
       return;
     }
     const subscriptionId = `subscription-${++this.#nextSubscription}`;
@@ -647,7 +647,7 @@ class ServerConnection implements RuntimeServerConnection {
 
   #sendError(
     id: string | null,
-    code: RuntimeProtocolErrorCode,
+    code: RuntimeProtocolErrorCode | 'unavailable',
     releasePermit?: () => void,
   ): Promise<boolean> {
     releasePermit?.();
@@ -1028,7 +1028,14 @@ class OutboundQueue {
   }
 }
 
-function protocolError(code: RuntimeProtocolErrorCode) {
+function protocolError(code: RuntimeProtocolErrorCode | 'unavailable') {
+  if (code === 'unavailable') {
+    return RUNTIME_PROTOCOL_ERROR_SCHEMA_.parse({
+      code: RUNTIME_PROTOCOL_ERROR_NUMBERS.internal_error,
+      message: 'Runtime admission unavailable',
+      data: { code: 'internal_error', detailCode: 'temporarily_unavailable' },
+    });
+  }
   const messages: Readonly<Record<RuntimeProtocolErrorCode, string>> = {
     parse_error: 'Parse error',
     invalid_request: 'Invalid request',

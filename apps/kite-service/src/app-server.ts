@@ -182,9 +182,34 @@ export function createKiteAppServerRuntimeOwner(
           workspace: environment.workspace ?? environment.runtimeRoot,
         };
       }
+      const command = request.command as RuntimeProtocolCommand | undefined;
+      if (command?.type === 'set_interaction_mode') {
+        // Session policy belongs to the persisted Session, not the process's selected
+        // execution Workspace. This admits no Turn and never changes that selection.
+        const session = storageOwner.loadCurrentSnapshot(command.sessionId)?.session;
+        if (!session?.projectId || !session.canonicalWorkspaceDigest)
+          return { allowed: false as const, reason: 'unauthorized' as const };
+        const trust = await composition.appControl.gateway.discovery
+          .queryWorkspaceTrust({
+            schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+            workspace: session.workspace,
+          })
+          .catch(() => undefined);
+        // The target may disappear during canonicalization. Admission has not
+        // dispatched anything, so this is a definite availability failure.
+        if (!trust || trust.status === 'corrupt' || trust.status === 'unavailable')
+          return { allowed: false as const, reason: 'unavailable' as const };
+        if (
+          trust.status !== 'trusted' ||
+          trust.workspace.canonicalPath !== session.workspace ||
+          trust.workspace.projectId !== session.projectId ||
+          trust.workspace.workspaceDigest !== session.canonicalWorkspaceDigest
+        )
+          return { allowed: false as const, reason: 'unauthorized' as const };
+        return { allowed: true as const, workspace: trust.workspace.canonicalPath };
+      }
       if (!environment.workspace)
         return { allowed: false as const, reason: 'unauthorized' as const };
-      const command = request.command as RuntimeProtocolCommand | undefined;
       if (command?.type === 'cancel_turn' && storageOwner.ownsSessionExecution(command.sessionId))
         return { allowed: true as const, workspace: environment.workspace };
       const trust = await composition.appControl.gateway.discovery.queryWorkspaceTrust({

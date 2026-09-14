@@ -14,8 +14,10 @@
 - `model.text_delta` 与 `reasoning.activity` 必须携带对应 model request identity；live projector 保留 Kernel
   event 的 `requestId`，history replay 从 durable model invocation identity 重建同一字段。`tool.queued`可携带
   opaque `presentationGroupId`，只把tool call与产生它的closed model message关联，不暴露Provider或Kernel payload。
-- `subagent.started`可携带Runtime签发的opaque `concurrencyGroupId`；同一并发派发批次的child在live与History中
-  保留该字段，使展示层能按真实dispatch identity聚合，串行child不携带该字段。
+- `subagent.started`可携带父 task 的`parentToolCallId`及Runtime签发的opaque `concurrencyGroupId`；前者建立准确的
+  task归属，后者让同一并发派发批次的child在live与History中按真实dispatch identity聚合。旧History可缺少这两个字段。
+- child内部tool lifecycle从queued到terminal均可携带仅用于展示的`presentationOwner { subagentId, parentToolCallId }`。
+  Client据此把hidden异常保留在所属task执行过程；terminal-only replay也不按`toolId`格式、名称或到达顺序猜测，缺少owner的旧终态异常仍可独立展示。
 - `subagent.completed`携带Runtime实测`toolCallCount + durationMs`；`subagent.failed`可携带同类终态计量和仅含
   `code + stage`的低敏感度诊断，App projector不得把`modelInvocationId` correlation带入Client边界。
 - `AcceptedPresentationEnvelope` 是唯一进入消息 projector 的接收边界：每个 envelope 固定 Session、connection
@@ -53,6 +55,8 @@
 Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录与当前信任身份分组核对；摘要不赋予授权，不需要暴露 workspace 路径。
 
 同一 Session revision 的投影允许更新 model 元数据，以及已接受 Run 的排队到运行、活动到终态或缺省 Task 关联补齐；Host 与 Client 共用[投影补齐判定](src/projection-enrichment.ts)。这些更新不产生新消息版本；初始／当前 Turn、Run revision、已有 Task、interaction identity 及其他稳定 Session 字段必须保持一致。终态只在允许的 cleanup 更新中补齐 outcome，不能借元数据更新回退或替换运行身份。该纯规则不读取或写入 Store，也不增加协议字段。
+
+`create_session.model` 与 `start_turn.model` 是可选的无凭据 Session route。前者把准备态选择绑定到新 Session，后者只更新该 Session 的下一次 Run；缺省时恢复已持久化 route，再回退到 Workspace 默认配置。Provider 凭据和 endpoint 始终由 Service composition 解析，不能进入命令。
 
 成功文件操作的 `tool.file_changed` 可携带有界 `path` 展示字段。客户端按 toolId 关联既有终态输出，路径不是任意文件读取或打开授权；本机宿主执行外部跳转前必须重新核实其工作区边界。
 
@@ -92,8 +96,9 @@ Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录�
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。
 - 新写入的tool queue projection用`presentationGroupId`与`model.responded.messageId`精确配对；该字段只参与
   Presentation grouping，不是execution、authorization或settlement identity。旧History没有该可选字段时仍可回放。
-- `subagent.started.concurrencyGroupId`同样只属于Presentation grouping，不授予调度或授权能力；Contract validator
-  对其执行bounded identifier校验，缺少该字段的串行或旧History事件保持合法。
+- `subagent.started.parentToolCallId`与child tool lifecycle的`presentationOwner`只提供Presentation ownership，
+  `subagent.started.concurrencyGroupId`只提供Presentation grouping，均不授予调度或授权能力；Contract validator
+  对其执行closed identity校验，缺少这些字段的旧History事件保持合法。
 - Contract 不泄漏具体执行、存储或展示 authority。
 
 ## 测试

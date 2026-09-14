@@ -435,6 +435,13 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
           : effect.effectClass === 'read_only' && effect.sideEffect === false
             ? 'exploration'
             : 'standalone';
+      const presentationOwner = recordField(payload, 'presentationOwner');
+      const ownerSubagentId = presentationOwner
+        ? stringField(presentationOwner, 'subagentId')
+        : undefined;
+      const ownerParentToolCallId = presentationOwner
+        ? stringField(presentationOwner, 'parentToolCallId')
+        : undefined;
       const call: AgentToolCallState = {
         toolCallId,
         ...(stringField(payload, 'modelInvocationId')
@@ -465,6 +472,14 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         payload.presentation === 'standalone' ||
         payload.presentation === 'hidden'
           ? { presentation }
+          : {}),
+        ...(ownerSubagentId && ownerParentToolCallId
+          ? {
+              presentationOwner: {
+                subagentId: ownerSubagentId,
+                parentToolCallId: ownerParentToolCallId,
+              },
+            }
           : {}),
         ...(stringField(payload, 'bindingId')
           ? { bindingId: stringField(payload, 'bindingId') }

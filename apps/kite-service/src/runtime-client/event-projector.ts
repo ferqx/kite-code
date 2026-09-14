@@ -78,6 +78,9 @@ export function projectRuntimeClientEvent(
         toolName: projectRuntimeToolDisplayName(event.name),
         ...toolDisplayLabelField(event.name, event.displayLabel),
         presentation: projectRuntimeToolPresentation(event),
+        ...(event.presentationOwner === undefined
+          ? {}
+          : { presentationOwner: event.presentationOwner }),
         arguments: projectRuntimeClientArguments(event.args),
         summary: 'Queued.',
       };
@@ -98,6 +101,9 @@ export function projectRuntimeClientEvent(
         toolName: projectRuntimeToolDisplayName(event.name),
         ...toolDisplayLabelField(event.name),
         presentation: projectRuntimeTerminalToolPresentation(event),
+        ...(event.presentationOwner === undefined
+          ? {}
+          : { presentationOwner: event.presentationOwner }),
         result: projectRuntimeClientToolResult(event.result),
         summary: event.result.ok ? 'Completed.' : 'Failed.',
       };
@@ -106,6 +112,9 @@ export function projectRuntimeClientEvent(
         type: 'tool.failed',
         toolId: event.toolCallId,
         presentation: projectRuntimeTerminalToolPresentation(event),
+        ...(event.presentationOwner === undefined
+          ? {}
+          : { presentationOwner: event.presentationOwner }),
         summary: 'Tool execution failed.',
       };
     case 'tool.rejected':
@@ -116,6 +125,9 @@ export function projectRuntimeClientEvent(
           event.failure?.kind === 'approval_rejected'
             ? projectRuntimeTerminalToolPresentation(event)
             : 'hidden',
+        ...(event.presentationOwner === undefined
+          ? {}
+          : { presentationOwner: event.presentationOwner }),
         summary: projectRuntimeClientText(event.reason, 512),
       };
     case 'tool.cancelled':
@@ -123,6 +135,9 @@ export function projectRuntimeClientEvent(
         type: 'tool.cancelled',
         toolId: event.toolCallId,
         presentation: projectRuntimeTerminalToolPresentation(event),
+        ...(event.presentationOwner === undefined
+          ? {}
+          : { presentationOwner: event.presentationOwner }),
         summary: 'Tool execution cancelled.',
       };
     case 'tool.file_change':
@@ -361,6 +376,9 @@ export function projectRuntimeClientEvent(
           'name' in event.subagent ? event.subagent.name : event.subagent.task,
           8_192,
         ),
+        ...(event.subagent.parentToolCallId === undefined
+          ? {}
+          : { parentToolCallId: event.subagent.parentToolCallId }),
         ...(event.subagent.concurrencyGroupId === undefined
           ? {}
           : { concurrencyGroupId: event.subagent.concurrencyGroupId }),

@@ -51,6 +51,8 @@ MCP readiness。它不创建configuration-only第二Worker或placeholder executi
 
 ## App Control、History 与 mutation
 
+本机 App Server 的 `set_interaction_mode` 从同一 Storage owner 读取目标 Session 的持久 workspace、projectId 与 canonicalWorkspaceDigest，重新查询该工作区 Trust 并比对完整身份；不从客户端目录、当前执行项目或显示路径推导授权。通过后复用原有按 Session 路由的 lazy Runtime、执行权和命令事务，不重启服务或停止其他 Session。未知会话、未信任或身份漂移仍拒绝；目标目录在信任查询时消失、Trust 损坏或不可用使用协议已有的 `internal_error + temporarily_unavailable` 详情。该命令不授予跨项目创建或启动 Turn 的权限。回归见 [App Server process](../test/isolated/app-server-process.test.ts) 与 [Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+
 设置交互模式仍校验 Session 与 expectedRevision；目标模式已生效时，在原有命令事务提交 snapshot 回执，不新增模式事件或推进 revision，不能把客户端确认当前权限当作内部故障。实际改变模式才写入 `interaction_mode.changed`。验证见 [coordinator 命令回归](../test/runtime/runtime-session-coordinator.test.ts)。
 
 [计划正文 projector](../src/runtime-client/plan-review.ts)从已保存的计划正文与步骤生成脱敏、有界的 review。实时交互与历史事件复用同一函数；Contract/Protocol 严格校验 text/truncated，交互结算继续绑定计划 identity 与 Session revision。超限明确标记，不暴露 Artifact/Store 句柄。验证见[计划正文测试](../test/runtime-plan-review.test.ts)。
@@ -58,7 +60,7 @@ MCP readiness。它不创建configuration-only第二Worker或placeholder executi
 `KiteInProcessAppControlComposition` 只表示Service内部handler composition，不是CLI embedded mode。Workspace Trust、
 Provider/model、MCP、Skill、execution/release与Native credential均有exact route/codec；secret只进入Native credential
 owner，browser-safe App Contract不携带secret。Trust query另投影Workspace关联的exact external-read roots与digest；
-Provider/model 的显式选择即使返回 `already_selected` 也重新读取当前配置并更新后续执行的期望配置，避免同名模型替换凭据或地址后继续使用旧路由；活动执行保持已捕获的配置。
+Provider 设置中的显式默认选择即使返回 `already_selected` 也重新读取当前配置；未绑定 route 的 Session 更新默认配置，已绑定 Session 则重新解析自己的 route，避免同名模型替换凭据或地址后继续使用旧配置，也不能借默认选择覆盖其模型。Composer 选择通过 `create_session.model` 或下一次 `start_turn.model` 绑定并原子持久化到对应 Session；恢复优先使用该 route，不能被同一 Workspace 的其他 Session 覆盖。活动执行始终保持开始时捕获的配置。
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
 Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
 grant subject与Host内部payload仍不进入client interaction。
@@ -127,6 +129,9 @@ execution authority；Service不得让TUI从事件相邻关系反推该归属。
 Thinking只读工具聚合。该判断使用admission时捕获的能力语义，不在TUI按工具名维护白名单。
 Runtime已在`subagent.started` payload签发的`concurrencyGroupId`必须由Client Event projector原样收窄并保留，随后由
 同一closed Contract与Protocol codec服务live订阅和History回放；不得丢弃该字段后让TUI按相邻child、名称或时间窗口猜测并发组。
+正常child启动还须保留父task的`parentToolCallId`。child内部tool lifecycle由Runtime在queued时写入、并在terminal时从canonical tool state延续closed
+`presentationOwner { subagentId, parentToolCallId }`；Client只据此隐藏顶层重复并把异常留在所属task过程，terminal-only replay也不得公开或解析
+`runtimeToolCallId`的命名格式。旧History缺少owner时继续保留独立异常入口。
 `subagent.completed`的Runtime实测`toolCallCount/durationMs`同样必须保留；failed事件可保留这两个计量与
 content-free `diagnostic.code/stage`，但必须删除`modelInvocationId`和raw provider/error correlation。
 `subagent.tool_result`的可选summary只有非空时才进入closed Client Event；成功但无匹配内容的read/search结果省略该字段，不能

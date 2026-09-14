@@ -33,6 +33,57 @@ const initialize = {
 } as const;
 
 describe('Runtime Server', () => {
+  test('preserves admission denial reasons without dispatching to Runtime', async () => {
+    const requests = [
+      initialize,
+      commandRequest('denied-command'),
+      queryListRequest('denied-query'),
+      {
+        jsonrpc: '2.0',
+        id: 'denied-subscribe',
+        method: 'runtime/subscribe',
+        params: { subscription: { scope: 'session', sessionId: 'session-1' } },
+      },
+    ] as const;
+    for (const request of requests) {
+      for (const reason of ['unauthorized', 'unavailable', undefined] as const) {
+        const runtime = new FakeRuntime();
+        const pair = createRuntimeServerInProcessHub(
+          {
+            runtime,
+            admission: {
+              authorize: async (input) =>
+                input.operation === request.method
+                  ? { allowed: false, ...(reason === undefined ? {} : { reason }) }
+                  : { allowed: true, workspace: '/trusted/workspace' },
+            },
+          },
+          serverOptions(),
+        ).open();
+        const messages = pair.client.messages()[Symbol.asyncIterator]();
+        try {
+          if (request.method !== 'initialize') await initializePair(pair, messages);
+          await pair.client.send(request);
+          expect(await next(messages)).toMatchObject({
+            id: request.id,
+            error:
+              reason === 'unavailable'
+                ? {
+                    message: 'Runtime admission unavailable',
+                    data: { code: 'internal_error', detailCode: 'temporarily_unavailable' },
+                  }
+                : { data: { code: 'unauthorized' } },
+          });
+          expect(runtime.commands).toHaveLength(0);
+          expect(runtime.queries).toHaveLength(0);
+          expect(runtime.subscriptions).toHaveLength(0);
+        } finally {
+          await pair.client.close();
+        }
+      }
+    }
+  });
+
   test('rejects pre-init, duplicate init, malformed and incompatible requests before RuntimeAccess', async () => {
     const runtime = new FakeRuntime();
     const pair = createPair(runtime);

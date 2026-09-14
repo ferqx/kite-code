@@ -1573,6 +1573,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           const pendingSessionBridges = new Map<string, Promise<ConfigurableCliRuntimeBridge>>();
           const bridgeForSession = async (
             sessionId: string,
+            requestedModel?: { readonly provider: string; readonly name: string },
           ): Promise<ConfigurableCliRuntimeBridge> => {
             const current = sessionBridges.get(sessionId);
             if (current) return current;
@@ -1584,10 +1585,24 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 throw new Error('Runtime Session belongs to a different Workspace.');
               }
               bySession.set(sessionId, admission);
+              const persistedModel = owner.storage.sessions.getSessionModelRoute(sessionId);
+              const selectedModel = requestedModel ?? persistedModel ?? undefined;
+              const defaultConfig = desiredConfigs.get(key) ?? registered.input.config;
+              const sessionConfig = selectedModel
+                ? (registered.input.resolveModelConfig?.(selectedModel) ??
+                  (selectedModel.provider === defaultConfig.providerName &&
+                  selectedModel.name === defaultConfig.modelName
+                    ? defaultConfig
+                    : (() => {
+                        throw new Error(
+                          `Model route '${selectedModel.provider}/${selectedModel.name}' is unavailable.`,
+                        );
+                      })()))
+                : defaultConfig;
               const bridge = createCliRuntimeBridge(
                 {
                   ...registered.input,
-                  config: desiredConfigs.get(key) ?? registered.input.config,
+                  config: sessionConfig,
                   sessionId,
                   projectIdentity: resolveProjectIdentity(admission.canonicalPath),
                 },
@@ -1622,13 +1637,32 @@ export function createKiteMultiWorkspaceRuntimeServer(
           const bridge: ConfigurableCliRuntimeBridge = Object.freeze({
             applySelectedConfig: (config: AgentConfig) => {
               desiredConfigs.set(key, config);
-              for (const sessionBridge of sessionBridges.values()) {
-                sessionBridge.applySelectedConfig(config);
+              for (const [sessionId, sessionBridge] of sessionBridges) {
+                const route = owner.storage.sessions.getSessionModelRoute(sessionId);
+                try {
+                  sessionBridge.applySelectedConfig(
+                    route && registered.input.resolveModelConfig
+                      ? registered.input.resolveModelConfig(route)
+                      : config,
+                  );
+                } catch {
+                  // A removed Session route keeps its last resolved config until the user
+                  // chooses a valid replacement; changing the Workspace default cannot retarget it.
+                }
               }
-              for (const pendingBridge of pendingSessionBridges.values()) {
-                void pendingBridge.then((sessionBridge) =>
-                  sessionBridge.applySelectedConfig(config),
-                );
+              for (const [sessionId, pendingBridge] of pendingSessionBridges) {
+                void pendingBridge.then((sessionBridge) => {
+                  const route = owner.storage.sessions.getSessionModelRoute(sessionId);
+                  try {
+                    sessionBridge.applySelectedConfig(
+                      route && registered.input.resolveModelConfig
+                        ? registered.input.resolveModelConfig(route)
+                        : config,
+                    );
+                  } catch {
+                    // See the settled-bridge path above.
+                  }
+                });
               }
             },
             recoverSession: async (
@@ -1644,6 +1678,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
                   command.type === 'fork_session'
                     ? command.sourceSessionId
                     : context.targetSessionId,
+                  command.type === 'create_session' ? command.model : undefined,
                 )
               ).inspectCommand(command, context),
             query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {

@@ -297,6 +297,13 @@ export function createKiteInProcessAppControlComposition<
         mcpManager: workspaceOwners.mcp.getRuntimeProvider(),
         workspaceReady,
         config: workspaceOwners.config,
+        resolveModelConfig: (route: { readonly provider: string; readonly name: string }) =>
+          loadAgentConfig({
+            workspace: workspace.canonicalPath,
+            providerName: route.provider,
+            modelName: route.name,
+            ...(options.userConfigPath === undefined ? {} : { configPath: options.userConfigPath }),
+          }),
         checkpointPath: options.checkpointPath ?? defaultCheckpointPath(),
         shellExecutor: workspaceOwners.shellExecutor,
         observabilityBridge: workspaceOwners.observability.bridge,

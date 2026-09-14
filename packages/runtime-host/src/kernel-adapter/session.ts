@@ -40,6 +40,7 @@ import type {
   RuntimeRunStatus,
   RuntimeRunStorePort,
   RuntimeRunTransactionMutation,
+  RuntimeSessionModelRoute,
   RuntimeStoredCommandReceipt,
   RuntimeStoredCommandResourceResult,
   RuntimeStoredRun,
@@ -183,13 +184,17 @@ export interface StateRuntimeSession {
   commitCommandBatch(
     events: readonly KernelEvent[],
     evidence: RuntimeCommandCommitEvidence,
+    sessionModelRoute?: RuntimeSessionModelRoute,
   ): StateRuntimeCommandCommitResult;
   /**
    * Commits a command receipt against the exact current snapshot without
    * inventing a Kernel event or advancing State revision. This is reserved
    * for accepted lifecycle decisions such as create/resume/idle close.
    */
-  commitCommandSnapshot(evidence: RuntimeCommandCommitEvidence): RuntimeStoredCommandReceipt;
+  commitCommandSnapshot(
+    evidence: RuntimeCommandCommitEvidence,
+    sessionModelRoute?: RuntimeSessionModelRoute,
+  ): RuntimeStoredCommandReceipt;
   /**
    * Commit one same-command release as a single Store transaction. The event
    * contains the complete snapshot match and per-invocation receipts; callers
@@ -452,18 +457,27 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   commitCommandBatch(
     events: readonly KernelEvent[],
     evidence: RuntimeCommandCommitEvidence,
+    sessionModelRoute?: RuntimeSessionModelRoute,
   ): StateRuntimeCommandCommitResult {
     if (evidence.targetSessionId !== this.sessionId) {
       throw new Error('Runtime command receipt target does not match State session.');
     }
-    const committed = this.#processEventBatch(events, { source: 'command' }, evidence);
+    const committed = this.#processEventBatch(
+      events,
+      { source: 'command' },
+      evidence,
+      sessionModelRoute,
+    );
     if (!committed.receipt) {
       throw new Error('Runtime command did not produce an applied State decision.');
     }
     return Object.freeze({ receipt: committed.receipt, events: committed.events });
   }
 
-  commitCommandSnapshot(evidence: RuntimeCommandCommitEvidence): RuntimeStoredCommandReceipt {
+  commitCommandSnapshot(
+    evidence: RuntimeCommandCommitEvidence,
+    sessionModelRoute?: RuntimeSessionModelRoute,
+  ): RuntimeStoredCommandReceipt {
     if (evidence.targetSessionId !== this.sessionId) {
       throw new Error('Runtime command receipt target does not match State session.');
     }
@@ -476,6 +490,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       metadata: [],
       expectedRestoreBoundary: this.#restoreBoundary(),
       commandReceipt: receipt,
+      ...(sessionModelRoute === undefined ? {} : { sessionModelRoute }),
     };
     this.#lastAppliedEvents = [];
     this.#lastProcessedEventId = undefined;
@@ -487,6 +502,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     events: readonly KernelEvent[],
     options: StateRuntimeProcessEventBatchOptions,
     commandEvidence?: RuntimeCommandCommitEvidence,
+    sessionModelRoute?: RuntimeSessionModelRoute,
   ): { readonly events: readonly KernelEvent[]; readonly receipt?: RuntimeStoredCommandReceipt } {
     this.#lastProcessedEventId = undefined;
     if (events.length === 0) {
@@ -560,6 +576,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       expectedRestoreBoundary: this.#restoreBoundary(),
       ...(receipt ? { commandReceipt: receipt } : {}),
       ...(runCommit ? { runMutation: runCommit.mutation } : {}),
+      ...(sessionModelRoute === undefined ? {} : { sessionModelRoute }),
     };
     try {
       if (receipt) this.#services.transactions.commitCommandDecision(input);

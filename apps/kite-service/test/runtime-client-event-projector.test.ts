@@ -13,6 +13,7 @@ describe('Runtime Client event projector', () => {
           type: 'tool.queued',
           toolCallId: 'tool-1',
           modelMessageId: 'model-message-1',
+          presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
           name: 'write_file',
           args: { path: '/private/secret', content: 'password=hidden' },
         } as RuntimeEvent,
@@ -22,6 +23,7 @@ describe('Runtime Client event projector', () => {
       type: 'tool.queued',
       toolId: 'tool-1',
       presentationGroupId: 'model-message-1',
+      presentationOwner: { subagentId: 'child-1', parentToolCallId: 'task-1' },
       toolName: 'write_file',
       presentation: 'standalone',
       arguments: { path: '/private/secret', content: '[redacted]' },
@@ -102,6 +104,7 @@ describe('Runtime Client event projector', () => {
           type: 'tool.failed',
           toolCallId: 'child-tool-step',
           presentation: 'hidden',
+          presentationOwner: { subagentId: 'child-1', parentToolCallId: 'parent-task-1' },
           failure: {
             kind: 'tool_runtime_error',
             message: 'failed',
@@ -118,6 +121,7 @@ describe('Runtime Client event projector', () => {
       type: 'tool.failed',
       toolId: 'child-tool-step',
       presentation: 'hidden',
+      presentationOwner: { subagentId: 'child-1', parentToolCallId: 'parent-task-1' },
       summary: 'Tool execution failed.',
     });
     expect(
@@ -261,6 +265,7 @@ describe('Runtime Client event projector', () => {
             id: 'child-1',
             role: 'explore',
             name: 'Inspect runtime files',
+            parentToolCallId: 'parent-task-1',
             concurrencyGroupId: 'subagent-batch:tool-1',
           },
         } as RuntimeEvent,
@@ -271,6 +276,7 @@ describe('Runtime Client event projector', () => {
       subagentId: 'child-1',
       role: 'explore',
       name: 'Inspect runtime files',
+      parentToolCallId: 'parent-task-1',
       concurrencyGroupId: 'subagent-batch:tool-1',
     });
     expect(

@@ -1221,6 +1221,8 @@ describe('agent kernel package boundary', () => {
             status: 'running',
             effectClass: 'read_only',
             sideEffect: false,
+            presentation: 'hidden',
+            presentationOwner: { subagentId: 'child-1', parentToolCallId: 'parent-task-1' },
           },
         },
         active: ['fixture'],
@@ -1239,6 +1241,8 @@ describe('agent kernel package boundary', () => {
       '2026-08-20T00:00:01.000Z',
     );
     expect(normalized).toMatchObject({
+      presentation: 'hidden',
+      presentationOwner: { subagentId: 'child-1', parentToolCallId: 'parent-task-1' },
       outcome: {
         schemaVersion: 1,
         status: 'success',
@@ -1991,7 +1995,13 @@ describe('agent kernel package boundary', () => {
       toolCallId: 'task-tool-1',
       name: 'task',
       args: { prompt: 'inspect' },
+      presentation: 'hidden',
+      presentationOwner: { subagentId: 'subagent-1', parentToolCallId: 'parent-task-1' },
     } as KernelEvent);
+    expect(state.tools.calls['task-tool-1']?.presentationOwner).toEqual({
+      subagentId: 'subagent-1',
+      parentToolCallId: 'parent-task-1',
+    });
     apply({ type: 'tool.started', toolCallId: 'task-tool-1' } as KernelEvent);
     apply({
       type: 'subagent.suspended',

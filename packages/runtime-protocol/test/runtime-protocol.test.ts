@@ -108,6 +108,7 @@ describe('Runtime Protocol', () => {
       commandId: 'command-1',
       type: 'create_session' as const,
       bootstrapSessionId: 'session-bootstrap',
+      model: { provider: 'openai', name: 'gpt-session' },
     };
     const command = mapProtocolCommandToRuntimeCommand(wire, { workspace: '/not-on-the-wire' });
     expect(command).toEqual({ ...wire, workspace: '/not-on-the-wire' });
@@ -427,6 +428,7 @@ describe('Runtime Protocol', () => {
         subagentId: 'subagent-1',
         role: 'explore',
         name: 'Inspect the runtime',
+        parentToolCallId: 'task-call-1',
         concurrencyGroupId: 'subagent-batch:tool-1',
       }),
     ).toEqual({
@@ -434,6 +436,7 @@ describe('Runtime Protocol', () => {
       subagentId: 'subagent-1',
       role: 'explore',
       name: 'Inspect the runtime',
+      parentToolCallId: 'task-call-1',
       concurrencyGroupId: 'subagent-batch:tool-1',
     });
     expect(
@@ -482,6 +485,7 @@ describe('Runtime Protocol', () => {
         type: 'tool.queued',
         toolId: 'tool-1',
         presentationGroupId: 'model-message-1',
+        presentationOwner: { subagentId: 'subagent-1', parentToolCallId: 'task-call-1' },
         toolName: 'read_file',
         presentation: 'exploration',
         arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -491,6 +495,7 @@ describe('Runtime Protocol', () => {
       type: 'tool.queued',
       toolId: 'tool-1',
       presentationGroupId: 'model-message-1',
+      presentationOwner: { subagentId: 'subagent-1', parentToolCallId: 'task-call-1' },
       toolName: 'read_file',
       presentation: 'exploration',
       arguments: { path: '/workspace/src/index.ts', pattern: 'needle' },
@@ -502,6 +507,7 @@ describe('Runtime Protocol', () => {
         toolId: 'tool-1',
         toolName: 'read_file',
         presentation: 'exploration',
+        presentationOwner: { subagentId: 'subagent-1', parentToolCallId: 'task-call-1' },
         result: {
           ok: true,
           exitCode: 0,
@@ -516,6 +522,7 @@ describe('Runtime Protocol', () => {
       toolId: 'tool-1',
       toolName: 'read_file',
       presentation: 'exploration',
+      presentationOwner: { subagentId: 'subagent-1', parentToolCallId: 'task-call-1' },
       result: {
         ok: true,
         exitCode: 0,
@@ -525,6 +532,15 @@ describe('Runtime Protocol', () => {
       },
       summary: 'Completed.',
     });
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
+        type: 'tool.failed',
+        toolId: 'tool-1',
+        presentation: 'hidden',
+        presentationOwner: { subagentId: 'subagent-1', parentToolCallId: '' },
+        summary: 'Failed.',
+      }).success,
+    ).toBeFalse();
     const approvalQueued = {
       type: 'approval.queued' as const,
       interaction: {
@@ -929,7 +945,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '0da083e0:2b7bc6e7';
+    const expectedDigest = 'da4fdd63:1b82b00f';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -941,8 +957,10 @@ describe('Runtime Protocol', () => {
     expect(generated.typeScript).toContain("method: 'app/provider_credential/write'");
     expect(generated.typeScript).toContain("method: 'server/ping'");
     expect(generated.typeScript).toContain('RuntimeProtocolToolPresentation');
+    expect(generated.typeScript).toContain('RuntimeProtocolToolPresentationOwner');
     expect(generated.typeScript).toContain('RuntimeProtocolToolQueuedEvent');
     expect(generated.typeScript).toContain('RuntimeProtocolToolFinishedEvent');
+    expect(generated.typeScript).toContain('RuntimeProtocolSubagentStartedEvent');
     expect(generated.typeScript).toContain('RuntimeProtocolReasoningActivity');
     expect(generated.typeScript).toContain('RuntimeProtocolModelTextDeltaEvent');
     expect(generated.typeScript).toContain('RuntimeProtocolModelRespondedEvent');

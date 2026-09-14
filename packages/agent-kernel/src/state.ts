@@ -749,6 +749,12 @@ export type AgentApprovalStatus =
  */
 export type AgentToolPresentation = 'exploration' | 'standalone' | 'hidden';
 
+/** Exact presentation-only ownership of an internal child tool. */
+export interface AgentToolPresentationOwner {
+  readonly subagentId: string;
+  readonly parentToolCallId: string;
+}
+
 /** Stable invocation subject used by same_command matching. */
 export interface AgentApprovalCommandIdentity {
   readonly sessionId: string;
@@ -907,6 +913,7 @@ export interface AgentToolCallState {
   readonly classificationReason?: string;
   /** Stable presentation classification decided at Tool admission. */
   readonly presentation?: AgentToolPresentation;
+  readonly presentationOwner?: AgentToolPresentationOwner;
   readonly networkDecisions?: readonly AgentNetworkDecisionReceipt[];
   readonly status:
     | 'queued'

@@ -64,6 +64,20 @@ export function isRuntimeToolPresentation(value: unknown): value is RuntimeToolP
   return typeof value === 'string' && RUNTIME_TOOL_PRESENTATION_SET.has(value);
 }
 
+function isToolPresentationOwner(value: unknown): value is RuntimeToolPresentationOwner {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['subagentId', 'parentToolCallId']) &&
+    isIdentifier(value.subagentId) &&
+    isIdentifier(value.parentToolCallId)
+  );
+}
+
+export interface RuntimeToolPresentationOwner {
+  readonly subagentId: string;
+  readonly parentToolCallId: string;
+}
+
 /** Closed terminal result shape; internal result metadata never crosses this boundary. */
 export interface RuntimeClientToolResult {
   readonly ok: boolean;
@@ -162,6 +176,8 @@ export type RuntimeClientEvent =
       readonly displayLabel?: string;
       /** Closed App rendering fact; never a tool argument or execution authority. */
       readonly presentation: RuntimeToolPresentation;
+      /** Exact child-task owner for presentation; omitted for root tools and legacy history. */
+      readonly presentationOwner?: RuntimeToolPresentationOwner;
       /** Bounded JSON-safe arguments after App-side credential redaction. */
       readonly arguments: Readonly<Record<string, unknown>>;
       readonly summary: string;
@@ -182,6 +198,7 @@ export type RuntimeClientEvent =
       readonly displayLabel?: string;
       /** Terminal fallback when the client missed the matching queued fact. */
       readonly presentation: RuntimeToolPresentation;
+      readonly presentationOwner?: RuntimeToolPresentationOwner;
       readonly result: RuntimeClientToolResult;
       readonly summary: string;
     }
@@ -189,18 +206,21 @@ export type RuntimeClientEvent =
       readonly type: 'tool.failed';
       readonly toolId: string;
       readonly presentation: RuntimeToolPresentation;
+      readonly presentationOwner?: RuntimeToolPresentationOwner;
       readonly summary: string;
     }
   | {
       readonly type: 'tool.rejected';
       readonly toolId: string;
       readonly presentation: RuntimeToolPresentation;
+      readonly presentationOwner?: RuntimeToolPresentationOwner;
       readonly summary: string;
     }
   | {
       readonly type: 'tool.cancelled';
       readonly toolId: string;
       readonly presentation: RuntimeToolPresentation;
+      readonly presentationOwner?: RuntimeToolPresentationOwner;
       readonly summary?: string;
     }
   | {
@@ -290,6 +310,8 @@ export type RuntimeClientEvent =
       readonly subagentId: string;
       readonly role: 'explore' | 'plan' | 'code' | 'review';
       readonly name: string;
+      /** Exact parent task-tool identity; absent for legacy or detached child records. */
+      readonly parentToolCallId?: string;
       /** Opaque Runtime dispatch identity shared by concurrently admitted siblings. */
       readonly concurrencyGroupId?: string;
     }
@@ -877,13 +899,15 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'toolId', 'presentation', 'arguments', 'summary'],
-            ['presentationGroupId', 'toolName', 'displayLabel'],
+            ['presentationGroupId', 'presentationOwner', 'toolName', 'displayLabel'],
           ),
         ) &&
         isIdentifier(value.toolId) &&
         (!Object.hasOwn(value, 'presentationGroupId') || isIdentifier(value.presentationGroupId)) &&
         isBoundedString(value.summary) &&
         isRuntimeToolPresentation(value.presentation) &&
+        (!Object.hasOwn(value, 'presentationOwner') ||
+          isToolPresentationOwner(value.presentationOwner)) &&
         isRecord(value.arguments) &&
         isJsonSafeValue(value.arguments) &&
         (!Object.hasOwn(value, 'toolName') || isRuntimeToolDisplayName(value.toolName)) &&
@@ -892,16 +916,26 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
     case 'tool.failed':
     case 'tool.rejected':
       return (
-        hasExactKeys(value, ['type', 'toolId', 'presentation', 'summary']) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'toolId', 'presentation', 'summary'], ['presentationOwner']),
+        ) &&
         isIdentifier(value.toolId) &&
         isRuntimeToolPresentation(value.presentation) &&
+        (!Object.hasOwn(value, 'presentationOwner') ||
+          isToolPresentationOwner(value.presentationOwner)) &&
         isBoundedString(value.summary)
       );
     case 'tool.cancelled':
       return (
-        hasExactKeys(value, presentKeys(value, ['type', 'toolId', 'presentation'], ['summary'])) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'toolId', 'presentation'], ['presentationOwner', 'summary']),
+        ) &&
         isIdentifier(value.toolId) &&
         isRuntimeToolPresentation(value.presentation) &&
+        (!Object.hasOwn(value, 'presentationOwner') ||
+          isToolPresentationOwner(value.presentationOwner)) &&
         (!Object.hasOwn(value, 'summary') || isBoundedString(value.summary))
       );
     case 'tool.finished':
@@ -911,12 +945,14 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'toolId', 'presentation', 'result', 'summary'],
-            ['toolName', 'displayLabel'],
+            ['presentationOwner', 'toolName', 'displayLabel'],
           ),
         ) &&
         isIdentifier(value.toolId) &&
         isBoundedString(value.summary) &&
         isRuntimeToolPresentation(value.presentation) &&
+        (!Object.hasOwn(value, 'presentationOwner') ||
+          isToolPresentationOwner(value.presentationOwner)) &&
         isRuntimeClientToolResult(value.result) &&
         (!Object.hasOwn(value, 'toolName') || isRuntimeToolDisplayName(value.toolName)) &&
         (!Object.hasOwn(value, 'displayLabel') || isBoundedUserText(value.displayLabel, 512))
@@ -1053,9 +1089,14 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       return (
         hasExactKeys(
           value,
-          presentKeys(value, ['type', 'subagentId', 'role', 'name'], ['concurrencyGroupId']),
+          presentKeys(
+            value,
+            ['type', 'subagentId', 'role', 'name'],
+            ['parentToolCallId', 'concurrencyGroupId'],
+          ),
         ) &&
         isIdentifier(value.subagentId) &&
+        (!Object.hasOwn(value, 'parentToolCallId') || isIdentifier(value.parentToolCallId)) &&
         (!Object.hasOwn(value, 'concurrencyGroupId') || isIdentifier(value.concurrencyGroupId)) &&
         (value.role === 'explore' ||
           value.role === 'plan' ||

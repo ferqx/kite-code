@@ -404,6 +404,8 @@ export interface SubAgentStartPayload {
   role: SubAgentRole;
   /** Explicit public name; full delegated task body stays in private Artifact storage. */
   name: string;
+  /** Exact parent task-tool identity; omitted only for legacy or detached child records. */
+  parentToolCallId?: string;
   /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
   concurrencyGroupId?: string;
 }

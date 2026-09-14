@@ -243,6 +243,7 @@ export function commitStartTurnCommand(
           }),
         })
       : evidence,
+    command.model,
   );
   return Object.freeze({
     receipt: committed.receipt,

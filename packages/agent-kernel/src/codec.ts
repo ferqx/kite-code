@@ -114,6 +114,20 @@ function validToolPresentation(value: unknown): boolean {
   return value === 'exploration' || value === 'standalone' || value === 'hidden';
 }
 
+function validToolPresentationOwner(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value).sort();
+  return (
+    keys.length === 2 &&
+    keys[0] === 'parentToolCallId' &&
+    keys[1] === 'subagentId' &&
+    typeof value.subagentId === 'string' &&
+    value.subagentId.length > 0 &&
+    typeof value.parentToolCallId === 'string' &&
+    value.parentToolCallId.length > 0
+  );
+}
+
 function validToolDisplayLabel(value: unknown): boolean {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) return false;
   for (const character of value) {
@@ -210,6 +224,12 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     }
     if (value.displayLabel !== undefined && !validToolDisplayLabel(value.displayLabel)) {
       throw new Error(`${value.type} display label is invalid.`);
+    }
+    if (
+      value.presentationOwner !== undefined &&
+      !validToolPresentationOwner(value.presentationOwner)
+    ) {
+      throw new Error(`${value.type} presentation owner is invalid.`);
     }
   }
   switch (value.type) {
@@ -785,6 +805,9 @@ export function assertCurrentRuntimeEventForWrite(value: unknown): asserts value
       !subagent ||
       typeof subagent.name !== 'string' ||
       subagent.name.length === 0 ||
+      (subagent.parentToolCallId !== undefined &&
+        (typeof subagent.parentToolCallId !== 'string' ||
+          subagent.parentToolCallId.length === 0)) ||
       Object.hasOwn(subagent, 'task')
     ) {
       throw new Error('Retired subagent task titles are read-only compatibility data.');

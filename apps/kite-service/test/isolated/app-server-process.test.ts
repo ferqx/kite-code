@@ -7,7 +7,9 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +29,211 @@ import { createKiteSessionAppServerStorageComposition } from '../../src/bootstra
 import { trustWorkspace } from '../../src/config/workspace-trust';
 
 describe('KASD parent-owned App Server process', () => {
+  test('changes a persisted Session policy across Workspaces without stopping another Turn', async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-session-policy-')));
+    for (const name of ['home', 'runtime', 'config', 'a', 'b']) mkdirSync(join(root, name));
+    const model = createMockModelServer();
+    model.setResponses([{ delay: 10_000, message: { content: 'still running' } }]);
+    writeAppServerConfig(join(root, 'config'), model.baseURL);
+    for (const name of ['a', 'b']) {
+      expect(
+        trustWorkspace({
+          workspace: join(root, name),
+          source: 'test',
+          storePath: join(root, 'config/workspace-trust.jsonc'),
+        }).status,
+      ).toBe('recorded');
+    }
+    const open = (workspace: string) =>
+      createAppServerProtocolConnection(
+        createBunStdioChildRuntimeClientTransport({
+          argv: [
+            process.execPath,
+            join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+            'app-server',
+            'run-stdio',
+          ],
+          cwd: '/',
+          env: {
+            KITE_CODE_HOME: join(root, 'runtime'),
+            KITE_CODE_CONFIG_HOME: join(root, 'config'),
+            KITE_APP_SERVER_WORKSPACE: workspace,
+            KITE_APP_SERVER_BUILD_ID: 'session-policy',
+            HOME: join(root, 'home'),
+            USERPROFILE: join(root, 'home'),
+            PATH: process.env.PATH ?? '/usr/bin:/bin',
+          },
+        }),
+        kiteAppServerVersion('session-policy'),
+        { name: 'session-policy', version: '1', instanceId: crypto.randomUUID() },
+        KITE_APP_SERVER_PROTOCOL_METHODS_,
+      );
+    let connection = open(join(root, 'a'));
+    try {
+      await connection.prepareAppControl();
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'create-a',
+          type: 'create_session',
+          workspace: join(root, 'a'),
+          bootstrapSessionId: 'policy-a',
+        }),
+      ).toMatchObject({ status: 'applied' });
+      await connection.close();
+      connection = open(join(root, 'b'));
+      await connection.prepareAppControl();
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'create-b',
+          type: 'create_session',
+          workspace: join(root, 'b'),
+          bootstrapSessionId: 'policy-b',
+        }),
+      ).toMatchObject({ status: 'applied' });
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'start-b',
+          type: 'start_turn',
+          sessionId: 'policy-b',
+          expectedRevision: 0,
+          input: 'wait',
+        }),
+      ).toMatchObject({ status: 'applied' });
+      await eventually(() => model.getRequests().length === 1);
+      const before = await connection.runtime.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId: 'policy-b',
+      });
+      expect(before).toMatchObject({
+        status: 'ok',
+        session: { currentRun: { status: 'running' } },
+      });
+      const changed = await connection.runtime.command({
+        schema: 'kite.runtime-command.v1',
+        commandId: 'mode-a',
+        type: 'set_interaction_mode',
+        sessionId: 'policy-a',
+        expectedRevision: 0,
+        mode: 'full',
+      });
+      expect(changed).toMatchObject({ status: 'applied', sessionId: 'policy-a', revision: 1 });
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'mode-a-stale',
+          type: 'set_interaction_mode',
+          sessionId: 'policy-a',
+          expectedRevision: 0,
+          mode: 'auto',
+        }),
+      ).toMatchObject({ status: 'conflict' });
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'mode-a-noop',
+          type: 'set_interaction_mode',
+          sessionId: 'policy-a',
+          expectedRevision: 1,
+          mode: 'full',
+        }),
+      ).toMatchObject({ status: 'applied', revision: 1 });
+      await expect(
+        connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'start-a-denied',
+          type: 'start_turn',
+          sessionId: 'policy-a',
+          expectedRevision: 1,
+          input: 'must not run',
+        }),
+      ).rejects.toThrow('Unauthorized');
+      const after = await connection.runtime.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId: 'policy-b',
+      });
+      expect(after).toEqual(before);
+      expect(model.getRequests()).toHaveLength(1);
+      const contender = open(join(root, 'a'));
+      try {
+        await contender.prepareAppControl();
+        expect(
+          await contender.runtime.command({
+            schema: 'kite.runtime-command.v1',
+            commandId: 'mode-a-other-owner',
+            type: 'set_interaction_mode',
+            sessionId: 'policy-a',
+            expectedRevision: 1,
+            mode: 'auto',
+          }),
+        ).toMatchObject({ status: 'rejected', code: 'runtime_busy' });
+      } finally {
+        await contender.close();
+      }
+      expect(await connection.history.loadSession('policy-a')).toMatchObject({
+        interactionMode: 'full',
+      });
+      await expect(
+        connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'mode-missing',
+          type: 'set_interaction_mode',
+          sessionId: 'missing',
+          expectedRevision: 0,
+          mode: 'full',
+        }),
+      ).rejects.toThrow('Unauthorized');
+      if (process.platform !== 'win32') {
+        renameSync(join(root, 'a'), join(root, 'a-original'));
+        try {
+          await expect(
+            connection.runtime.command({
+              schema: 'kite.runtime-command.v1',
+              commandId: 'mode-missing-workspace',
+              type: 'set_interaction_mode',
+              sessionId: 'policy-a',
+              expectedRevision: 1,
+              mode: 'auto',
+            }),
+          ).rejects.toThrow('Runtime admission unavailable');
+        } finally {
+          renameSync(join(root, 'a-original'), join(root, 'a'));
+        }
+        renameSync(join(root, 'a'), join(root, 'a-original'));
+        symlinkSync(join(root, 'b'), join(root, 'a'));
+        try {
+          await expect(
+            connection.runtime.command({
+              schema: 'kite.runtime-command.v1',
+              commandId: 'mode-retargeted',
+              type: 'set_interaction_mode',
+              sessionId: 'policy-a',
+              expectedRevision: 1,
+              mode: 'auto',
+            }),
+          ).rejects.toThrow('Unauthorized');
+        } finally {
+          rmSync(join(root, 'a'));
+          renameSync(join(root, 'a-original'), join(root, 'a'));
+        }
+      }
+      await connection.close();
+      connection = open(join(root, 'a'));
+      await connection.prepareAppControl();
+      expect(await connection.history.loadSession('policy-a')).toMatchObject({
+        interactionMode: 'full',
+      });
+    } finally {
+      await connection.close();
+      model.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test('opens application History without a project, valid model configuration, or Git', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-neutral-history-')));
     for (const name of ['home', 'runtime', 'config']) mkdirSync(join(root, name));

@@ -2,6 +2,8 @@
 
 accepted 表示当时已接受，不表示全文仍定义当前行为。当前完整结论见[开发入口](../development/README.md)和[产品手册](../handbook/README.md)。仅在追溯设计理由时定向读取。失效记录提炼后删除，历史通过 Git 保留。
 
+- [ADR-0185：会话权限设置按目标工作区准入](0185-session-permission-admission.md)
+
 - [ADR-0184：Electron 客户端与独立 Runtime Host](0184-electron-desktop-runtime-host.md)
 
 - [ADR-0181：桌面页面重接保留原生 Service protocol peer](0181-desktop-renderer-reattachment.md)

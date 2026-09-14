@@ -22,11 +22,18 @@ export interface RuntimeSessionCommandBase extends RuntimeCommandBase {
   readonly expectedRevision: number;
 }
 
+export interface RuntimeModelRoute {
+  readonly provider: string;
+  readonly name: string;
+}
+
 /** Create a session for the canonical Workspace resolved by the Runtime Host. */
 export interface CreateSessionCommand extends RuntimeCommandBase {
   readonly type: 'create_session';
   readonly workspace: string;
   readonly bootstrapSessionId?: string;
+  /** Session-owned model route selected by the client before creation. */
+  readonly model?: RuntimeModelRoute;
 }
 
 export interface ResumeSessionCommand extends RuntimeCommandBase {
@@ -39,6 +46,8 @@ export interface StartTurnCommand extends RuntimeSessionCommandBase {
   readonly type: 'start_turn';
   readonly input: string;
   readonly phase?: 'planning' | 'building';
+  /** Optional next-Run route; when applied it becomes this Session's persisted route. */
+  readonly model?: RuntimeModelRoute;
   readonly initialSkills?: readonly {
     readonly skillId: string;
     readonly input: Readonly<Record<string, unknown>>;
@@ -238,12 +247,13 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
           optionalKeys(
             candidate,
             ['schema', 'commandId', 'type', 'workspace'],
-            ['bootstrapSessionId'],
+            ['bootstrapSessionId', 'model'],
           ),
         ) &&
         isBoundedString(candidate.workspace) &&
         (!Object.hasOwn(candidate, 'bootstrapSessionId') ||
-          isIdentifier(candidate.bootstrapSessionId))
+          isIdentifier(candidate.bootstrapSessionId)) &&
+        (!Object.hasOwn(candidate, 'model') || isRuntimeModelRoute(candidate.model))
       );
     case 'resume_session':
       return (
@@ -257,7 +267,9 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
       );
     case 'start_turn':
       return (
-        isSessionCommand(candidate, ['input', 'phase', 'initialSkills']) && isStartTurn(candidate)
+        isSessionCommand(candidate, ['input', 'phase', 'model', 'initialSkills']) &&
+        isStartTurn(candidate) &&
+        (!Object.hasOwn(candidate, 'model') || isRuntimeModelRoute(candidate.model))
       );
     case 'cancel_turn':
       return (
@@ -315,6 +327,16 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
     default:
       return false;
   }
+}
+
+function isRuntimeModelRoute(value: unknown): value is RuntimeModelRoute {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['provider', 'name']) &&
+    isIdentifier(value.provider) &&
+    isBoundedString(value.name) &&
+    value.name.length > 0
+  );
 }
 
 export function assertRuntimeCommand(value: unknown): asserts value is RuntimeCommand {

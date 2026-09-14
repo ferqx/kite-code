@@ -353,6 +353,8 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly commandReceipt?: RuntimeStoredCommandReceipt;
   /** Store 8-only Run row change committed by the same transaction owner. */
   readonly runMutation?: RuntimeRunTransactionMutation;
+  /** Session model metadata committed with the same accepted command decision. */
+  readonly sessionModelRoute?: RuntimeSessionModelRoute;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */

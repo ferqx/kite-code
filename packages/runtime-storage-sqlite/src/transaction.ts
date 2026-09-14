@@ -97,6 +97,10 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
     stateChecksum: string,
     schemaVersion: number,
   ) => void;
+  readonly setSessionModelRoute?: (
+    sessionId: string,
+    route: import('@kite-ai/runtime-host/storage').RuntimeSessionModelRoute,
+  ) => void;
   readonly readSessionBinding?: (sessionId: string) => SqliteRuntimeSessionBinding | null;
   /** Read one Store-owned command receipt while the writer is held. */
   readonly readCommandReceipt?: (
@@ -181,6 +185,11 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       }
     }
     input.ensureSession(transaction.sessionId, transaction.snapshot);
+    if (transaction.sessionModelRoute) {
+      if (!input.setSessionModelRoute)
+        throw new Error('Runtime Store cannot persist a Session model route.');
+      input.setSessionModelRoute(transaction.sessionId, transaction.sessionModelRoute);
+    }
     input.insertEvents(transaction.sessionId, transaction.events, transaction.metadata);
     const encoded = input.encodeSnapshot(transaction.snapshot, transaction.snapshotMetadata);
     const position =

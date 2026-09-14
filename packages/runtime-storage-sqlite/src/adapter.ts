@@ -687,6 +687,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       insertEvents,
       encodeSnapshot,
       persistSnapshot,
+      setSessionModelRoute: (sessionId, route) => sessionMetadata.setModelRoute(sessionId, route),
       receiptWriter: commandReceiptWriter,
       readSessionBinding: (sessionId) => selectSessionBinding?.get(sessionId) ?? null,
       readCommandReceipt,
