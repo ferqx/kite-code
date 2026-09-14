@@ -18,7 +18,7 @@ Electron `before-quit` 进入绑定主窗口的确认；确认后先关闭 stdin
 
 桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [ADR-0184](../adr/0184-electron-desktop-runtime-host.md)。
 
-桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；会话投影与订阅初始快照沿同一 Store 只读快照读取，不解析失效项目路径、不创建 Workspace context 或执行 authority。创建与启动任务仍须激活与授权当前 Workspace，跨工作区执行命令被拒绝。已有会话的 `set_interaction_mode` 按持久 Session 身份核对目标 Workspace Trust，再进入同一 Host 的命令事务；不绑定进程当前执行项目，也不改变它。该操作继续受 Session execution authority、revision 与持久回执约束，不因可读历史获得授权；完整机制见 [Service owner](../../apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation)。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
+桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；会话投影与订阅初始快照沿同一 Store 只读快照读取，不解析失效项目路径、不创建 Workspace context 或执行 authority。创建与启动任务仍须激活与授权当前 Workspace，跨工作区执行命令被拒绝。已有会话的 `set_interaction_mode` 按持久 Session 身份核对目标 Workspace Trust，再进入同一 Host 的命令事务；不绑定进程当前执行项目，也不改变它。该操作不申请执行租约：已有本地 Runtime 时沿其 execution fence 提交，否则只在 idle／recovery_required 且版本一致时提交权限事务，保留恢复事实；仍受目标 Trust、并发执行所有权、revision 与持久回执约束，不因可读历史获得授权；完整机制见 [Service owner](../../apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation)。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
 
 桌面[新对话准备](../../apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
 
@@ -54,7 +54,7 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 - Durable Store 记录 Session facts、单调 `controllerGeneration`、lease、revision、cleanup 与 effect receipt。
 - 一个 Session 同时最多一个 execution writer；不同 App Server 可以并行写不同 Session。
 - PID、build、socket、client connection 和 Web URL 均不是 Session authority。
-- read/list 不取得 writer；resume/handoff/mutation 必须取得并持续验证 durable generation。
+- read/list 不取得 writer；resume/handoff/执行 mutation 必须取得并持续验证 durable generation。冷会话权限事务仅在 idle／recovery_required 与版本一致时允许，不清除恢复状态、不 dispatch Effect。
 - stale generation 不能 dispatch effect、提交 terminal receipt 或补写 late completion；unknown outcome 不自动重放。
 
 ## 默认 paired App Server

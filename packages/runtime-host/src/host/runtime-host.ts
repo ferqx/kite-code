@@ -170,7 +170,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     context?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeCommandReceipt> {
     const execute = () => this.#beginAccess(() => this.#executeCommand(command, context));
-    return command.type === 'create_session'
+    return command.type === 'create_session' || command.type === 'set_interaction_mode'
       ? execute()
       : this.#withSessionExecution(runtimeCommandSessionId(command), execute);
   }
@@ -248,9 +248,18 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       if (inspected.decision.targetSessionId !== expectedTarget) {
         throw new Error('Runtime Host inspected command target identity is invalid.');
       }
-      const committed = await inspected.decision.commit(
-        Object.freeze({ ...evidence, targetSessionId: expectedTarget }),
-      );
+      let committed: Awaited<ReturnType<typeof inspected.decision.commit>>;
+      try {
+        committed = await inspected.decision.commit(
+          Object.freeze({ ...evidence, targetSessionId: expectedTarget }),
+        );
+      } catch (error) {
+        if (command.type === 'set_interaction_mode') {
+          const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
+          if (replay) return this.#replayAfterLookup(command, replay);
+        }
+        throw error;
+      }
       assertAppliedReceipt(command, committed.receipt, expectedTarget);
       const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
       if (!stored) throw new Error('Runtime Host command receipt was not persisted by commit.');
@@ -273,7 +282,12 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     });
     this.#pendingCommands.set(identity, { digest: evidence.requestDigest, promise: execution });
     try {
-      return await execution;
+      const receipt = await execution;
+      if (command.type === 'set_interaction_mode' && receipt.status !== 'applied') {
+        const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
+        if (replay) return this.#replayAfterLookup(command, replay);
+      }
+      return receipt;
     } finally {
       if (this.#pendingCommands.get(identity)?.promise === execution) {
         this.#pendingCommands.delete(identity);
@@ -310,7 +324,12 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     }
     // A delete receipt intentionally outlives its target Session. Replaying it
     // must never call App recovery or recreate a snapshot/Runtime owner.
-    if (command.type === 'delete_session' || command.type === 'start_turn') return receipt;
+    if (
+      command.type === 'delete_session' ||
+      command.type === 'start_turn' ||
+      command.type === 'set_interaction_mode'
+    )
+      return receipt;
     await this.#recoverSession(receipt.sessionId);
     return receipt;
   }
@@ -672,8 +691,22 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     } else {
       return undefined;
     }
+    // Settings can have independent Store writers. Read their current CAS without publishing
+    // a snapshot ahead of an active bridge's still-queued canonical events.
+    const current =
+      command.type === 'set_interaction_mode'
+        ? await this.#bridge.query({
+            schema: RUNTIME_QUERY_SCHEMA_,
+            type: 'get_session_projection',
+            sessionId,
+          })
+        : undefined;
     const projection =
-      this.#registry.projection(sessionId) ?? (await this.#loadProjection(sessionId));
+      command.type === 'set_interaction_mode'
+        ? current?.status === 'ok'
+          ? current.session
+          : undefined
+        : (this.#registry.projection(sessionId) ?? (await this.#loadProjection(sessionId)));
     if (!projection || projection.revision === expected) return undefined;
     return {
       status: 'conflict',

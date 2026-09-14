@@ -17,7 +17,7 @@
 
 ## 写入过程
 
-Session mutation 在 BEGIN IMMEDIATE 内重新读取 generation 与 Session revision，再执行变更。检查不能放在事务前，否则其他 SQLite writer 可以在检查后提交。无 Session、旧 revision 或失效 writer 必须失败，不覆盖较新状态。
+执行期间的 Session mutation 在 BEGIN IMMEDIATE 内重新读取 generation 与 Session revision，再执行变更。检查不能放在事务前，否则其他 SQLite writer 可以在检查后提交。无 Session、旧 revision 或失效 writer 必须失败，不覆盖较新状态。
 
 storage owner 使用 AsyncLocalStorage 传递本次 execution handle。runWithExecution 绑定精确 handle，foreign/stale/缺少 execution scope 的写入拒绝；readSnapshot 不因此获取写权限。
 
@@ -25,6 +25,10 @@ start 对应 Run、command receipt、事件与 State 的关联更新必须在所
 
 验证：[mutation](../test/kite-session-mutation.test.ts)、[storage](../test/isolated/kite-session-runtime-storage.test.ts)、[run store](../test/run-store.test.ts)。
 
+
+## 无执行者的设置事务
+
+冷会话权限设置使用 `commitUnownedDecision`，不取得 execution handle。该入口在同一 BEGIN IMMEDIATE 内要求 authority 为 idle 或 recovery_required，并校验 expected Session revision；active、detached 与旧版本拒绝。必须携带同 Session 的命令回执，禁止 requiredEffectLease、runMutation 与 sessionModelRoute；Service 再限制为权限事件。入口只调用已有 decision 原子提交，不暴露通用无租约写作用域，不修改 authority 或恢复事实。后续执行仍走原有 generation fence，事务失败不会留下可用于任意写入的作用域。验证见 [Session Store 回归](../test/isolated/kite-session-runtime-storage.test.ts)。
 
 ## 按会话恢复校验
 

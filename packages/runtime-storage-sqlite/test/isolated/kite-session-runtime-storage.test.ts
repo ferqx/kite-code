@@ -57,6 +57,107 @@ const codec = {
 };
 
 describe('multi-connection Kite Session Runtime storage', () => {
+  test('fences unowned decisions atomically and leaves authority and effects unchanged', () => {
+    const fixture = createFixture(['session-1']);
+    const first = openOwner(fixture.path);
+    const second = openOwner(fixture.path);
+    const transaction = (revision: number) => ({
+      sessionId: 'session-1',
+      events: [{ type: 'policy.changed' }],
+      metadata: [{ eventId: `policy-${revision}`, revision }],
+      snapshot: state(revision, 'recovery-0'),
+      commandReceipt: createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'session-1',
+          targetSessionId: 'session-1',
+          commandId: `policy-${revision}`,
+          requestDigest: 'a'.repeat(64),
+          committedAt: Date.now(),
+        },
+        revision,
+      ),
+    });
+    try {
+      const idle = first.recovery.inspect('session-1');
+      first.commitUnownedDecision(transaction(1), 0);
+      expect(first.recovery.inspect('session-1')).toEqual(idle);
+      expect(() => second.commitUnownedDecision(transaction(2), 0)).toThrow();
+      expect(second.storage.sessions.loadSnapshot<State>('session-1')?.revision).toBe(1);
+      const authority = acquire(first, 'session-1', 'execution-owner');
+      const handle = first.bindExecution(authority);
+      first.runWithExecution(handle, () => {
+        expect(
+          first.storage.effects.tryAcquireEffectLease(
+            'session-1',
+            'pending-effect',
+            'effect-owner',
+            Date.now() + 10000,
+          ),
+        ).toBe(true);
+      });
+      expect(() => second.commitUnownedDecision(transaction(2), 1)).toThrow();
+      const active = first.authority.read('session-1');
+      first.authority.release({
+        sessionId: 'session-1',
+        expectedRevision: active.revision,
+        controllerGeneration: active.controllerGeneration,
+        hostInstanceId: 'execution-owner',
+        cleanupConfirmed: false,
+      });
+      const recovery = first.recovery.inspect('session-1');
+      expect(recovery.authority.status).toBe('recovery_required');
+      second.commitUnownedDecision(transaction(2), 1);
+      expect(second.recovery.inspect('session-1')).toEqual(recovery);
+      expect(() =>
+        first.runWithExecution(handle, () =>
+          first.storage.sessions.setSessionName('session-1', 'stale'),
+        ),
+      ).toThrow();
+      expect(() =>
+        first.commitUnownedDecision(
+          {
+            ...transaction(3),
+            requiredEffectLease: {
+              effectId: 'pending-effect',
+              ownerId: 'effect-owner',
+              observedAtMs: Date.now(),
+            },
+          },
+          2,
+        ),
+      ).toThrow();
+      expect(() =>
+        first.commitUnownedDecision({ ...transaction(3), commandReceipt: undefined }, 2),
+      ).toThrow();
+      // A persistence failure rolls the event, State and receipt back and leaves no bypass scope.
+      const fault = openKiteSessionStoreDatabase(fixture.path);
+      fault.run(
+        "CREATE TRIGGER policy_receipt_failure BEFORE INSERT ON runtime_command_receipts WHEN NEW.command_id = 'policy-3' BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
+      );
+      try {
+        expect(() => first.commitUnownedDecision(transaction(3), 2)).toThrow();
+      } finally {
+        fault.run('DROP TRIGGER policy_receipt_failure');
+        fault.close(false);
+      }
+      expect(first.storage.sessions.loadSnapshot<State>('session-1')?.revision).toBe(2);
+      expect(
+        first.storage.commandReceipts.lookup({
+          scopeSessionId: 'session-1',
+          commandId: 'policy-3',
+          requestDigest: 'a'.repeat(64),
+        }).status,
+      ).toBe('missing');
+      expect(() => first.storage.sessions.setSessionName('session-1', 'unfenced')).toThrow();
+      first.commitUnownedDecision(transaction(3), 2);
+      expect(first.storage.sessions.loadSnapshot<State>('session-1')?.revision).toBe(3);
+    } finally {
+      first.close();
+      second.close();
+      fixture.remove();
+    }
+  });
+
   test('routes Session writes through an execution scope while reads remain lease-free', async () => {
     const fixture = createFixture(['session-1', 'session-2']);
     const first = openOwner(fixture.path);

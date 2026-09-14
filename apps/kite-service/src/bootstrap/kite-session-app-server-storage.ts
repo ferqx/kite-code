@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
-import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import type { RuntimeStorage, RuntimeTransactionInput } from '@kite-ai/runtime-host/storage';
 import type {
   KiteSessionExecutionAuthorityRecord,
   KiteSessionExecutionHandle,
@@ -49,6 +49,10 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
   runWithSessionExecution<Result>(sessionId: string, operation: () => Result): Result;
+  commitUnownedInteractionMode(
+    transaction: RuntimeTransactionInput<RuntimeEvent, RuntimeState>,
+    expectedRevision: number,
+  ): void;
   readSnapshot<Result>(operation: () => Result): Result;
   ownsSessionExecution(sessionId: string): boolean;
   setExecutionLossHandler(handler: (sessionId: string) => void): void;
@@ -406,6 +410,15 @@ export function createKiteSessionAppServerStorage(input: {
     loadCurrentSnapshot: (sessionId) => storage.sessions.loadSnapshot<RuntimeState>(sessionId),
     getCurrentSessionModelRoute: (sessionId) => storage.sessions.getSessionModelRoute(sessionId),
     runWithSessionExecution,
+    commitUnownedInteractionMode(transaction, expectedRevision) {
+      if (
+        transaction.events.length > 1 ||
+        transaction.events.some((event) => event.type !== 'interaction_mode.changed')
+      ) {
+        throw new Error('Unowned policy decisions may only change interaction mode.');
+      }
+      target.commitUnownedDecision(transaction, expectedRevision);
+    },
     readSnapshot: target.readSnapshot,
     ownsSessionExecution: (sessionId) => owned.has(sessionId),
     setExecutionLossHandler: (handler) => {

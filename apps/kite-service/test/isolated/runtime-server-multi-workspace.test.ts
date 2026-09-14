@@ -74,6 +74,189 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
   }
 }, 30_000);
 
+test('edits policy without recovery or Workspace initialization and observes other settings writers', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-policy-without-runtime-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const databasePath = join(root, 'kite-session.sqlite');
+  const sessionId = 'policy-recovery-session';
+  const seedStorage = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'policy-seed',
+  });
+  const seed = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner: seedStorage,
+    workspaces: [runtimeInput(workspace, 'http://127.0.0.1:1', 'removed-model')],
+  });
+  const seedClient = client(seed, admission(workspace), 'policy-seed-client');
+  const opened: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer>[] = [];
+  const clients: RuntimeClient[] = [];
+  try {
+    await createSession(seedClient, sessionId, workspace);
+    await seedClient.close();
+    await seed[Symbol.asyncDispose]();
+    const repair = createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'policy-interrupted',
+    });
+    repair.runWithSessionExecution(sessionId, () => undefined);
+    repair.releaseExecutions(false);
+    const before = repair.recovery.inspect(sessionId);
+    expect(before.authority.status).toBe('recovery_required');
+    repair.disposeStorage();
+    let templateLoads = 0;
+    const open = (hostInstanceId: string, beforePolicyCommit?: () => void) => {
+      const storage = createKiteSessionAppServerStorageComposition({
+        databasePath,
+        hostInstanceId,
+      });
+      const owner = createKiteMultiWorkspaceRuntimeServer({
+        checkpointPath: databasePath,
+        storageOwner: beforePolicyCommit
+          ? {
+              ...storage,
+              commitUnownedInteractionMode(transaction, expectedRevision) {
+                beforePolicyCommit();
+                storage.commitUnownedInteractionMode(transaction, expectedRevision);
+              },
+            }
+          : storage,
+        workspaces: [],
+        workspaceTemplateFor: async () => {
+          templateLoads++;
+          throw new Error('Workspace configuration unavailable');
+        },
+      });
+      const runtime = client(owner, admission(workspace), hostInstanceId);
+      opened.push(owner);
+      clients.push(runtime);
+      return { owner, storage, runtime };
+    };
+    const first = open('policy-first');
+    const second = open('policy-second');
+    const command = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'set_interaction_mode' as const,
+      sessionId,
+      commandId: 'policy-full',
+      expectedRevision: 0,
+      mode: 'full' as const,
+    };
+    const stream = first.runtime.subscribe({ spec: { scope: 'session', sessionId } });
+    const iterator = stream[Symbol.asyncIterator]();
+    await next(iterator);
+    expect(await first.runtime.command(command)).toMatchObject({ status: 'applied', revision: 1 });
+    expect(await next(iterator)).toMatchObject({
+      revision: 1,
+      projection: { event: { type: 'interaction_mode.changed', mode: 'full' } },
+    });
+    expect(first.storage.recovery.inspect(sessionId)).toEqual(before);
+    expect(first.storage.ownedSessionIds()).toEqual([]);
+    expect(await first.runtime.command(command)).toMatchObject({
+      status: 'idempotent_replay',
+      originalRevision: 1,
+    });
+    expect(
+      await second.runtime.command({
+        ...command,
+        commandId: 'policy-auto',
+        expectedRevision: 1,
+        mode: 'auto',
+      }),
+    ).toMatchObject({ status: 'applied', revision: 2 });
+    expect(
+      await first.runtime.command({ ...command, commandId: 'policy-stale', expectedRevision: 1 }),
+    ).toMatchObject({ status: 'conflict', currentRevision: 2 });
+    expect(
+      await first.runtime.command({ ...command, commandId: 'policy-current', expectedRevision: 2 }),
+    ).toMatchObject({ status: 'applied', revision: 3 });
+    expect(first.storage.recovery.inspect(sessionId)).toEqual(before);
+    const restarted = open('policy-restarted');
+    expect(await restarted.runtime.command(command)).toMatchObject({
+      status: 'idempotent_replay',
+      originalRevision: 1,
+    });
+    expect(restarted.storage.loadCurrentSnapshot(sessionId)).toMatchObject({
+      mode: 'full',
+      revision: 3,
+    });
+    expect(
+      restarted.storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event.type),
+    ).toEqual(['interaction_mode.changed', 'interaction_mode.changed', 'interaction_mode.changed']);
+    expect(
+      await restarted.runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'start_turn',
+        input: 'must not execute',
+        sessionId,
+        commandId: 'must-still-recover',
+        expectedRevision: 3,
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'session_unavailable' });
+    expect(templateLoads).toBe(0);
+    expect(restarted.storage.recovery.inspect(sessionId)).toEqual(before);
+    const raced = {
+      ...command,
+      commandId: 'policy-raced',
+      expectedRevision: 3,
+      mode: 'auto' as const,
+    };
+    const receipts = await Promise.all([
+      first.runtime.command(raced),
+      second.runtime.command(raced),
+    ]);
+    expect(receipts.map((receipt) => receipt.status).sort()).toEqual([
+      'applied',
+      'idempotent_replay',
+    ]);
+    expect(first.storage.loadCurrentSnapshot(sessionId)?.revision).toBe(4);
+    const contenders = await Promise.all([
+      first.runtime.command({ ...command, commandId: 'contender-first', expectedRevision: 4 }),
+      second.runtime.command({ ...command, commandId: 'contender-second', expectedRevision: 4 }),
+    ]);
+    expect(contenders.map((receipt) => receipt.status).sort()).toEqual(['applied', 'conflict']);
+    expect(first.storage.loadCurrentSnapshot(sessionId)?.revision).toBe(5);
+    first.storage.recovery.reconcile({
+      sessionId,
+      expectedAuthorityRevision: before.authority.revision,
+    });
+    const deletionRace = open('policy-deletion-race', () => {
+      const deleter = createKiteSessionAppServerStorageComposition({
+        databasePath,
+        hostInstanceId: 'policy-deleter',
+      });
+      try {
+        deleter.runWithSessionExecution(sessionId, () =>
+          deleter.storage.sessions.deleteSession(sessionId),
+        );
+      } finally {
+        deleter.releaseExecutions(true);
+        deleter.disposeStorage();
+      }
+    });
+    expect(
+      await deletionRace.runtime.command({
+        ...command,
+        commandId: 'policy-after-delete',
+        expectedRevision: 5,
+        mode: 'auto',
+      }),
+    ).toMatchObject({ status: 'not_found', code: 'session_not_found' });
+    expect(first.storage.loadCurrentSnapshot(sessionId)).toBeNull();
+  } finally {
+    await seedClient.close();
+    await seed[Symbol.asyncDispose]();
+    for (const runtime of clients) await runtime.close();
+    for (const owner of opened) await owner[Symbol.asyncDispose]();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test('freezes the active Run model and applies a selected model to the next Run', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-next-run-model-'));
   const workspace = join(root, 'workspace');
@@ -945,6 +1128,21 @@ test('execution lease loss aborts all three real subagent model connections and 
     });
     expect(run).toMatchObject({ status: 'ok', run: { status: 'unknown' } });
     expect(storageOwner.recovery.inspect(sessionId).authority.cleanupConfirmed).toBe(false);
+    const lost = storageOwner.loadCurrentSnapshot(sessionId)!;
+    const recoveryBeforePolicy = storageOwner.recovery.inspect(sessionId);
+    expect(
+      await runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'set_interaction_mode',
+        sessionId,
+        commandId: 'policy-after-lease-loss',
+        expectedRevision: lost.revision,
+        mode: 'full',
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'session_unavailable' });
+    expect(storageOwner.loadCurrentSnapshot(sessionId)).toEqual(lost);
+    expect(storageOwner.recovery.inspect(sessionId)).toEqual(recoveryBeforePolicy);
+
     expect(
       storageOwner.storage.sessions
         .loadEventsStrict(sessionId)

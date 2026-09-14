@@ -30,6 +30,7 @@ import {
 } from './kite-session-execution-authority';
 import {
   createKiteSessionMutationPort,
+  KiteSessionMutationError,
   type KiteSessionMutationInput,
 } from './kite-session-mutation';
 import { openKiteSessionStoreDatabase } from './kite-session-runtime-file';
@@ -44,6 +45,7 @@ export class KiteSessionRuntimeStorageError extends Error {
     | 'execution_scope_required'
     | 'foreign_execution_handle'
     | 'stale_execution_handle'
+    | 'session_busy'
     | 'unsupported_mutation';
 
   constructor(code: KiteSessionRuntimeStorageError['code'], message: string) {
@@ -100,6 +102,11 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
   ): void;
   runWithExecution<Result>(handle: KiteSessionExecutionHandle, operation: () => Result): Result;
   readSnapshot<Result>(operation: () => Result): Result;
+  /** Receipt-bearing, effect-free State decision when no execution writer is present. */
+  commitUnownedDecision(
+    transaction: RuntimeTransactionInput<Event, State>,
+    expectedRevision: number,
+  ): void;
   close(): void;
 }
 
@@ -111,7 +118,8 @@ interface ExecutionHandleState {
 
 /**
  * Opens one WAL connection without a Workspace process lock. Every exposed Session/Run/checkpoint
- * or Artifact write requires a bound execution scope and enters the durable sessionMutation fence.
+ * or Artifact execution write requires a bound scope and enters the durable sessionMutation fence.
+ * Receipt-bearing unowned decisions have a separate atomic no-execution-owner/revision check.
  */
 export function openKiteSessionRuntimeStorage<Event, State>(input: {
   readonly databasePath: string;
@@ -137,6 +145,8 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     ...(input.now ? { nowMs: input.now } : {}),
   });
   const scope = new AsyncLocalStorage<KiteSessionExecutionHandle>();
+  // Synchronous and private: callers cannot use this scope for arbitrary Store writes.
+  let committingUnownedDecision = false;
   const handles = new WeakMap<object, ExecutionHandleState>();
   const effectLeaseRevisions = new Map<string, number>();
   const selectRevision = database.query<{ revision: number }, [string]>(
@@ -219,6 +229,7 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
       return rawWriter.inTransaction;
     },
     run<Result>(write: () => Result): Result {
+      if (committingUnownedDecision) return write();
       const handle = currentHandle();
       const result = mutations.run(handle.current, write);
       const row = selectRevision.get(handle.current.sessionId);
@@ -525,6 +536,43 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     refreshExecution,
     runWithExecution,
     readSnapshot,
+    commitUnownedDecision(transaction, expectedRevision) {
+      if (
+        !Number.isSafeInteger(expectedRevision) ||
+        expectedRevision < 0 ||
+        !transaction.commandReceipt ||
+        transaction.requiredEffectLease ||
+        transaction.runMutation ||
+        transaction.sessionModelRoute ||
+        transaction.commandReceipt.scopeSessionId !== transaction.sessionId ||
+        transaction.commandReceipt.targetSessionId !== transaction.sessionId
+      )
+        unsupported(
+          'Unowned decisions require a Session receipt and cannot mutate execution resources.',
+        );
+      rawWriter.run(() => {
+        const current = authority.read(transaction.sessionId);
+        // Detached/expired owners must be fenced by explicit recovery first; never take over here.
+        if (current.status !== 'idle' && current.status !== 'recovery_required') {
+          throw new KiteSessionRuntimeStorageError(
+            'session_busy',
+            'Session has an execution owner.',
+          );
+        }
+        if (selectRevision.get(transaction.sessionId)?.revision !== expectedRevision) {
+          throw new KiteSessionMutationError(
+            'revision_conflict',
+            'Session revision changed before decision.',
+          );
+        }
+        committingUnownedDecision = true;
+        try {
+          base.storage.transactions.commitDecision(transaction);
+        } finally {
+          committingUnownedDecision = false;
+        }
+      });
+    },
     close: () => base.close(),
     [Symbol.asyncDispose]: async () => base.close(),
   };

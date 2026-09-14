@@ -51,7 +51,13 @@ MCP readiness。它不创建configuration-only第二Worker或placeholder executi
 
 ## App Control、History 与 mutation
 
-本机 App Server 的 `set_interaction_mode` 从同一 Storage owner 读取目标 Session 的持久 workspace、projectId 与 canonicalWorkspaceDigest，重新查询该工作区 Trust 并比对完整身份；不从客户端目录、当前执行项目或显示路径推导授权。通过后复用原有按 Session 路由的 lazy Runtime、执行权和命令事务，不重启服务或停止其他 Session。未知会话、未信任或身份漂移仍拒绝；目标目录在信任查询时消失、Trust 损坏或不可用使用协议已有的 `internal_error + temporarily_unavailable` 详情。该命令不授予跨项目创建或启动 Turn 的权限。回归见 [App Server process](../test/isolated/app-server-process.test.ts) 与 [Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+本机 App Server 的 `set_interaction_mode` 从同一 Storage owner 读取目标 Session 的持久 workspace、projectId 与 canonicalWorkspaceDigest，重新查询该工作区 Trust 并比对完整身份；不从客户端目录、当前执行项目或显示路径推导授权。通过后进入同一 Host 的权限命令事务，不重启服务或停止其他 Session。未知会话、未信任或身份漂移仍拒绝；目标目录在信任查询时消失、Trust 损坏或不可用使用协议已有的 `internal_error + temporarily_unavailable` 详情。该命令不授予跨项目创建或启动 Turn 的权限。回归见 [App Server process](../test/isolated/app-server-process.test.ts) 与 [Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+
+权限设置与执行准备分离。本进程已有 coordinator 时，仍由其持有的 State、execution fence 和提交后事件队列更新，运行中的工具继续观察同一份策略。没有本地 coordinator 时，直接用持久 State 构造一次性的 `StateRuntimeSession`，复用 `commitInteractionModeCommand`，不加载 Workspace 配置、模型、MCP 或完整 Runtime，也不调用 recovery。该实例不进入 registry，不取得 Run 写入能力；SQLite 的 `commitUnownedDecision` 在 BEGIN IMMEDIATE 内检查 authority 为 idle 或 recovery_required、Session revision 未变化，再提交同一事件／State／回执事务。active、detached（含尚未显式 fencing 的过期租约）返回 runtime_busy，避免覆盖其他执行者的内存 State。
+
+冷会话的权限事务不修改 execution generation、cleanup、Effect 或 Run 记录。切到 Full 继续复用 Kernel 对尚未 dispatch 且符合条件的审批记录的模式规则，但不会因此启动执行或确认历史副作用；仍需恢复的任务继续走显式恢复。提交后使用决定的确切 State 发布权限事件，再由 Host 刷新 Store 投影。每次设置都读取最新持久 revision，独立进程同时提交同一 commandId 时从已提交回执确认重放，不重试业务写入。若会话在检查后被其他进程删除，返回明确的 session_not_found，不把未执行的修改报告为内部错误或未知结果。回归见 [多工作区集成](../test/isolated/runtime-server-multi-workspace.test.ts)、[Store 原子边界](../../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)。
+
+若本进程已丢失执行租约但 registry 中仍有旧 coordinator，权限命令继续沿受 fence 保护的原路径拒绝，不把旧 State 与一次性设置实例并列写入。重新启动服务后才能采用没有本地 coordinator 的设置路径；任务恢复要求仍保留。本轮不引入失效 coordinator 自动淘汰或跨进程命令转发。冷 Full 可以把符合条件的待审批工具改为 authorized_queued，但原 waiting Run 仍保留；resume_session 不自动续跑该队列，新 start_turn 通过既有 eventsForSupersededTurnRecovery 取消被替代的未结束工具。当前不承诺“冷 Full 后自动恢复旧队列并恰好执行一次”，该链路未经过端到端验证。[租约丢失回归](../test/isolated/runtime-server-multi-workspace.test.ts)验证拒绝后 State 与 recovery facts 均不变。
 
 设置交互模式仍校验 Session 与 expectedRevision；目标模式已生效时，在原有命令事务提交 snapshot 回执，不新增模式事件或推进 revision，不能把客户端确认当前权限当作内部故障。实际改变模式才写入 `interaction_mode.changed`。验证见 [coordinator 命令回归](../test/runtime/runtime-session-coordinator.test.ts)。
 

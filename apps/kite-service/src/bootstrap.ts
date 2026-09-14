@@ -21,6 +21,7 @@ import {
   type ListRuntimeLogEventsRequest,
   type ListRuntimeLogSessionsRequest,
   RUNTIME_CONTRACT_BOUNDARY_,
+  RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
@@ -38,12 +39,14 @@ import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHost,
   type RuntimeHostBoundary,
+  type RuntimeHostCommandInspection,
   type RuntimeHostExecutionAdapterContext,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   resolveProjectIdentity,
   runtimeHostCurrentStateEventTypes,
 } from '@kite-ai/runtime-host';
+import { createRuntimeHostStateSession } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeLogEventReadPage,
   RuntimeLogQueryPort,
@@ -71,6 +74,10 @@ import {
   discoverSqliteRuntimeCompatibilitySource,
   type KiteHomeArtifactStore,
   type KiteHomeDirectoryQueryPort,
+  KiteHomeWriteError,
+  KiteSessionExecutionAuthorityError,
+  KiteSessionMutationError,
+  KiteSessionRuntimeStorageError,
   openKiteSessionRuntimeStorage,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
@@ -110,6 +117,7 @@ import {
   type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
+import { commitInteractionModeCommand } from './bootstrap/runtime/command-control-decision';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
 import { createRuntimeSessionCoordinatorBinding } from './bootstrap/runtime/RuntimeSessionCoordinator';
 import type {
@@ -895,6 +903,7 @@ export interface KiteRuntimeStorageOwner {
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
   /** KASD App Server Session generation scope. */
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly commitUnownedInteractionMode?: KiteSessionAppServerStorageOwner['commitUnownedInteractionMode'];
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly setExecutionLossHandler?: (handler: (sessionId: string) => void) => void;
@@ -1448,8 +1457,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
     bySession.delete(sessionId);
     return undefined;
   };
-  const projectStoredSession = (threadId: string): RuntimeSessionProjection | undefined => {
-    const snapshot = owner.loadCurrentSnapshot(threadId);
+  const projectStoredSession = (
+    threadId: string,
+    snapshot = owner.loadCurrentSnapshot(threadId),
+  ): RuntimeSessionProjection | undefined => {
     if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
     const model = owner.getCurrentSessionModelRoute(threadId);
     const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
@@ -1763,7 +1774,95 @@ export function createKiteMultiWorkspaceRuntimeServer(
       });
       return Object.freeze({
         recoverSession: router.recoverSession.bind(router),
-        inspectCommand: router.inspectCommand.bind(router),
+        inspectCommand: async (
+          command: RuntimeCommand,
+          commandContext: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
+        ): Promise<RuntimeHostCommandInspection> => {
+          // Settings do not instantiate Workspace configuration, models, or an execution Runtime.
+          // A live coordinator remains the sole State owner and uses its existing fenced commit.
+          if (
+            command.type !== 'set_interaction_mode' ||
+            !owner.commitUnownedInteractionMode ||
+            runtimeCoordinatorBinding.access().get(command.sessionId)
+          ) {
+            return router.inspectCommand(command, commandContext);
+          }
+          const state = owner.loadCurrentSnapshot(command.sessionId);
+          if (!state)
+            return {
+              kind: 'terminal',
+              receipt: {
+                status: 'not_found',
+                commandId: command.commandId,
+                code: 'session_not_found',
+              },
+            };
+          if (state.revision !== command.expectedRevision)
+            return {
+              kind: 'terminal',
+              receipt: {
+                status: 'conflict',
+                commandId: command.commandId,
+                code: 'revision_conflict',
+                currentRevision: state.revision,
+              },
+            };
+          return {
+            kind: 'accepted',
+            decision: {
+              targetSessionId: command.sessionId,
+              commit: async (evidence) => {
+                let projection: RuntimeSessionProjection | undefined;
+                const { runs: _runs, ...policyServices } = services;
+                const session = createRuntimeHostStateSession({
+                  state,
+                  services: {
+                    ...policyServices,
+                    transactions: {
+                      ...services.transactions,
+                      commitCommandDecision: (transaction) => {
+                        projection = projectStoredSession(command.sessionId, transaction.snapshot);
+                        owner.commitUnownedInteractionMode!(transaction, state.revision);
+                      },
+                    },
+                  },
+                  clock: () => new Date(evidence.committedAt).toISOString(),
+                  id: () => crypto.randomUUID(),
+                });
+                const { receipt, events } = commitInteractionModeCommand(
+                  session,
+                  command,
+                  evidence,
+                );
+                const committedProjection = projection;
+                if (!committedProjection)
+                  throw new Error('Committed policy projection is unavailable.');
+                return {
+                  receipt: {
+                    status: 'applied',
+                    commandId: receipt.commandId,
+                    sessionId: receipt.targetSessionId,
+                    revision: receipt.committedRevision,
+                  },
+                  activation: async (publish) => {
+                    if (events.length === 0) return;
+                    publish({
+                      schema: RUNTIME_NOTIFICATION_SCHEMA_,
+                      durability: 'durable',
+                      sessionId: command.sessionId,
+                      revision: receipt.committedRevision,
+                      projection: {
+                        kind: 'session',
+                        session: committedProjection,
+                        event: { type: 'interaction_mode.changed', mode: command.mode },
+                      },
+                    });
+                  },
+                };
+              },
+            },
+          };
+        },
         query: (query: RuntimeQuery) =>
           owner.readSnapshot && query.type === 'get_session_projection'
             ? Promise.resolve(owner.readSnapshot(() => queryStoredProjection(query.sessionId)))
@@ -1792,10 +1891,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
   const runHostCommand = (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) => {
     try {
       return Promise.resolve(host.command(command, context)).catch((error) =>
-        appServerCommandFailure(command, error),
+        appServerCommandFailure(command, error, owner),
       );
     } catch (error) {
-      return Promise.resolve(appServerCommandFailure(command, error));
+      return Promise.resolve(appServerCommandFailure(command, error, owner));
     }
   };
   function queryStoredProjection(sessionId: string): RuntimeQueryResult {
@@ -2021,7 +2120,49 @@ export function createKiteMultiWorkspaceRuntimeServer(
   });
 }
 
-function appServerCommandFailure(command: RuntimeCommand, error: unknown) {
+function appServerCommandFailure(
+  command: RuntimeCommand,
+  error: unknown,
+  owner: KiteRuntimeStorageOwner,
+) {
+  if (error instanceof KiteHomeWriteError && error.code === 'write_failed') error = error.cause;
+  if (
+    command.type === 'set_interaction_mode' &&
+    error instanceof KiteSessionExecutionAuthorityError &&
+    error.code === 'session_not_found'
+  ) {
+    return {
+      status: 'not_found' as const,
+      commandId: command.commandId,
+      code: 'session_not_found' as const,
+    };
+  }
+  if (error instanceof KiteSessionRuntimeStorageError && error.code === 'session_busy') {
+    return {
+      status: 'rejected' as const,
+      commandId: command.commandId,
+      code: 'runtime_busy' as const,
+    };
+  }
+  if (
+    error instanceof KiteSessionMutationError &&
+    error.code === 'revision_conflict' &&
+    command.type === 'set_interaction_mode'
+  ) {
+    const state = owner.loadCurrentSnapshot(command.sessionId);
+    if (state)
+      return {
+        status: 'conflict' as const,
+        commandId: command.commandId,
+        code: 'revision_conflict' as const,
+        currentRevision: state.revision,
+      };
+    return {
+      status: 'not_found' as const,
+      commandId: command.commandId,
+      code: 'session_not_found' as const,
+    };
+  }
   if (!(error instanceof KiteAppServerSessionError)) throw error;
   return {
     status: 'rejected' as const,

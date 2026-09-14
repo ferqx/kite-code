@@ -15,6 +15,8 @@
 
 ## Mailbox 的边界
 
+`set_interaction_mode` 不进入 Host 的 execution lease 包装，也不在回执重放时恢复 Runtime。它保留同一 mailbox、digest、事务回执与通知顺序；每次命令从 Store 投影刷新 revision，避免其他设置写入者提交后仍按旧 registry 冲突。commit 失败后若已存在同命令的持久回执，返回其已知结果，不重试写入。执行 bridge 必须在具体提交处裁决：活动 State owner 继续验证执行权，无执行 owner 的专用设置事务须原子验证无并发执行者与 State revision。其他执行命令仍进入 execution scope。
+
 SessionMailbox 用 Promise tail 串行化单 Session 的操作，失败也将 tail 收敛为可继续的 Promise，避免污染后续队列；不同 Session 不共用一条队列。进程内串行不能替代 SQLite 多进程 writer fencing。
 
 ## Query 与通知

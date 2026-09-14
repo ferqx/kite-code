@@ -10,6 +10,8 @@ controllerGeneration 与 authority revision 描述持久执行所有权；PID、
 
 ## 恢复顺序
 
+冷会话权限设置允许在 idle 或 recovery_required 下提交无执行资源的决定，具体约束见[事务提交](transactions-and-state.md)。它不取得或释放执行权，不确认 cleanup；active／detached owner 仍阻断该入口。
+
 recovery.inspect 读取 authority 与 pending effects；reconcile 绑定预期 authority revision，并返回需要处理的 unknown effects。无完整结果的操作不能标记成“没有执行”。Kernel/Host 根据这些 facts 决定继续、拒绝或要求处理，SQLite 不自行重跑 Provider。
 
 进程退出、连接中断、业务取消和会话删除是不同事件。删除需要防止迟到写入复活数据，回执与 tombstone 的保留按各自语义处理。

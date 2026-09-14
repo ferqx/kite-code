@@ -168,7 +168,18 @@ describe('KASD parent-owned App Server process', () => {
             type: 'set_interaction_mode',
             sessionId: 'policy-a',
             expectedRevision: 1,
-            mode: 'auto',
+            mode: 'full',
+          }),
+        ).toMatchObject({ status: 'applied', revision: 1 });
+        if (before.status !== 'ok' || !before.session) throw new Error('Missing active projection');
+        expect(
+          await contender.runtime.command({
+            schema: 'kite.runtime-command.v1',
+            commandId: 'mode-b-other-owner',
+            type: 'set_interaction_mode',
+            sessionId: 'policy-b',
+            expectedRevision: before.session.revision,
+            mode: 'full',
           }),
         ).toMatchObject({ status: 'rejected', code: 'runtime_busy' });
       } finally {

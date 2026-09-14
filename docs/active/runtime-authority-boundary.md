@@ -62,6 +62,8 @@ daemon build ID不参与compatibility，Store generation/revision仍是唯一wri
 
 ## 当前可信域
 
+冷会话的 `set_interaction_mode` 不申请 execution generation，也不恢复 Runtime。Service 只允许权限决定进入现有 Store 的无执行者事务：在 BEGIN IMMEDIATE 内检查 idle／recovery_required 与 expected Session revision，原子持久化事件、State、回执；不写 Run、Effect、cleanup 或 authority。active／detached 仍拒绝，本进程活动 coordinator 则沿已有 generation fence 更新同一 State。该例外不扩展通用 mutation、read 或 effect dispatch 的权限，详见[Store 事务](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+
 Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
 当前不建立持久 Project authority。Project identity 是 Runtime Host 从 native canonical Workspace realpath

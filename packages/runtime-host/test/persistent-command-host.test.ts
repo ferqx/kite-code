@@ -170,6 +170,194 @@ function harness(options: ReceiptBridgeOptions = {}): Harness {
 }
 
 describe('Host persistent receipt command flow', () => {
+  for (const phase of ['revision', 'inspection'] as const) {
+    test(`rechecks a competing policy receipt after ${phase} returns conflict`, async () => {
+      const first = harness();
+      const second = harness();
+      const winner = createRuntimeHost({
+        storage: first.storage,
+        modules: testRuntimeModules(() => first.bridge),
+      });
+      const follower = createRuntimeHost({
+        storage: first.storage,
+        modules: testRuntimeModules(() => second.bridge),
+      });
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: `policy-${phase}-race`,
+        type: 'set_interaction_mode' as const,
+        sessionId: 'session-1',
+        expectedRevision: 0,
+        mode: 'full' as const,
+      };
+      if (phase === 'revision') {
+        const query = second.bridge.query.bind(second.bridge);
+        second.bridge.query = async (request) => {
+          if (request.type !== 'get_session_projection') return query(request);
+          expect(await winner.command(command)).toMatchObject({ status: 'applied' });
+          return {
+            status: 'ok',
+            queryType: request.type,
+            revision: 1,
+            session: { ...projection('session-1'), revision: 1 },
+          };
+        };
+      } else {
+        second.bridge.inspectCommand = async () => {
+          expect(await winner.command(command)).toMatchObject({ status: 'applied' });
+          return {
+            kind: 'terminal',
+            receipt: {
+              status: 'conflict',
+              commandId: command.commandId,
+              code: 'revision_conflict',
+              currentRevision: 1,
+            },
+          };
+        };
+      }
+      try {
+        expect(await follower.command(command)).toMatchObject({
+          status: 'idempotent_replay',
+          originalRevision: 1,
+        });
+        expect(first.bridge.commits).toHaveLength(1);
+        expect(second.bridge.commits).toHaveLength(0);
+        expect(second.bridge.recoveries).toEqual([]);
+      } finally {
+        await follower[Symbol.asyncDispose]();
+        await winner[Symbol.asyncDispose]();
+      }
+    });
+  }
+
+  test('policy CAS reads do not publish ahead of queued canonical events', async () => {
+    const h = harness();
+    let revision = 0;
+    const at = (value: number) => ({
+      ...projection('session-1'),
+      revision: value,
+      interactionQueue: { interactions: [], revision: value },
+    });
+    h.bridge.query = async (query) =>
+      query.type === 'get_session_projection'
+        ? { status: 'ok', queryType: query.type, revision, session: at(revision) }
+        : { status: 'ok', queryType: 'list_sessions', sessions: [] };
+    h.bridge.inspectCommand = async () => ({
+      kind: 'accepted',
+      decision: {
+        targetSessionId: 'session-1',
+        commit: async (evidence) => {
+          const stored = createRuntimeStoredCommandReceipt(evidence, 2);
+          h.records.set(receiptKey(evidence), stored);
+          revision = 2;
+          return {
+            receipt: applied(evidence.commandId, 'session-1', 2),
+            activation: async (publish) => {
+              for (const [value, mode] of [
+                [1, 'auto'],
+                [2, 'full'],
+              ] as const)
+                publish({
+                  schema: 'kite.runtime-notification.v2',
+                  durability: 'durable',
+                  sessionId: 'session-1',
+                  revision: value,
+                  projection: {
+                    kind: 'session',
+                    session: at(value),
+                    event: { type: 'interaction_mode.changed', mode },
+                  },
+                });
+            },
+          };
+        },
+      },
+    });
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    const stream = host.subscribe({ spec: { scope: 'session', sessionId: 'session-1' } });
+    const iterator = stream[Symbol.asyncIterator]();
+    try {
+      await iterator.next();
+      revision = 1; // A live coordinator has committed an event but has not published it yet.
+      expect(
+        await host.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'queued-policy',
+          type: 'set_interaction_mode',
+          sessionId: 'session-1',
+          expectedRevision: 1,
+          mode: 'full',
+        }),
+      ).toMatchObject({ status: 'applied', revision: 2 });
+      expect((await iterator.next()).value).toMatchObject({
+        revision: 1,
+        projection: { event: { type: 'interaction_mode.changed', mode: 'auto' } },
+      });
+      expect((await iterator.next()).value).toMatchObject({
+        revision: 2,
+        projection: { event: { type: 'interaction_mode.changed', mode: 'full' } },
+      });
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('policy receipt races do not swallow activation failures', async () => {
+    const h = harness({ activationFailure: new Error('policy publication failed') });
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    const command = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'publication-failure',
+      type: 'set_interaction_mode' as const,
+      sessionId: 'session-1',
+      expectedRevision: 0,
+      mode: 'full' as const,
+    };
+    try {
+      await expect(host.command(command)).rejects.toThrow('policy publication failed');
+      expect(await host.command(command)).toMatchObject({ status: 'idempotent_replay' });
+      expect(h.bridge.commits).toHaveLength(1);
+      expect(h.bridge.recoveries).toEqual([]);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('policy commands and their receipts never request execution ownership or recovery', async () => {
+    const h = harness();
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+      runWithSessionExecution: () => {
+        throw new Error('execution unavailable');
+      },
+    });
+    const command = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'policy-command',
+      type: 'set_interaction_mode' as const,
+      sessionId: 'session-1',
+      expectedRevision: 0,
+      mode: 'full' as const,
+    };
+    try {
+      expect(await host.command(command)).toMatchObject({ status: 'applied' });
+      expect(await host.command(command)).toMatchObject({ status: 'idempotent_replay' });
+      expect(h.bridge.recoveries).toEqual([]);
+      expect(h.bridge.commits).toHaveLength(1);
+      expect(() => host.command(startCommand())).toThrow('execution unavailable');
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
   test('looks up before recovery and inspection, then commits before activation and schedule', async () => {
     const h = harness({ withExecution: true });
     const host = createRuntimeHost({
