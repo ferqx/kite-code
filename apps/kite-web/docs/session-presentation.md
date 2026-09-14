@@ -12,11 +12,11 @@ Web 不重现 TUI Static、Thought 聚合与 scrollback。共享结果含义，�
 
 按轮复制由共享 Conversation 根据正文与 settled 状态提供；剪贴板操作仅复制页面已有文本，不增加 Runtime 写权限。流式助手正文下显示“正在回复”，落定后移除。
 
-## 当前差异：取消与未知状态丢失
+## Run 汇总与工具终态边界
 
-[transport.runStatus](../src/transport/client.ts) 将 Run 的 failed、cancelled、unknown 都投影为 failed；工具取消也被降为 ok=false 的 tool_result，[共享页面投影](../src/presentation/page.ts) 仍只按 ok 映射 completed/failed。当前 Web 无法完整表达 Public contract 中的取消与未知结果；不能将该投影作为已知失败、可安全重试的证据。
+[transport.runStatus](../src/transport/client.ts) 仍将 Run 的 failed、cancelled、unknown 投影为目录使用的粗粒度 failed；该汇总不能作为已知失败或可安全重试的证据。工具消息则在本地 presentation 保留 Public History 实际提供的 queued、running、completed、failed、rejected 与 cancelled，[共享页面投影](../src/presentation/page.ts)不再只按 `ok` 把取消降成 failed。当前 Public 工具生命周期没有 unknown；只有 Run 汇总可能为 unknown。
 
-修复需在本地 presentation 保留明确终态，并为 cancelled/unknown 添加 transport与组件断言。现有 [transport tests](../test/transport.test.ts) 的 completed/running/rejected 覆盖不足以证明全部终态语义。
+Public History 当前只提供安全 label、status 与 summary，不提供 Runtime Native 的 presentation、presentationGroupId、结构化参数或 stdout/stderr，因此 Web 工具保持 standalone，不从 label 或相邻顺序猜测 exploration 分组。
 
 
 共享页面采用点击直接加载消息、消息折叠和阅读位置恢复。Web 入口仅提供只读导航与诊断；不提供 Composer、审批、停止、新建、配置或本地文件打开回调。助手 Markdown 的相对文件链接只显示文字，HTTP(S) 链接仍可打开；消息 HTML 不执行，图片不自动请求。数据转换不补造 Public API 未提供的路径、工具名或父子关系。[页面投影回归](../test/page-presentation.test.ts)核对原始可展示内容和终态保留；[页面生命周期](../test/app-lifecycle.test.tsx)核对只读操作缺席与点击直接导航。

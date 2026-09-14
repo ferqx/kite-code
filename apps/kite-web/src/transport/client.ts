@@ -376,6 +376,12 @@ function projectHistoryItem(item: AgentApiHistoryItem): WebPresentationMessage {
                     toolId: item.content.tool_call_id,
                     label: item.content.label,
                     ok: item.content.status === 'completed',
+                    status:
+                      item.content.status === 'completed' ||
+                      item.content.status === 'failed' ||
+                      item.content.status === 'cancelled'
+                        ? item.content.status
+                        : 'failed',
                     stdout: item.content.summary ?? '',
                     stderr: '',
                   },

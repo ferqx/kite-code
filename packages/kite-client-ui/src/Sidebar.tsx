@@ -91,7 +91,7 @@ function Workspace({
                 size="icon-sm"
                 aria-label={`在 ${workspace.label} 中新建对话`}
                 title="新对话"
-                disabled={props.busy || props.mutationBusy}
+                disabled={props.mutationBusy}
                 onClick={() => props.onNewSession?.(workspace.id)}
               >
                 <HugeiconsIcon icon={Add01Icon} />
@@ -185,7 +185,7 @@ function Workspace({
             </Button>
           )}
           {!sessions.length && workspace.state === 'loaded' && (
-            <p className="empty-list">还没有会话。</p>
+            <p className="empty-list">暂无聊天</p>
           )}
         </nav>
       </div>

@@ -6,6 +6,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '@/app/app';
 import type { WebRestTransport } from '@/transport/client';
 
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
 const LONG_SESSION_NAME = 'session-with-a-name-that-must-not-expand-the-sidebar-width';
 
 function CurrentPath() {
@@ -190,13 +199,13 @@ describe('Web REST App lifecycle', () => {
     expect(await screen.findByRole('dialog', { name: 'Model context' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'System prompt' }));
     expect(await screen.findByText('You are Kite. Use tools carefully.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 
     expect(document.documentElement.dataset.theme).toBe('dark');
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light theme' }));
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close model context inspector' }));
     fireEvent.click(screen.getByRole('tab', { name: 'Conversation history' }));
     deferSessionOneLogs = true;
     fireEvent.click(screen.getByRole('tab', { name: 'Runtime logs' }));

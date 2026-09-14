@@ -220,18 +220,18 @@
 
 ### 已核实的实现差异与交接
 
-本轮检查设计和数据投影，不修改并行开发中的应用代码。下列差异不能用本轮文档或 Figma 的完成标记覆盖：
+下列差异以当前生产代码与验证证据为准，不能用文档或 Figma 的完成标记覆盖：
 
 | 差异 | 当前证据与后续 owner |
 | --- | --- |
-| 分类和分组事实丢失 | [桌面 projectEvent](../../apps/kite-desktop/src/presentation.ts) 与 [Message](../../packages/kite-client-ui/src/types.ts) 未保留 presentation／presentationGroupId；[探索组件](../../packages/kite-client-ui/src/ToolExploration.tsx)只识别 4 个名称。应沿现有投影和共享阅读 owner 保留服务事实，避免漏聚合或显示 hidden 工具 |
-| 多数工具仍是通用原始文本 | [Conversation](../../packages/kite-client-ui/src/Conversation.tsx)仅对 Shell 退出码和文件路径做少量专门处理；19 项完整结构尚未实现。按可信工具身份映射可读结果，未知数据保留通用输出，不建立第二套运行注册表 |
-| 排队和终态表达不足 | 桌面与 [Web pageMessages](../../apps/kite-web/src/presentation/page.ts)把 queued 表示为 running；共享 Message 没有 queued／unknown。Web 还将取消／未知降为 failed，现有差异见 [Web owner](../../apps/kite-web/docs/session-presentation.md#当前差异取消与未知状态丢失) |
-| 流式与分流输出丢失 | 服务的 tool.progress 是带 stream 的 chunk；桌面逐次替换 text，终态再将摘要、stdout、stderr 拼接。需要保留有界的分流结果及提供过的终止／截断信息，不以“最后一个 chunk”冒充完整输出 |
-| 过程与交互回执未完整接入 | 桌面尚未处理 reasoning.activity、plan.progress／plan.completed；input.answered 的真实 summary 也没有用于回执。必须按已允许的事件和交互身份接入，不能用 Figma 样例补出问题、回答或思考原文 |
+| 分类、分组和归属事实 | [桌面 projectEvent](../../apps/kite-desktop/src/presentation.ts)与共享 [Message](../../packages/kite-client-ui/src/types.ts)现保留 presentation／presentationGroupId／presentationOwner；owner从queued贯穿terminal，恢复只收到终态时仍可正确归属。[工具活动](../../packages/kite-client-ui/src/ToolActivity.tsx)只消费显式分组和归属，standalone 与缺失分类保持独立，有owner的hidden子工具异常归入所属task，旧记录没有owner时保留独立异常入口 |
+| 多数工具仍是通用原始文本 | [工具活动](../../packages/kite-client-ui/src/ToolActivity.tsx)已统一状态、目标、摘要和技术详情层级，并为 Shell 提供单层分支；19 项完整结构化结果仍需随各工具真实契约逐项补齐。未知数据保留通用输出，不建立第二套运行注册表 |
+| 排队和终态表达 | Desktop 与 [Web pageMessages](../../apps/kite-web/src/presentation/page.ts)现保留 queued；共享 Message 区分 queued／waiting／cancelled／unknown，Web 工具结果不再把取消／未知降为 failed。会话级 WebSessionStatus 仍是更粗的目录状态，不替代工具终态 |
+| 流式与分流输出 | Desktop 对服务已合帧的 tool.progress 按 stream 分别保留累计 stdout/stderr，终态使用结构化 result 覆盖；源截断行数等尚未进入共享 Message，仍需按 Runtime 已提供事实补齐 |
+| 过程与交互回执 | Desktop 已按 request/segment identity 接入允许公开的 reasoning.activity，按 plan identity 原位更新 plan.progress／plan.completed，并在 input.answered 使用 Runtime 安全 summary；不读取或用 Figma 补出私有推理、问题或回答原文 |
 | 子代理与媒体有数据边界 | 已有父工具关系和步骤可用，但独立详情、发送／接收回执和丰富媒体结果仍受现有接口限制；缺失信息时展示已知结果，不以模型返回的任意对象扩展客户端授权 |
 
-2026-09-11 用隔离的内存事件调用当前生产投影，确认：两段不同 stream 的进度仅保留第二段；hidden queued 仍生成工具消息；Web queued 变成 running；桌面的计划进度和 reasoning.activity 没有生成展示项。这是投影函数证据，不是原生或浏览器交互验收。
+2026-09-13 已用共享真实组件 fixture 在默认宽度与 390 px 窄列复核显式探索分组、standalone Shell、失败长输出、思考与计划混排及子 Agent；共享阅读、Desktop 投影与 Web 测试分别覆盖状态、分流、hidden 异常、父工具折叠、reasoning 与 plan identity。源结果没有独立 truncated 字段，客户端只展示实际提供的 totalLines／exhausted，不从文本猜测截断。
 
 实施验收必须覆盖全部 19 个内置契约和 20 个展示类别的接入／兜底，并复查同一调用排队→运行→终态、终态后迟到进度、跨分组探索、hidden 父工具与可见子结果、交互提交失败、取消与未知、stdout／stderr、源截断和空结果。结构化结果缺字段或格式异常时保留安全输出，不能让整段历史崩溃。两端分别验证数据投影，共享层验证同一套渲染、键盘展开、焦点与阅读位置；Figma 中配置的展开动作及静态问题样例不代替这些运行证据。
 
@@ -322,7 +322,7 @@ Figma 变量、自动布局、8 个基础组件族和 5 个布局／场景组件
 | 读取／搜索过程 | TUI ToolSummaryBlock 已有聚合；共享页按明确类型聚合相邻记录，保留参数、路径、失败和展开操作，不将 Shell 或 MCP label 猜作只读 |
 | 文件与产出副层 | 复用成功文件工具记录及既有 native editor；共享副层承载逐次文件变更，不增加完整 Git、文档编辑器或产出数据库 |
 | 设置与扩展 | Provider／模型已有；补齐 MCP 安全快照、连接详情、认证／取消／重连及 Skills 目录；服务仍拥有 CAS、凭据与实际连接 |
-| 子代理 | 保留现有摘要、状态与步骤，正文样式对齐；没有完整子会话读取和真实交接回执时不制作独立详情或“已收到”状态 |
+| 子代理 | 同步 task 返回，保留来源、状态与摘要，内部步骤在所属 task 展开区按需查看，不在结果消息中重复展示；没有完整子会话读取和真实交接回执时不制作独立详情或“已收到”状态 |
 | 未具备的设计能力 | 工作台主题／时间筛选、未读／置顶持久化、全量产出、内置 Browser／Terminal、Skill 安装、专用模型诊断、语音与附件上传先不接入；不摆放空按钮 |
 
 Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型和文件记录时不补造这些字段；扩展设置仍由有权使用 App Control 的桌面入口提供。项目主动选择的信任交互、运行中输入队列等其余差异仍保留在对应 owner，不能由这批界面同步宣称已经解决。
@@ -344,6 +344,10 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 ## 应用历史与普通工作目录修复
 
 状态：iteration_complete。用户确认历史读取应独立于项目环境，且工作目录可能用于非代码任务、没有 Git。当前实现与验证归位到[历史与恢复](../../apps/kite-desktop/docs/history-and-recovery.md)，架构取舍见 [ADR-0182](../adr/0182-neutral-desktop-history.md)。历史按持久空间分页，跨空间阅读保留原任务；断线有界自动重接且不重放命令。普通工作目录不要求 Git，实际执行仍核对可用路径与授权。新版系统窗口与输入法的人工资格仍按原生验收边界单独处理。
+
+## 新对话选择与 Session 模型隔离
+
+状态：iteration_complete。用户确认 Workspace、Git 分支、模型和权限都是准备态选择，选择本身不产生执行副作用；发送首条提示词才激活目标空间、执行明确要求的分支切换并创建 Session。模型 route 随 `create_session` 绑定，新选择随已有 Session 的下一次 `start_turn` 更新；Store 与命令回执在同一事务中持久化 route，恢复优先于 Workspace 默认值。外部 branch／HEAD 变化只刷新发送时事实，不阻止首发；普通目录和 Git 探测降级继续可用。桌面、Runtime Contract／Protocol、Host storage 与双 Session Service 集成回归覆盖该边界；设计批注同步到既有 Figma 节点，不新增页面或控件族。
 
 ## 本地启动性能
 

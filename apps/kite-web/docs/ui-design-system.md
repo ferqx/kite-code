@@ -9,7 +9,7 @@
 
 ## 共享会话页面
 
-Web 与桌面共用 [kite-client-ui](../../../packages/kite-client-ui/README.md) 的主页面、侧栏、会话消息、控件和样式。暖中性色、间距、阅读宽度、消息折叠与窄屏目录在共享 owner 中维护，禁止在 Web 再写一套主页面或消息组件。Web 保留页面内 dark/light 切换，默认 dark；相同组件与布局只切换共享颜色变量。
+Web 与桌面共用 [kite-client-ui](../../../packages/kite-client-ui/README.md) 的主页面、侧栏、会话消息、控件和样式。暖中性色、间距、阅读宽度、消息折叠与窄屏目录在共享 owner 中维护，禁止在 Web 再写一套主页面或消息组件。新增或修改 Web 控件时必须先复用共享 shadcn 组件；缺少的通用控件先接入共享包，不在 Web app 内复制原生控件、Radix wrapper 或局部样式版本。允许专用组件的边界、上游差异检查和跨端验证要求以[共享基础控件规范](../../../packages/kite-client-ui/README.md#基础控件)为准。Web 保留页面内 dark/light 切换，默认 dark；相同组件与布局只切换共享颜色变量。
 
 共享页面与控件样式限定在 `.kite-client` 根下，通用控件规则不覆盖诊断标签的 Tailwind 样式；Agent Markdown 使用两端相同的 shadcn/typeset stylesheet、`typeset-chat` preset 与 Geist 字体，避免 Web preflight 与原生浏览器默认值造成两端差异。共享 CSS 只保留选择、溢出、链接和文件操作规则，不建立第二套正文排版。桌面常用与最小窗口、Web 1280 × 800、1024 × 768、390 × 844 均按实际 React 组件检查。
 

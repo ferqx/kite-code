@@ -12,7 +12,7 @@ export function Button({
 }: ComponentProps<typeof ShadcnButton>) {
   return (
     <ShadcnButton
-      className={cn('button shadow-none', className)}
+      className={cn('button shadow-none focus-visible:ring-0', className)}
       variant={variant}
       size={size}
       {...props}

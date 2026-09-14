@@ -15,6 +15,7 @@
 
 @theme inline {
   --color-canvas: var(--canvas);
+  --color-card: var(--surface-raised);
   --color-sidebar: var(--sidebar);
   --color-surface: var(--surface);
   --color-surface-subtle: var(--surface-subtle);

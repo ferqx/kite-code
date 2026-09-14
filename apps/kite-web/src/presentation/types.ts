@@ -21,6 +21,7 @@ export type WebPresentationBlock =
       readonly toolId: string;
       readonly label: string;
       readonly ok: boolean;
+      readonly status?: 'completed' | 'failed' | 'cancelled';
       readonly stdout: string;
       readonly stderr: string;
       readonly exitCode?: number;

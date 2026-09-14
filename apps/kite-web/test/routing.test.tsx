@@ -6,6 +6,15 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { KiteRoutes } from '@/routing';
 import type { WebRestTransport } from '@/transport/client';
 
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

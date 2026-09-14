@@ -45,6 +45,7 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html).toContain('data-radix-scroll-area-viewport');
   expect(html.match(/<header/g)).toHaveLength(2);
   expect(html).toContain('data-slot="resizable-panel-group"');
+  expect(html).toContain('focus-visible:ring-0');
   expect(html.match(/ data-panel(?:=|>)/g)).toHaveLength(2);
   expect(html.match(/role="separator"/g)).toHaveLength(1);
 });
@@ -147,6 +148,16 @@ test('an optimistic first message replaces loading and welcome content', () => {
   expect(html).toContain('正在发送');
   expect(html).not.toContain('从一个想法开始');
   expect(html).not.toContain('描述你的目标');
+  expect(html).not.toContain('正在加载会话历史');
+  expect(html).not.toContain('class="welcome"');
+});
+
+test('an uncached conversation keeps the content frame and shows only the centered brand mark', () => {
+  const html = renderToStaticMarkup(<SessionPage {...base} loading messages={[]} />);
+
+  expect(html).toContain('class="conversation-loading"');
+  expect(html).toContain('aria-label="正在加载聊天"');
+  expect(html).toContain('data-icon="kite-loading"');
   expect(html).not.toContain('正在加载会话历史');
   expect(html).not.toContain('class="welcome"');
 });

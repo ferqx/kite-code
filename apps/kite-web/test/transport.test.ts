@@ -182,13 +182,14 @@ describe('Web REST transport', () => {
       listHistory: vi.fn(async () => ({
         schema: 'kite.agent-api.history-page.v1' as const,
         session_id: 'session-one',
-        through_sequence: 6,
+        through_sequence: 7,
         items: [
           toolLifecycleItem(2, 'tool-read', 'read_file', 'queued'),
           toolLifecycleItem(3, 'tool-read', 'Tool', 'running'),
           toolLifecycleItem(4, 'tool-read', 'read_file', 'completed'),
           toolLifecycleItem(5, 'tool-search', 'search_files', 'queued'),
           toolLifecycleItem(6, 'tool-search', 'Tool', 'running'),
+          toolLifecycleItem(7, 'tool-shell', 'shell_execute', 'cancelled'),
         ],
       })),
     };
@@ -197,7 +198,7 @@ describe('Web REST transport', () => {
 
     const history = await transport.loadHistory('session-one');
 
-    expect(history.messages).toHaveLength(2);
+    expect(history.messages).toHaveLength(3);
     expect(history.messages[0]).toMatchObject({
       messageId: 'tool:tool-read',
       sequence: 4,
@@ -207,6 +208,10 @@ describe('Web REST transport', () => {
       messageId: 'tool:tool-search',
       sequence: 6,
       blocks: [{ kind: 'tool_activity', label: 'search_files', status: 'running' }],
+    });
+    expect(history.messages[2]).toMatchObject({
+      messageId: 'tool:tool-shell',
+      blocks: [{ kind: 'tool_result', label: 'shell_execute', ok: false, status: 'cancelled' }],
     });
   });
 
@@ -328,7 +333,7 @@ function toolLifecycleItem(
   sequence: number,
   toolCallId: string,
   label: string,
-  status: 'queued' | 'running' | 'completed' | 'rejected',
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'rejected' | 'cancelled',
 ) {
   return {
     schema: 'kite.agent-api.history-item.v1' as const,

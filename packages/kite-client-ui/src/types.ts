@@ -16,11 +16,38 @@ export interface Message {
     readonly stdout?: string;
     readonly stderr?: string;
     readonly exitCode?: number;
+    readonly status?: 'success' | 'error' | 'exhausted';
+    readonly totalLines?: number;
+    readonly terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
+  };
+  /** Runtime-framed live output; it is not a terminal success/failure receipt. */
+  readonly toolProgress?: {
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly stdoutLines?: number;
+    readonly stderrLines?: number;
   };
   readonly toolName?: string;
+  /** Runtime-owned display classification; missing values remain standalone. */
+  readonly presentation?: 'exploration' | 'standalone' | 'hidden';
+  /** Exact child-task owner for internal tool presentation. */
+  readonly presentationOwner?: {
+    readonly subagentId: string;
+    readonly parentToolCallId: string;
+  };
+  /** Opaque Runtime grouping identity used only for adjacent exploration calls. */
+  readonly presentationGroupId?: string;
   readonly title?: string;
   readonly arguments?: Readonly<Record<string, unknown>>;
-  readonly status?: 'running' | 'waiting' | 'completed' | 'failed' | 'rejected' | 'cancelled';
+  readonly status?:
+    | 'queued'
+    | 'running'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'rejected'
+    | 'cancelled'
+    | 'unknown';
   readonly parentToolCallId?: string;
   readonly steps?: readonly {
     readonly id: string;

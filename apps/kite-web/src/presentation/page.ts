@@ -35,7 +35,7 @@ export function pageMessages(messages: readonly WebPresentationMessage[]): reado
             role: 'tool',
             title: block.label,
             text: block.summary ?? '',
-            status: 'running',
+            status: block.status,
             settled: false,
           };
         case 'tool_result':
@@ -45,7 +45,7 @@ export function pageMessages(messages: readonly WebPresentationMessage[]): reado
             role: 'tool',
             title: block.label,
             text: [block.stdout, block.stderr].filter(Boolean).join('\n'),
-            status: block.ok ? 'completed' : 'failed',
+            status: block.status ?? (block.ok ? 'completed' : 'failed'),
             toolResult: {
               ok: block.ok,
               stdout: block.stdout,

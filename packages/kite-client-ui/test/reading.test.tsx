@@ -285,7 +285,7 @@ test('Markdown renders code and tables without executing HTML, loading images or
   expect(paths).toEqual(['src/app.ts']);
 });
 
-test('scrolling history stops live follow; returning to a conversation restores reading and tool expansion', async () => {
+test('scrolling history stops live follow; returning restores reading and activity expansion', async () => {
   let saved: ReadingState | undefined;
   const messages: Message[] = [
     {
@@ -293,6 +293,7 @@ test('scrolling history stops live follow; returning to a conversation restores 
       role: 'tool',
       text: 'output',
       title: 'shell',
+      arguments: { command: 'pwd' },
       settled: true,
     },
   ];
@@ -316,9 +317,7 @@ test('scrolling history stops live follow; returning to a conversation restores 
   await act(async () => {
     viewport.scrollTop = 200;
     viewport.dispatchEvent(new dom.window.Event('scroll', { bubbles: true }));
-    const details = document.querySelector('details')!;
-    details.open = true;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
   });
   const updated: Message[] = [
     ...messages,
@@ -331,13 +330,15 @@ test('scrolling history stops live follow; returning to a conversation restores 
   expect(saved).toMatchObject({
     top: 200,
     follow: false,
-    expanded: { 'tool:t': true },
+    expanded: { 'activity:tool:t': true },
   });
   await act(() =>
     root!.render(<Conversation {...props} initialReading={saved} messages={updated} />),
   );
   expect(document.querySelector<HTMLElement>('.conversation-viewport')!.scrollTop).toBe(200);
-  expect(document.querySelector('details')?.open).toBe(true);
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'true',
+  );
   await click(button('回到最新消息'));
   expect(document.querySelector('.jump-latest')).toBeNull();
 });
@@ -369,6 +370,29 @@ test('shared directory opens on click and preserves full names under read-only a
   expect(document.querySelector('input[type=search]')).toBeNull();
   expect(document.body.textContent).not.toContain('新建会话');
   expect(document.body.textContent).not.toContain('模型与 Provider 设置');
+});
+
+test('loaded workspace without sessions shows the aligned empty chat label', async () => {
+  await render(
+    <Sidebar
+      workspaces={[
+        {
+          id: 'w',
+          label: 'Workspace',
+          state: 'loaded',
+          sessionCount: 0,
+          sessions: [],
+        },
+      ]}
+      actions={{}}
+      connectionLabel=""
+    />,
+  );
+
+  const empty = document.querySelector<HTMLElement>('.empty-list');
+  expect(empty?.textContent).toBe('暂无聊天');
+  expect(empty?.className).toBe('empty-list');
+  expect(document.body.textContent).not.toContain('还没有会话');
 });
 
 test('shared directory distinguishes running sessions from sessions awaiting input', async () => {
@@ -417,11 +441,13 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
   expect(rows[3]?.querySelector('[role="status"]')).toBeNull();
 });
 
-test('exploration collapses after completion, keeps failures visible in its summary and never absorbs shell', async () => {
+test('tool activity keeps failures visible and groups adjacent tools without raw details', async () => {
   const read: Message = {
     id: 'tool:r',
     role: 'tool',
     toolName: 'read_file',
+    presentation: 'exploration',
+    presentationGroupId: 'group-1',
     arguments: { path: 'a.ts' },
     text: '',
     settled: false,
@@ -434,9 +460,8 @@ test('exploration collapses after completion, keeps failures visible in its summ
     saveReading: () => {},
   };
   await render(<Conversation {...props} messages={[read]} />);
-  expect(document.querySelector('.exploration-summary')?.getAttribute('aria-expanded')).toBe(
-    'true',
-  );
+  expect(document.querySelector('.tool-activity-summary')).toBeNull();
+  expect(document.querySelector('.tool-activity-step')?.textContent).toContain('读取文件');
   await act(() =>
     root!.render(
       <Conversation
@@ -447,6 +472,8 @@ test('exploration collapses after completion, keeps failures visible in its summ
             id: 'tool:s',
             role: 'tool',
             toolName: 'shell_execute',
+            presentation: 'standalone',
+            presentationGroupId: 'group-1',
             title: '独立命令',
             text: '输出',
             settled: true,
@@ -456,23 +483,27 @@ test('exploration collapses after completion, keeps failures visible in its summ
       />,
     ),
   );
-  expect(document.querySelector('.exploration-summary')?.getAttribute('aria-expanded')).toBe(
-    'false',
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'true',
   );
-  expect(document.querySelector('.exploration-summary')?.textContent).toContain('1 项未成功');
-  expect(document.querySelectorAll('.exploration')).toHaveLength(1);
-  expect(document.querySelector('.message.tool')?.textContent).toContain('独立命令');
-  await click(document.querySelector<HTMLButtonElement>('.exploration-summary')!);
-  expect(document.querySelector('.exploration-steps')?.textContent).toContain('读取失败');
-  expect(document.querySelector('.exploration-steps')?.textContent).toContain('a.ts');
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('1 项失败');
+  expect(document.querySelectorAll('.tool-activity')).toHaveLength(2);
+  expect(document.querySelectorAll('.tool-activity-step')).toHaveLength(1);
+  expect(document.querySelectorAll('.tool-activity-steps')[0]?.textContent).toContain('读取失败');
+  expect(document.querySelectorAll('.tool-activity-steps')[0]?.textContent).toContain('a.ts');
+  expect(document.querySelector('.shell-activity')?.textContent).toContain('独立命令');
+  expect(document.body.textContent).not.toContain('查看参数与输出');
+  expect(document.querySelector('.tool-arguments')).toBeNull();
   expect(document.querySelector('.file-link')).toBeNull();
 });
 
-test('exploration stays on its side of replies and preserves explicit user folding during live updates', async () => {
+test('tool activity stays on its side of replies and preserves explicit folding during live updates', async () => {
   const read = (id: string): Message => ({
     id: `tool:${id}`,
     role: 'tool',
     toolName: 'read_file',
+    presentation: 'exploration',
+    presentationGroupId: id === 'a' || id === 'b' ? 'group-1' : 'group-2',
     arguments: { path: id },
     text: '内容',
     settled: false,
@@ -491,13 +522,453 @@ test('exploration stays on its side of replies and preserves explicit user foldi
     read('c'),
   ];
   await render(<Conversation {...props} messages={messages} />);
-  expect(document.querySelectorAll('.exploration')).toHaveLength(2);
-  const first = document.querySelector<HTMLButtonElement>('.exploration-summary')!;
+  expect(document.querySelectorAll('.tool-activity')).toHaveLength(2);
+  const first = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
   expect(first.textContent).toContain('读取 2 次');
   await click(first);
   await act(() => root!.render(<Conversation {...props} messages={[...messages, read('d')]} />));
   expect(first.getAttribute('aria-expanded')).toBe('false');
-  expect(document.querySelectorAll('.exploration-summary')[1]?.textContent).toContain('读取 2 次');
+  expect(document.querySelectorAll('.tool-activity-summary')[1]?.textContent).toContain(
+    '读取 2 次',
+  );
+});
+
+test('a failed command exposes its error summary without expanding the full output', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:failed',
+          role: 'tool',
+          toolName: 'shell_execute',
+          title: '运行测试',
+          text: 'many successful lines\nthe complete log',
+          settled: true,
+          status: 'failed',
+          toolResult: {
+            ok: false,
+            stderr: 'Expected empty session, received cached profile',
+            exitCode: 1,
+          },
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('1 项失败');
+  expect(document.querySelector('.tool-step-preview')?.textContent).toBe(
+    'Expected empty session, received cached profile',
+  );
+  expect(document.body.textContent).not.toContain('查看参数与输出');
+});
+
+test('tool activity preserves waiting, rejected and cancelled terminal states', async () => {
+  const tool = (id: string, status: Message['status'], settled: boolean): Message => ({
+    id: `tool:${id}`,
+    role: 'tool',
+    title: id,
+    text: `${id} output`,
+    settled,
+    status,
+    presentation: 'exploration',
+    presentationGroupId: 'group',
+  });
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        tool('waiting', 'waiting', false),
+        tool('running', 'running', false),
+        tool('rejected', 'rejected', true),
+        tool('cancelled', 'cancelled', true),
+        tool('unknown', 'unknown', true),
+      ]}
+    />,
+  );
+  const activity = document.querySelector('.tool-activity')!;
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('等待交互');
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).not.toContain('进行中');
+  expect(activity.textContent).toContain('等待交互');
+  expect(activity.textContent).toContain('已拒绝');
+  expect(activity.textContent).toContain('已停止');
+  expect(activity.textContent).toContain('结果未知');
+  expect(activity.querySelectorAll('.tool-activity-step')).toHaveLength(5);
+  expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe('true');
+});
+
+test('tool activity does not combine adjacent tools owned by different turns', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:a',
+          turnId: 'a',
+          role: 'tool',
+          text: 'a',
+          settled: true,
+          presentation: 'exploration',
+          presentationGroupId: 'group',
+        },
+        {
+          id: 'tool:b',
+          turnId: 'b',
+          role: 'tool',
+          text: 'b',
+          settled: true,
+          presentation: 'exploration',
+          presentationGroupId: 'group',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelectorAll('.tool-activity')).toHaveLength(2);
+});
+
+test('hidden parent tools stay out of the timeline without hiding their subagent result', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:parent',
+          role: 'tool',
+          title: '内部委派',
+          text: 'hidden',
+          settled: true,
+          presentation: 'hidden',
+        },
+        {
+          id: 'subagent:child',
+          role: 'subagent',
+          parentToolCallId: 'parent',
+          title: '审查',
+          text: '发现一项问题',
+          settled: true,
+          status: 'completed',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity')).toBeNull();
+  expect(document.querySelector('.message.subagent')?.textContent).toContain('发现一项问题');
+  expect(document.body.textContent).not.toContain('内部委派');
+});
+
+test('owned hidden terminal issues stay inside the child result', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:hidden-rejected',
+          role: 'tool',
+          title: '受限操作',
+          text: '权限不足',
+          settled: true,
+          presentation: 'hidden',
+          presentationOwner: {
+            subagentId: 'hidden-child',
+            parentToolCallId: 'hidden-rejected',
+          },
+          status: 'rejected',
+        },
+        {
+          id: 'subagent:hidden-child',
+          role: 'subagent',
+          parentToolCallId: 'hidden-rejected',
+          title: '权限复核',
+          text: '确认未执行',
+          settled: true,
+          status: 'completed',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity')).toBeNull();
+  expect(document.querySelector('.message.subagent')?.textContent).toContain('确认未执行');
+});
+
+test('legacy hidden terminal issues without an owner remain visible', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:legacy-hidden-failure',
+          role: 'tool',
+          title: '读取文件',
+          text: '文件不存在',
+          settled: true,
+          presentation: 'hidden',
+          status: 'failed',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity')?.textContent).toContain('文件不存在');
+});
+
+test('collapsing a parent tool keeps its subagent summary visible', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:parent',
+          role: 'tool',
+          title: '委派',
+          text: '',
+          settled: true,
+          presentation: 'standalone',
+          status: 'completed',
+        },
+        {
+          id: 'subagent:child',
+          role: 'subagent',
+          parentToolCallId: 'parent',
+          title: '审查',
+          text: '复核完成',
+          settled: true,
+          status: 'completed',
+          steps: [{ id: 'internal', text: '内部读取', status: 'completed' }],
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+  const result = document.querySelector('.message.subagent');
+  expect(result?.getAttribute('aria-label')).toBe('子 Agent 状态');
+  expect(result?.textContent).not.toContain('引导中');
+  expect(result?.textContent).not.toContain('执行过程');
+  expect(result?.textContent).not.toContain('内部读取');
+  expect(result?.textContent).toContain('复核完成');
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  const process = result?.querySelector<HTMLDetailsElement>('.subagent-process');
+  expect(process).not.toBeNull();
+  expect(process?.open).toBe(false);
+  await click(process!.querySelector('summary')!);
+  expect(process?.open).toBe(true);
+  expect(process?.textContent).toContain('内部读取');
+  expect(document.querySelectorAll('.subagent-process')).toHaveLength(1);
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.subagent-process')).toBeNull();
+  expect(document.body.textContent).toContain('复核完成');
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector<HTMLDetailsElement>('.subagent-process')?.open).toBe(true);
+});
+
+test('subagent processes stay collapsed through progress and failure until explicitly expanded', async () => {
+  const child: Message = {
+    id: 'subagent:live',
+    role: 'subagent',
+    title: '探查',
+    text: '',
+    settled: false,
+    status: 'running',
+    steps: [{ id: 'read', text: '读取配置', status: 'started' }],
+  };
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(<Conversation {...props} messages={[child]} />);
+  const process = () => document.querySelector<HTMLDetailsElement>('.subagent-process')!;
+  expect(process().open).toBe(false);
+  const failed: Message = {
+    ...child,
+    steps: [{ id: 'read', text: '文件不存在', status: 'failed' }],
+  };
+  await act(() => root!.render(<Conversation {...props} messages={[failed]} />));
+  expect(process().open).toBe(false);
+  await click(process().querySelector('summary')!);
+  expect(process().open).toBe(true);
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[{ ...failed, settled: true, status: 'completed', text: '已核对' }]}
+      />,
+    ),
+  );
+  expect(process().open).toBe(true);
+  await click(process().querySelector('summary')!);
+  expect(process().open).toBe(false);
+});
+
+test('running and failed subagents do not claim that a result was sent to the main agent', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'subagent:running',
+          role: 'subagent',
+          title: '运行检查',
+          text: '',
+          settled: false,
+          status: 'running',
+        },
+        {
+          id: 'subagent:failed',
+          role: 'subagent',
+          title: '失败检查',
+          text: '模型调用失败',
+          settled: true,
+          status: 'failed',
+        },
+      ]}
+    />,
+  );
+  const subagents = [...document.querySelectorAll('.message.subagent')];
+  expect(subagents[0]?.getAttribute('aria-label')).toBe('子 Agent 状态');
+  expect(subagents[0]?.textContent).toContain('正在工作');
+  expect(subagents[1]?.textContent).toContain('失败');
+  expect(subagents.every((item) => !item.textContent?.includes('已发送给主 Agent'))).toBe(true);
+});
+
+test('reasoning and plan progress remain readable without raw tool metadata', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        { id: 'thinking:r:s', role: 'thinking', text: '正在核对状态', settled: false },
+        {
+          id: 'plan:p',
+          role: 'system',
+          title: '计划进度',
+          text: '执行第 2 步',
+          settled: false,
+          status: 'running',
+        },
+        {
+          id: 'tool:limited',
+          role: 'tool',
+          title: '读取大文件',
+          text: '片段',
+          settled: true,
+          status: 'completed',
+          toolResult: {
+            ok: true,
+            stdout: '片段',
+            exitCode: 0,
+            status: 'exhausted',
+            totalLines: 420,
+          },
+        },
+      ]}
+    />,
+  );
+  expect(document.body.textContent).toContain('思考过程');
+  expect(document.body.textContent).toContain('计划进度');
+  expect(document.body.textContent).toContain('正在工作');
+  expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe('true');
+  expect(document.body.textContent).not.toContain('共 420 行');
+  expect(document.body.textContent).not.toContain('输出已达到工具限制');
+});
+
+test('the closed tool display vocabulary renders through one safe activity path', async () => {
+  const names = [
+    'ask_user',
+    'edit_file',
+    'glob',
+    'list_mcp_resources',
+    'list_mcp_tools',
+    'mcp_tool',
+    'read_file',
+    'read_mcp_resource',
+    'request_plan_review',
+    'search_content',
+    'search_files',
+    'shell_execute',
+    'skill',
+    'task',
+    'tool_search',
+    'update_plan',
+    'web_fetch',
+    'write_file',
+    'write_plan',
+    'other',
+  ];
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={names.map((toolName, index) => ({
+        id: `tool:vocabulary-${index}`,
+        role: 'tool' as const,
+        toolName,
+        title: toolName === 'other' ? '<untrusted label>' : toolName,
+        text: index === 0 ? '' : `result ${index}`,
+        settled: true,
+        status: index === 0 ? ('unknown' as const) : ('completed' as const),
+        presentation: 'standalone' as const,
+      }))}
+    />,
+  );
+  expect(document.querySelectorAll('.tool-activity')).toHaveLength(names.length);
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('结果未知');
+  expect(document.body.textContent).toContain('<untrusted label>');
+  expect(document.body.innerHTML).not.toContain('<untrusted label></untrusted>');
+});
+
+test('tool activities translate internal tool names and remove redundant completed labels', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:shell',
+          role: 'tool',
+          toolName: 'shell_execute',
+          title: 'shell_execute',
+          text: 'total 328',
+          arguments: { description: 'List workspace root' },
+          settled: true,
+          status: 'completed',
+          presentation: 'standalone',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.tool-activity-title')?.textContent).toBe('运行命令');
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.tool-step-title')?.textContent).toBe('运行命令');
+  expect(document.querySelector('.tool-activity-state')).toBeNull();
+  expect(document.querySelector('.tool-step-status')).toBeNull();
+  expect(document.querySelectorAll('.tool-step-icon')).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('shell_execute');
 });
 
 test('workspace sessions reveal five then ten at a time and reset independently on collapse', async () => {

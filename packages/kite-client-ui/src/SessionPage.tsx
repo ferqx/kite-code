@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from './Composer';
 import { Conversation, type ReadingState } from './Conversation';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from './components/ui/sheet';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
@@ -89,23 +90,15 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     if (!props.scheduledTasks) setScheduledEditorOpen(false);
   }, [props.scheduledTasks]);
   const readings = useRef<Record<string, ReadingState>>({});
-  const sidebar = useRef<HTMLElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
         document.querySelector('dialog[open]') ||
-        [...document.querySelectorAll('[role="dialog"]')].some(
-          (element) => element !== sidebar.current,
-        )
+        document.querySelector('[role="dialog"]')
       )
         return;
-      if (narrow && sidebarOpen) {
-        setSidebarOpen(false);
-        toggle.current?.focus();
-        return;
-      }
       if (rightSidebarOpen) {
         setChangesKey(undefined);
         setScheduledEditorOpen(false);
@@ -119,7 +112,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     };
     window.addEventListener('keydown', cancel);
     return () => window.removeEventListener('keydown', cancel);
-  }, [narrow, sidebarOpen, changesOpen, rightSidebarOpen, focusControlAfterCommit]);
+  }, [narrow, changesOpen, rightSidebarOpen, focusControlAfterCommit]);
   useEffect(() => {
     if (typeof matchMedia === 'undefined') return;
     const media = matchMedia('(max-width: 600px)');
@@ -131,16 +124,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     media.addEventListener('change', resize);
     return () => media.removeEventListener('change', resize);
   }, []);
-  useEffect(() => {
-    if (!narrow || !sidebarOpen) return;
-    sidebar.current?.querySelector<HTMLButtonElement>('button')?.focus();
-    return () => {
-      if (focusComposerOnClose.current) {
-        focusComposerOnClose.current = false;
-        focusComposerAfterCommit();
-      } else toggle.current?.focus();
-    };
-  }, [focusComposerAfterCommit, narrow, sidebarOpen]);
   const open = (id: string) => {
     if (!props.onOpen) return;
     props.onOpen(id);
@@ -175,29 +158,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           <HugeiconsIcon icon={PanelLeftCloseIcon} />
         </Button>
       </header>
-      <aside
-        ref={sidebar}
-        className="sidebar"
-        aria-label="空间与会话"
-        {...(narrow && sidebarOpen ? { role: 'dialog', 'aria-modal': true } : {})}
-        onKeyDown={(event) => {
-          if (!narrow || event.key !== 'Tab') return;
-          const controls = [
-            ...(sidebar.current?.querySelectorAll<HTMLElement>(
-              'button:not(:disabled), input:not(:disabled), a[href]',
-            ) ?? []),
-          ].filter((element) => element.getClientRects().length);
-          const first = controls[0];
-          const last = controls.at(-1);
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last?.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first?.focus();
-          }
-        }}
-      >
+      <aside className="sidebar" aria-label="空间与会话">
         <Sidebar
           workspaces={props.workspaces}
           selected={props.selected}
@@ -456,18 +417,24 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           </>
         )}
       </ResizablePanelGroup>
-      {narrow && sidebarOpen && sidebarPanel}
-      {narrow && sidebarOpen && (
-        <button
-          type="button"
-          className="sidebar-backdrop"
-          tabIndex={-1}
-          aria-label="关闭空间列表"
-          onClick={() => {
-            setSidebarOpen(false);
-            toggle.current?.focus();
+      {narrow && (
+        <Sheet
+          open={sidebarOpen}
+          onOpenChange={(open) => {
+            setSidebarOpen(open);
+            if (open) return;
+            if (focusComposerOnClose.current) {
+              focusComposerOnClose.current = false;
+              focusComposerAfterCommit();
+            } else toggle.current?.focus();
           }}
-        />
+        >
+          <SheetContent side="left" portalled={false} showCloseButton={false}>
+            <SheetTitle className="sr-only">空间与会话</SheetTitle>
+            <SheetDescription className="sr-only">选择空间或会话</SheetDescription>
+            {sidebarPanel}
+          </SheetContent>
+        </Sheet>
       )}
       {props.overlays}
     </div>

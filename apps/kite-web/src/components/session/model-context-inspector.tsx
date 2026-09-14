@@ -1,6 +1,5 @@
 import {
   AlertCircleIcon,
-  Cancel01Icon,
   FileTextIcon,
   InformationCircleIcon,
   LoaderCircleIcon,
@@ -11,8 +10,15 @@ import {
   Wrench01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
-import { ScrollArea, ScrollBar } from '@kite-ai/kite-client-ui';
-import { useEffect, useState } from 'react';
+import {
+  ScrollArea,
+  ScrollBar,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from '@kite-ai/kite-client-ui';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -49,51 +55,25 @@ export function ModelContextInspector({
 }) {
   const [tab, setTab] = useState<InspectorTab>('overview');
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end">
-      <button
-        type="button"
-        aria-label="Dismiss model context inspector"
-        className="absolute inset-0 bg-overlay backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="model-context-title"
-        className="relative flex h-full w-[min(760px,92vw)] flex-col border-l border-border bg-canvas shadow-[-18px_0_48px_rgb(0_0_0/0.18)] max-sm:w-full"
-      >
+    <Sheet open onOpenChange={(open) => !open && onClose()}>
+      <SheetContent>
+        <SheetDescription className="sr-only">
+          Inspect the prepared model invocation context.
+        </SheetDescription>
         <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-border px-5">
           <div className="grid size-8 shrink-0 place-items-center rounded-[10px] border border-border/70 bg-surface-subtle/70 text-muted-foreground">
             <HugeiconsIcon icon={RoboticIcon} strokeWidth={2} className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 id="model-context-title" className="text-sm font-semibold">
-                Model context
-              </h2>
+              <SheetTitle className="text-sm">Model context</SheetTitle>
               <Badge>Local diagnostic</Badge>
             </div>
             <p className="mt-0.5 truncate font-mono text-[9px] text-muted-foreground">
               {invocationId}
             </p>
           </div>
-          <Button
-            autoFocus
-            aria-label="Close model context inspector"
-            className="size-8 px-0"
-            onClick={onClose}
-          >
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-4" />
-          </Button>
         </header>
 
         {status === 'loaded' && context ? (
@@ -141,8 +121,8 @@ export function ModelContextInspector({
         ) : (
           <InspectorState status={status} reason={reason} onRetry={onRetry} />
         )}
-      </section>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

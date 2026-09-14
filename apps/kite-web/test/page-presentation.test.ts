@@ -19,6 +19,15 @@ test('shared-page projection retains text, thought and terminal tool evidence wi
           stdout: '文件内容',
           stderr: '',
         },
+        {
+          kind: 'tool_result',
+          toolId: 'cancelled',
+          label: '命令',
+          ok: false,
+          status: 'cancelled',
+          stdout: '',
+          stderr: '',
+        },
         { kind: 'error', code: 'unavailable', text: '读取失败' },
       ],
     },
@@ -26,6 +35,7 @@ test('shared-page projection retains text, thought and terminal tool evidence wi
   expect(messages.map((message) => message.role)).toEqual([
     'assistant',
     'thinking',
+    'tool',
     'tool',
     'tool',
     'system',
@@ -44,5 +54,6 @@ test('shared-page projection retains text, thought and terminal tool evidence wi
   });
   expect(messages[3]?.toolName).toBeUndefined();
   expect(messages[3]?.parentToolCallId).toBeUndefined();
-  expect(messages[4]).toMatchObject({ title: 'unavailable', text: '读取失败' });
+  expect(messages[4]).toMatchObject({ id: 'tool:cancelled', status: 'cancelled' });
+  expect(messages[5]).toMatchObject({ title: 'unavailable', text: '读取失败' });
 });
