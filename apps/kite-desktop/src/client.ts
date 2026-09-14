@@ -149,6 +149,7 @@ export class DesktopClient {
   #recoveryGeneration = 0;
   #branchRead = 0;
   #modelRead = 0;
+  #modelCatalogInitialized = false;
   getSnapshot = () => this.#view;
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener);
@@ -182,7 +183,12 @@ export class DesktopClient {
     this.#publish({ error: messageOf(error) });
   }
   clearError() {
-    this.#publish({ error: undefined, commandError: undefined });
+    this.#publish({
+      error: undefined,
+      commandError: undefined,
+      projectError: undefined,
+      branchError: undefined,
+    });
   }
 
   async openProject() {
@@ -192,7 +198,19 @@ export class DesktopClient {
   }
   async refreshProjects() {
     const projects = await this.#native().listProjects();
-    this.#publish({ projects });
+    const current = this.#view.projects;
+    this.#publish({
+      projects:
+        current?.length === projects.length &&
+        current.every(
+          (project, index) =>
+            project.path === projects[index]?.path &&
+            project.lastOpenedAt === projects[index]?.lastOpenedAt &&
+            project.directoryMissing === projects[index]?.directoryMissing,
+        )
+          ? current
+          : projects,
+    });
   }
   hasNativeConnection() {
     return this.#connectionId !== undefined;
@@ -218,8 +236,7 @@ export class DesktopClient {
       if (this.#view.workspace !== path) throw new Error('请先断开当前项目。');
     } else {
       await this.#native().activateWorkspace(path);
-      await this.refreshProjects();
-      await this.connect();
+      await this.connect({ refreshDirectory: false });
     }
     await this.#workspacePreparation;
     // Explicit project selection is consent for this workspace. Startup and
@@ -231,6 +248,10 @@ export class DesktopClient {
   async checkProject(workspace: string) {
     // Native query validates the explicitly registered canonical directory without activating it.
     return this.#native().checkWorkspace(workspace);
+  }
+  async queryProjectBranch(workspace: string) {
+    await this.checkProject(workspace);
+    return this.#native().queryWorkspaceBranch(workspace);
   }
   async refreshBranch() {
     const read = ++this.#branchRead;
@@ -310,25 +331,23 @@ export class DesktopClient {
     const connection = this.#requireConnection();
     const workspace = this.#view.workspace;
     const expected = this.#view.branch;
-    const previousModel = this.#view.models?.selected;
     // Git is an optional project capability, not a precondition for general work.
     await this.checkProject(workspace);
-    const [actual, trust, models] = await Promise.all([
-      expected?.repository ? this.refreshBranch().catch(() => undefined) : undefined,
+    const [, trust] = await Promise.all([
+      expected ? this.refreshBranch().catch(() => undefined) : undefined,
       readWithDeadline(
         connection.app.queryWorkspaceTrust({
           schema: 'kite.app.workspace-trust.query-request.v1',
           workspace,
         }),
       ),
-      this.refreshModels(),
     ]);
-    if (expected && actual && !sameEnvironment(expected, actual))
-      throw new Error('项目或分支已改变，已更新显示，请检查后重新发送。');
     if (this.#connection !== connection || this.#view.workspace !== workspace)
       throw new Error('项目连接已改变，请重新检查。');
     this.#publish({ trust });
     if (trust.status !== 'trusted') throw new Error('请先确认工作区信任。');
+    const models = this.#view.models;
+    if (!models) throw new Error('请先配置可用的模型。');
     const selected = models.selected;
     if (
       !selected ||
@@ -337,21 +356,19 @@ export class DesktopClient {
       )
     )
       throw new Error('请先配置可用的模型。');
-    if (previousModel?.provider !== selected.provider || previousModel?.name !== selected.name)
-      throw new Error('模型配置已改变，已更新显示，请检查后重新发送。');
   }
-  connect(): Promise<void> {
+  connect(options: { refreshDirectory?: boolean } = {}): Promise<void> {
     if (this.#connection?.status === 'active')
       return this.#view.selected && !this.#view.ready
         ? this.refreshSessions().then(() => this.selectSession(this.#view.selected!))
         : Promise.resolve();
     if (this.#connecting) return this.#connecting;
-    this.#connecting = this.#connect().finally(() => {
+    this.#connecting = this.#connect(options.refreshDirectory ?? true).finally(() => {
       this.#connecting = undefined;
     });
     return this.#connecting;
   }
-  async #connect() {
+  async #connect(refreshDirectory: boolean) {
     const selected = this.#view.selected;
     await this.#detach();
     const info: DesktopConnectionInfo = await this.#native().runtimeOpen();
@@ -372,7 +389,6 @@ export class DesktopClient {
             sessions: [],
             messages: [],
             projection: undefined,
-            branch: undefined,
             ready: false,
             loadingSession: false,
             hasLoadedHistory: false,
@@ -397,10 +413,12 @@ export class DesktopClient {
         isActiveRun(this.#view.projection) &&
         !!session?.projection &&
         !isActiveRun(session.projection);
-      const sessions = this.#view.sessions.map((item) => {
-        const updated = snapshot.sessions[item.sessionId]?.projection;
-        return updated && updated.revision >= (item.revision ?? 0) ? updated : item;
-      });
+      const sessions = this.#view.sessions.map((item) =>
+        mergeSessionSummary(item, snapshot.sessions[item.sessionId]?.projection),
+      );
+      const directory = this.#view.directory?.map((item) =>
+        mergeSessionSummary(item, snapshot.sessions[item.sessionId]?.projection),
+      );
       this.#publish({
         connected: connection.status === 'active',
         ready:
@@ -415,6 +433,9 @@ export class DesktopClient {
         sessions: sessions.every((item, index) => item === this.#view.sessions[index])
           ? this.#view.sessions
           : sessions,
+        ...(directory && !directory.every((item, index) => item === this.#view.directory?.[index])
+          ? { directory }
+          : {}),
       });
       if (resyncSession) {
         // A replacement subscription restores projection, not omitted message events.
@@ -444,7 +465,7 @@ export class DesktopClient {
     }
     this.#publish({ connected: true });
     // Independent read capabilities cannot tear down a healthy protocol peer.
-    await this.refreshDirectory().catch(() => undefined);
+    if (refreshDirectory) await this.refreshDirectory().catch(() => undefined);
     this.#workspacePreparation = this.#prepareWorkspace(connection);
     if (selected && this.#view.selected === selected && !this.#view.loadingSession)
       await this.selectSession(selected).catch((error) => {
@@ -454,25 +475,38 @@ export class DesktopClient {
   async #prepareWorkspace(connection: KiteAppServerConnection) {
     const workspace = this.#view.workspace;
     if (!workspace) return;
-    const branch = this.refreshBranch().catch(() => undefined);
     try {
-      const trust = await readWithDeadline(
-        connection.app.queryWorkspaceTrust({
-          schema: 'kite.app.workspace-trust.query-request.v1',
-          workspace,
-        }),
-      );
+      const [branch, trust] = await Promise.all([
+        this.refreshBranch().catch(() => undefined),
+        readWithDeadline(
+          connection.app.queryWorkspaceTrust({
+            schema: 'kite.app.workspace-trust.query-request.v1',
+            workspace,
+          }),
+        ),
+      ]);
       if (this.#connection !== connection) return;
       this.#publish({ trust, projectError: undefined });
+      if (
+        branch?.repository &&
+        trust.status === 'unknown' &&
+        trust.canDecide &&
+        !trust.externalReadScope.roots.length
+      )
+        await this.trustProject();
+      if (this.#connection !== connection) return;
       this.#updateSessions(connection);
     } catch (error) {
       if (this.#connection === connection && connection.status === 'active')
         this.#publish({ projectError: messageOf(error) });
       return;
-    } finally {
-      await branch;
     }
-    await this.refreshModels().catch(() => undefined);
+    // Provider/model choices are application/session concerns. A Workspace switch must not
+    // reload or blank the selector; Settings owns explicit catalog refreshes.
+    if (!this.#modelCatalogInitialized) {
+      this.#modelCatalogInitialized = true;
+      await this.refreshModels().catch(() => undefined);
+    }
   }
   #recover() {
     if (this.#recovering) return;
@@ -524,7 +558,7 @@ export class DesktopClient {
     const connectionId = this.#connectionId;
     await this.#detach();
     this.#connectionId = undefined;
-    this.#publish({ trust: undefined, models: undefined, mcp: undefined, skills: undefined });
+    this.#publish({ trust: undefined, mcp: undefined, skills: undefined });
     // Only an explicit project/branch switch or exit owns process shutdown.
     if (connectionId !== undefined) await this.#native().runtimeClose(connectionId);
   }
@@ -777,7 +811,19 @@ export class DesktopClient {
     let receipt: Awaited<ReturnType<typeof connection.runtime.command>>;
     try {
       receipt = await connection.runtime.command(command);
-    } catch {
+    } catch (cause) {
+      if (
+        cause instanceof RuntimeClientError &&
+        cause.code !== 'connection_closed' &&
+        cause.code !== 'connection_failed' &&
+        // Admission unavailability is a pre-dispatch rejection. A generic internal
+        // error may follow a durable commit, so its mutation result remains unknown.
+        (cause.protocol?.data.code !== 'internal_error' ||
+          cause.protocol.data.detailCode === 'temporarily_unavailable')
+      ) {
+        this.#publish({ commandError: cause.message });
+        throw cause;
+      }
       const error = new CommandResultUnknown(
         '操作提交结果未知。请检查会话与实际文件，再决定是否继续；不会自动重发。',
         command.type,
@@ -789,7 +835,7 @@ export class DesktopClient {
       throw new Error(`操作未执行：${receipt.code}`);
     return receipt;
   }
-  async newSession(): Promise<string> {
+  async newSession(model?: { readonly provider: string; readonly name: string }): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const connection = this.#requireConnection();
     const selection = this.#selection;
@@ -802,6 +848,7 @@ export class DesktopClient {
         type: 'create_session',
         workspace: this.#view.workspace,
         bootstrapSessionId: sessionId,
+        ...(model === undefined ? {} : { model }),
       });
     } catch (error) {
       if (error instanceof CommandResultUnknown) {
@@ -889,7 +936,9 @@ export class DesktopClient {
         : (usableCache?.hasLoadedHistory ?? false),
       ready: false,
       projection: sameSelection ? this.#view.projection : undefined,
-      interactionMode: sameSelection ? this.#view.interactionMode : undefined,
+      // Keep the last confirmed mode as a disabled loading placeholder. Clearing it makes
+      // the controlled selector render Auto before the target Session history arrives.
+      interactionMode: this.#view.interactionMode,
       error: undefined,
       loadingSession: true,
     });
@@ -1114,7 +1163,11 @@ export class DesktopClient {
     }
   }
 
-  async send(input: string, targetSessionId?: string) {
+  async send(
+    input: string,
+    targetSessionId?: string,
+    model?: { readonly provider: string; readonly name: string },
+  ) {
     const sessionId = targetSessionId ?? this.#view.selected;
     if (!sessionId || !input.trim()) return;
     // Explicit creation targets remain independent of the current reading selection.
@@ -1155,6 +1208,7 @@ export class DesktopClient {
       expectedRevision: result.session.revision,
       input,
       phase: 'building',
+      ...(model === undefined ? {} : { model }),
     });
   }
   async setInteractionMode(sessionId: string, mode: 'accept_edits' | 'auto' | 'full') {
@@ -1165,14 +1219,34 @@ export class DesktopClient {
       sessionId,
     });
     if (result.status !== 'ok' || !result.session) throw new Error('会话当前不可用。');
-    await this.#command({
-      schema: 'kite.runtime-command.v1',
-      commandId: crypto.randomUUID(),
-      type: 'set_interaction_mode',
-      sessionId,
-      expectedRevision: result.session.revision,
-      mode,
-    });
+    try {
+      await this.#command({
+        schema: 'kite.runtime-command.v1',
+        commandId: crypto.randomUUID(),
+        type: 'set_interaction_mode',
+        sessionId,
+        expectedRevision: result.session.revision,
+        mode,
+      });
+    } catch (error) {
+      if (!(error instanceof CommandResultUnknown)) throw error;
+      try {
+        const transcript = await connection.history.loadSession(sessionId);
+        if (this.#connection === connection && transcript.interactionMode === mode) {
+          if (this.#view.selected === sessionId)
+            this.#publish({ interactionMode: mode, commandError: undefined });
+          return;
+        }
+      } catch {
+        // The original mutation remains unknown when its durable result cannot be read.
+      }
+      const unknown = new CommandResultUnknown(
+        '权限切换结果未知。请检查当前会话权限后再决定是否重试；不会自动重发。',
+        'set_interaction_mode',
+      );
+      this.#publish({ commandError: unknown.message });
+      throw unknown;
+    }
     if (this.#view.selected === sessionId) this.#publish({ interactionMode: mode });
   }
   async cancel() {
@@ -1276,6 +1350,29 @@ export class DesktopClient {
       response,
     });
   }
+}
+
+function mergeSessionSummary(
+  summary: DesktopSessionSummary,
+  projection?: RuntimeSessionProjection,
+): DesktopSessionSummary {
+  if (!projection || projection.revision < (summary.revision ?? 0)) return summary;
+  if (
+    projection.revision === summary.revision &&
+    projection.lifecycle === summary.lifecycle &&
+    projection.currentRun === summary.currentRun &&
+    projection.interactionQueue === summary.interactionQueue &&
+    (projection.updatedAt ?? summary.updatedAt) === summary.updatedAt
+  )
+    return summary;
+  return {
+    ...summary,
+    revision: projection.revision,
+    lifecycle: projection.lifecycle,
+    currentRun: projection.currentRun,
+    interactionQueue: projection.interactionQueue,
+    updatedAt: projection.updatedAt ?? summary.updatedAt,
+  };
 }
 
 function sameEnvironment(left: BranchSnapshot, right: BranchSnapshot) {

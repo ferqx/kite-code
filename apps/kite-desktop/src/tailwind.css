@@ -59,6 +59,7 @@ html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-he
 
 @theme inline {
   --color-background: var(--background);
+  --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-input: var(--input);
   --color-border: var(--border);

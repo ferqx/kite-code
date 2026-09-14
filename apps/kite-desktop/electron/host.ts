@@ -88,7 +88,6 @@ export class DesktopHost {
     return this.#lock.run(() => {
       if (this.#process || this.#quitting) throw new Error('请先等待当前连接清理完成。');
       const path = knownProject(this.#options.appDataDirectory, value);
-      rememberProject(this.#options.appDataDirectory, path);
       this.#workspace = path;
       return path;
     });

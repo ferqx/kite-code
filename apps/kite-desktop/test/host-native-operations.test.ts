@@ -111,6 +111,29 @@ test('Git switching requires a clean repository root and the observed environmen
   }
 });
 
+test('an unreadable Git marker does not block an ordinary workspace', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-non-git-')));
+  try {
+    writeFileSync(join(root, '.git'), 'invalid git marker\n');
+    const workspace = join(root, 'notes');
+    mkdirSync(workspace);
+
+    expect((await queryBranch(root)).repository).toBe(false);
+    expect(await queryBranch(workspace)).toEqual({
+      workspace,
+      repository: false,
+      root: null,
+      current: null,
+      head: null,
+      branches: [],
+      dirty: false,
+      canSwitch: false,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function git(directory: string, ...args: string[]): void {
   const result = spawnSync('git', args, {
     cwd: directory,

@@ -78,7 +78,12 @@ test('host preserves the Service across renderer generations and fences stale cl
     });
 
     const selected = await host.rememberPickedWorkspace(workspace);
+    const otherWorkspace = join(home, 'other-workspace');
+    mkdirSync(otherWorkspace);
+    await host.rememberPickedWorkspace(otherWorkspace);
+    const orderBeforeActivation = host.listProjects().map((project) => project.path);
     await host.activateWorkspace(selected);
+    expect(host.listProjects().map((project) => project.path)).toEqual(orderBeforeActivation);
     const first = await host.runtimeOpen();
     expect(first).toMatchObject({ connectionId: 1, workspace });
     expect(peers).toHaveLength(1);

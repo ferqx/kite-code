@@ -3,9 +3,7 @@ import type { AppMcpServer } from '@kite-ai/kite-app-contract';
 import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { App } from '../src/App';
 import { CommandResultUnknown, DesktopClient, type DesktopView } from '../src/client';
-import { Settings } from '../src/Settings';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 class TestResizeObserver {
@@ -31,6 +29,7 @@ const globals = {
   Node: dom.window.Node,
   Element: dom.window.Element,
   DOMRect: dom.window.DOMRect,
+  MutationObserver: dom.window.MutationObserver,
   getComputedStyle: dom.window.getComputedStyle,
   ResizeObserver: TestResizeObserver,
   requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
@@ -44,6 +43,8 @@ for (const [key, value] of Object.entries(globals)) {
 }
 // React DOM must observe a DOM when it initializes its input event support.
 const { createRoot } = await import('react-dom/client');
+const { App } = await import('../src/App');
+const { Settings } = await import('../src/Settings');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
   if (root) await act(() => root?.unmount());
@@ -82,6 +83,8 @@ class UiClient extends DesktopClient {
   cancelled = 0;
   approvals = 0;
   selectedModels: string[] = [];
+  createdModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
+  sentModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
   selectedModes: Array<{ sessionId: string; mode: 'accept_edits' | 'auto' | 'full' }> = [];
   mcpActions: string[] = [];
   created = 0;
@@ -90,6 +93,9 @@ class UiClient extends DesktopClient {
   override async refreshDirectory() {}
   override async prepareNewConversation() {}
   override async checkProject() {}
+  override async queryProjectBranch(workspace: string) {
+    return { ...this.view.branch!, workspace, root: workspace };
+  }
   override async activateProject(path: string) {
     this.update({
       workspace: path,
@@ -102,8 +108,9 @@ class UiClient extends DesktopClient {
   override async switchBranch(name: string) {
     this.update({ branch: { ...this.view.branch!, current: name } });
   }
-  override async newSession() {
+  override async newSession(model?: { readonly provider: string; readonly name: string }) {
     this.created++;
+    this.createdModels.push(model);
     const created = session(`created-${this.created}`);
     this.update({
       sessions: [...this.view.sessions, created],
@@ -192,7 +199,12 @@ class UiClient extends DesktopClient {
     for (const listener of this.listeners) listener();
   }
   override clearError() {
-    this.update({ error: undefined });
+    this.update({
+      error: undefined,
+      commandError: undefined,
+      projectError: undefined,
+      branchError: undefined,
+    });
   }
   override report(error: unknown) {
     this.update({ error: String(error) });
@@ -207,9 +219,14 @@ class UiClient extends DesktopClient {
       messages: [],
     });
   }
-  override async send(input: string, targetSessionId?: string) {
+  override async send(
+    input: string,
+    targetSessionId?: string,
+    model?: { readonly provider: string; readonly name: string },
+  ) {
     this.sent.push(input);
     this.sentTargets.push(targetSessionId);
+    this.sentModels.push(model);
     await this.sendResult();
   }
   override async cancel() {
@@ -284,6 +301,10 @@ async function key(element: Element, value: string, options: KeyboardEventInit =
     );
   });
 }
+async function openDropdown(element: Element) {
+  await key(element, 'ArrowDown');
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+}
 
 test('startup hides the main page until preparation settles and does not return on disconnect', async () => {
   const client = new UiClient();
@@ -318,7 +339,11 @@ test('composer selects a configured model and changes the current session permis
   const model = document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!;
   expect([...model.options].map((option) => option.text)).toEqual(['model', 'model-fast']);
   await choose(model, 'test\0model-fast');
-  expect(client.selectedModels).toEqual(['test/model-fast']);
+  expect(client.selectedModels).toEqual([]);
+  await write(input(), '使用会话模型');
+  await key(input(), 'Enter');
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(client.sentModels).toEqual([{ provider: 'test', name: 'model-fast' }]);
 
   const permission = document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!;
   expect([...permission.options].map((option) => option.text)).toEqual(['Ask', 'Auto', 'Full']);
@@ -381,18 +406,24 @@ test('new conversation applies its selected permission before sending the first 
   const client = new UiClient();
   await render(<App client={client} />);
   await click(button('新对话'));
+  await choose(
+    document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!,
+    'test\0model-fast',
+  );
   await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
   expect(client.selectedModes).toEqual([]);
   await write(input(), '使用所选权限');
   await key(input(), 'Enter');
   expect(client.selectedModes).toEqual([{ sessionId: 'created-1', mode: 'full' }]);
+  expect(client.createdModels).toEqual([{ provider: 'test', name: 'model-fast' }]);
   expect(client.sent).toEqual(['使用所选权限']);
 });
 
 test('new conversation does not send when its selected permission cannot be applied', async () => {
   const client = new UiClient();
+  let fail = true;
   client.setInteractionMode = async () => {
-    throw new Error('权限切换失败');
+    if (fail) throw new Error('权限切换失败');
   };
   await render(<App client={client} />);
   await click(button('新对话'));
@@ -400,6 +431,40 @@ test('new conversation does not send when its selected permission cannot be appl
   await key(input(), 'Enter');
   expect(client.sent).toEqual([]);
   expect(input().value).toBe('不能越过权限失败');
+  expect(client.created).toBe(1);
+  expect(client.view.selected).toBe('created-1');
+  fail = false;
+  await click(button('发送'));
+  expect(client.created).toBe(1);
+  expect(client.sent).toEqual(['不能越过权限失败']);
+});
+
+test('an unknown permission receipt stays bound to the created conversation', async () => {
+  const client = new UiClient();
+  let unknown = true;
+  let attempts = 0;
+  client.setInteractionMode = async () => {
+    attempts++;
+    if (!unknown) return;
+    unknown = false;
+    throw new CommandResultUnknown('权限切换结果未知', 'set_interaction_mode');
+  };
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  await write(input(), '复用已创建会话');
+  await key(input(), 'Enter');
+  await act(() => Bun.sleep(0));
+
+  expect(client.created).toBe(1);
+  expect(client.view.selected).toBe('created-1');
+  expect(input().value).toBe('复用已创建会话');
+  expect(document.body.textContent).not.toContain('发送结果待确认');
+  await click(button('确定'));
+  await click(button('发送'));
+  expect(client.created).toBe(1);
+  expect(attempts).toBe(2);
+  expect(client.sentTargets).toEqual(['created-1']);
 });
 
 test('startup failure offers a retry and accepts an empty directory without creating a session', async () => {
@@ -418,6 +483,20 @@ test('startup failure offers a retry and accepts an empty directory without crea
   expect(input()).not.toBeNull();
   expect(client.created).toBe(0);
   expect(client.sent).toEqual([]);
+});
+
+test('workspace and repository failures use a confirmation alert instead of page content', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+  await act(() => client.update({ commandError: 'Git 仓库无法读取，请检查仓库后重试。' }));
+  await act(() => Bun.sleep(0));
+  expect(client.view.commandError).toBe('Git 仓库无法读取，请检查仓库后重试。');
+  const alert = document.querySelector('[role="alertdialog"]');
+  expect(alert?.textContent).toContain('Git 仓库无法读取，请检查仓库后重试。');
+  expect(document.querySelector('.notice.error')).toBeNull();
+  await click(button('确定'));
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(document.body.textContent).not.toContain('Git 仓库无法读取');
 });
 
 test('after startup can focus and draft before a project exists; setup preserves it without sending', async () => {
@@ -701,13 +780,14 @@ test('unknown create receipt binds recovery to the generated session without cre
   await click(button('新对话'));
   await write(input(), '保持同一个会话');
   await key(input(), 'Enter');
+  await act(() => Bun.sleep(0));
   expect(client.created).toBe(1);
   expect(document.querySelector('[aria-label="用户消息"]')?.textContent).toContain(
     '发送结果待确认',
   );
   expect(input().value).toBe('保持同一个会话');
   expect(button('发送').disabled).toBe(true);
-  await click(button('重新加载会话'));
+  await click(button('确定'));
   expect(client.selectedIds.at(-1)).toBe('created-1');
   expect(client.created).toBe(1);
   expect(button('发送').disabled).toBe(false);
@@ -813,7 +893,7 @@ test('retyping identical text during a successful send preserves it as the next 
   expect(input().value).toBe('相同草稿');
 });
 
-test('project and branch menus apply choices immediately, keep the new draft and restore keyboard focus', async () => {
+test('project and branch menus stage choices, keep the new draft and restore keyboard focus', async () => {
   const client = new UiClient();
   client.view = {
     ...client.view,
@@ -828,27 +908,180 @@ test('project and branch menus apply choices immediately, keep the new draft and
   await render(<App client={client} />);
   await write(input(), '跨项目保留需求');
   const projectTrigger = document.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
-  await click(projectTrigger);
-  expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  await openDropdown(projectTrigger);
+  expect(document.querySelector('[role="menu"]')?.getAttribute('class')).toContain('context-menu');
+  expect(document.querySelectorAll('.context-menu svg')).toHaveLength(1);
+  expect(document.querySelector('[aria-checked="true"] > span.absolute')?.className).toContain(
+    'right-2',
+  );
+  expect(document.querySelector('[aria-checked="true"]')?.className).not.toContain(
+    'data-[state=checked]',
+  );
+  expect(document.querySelectorAll('.context-menu-action svg')).toHaveLength(0);
   await key(document.activeElement!, 'Escape');
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(document.querySelector('[role="menu"]')).toBeNull();
   expect(document.activeElement).toBe(projectTrigger);
-  await click(projectTrigger);
-  const option = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(
+  await openDropdown(projectTrigger);
+  const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
     (item) => item.textContent?.includes('/another'),
   )!;
   await click(option);
-  expect(client.view.workspace).toBe('/another');
+  expect(client.view.workspace).toBe('/project');
+  expect(document.querySelector('[aria-label="项目空间"]')?.textContent).toContain('another');
   expect(input().value).toBe('跨项目保留需求');
   expect(client.created).toBe(0);
-  await click(document.querySelector<HTMLButtonElement>('[aria-label="分支"]')!);
+  await openDropdown(document.querySelector<HTMLButtonElement>('[aria-label="分支"]')!);
   await key(document.activeElement!, 'ArrowDown');
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(document.activeElement?.textContent).toBe('feature');
   await click(document.activeElement as HTMLElement);
-  expect(client.view.branch?.current).toBe('feature');
+  expect(client.view.branch?.current).toBe('main');
+  expect(document.querySelector('[aria-label="分支"]')?.textContent).toContain('feature');
   expect(input().value).toBe('跨项目保留需求');
   expect(client.created).toBe(0);
   expect(client.sent).toEqual([]);
+});
+
+test('a preselected workspace stages its session model without mutating active workspace trust', async () => {
+  const client = new UiClient();
+  let finishBranchRead: (() => void) | undefined;
+  client.view = {
+    ...client.view,
+    projects: [
+      { path: '/project', lastOpenedAt: 2 },
+      { path: '/another', lastOpenedAt: 1 },
+    ],
+    trust: {
+      ...client.view.trust!,
+      status: 'unknown',
+      canDecide: true,
+      externalReadScope: { roots: ['/outside'], digest: 'sha256:outside' },
+    },
+  };
+  client.queryProjectBranch = (workspace) =>
+    new Promise((resolve) => {
+      finishBranchRead = () => resolve({ ...client.view.branch!, workspace, root: workspace });
+    });
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await choose(
+    document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!,
+    'test\0model-fast',
+  );
+  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  expect(document.querySelector('.trust-notice')).not.toBeNull();
+  await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
+  await click(
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('/another'),
+    )!,
+  );
+
+  await act(() => Promise.resolve());
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')?.disabled).toBe(
+    false,
+  );
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')?.disabled).toBe(
+    false,
+  );
+  await act(async () => {
+    finishBranchRead?.();
+    await Promise.resolve();
+  });
+
+  expect(document.querySelector('.trust-notice')).toBeNull();
+  const model = document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!;
+  expect(model.value).toBe('test\0model-fast');
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')?.value).toBe(
+    'full',
+  );
+  expect(client.selectedModels).toEqual([]);
+});
+
+test('cancelling an active-task workspace switch restores and re-enables the first draft', async () => {
+  const client = new UiClient();
+  client.view.projects = [
+    { path: '/project', lastOpenedAt: 2 },
+    { path: '/another', lastOpenedAt: 1 },
+  ];
+  client.hasActiveTasks = async () => true;
+  client.confirm = async () => false;
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
+  await click(
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('/another'),
+    )!,
+  );
+  await write(input(), '不要丢失这条需求');
+  await key(input(), 'Enter');
+  await act(() => Bun.sleep(0));
+
+  expect(client.created).toBe(0);
+  expect(input().value).toBe('不要丢失这条需求');
+  expect(button('发送').disabled).toBe(false);
+});
+
+test('a non-Git workspace omits the branch selector', async () => {
+  const client = new UiClient();
+  client.view = {
+    ...client.view,
+    selected: undefined,
+    branch: {
+      ...client.view.branch!,
+      repository: false,
+      current: null,
+      branches: [],
+      canSwitch: false,
+    },
+  };
+  await render(<App client={client} />);
+  expect(document.querySelector('[aria-label="项目空间"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="分支"]')).toBeNull();
+});
+
+test('a non-Git workspace can create a conversation without an active Git project', async () => {
+  const client = new UiClient(0);
+  client.view = {
+    ...client.view,
+    workspace: '',
+    selected: undefined,
+    sessions: [],
+    projection: undefined,
+    ready: false,
+    models: undefined,
+    trust: undefined,
+    projects: [{ path: '/notes', lastOpenedAt: 1 }],
+    branch: {
+      workspace: '/notes',
+      repository: false,
+      root: null,
+      current: null,
+      head: null,
+      branches: [],
+      dirty: false,
+      canSwitch: false,
+    },
+  };
+  await render(<App client={client} />);
+  await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
+  await click(
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('notes'),
+    )!,
+  );
+  expect(document.querySelector('[aria-label="分支"]')).toBeNull();
+
+  await write(input(), '整理这些资料');
+  expect(button('发送').disabled).toBe(false);
+  await key(input(), 'Enter');
+
+  expect(client.view.workspace).toBe('/notes');
+  expect(client.created).toBe(1);
+  expect(client.sent).toEqual(['整理这些资料']);
+  expect(client.sentTargets).toEqual(['created-1']);
 });
 
 test('adding a project survives WebKit mouse focus loss and opens the picker once', async () => {
@@ -861,8 +1094,10 @@ test('adding a project survives WebKit mouse focus loss and opens the picker onc
   };
   await render(<App client={client} />);
   await write(input(), '保留输入');
-  await click(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
-  const add = button('添加项目…');
+  await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
+  const add = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
+    item.textContent?.includes('添加项目…'),
+  )!;
   await act(() => {
     const down = new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true });
     add.dispatchEvent(down);
@@ -940,13 +1175,61 @@ test('space new conversation icon targets that project without toggling its list
     trigger.closest('.space-heading')?.querySelector('.space-row')?.getAttribute('aria-expanded'),
   ).toBe('true');
   await click(trigger);
-  expect(client.view.workspace).toBe('/another');
+  expect(client.view.workspace).toBe('/project');
+  expect(document.querySelector('[aria-label="项目空间"]')?.textContent).toContain('another');
   expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
   expect(
     trigger.closest('.space-heading')?.querySelector('.space-row')?.getAttribute('aria-expanded'),
   ).toBe('true');
   expect(client.created).toBe(0);
   expect(client.sent).toEqual([]);
+});
+
+test('workspace switching keeps the existing session list mounted and visually enabled', async () => {
+  const client = new UiClient();
+  client.view.projects = [
+    { path: '/project', lastOpenedAt: 2 },
+    { path: '/another', lastOpenedAt: 1 },
+  ];
+  client.hasActiveTasks = async () => false;
+  let activations = 0;
+  let branchReads = 0;
+  client.activateProject = async () => {
+    activations++;
+  };
+  client.queryProjectBranch = async (workspace) => {
+    branchReads++;
+    return { ...client.view.branch!, workspace, root: workspace };
+  };
+  await render(<App client={client} />);
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('.session-row')];
+  const disabledMutations: MutationRecord[] = [];
+  const observer = new MutationObserver((records) => {
+    disabledMutations.push(
+      ...records.filter(
+        (record) =>
+          record.type === 'attributes' &&
+          record.attributeName === 'disabled' &&
+          (record.target as Element).matches('.session-row'),
+      ),
+    );
+  });
+  for (const row of rows) observer.observe(row, { attributes: true });
+  const trigger = document.querySelector<HTMLButtonElement>(
+    '[aria-label="在 another 中新建对话"]',
+  )!;
+  await click(trigger);
+  const switchingRows = [...document.querySelectorAll<HTMLButtonElement>('.session-row')];
+  expect(switchingRows).toEqual(rows);
+  expect(switchingRows.every((row) => !row.disabled)).toBe(true);
+  expect(trigger.disabled).toBe(false);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  observer.disconnect();
+  expect(disabledMutations).toHaveLength(0);
+  expect(activations).toBe(0);
+  expect(branchReads).toBe(1);
+  expect(client.view.connected).toBe(true);
+  expect(client.view.workspace).toBe('/project');
 });
 
 test('missing local directories mute the space name without blocking an already prepared conversation', async () => {
@@ -1080,8 +1363,10 @@ test('empty, IME, Shift+Enter and repeated submit cannot issue unintended turns;
   expect(client.sent).toEqual(['中文输入']);
   expect(button('发送').disabled).toBe(true);
   await act(() => reject(new Error('发送失败')));
+  await act(() => Bun.sleep(0));
   expect(input().value).toBe('中文输入');
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('发送失败');
+  expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('发送失败');
+  await click(button('确定'));
   client.sendResult = async () => {};
   await click(button('发送'));
   expect(input().value).toBe('');
@@ -1154,7 +1439,8 @@ test('cached history stays readable while calibrating, including cached empty hi
   await act(() => client.update({ messages: [] }));
   expect(document.querySelector('.conversation')?.textContent).not.toContain('正在加载会话历史');
   await act(() => client.update({ hasLoadedHistory: false }));
-  expect(document.querySelector('.conversation')?.textContent).toContain('正在加载会话历史');
+  expect(document.querySelector('.conversation')?.textContent).not.toContain('正在加载会话历史');
+  expect(document.querySelector('[aria-label="正在加载聊天"] svg')).not.toBeNull();
   expect(input().value).toBe('继续写草稿');
 });
 

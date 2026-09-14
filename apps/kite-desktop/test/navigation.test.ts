@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AppMcpServer } from '@kite-ai/kite-app-contract';
@@ -40,6 +40,8 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   let failModel = false;
   let failGit = false;
   let historyReads = 0;
+  let projectReads = 0;
+  let modelReads = 0;
   const injectedFailures = new Set<unknown>();
   let loseBranchResult = false;
   let activeDirectory = false;
@@ -47,6 +49,9 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   let loseCreationResult = false;
   let creationId: unknown;
   let creations = 0;
+  let permissionWrites = 0;
+  let losePermissionResult = false;
+  let permissionResultId: unknown;
   let generation = 0;
   const carriers = new Map<
     number,
@@ -66,8 +71,10 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     if (command === 'pick_workspace') return workspace as T;
     if (command === 'activate_workspace') return workspace as T;
     if (command === 'check_workspace' || command === 'runtime_detach') return undefined as T;
-    if (command === 'list_projects')
+    if (command === 'list_projects') {
+      projectReads++;
       return ['a', 'b'].map((name) => ({ path: join(root, name), lastOpenedAt: 1 })) as T;
+    }
     if (command === 'switch_workspace_branch') {
       branchSwitches++;
       branch = args?.branch as string;
@@ -126,12 +133,20 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
         creations++;
         if (loseCreationResult) creationId = message.id;
       }
+      if (
+        message.method === 'runtime/command' &&
+        message.params?.command?.type === 'set_interaction_mode'
+      ) {
+        permissionWrites++;
+        if (losePermissionResult) permissionResultId = message.id;
+      }
       if (message.method === 'history/list_sessions') {
         historyReads++;
         if (failDirectory) injectedFailures.add(message.id);
       }
       if (message.method === 'app/provider_model/snapshot' && failModel)
         injectedFailures.add(message.id);
+      if (message.method === 'app/provider_model/snapshot') modelReads++;
       if (message.method === 'app/mcp/action') {
         mcpActions++;
         if (failMcpResponse) mcpResponseId = message.id;
@@ -171,6 +186,18 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
           revision: 1,
         };
       }
+      if (permissionResultId !== undefined && message.id === permissionResultId) {
+        permissionResultId = undefined;
+        return JSON.stringify({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32603,
+            message: 'fixture lost permission receipt',
+            data: { code: 'internal_error' },
+          },
+        }) as T;
+      }
       if (creationId !== undefined && message.id === creationId) {
         creationId = undefined;
         return JSON.stringify({
@@ -205,8 +232,8 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     await client.restoreWorkspace();
     expect(client.getSnapshot().connected).toBe(true);
     expect(client.getSnapshot().directory).toEqual([]);
-    await waitFor(() => client.getSnapshot().trust?.status === 'unknown');
-    expect(client.getSnapshot().trust?.status).toBe('unknown');
+    await waitFor(() => client.getSnapshot().trust?.status === 'trusted');
+    expect(client.getSnapshot().trust?.status).toBe('trusted');
     expect(creations).toBe(0);
     await client.activateProject(workspace);
     expect(client.getSnapshot().trust?.status).toBe('trusted');
@@ -214,9 +241,9 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     await client.prepareNewConversation();
     expect(creations).toBe(0);
     branch = 'feature';
-    await expect(client.prepareNewConversation()).rejects.toThrow('分支已改变');
-    expect(creations).toBe(0);
     await client.prepareNewConversation();
+    expect(client.getSnapshot().branch?.current).toBe('feature');
+    expect(creations).toBe(0);
     dirty = true;
     const beforeDirty = closes;
     await expect(client.switchBranch('main')).rejects.toThrow('改动');
@@ -262,8 +289,18 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     await client.connect();
     const first = await client.newSession();
     await client.selectSession(first);
+    await client.setInteractionMode(first, 'full');
+    expect(client.getSnapshot().interactionMode).toBe('full');
+    await client.setInteractionMode(first, 'auto');
+    expect(client.getSnapshot().interactionMode).toBe('auto');
     const second = await client.newSession();
+    const modesDuringSelection: Array<string | undefined> = [];
+    const unsubscribeModes = client.subscribe(() => {
+      modesDuringSelection.push(client.getSnapshot().interactionMode);
+    });
     await client.selectSession(second);
+    unsubscribeModes();
+    expect(modesDuringSelection).not.toContain(undefined);
     const beforeReadFailureCloses = closes;
     const cachedDirectory = client.getSnapshot().directory;
     failDirectory = true;
@@ -324,14 +361,31 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(client.getSnapshot().selected).toBe(second);
     expect(client.getSnapshot().projection?.sessionId).toBe(second);
     expect(client.getSnapshot().ready).toBe(true);
+    const directoryBeforeSwitch = client.getSnapshot().directory;
+    const projectsBeforeSwitch = client.getSnapshot().projects;
+    const modelsBeforeSwitch = client.getSnapshot().models;
+    const modelReadsBeforeSwitch = modelReads;
+    const branchSnapshots: Array<string | undefined> = [];
+    const unsubscribeBranchSnapshots = client.subscribe(() => {
+      branchSnapshots.push(client.getSnapshot().branch?.current ?? undefined);
+    });
     await client.disconnect();
     expect(client.getSnapshot().mcp).toBeUndefined();
     expect(client.getSnapshot().skills).toBeUndefined();
     workspace = join(root, 'b');
-    await client.connect();
-    await waitFor(() => client.getSnapshot().trust?.status === 'unknown');
-    expect(client.getSnapshot().trust?.status).toBe('unknown');
+    const historyReadsBeforeSwitch = historyReads;
+    const projectReadsBeforeSwitch = projectReads;
     await client.activateProject(workspace);
+    await client.prepareNewConversation();
+    unsubscribeBranchSnapshots();
+    expect(branchSnapshots).not.toContain(undefined);
+    expect(historyReads).toBe(historyReadsBeforeSwitch);
+    expect(projectReads).toBe(projectReadsBeforeSwitch);
+    expect(client.getSnapshot().directory).toBe(directoryBeforeSwitch);
+    expect(client.getSnapshot().projects).toBe(projectsBeforeSwitch);
+    expect(client.getSnapshot().models).toBe(modelsBeforeSwitch);
+    expect(modelReadsBeforeSwitch).toBeGreaterThan(0);
+    expect(modelReads).toBe(modelReadsBeforeSwitch);
     expect(client.getSnapshot().trust?.status).toBe('trusted');
     expect(client.getSnapshot().selected).toBeUndefined();
     expect(client.getSnapshot().messages).toEqual([]);
@@ -346,6 +400,47 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     await client.selectSession(first);
     expect(client.getSnapshot().ready).toBe(true);
     await expect(client.send('must not run in a different project')).rejects.toThrow('工作目录');
+    const permissionConnection = generation;
+    const permissionCloses = closes;
+    losePermissionResult = true;
+    const writesBeforePermission = permissionWrites;
+    await client.setInteractionMode(first, 'full');
+    losePermissionResult = false;
+    expect(permissionWrites).toBe(writesBeforePermission + 1);
+    expect(client.getSnapshot().interactionMode).toBe('full');
+    expect(client.getSnapshot().commandError).toBeUndefined();
+    expect(client.getSnapshot().workspace).toBe(workspace);
+    expect(generation).toBe(permissionConnection);
+    expect(closes).toBe(permissionCloses);
+    await expect(client.send('permission must not admit cross-project execution')).rejects.toThrow(
+      '工作目录',
+    );
+    const trustPath = join(root, 'config/workspace-trust.jsonc');
+    const savedTrust = readFileSync(trustPath, 'utf8');
+    const trustFile = JSON.parse(savedTrust);
+    for (const [key, record] of Object.entries(trustFile.records)) {
+      if ((record as { workspacePath: string }).workspacePath === join(root, 'a'))
+        delete trustFile.records[key];
+    }
+    writeFileSync(trustPath, JSON.stringify(trustFile));
+    await expect(client.setInteractionMode(first, 'auto')).rejects.toThrow('Unauthorized');
+    expect(client.getSnapshot().interactionMode).toBe('full');
+    writeFileSync(trustPath, '{invalid trust');
+    await expect(client.setInteractionMode(first, 'auto')).rejects.toThrow(
+      'Runtime admission unavailable',
+    );
+    expect(client.getSnapshot().interactionMode).toBe('full');
+    writeFileSync(trustPath, savedTrust);
+    await client.disconnect();
+    workspace = '';
+    await client.connect();
+    await client.selectSession(first);
+    expect(client.getSnapshot().ready).toBe(true);
+    expect(client.getSnapshot().interactionMode).toBe('full');
+    await client.setInteractionMode(first, 'auto');
+    expect(client.getSnapshot().interactionMode).toBe('auto');
+    expect(client.getSnapshot().workspace).toBe('');
+
     await client.disconnect();
     workspace = join(root, 'a');
     await client.openProject();

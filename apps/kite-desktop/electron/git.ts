@@ -72,13 +72,17 @@ export async function queryBranch(path: string): Promise<BranchSnapshot> {
     throw new Error('项目目录不可用。');
   }
   if (canonical !== path) throw new Error('项目路径已改变，请重新添加项目。');
-  if (!hasGitMarker(path)) return ordinaryDirectory(path);
+  const markerRoot = findGitMarker(path);
+  if (!markerRoot) return ordinaryDirectory(path);
 
-  const [repository, rootOutput] = await runGit(path, ['rev-parse', '--show-toplevel']);
-  if (!repository) {
-    if (hasGitMarker(path)) throw new Error('Git 仓库状态无法读取，请检查仓库后重试。');
+  let repository: boolean;
+  let rootOutput: string;
+  try {
+    [repository, rootOutput] = await runGit(path, ['rev-parse', '--show-toplevel']);
+  } catch {
     return ordinaryDirectory(path);
   }
+  if (!repository) return ordinaryDirectory(path);
   const root = rootOutput.trimEnd();
   const [hasBranch, branch] = await runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   const [hasHead, head] = await runGit(path, ['rev-parse', '--verify', 'HEAD']);
@@ -149,10 +153,10 @@ function ordinaryDirectory(workspace: string): BranchSnapshot {
   };
 }
 
-function hasGitMarker(path: string): boolean {
+function findGitMarker(path: string): string | undefined {
   for (let current = path; ; current = dirname(current)) {
-    if (existsSync(join(current, '.git'))) return true;
+    if (existsSync(join(current, '.git'))) return current;
     const parent = dirname(current);
-    if (parent === current) return false;
+    if (parent === current) return undefined;
   }
 }

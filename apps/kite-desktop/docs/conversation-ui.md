@@ -26,6 +26,8 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 会话消息列表使用共享 shadcn ScrollArea 独立滚动，实际 viewport 继续拥有滚动监听、自动跟随与阅读位置；单条消息内部的代码、表格、命令输出和 diff 溢出仍由内容 owner 处理。首次进入显示最新消息；用户向上阅读后停止跟随，提供回到最新消息入口。流式正文、窗口缩放以及输入／交互区高度变化只在仍跟随时贴住底部；连续尺寸变化产生的滚动校正按 animation frame 合并，每帧最多读取和写入一次布局。切换会话保存 scrollTop、跟随意图和工具／子代理展开项，回到该会话时，缓存命中即恢复，未命中则在完整历史加载后恢复；后台校准不改变会话组件 identity。缓存状态与验证见[历史 owner](history-and-recovery.md#会话正文缓存与校准)。
 
+未缓存历史加载时保留同一个消息滚动容器及其尺寸，正文列暂时为空，中央覆盖 48 px 无底色、低对比度风筝图标，并以透明度与阴影做不改变几何尺寸的轻微闪光；系统要求减少动态效果时显示静态图标。加载层通过 `aria-busy`／状态标签保留无障碍加载语义，不插入可见加载文案。完成后移除覆盖层并直接提交正文 DOM，避免加载提示参与正文流造成布局抖动。已有缓存正文的后台校准不覆盖正文。
+
 ## 消息与交互
 
 Desktop 的消息复制不依赖 renderer 的 Web Clipboard API；共享会话组件把经 turn 归属选定的最终纯文本交给桌面宿主，preload 只暴露具名 `writeClipboardText`，IPC 核对主窗口 frame、封闭 `{text}` 参数和 1 MiB UTF-8 上限后，由 Electron 主进程写入系统剪贴板。宿主写入失败时按钮显示失败状态，不伪装成已复制。
@@ -34,13 +36,17 @@ Desktop 的消息复制不依赖 renderer 的 Web Clipboard API；共享会话�
 
 Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后读取的结果；刷新失败不覆盖明确拒绝或未知写入结果，已确认写入则提示仅刷新配置。所有路径均在写入结束后、刷新开始前清空临时密钥，不重放写入。[配置回归](../test/models.test.ts)覆盖回执丢失、明确未知、拒绝和已保存与刷新失败的组合；实际配置和继续任务另由真实 Service 的[开发闭环测试](../test/development.test.ts)验证。
 
-[投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留结构化参数、stdout/stderr、明确失败／拒绝／取消和文件证据，默认折叠长输出；退出码只在 Shell 的真实结果中显示。
+[投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留 queued 与 Runtime 提供的 presentation/group identity、结构化参数、分别累积的 stdout/stderr、明确失败／拒绝／取消和文件证据，但会话展示只消费可读标题、主要目标、状态与异常摘要，不提供原始参数或输出入口。会话正文、工具活动和后续正文保持同一阅读列；连续工具活动使用无容器底色的紧凑日志结构，总览与步骤共享左侧图标轨道，步骤将动作和主要目标排在同一行。已完成状态由记录留在活动流中表达，不逐项重复绘制徽标；运行、等待、排队与异常仍显示文字状态，错误摘要保持可见。
 
-子代理保留服务提供的名称、状态、结果和稳定 stepId。存在 `parentToolCallId` 且父工具可见时显示在父工具下；否则保留明确来源的独立摘要，不按邻近模型回复猜测父关系。当前没有独立子代理详情或子代理控制。审批回执表达命令已批准或已拒绝；批准不等于工具成功，工具终态仍独立显示。
+Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示为可折叠思考活动，不接收或推导私有 reasoning 字段；`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `totalLines` 与 `exhausted` 作为技术详情元信息显示，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
+
+子代理保留服务提供的名称、状态、结果和稳定 stepId。`subagent.started.parentToolCallId`存在且父工具可见时直接显示在父工具下；否则保留明确来源的独立摘要，不按邻近模型回复猜测父关系。带`presentationOwner`的hidden子工具不再重复为顶层工具，其成功或异常只在所属task的执行过程里展示；该owner随queued及terminal事件保留，恢复时即使只收到终态也不会重新冒出顶层工具。旧记录没有owner时仍保留异常入口。当前没有独立子代理详情或子代理控制。审批回执表达命令已批准或已拒绝；批准不等于工具成功，工具终态仍独立显示。
 
 [Markdown](../../../packages/kite-client-ui/src/MessageContent.tsx)使用 react-markdown 与 remark-gfm 展示助手段落、列表、代码和表格；语义 HTML 的外层由 shadcn/typeset `typeset-chat` preset 统一排版，使用 Geist／Geist Mono、14 px 与 1.6 行高。Agent 正文不增加 padding 或独立限宽，与消息阅读列同宽。共享 CSS 只补充选择、溢出、链接和文件按钮行为，不再覆盖 Typeset 的正文排版。渲染跳过 HTML，保留默认 URL 安全转换，不自动请求图片。文件路径链接及 read_file 的结构化 path 调用既有 native editor 校验。编辑器选择在当前进程由 App 共享，默认 VS Code，可在设置中切换；限制见[文件与编辑器](results-and-editor.md)。
 
-普通用户与助手正文不重复绘制角色标签，但保留可访问名称。没有 active interaction 时，输入区位于底部，模型与权限选择及主控收在同一输入卡片中，不展示快捷键教学；底部原生选择器按 Provider 分组展示 App Control 实际返回的模型，并展示 Runtime 已有的 Ask（`accept_edits`）、Auto 与 Full 权限模式；选择器关闭状态隐藏系统箭头并复用本地图标，宽度按当前选中值而非最长候选项收缩，文字与 16 px 图标保持 6 px 间距，不在共享组件中补造模型或权限。共享页面根节点声明 `color-scheme: light`，使原生选择器弹层等浏览器控件与当前固定浅色客户端一致，不跟随系统暗色模式；未来若支持客户端暗色主题，再由客户端主题状态切换该值。已有会话切换权限通过 `set_interaction_mode` 提交，新对话的本地选择在创建会话后、首条消息前提交，失败则不发送任务；提交期间仍禁用模型和权限选择以避免并发 revision 冲突，但保持原有视觉，不通过短暂透明度变化制造闪烁，真正断连或加载不可用时仍显示禁用态。active interaction 由完整 queue 选择，审批／问题／计划放在底部操作区；此时共享 `SessionPage` 给 `Composer` 传入 `promptHidden`，整个 Composer 返回空，不渲染主 textarea、模型、权限或停止按钮，避免并行操作。主草稿仍由 App 持有，交互结束后原样恢复。Enter 发送、Shift+Enter 换行，composition 与 keyCode 229 防止中文组词确认误发。任务运行但未等待交互时允许先写草稿，尚未接入 TUI 消息队列；唯一主控为停止。命令失败保留草稿，成功只清除实际提交且未被继续编辑的草稿。
+普通用户与助手正文不重复绘制角色标签，但保留可访问名称。没有 active interaction 时，输入区位于底部，模型与权限选择及主控收在同一输入卡片中，不展示快捷键教学；底部原生选择器按 Provider 分组展示 App Control 实际返回的模型，并展示 Runtime 已有的 Ask（`accept_edits`）、Auto 与 Full 权限模式；选择器关闭状态隐藏系统箭头并复用本地图标，宽度按当前选中值而非最长候选项收缩，文字与 16 px 图标保持 6 px 间距，不在共享组件中补造模型或权限。共享页面根节点声明 `color-scheme: light`，使原生选择器弹层等浏览器控件与当前固定浅色客户端一致，不跟随系统暗色模式；未来若支持客户端暗色主题，再由客户端主题状态切换该值。已有会话切换权限通过 `set_interaction_mode` 提交。模型选择是 Session 本地待提交 route：新对话随 `create_session` 提交，已有会话随下一次 `start_turn` 提交；它不调用 workspace 默认模型写入，也不覆盖其他 Session。新对话权限在创建会话后、首条消息前提交，失败则不发送任务；提交期间仍禁用模型和权限选择以避免并发 revision 冲突，但保持原有视觉，不通过短暂透明度变化制造闪烁，真正断连或加载不可用时仍显示禁用态。active interaction 由完整 queue 选择，审批／问题／计划放在底部操作区；此时共享 `SessionPage` 给 `Composer` 传入 `promptHidden`，整个 Composer 返回空，不渲染主 textarea、模型、权限或停止按钮，避免并行操作。主草稿仍由 App 持有，交互结束后原样恢复。Enter 发送、Shift+Enter 换行，composition 与 keyCode 229 防止中文组词确认误发。任务运行但未等待交互时允许先写草稿，尚未接入 TUI 消息队列；唯一主控为停止。命令失败保留草稿，成功只清除实际提交且未被继续编辑的草稿。
+
+切换已有会话的校准中间态保留上一条已确认权限作为禁用占位，不回退显示 `Auto`；目标历史返回后一次替换为该会话的真实权限，加载期间不会把占位值提交给目标会话。权限命令只有在连接发送或等待回执期间中断时才标记为结果未知；服务端明确拒绝保留原始原因。真正丢失回执后只读核对持久历史，目标权限已经生效时直接确认成功，不自动重放命令。
 
 ## HTML 预览优先的界面迭代
 
@@ -97,12 +103,14 @@ Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后�
 
 2026-09-12 Electron 原生标题栏同步：真实 `hiddenInset` 窗口验证后，侧栏 header 保持 52 px 高，交通灯使用宿主配置的 x=13、y=19，kite 标识从 x=80 开始，32 px 收起按钮位于 x=188、y=10；不再对 header 内容附加向上位移。[Figma Sidebar 主组件](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4025-18427)已原位同步，[日常任务画面的实例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)继承相同标题区，新对话入口从 y=60 开始。主组件 metadata 与两处页面上下文渲染均核对通过；Figma 的隔离实例导出会漏掉越过实例左边界的继承层，不作为页面视觉证据。
 
-连续的 `read_file`、`search_content`、`search_files` 与 `read_mcp_resource` 使用共享[探索记录](../../../packages/kite-client-ui/src/ToolExploration.tsx)，沿用 TUI 聚合思路。只合并相邻且类型明确的只读记录，不跨正文、独立命令或子代理父工具边界；摘要统计操作次数，避免把重复读取称为不同文件。进行中默认展示最近 5 项，可展开全部；完成后默认折叠，用户主动展开／收起优先并随阅读状态保留。失败、拒绝或取消不会被统计为全部成功；明细保留参数、输出和路径。Web Public History 缺少明确工具类型时保留独立记录，不从 label 推导类型。
+共享[工具活动](../../../packages/kite-client-ui/src/ToolActivity.tsx)消费 Runtime 的显式展示分类：只有相邻、同 turn、`presentation=exploration` 且 `presentationGroupId` 相同的记录合并；standalone、缺失分组和 Web Public History 的弱事实均保持独立，不从 label 或邻近关系推导。普通探索与文件工具使用轻量状态行；内部工具名仅在没有更具体标题时转换为可读动作。完成态不重复绘制状态，queued、running、waiting、failed、rejected、cancelled 与 unknown 保留文字状态；Shell 使用终端图标，其他工具按类别使用 18 px 图标。工具参数、stdout/stderr、退出码与输出限制不进入会话 UI；失败工具仍显示有界错误摘要。带明确`presentationOwner`的hidden子工具及异常只在所属task内展示，没有owner的历史异常保持可见。子 Agent 摘要独立于父工具折叠，避免父记录收起后失去任务结果。
 
-子代理继续复用正文样式并保留来源、真实状态及已取得步骤；没有发送／接收事实时不宣称“已收到”，不提供没有独立历史接口支撑的详情导航。文件变更的右侧副层见[文件与编辑器](results-and-editor.md)，MCP／Skills 设置接入见[扩展设置](extensions.md)。
+同步子代理通过原 `task` 工具结果返回主 Agent；客户端保留父工具活动、子代理名称、真实状态与结果摘要，不创建独立发送气泡或推断已消费状态。子代理执行过程只在父 task 展开区提供，所有状态默认收起，只有用户点击才展开；进度更新、失败和完成不改变用户的展开选择；父工具收起时仅保留结果摘要。缺少父工具身份的历史提供带来源的过程入口，不猜测归属；没有独立历史接口时不提供详情导航。文件变更的右侧副层见[文件与编辑器](results-and-editor.md)，MCP／Skills 设置接入见[扩展设置](extensions.md)。
 
 2026-09-09 本轮通过共享 UI 7 项、桌面 24 项、Web 13 项及 Service 扩展 owner 5 项回归。HTML 测试数据预览核对桌面 1440 × 960／760 × 540 副层开关、Esc 焦点返回、输入可达与设置分类；Web 390 × 844 无横向溢出，点击即进入且不提供输入、文件副层或扩展管理。窗口改变的初始化监听同步当前媒体查询，避免挂载时遗漏尺寸变化。类型、构建与边界检查通过；本轮没有更新原生窗口、系统输入法或真实 MCP 认证资格。
 
 2026-09-12 空间列表分批展示：共享侧栏默认显示 5 条，点击“展开更多”每次追加 10 条，收起空间重置；浏览器以 28 条隔离会话核对默认数量、追加与重置，按钮计算颜色为辅助色 `#666`。共享和桌面回归覆盖空间隔离、尾页与键盘导航。Figma 的[日常侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20908)、[工作台侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4271-20967)和[新对话侧栏](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4096-1965)已保存分页交互注释，共享组件的底部展开控件已回读确认；新增的三条示例会话在最终回读中缺失，因此五条默认会话的视觉同步与最终渲染复核尚未完成，不能以此前截图认定设计同步全部通过。
 
 会话列表按更新时间倒序排序后再分批展示；相同时间保持输入顺序，缺失或无效时间排在末尾。2026-09-12 已将排序规则追加到上述三个 Figma 侧栏的分页注释并回读确认，本次仅同步交互语义；上一段的五条示例会话视觉同步限制仍保留。对应共享目录测试覆盖时区换算、同时间顺序、更新时间变化以及排序后的展开与重置。
+
+2026-09-14 Agent 会话消息布局收敛：HTML 预览按用户参考核对正文—工具活动—正文的阅读结构，工具总览使用前置类别图标与尾部折叠箭头，展开步骤按 18 px 图标轨道和单行“动作＋目标”排列；完成态移除重复状态，单条运行工具不再重复显示总览和进度文案。初次预览发现详情入口及三层运行态造成 P2 密度问题；最终按产品要求移除工具“查看参数与输出”入口及原始详情，只保留失败摘要。修正后在 1440 × 900 与窄屏复查通过，控制台无错误；共享 UI、共享与桌面类型检查、桌面生产构建通过。[Figma Tool Message 组件](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4207-579)与[会话实例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4029-49)已原位同步并回读：General／Shell 的详情树、Context 和 Output Surface 均已删除，两个会话工具实例只保留 32 px Tool Header；General／Shell 的 `Execution Process` 与 `Bounded Result Summary` 继续保留，子 Agent 消息分组及“执行过程”未受影响。回读截图见[组件集](https://www.figma.com/api/mcp/asset/7fd2fcc7-ea0e-4249-9939-a72c78e369df.png)、[General 展开态](https://www.figma.com/api/mcp/asset/99474ee1-c0d6-4f13-b110-a083d84637fb.png)、[Shell 展开态](https://www.figma.com/api/mcp/asset/5ef6422a-8462-4778-801e-e4a1e547af8e.png)和[会话实例](https://www.figma.com/api/mcp/asset/f4f547b8-d7d7-44da-b277-6f7c1ba90c2b.png)。

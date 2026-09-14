@@ -35,12 +35,21 @@ export function projectEventWithIdentity(
   }
   let next: Message;
   switch (event.type) {
+    case 'reasoning.activity':
+      next = {
+        id: `thinking:${event.requestId}:${event.segmentId}`,
+        role: 'thinking',
+        text: event.text,
+        settled: event.state === 'completed',
+      };
+      break;
     case 'subagent.started':
       next = {
         id: `subagent:${event.subagentId}`,
         role: 'subagent',
         title: event.name,
         text: '',
+        ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
         settled: false,
         status: 'running',
       };
@@ -135,11 +144,47 @@ export function projectEventWithIdentity(
                       : event.outcome === 'expired'
                         ? '交互已过期'
                         : '本次确认已提交';
-      next = { id, role: 'system', title, text: previous?.text ?? '', settled: true };
+      next = {
+        id,
+        role: 'system',
+        title,
+        text:
+          event.type === 'input.answered' && event.summary !== undefined
+            ? event.summary
+            : (previous?.text ?? ''),
+        settled: true,
+      };
       break;
     }
     case 'user.message':
       next = { id: `user:${event.messageId}`, role: 'user', text: event.text, settled: true };
+      break;
+    case 'plan.progress':
+      next = {
+        id: `plan:${event.planId}`,
+        role: 'system',
+        title: '计划进度',
+        text: event.summary ?? '',
+        settled: event.status === 'completed' || event.status === 'skipped',
+        status:
+          event.status === 'completed'
+            ? 'completed'
+            : event.status === 'skipped'
+              ? 'cancelled'
+              : event.status === 'pending'
+                ? 'queued'
+                : 'running',
+      };
+      break;
+    case 'plan.completed':
+      next = {
+        id: `plan:${event.planId}`,
+        role: 'system',
+        title: '计划已完成',
+        text: event.summary ?? '',
+        settled: true,
+        status: 'completed',
+      };
       break;
     case 'model.text_delta':
       next = {
@@ -166,12 +211,14 @@ export function projectEventWithIdentity(
         settled: false,
         title: event.displayLabel || event.toolName || '工具执行',
         toolName: event.toolName,
+        presentation: event.presentation,
+        presentationOwner: event.presentationOwner,
+        presentationGroupId: event.presentationGroupId,
         arguments: event.arguments,
-        status: 'running',
+        status: 'queued',
       };
       break;
     case 'tool.started':
-    case 'tool.progress':
       next = {
         id: `tool:${event.toolId}`,
         role: 'tool',
@@ -180,6 +227,26 @@ export function projectEventWithIdentity(
         status: 'running',
       };
       break;
+    case 'tool.progress': {
+      const existing = messages.find((message) => message.id === `tool:${event.toolId}`);
+      const toolProgress = {
+        stdout: event.stream === 'stdout' ? event.summary : existing?.toolProgress?.stdout,
+        stderr: event.stream === 'stderr' ? event.summary : existing?.toolProgress?.stderr,
+        stdoutLines:
+          event.stream === 'stdout' ? event.lineCount : existing?.toolProgress?.stdoutLines,
+        stderrLines:
+          event.stream === 'stderr' ? event.lineCount : existing?.toolProgress?.stderrLines,
+      };
+      next = {
+        id: `tool:${event.toolId}`,
+        role: 'tool',
+        text: event.summary,
+        settled: false,
+        status: 'running',
+        toolProgress,
+      };
+      break;
+    }
     case 'tool.finished':
       next = {
         id: `tool:${event.toolId}`,
@@ -191,6 +258,8 @@ export function projectEventWithIdentity(
         ...(event.displayLabel || event.toolName
           ? { title: event.displayLabel || event.toolName }
           : {}),
+        presentation: event.presentation,
+        ...(event.presentationOwner ? { presentationOwner: event.presentationOwner } : {}),
         status: event.result.ok ? 'completed' : 'failed',
       };
       break;
@@ -201,6 +270,8 @@ export function projectEventWithIdentity(
         role: 'tool',
         text: event.summary,
         settled: true,
+        presentation: event.presentation,
+        ...(event.presentationOwner ? { presentationOwner: event.presentationOwner } : {}),
         status: event.type === 'tool.failed' ? 'failed' : 'rejected',
       };
       break;
@@ -210,6 +281,8 @@ export function projectEventWithIdentity(
         role: 'tool',
         text: event.summary ?? '工具已取消',
         settled: true,
+        presentation: event.presentation,
+        ...(event.presentationOwner ? { presentationOwner: event.presentationOwner } : {}),
         status: 'cancelled',
       };
       break;

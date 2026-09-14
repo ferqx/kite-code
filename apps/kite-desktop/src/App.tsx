@@ -1,4 +1,20 @@
-import { Button, type Message, SessionPage } from '@kite-ai/kite-client-ui';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  type Message,
+  SessionPage,
+} from '@kite-ai/kite-client-ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import appIcon from '../app-icon.svg';
 import { CommandResultUnknown, type DesktopClient } from './client';
@@ -16,6 +32,7 @@ type FirstSubmission = {
   baselineUserIds: readonly string[];
   sessionId?: string;
   uncertainty?: 'create' | 'turn';
+  permissionRequired?: boolean;
 };
 function readNavigation(): { workspace: string; sessionId?: string } | undefined {
   try {
@@ -67,16 +84,36 @@ export function App({ client }: { client: DesktopClient }) {
   const submittingRef = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newConversation, setNewConversation] = useState(!selected);
+  const [newConversationWorkspace, setNewConversationWorkspace] = useState<string>();
+  const [newConversationBranch, setNewConversationBranch] = useState(view.branch);
+  const [newConversationTargetBranch, setNewConversationTargetBranch] = useState<string>();
+  const [newConversationModel, setNewConversationModel] = useState<{
+    provider: string;
+    name: string;
+  }>();
+  const [sessionModels, setSessionModels] = useState<
+    Record<string, { provider: string; name: string }>
+  >({});
   const [firstSubmission, setFirstSubmission] = useState<FirstSubmission>();
   const [workbenchView, setWorkbenchView] = useState(false);
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
   const preparing = newConversation || !selected;
+  const conversationWorkspace = newConversationWorkspace ?? workspace;
+  const conversationBranch =
+    newConversationBranch?.workspace === conversationWorkspace
+      ? newConversationBranch
+      : view.branch;
+  const preparingActiveWorkspace = !preparing || conversationWorkspace === workspace;
+  const operationError =
+    view.commandError ||
+    view.projectError ||
+    view.branchError ||
+    (connected ? view.error : undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState<'vscode' | 'zed' | 'textedit'>('vscode');
   const [stopRequest, setStopRequest] = useState<{ key: string; runId: string }>();
-  const dialog = useRef<HTMLDialogElement>(null);
   const selectedSession = (directorySnapshot ?? view.sessions).find(
     (session) => session.sessionId === selected,
   );
@@ -120,6 +157,7 @@ export function App({ client }: { client: DesktopClient }) {
     [act, client, editor],
   );
   const openSession = (id: string) => {
+    if (busyRef.current || !client.getSnapshot().connected) return;
     const revision = ++navigationRevision.current;
     setWorkbenchView(false);
     setScheduledTasksView(false);
@@ -148,12 +186,18 @@ export function App({ client }: { client: DesktopClient }) {
       .catch((error) => client.report(error))
       .finally(() => setSelectingSession((current) => (current === id ? undefined : current)));
   };
+  const dismissOperationError = () => {
+    client.clearError();
+    if (!preparing && connected && selected && !loadingSession && !ready) openSession(selected);
+  };
   const newSession = () => {
     if (!busyRef.current) {
       navigationRevision.current++;
       setWorkbenchView(false);
       setScheduledTasksView(false);
       setNewConversation(true);
+      setNewConversationWorkspace(undefined);
+      setNewConversationBranch(view.branch);
       setFirstSubmission((submission) =>
         submission?.phase === 'unknown' ? submission : undefined,
       );
@@ -203,18 +247,19 @@ export function App({ client }: { client: DesktopClient }) {
     void act(async () => {
       const revision = navigationRevision.current;
       const target = path ?? (await client.pickProject());
-      if (!target || !(await activateForWork(target))) return;
+      if (!target) return;
+      const branch = await client.queryProjectBranch(target);
       if (navigationRevision.current !== revision) return;
       navigationRevision.current++;
       setWorkbenchView(false);
       setScheduledTasksView(false);
       setNewConversation(true);
+      setNewConversationWorkspace(target);
+      setNewConversationBranch(branch);
+      setNewConversationTargetBranch(undefined);
       rememberNavigation(target);
     });
   const openProject = () => chooseProject();
-  useEffect(() => {
-    if (settingsOpen) dialog.current?.showModal();
-  }, [settingsOpen]);
   useEffect(() => {
     void startupAttempt;
     let cancelled = false;
@@ -263,12 +308,11 @@ export function App({ client }: { client: DesktopClient }) {
     if (!connected) setStopRequest(undefined);
   }, [connected]);
   const active = !preparing && isActiveRun(projection);
-  const model =
-    !preparing && selectedWorkspace !== workspace
-      ? projection?.model
-      : active
-        ? (projection?.model ?? view.models?.selected)
-        : (view.models?.selected ?? projection?.model);
+  const model = preparing
+    ? (newConversationModel ?? view.models?.selected)
+    : selected
+      ? (sessionModels[selected] ?? projection?.model ?? view.models?.selected)
+      : undefined;
   const submissionInFlight =
     !!firstSubmission &&
     firstSubmission.phase !== 'failed' &&
@@ -282,7 +326,7 @@ export function App({ client }: { client: DesktopClient }) {
     (preparing || selectingSession === undefined) &&
     connected &&
     (preparing
-      ? !!workspace && !!view.models?.selected && view.trust?.status === 'trusted'
+      ? !!conversationWorkspace
       : ready && !loadingSession && !!selected && !!selectedWorkspace);
   const submissionVisible =
     !!firstSubmission &&
@@ -322,19 +366,7 @@ export function App({ client }: { client: DesktopClient }) {
     : workbenchView || scheduledTasksView || preparing
       ? []
       : view.messages;
-  const liveSessions = new Map(view.sessions.map((session) => [session.sessionId, session]));
-  const directory = (directorySnapshot ?? view.sessions).map((session) => {
-    const current = liveSessions.get(session.sessionId);
-    if (!current || (current.revision ?? 0) < (session.revision ?? 0)) return session;
-    return {
-      ...session,
-      revision: current.revision,
-      lifecycle: current.lifecycle,
-      currentRun: current.currentRun,
-      interactionQueue: current.interactionQueue,
-      updatedAt: current.updatedAt ?? session.updatedAt,
-    };
-  });
+  const directory = directorySnapshot ?? view.sessions;
   if (startup !== 'ready')
     return (
       <main
@@ -423,7 +455,7 @@ export function App({ client }: { client: DesktopClient }) {
       onHeaderMouseDown={(clickCount) =>
         void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
       }
-      onOpen={connected ? openSession : undefined}
+      onOpen={connected || busyRef.current ? openSession : undefined}
       actions={{
         newSession,
         newWorkspaceSession: (id) => chooseProject(id),
@@ -458,65 +490,64 @@ export function App({ client }: { client: DesktopClient }) {
                 path: project.path,
                 label: project.path.split('/').filter(Boolean).pop() || project.path,
               })),
-              workspace: workspace,
-              branch: view.branch
+              workspace: conversationWorkspace,
+              branch: conversationBranch?.repository
                 ? {
-                    current: view.branch.current ?? undefined,
-                    repository: view.branch.repository,
-                    branches: view.branch.canSwitch ? view.branch.branches : [],
-                    label: !view.branch.repository
-                      ? '非 Git 项目'
-                      : (view.branch.current ??
-                        `分离 HEAD · ${view.branch.head?.slice(0, 7) ?? '未知'}`),
+                    current: newConversationTargetBranch ?? conversationBranch.current ?? undefined,
+                    repository: true,
+                    branches: conversationBranch.canSwitch ? conversationBranch.branches : [],
+                    label:
+                      newConversationTargetBranch ??
+                      conversationBranch.current ??
+                      `分离 HEAD · ${conversationBranch.head?.slice(0, 7) ?? '未知'}`,
                   }
                 : undefined,
               busy: busy || submitting,
               onProject: chooseProject,
               onAddProject: openProject,
-              onBranch: (name) => void act(() => client.switchBranch(name)),
-              onRefreshBranch: () => void act(() => client.refreshBranch()),
+              onBranch: (name) => setNewConversationTargetBranch(name),
+              onRefreshBranch: () =>
+                void act(async () => {
+                  setNewConversationBranch(await client.queryProjectBranch(conversationWorkspace));
+                }),
             }
           : undefined
       }
       notices={
         <>
-          {(view.commandError || (connected && view.error)) && (
-            <div className="notice error" role="alert">
-              <span>{view.commandError || view.error}</span>
-              {!preparing && connected && selected && !loadingSession && !ready && (
-                <Button disabled={busy} onClick={() => openSession(selected!)}>
-                  重新加载会话
-                </Button>
-              )}
-            </div>
+          {operationError && (
+            <AlertDialog open>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>操作未完成</AlertDialogTitle>
+                  <AlertDialogDescription>{operationError}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogAction onClick={dismissOperationError}>确定</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
-          {view.trust && view.trust.status !== 'trusted' && (
-            <section className="notice trust-notice">
-              <strong>
-                {view.trust.externalReadScope.roots.length
-                  ? '允许读取项目关联目录？'
-                  : '项目授权未完成'}
-              </strong>
-              <p>
-                {view.trust.externalReadScope.roots.length
-                  ? '此项目还需要读取以下工作区外目录，请确认访问范围。'
-                  : '添加项目即授权工作区访问，但本次授权尚未生效，请重试。'}
-              </p>
-              <code>{view.trust.workspace.canonicalPath}</code>
-              {!!view.trust.externalReadScope.roots.length && (
+          {view.trust &&
+            preparingActiveWorkspace &&
+            view.trust.status !== 'trusted' &&
+            !!view.trust.externalReadScope.roots.length && (
+              <section className="notice trust-notice">
+                <strong>允许读取项目关联目录？</strong>
+                <p>此项目还需要读取以下工作区外目录，请确认访问范围。</p>
+                <code>{view.trust.workspace.canonicalPath}</code>
                 <p>关联外部只读目录：{view.trust.externalReadScope.roots.join('、')}</p>
-              )}
-              <div className="actions">
-                <Button
-                  className="primary"
-                  disabled={busy || !view.trust.canDecide}
-                  onClick={() => void act(() => client.trustProject())}
-                >
-                  {view.trust.externalReadScope.roots.length ? '允许并继续' : '重新授权'}
-                </Button>
-              </div>
-            </section>
-          )}
+                <div className="actions">
+                  <Button
+                    className="primary"
+                    disabled={busy || !view.trust.canDecide}
+                    onClick={() => void act(() => client.trustProject())}
+                  >
+                    允许并继续
+                  </Button>
+                </div>
+              </section>
+            )}
         </>
       }
       interaction={
@@ -620,13 +651,25 @@ export function App({ client }: { client: DesktopClient }) {
               cancelDisabled: busy || !ready || loadingSession,
               model: model ? `${model.provider} / ${model.name}` : undefined,
               models: view.models?.providers.flatMap((provider) =>
-                provider.models.map((item) => ({ provider: provider.provider, name: item.name })),
+                provider.models.map((item) => ({
+                  provider: provider.provider,
+                  name: item.name,
+                })),
               ),
-              modelDisabled: busy || !connected || !view.models,
-              onModelChange: (provider, name) => void act(() => client.selectModel(provider, name)),
+              modelDisabled: (!preparing && busy) || !connected || !view.models,
+              onModelChange: (provider, name) => {
+                if (preparing) setNewConversationModel({ provider, name });
+                else if (selected)
+                  setSessionModels((current) => ({
+                    ...current,
+                    [selected]: { provider, name },
+                  }));
+              },
               permission: preparing ? newConversationPermission : (view.interactionMode ?? 'auto'),
               permissionDisabled:
-                busy || submitting || (!preparing && (!selected || !ready || loadingSession)),
+                (!preparing && busy) ||
+                submitting ||
+                (!preparing && (!selected || !ready || loadingSession)),
               permissionPending: permissionSubmitting,
               onPermissionChange: (permission) => {
                 if (preparing) {
@@ -678,6 +721,7 @@ export function App({ client }: { client: DesktopClient }) {
                             phase: 'failed',
                             text: submitted,
                           });
+                        else setFirstSubmission(undefined);
                       };
                       if (preparing) {
                         setFirstSubmission({
@@ -705,15 +749,26 @@ export function App({ client }: { client: DesktopClient }) {
                         let submittedKey = draftKey;
                         let targetSession = selected;
                         let sessionCreated = !preparing;
+                        let permissionApplied = !preparing;
                         try {
                           if (preparing) {
+                            if (conversationWorkspace !== client.getSnapshot().workspace) {
+                              if (!(await activateForWork(conversationWorkspace))) {
+                                abandonPendingSend();
+                                return;
+                              }
+                              setNewConversationBranch(client.getSnapshot().branch);
+                            }
+                            if (
+                              newConversationTargetBranch &&
+                              client.getSnapshot().branch?.current !== newConversationTargetBranch
+                            ) {
+                              await client.switchBranch(newConversationTargetBranch);
+                              setNewConversationBranch(client.getSnapshot().branch);
+                            }
                             await client.prepareNewConversation();
-                            targetSession = await client.newSession();
+                            targetSession = await client.newSession(model);
                             sessionCreated = true;
-                            await client.setInteractionMode(
-                              targetSession,
-                              newConversationPermission,
-                            );
                             setFirstSubmission({
                               phase: 'sending',
                               text: submitted,
@@ -730,11 +785,15 @@ export function App({ client }: { client: DesktopClient }) {
                               [draftKey]: '',
                             }));
                             if (navigationRevision.current === submittedNavigation) {
-                              const selection = client.selectSession(targetSession);
                               setNewConversation(false);
                               rememberNavigation(current.workspace, targetSession);
-                              await selection;
+                              await client.selectSession(targetSession);
                             }
+                            await client.setInteractionMode(
+                              targetSession,
+                              newConversationPermission,
+                            );
+                            permissionApplied = true;
                           }
                           if (!preparing) {
                             targetSession = selected;
@@ -752,8 +811,20 @@ export function App({ client }: { client: DesktopClient }) {
                               }
                               await client.selectSession(selected!);
                             }
+                            if (retryingFirst && firstSubmission.permissionRequired) {
+                              await client.setInteractionMode(
+                                targetSession!,
+                                newConversationPermission,
+                              );
+                              permissionApplied = true;
+                              setFirstSubmission({
+                                ...firstSubmission,
+                                phase: 'sending',
+                                permissionRequired: false,
+                              });
+                            }
                           }
-                          await client.send(submitted, targetSession);
+                          await client.send(submitted, targetSession, model);
                         } catch (error) {
                           if (error instanceof CommandResultUnknown) {
                             if (error.commandType === 'resume_session') {
@@ -765,6 +836,29 @@ export function App({ client }: { client: DesktopClient }) {
                                   text: submitted,
                                   uncertainty: undefined,
                                 });
+                              client.report(error);
+                              return;
+                            }
+                            if (
+                              error.commandType === 'set_interaction_mode' &&
+                              sessionCreated &&
+                              targetSession
+                            ) {
+                              const current = client.getSnapshot();
+                              submittedKey = `${current.workspace}\0${targetSession}`;
+                              const permissionRequired =
+                                current.selected !== targetSession ||
+                                current.interactionMode !== newConversationPermission;
+                              setFirstSubmission({
+                                phase: 'failed',
+                                text: submitted,
+                                visibleUntil: Date.now(),
+                                navigation: submittedNavigation,
+                                baselineUserIds,
+                                sessionId: targetSession,
+                                permissionRequired,
+                              });
+                              restoreDraft(submittedKey);
                               client.report(error);
                               return;
                             }
@@ -805,6 +899,7 @@ export function App({ client }: { client: DesktopClient }) {
                               navigation: submittedNavigation,
                               baselineUserIds,
                               sessionId: sessionCreated ? targetSession : undefined,
+                              permissionRequired: sessionCreated && !permissionApplied,
                             });
                           }
                           restoreDraft(sessionCreated && targetSession ? submittedKey : draftKey);
@@ -854,19 +949,13 @@ export function App({ client }: { client: DesktopClient }) {
           : undefined
       }
       overlays={
-        settingsOpen && (
-          <dialog
-            ref={dialog}
-            className="utility-dialog"
-            aria-label="设置"
-            onClose={() => setSettingsOpen(false)}
-          >
-            <div className="dialog-heading">
-              <strong>设置</strong>
-              <Button onClick={() => dialog.current?.close()}>关闭</Button>
-            </div>
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent portalled={false}>
+            <DialogHeader>
+              <DialogTitle>设置</DialogTitle>
+              <DialogDescription className="sr-only">配置编辑器与扩展能力</DialogDescription>
+            </DialogHeader>
             <Settings
-              key={workspace}
               client={client}
               view={view}
               busy={busy}
@@ -874,8 +963,8 @@ export function App({ client }: { client: DesktopClient }) {
               editor={editor}
               onEditorChange={setEditor}
             />
-          </dialog>
-        )
+          </DialogContent>
+        </Dialog>
       }
     />
   );
