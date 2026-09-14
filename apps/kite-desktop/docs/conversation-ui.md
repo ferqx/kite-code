@@ -36,11 +36,13 @@ Desktop 的消息复制不依赖 renderer 的 Web Clipboard API；共享会话�
 
 Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后读取的结果；刷新失败不覆盖明确拒绝或未知写入结果，已确认写入则提示仅刷新配置。所有路径均在写入结束后、刷新开始前清空临时密钥，不重放写入。[配置回归](../test/models.test.ts)覆盖回执丢失、明确未知、拒绝和已保存与刷新失败的组合；实际配置和继续任务另由真实 Service 的[开发闭环测试](../test/development.test.ts)验证。
 
-[投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留 queued 与 Runtime 提供的 presentation/group identity、结构化参数、分别累积的 stdout/stderr、明确失败／拒绝／取消和文件证据，但会话展示只消费可读标题、主要目标、状态与异常摘要，不提供原始参数或输出入口。会话正文、工具活动和后续正文保持同一阅读列；连续工具活动使用无容器底色的紧凑日志结构，总览与步骤共享左侧图标轨道，步骤将动作和主要目标排在同一行。已完成状态由记录留在活动流中表达，不逐项重复绘制徽标；运行、等待、排队与异常仍显示文字状态，错误摘要保持可见。
+[投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留 queued 与 Runtime 提供的 presentation/group identity、结构化参数、分别累积的 stdout/stderr、明确失败／拒绝／取消和文件证据，会话按工具类型展示：读取不展开正文，Shell 可展开真实输出及底部状态，文件修改展开已确认的工具差异，不新增原始参数面板。会话正文、工具活动和后续正文保持同一阅读列；连续工具活动使用无容器底色的紧凑日志结构，总览与步骤共享左侧图标轨道，步骤将动作和主要目标排在同一行。已完成状态由记录留在活动流中表达，不逐项重复绘制徽标；运行、等待、排队与异常仍显示文字状态，错误摘要保持可见。
 
-Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示为可折叠思考活动，不接收或推导私有 reasoning 字段；`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `totalLines` 与 `exhausted` 作为技术详情元信息显示，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
+Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示为可折叠思考活动，不接收或推导私有 reasoning 字段；`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `exhausted` 在 Shell 底部标明已达到输出限制，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
 
-子代理保留服务提供的名称、状态、结果和稳定 stepId。`subagent.started.parentToolCallId`存在且父工具可见时直接显示在父工具下；否则保留明确来源的独立摘要，不按邻近模型回复猜测父关系。带`presentationOwner`的hidden子工具不再重复为顶层工具，其成功或异常只在所属task的执行过程里展示；该owner随queued及terminal事件保留，恢复时即使只收到终态也不会重新冒出顶层工具。旧记录没有owner时仍保留异常入口。当前没有独立子代理详情或子代理控制。审批回执表达命令已批准或已拒绝；批准不等于工具成功，工具终态仍独立显示。
+子代理消息保留服务事实用于恢复，但主会话只渲染工具活动与稳定 stepId 对应的工具步骤，不显示子 Agent 结果段落。可见父 task 的 hidden 子工具进入父展开区，按确切 toolCallId 去重；没有可见父工具时保留工具入口，不丢失终态异常。当前没有独立子代理详情或控制。
+
+主工具的 `tool.review` 由 Service 投影真实自动审批请求与完成事实，显示审批中、批准、未通过或转人工；技术异常和无效结果均转人工，不伪装拒绝。`approval.granted` 保留明确 grant，批准与工具执行结果分开保存，停止后不丢批准来源。审批控件只在 `interaction.grants` 包含 same_command 时显示下拉直接批准入口，调用原 `respond_interaction`，不增加本地授权缓存。压缩 requested／completed／failed 更新同一次压缩标记；Ask 回执保留已有安全问题文本与回答摘要，详情可折叠。
 
 [Markdown](../../../packages/kite-client-ui/src/MessageContent.tsx)使用 react-markdown 与 remark-gfm 展示助手段落、列表、代码和表格；语义 HTML 的外层由 shadcn/typeset `typeset-chat` preset 统一排版，使用 Geist／Geist Mono、14 px 与 1.6 行高。Agent 正文不增加 padding 或独立限宽，与消息阅读列同宽。共享 CSS 只补充选择、溢出、链接和文件按钮行为，不再覆盖 Typeset 的正文排版。渲染跳过 HTML，保留默认 URL 安全转换，不自动请求图片。文件路径链接及 read_file 的结构化 path 调用既有 native editor 校验。编辑器选择在当前进程由 App 共享，默认 VS Code，可在设置中切换；限制见[文件与编辑器](results-and-editor.md)。
 

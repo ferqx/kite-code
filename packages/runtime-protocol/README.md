@@ -38,6 +38,8 @@ Only `@kite-ai/runtime-protocol` is public. The root entry exports codecs, limit
 
 ## Invariants
 
+`tool.review` 显式允许主工具的有界审查状态与原因进入实时及 History；`approval.granted.grant` 只允许 approve_once／same_command。Codec 与 mapper 同步开放这些展示字段，其他额外字段仍拒绝；不增加审批命令、Runtime 权限或新的方法。
+
 Plan review 的可选 `review { text, truncated }` 与 Contract 同步进入实时、History 和 respond_interaction codec；mapper 创建独立副本，正文上限 65,536 个 UTF-16 单位。新增字段没有增加协议方法或赋予任意文件读取能力。
 
 Session 的可选 `workspaceDigest` 在 wire 中保留，供客户端目录归属展示；原始 workspace 路径继续由 mapper 排除。

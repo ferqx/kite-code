@@ -1136,6 +1136,16 @@ function exportedNamesFromModule(
   );
   const names = new Set<string>();
   for (const statement of source.statements) {
+    // shadcn primitives declare locals and export them in a final named export list.
+    if (
+      ts.isExportDeclaration(statement) &&
+      !statement.moduleSpecifier &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) names.add(element.name.text);
+      continue;
+    }
     const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
     if (!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue;
     if (ts.isVariableStatement(statement)) {

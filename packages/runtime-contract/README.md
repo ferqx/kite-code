@@ -23,6 +23,7 @@
 - `AcceptedPresentationEnvelope` 是唯一进入消息 projector 的接收边界：每个 envelope 固定 Session、connection
   generation、durability，以及由事件 coverage scope 要求的 Run/Task/Turn identity 与 ephemeral stream tuple；model/tool/subagent/interaction 事件必须绑定 Turn，Task/Turn/Run terminal 的 envelope identity 必须与事件字段精确相等；Subagent step/review/phase 和审批 owner
   均使用稳定 child/tool identity，不能由展示层按工具名或到达顺序补全。
+- `tool.review` 保留主工具的确切 toolId／reviewId、封闭审查状态与有界原因，来自真实 auto_review 请求／完成事件；不携带 reviewer model、权限材料或原始 result。`approval.granted` 可携带明确 approve_once／same_command，旧事实缺省时不猜授权范围。它们只表达展示事实，不提供新的授权路径。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
 - 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
   Run resource；这些DTO不代表Public Agent API route已开放。

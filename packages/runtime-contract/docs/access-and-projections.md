@@ -13,3 +13,6 @@
 新增字段需要检查真实 producer/consumer 和严格校验。不能通过 any 或继承 Service 内部类型让字段自动进入客户端。Kernel 的 State/Event、Runtime transport 与 Browser REST 各有边界，不是同一个 union 的别名。
 
 准确字段以源码为准，语义变化同时检查 [Protocol](../../runtime-protocol/docs/wire-format.md)、[Client](../../runtime-client/docs/requests-and-history.md) 和真实 projector。验证：[contract tests](../test/)。
+
+
+主工具审批展示使用 `tool.review` 的 toolId／reviewId／status／有界 summary；`approval.granted.grant` 可选地保留 approve_once／same_command。二者经过同一 Protocol allowlist 进入 live 和历史回放，缺失 grant 不推导授权范围，不接收原始 reviewer result 或模型身份。具体字段见 [notifications](../src/notifications.ts)。

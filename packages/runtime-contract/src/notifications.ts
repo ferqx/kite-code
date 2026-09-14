@@ -182,6 +182,13 @@ export type RuntimeClientEvent =
       readonly arguments: Readonly<Record<string, unknown>>;
       readonly summary: string;
     }
+  | {
+      readonly type: 'tool.review';
+      readonly toolId: string;
+      readonly reviewId: string;
+      readonly status: 'reviewing' | 'approved' | 'rejected' | 'awaiting_user';
+      readonly summary?: string;
+    }
   | { readonly type: 'tool.started'; readonly toolId: string; readonly summary?: string }
   | {
       readonly type: 'tool.progress';
@@ -245,6 +252,7 @@ export type RuntimeClientEvent =
     }
   | {
       readonly type: 'approval.granted';
+      readonly grant?: 'approve_once' | 'same_command';
       readonly interactionId: string;
       readonly generation: number;
       readonly owner: InteractionOwner;
@@ -454,6 +462,7 @@ const RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_ = {
   'model.cache': 'turn',
   'tool.queued': 'turn',
   'tool.started': 'turn',
+  'tool.review': 'turn',
   'tool.progress': 'turn',
   'tool.finished': 'turn',
   'tool.failed': 'turn',
@@ -976,6 +985,17 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value.stream === 'stderr') &&
         (!Object.hasOwn(value, 'lineCount') || isNonNegativeSafeInteger(value.lineCount))
       );
+    case 'tool.review':
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'toolId', 'reviewId', 'status'], ['summary']),
+        ) &&
+        isIdentifier(value.toolId) &&
+        isIdentifier(value.reviewId) &&
+        ['reviewing', 'approved', 'rejected', 'awaiting_user'].includes(value.status as string) &&
+        optionalSummary(value)
+      );
     case 'tool.file_changed':
       return (
         hasExactKeys(
@@ -1010,7 +1030,18 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
         isNonNegativeSafeInteger(value.queueSequence)
       );
     case 'approval.granted':
-      return exactInteractionGeneration(value) && isRuntimeInteractionOwner(value.owner);
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'interactionId', 'generation', 'owner'], ['grant']),
+        ) &&
+        isIdentifier(value.interactionId) &&
+        isNonNegativeSafeInteger(value.generation) &&
+        isRuntimeInteractionOwner(value.owner) &&
+        (!Object.hasOwn(value, 'grant') ||
+          value.grant === 'approve_once' ||
+          value.grant === 'same_command')
+      );
     case 'approval.rejected':
       return (
         hasExactKeys(
@@ -1388,14 +1419,6 @@ function isRuntimeInteractionOwner(value: unknown): value is InteractionOwner {
     isIdentifier(value.toolCallId) &&
     isIdentifier(value.subagentId) &&
     isIdentifier(value.parentToolCallId)
-  );
-}
-
-function exactInteractionGeneration(value: Record<string, unknown>): boolean {
-  return (
-    hasExactKeys(value, ['type', 'interactionId', 'generation', 'owner']) &&
-    isIdentifier(value.interactionId) &&
-    isNonNegativeSafeInteger(value.generation)
   );
 }
 

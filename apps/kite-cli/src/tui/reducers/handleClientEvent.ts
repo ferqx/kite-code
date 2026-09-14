@@ -567,6 +567,9 @@ function reducePresentationBlocks(
       return settleSubagent(state, event.subagentId, 'done', event, envelope);
     case 'subagent.failed':
       return settleSubagent(state, event.subagentId, 'error', event, envelope);
+    case 'tool.review':
+      // Graphical clients display this metadata; TUI keeps its existing approval projection.
+      return state;
     case 'context.compaction':
       return appendNotice(
         settlePresentationBoundary(state),

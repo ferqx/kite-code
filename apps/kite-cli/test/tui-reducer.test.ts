@@ -134,6 +134,7 @@ describe('TUI RuntimeClientEvent reducer', () => {
         arguments: {},
         summary: 'Inspecting dependencies.',
       },
+      { type: 'tool.review', toolId: 'tool-1', reviewId: 'review-1', status: 'reviewing' },
       { type: 'tool.progress', toolId: 'tool-1', summary: 'Tool output updated.', lineCount: 2 },
       {
         type: 'tool.finished',

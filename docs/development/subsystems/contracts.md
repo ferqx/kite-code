@@ -43,3 +43,6 @@
 - [Runtime 分级验证治理](../../active/verification-governance.md)
 - [Windows Shell 沙箱：direct restricted-token 与已审批当前用户联网](../../active/windows-shell-sandbox.md)
 - [Workspace 信任门禁 / Workspace Trust Gate](../../active/workspace-trust.md)
+
+
+包导出检查同时识别声明处导出与 `export { local as name }` 的本地具名列表，避免将共享 shadcn primitive 误判为缺失符号；不存在的 re-export 仍失败。回归见 [包检查器测试](../../../apps/kite-service/test/scripts/check-runtime-packages.test.ts)。

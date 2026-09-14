@@ -6,6 +6,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  Approval,
   Button,
   Dialog,
   DialogContent,
@@ -556,36 +557,15 @@ export function App({ client }: { client: DesktopClient }) {
         interaction &&
         interaction.kind === 'approval' &&
         selected ? (
-          <section className="notice" aria-label="工具审批">
-            <strong>{interaction.title || '工具需要你的批准'}</strong>
-            <p>{interaction.summary}</p>
-            {interaction.command && <pre className="interaction-text">{interaction.command}</pre>}
-            <div className="actions">
-              <Button
-                disabled={busy || !ready || loadingSession || stopping}
-                onClick={() =>
-                  void act(() => client.respondApproval(selected!, interaction, 'reject'))
-                }
-              >
-                拒绝本次
-              </Button>
-              <Button
-                className="primary"
-                disabled={
-                  busy ||
-                  !ready ||
-                  loadingSession ||
-                  stopping ||
-                  !interaction.grants.includes('approve_once')
-                }
-                onClick={() =>
-                  void act(() => client.respondApproval(selected!, interaction, 'approve_once'))
-                }
-              >
-                仅批准这一次
-              </Button>
-            </div>
-          </section>
+          <Approval
+            command={interaction.command}
+            summary={interaction.summary}
+            grants={interaction.grants}
+            disabled={busy || !ready || loadingSession || stopping}
+            onDecide={(decision) =>
+              void act(() => client.respondApproval(selected!, interaction, decision))
+            }
+          />
         ) : !workbenchView &&
           !scheduledTasksView &&
           interaction &&

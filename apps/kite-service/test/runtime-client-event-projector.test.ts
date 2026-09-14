@@ -695,3 +695,51 @@ describe('Runtime Client event projector', () => {
     });
   });
 });
+
+test('root auto review exposes only bounded decision facts to the client', () => {
+  const base = {
+    toolCallId: 'tool',
+    reviewId: 'review',
+    owner: { kind: 'root_tool', toolCallId: 'tool' },
+  } as const;
+  const review = projectRuntimeClientEvent(
+    {
+      ...base,
+      type: 'auto_review.requested',
+      toolName: 'shell_execute',
+      reason: 'policy',
+      approval: {},
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+    } as RuntimeEvent,
+    { sessionRevision: 1 },
+  );
+  expect(review).toEqual({
+    type: 'tool.review',
+    toolId: 'tool',
+    reviewId: 'review',
+    status: 'reviewing',
+  });
+  for (const [result, status] of [
+    [{ ok: true, approved: true }, 'approved'],
+    [{ ok: true, approved: false }, 'rejected'],
+    [{ ok: true, approved: false, escalatedToUser: true }, 'awaiting_user'],
+    [{ ok: false, approved: false, failureType: 'technical' }, 'awaiting_user'],
+  ] as const) {
+    const event = projectRuntimeClientEvent(
+      {
+        ...base,
+        type: 'auto_review.completed',
+        result: {
+          ...result,
+          reason: 'password=secret',
+          reviewerModelName: 'private-model',
+          durationMs: 10,
+        },
+      } as RuntimeEvent,
+      { sessionRevision: 1 },
+    );
+    expect(event).toMatchObject({ type: 'tool.review', status, summary: '[redacted]' });
+    expect(JSON.stringify(event)).not.toContain('private-model');
+  }
+});

@@ -74,6 +74,8 @@ apps/kite-web ──────────────────────
 apps/kite-desktop ─────────────────────────────────────────→ app-contract + local-runtime + client + contract + protocol + kite-client-ui
 ```
 
+主工具审批展示由 Service 的 `auto_review.requested/completed` 映射为封闭 `tool.review`，Contract、Protocol codec/mapper 和 Desktop live/history 保留同一 toolId 与审查状态；人工批准的可选 grant 只保留真实 approve_once／same_command。该链路只补充安全展示事实，既有审批 queue、授权与执行 owner 不变，技术异常转人工而非被 UI 推断为拒绝。
+
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 Runtime Protocol V2（JSON-RPC 2.0）DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
 
 KASD parent-owned App Server在同一条已initialize Protocol connection上增加三个exact durable History read与九个no-secret App Control方法。

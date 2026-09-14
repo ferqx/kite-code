@@ -33,8 +33,120 @@ export function projectEventWithIdentity(
       ? messages.map((message) => (message.id === id ? change : message))
       : [...messages, change];
   }
+  if (
+    event.type === 'interaction.settled' &&
+    messages.some((message) => message.approval?.interactionId === event.interactionId)
+  )
+    return messages;
+  // Authorization is attached to its exact tool owner and survives execution terminal events.
+  const approvalInteraction =
+    (event.type === 'approval.queued' || event.type === 'interaction.available') &&
+    event.interaction.kind === 'approval'
+      ? event.interaction
+      : undefined;
+  if (
+    event.type === 'tool.review' ||
+    approvalInteraction ||
+    event.type === 'approval.granted' ||
+    event.type === 'approval.rejected'
+  ) {
+    const owner =
+      approvalInteraction?.owner ??
+      (event.type === 'approval.granted' || event.type === 'approval.rejected'
+        ? event.owner
+        : undefined);
+    const toolId = event.type === 'tool.review' ? event.toolId : owner?.toolCallId;
+    if (toolId && (!owner || owner.kind === 'root_tool')) {
+      const id = `tool:${toolId}`;
+      const previous = messages.find((message) => message.id === id);
+      if (
+        previous?.settled &&
+        (approvalInteraction || (event.type === 'tool.review' && event.status === 'reviewing'))
+      )
+        return messages;
+      if (approvalInteraction && ['approved', 'rejected'].includes(previous?.approval?.state ?? ''))
+        return messages;
+      if (
+        event.type === 'tool.review' &&
+        previous?.approval?.source === 'user' &&
+        previous.approval.state === 'approved'
+      )
+        return messages;
+      const approval: NonNullable<Message['approval']> =
+        event.type === 'tool.review'
+          ? { source: 'auto', state: event.status, reason: event.summary }
+          : event.type === 'approval.granted'
+            ? {
+                source: 'user',
+                state: 'approved',
+                grant: event.grant,
+                interactionId: event.interactionId,
+              }
+            : event.type === 'approval.rejected'
+              ? {
+                  source: 'user',
+                  state: 'rejected',
+                  reason: event.summary,
+                  interactionId: event.interactionId,
+                }
+              : {
+                  interactionId: approvalInteraction?.interactionId,
+                  source: previous?.approval?.source ?? 'user',
+                  state: 'awaiting_user',
+                  reason: previous?.approval?.reason ?? approvalInteraction?.summary,
+                };
+      const message: Message = {
+        ...(previous ?? { id, role: 'tool', text: '', settled: false }),
+        ...(identity.turnId ? { turnId: identity.turnId } : {}),
+        approval,
+        ...(!previous?.settled
+          ? {
+              status:
+                approval.state === 'approved'
+                  ? ('queued' as const)
+                  : approval.state === 'rejected'
+                    ? ('rejected' as const)
+                    : ('waiting' as const),
+              settled: approval.state === 'rejected',
+            }
+          : {}),
+      };
+      return previous
+        ? messages.map((item) => (item.id === id ? message : item))
+        : [...messages, message];
+    }
+  }
   let next: Message;
   switch (event.type) {
+    case 'context.compaction': {
+      const previous = [...messages]
+        .reverse()
+        .find((message) => message.systemKind === 'compaction');
+      if (event.status === 'reset') return messages;
+      next = {
+        id:
+          event.status !== 'requested' && previous && !previous.settled
+            ? previous.id
+            : `compaction:${messages.length}`,
+        role: 'system',
+        systemKind: 'compaction',
+        title:
+          event.status === 'requested'
+            ? '正在自动压缩上下文'
+            : event.status === 'failed'
+              ? '上下文自动压缩失败'
+              : '上下文已自动压缩',
+        text: event.status === 'failed' ? (event.summary ?? '') : '',
+        status:
+          event.status === 'requested'
+            ? 'running'
+            : event.status === 'failed'
+              ? 'failed'
+              : 'completed',
+        settled: event.status !== 'requested',
+      };
+      break;
+    }
     case 'reasoning.activity':
       next = {
         id: `thinking:${event.requestId}:${event.segmentId}`,
@@ -71,6 +183,7 @@ export function projectEventWithIdentity(
       const steps = previous?.steps ?? [];
       const step = {
         id: event.stepId,
+        toolCallId: event.toolCallId,
         text: event.summary || event.displayLabel || event.toolName,
         status: event.status,
       };
@@ -104,11 +217,20 @@ export function projectEventWithIdentity(
       next = {
         id: `interaction:${event.interaction.interactionId}`,
         role: 'system',
+        systemKind:
+          event.interaction.kind === 'input'
+            ? 'ask'
+            : event.interaction.kind === 'approval'
+              ? 'approval'
+              : undefined,
         title: event.interaction.title,
         text:
           event.interaction.kind === 'approval'
             ? (event.interaction.command ?? event.interaction.summary ?? '')
-            : (event.interaction.summary ?? ''),
+            : event.interaction.kind === 'input'
+              ? (event.interaction.questions?.map((question) => question.question).join('\n') ??
+                event.interaction.question)
+              : (event.interaction.summary ?? ''),
         settled: false,
       };
       break;
@@ -147,10 +269,14 @@ export function projectEventWithIdentity(
       next = {
         id,
         role: 'system',
+        systemKind:
+          event.type === 'input.answered' || event.type === 'input.cancelled'
+            ? 'ask'
+            : previous?.systemKind,
         title,
         text:
           event.type === 'input.answered' && event.summary !== undefined
-            ? event.summary
+            ? [previous?.text, event.summary].filter(Boolean).join('\n\n')
             : (previous?.text ?? ''),
         settled: true,
       };

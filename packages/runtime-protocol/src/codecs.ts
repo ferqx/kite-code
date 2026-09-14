@@ -1321,6 +1321,15 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       summary: shortText.optional(),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('tool.review'),
+      toolId: identifier,
+      reviewId: identifier,
+      status: z.enum(['reviewing', 'approved', 'rejected', 'awaiting_user']),
+      summary: shortText.optional(),
+    })
+    .strict(),
   z.object({ type: z.literal('interaction.available'), interaction }).strict(),
   z
     .object({
@@ -1357,6 +1366,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('approval.granted'),
+      grant: z.enum(['approve_once', 'same_command']).optional(),
       interactionId: identifier,
       generation: safeRevision,
       owner: interactionOwner,

@@ -116,6 +116,7 @@ export function mapRuntimeClientEventToProtocol(
       // Revalidate the closed presentation fact at the Contract-to-wire seam;
       // never recreate it from hidden tool arguments.
       return validate(event);
+    case 'tool.review':
     case 'tool.started':
     case 'tool.progress':
     case 'tool.finished':

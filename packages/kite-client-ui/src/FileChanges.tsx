@@ -25,25 +25,7 @@ export function FileChanges({
           {!message.toolResult ? (
             <p>尚无可读的终态输出，请检查工具过程。</p>
           ) : (
-            <pre className="diff-output">
-              {(message.toolResult.stdout || message.toolResult.stderr || '工具没有返回可读差异。')
-                .split('\n')
-                .map((line, index) => (
-                  <span
-                    key={`${index}:${line}`}
-                    className={
-                      /^\s*\d+ \+/.test(line)
-                        ? 'diff-added'
-                        : /^\s*\d+ -/.test(line)
-                          ? 'diff-removed'
-                          : undefined
-                    }
-                  >
-                    {line}
-                    {'\n'}
-                  </span>
-                ))}
-            </pre>
+            <FileDiff message={message} />
           )}
         </details>
       ))}
@@ -59,5 +41,31 @@ export function FileChanges({
         </p>
       </details>
     </div>
+  );
+}
+
+/** Tool-reported diff only; no reconstruction from current workspace contents. */
+export function FileDiff({ message }: { message: Message }) {
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex lint/a11y/useSemanticElements: the preformatted diff is a named keyboard-scrollable region.
+    <pre role="region" className="diff-output" tabIndex={0} aria-label="文件差异">
+      {(message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。')
+        .split('\n')
+        .map((line, index) => (
+          <span
+            key={`${index}:${line}`}
+            className={
+              /^\s*\d+ \+/.test(line) || /^\+(?!\+\+)/.test(line)
+                ? 'diff-added'
+                : /^\s*\d+ -/.test(line) || /^-(?!--)/.test(line)
+                  ? 'diff-removed'
+                  : undefined
+            }
+          >
+            {line}
+            {'\n'}
+          </span>
+        ))}
+    </pre>
   );
 }

@@ -923,3 +923,20 @@ describe('runtime contract package boundary', () => {
     ).toThrow('1 to 200');
   });
 });
+
+test('tool review decisions are a closed bounded display event and grants stay explicit', () => {
+  const review = { type: 'tool.review', toolId: 'tool', reviewId: 'review', status: 'reviewing' };
+  expect(isRuntimeClientEvent(review)).toBe(true);
+  expect(isRuntimeClientEvent({ ...review, status: 'anything' })).toBe(false);
+  expect(isRuntimeClientEvent({ ...review, credentials: 'secret' })).toBe(false);
+  expect(isRuntimeClientEvent({ ...review, summary: 'x'.repeat(70_000) })).toBe(false);
+  const grant = {
+    type: 'approval.granted',
+    interactionId: 'interaction',
+    generation: 1,
+    owner: { kind: 'root_tool', toolCallId: 'tool' },
+  };
+  expect(isRuntimeClientEvent(grant)).toBe(true);
+  expect(isRuntimeClientEvent({ ...grant, grant: 'same_command' })).toBe(true);
+  expect(isRuntimeClientEvent({ ...grant, grant: 'always' })).toBe(false);
+});

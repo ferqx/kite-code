@@ -267,6 +267,30 @@ describe('runtime workspace package gate', () => {
     expectViolation(root, 'APP_PUBLIC_ENTRY_INVALID');
   });
 
+  test('recognizes a local named export list without accepting a missing re-export', () => {
+    const root = createFixture();
+    updateText(
+      root,
+      'packages/kite-client-ui/src/index.ts',
+      (value) => `export { namedLocal } from './named-local';\n${value}`,
+    );
+    writeFileSync(
+      join(root, 'packages/kite-client-ui/src/named-local.ts'),
+      'const internal = true; export { internal as namedLocal };',
+    );
+    expect(
+      analyzeRuntimePackages(root).violations.filter(
+        (item) => item.code === 'PUBLIC_EXPORT_SYMBOL_DRIFT',
+      ),
+    ).toEqual([]);
+    updateText(
+      root,
+      'packages/kite-client-ui/src/named-local.ts',
+      () => 'const internal = true; export { internal };',
+    );
+    expectViolation(root, 'PUBLIC_EXPORT_SYMBOL_DRIFT');
+  });
+
   test('rejects drift between a named re-export and its source module', () => {
     const root = createFixture();
     updateText(

@@ -1,3 +1,4 @@
+export { Approval } from './Approval';
 export {
   AskQuestionnaire,
   type AskQuestionnaireOption,

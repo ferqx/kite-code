@@ -58,7 +58,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 `bun run --cwd packages/kite-client-ui test`、`typecheck`，两端的 `test`、`typecheck`、`build`，以及根 `check:runtime-packages`。共享包没有独立打包产物，`build` 核对类型，最终页面由两个 app 的 Vite 构建消费。[权限回归](test/page.test.tsx)核对只读与可操作页面；[桌面 UI 回归](../../apps/kite-desktop/test/ui.test.tsx)覆盖发送、中文组词、审批、停止和阅读位置；[Web 生命周期](../../apps/kite-web/test/app-lifecycle.test.tsx)覆盖只读接入、导航与诊断。
 
-[工具活动](src/ToolActivity.tsx)只按 Runtime 提供的 `presentation=exploration` 与相同 `presentationGroupId` 聚合相邻记录；standalone 始终独立，缺失分类或分组时不按工具名、label 或邻近关系猜测。摘要与步骤使用轻量横排，内部工具名在没有更具体标题时转换为可读动作；完成态不重复显示状态，运行、等待与异常保留文字提示，Shell 使用单层结果行。会话不提供工具参数、stdout/stderr、退出码或输出限制的展开入口；失败、拒绝、取消与未知结果保留紧凑异常摘要，即使 Runtime 将内部步骤标为 hidden。父工具折叠也不隐藏其子 Agent 摘要。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
+[工具活动](src/ToolActivity.tsx)只按 Runtime 提供的 `presentation=exploration` 与相同 `presentationGroupId` 聚合相邻记录；standalone 始终独立，缺失分类时不按 label 猜测。读取直接显示动作与目标，不提供内容展开；Shell 展开有界输出并保留底部真实状态，文件修改复用 [FileDiff](src/FileChanges.tsx) 展示已确认工具结果。工具、Ask 回执与压缩标记的视觉值统一见[设计规范](docs/design-system.md#会话消息结构)。`Message.approval` 只消费端侧投影的批准来源／范围与审查状态，工具终态不清除授权事实。共享 [Approval](src/Approval.tsx) 只提交宿主提供的 approve_once／same_command／reject 回调，不拥有审批权威。子 Agent 在主会话只显示工具过程，不渲染子 Agent 结果正文；有可见父 task 时，hidden 子工具在父展开区展示，并按 toolCallId 去除重复步骤；父工具缺失或不可见时保留工具入口，避免丢失异常。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
 
 空间摘要的可选 `muted` 仅控制名称的次级文字色，不禁用展开或会话操作。Desktop 用它表示本地目录缺失；共享组件不访问本地文件系统，Web 未提供该标记时保持原样。
 

@@ -1269,7 +1269,7 @@ export class DesktopClient {
   async respondApproval(
     sessionId: string,
     interaction: RuntimeApprovalInteraction,
-    decision: 'approve_once' | 'reject',
+    decision: 'approve_once' | 'same_command' | 'reject',
   ) {
     if (this.#view.selected !== sessionId || !this.#view.ready)
       throw new Error('审批所属会话已改变，请重新查看。');

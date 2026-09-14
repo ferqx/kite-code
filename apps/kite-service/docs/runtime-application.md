@@ -183,3 +183,6 @@ Session 写入口在核对当前执行权与有效期后，可使用同一 autho
 Daemon lifecycle status 直接读取 Application activeOperations（gate 临界区或 Host 活动 Session），不维护额外计数。接受 shutdown 后仍由同一 quiesce lease 管理取消和 drain，状态查询不会取得 lease。
 
 History 可按已观察的 `throughSequence` 重建历史前缀，模式、恢复与展示身份都来自该前缀。stdio carrier 将该只读结果按完整 source record 分页，每页最多 512 条并预留协议封装字节；不拆分事件正文、不持久化分页状态。现有完整历史 owner 仍在每页请求内重建前缀，此处不承诺 Store 扫描或客户端最终 transcript 的恒定内存。
+
+
+主工具的自动审批请求与完成通过 [event projector](../src/runtime-client/event-projector.ts) 映射为 `tool.review`，只保留 tool/review 身份、封闭状态及现有 safe-text 处理过的原因；人工批准携带明确 grant。审查异常或显式升级转人工，不投影成拒绝。Contract 与 Protocol codec/mapper 必须同时允许这些展示字段，历史与订阅使用同一投影；不改变 Kernel 的授权、调度或模型结果。

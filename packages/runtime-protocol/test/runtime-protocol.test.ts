@@ -945,7 +945,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'da4fdd63:1b82b00f';
+    const expectedDigest = '4c30a2ec:1b82b00f';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -1037,3 +1037,28 @@ void pingWithExtraParams;
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+test('root review and explicit grants survive the closed wire mapper', () => {
+  for (const event of [
+    { type: 'tool.review', toolId: 'tool', reviewId: 'review', status: 'reviewing' },
+    {
+      type: 'tool.review',
+      toolId: 'tool',
+      reviewId: 'review',
+      status: 'awaiting_user',
+      summary: '需要确认',
+    },
+    {
+      type: 'approval.granted',
+      interactionId: 'interaction',
+      generation: 1,
+      owner: { kind: 'root_tool', toolCallId: 'tool' },
+      grant: 'same_command',
+    },
+  ] as const) {
+    expect(mapRuntimeClientEventToProtocol(event)).toEqual(event);
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({ ...event, privateKey: 'secret' }).success,
+    ).toBe(false);
+  }
+});

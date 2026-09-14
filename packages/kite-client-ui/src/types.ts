@@ -9,6 +9,14 @@ export interface Message {
   readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
+  readonly systemKind?: 'compaction' | 'ask' | 'approval';
+  readonly approval?: {
+    readonly state: 'reviewing' | 'awaiting_user' | 'approved' | 'rejected';
+    readonly source: 'auto' | 'user';
+    readonly interactionId?: string;
+    readonly grant?: 'approve_once' | 'same_command';
+    readonly reason?: string;
+  };
   readonly changedFile?: string;
   readonly changeConfirmed?: boolean;
   readonly toolResult?: {
@@ -51,6 +59,7 @@ export interface Message {
   readonly parentToolCallId?: string;
   readonly steps?: readonly {
     readonly id: string;
+    readonly toolCallId?: string;
     readonly text: string;
     readonly status: 'started' | 'completed' | 'failed' | 'cancelled';
   }[];

@@ -35,10 +35,12 @@ const MessageItem = memo(function MessageItem({
   copyRole,
   writeClipboardText,
   showProcess = true,
+  inlineProcess = false,
 }: {
   message: Message;
   expanded?: boolean;
   showProcess?: boolean;
+  inlineProcess?: boolean;
   onToggle: (id: string, open: boolean) => void;
   openFile?: (path: string) => void;
   copyText?: string;
@@ -84,46 +86,78 @@ const MessageItem = memo(function MessageItem({
       </article>
     );
   if (message.role === 'tool') return null;
-  if (message.role === 'subagent')
-    return (
-      <article className={`message subagent ${message.status ?? ''}`} aria-label="子 Agent 状态">
-        <div className="message-label">
-          {message.title || '未命名'} · 子 Agent
-          <span className="message-status">
-            {message.status ? statusLabel(message.status) : ''}
-          </span>
+  if (message.role === 'subagent') {
+    if (!showProcess) return null;
+    const steps = (message.steps ?? []).map((step) => (
+      <div
+        className={`tool-activity-step ${step.status === 'started' ? 'running' : step.status}`}
+        key={step.id}
+      >
+        <span className="tool-step-title tool-label">{step.text}</span>
+        <span className="tool-step-status" data-status={step.status}>
+          {step.status === 'completed'
+            ? ''
+            : statusLabel(step.status === 'started' ? 'running' : step.status)}
+        </span>
+      </div>
+    ));
+    // Child prose/results belong to the task result; the parent transcript shows tool activity only.
+    if (inlineProcess)
+      return (
+        // biome-ignore lint/a11y/useSemanticElements: this is a group of tool records, not form controls.
+        <div
+          role="group"
+          className="subagent-process"
+          aria-label={`${message.title || '子 Agent'}的工具步骤`}
+        >
+          {steps}
         </div>
-        {message.text && <MessageContent text={message.text} openFile={openFile} />}
-        {showProcess && !!message.steps?.length && (
-          <details className="subagent-process" open={expanded ?? false}>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: summary is the native disclosure control; the handler preserves the user's explicit choice while its parent unmounts. */}
-            <summary
-              aria-label={`${message.title || '子 Agent'}的执行过程`}
-              onClick={(event) => {
-                event.preventDefault();
-                onToggle(message.id, !expanded);
-              }}
-            >
-              执行过程 · {message.steps.length} 项
-            </summary>
-            <ol
-              className="tool-activity-steps"
-              aria-label={`${message.title || '子 Agent'}的工具步骤`}
-            >
-              {message.steps.map((step) => (
-                <li className="tool-activity-step" key={step.id}>
-                  <div className="tool-step-heading">
-                    <span className="tool-step-title">{step.text}</span>
-                    <span className="message-status">
-                      {statusLabel(step.status === 'started' ? 'running' : step.status)}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </details>
-        )}
+      );
+    return (
+      <ToolActivity
+        messages={[
+          {
+            ...message,
+            role: 'tool',
+            toolName: 'task',
+            title: '运行子 Agent',
+            arguments: { name: message.title },
+            text: '',
+          },
+        ]}
+        expanded={expanded}
+        onToggle={(open) => onToggle(message.id, open)}
+        openFile={openFile}
+        renderChildren={() => steps}
+      />
+    );
+  }
+  if (message.systemKind === 'compaction')
+    return (
+      <article className={`message context-compacted ${message.status ?? ''}`}>
+        <div role="status">
+          <span aria-hidden="true" />
+          <span className="tool-label">{message.title}</span>
+          <span aria-hidden="true" />
+        </div>
+        {message.status === 'failed' && message.text && <p>{message.text}</p>}
       </article>
+    );
+  if (message.systemKind === 'ask')
+    return (
+      <ToolActivity
+        messages={[
+          {
+            ...message,
+            role: 'tool',
+            toolName: 'ask_user',
+            status: message.settled ? 'completed' : 'waiting',
+          },
+        ]}
+        expanded={expanded}
+        onToggle={(open) => onToggle(message.id, open)}
+        renderChildren={() => null}
+      />
     );
   if (message.role === 'system')
     return (
@@ -318,9 +352,25 @@ export function Conversation({
     group.push(message);
     children.set(message.parentToolCallId, group);
   }
+  for (const message of messages) {
+    if (
+      message.role !== 'tool' ||
+      message.presentation !== 'hidden' ||
+      !message.presentationOwner ||
+      !visibleToolIds.has(message.presentationOwner.parentToolCallId)
+    )
+      continue;
+    const owner = message.presentationOwner.parentToolCallId;
+    children.set(owner, [...(children.get(owner) ?? []), message]);
+  }
   const shown = messages.filter((message) => {
     if (message.role === 'system') return message.settled || !!message.status;
-    if (message.role === 'tool') return isVisibleTool(message);
+    if (message.role === 'tool')
+      return (
+        isVisibleTool(message) ||
+        (!!message.presentationOwner &&
+          !visibleToolIds.has(message.presentationOwner.parentToolCallId))
+      );
     if (message.role === 'subagent')
       return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
     return !message.settled || !!message.text;
@@ -415,18 +465,40 @@ export function Conversation({
                     onToggle={(open) => onToggle(activityKey, open)}
                     openFile={openFile}
                     renderChildren={(toolCallId, taskExpanded) =>
-                      children
-                        .get(toolCallId)
-                        ?.map((child) => (
+                      children.get(toolCallId)?.map((child) =>
+                        child.role === 'tool' ? (
+                          <ToolActivity
+                            key={child.id}
+                            messages={[child]}
+                            expanded={expanded[child.id]}
+                            onToggle={(open) => onToggle(child.id, open)}
+                            openFile={openFile}
+                            renderChildren={() => null}
+                          />
+                        ) : (
                           <MessageItem
                             key={child.id}
-                            message={child}
+                            message={{
+                              ...child,
+                              steps: child.steps?.filter(
+                                (step) =>
+                                  !step.toolCallId ||
+                                  !messages.some(
+                                    (tool) =>
+                                      tool.role === 'tool' &&
+                                      tool.id === `tool:${step.toolCallId}` &&
+                                      tool.presentationOwner?.parentToolCallId === toolCallId,
+                                  ),
+                              ),
+                            }}
+                            inlineProcess
                             expanded={expanded[child.id]}
                             showProcess={taskExpanded}
                             onToggle={onToggle}
                             openFile={openFile}
                           />
-                        ))
+                        ),
+                      )
                     }
                   />
                 ) : (

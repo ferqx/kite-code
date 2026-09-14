@@ -14,34 +14,40 @@ import {
   Wrench01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { FileDiff } from './FileChanges';
 import { statusLabel } from './status';
 import type { Message } from './types';
 import { Button } from './ui';
 
 const TOOL_LABELS: Record<string, string> = {
   ask_user: '询问用户',
-  edit_file: '编辑文件',
+  edit_file: '修改',
   glob: '查找文件',
   list_mcp_resources: '列出 MCP 资源',
   list_mcp_tools: '列出 MCP 工具',
   mcp_tool: '运行 MCP 工具',
-  read_file: '读取文件',
+  read_file: '读取',
   read_mcp_resource: '读取 MCP 资源',
   request_plan_review: '请求计划审阅',
   search_content: '搜索内容',
   search_files: '搜索文件',
-  shell_execute: '运行命令',
+  shell_execute: '运行',
   skill: '使用 Skill',
   task: '运行子 Agent 任务',
   tool_search: '搜索工具',
   update_plan: '更新计划',
   web_fetch: '读取网页',
-  write_file: '写入文件',
+  write_file: '写入',
   write_plan: '编写计划',
 };
 
 function toolTitle(message: Message): string {
+  if (
+    message.toolName &&
+    ['read_file', 'edit_file', 'write_file', 'shell_execute'].includes(message.toolName)
+  )
+    return TOOL_LABELS[message.toolName]!;
   const title = message.title?.trim();
   if (title && title !== message.toolName) return title;
   return (
@@ -65,7 +71,7 @@ function toolTarget(message: Message): string | undefined {
     case 'web_fetch':
       return argument('url');
     case 'shell_execute':
-      return argument('description') ?? argument('command');
+      return argument('command');
     case 'write_plan':
     case 'update_plan':
     case 'request_plan_review':
@@ -95,6 +101,8 @@ function toolTarget(message: Message): string | undefined {
 }
 
 function resultPreview(message: Message): string | undefined {
+  if (message.approval?.reason && ['rejected', 'awaiting_user'].includes(message.approval.state))
+    return message.approval.reason;
   if (message.toolResult?.terminationReason === 'timed_out') return '执行超时';
   if (message.toolResult?.terminationReason === 'cancelled') return '执行已取消';
   if (message.toolResult?.terminationReason === 'sandbox_denied') return '执行被沙箱拒绝';
@@ -161,6 +169,146 @@ function activitySummary(messages: readonly Message[]) {
   return parts.join(' · ') || `${messages.length} 项工具操作`;
 }
 
+function approvalLabel(message: Message): string | undefined {
+  const approval = message.approval;
+  if (!approval) return;
+  switch (approval.state) {
+    case 'reviewing':
+      return message.settled ? '自动审批已停止' : '正在自动审批';
+    case 'awaiting_user':
+      return message.settled ? undefined : '等待人工审批';
+    case 'rejected':
+      return approval.source === 'auto' ? '自动审批未通过' : '人工审批已拒绝';
+    case 'approved':
+      return approval.source === 'auto'
+        ? '已自动批准'
+        : approval.grant === 'same_command'
+          ? '已人工批准 · 本会话相同命令'
+          : '已人工批准';
+  }
+}
+
+function executionLabel(message: Message) {
+  if (message.approval?.state === 'reviewing' && !message.settled) return '';
+  if (message.approval?.state === 'awaiting_user' && !message.settled) return '等待人工审批';
+  if (message.approval?.state === 'rejected') return '未执行';
+  if (message.toolResult?.terminationReason === 'timed_out') return '执行超时';
+  return message.status === 'completed'
+    ? '成功'
+    : message.status === 'queued'
+      ? '等待执行'
+      : message.status
+        ? statusLabel(message.status)
+        : '结果未知';
+}
+
+function ShellOutput({ message }: { message: Message }) {
+  const viewport = useRef<HTMLPreElement>(null);
+  const follow = useRef(true);
+  const [following, setFollowing] = useState(true);
+  const result = message.toolResult;
+  const stdout = result?.stdout ?? message.toolProgress?.stdout;
+  const stderr = result?.stderr ?? message.toolProgress?.stderr;
+  const streams = [stdout, stderr].filter(Boolean).join('\n');
+  const reason =
+    message.approval?.state === 'rejected' || message.approval?.state === 'awaiting_user'
+      ? message.approval.reason
+      : undefined;
+  const output =
+    reason || streams || (message.status === 'completed' ? '命令执行成功，无输出。' : message.text);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: output commits change the scroll height.
+  useLayoutEffect(() => {
+    if (follow.current && viewport.current)
+      viewport.current.scrollTop = viewport.current.scrollHeight;
+  }, [output]);
+  return (
+    <div className="shell-output" data-status={message.status}>
+      {/* biome-ignore lint/a11y/useSemanticElements: keep preformatted output as the named scroll region. */}
+      <pre
+        role="region"
+        ref={viewport}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: allow keyboard scrolling of output.
+        tabIndex={0}
+        aria-label="Shell 执行输出"
+        onScroll={() => {
+          const node = viewport.current!;
+          follow.current = node.scrollHeight - node.clientHeight - node.scrollTop < 24;
+          setFollowing(follow.current);
+        }}
+      >
+        {output || '等待输出…'}
+        {streams &&
+        ['cancelled', 'failed', 'rejected'].includes(message.status ?? '') &&
+        message.text &&
+        !streams.includes(message.text)
+          ? `\n${message.text}`
+          : ''}
+      </pre>
+      <span className="shell-result" role="status">
+        {executionLabel(message)}
+        {result?.exitCode !== undefined ? ` · 退出码 ${result.exitCode}` : ''}
+        {result?.status === 'exhausted' ? ' · 输出已达到工具限制' : ''}
+      </span>
+      {!following && (
+        <Button
+          variant="ghost"
+          className="shell-latest"
+          onClick={() => {
+            follow.current = true;
+            setFollowing(true);
+            if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
+          }}
+        >
+          回到最新输出
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function ToolRow({ message, openFile }: { message: Message; openFile?: (path: string) => void }) {
+  const target = toolTarget(message);
+  const file = ['read_file', 'edit_file', 'write_file'].includes(message.toolName ?? '');
+  const approval = approvalLabel(message);
+  const status = executionLabel(message);
+  return (
+    <div
+      className={`tool-activity-step ${!message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
+    >
+      <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
+      <div className="tool-step-content">
+        <div className="tool-step-heading">
+          <span className="tool-step-title tool-label">{toolTitle(message)}</span>
+          {target && (
+            <span className="tool-step-target">
+              {file && openFile ? (
+                <Button className="file-link" onClick={() => openFile(target)}>
+                  {target}
+                </Button>
+              ) : (
+                target
+              )}
+            </span>
+          )}
+          {approval && (
+            <span className="tool-approval" role="status">
+              {approval}
+            </span>
+          )}
+          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+            <span className="tool-step-status" data-status={message.status}>
+              {status}
+            </span>
+          )}
+        </div>
+        {(message.approval?.state === 'awaiting_user' ||
+          ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
+          resultPreview(message) && <p className="tool-step-preview">{resultPreview(message)}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function ToolActivity({
   messages,
   expanded,
@@ -174,111 +322,164 @@ export function ToolActivity({
   openFile?: (path: string) => void;
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
 }) {
-  const active = messages.some((message) => !message.settled);
-  const waiting = messages.some((message) => !message.settled && message.status === 'waiting');
-  const running = messages.some((message) => !message.settled && message.status === 'running');
-  const queued = messages.some((message) => !message.settled && message.status === 'queued');
-  const statusCount = (status: Message['status']) =>
-    messages.filter((message) => message.status === status).length;
-  const failed = statusCount('failed');
-  const rejected = statusCount('rejected');
-  const cancelled = statusCount('cancelled');
-  const unknown = statusCount('unknown');
-  const unsuccessful = failed + rejected + cancelled + unknown;
-  const singleActive = messages.length === 1 && active;
-  const open = singleActive || (expanded ?? (active || unsuccessful > 0));
-  const standaloneShell = messages.length === 1 && messages[0]?.toolName === 'shell_execute';
-  const terminalState = [
-    failed && `${failed} 项失败`,
-    rejected && `${rejected} 项已拒绝`,
-    cancelled && `${cancelled} 项已停止`,
-    unknown && `${unknown} 项结果未知`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const state = waiting
-    ? '等待交互'
-    : running
-      ? '进行中'
-      : queued
-        ? '排队中'
-        : unsuccessful
-          ? terminalState
-          : '已完成';
-
+  const message = messages[0]!;
+  const grouped = messages.length > 1;
+  const shell = !grouped && message.toolName === 'shell_execute';
+  const read =
+    !grouped &&
+    ['read_file', 'search_content', 'search_files', 'glob', 'read_mcp_resource'].includes(
+      message.toolName ?? '',
+    );
+  const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
+  const active = messages.some((item) => !item.settled);
+  const running = messages.some((item) => !item.settled && item.status === 'running');
+  const issues = messages.filter((item) =>
+    ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
+  );
+  const open = expanded ?? (grouped && active);
+  const children = messages.map((item) => renderChildren(item.id.slice(5), open));
+  const approval = approvalLabel(message);
+  const pendingReview = !message.settled && message.approval?.state === 'reviewing';
+  const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
+  const canExpand =
+    !read &&
+    (!edit || hasDiff) &&
+    !pendingReview &&
+    (grouped ||
+      shell ||
+      hasDiff ||
+      message.toolName === 'task' ||
+      !!message.text ||
+      children.some(Boolean));
+  const label = grouped ? activitySummary(messages) : toolTitle(message);
+  const target = !grouped ? toolTarget(message) : undefined;
+  const status = grouped
+    ? issues.length
+      ? `${issues.length} 项异常`
+      : running
+        ? '正在执行'
+        : active
+          ? '等待执行'
+          : ''
+    : executionLabel(message);
+  const heading = (
+    <>
+      <HugeiconsIcon
+        className="tool-activity-kind-icon"
+        icon={grouped ? Search01Icon : toolIcon(message)}
+      />
+      <span className="tool-activity-title tool-label">{label}</span>
+      {target &&
+        (shell ? (
+          <code className="tool-command tool-label">{target}</code>
+        ) : (
+          <span className="tool-step-target">{target}</span>
+        ))}
+      {approval && (
+        <span className="tool-approval" role="status">
+          {approval}
+        </span>
+      )}
+      {status && (grouped || !shell || !open) && status !== '成功' && status !== approval && (
+        <span
+          className="tool-activity-state"
+          data-status={issues.length ? 'issue' : 'neutral'}
+          role="status"
+        >
+          {status}
+        </span>
+      )}
+      {canExpand && (
+        <HugeiconsIcon
+          className="tool-activity-chevron"
+          icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+        />
+      )}
+    </>
+  );
   return (
     <article
-      className={`message tool-activity${standaloneShell ? ' shell-activity' : ''}${unsuccessful ? ' has-issues' : ''}${active ? ' active' : ''}`}
-      aria-label={`${activitySummary(messages)} · ${state}`}
+      className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
+      aria-label={`${label}${status ? ` · ${status}` : ''}`}
     >
-      {!singleActive && (
+      {read ? (
+        <ToolRow message={message} openFile={openFile} />
+      ) : edit ? (
+        <div className="tool-activity-summary tool-edit-heading">
+          <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
+          <span className="tool-label">{label}</span>
+          {target &&
+            (openFile ? (
+              <Button className="file-link" onClick={() => openFile(target)}>
+                {target}
+              </Button>
+            ) : (
+              <span className="tool-step-target">{target}</span>
+            ))}
+          {hasDiff && (
+            <Button
+              variant="ghost"
+              className="tool-diff-toggle"
+              aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
+              aria-expanded={open}
+              onClick={() => onToggle(!open)}
+            >
+              <HugeiconsIcon icon={open ? ArrowDown01Icon : ArrowRight01Icon} />
+            </Button>
+          )}
+          {approval && (
+            <span className="tool-approval" role="status">
+              {approval}
+            </span>
+          )}
+          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+            <span className="tool-step-status" data-status={message.status}>
+              {status}
+            </span>
+          )}
+        </div>
+      ) : canExpand ? (
         <Button
-          className="tool-activity-summary"
           variant="ghost"
-          size="sm"
+          className="tool-activity-summary"
           aria-expanded={open}
           onClick={() => onToggle(!open)}
         >
-          <HugeiconsIcon
-            data-icon="inline-start"
-            className="tool-activity-kind-icon"
-            icon={standaloneShell ? TerminalIcon : Search01Icon}
-          />
-          <span className="tool-activity-title">{activitySummary(messages)}</span>
-          {state !== '已完成' && (
-            <span
-              className="tool-activity-state"
-              data-status={waiting ? 'waiting' : running ? 'running' : queued ? 'queued' : 'issue'}
-              role="status"
-            >
-              {state}
-            </span>
-          )}
-          <span className="tool-activity-chevron" aria-hidden="true">
-            <HugeiconsIcon icon={open ? ArrowDown01Icon : ArrowRight01Icon} />
-          </span>
+          {heading}
         </Button>
+      ) : (
+        <div className="tool-activity-summary">{heading}</div>
       )}
-      {open && (
-        <ol className="tool-activity-steps">
-          {messages.map((message) => {
-            const target = toolTarget(message);
-            const preview = resultPreview(message);
-            return (
-              <li className={`tool-activity-step ${message.status ?? ''}`} key={message.id}>
-                <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
-                <div className="tool-step-content">
-                  <div className="tool-step-heading">
-                    <span className="tool-step-title">{toolTitle(message)}</span>
-                    {target && (
-                      <span className="tool-step-target">
-                        {openFile && (message.toolName === 'read_file' || !!message.changedFile) ? (
-                          <Button className="file-link" onClick={() => openFile(target)}>
-                            {target}
-                          </Button>
-                        ) : (
-                          target
-                        )}
-                      </span>
-                    )}
-                    {!['completed', 'running', 'queued'].includes(message.status ?? '') && (
-                      <span className="tool-step-status" data-status={message.status ?? 'unknown'}>
-                        {message.status ? statusLabel(message.status) : '状态未提供'}
-                      </span>
-                    )}
-                  </div>
-                  {preview && message.status !== 'completed' && (
-                    <p className="tool-step-preview">{preview}</p>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+      {edit && !hasDiff && (issues.length > 0 || message.approval?.state === 'awaiting_user') && (
+        <p className="tool-step-preview">{resultPreview(message)}</p>
       )}
-      <div className="tool-activity-children">
-        {messages.map((message) => renderChildren(message.id.slice(5), open))}
-      </div>
+      {!open &&
+        grouped &&
+        issues.map((item) => (
+          <p className="tool-step-preview" key={item.id}>
+            {toolTarget(item)} · {resultPreview(item)}
+          </p>
+        ))}
+      {open && grouped && (
+        <div className="tool-activity-steps">
+          {messages.map((item) => (
+            <ToolRow key={item.id} message={item} openFile={openFile} />
+          ))}
+        </div>
+      )}
+      {open && shell && <ShellOutput message={message} />}
+      {open && hasDiff && <FileDiff message={message} />}
+      {open &&
+        !grouped &&
+        !shell &&
+        !edit &&
+        !read &&
+        message.toolName !== 'task' &&
+        message.text && <pre className="tool-detail">{message.text}</pre>}
+      {!open && !grouped && !shell && !read && !edit && issues.length > 0 && (
+        <p className="tool-step-preview">{resultPreview(message)}</p>
+      )}
+      {open && <div className="tool-activity-children">{children}</div>}
     </article>
   );
 }

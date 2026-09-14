@@ -169,6 +169,7 @@ export function projectRuntimeClientEvent(
     case 'approval.granted':
       return {
         type: 'approval.granted',
+        grant: event.grant,
         interactionId: event.interactionId,
         generation: event.generation,
         owner: event.owner,
@@ -176,6 +177,7 @@ export function projectRuntimeClientEvent(
     case 'approval.batch_released':
       return {
         type: 'approval.granted',
+        grant: event.grant,
         interactionId: event.interactionId,
         generation: event.generation,
         owner: event.owner,
@@ -447,7 +449,12 @@ export function projectRuntimeClientEvent(
             status: 'queued',
             summary: projectRuntimeClientText(event.reason, 8_192),
           }
-        : { type: 'unavailable', reason: 'redacted' };
+        : {
+            type: 'tool.review',
+            toolId: event.owner.toolCallId,
+            reviewId: event.reviewId,
+            status: 'reviewing',
+          };
     case 'auto_review.completed':
       return event.owner.kind === 'subagent_tool'
         ? {
@@ -461,7 +468,20 @@ export function projectRuntimeClientEvent(
               ? {}
               : { summary: projectRuntimeClientText(event.result.reason, 8_192) }),
           }
-        : { type: 'unavailable', reason: 'redacted' };
+        : {
+            type: 'tool.review',
+            toolId: event.owner.toolCallId,
+            reviewId: event.reviewId,
+            status:
+              event.result.escalatedToUser || !event.result.ok
+                ? 'awaiting_user'
+                : event.result.approved
+                  ? 'approved'
+                  : 'rejected',
+            ...(event.result.reason === undefined
+              ? {}
+              : { summary: projectRuntimeClientText(event.result.reason, 8_192) }),
+          };
     case 'subagent.completed':
       return {
         type: 'subagent.completed',

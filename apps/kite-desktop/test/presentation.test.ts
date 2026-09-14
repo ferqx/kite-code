@@ -225,7 +225,9 @@ test('subagents keep explicit parent identity, stable steps, and terminal result
       status,
       summary: '检查边界',
     });
-  expect(messages[0]?.steps).toEqual([{ id: 'step', text: '检查边界', status: 'completed' }]);
+  expect(messages[0]?.steps).toEqual([
+    { id: 'step', toolCallId: 'child-tool', text: '检查边界', status: 'completed' },
+  ]);
   messages = projectEvent(messages, {
     type: 'subagent.completed',
     subagentId: 'child',
@@ -371,6 +373,92 @@ test('approval receipt is distinct from tool success and repeated availability c
   });
   messages = projectEvent(messages, { type: 'interaction.available', interaction });
   expect(messages).toHaveLength(1);
-  expect(messages[0]).toMatchObject({ text: 'git push', settled: true });
-  expect(messages[0]?.title).toBe('已批准本次命令，执行结果以工具记录为准');
+  expect(messages[0]).toMatchObject({
+    id: 'tool:tool',
+    settled: false,
+    status: 'queued',
+    approval: { state: 'approved', source: 'user' },
+  });
+});
+
+test('auto review stays on the tool and manual grant survives stop and late review', () => {
+  let messages = projectEvent([], {
+    type: 'tool.queued',
+    toolId: 'test',
+    toolName: 'shell_execute',
+    arguments: { command: 'pnpm test' },
+    summary: 'Queued',
+    presentation: 'standalone',
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.review',
+    toolId: 'test',
+    reviewId: 'review',
+    status: 'reviewing',
+  });
+  expect(messages[0]).toMatchObject({
+    status: 'waiting',
+    approval: { state: 'reviewing', source: 'auto' },
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.review',
+    toolId: 'test',
+    reviewId: 'review',
+    status: 'awaiting_user',
+    summary: '需人工确认',
+  });
+  messages = projectEvent(messages, {
+    type: 'approval.granted',
+    interactionId: 'human',
+    generation: 1,
+    owner: { kind: 'root_tool', toolCallId: 'test' },
+    grant: 'same_command',
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.progress',
+    toolId: 'test',
+    stream: 'stdout',
+    summary: 'tests started',
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.cancelled',
+    toolId: 'test',
+    presentation: 'standalone',
+    summary: '用户停止',
+  });
+  messages = projectEvent(messages, {
+    type: 'tool.review',
+    toolId: 'test',
+    reviewId: 'review',
+    status: 'approved',
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({
+    status: 'cancelled',
+    settled: true,
+    approval: { source: 'user', state: 'approved', grant: 'same_command' },
+    toolProgress: { stdout: 'tests started' },
+  });
+});
+
+test('each compaction keeps a single marker from requested through terminal result', () => {
+  let messages = projectEvent([], { type: 'context.compaction', status: 'requested' });
+  const id = messages[0]?.id;
+  messages = projectEvent(messages, {
+    type: 'context.compaction',
+    status: 'failed',
+    summary: '请求超时',
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({
+    id,
+    systemKind: 'compaction',
+    settled: true,
+    status: 'failed',
+    text: '请求超时',
+  });
+  messages = projectEvent(messages, { type: 'context.compaction', status: 'requested' });
+  messages = projectEvent(messages, { type: 'context.compaction', status: 'completed' });
+  expect(messages).toHaveLength(2);
+  expect(messages[1]).toMatchObject({ title: '上下文已自动压缩', status: 'completed' });
 });
