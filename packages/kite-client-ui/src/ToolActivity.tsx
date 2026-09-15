@@ -343,7 +343,7 @@ export function ToolActivity({
       /* A tool failure is not an answered question. */
     }
   }
-  const answerBrief = ask?.answers ? Object.values(ask.answers).join(' · ') : ask?.summary;
+  const askMultiple = !!ask && ask.questions.length > 1;
   const grouped = messages.length > 1;
   const shell = !grouped && message.toolName === 'shell_execute';
   const read =
@@ -369,20 +369,38 @@ export function ToolActivity({
     (grouped ||
       shell ||
       hasDiff ||
+      !!ask ||
       message.toolName === 'task' ||
       !!message.text ||
       children.some(Boolean));
-  const label = grouped ? activitySummary(messages) : toolTitle(message);
-  const target = !grouped ? toolTarget(message) : undefined;
-  const status = grouped
-    ? issues.length
-      ? `${issues.length} 项异常`
-      : running
-        ? '正在执行'
-        : active
-          ? '等待执行'
-          : ''
-    : executionLabel(message);
+  const label = grouped
+    ? activitySummary(messages)
+    : ask
+      ? askMultiple
+        ? `询问用户 · ${message.status === 'completed' ? '已回答 ' : ''}${ask.questions.length} 项`
+        : '询问用户'
+      : toolTitle(message);
+  const target = ask
+    ? !askMultiple
+      ? ask.questions[0]?.question
+      : undefined
+    : !grouped
+      ? toolTarget(message)
+      : undefined;
+  const status =
+    ask && message.status === 'cancelled'
+      ? open
+        ? undefined
+        : '已取消'
+      : grouped
+        ? issues.length
+          ? `${issues.length} 项异常`
+          : running
+            ? '正在执行'
+            : active
+              ? '等待执行'
+              : ''
+        : executionLabel(message);
   const heading = (
     <>
       <HugeiconsIcon
@@ -394,9 +412,8 @@ export function ToolActivity({
         (shell ? (
           <code className="tool-command tool-label">{target}</code>
         ) : (
-          <span className="tool-step-target">{target}</span>
+          <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
         ))}
-      {answerBrief && <span className="tool-ask-brief">{answerBrief}</span>}
       {approval && (
         <span className="tool-approval" role="status">
           {approval}
@@ -506,16 +523,25 @@ export function ToolActivity({
       {open && hasDiff && <FileDiff message={message} />}
       {open && ask && (
         <div className="tool-ask-answers">
-          {ask.questions.map((question) => (
-            <div key={question.id}>
-              <span className="tool-ask-question">{question.question}</span>
-              {(ask.answers?.[question.id] ??
-                (ask.questions.length === 1 ? ask.summary : undefined)) && (
-                <p>{ask.answers?.[question.id] ?? ask.summary}</p>
-              )}
+          {message.status === 'cancelled' ? (
+            <span>已取消</span>
+          ) : askMultiple ? (
+            ask.questions.map((question, index) => (
+              <div className="tool-ask-answer" key={question.id}>
+                <span className="tool-ask-prefix">{index + 1}. </span>
+                <span className="tool-ask-text">
+                  {question.question}：{ask.answers?.[question.id] ?? '尚未回答'}
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="tool-ask-answer">
+              <span className="tool-ask-prefix">回答：</span>
+              <span className="tool-ask-text">
+                {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
+              </span>
             </div>
-          ))}
-          {!ask.answers && ask.questions.length !== 1 && ask.summary && <p>{ask.summary}</p>}
+          )}
         </div>
       )}
       {open &&

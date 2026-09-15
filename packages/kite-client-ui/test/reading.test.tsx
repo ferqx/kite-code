@@ -1327,6 +1327,7 @@ test('Ask renders one paired history record instead of the owned raw tool result
           role: 'system',
           systemKind: 'ask',
           title: '回答已提交',
+          status: 'completed',
           settled: true,
           text: 'Next?\nstop',
           ask: {
@@ -1352,13 +1353,48 @@ test('Ask renders one paired history record instead of the owned raw tool result
   expect(document.body.textContent).not.toContain('Completed.');
   expect(document.body.textContent).not.toContain('"answers"');
   expect(document.body.textContent).toContain('问题格式无效');
-  expect(document.querySelectorAll('.tool-ask-brief')).toHaveLength(1);
+  expect(document.body.textContent).toContain('询问用户 · 已回答 2 项');
   const button = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
   await click(button);
   expect(
     Array.from(document.querySelectorAll('.tool-ask-answers > div')).map(
       (item) => item.textContent,
     ),
-  ).toEqual(['接下来要我做什么？先不动，到此为止', '范围？当前会话']);
+  ).toEqual(['1. 接下来要我做什么？：先不动，到此为止', '2. 范围？：当前会话']);
   expect(document.querySelector('.tool-ask-answers pre')).toBeNull();
+});
+
+test('single Ask keeps its question in the heading and cancelled Ask hides answer content', async () => {
+  const message: Message = {
+    id: 'interaction:single',
+    role: 'system',
+    systemKind: 'ask',
+    status: 'completed',
+    settled: true,
+    text: '',
+    ask: {
+      questions: [{ id: 'q1', question: '接下来做什么？' }],
+      answers: { q1: '自定义回答\n'.repeat(8) },
+    },
+  };
+  await render(
+    <Conversation messages={[message]} selected connected loading={false} saveReading={() => {}} />,
+  );
+  expect(document.body.textContent).toContain('接下来做什么？');
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.tool-ask-prefix')?.textContent).toBe('回答：');
+  expect(document.querySelector('.tool-ask-text')?.textContent).toBe('自定义回答\n'.repeat(8));
+  await act(() =>
+    root!.render(
+      <Conversation
+        messages={[{ ...message, status: 'cancelled' }]}
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  expect(document.querySelector('.tool-ask-answers')?.textContent).toBe('已取消');
+  expect(document.querySelector('.tool-ask-prefix')).toBeNull();
 });

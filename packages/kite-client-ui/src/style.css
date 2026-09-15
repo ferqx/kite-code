@@ -2146,25 +2146,29 @@ body {
   }
 }
 
-.kite-client .tool-ask-brief {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 36ch;
-}
 .kite-client .tool-ask-answers {
   display: grid;
-  gap: 12px;
-  padding: 8px 0;
-  line-height: 1.6;
+  gap: 4px;
+  padding: 4px 0 8px calc(1em + 8px);
+  line-height: 24px;
 }
-.kite-client .tool-ask-answers p {
-  margin: 4px 0 0;
-  color: var(--foreground);
-  white-space: pre-wrap;
+.kite-client .tool-ask-answer {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.kite-client .tool-ask-prefix {
+  flex: none;
+  white-space: pre;
+}
+.kite-client .tool-ask-text {
+  min-width: 0;
   overflow-wrap: anywhere;
-}
-.kite-client .tool-ask-question {
-  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  max-height: 120px;
+  overflow: hidden;
 }
