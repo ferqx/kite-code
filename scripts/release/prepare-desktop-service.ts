@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { kiteAppServerVersion } from '@kite-ai/kite-local-runtime/client';
 import { selectKiteServiceEnvironmentSource } from './local-service-client';
@@ -22,8 +22,22 @@ const bytes = candidate.files.get(entry.entrypoint);
 if (!bytes) throw new Error('Verified candidate service is missing.');
 const directory = resolve('apps/kite-desktop/service');
 mkdirSync(directory, { recursive: true });
-writeFileSync(resolve(directory, 'kite-service'), bytes);
-chmodSync(resolve(directory, 'kite-service'), 0o755);
+// Publish a new inode instead of overwriting an executable macOS may have cached.
+const staging = mkdtempSync(resolve(directory, '.prepare-'));
+try {
+  const executable = resolve(staging, 'kite-service');
+  writeFileSync(executable, bytes);
+  chmodSync(executable, 0o755);
+  const signature = Bun.spawnSync(['/usr/bin/codesign', '--verify', '--strict', executable], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (signature.exitCode !== 0)
+    throw new Error(`Desktop service signature is invalid: ${signature.stderr.toString()}`);
+  renameSync(executable, resolve(directory, 'kite-service'));
+} finally {
+  rmSync(staging, { recursive: true, force: true });
+}
 writeFileSync(
   resolve(directory, 'desktop.json'),
   `${JSON.stringify(

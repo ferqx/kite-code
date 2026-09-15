@@ -45,6 +45,10 @@ console.log('production session list passed');
 `,
     );
     await compileOssReleaseExecutable(entrypoint, executable);
+    if (process.platform === 'darwin') {
+      const signature = Bun.spawnSync(['/usr/bin/codesign', '--verify', '--strict', executable]);
+      expect(signature.exitCode).toBe(0);
+    }
     rmSync(entrypoint);
     const child = Bun.spawn([executable], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
     const [exit, stdout, stderr] = await Promise.all([

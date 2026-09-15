@@ -48,6 +48,8 @@ Windows ACL/locked-directory atomic publication与三平台 qualification 仍未
 
 ## 制品与安装
 
+macOS 原生编译完成后，构建 owner 对可执行文件重新执行本地 ad-hoc 签名并严格校验，再读取字节生成候选摘要，避免编译载荷使嵌入签名失效而被系统直接终止。该签名仅满足本机执行校验，不提供开发者身份、notarization 或发布来源证明。
+
 `bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与`kite-service`，并生成`payload/web`静态资产；其中固定
 `api-docs/openapi.json`逐字节来自canonical Agent API OpenAPI，
 是verifier、installer preflight与smoke共同要求且由manifest checksum绑定的必需asset。所有制品共享 candidate identity，另生成 gzip tar、严格 manifest、

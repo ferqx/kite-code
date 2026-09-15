@@ -666,6 +666,24 @@ export async function compileOssReleaseExecutable(
   if (!existsSync(outfile) || !statSync(outfile).isFile()) {
     throw new Error(`Bun compile did not create ${outfile}.`);
   }
+  if (process.platform === 'darwin') {
+    // Bun's compiled payload can invalidate the embedded linker signature.
+    // Finalize executable bytes before callers calculate candidate identities.
+    for (const args of [
+      ['--force', '--sign', '-'],
+      ['--verify', '--strict'],
+    ]) {
+      const signed = Bun.spawnSync(['/usr/bin/codesign', ...args, outfile], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      if (signed.exitCode !== 0) {
+        throw new Error(
+          `macOS executable signing failed for ${outfile}: ${signed.stderr.toString()}`,
+        );
+      }
+    }
+  }
 }
 
 export async function writeOssCandidateArchive(input: {
