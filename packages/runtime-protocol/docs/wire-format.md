@@ -11,3 +11,5 @@
 验证：[Protocol tests](../test/)、[Server tests](../../runtime-server/test/runtime-server.test.ts)、[Client tests](../../runtime-client/test/runtime-client.test.ts)。
 
 `history/load_session` 的可选 `page` 参数携带 `afterSequence` 与 `throughSequence`。分页响应为闭集 `history_session_page`，只传 source-sequence records，不重复传 flattened events；客户端合并后还原完整 transcript。单帧仍受 1 MiB 限制，不分页的显式读取保留完整响应语义。
+
+按需恢复的 command/query、codec、双向 mapper 和生成类型在同一配套版本更新：`recover_session` 绑定 expectedRevision/expectedAuthorityRevision，`get_session_recovery` 只读既有事实，`get_command_receipt` 查询原命令回执。原命令作为查询数据绝不进入 dispatch；Host 仍校验 scope 和 digest。create_session 允许显式请求目标 workspace，但准入规范化与信任校验后的上下文才是最终执行身份。无未发布格式的兼容分支。

@@ -103,6 +103,9 @@ async function fixture(responses: MockResponse[] = []) {
     const carrier = carriers.get(args?.connectionId as number)!;
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
+      // This fixture keeps a lost creation genuinely unknown: its receipt read is unavailable too.
+      if (message.method === 'runtime/query' && message.params.query.type === 'get_command_receipt')
+        failures.set(message.id, 'temporary');
       if (
         message.method === 'runtime/command' &&
         message.params?.command?.type === 'create_session' &&

@@ -21,3 +21,9 @@ POSIX 使用 process group/watchdog 边界处理正常取消与 Host 意外退�
 未知外部结果保持 unknown，不通过重复运行“试试看”恢复。持久恢复事实由 Storage 检查，业务恢复选择由 Kernel 决定，Host 组织执行。流程见[取消恢复链路](../../../docs/development/flows/cancellation-recovery.md)。
 
 验证：[tool coordinator](../test/tool-pipeline-coordinator.test.ts)、[effect supervisor](../test/effect-supervisor.test.ts)、[process execution](../test/process-execution-port.test.ts)、[state recovery](../test/state-recovery.test.ts)。
+
+## 空闲执行权
+
+App Server 的释放回调由 Host 在会话 mailbox 中调用，与下一条命令取得执行权串行。命令提交、activation 和 scheduled work 的 completion 全部结束后，Service 等待 coordinator 清理并核对未决 effect/Provider 事实，才以原 generation 与 authority revision 释放；不再续约空闲会话。下一次执行重新获取 generation 并恢复 coordinator。终态通知先于清理时仍等待实际 completion；等待用户交互只在没有活动执行资源时释放。
+
+get_command_receipt 只读取原命令的持久结果，校验查询 scope 与原命令相符，不进入 mailbox、不获取执行权、不执行 activation。缺失回执保持未知；命令自身的持久幂等校验继续保留。验证见[命令与清理回归](../test/persistent-command-host.test.ts)。

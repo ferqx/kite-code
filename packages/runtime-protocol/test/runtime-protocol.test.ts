@@ -112,7 +112,16 @@ describe('Runtime Protocol', () => {
     };
     const command = mapProtocolCommandToRuntimeCommand(wire, { workspace: '/not-on-the-wire' });
     expect(command).toEqual({ ...wire, workspace: '/not-on-the-wire' });
-    expect(mapRuntimeCommandToProtocol(command)).toEqual(wire);
+    expect(mapRuntimeCommandToProtocol(command)).toEqual({
+      ...wire,
+      workspace: '/not-on-the-wire',
+    });
+    expect(
+      mapProtocolCommandToRuntimeCommand(
+        { ...wire, workspace: '/untrusted-request' },
+        { workspace: '/verified-admission' },
+      ),
+    ).toEqual({ ...wire, workspace: '/verified-admission' });
     expect(
       RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse({
         jsonrpc: '2.0',
@@ -945,7 +954,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '4c30a2ec:1b82b00f';
+    const expectedDigest = '5dd3af1f:7d3b7c4d';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

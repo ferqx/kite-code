@@ -94,3 +94,5 @@ query权威投影独立hydrate。rewind mutation、Controller命令与普通turn
 恢复投影下的本地 cleanup barrier 会明确拒绝等待，后续任务也不向未恢复的执行继续提交；不会将本地 Promise 结束视为服务端 cleanup 完成。
 
 CLI restart 默认 if_idle，--cancel 显式授权取消，未传工作区时沿用现存实例。status 成功读取业务不兼容状态仍退出 0；Runtime 连接继续要求业务 exact protocol，不因可管理就允许业务请求。
+
+TUI 继续操作遇到 session_recovery_required 时读取恢复摘要，只有清理已确认且没有未决/未知 effect 才提交单独恢复命令，再以原命令身份继续。无法安全恢复时显示具体原因；丢回执查询原命令结果，不自动重发。恢复不改变原交互身份与会话校准要求。Web 保持只读，CLI 协议错误保留结构化 code。

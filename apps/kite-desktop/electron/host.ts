@@ -86,7 +86,7 @@ export class DesktopHost {
 
   async activateWorkspace(value: string): Promise<string> {
     return this.#lock.run(() => {
-      if (this.#process || this.#quitting) throw new Error('请先等待当前连接清理完成。');
+      if (this.#quitting) throw new Error('应用正在退出。');
       const path = knownProject(this.#options.appDataDirectory, value);
       this.#workspace = path;
       return path;

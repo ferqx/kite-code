@@ -16,3 +16,5 @@
 
 
 主工具审批展示使用 `tool.review` 的 toolId／reviewId／status／有界 summary；`approval.granted.grant` 可选地保留 approve_once／same_command。二者经过同一 Protocol allowlist 进入 live 和历史回放，缺失 grant 不推导授权范围，不接收原始 reviewer result 或模型身份。具体字段见 [notifications](../src/notifications.ts)。
+
+恢复契约提供只读 `get_session_recovery` 摘要（authority revision、清理确认、effect 计数与有界 identity、允许操作）与显式 `recover_session`（同时绑定业务和 authority revision）。`get_command_receipt` 携带原命令和 scope，只查询已提交回执，不执行原命令。错误区分 runtime_busy、session_cleanup_pending、session_recovery_required、external_outcome_unknown 和 storage_unavailable；消费者不能解析错误字符串决定恢复。

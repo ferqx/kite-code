@@ -4,6 +4,8 @@
 
 ## 正在实施
 
+[执行保护与恢复机制整体优化](execution-recovery-optimization.md)：已确认并开始实施，覆盖空闲执行权、按需恢复、空间独立运行及相关保护审查。
+
 [客户端启动、服务生命周期与发布升级规范](daemon-upgrade-lifecycle.md)：阶段 1、2 已完成本机实现与验证，阶段 3 的发布门禁已接入；Linux/Windows hosted 资格仍待验证。覆盖默认 TUI/CLI 配套服务、共享 daemon 与 Web；未来桌面端仅规定接入边界。
 
 [桌面客户端](desktop-client.md)：阶段 0、1 与阶段 2 的本机稳定性验收已完成，正式发布暂缓；后续进入[对标 Codex 的日常体验开发](desktop-client.md#首轮验证后的日常体验方向)，逐项核对功能覆盖和交互体验。

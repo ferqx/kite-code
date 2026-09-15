@@ -122,3 +122,5 @@ Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录�
 - [Runtime 访问对象与投影边界](docs/access-and-projections.md)
 
 会话日志摘要可包含持久 Workspace membership（ID、digest、展示名），不包含 canonical path；目录分页按原 cursor 契约执行，membership 不是执行授权。
+
+按需恢复与原命令回执查询见[访问与恢复说明](docs/access-and-projections.md)。

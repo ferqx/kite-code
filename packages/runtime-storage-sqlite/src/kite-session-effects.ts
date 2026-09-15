@@ -88,6 +88,7 @@ export interface KiteSessionEffectPort {
     readonly effect: KiteSessionEffectRecord;
     readonly authority: KiteSessionExecutionAuthorityRecord;
   };
+  listUnknown(sessionId: string): readonly KiteSessionEffectRecord[];
   listPrepared(sessionId: string): readonly KiteSessionEffectRecord[];
   /** Caller owns recovery/release transaction and has validated the Session authority. */
   markGenerationUnknownInTransaction(input: {
@@ -329,6 +330,15 @@ export function createKiteSessionEffectPort(input: {
     commitTerminalInTransaction,
     markOutcomeUnknown,
     listPrepared,
+    listUnknown: (sessionId: string) =>
+      Object.freeze(
+        input.database
+          .query<EffectRow, [string]>(
+            "SELECT * FROM runtime_effect_leases WHERE session_id = ? AND state = 'unknown' ORDER BY effect_id",
+          )
+          .all(sessionId)
+          .map(record),
+      ),
     markGenerationUnknownInTransaction,
     inspect,
   });

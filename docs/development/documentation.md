@@ -71,3 +71,5 @@
 根 README 负责产品介绍与导流，手册负责完整产品定义，plans/backlog 负责工作状态。不要再建立 PRODUCT 或 ROADMAP 形式的第二份当前定义。CLAUDE 等客户端指令文件只路由到根 AGENTS，不复制权威顺序、架构或命令清单。
 
 新根 Markdown 自动进入本地链接检查，避免新入口遗漏在硬编码名单外。历史 ADR 正文保留当时结论；已退役方案通过明确 Git revision 追溯，不用原目录全文继续指导开发。
+
+Required 的 quality job 使用 `format:check`（Biome check）同时检查格式、import 整理与启用的 lint 规则，不再随后对相同输入重复执行独立 lint step。`bun run lint` 仍保留供定向检查；hook 的 staged 输入和不同平台／制品资格继续独立执行。

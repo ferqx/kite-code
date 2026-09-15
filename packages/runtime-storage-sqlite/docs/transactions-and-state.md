@@ -37,3 +37,5 @@ schema assertion 检查表、列、索引、DDL、marker 与 epoch；SQLite phys
 `loadSnapshot`／`loadSnapshotRecord` 在一次 read snapshot 内校验目标 Session 的 Workspace binding、snapshot checksum／identity／revision、事件 schema／连续顺序、Run start receipt 与 active Run 唯一性。已有事务内复用其快照，未开启事务时在本层创建并关闭只读事务；并发 writer 的提交只能在下一次读取观察到。不持久化“已验证”标记，不用校验缓存掩盖后续内容变化。Artifact 的长度、JSON 与业务完整性继续由所属读取边界负责。
 
 [全局 owner 回归](../test/kite-home-runtime-storage.test.ts)覆盖目录读取不解码历史以及损坏 snapshot 在访问时拒绝；[Session 并发回归](../test/isolated/kite-session-runtime-storage.test.ts)在校验中让另一连接提交，核对每次读取只观察一个一致版本。
+
+显式恢复事务以 authority revision 与业务 revision 为共同 CAS 边界，只允许已确认清理且无未决、未知 effect 的 recovery_required 记录回到 idle；它原子保存命令回执，不能重写历史 State、事件或旧操作结果。机制见[执行权与恢复](authority-and-recovery.md#清理确认与恢复命令)。

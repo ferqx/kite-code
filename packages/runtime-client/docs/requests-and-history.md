@@ -13,3 +13,5 @@
 协议 History 的 `loadSession` 通过同一连接分页读取，首次返回的 source sequence 固定本次读取上界；校验 Session、序号顺序与游标前进后才合并为完整 transcript。分页只重组只读展示记录，不重放命令；断线或页身份错误会使本次加载失败。传入 `throughSequence` 可读取该已观察上界内的完整历史。
 
 `loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。已经发送到服务的单页读取仍可能完成，不新增远端取消方法、不改变协议 DTO 或命令重放语义。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
+
+`recoverSessionIfSafe` 仅供用户继续时处理明确的恢复拒绝：先读摘要，安全时提交独立恢复命令；不自动重跑任务或未知副作用。恢复丢回执和客户端命令结果未知时，`readCommandReceipt` 查询原命令身份，查不到则保留未知。原始发送重试只发生在服务明确拒绝且安全恢复成功之后，使用同一命令身份。

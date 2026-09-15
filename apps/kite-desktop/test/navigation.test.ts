@@ -45,6 +45,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   const injectedFailures = new Set<unknown>();
   let loseBranchResult = false;
   let activeDirectory = false;
+  let activeDifferentWorkspaceDigest = false;
   let directoryId: unknown;
   let loseCreationResult = false;
   let creationId: unknown;
@@ -179,6 +180,8 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
         message.id === directoryId &&
         message.result?.sessions?.length
       ) {
+        if (activeDifferentWorkspaceDigest)
+          message.result.sessions[0]!.workspaceDigest = `sha256:${'a'.repeat(64)}`;
         message.result.sessions[0]!.currentRun = {
           runId: 'fixture-running',
           initialTurnId: 'fixture-turn',
@@ -332,6 +335,10 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     const beforeActive = closes;
     await expect(client.switchBranch('feature')).rejects.toThrow('运行');
     expect(closes).toBe(beforeActive);
+    activeDifferentWorkspaceDigest = true;
+    await expect(client.switchBranch('feature')).rejects.toThrow('其他空间');
+    expect(closes).toBe(beforeActive);
+    activeDifferentWorkspaceDigest = false;
     activeDirectory = false;
     loseBranchResult = true;
     await expect(client.switchBranch('feature')).rejects.toThrow('lost branch');

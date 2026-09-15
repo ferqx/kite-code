@@ -1,4 +1,5 @@
 import type { RuntimeCommandErrorCode } from './commands';
+import { isRuntimeCommand, type RuntimeCommand, type RuntimeCommandReceipt } from './commands';
 import type {
   RuntimeCheckpointProjection,
   RuntimeContextProjection,
@@ -13,8 +14,32 @@ import { hasExactKeys, isIdentifier, isNonNegativeSafeInteger, isRecord } from '
 
 export const RUNTIME_QUERY_SCHEMA_ = 'kite.runtime-query.v1' as const;
 
+export interface RuntimeSessionRecoverySummary {
+  readonly authorityRevision: number;
+  readonly status: 'idle' | 'active' | 'detached' | 'recovery_required';
+  readonly cleanupConfirmed: boolean;
+  readonly pendingEffectCount: number;
+  readonly unknownEffectCount: number;
+  readonly effects?: readonly {
+    readonly effectId: string;
+    readonly state: 'prepared' | 'unknown';
+  }[];
+  readonly action: 'continue' | 'wait' | 'recover' | 'inspect';
+}
+
 export type RuntimeQuery =
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'get_command_receipt';
+      readonly sessionId: string;
+      readonly command: RuntimeCommand;
+    }
   | { readonly schema: typeof RUNTIME_QUERY_SCHEMA_; readonly type: 'list_sessions' }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'get_session_recovery';
+      readonly sessionId: string;
+    }
   | {
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'get_session_projection';
@@ -59,6 +84,8 @@ export type RuntimeQueryResult =
       readonly revision?: number;
       readonly sessions?: readonly RuntimeSessionProjection[];
       readonly session?: RuntimeSessionProjection;
+      readonly recovery?: RuntimeSessionRecoverySummary;
+      readonly receipt?: RuntimeCommandReceipt;
       readonly context?: RuntimeContextProjection;
       readonly checkpoints?: readonly RuntimeCheckpointProjection[];
       readonly rewindPreview?: RuntimeRewindPreviewProjection;
@@ -81,9 +108,16 @@ export function isRuntimeQuery(value: unknown): value is RuntimeQuery {
     return false;
   }
   switch (value.type) {
+    case 'get_command_receipt':
+      return (
+        hasExactKeys(value, ['schema', 'type', 'sessionId', 'command']) &&
+        isIdentifier(value.sessionId) &&
+        isRuntimeCommand(value.command)
+      );
     case 'list_sessions':
       return hasExactKeys(value, ['schema', 'type']);
     case 'get_session_projection':
+    case 'get_session_recovery':
     case 'get_context_status':
     case 'list_checkpoints':
       return hasExactKeys(value, ['schema', 'type', 'sessionId']) && isIdentifier(value.sessionId);

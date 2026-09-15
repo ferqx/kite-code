@@ -4,6 +4,7 @@ export interface RuntimeSessionExecution {
   readonly operationId: string;
   readonly operation: RuntimeSessionOperation;
   readonly execute: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
+  readonly onSettled?: () => void;
   readonly onSkipped?: (reason: string) => void;
   /** Host has observed the predecessor's durable terminal before cleanup settled. */
   readonly allowQueuedSuccessor?: boolean;
@@ -53,6 +54,7 @@ export class SessionLifecycleSupervisor {
       .finally(() => {
         if (lifecycle.scheduled.get(input.operationId) === scheduled) {
           lifecycle.scheduled.delete(input.operationId);
+          input.onSettled?.();
         }
       });
     return true;

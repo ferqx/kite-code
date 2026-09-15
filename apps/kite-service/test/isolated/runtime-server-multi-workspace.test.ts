@@ -195,7 +195,7 @@ test('edits policy without recovery or Workspace initialization and observes oth
         commandId: 'must-still-recover',
         expectedRevision: 3,
       }),
-    ).toMatchObject({ status: 'rejected', code: 'session_unavailable' });
+    ).toMatchObject({ status: 'rejected', code: 'session_recovery_required' });
     expect(templateLoads).toBe(0);
     expect(restarted.storage.recovery.inspect(sessionId)).toEqual(before);
     const raced = {
@@ -403,6 +403,8 @@ test('a second App Server reads another Host Session without acquiring or cancel
   const sessionId = 'read-only-shared-session';
   try {
     await createSession(writerClient, sessionId, '/writer-wire');
+    // Explicitly retain a writer for this concurrent-reader ownership scenario.
+    writerStorage.runWithSessionExecution(sessionId, () => undefined);
     expect(writerStorage.recovery.inspect(sessionId).authority).toMatchObject({
       status: 'active',
       hostInstanceId: 'read-only-writer-host',
@@ -989,6 +991,7 @@ test('continuous Session writes renew a valid lease without waiting for the time
   const sessionId = 'progress-session';
   try {
     await createSession(runtime, sessionId, workspace);
+    storageOwner.runWithSessionExecution(sessionId, () => undefined);
     const generation = storageOwner.recovery.inspect(sessionId).authority.controllerGeneration;
     // No awaits: model/tool continuations can perform several synchronous
     // commits before the event loop services a renewal timer.
@@ -1130,17 +1133,27 @@ test('execution lease loss aborts all three real subagent model connections and 
     expect(storageOwner.recovery.inspect(sessionId).authority.cleanupConfirmed).toBe(false);
     const lost = storageOwner.loadCurrentSnapshot(sessionId)!;
     const recoveryBeforePolicy = storageOwner.recovery.inspect(sessionId);
-    expect(
-      await runtime.command({
-        schema: RUNTIME_COMMAND_SCHEMA_,
-        type: 'set_interaction_mode',
-        sessionId,
-        commandId: 'policy-after-lease-loss',
-        expectedRevision: lost.revision,
-        mode: 'full',
-      }),
-    ).toMatchObject({ status: 'rejected', code: 'session_unavailable' });
-    expect(storageOwner.loadCurrentSnapshot(sessionId)).toEqual(lost);
+    const policyCommand = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'set_interaction_mode',
+      sessionId,
+      commandId: 'policy-after-lease-loss',
+      expectedRevision: lost.revision,
+      mode: 'full',
+    } as const;
+    let policyResult = await runtime.command(policyCommand);
+    for (
+      let attempt = 0;
+      policyResult.status === 'rejected' &&
+      policyResult.code === 'session_cleanup_pending' &&
+      attempt < 100;
+      attempt++
+    ) {
+      await Bun.sleep(10);
+      policyResult = await runtime.command(policyCommand);
+    }
+    expect(policyResult).toMatchObject({ status: 'applied' });
+    expect(storageOwner.loadCurrentSnapshot(sessionId)?.turn).toEqual(lost.turn);
     expect(storageOwner.recovery.inspect(sessionId)).toEqual(recoveryBeforePolicy);
 
     expect(
@@ -1165,6 +1178,140 @@ test('execution lease loss aborts all three real subagent model connections and 
     model.stop(true);
     if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('completed idle Sessions survive lease expiry and acquire a fresh generation on continuation', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-idle-authority-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const model = createMockModelServer();
+  model.setResponses([{ message: { content: 'first' } }, { message: { content: 'second' } }]);
+  let clock = Date.now();
+  const databasePath = join(root, 'kite-session.sqlite');
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'idle-owner',
+    executionLeaseMs: 60,
+    renewIntervalMs: 20,
+    now: () => clock,
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'idle-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'idle-client');
+  const sessionId = 'idle-session';
+  try {
+    await createSession(runtime, sessionId, workspace);
+    expect(storageOwner.recovery.inspect(sessionId).authority.status).toBe('idle');
+    const iterator = runtime
+      .subscribe({ spec: { scope: 'session', sessionId } })
+      [Symbol.asyncIterator]();
+    await next(iterator);
+    await runtime.command(start('idle-first', sessionId, 'first'));
+    await waitForTerminal(iterator, sessionId);
+    for (let i = 0; i < 100 && storageOwner.ownedSessionIds().length; i++) await Bun.sleep(2);
+    const before = storageOwner.recovery.inspect(sessionId).authority;
+    expect(before.status).toBe('idle');
+    clock += 120_000;
+    await Bun.sleep(30);
+    expect(storageOwner.recovery.inspect(sessionId).authority).toEqual(before);
+    const projection = await runtime.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId,
+    });
+    if (projection.status !== 'ok' || !projection.session) throw new Error('Missing projection');
+    const receipt = await runtime.command({
+      ...start('idle-second', sessionId, 'second'),
+      expectedRevision: projection.session.revision,
+    });
+    if (receipt.status !== 'applied' || !receipt.resource)
+      throw new Error('Second run was not accepted');
+    for (
+      let i = 0;
+      i < 200 && storageOwner.loadCurrentSnapshot(sessionId)?.turn.status === 'active';
+      i++
+    )
+      await Bun.sleep(5);
+    expect(storageOwner.loadCurrentSnapshot(sessionId)?.turn.status).toBe('completed');
+    expect(model.getRequestCount()).toBe(2);
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    model.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('recovery query is read-only and recovery command requires confirmed cleanup and a fresh authority revision', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-explicit-recovery-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const storageOwner = createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'recovery-owner',
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner,
+    workspaces: [runtimeInput(workspace, 'http://127.0.0.1:1', 'unused-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'recovery-client');
+  const sessionId = 'recoverable-session';
+  try {
+    await createSession(runtime, sessionId, workspace);
+    storageOwner.runWithSessionExecution(sessionId, () => undefined);
+    storageOwner.releaseExecutions(false);
+    const before = storageOwner.recovery.inspect(sessionId);
+    const query = {
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_recovery',
+      sessionId,
+    } as const;
+    expect(await runtime.query(query)).toMatchObject({
+      status: 'ok',
+      recovery: { action: 'inspect', cleanupConfirmed: false },
+    });
+    expect(storageOwner.recovery.inspect(sessionId)).toEqual(before);
+    const command = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'recover_session',
+      sessionId,
+      commandId: 'explicit-recovery',
+      expectedRevision: 0,
+      expectedAuthorityRevision: before.authority.revision,
+    } as const;
+    expect(await runtime.command(command)).toMatchObject({
+      status: 'rejected',
+      code: 'session_cleanup_pending',
+    });
+    storageOwner.recovery.confirmCleanup({
+      sessionId,
+      expectedAuthorityRevision: before.authority.revision,
+    });
+    expect(await runtime.command(command)).toMatchObject({
+      status: 'conflict',
+      code: 'revision_conflict',
+    });
+    const confirmed = storageOwner.recovery.inspect(sessionId);
+    const accepted = { ...command, expectedAuthorityRevision: confirmed.authority.revision };
+    expect(await runtime.query(query)).toMatchObject({
+      status: 'ok',
+      recovery: { action: 'recover' },
+    });
+    expect(await runtime.command(accepted)).toMatchObject({ status: 'applied' });
+    const after = storageOwner.recovery.inspect(sessionId);
+    expect(after.authority.status).toBe('idle');
+    expect(await runtime.command(accepted)).toMatchObject({ status: 'idempotent_replay' });
+    expect(storageOwner.recovery.inspect(sessionId)).toEqual(after);
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -859,3 +859,57 @@ async function readFirstJsonLine<Result>(stream: ReadableStream<Uint8Array>): Pr
     reader.releaseLock();
   }
 }
+
+test('recovery command is atomic with its receipt and requires real cleanup confirmation', () => {
+  const fixture = createFixture(['session-1']);
+  const owner = openOwner(fixture.path);
+  try {
+    const current = acquire(owner, 'session-1', 'old-owner');
+    owner.authority.release({
+      sessionId: 'session-1',
+      expectedRevision: current.revision,
+      controllerGeneration: current.controllerGeneration,
+      hostInstanceId: 'old-owner',
+      cleanupConfirmed: false,
+    });
+    const before = owner.recovery.inspect('session-1');
+    const evidence = {
+      scopeSessionId: 'session-1',
+      targetSessionId: 'session-1',
+      commandId: 'recover-command',
+      requestDigest: 'b'.repeat(64),
+      committedAt: Date.now(),
+    };
+    const transaction = {
+      sessionId: 'session-1',
+      snapshot: owner.storage.sessions.loadSnapshot<State>('session-1')!,
+      events: [],
+      commandReceipt: createRuntimeStoredCommandReceipt(evidence, 0),
+    };
+    expect(() => owner.commitRecoveryDecision(transaction, 0, before.authority.revision)).toThrow();
+    expect(owner.recovery.inspect('session-1')).toEqual(before);
+    owner.recovery.confirmCleanup({
+      sessionId: 'session-1',
+      expectedAuthorityRevision: before.authority.revision,
+    });
+    const confirmed = owner.recovery.inspect('session-1');
+    expect(confirmed.authority.status).toBe('recovery_required');
+    expect(confirmed.authority.controllerGeneration).toBe(before.authority.controllerGeneration);
+    expect(() => owner.commitRecoveryDecision(transaction, 0, before.authority.revision)).toThrow();
+    expect(() =>
+      owner.commitRecoveryDecision(
+        { ...transaction, commandReceipt: undefined },
+        0,
+        confirmed.authority.revision,
+      ),
+    ).toThrow();
+    expect(owner.recovery.inspect('session-1')).toEqual(confirmed);
+    owner.commitRecoveryDecision(transaction, 0, confirmed.authority.revision);
+    expect(owner.recovery.inspect('session-1').authority.status).toBe('idle');
+    expect(owner.storage.commandReceipts.lookup(evidence).status).toBe('replay');
+    expect(owner.storage.sessions.loadSnapshot<State>('session-1')).toEqual(transaction.snapshot);
+  } finally {
+    owner.close();
+    fixture.remove();
+  }
+});

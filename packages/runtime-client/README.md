@@ -73,3 +73,5 @@
 ## 深入机制
 
 - [请求关联、订阅与历史](docs/requests-and-history.md)
+
+按需恢复与原命令回执查询见[访问与恢复说明](docs/requests-and-history.md)。

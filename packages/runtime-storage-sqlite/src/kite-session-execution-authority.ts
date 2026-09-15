@@ -113,11 +113,13 @@ export interface KiteSessionExecutionAuthority {
     readonly cleanupConfirmed: boolean;
   }): KiteSessionExecutionAuthorityRecord;
   confirmRecoveryCleanup(input: {
+    readonly retainRecoveryRequired?: boolean;
     readonly sessionId: string;
     readonly expectedRevision: number;
   }): KiteSessionExecutionAuthorityRecord;
   /** Caller already owns the recovery reconciliation transaction. */
   confirmRecoveryCleanupInTransaction(input: {
+    readonly retainRecoveryRequired?: boolean;
     readonly sessionId: string;
     readonly expectedRevision: number;
   }): KiteSessionExecutionAuthorityRecord;
@@ -431,8 +433,10 @@ export function createKiteSessionExecutionAuthority(input: {
       );
     }
     const reconciled = nextRecord(current, now(), {
-      status: 'idle',
-      controllerGeneration: increment(current.controllerGeneration),
+      status: request.retainRecoveryRequired ? 'recovery_required' : 'idle',
+      controllerGeneration: request.retainRecoveryRequired
+        ? current.controllerGeneration
+        : increment(current.controllerGeneration),
       hostInstanceId: null,
       clientId: null,
       connectionGeneration: 0,
@@ -535,10 +539,7 @@ function parseRecord(value: unknown, sessionId: string): PersistedRecord {
         record.leaseUntilMs === null ||
         record.cleanupConfirmed)) ||
     (record.status === 'recovery_required' &&
-      (record.hostInstanceId !== null ||
-        record.clientId !== null ||
-        record.leaseUntilMs !== null ||
-        record.cleanupConfirmed))
+      (record.hostInstanceId !== null || record.clientId !== null || record.leaseUntilMs !== null))
   ) {
     invalidRecord();
   }

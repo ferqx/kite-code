@@ -149,24 +149,30 @@ export function createKiteAppServerRuntimeOwner(
     storageOwner.disposeStorage?.();
     throw error;
   }
-  const scopedAppControl = () => {
-    if (!environment.workspace) throw new Error('Select a Workspace before preparing execution.');
+  const scopedAppControl = (workspace: string) => {
+    if (!workspace) throw new Error('Select a Workspace before preparing execution.');
     return composition.appControl.gateway.forWorkspace(
-      composition.appControl.admitWorkspace(environment.workspace),
+      composition.appControl.admitWorkspace(workspace),
     );
   };
   // Opening the application's Store and History must not resolve a project path, config or Git.
   // Scope is admitted only when an execution-related App operation is actually requested.
   const appControl = Object.freeze<KiteAppControlClient>({
     queryWorkspaceTrust: composition.appControl.gateway.discovery.queryWorkspaceTrust,
-    decideWorkspaceTrust: async (request) => scopedAppControl().decideWorkspaceTrust(request),
+    decideWorkspaceTrust: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).decideWorkspaceTrust(request),
     getProviderModelSnapshot: async (request) =>
-      scopedAppControl().getProviderModelSnapshot(request),
-    selectProviderModel: async (request) => scopedAppControl().selectProviderModel(request),
-    getMcpSnapshot: async (request) => scopedAppControl().getMcpSnapshot(request),
-    applyMcpAction: async (request) => scopedAppControl().applyMcpAction(request),
-    getSkillCatalog: async (request) => scopedAppControl().getSkillCatalog(request),
-    getExecutionStatus: async (request) => scopedAppControl().getExecutionStatus(request),
+      scopedAppControl(request.workspace.canonicalPath).getProviderModelSnapshot(request),
+    selectProviderModel: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).selectProviderModel(request),
+    getMcpSnapshot: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).getMcpSnapshot(request),
+    applyMcpAction: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).applyMcpAction(request),
+    getSkillCatalog: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).getSkillCatalog(request),
+    getExecutionStatus: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).getExecutionStatus(request),
     getReleaseStatus: composition.appControl.gateway.discovery.getReleaseStatus,
   });
   const admission: RuntimeServerAdmissionPort = Object.freeze({
@@ -183,12 +189,16 @@ export function createKiteAppServerRuntimeOwner(
         };
       }
       const command = request.command as RuntimeProtocolCommand | undefined;
-      if (command?.type === 'set_interaction_mode') {
-        // Session policy belongs to the persisted Session, not the process's selected
-        // execution Workspace. This admits no Turn and never changes that selection.
-        const session = storageOwner.loadCurrentSnapshot(command.sessionId)?.session;
+      if (command && command.type !== 'create_session') {
+        // Every existing Session is admitted against its own durable Workspace identity.
+        const session = storageOwner.loadCurrentSnapshot(
+          command.type === 'fork_session' ? command.sourceSessionId : command.sessionId,
+        )?.session;
         if (!session?.projectId || !session.canonicalWorkspaceDigest)
           return { allowed: false as const, reason: 'unauthorized' as const };
+        // Revoked trust or a moved directory must not prevent stopping our existing execution.
+        if (command.type === 'cancel_turn' && storageOwner.ownsSessionExecution(command.sessionId))
+          return { allowed: true as const, workspace: session.workspace };
         const trust = await composition.appControl.gateway.discovery
           .queryWorkspaceTrust({
             schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
@@ -208,26 +218,15 @@ export function createKiteAppServerRuntimeOwner(
           return { allowed: false as const, reason: 'unauthorized' as const };
         return { allowed: true as const, workspace: trust.workspace.canonicalPath };
       }
-      if (!environment.workspace)
-        return { allowed: false as const, reason: 'unauthorized' as const };
-      if (command?.type === 'cancel_turn' && storageOwner.ownsSessionExecution(command.sessionId))
-        return { allowed: true as const, workspace: environment.workspace };
+      const workspace =
+        command?.type === 'create_session'
+          ? (command.workspace ?? environment.workspace)
+          : environment.workspace;
+      if (!workspace) return { allowed: false as const, reason: 'unauthorized' as const };
       const trust = await composition.appControl.gateway.discovery.queryWorkspaceTrust({
         schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
-        workspace: environment.workspace,
+        workspace,
       });
-      if (command && 'sessionId' in command) {
-        const result = await composition.runtime.query({
-          schema: 'kite.runtime-query.v1',
-          type: 'get_session_projection',
-          sessionId: command.sessionId,
-        });
-        if (
-          result.status !== 'ok' ||
-          result.session?.workspaceDigest !== trust.workspace.workspaceDigest
-        )
-          return { allowed: false as const, reason: 'unauthorized' as const };
-      }
       return trust.status === 'trusted'
         ? { allowed: true as const, workspace: trust.workspace.canonicalPath }
         : { allowed: false as const, reason: 'unauthorized' as const };

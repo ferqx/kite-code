@@ -144,33 +144,40 @@ describe('KASD parent-owned App Server process', () => {
       await expect(
         connection.runtime.command({
           schema: 'kite.runtime-command.v1',
-          commandId: 'start-a-denied',
+          commandId: 'start-a-concurrently',
           type: 'start_turn',
           sessionId: 'policy-a',
           expectedRevision: 1,
-          input: 'must not run',
+          input: 'run independently',
         }),
-      ).rejects.toThrow('Unauthorized');
+      ).resolves.toMatchObject({ status: 'applied' });
       const after = await connection.runtime.query({
         schema: 'kite.runtime-query.v1',
         type: 'get_session_projection',
         sessionId: 'policy-b',
       });
       expect(after).toEqual(before);
-      expect(model.getRequests()).toHaveLength(1);
+      await eventually(() => model.getRequests().length === 2);
       const contender = open(join(root, 'a'));
       try {
         await contender.prepareAppControl();
+        const activeA = await connection.runtime.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId: 'policy-a',
+        });
+        if (activeA.status !== 'ok' || !activeA.session)
+          throw new Error('Missing active A projection');
         expect(
           await contender.runtime.command({
             schema: 'kite.runtime-command.v1',
             commandId: 'mode-a-other-owner',
             type: 'set_interaction_mode',
             sessionId: 'policy-a',
-            expectedRevision: 1,
+            expectedRevision: activeA.session.revision,
             mode: 'full',
           }),
-        ).toMatchObject({ status: 'applied', revision: 1 });
+        ).toMatchObject({ status: 'rejected', code: 'runtime_busy' });
         if (before.status !== 'ok' || !before.session) throw new Error('Missing active projection');
         expect(
           await contender.runtime.command({

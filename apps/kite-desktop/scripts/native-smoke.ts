@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,8 +10,10 @@ import { createMockModelServer } from '../../../tests/tui-system/harness/fixture
 if (process.platform !== 'darwin')
   throw new Error('This native window smoke currently targets macOS.');
 const root = resolve(import.meta.dir, '..');
+const executionRecovery = process.argv.includes('--execution-recovery');
 const packagedExecutable = resolve(
-  process.argv[2] ?? join(root, `out/kite-darwin-${process.arch}/kite.app/Contents/MacOS/kite`),
+  process.argv.slice(2).find((value) => value !== '--execution-recovery') ??
+    join(root, `out/kite-darwin-${process.arch}/kite.app/Contents/MacOS/kite`),
 );
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-electron-window-')));
 const appData = join(home, 'app-data');
@@ -21,6 +24,8 @@ cpSync(resolve(dirname(packagedExecutable), '../..'), application, {
 });
 const executable = join(application, 'Contents/MacOS/kite');
 const workspace = join(home, 'workspace');
+const secondWorkspace = join(home, 'workspace-b');
+mkdirSync(secondWorkspace);
 for (const directory of [appData, workspace, join(home, '.kite-code')])
   mkdirSync(directory, { mode: 0o700 });
 const model = createMockModelServer();
@@ -30,6 +35,18 @@ model.setResponses([
     chunk_delay: 800,
   },
   { message: { content: 'Second Electron session complete.' } },
+  {
+    message: {
+      content_chunks: [
+        'Workspace A starts',
+        ' and keeps running',
+        ' across workspace switch',
+        ' complete.',
+      ],
+    },
+    chunk_delay: 2500,
+  },
+  { message: { content: 'Workspace B independently complete.' } },
 ]);
 writeFileSync(
   join(home, '.kite-code/kite-code.jsonc'),
@@ -284,99 +301,104 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     .waitFor({ timeout: 30_000 });
   assert.equal(await page.getByText('正在回复…', { exact: true }).count(), 0);
   assert.equal(await page.locator('.message-copy').count(), 2);
-  assert.deepEqual(
-    await page.locator('.message-copy').evaluateAll((elements) =>
-      elements.map((element) => {
-        const style = getComputedStyle(element);
-        const box = element.getBoundingClientRect();
-        return {
-          width: box.width,
-          height: box.height,
-          paddingBlock: `${style.paddingTop} ${style.paddingBottom}`,
-          paddingInline: `${style.paddingLeft} ${style.paddingRight}`,
-          borderRadius: style.borderRadius,
-        };
-      }),
-    ),
-    [
-      {
-        width: 24,
-        height: 24,
-        paddingBlock: '0px 0px',
-        paddingInline: '0px 0px',
-        borderRadius: '6px',
-      },
-      {
-        width: 24,
-        height: 24,
-        paddingBlock: '0px 0px',
-        paddingInline: '0px 0px',
-        borderRadius: '6px',
-      },
-    ],
-  );
-  assert.deepEqual(
-    await page
-      .locator('.message-copy')
-      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).opacity)),
-    ['0', '0'],
-  );
-  await page.evaluate(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {
-        writeText: async (text: string) => {
-          const state = globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] };
-          state.__kiteCopiedTexts ??= [];
-          state.__kiteCopiedTexts.push(text);
+  if (!executionRecovery) {
+    assert.deepEqual(
+      await page.locator('.message-copy').evaluateAll((elements) =>
+        elements.map((element) => {
+          const style = getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          return {
+            width: box.width,
+            height: box.height,
+            paddingBlock: `${style.paddingTop} ${style.paddingBottom}`,
+            paddingInline: `${style.paddingLeft} ${style.paddingRight}`,
+            borderRadius: style.borderRadius,
+          };
+        }),
+      ),
+      [
+        {
+          width: 20,
+          height: 20,
+          paddingBlock: '0px 0px',
+          paddingInline: '0px 0px',
+          borderRadius: '6px',
         },
-      },
-    });
-  });
-  for (const selector of ['.message.assistant', '.message.user']) {
-    const messageBox = await page.locator(selector).boundingBox();
-    const copyBox = await page.locator(`${selector} .message-copy`).boundingBox();
-    assert.ok(messageBox && copyBox);
-    await page.mouse.move(
-      messageBox.x + messageBox.width / 2,
-      messageBox.y + messageBox.height / 2,
+        {
+          width: 20,
+          height: 20,
+          paddingBlock: '0px 0px',
+          paddingInline: '0px 0px',
+          borderRadius: '6px',
+        },
+      ],
     );
-    await page.mouse.move(copyBox.x + copyBox.width / 2, copyBox.y + copyBox.height / 2, {
-      steps: 12,
-    });
-    await page.waitForTimeout(150);
-    assert.equal(
+    assert.deepEqual(
       await page
-        .locator(`${selector} .message-copy`)
-        .evaluate((element) => getComputedStyle(element).opacity),
-      '1',
-      `${selector} copy action must remain visible along a real pointer path`,
+        .locator('.message-copy')
+        .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).opacity)),
+      ['0', '0'],
     );
-    await page.mouse.down();
-    await page.mouse.up();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            const state = globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] };
+            state.__kiteCopiedTexts ??= [];
+            state.__kiteCopiedTexts.push(text);
+          },
+        },
+      });
+    });
+    await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].focus()');
+    await page.bringToFront();
+    for (const selector of ['.message.assistant', '.message.user']) {
+      const messageBox = await page.locator(selector).boundingBox();
+      const copyBox = await page.locator(`${selector} .message-copy`).boundingBox();
+      assert.ok(messageBox && copyBox);
+      await page.mouse.move(
+        messageBox.x + messageBox.width / 2,
+        messageBox.y + messageBox.height / 2,
+      );
+      await page.mouse.move(copyBox.x + copyBox.width / 2, copyBox.y + copyBox.height / 2, {
+        steps: 12,
+      });
+      await page.waitForTimeout(150);
+      assert.equal(
+        await page
+          .locator(`${selector} .message-copy`)
+          .evaluate((element) => getComputedStyle(element).opacity),
+        '1',
+        `${selector} copy action must remain visible along a real pointer path`,
+      );
+      await page.mouse.down();
+      await page.mouse.up();
+    }
+    assert.deepEqual(
+      await page.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] }).__kiteCopiedTexts,
+      ),
+      ['Electron streaming survives reload complete.', 'Verify the Electron packaged client.'],
+    );
+    assert.equal(await page.getByRole('button', { name: '已复制消息', exact: true }).count(), 2);
+    const copyGeometry = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.message.user, .message.assistant')].map(
+        (message) => {
+          const copy = message.querySelector<HTMLElement>('.message-copy')!;
+          const messageBox = message.getBoundingClientRect();
+          const copyBox = copy.getBoundingClientRect();
+          return { messageBottom: messageBox.bottom, copyTop: copyBox.top };
+        },
+      ),
+    );
+    assert.ok(
+      copyGeometry.every(({ messageBottom, copyTop }) => copyTop >= messageBottom),
+      'copy actions must render below their completed message boxes',
+    );
+    await page.screenshot({ path: join(root, 'out/electron-message-copy-actions.png') });
   }
-  assert.deepEqual(
-    await page.evaluate(
-      () => (globalThis as typeof globalThis & { __kiteCopiedTexts?: string[] }).__kiteCopiedTexts,
-    ),
-    ['Electron streaming survives reload complete.', 'Verify the Electron packaged client.'],
-  );
-  assert.equal(await page.getByRole('button', { name: '已复制消息', exact: true }).count(), 2);
-  const copyGeometry = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.message.user, .message.assistant')].map(
-      (message) => {
-        const copy = message.querySelector<HTMLElement>('.message-copy')!;
-        const messageBox = message.getBoundingClientRect();
-        const copyBox = copy.getBoundingClientRect();
-        return { messageBottom: messageBox.bottom, copyTop: copyBox.top };
-      },
-    ),
-  );
-  assert.ok(
-    copyGeometry.every(({ messageBottom, copyTop }) => copyTop >= messageBottom),
-    'copy actions must render below their completed message boxes',
-  );
-  await page.screenshot({ path: join(root, 'out/electron-message-copy-actions.png') });
   const afterReload = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   assert.equal(afterReload.workspace, beforeReload.workspace);
   assert.ok(afterReload.connectionId! > beforeReload.connectionId!);
@@ -433,47 +455,91 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     'Electron cached switch with 2s history delay:',
     JSON.stringify({ firstFrameMs: cached.elapsed, messages: 2 }),
   );
-  const conversationGeometry = await page.evaluate(() => {
-    const reading = document.querySelector('.reading-column')!.getBoundingClientRect();
-    const composer = document.querySelector('.composer')!.getBoundingClientRect();
-    return {
-      reading: { x: reading.x, width: reading.width },
-      composer: { x: composer.x, width: composer.width },
-    };
-  });
-  await page.getByRole('button', { name: '文件变更', exact: true }).click();
-  await page.getByRole('complementary', { name: '文件变更' }).waitFor();
-  assert.deepEqual(
-    await page.evaluate(() => {
+  if (!executionRecovery) {
+    const conversationGeometry = await page.evaluate(() => {
       const reading = document.querySelector('.reading-column')!.getBoundingClientRect();
       const composer = document.querySelector('.composer')!.getBoundingClientRect();
       return {
         reading: { x: reading.x, width: reading.width },
         composer: { x: composer.x, width: composer.width },
       };
-    }),
-    conversationGeometry,
-    'opening file changes must not move or resize the reading column or composer',
+    });
+    await page.getByRole('button', { name: '文件变更', exact: true }).click();
+    await page.getByRole('complementary', { name: '文件变更' }).waitFor();
+    assert.deepEqual(
+      await page.evaluate(() => {
+        const reading = document.querySelector('.reading-column')!.getBoundingClientRect();
+        const composer = document.querySelector('.composer')!.getBoundingClientRect();
+        return {
+          reading: { x: reading.x, width: reading.width },
+          composer: { x: composer.x, width: composer.width },
+        };
+      }),
+      conversationGeometry,
+      'opening file changes must not move or resize the reading column or composer',
+    );
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    const header = await page.locator('.app-header').boundingBox();
+    const brand = await page.locator('.sidebar-header .brand').boundingBox();
+    assert.equal(header?.height, 52);
+    assert.ok(brand && brand.x >= 80, 'brand must clear native traffic lights');
+    assert.deepEqual(
+      await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getWindowButtonPosition()'),
+      { x: 13, y: 19 },
+    );
+    await page.evaluate(() => window.kiteDesktop!.toggleWindowMaximize());
+    assert.equal(
+      await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isMaximized()'),
+      true,
+    );
+    await page.evaluate(() => window.kiteDesktop!.toggleWindowMaximize());
+    assert.equal(
+      await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isMaximized()'),
+      false,
+    );
+  }
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await input.fill('Workspace A independent task');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.getByText('Workspace A starts', { exact: false }).waitFor();
+  await main(
+    `__kiteNativeSmoke.dialog.showOpenDialog = async () => ({canceled:false, filePaths:[${JSON.stringify(secondWorkspace)}]});`,
   );
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  const header = await page.locator('.app-header').boundingBox();
-  const brand = await page.locator('.sidebar-header .brand').boundingBox();
-  assert.equal(header?.height, 52);
-  assert.ok(brand && brand.x >= 80, 'brand must clear native traffic lights');
-  assert.deepEqual(
-    await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getWindowButtonPosition()'),
-    { x: 13, y: 19 },
-  );
-  await page.evaluate(() => window.kiteDesktop!.toggleWindowMaximize());
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await page.getByRole('button', { name: '项目空间', exact: true }).click();
+  await page.getByRole('menuitem', { name: '添加项目…', exact: true }).click();
+  await input.fill('Workspace B independent task');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.getByText('Workspace B independently complete.', { exact: false }).waitFor();
+  const stored = new Database(join(home, '.kite-code/kite-session.sqlite'), { readonly: true });
+  try {
+    const row = stored
+      .query<{ state_json: string }, [string]>(
+        'SELECT state_json FROM runtime_snapshots WHERE state_json LIKE ?',
+      )
+      .get('%Workspace A independent task%');
+    assert.ok(row, 'A must remain in the shared Store');
+    assert.equal(
+      JSON.parse(row.state_json).turn.status,
+      'active',
+      'B completes while A is still executing',
+    );
+  } finally {
+    stored.close();
+  }
+
+  await page.locator('.session-row').filter({ hasText: 'Workspace A independent task' }).click();
+  await page
+    .getByText('Workspace A starts and keeps running across workspace switch complete.', {
+      exact: false,
+    })
+    .waitFor({ timeout: 30000 });
   assert.equal(
-    await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isMaximized()'),
-    true,
+    model.getRequestCount(),
+    4,
+    'space switch must neither cancel nor replay either task',
   );
-  await page.evaluate(() => window.kiteDesktop!.toggleWindowMaximize());
-  assert.equal(
-    await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isMaximized()'),
-    false,
-  );
+  const beforeQuit = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   await page.screenshot({ path: join(root, 'out/electron-native-smoke.png') });
   const windowId = String(
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getMediaSourceId()'),
@@ -492,7 +558,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isDestroyed()'),
     false,
   );
-  assert.deepEqual(await page.evaluate(() => window.kiteDesktop!.runtimeStatus()), afterReload);
+  assert.deepEqual(await page.evaluate(() => window.kiteDesktop!.runtimeStatus()), beforeQuit);
   await main(
     `__kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });`,
   );

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   type RuntimeClient,
   type RuntimeClientNotificationWithGeneration,
+  readCommandReceipt,
+  recoverSessionIfSafe,
   toAcceptedPresentationEnvelope,
 } from '@kite-ai/runtime-client';
 import type {
@@ -368,7 +370,7 @@ class NativeTuiRuntimeClient {
   }
 
   async #createRemoteSession(record: NativeSessionRecord): Promise<void> {
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'create'),
       type: 'create_session',
@@ -456,7 +458,7 @@ class NativeTuiRuntimeClient {
   async #ensureMutationAdmission(record: NativeSessionRecord): Promise<void> {
     const generation = this.#runtime.connectionGeneration;
     if (record.mutationAdmissionGeneration === generation) return;
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'mutation-resume'),
       type: 'resume_session',
@@ -798,7 +800,7 @@ class NativeTuiRuntimeClient {
           // can receive the next subscription message before this async continuation
           // observes the accepted receipt.
           record.runProjectionRevisionFloor = expectedRevision + 1;
-          const result = await this.#runtime.command({
+          const result = await this.#command({
             schema: RUNTIME_COMMAND_SCHEMA_,
             commandId,
             type: 'start_turn',
@@ -1107,7 +1109,7 @@ class NativeTuiRuntimeClient {
   ): Promise<void> {
     await this.#waitForSessionReady(record.threadId);
     await this.#ensureMutationAdmission(record);
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(record.threadId, 'mode'),
       type: 'set_interaction_mode',
@@ -1146,7 +1148,7 @@ class NativeTuiRuntimeClient {
         action,
       );
       if (!command) throw new Error('The Runtime interaction response does not match its request.');
-      const receipt = await this.#runtime.command(command);
+      const receipt = await this.#command(command);
       if (
         receipt.status === 'conflict' &&
         receipt.code === 'revision_conflict' &&
@@ -1281,7 +1283,7 @@ class NativeTuiRuntimeClient {
     for (let attempt = 0; attempt < CANCEL_RETRY_LIMIT; attempt += 1) {
       const commandId = this.#nextCommandId(record.threadId, 'cancel');
       record.cancelCommand = { state: 'submitting', runId, turnId, commandId };
-      const receipt = await this.#runtime.command({
+      const receipt = await this.#command({
         schema: RUNTIME_COMMAND_SCHEMA_,
         commandId,
         type: 'cancel_turn',
@@ -1358,7 +1360,7 @@ class NativeTuiRuntimeClient {
     if (!record) throw new Error(`Runtime session is unavailable: ${sessionId}`);
     await this.#cancelRuntimeOperations(sessionId);
     await this.#ensureMutationAdmission(record);
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'delete'),
       type: 'delete_session',
@@ -1483,7 +1485,7 @@ class NativeTuiRuntimeClient {
       resolve: resolveTerminal,
       reject: rejectTerminal,
     });
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId,
       type: 'rewind_session',
@@ -1526,7 +1528,7 @@ class NativeTuiRuntimeClient {
     if (!record) return undefined;
     await this.#waitForSessionReady(sessionId);
     await this.#ensureMutationAdmission(record);
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'fork'),
       type: 'fork_session',
@@ -1558,7 +1560,7 @@ class NativeTuiRuntimeClient {
     onProgress?.('preparing');
     const commandId = this.#nextCommandId(sessionId, 'compact');
     onCommand?.({ type: 'user.command_invoked', commandId, command: '/compact' });
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId,
       type: 'compact_session',
@@ -1576,7 +1578,7 @@ class NativeTuiRuntimeClient {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
     await this.#ensureMutationAdmission(record);
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'reset'),
       type: 'compact_session',
@@ -1615,7 +1617,7 @@ class NativeTuiRuntimeClient {
     await this.#waitForSessionReady(sessionId);
     const record = this.#sessions.get(sessionId)!;
     await this.#ensureMutationAdmission(record);
-    const receipt = await this.#runtime.command({
+    const receipt = await this.#command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: this.#nextCommandId(sessionId, 'clear-grants'),
       type: 'clear_session_command_grants',
@@ -1673,8 +1675,43 @@ class NativeTuiRuntimeClient {
     return `tui-${operation}-${next}-${this.#commandNonce}-${sessionId}`;
   }
 
+  async #command(
+    command: import('@kite-ai/runtime-contract').RuntimeCommand,
+  ): Promise<RuntimeCommandReceipt> {
+    const generation = this.#runtime.connectionGeneration;
+    let receipt: RuntimeCommandReceipt;
+    try {
+      receipt = await this.#runtime.command(command);
+    } catch (error) {
+      const stored = await readCommandReceipt(this.#runtime, command).catch(() => undefined);
+      if (!stored) throw error;
+      receipt = stored;
+    }
+    if (
+      receipt.status !== 'rejected' ||
+      receipt.code !== 'session_recovery_required' ||
+      !('sessionId' in command) ||
+      command.type === 'recover_session'
+    )
+      return receipt;
+    const recovered = await recoverSessionIfSafe(
+      this.#runtime,
+      command.sessionId,
+      this.#nextCommandId(command.sessionId, 'recover'),
+    );
+    if (recovered?.status !== 'applied' && recovered?.status !== 'idempotent_replay')
+      return receipt;
+    if (this.#runtime.connectionGeneration !== generation)
+      throw new Error('连接已变化，请重新加载会话。');
+    return this.#runtime.command(command);
+  }
+
   #assertApplied(receipt: RuntimeCommandReceipt): void {
     if (receipt.status === 'applied' || receipt.status === 'idempotent_replay') return;
+    if (receipt.code === 'session_recovery_required' || receipt.code === 'session_cleanup_pending')
+      throw new Error(`会话需要恢复核对，旧执行清理尚未确认；不会重发旧操作。(${receipt.code})`);
+    if (receipt.code === 'external_outcome_unknown')
+      throw new Error('外部操作结果未知，请先核对实际结果；不会自动重跑。');
     throw new Error(`Runtime command rejected: ${receipt.code}`);
   }
 }

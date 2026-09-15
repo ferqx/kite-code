@@ -6,7 +6,7 @@
 
 1. 校验 command，冻结连接上下文，计算 Session scope 与 request digest。
 2. 查持久回执；相同已提交命令返回重放结果。进程内相同 commandId 的 pending 请求共享 Promise，digest 不同则拒绝。
-3. 进入该 Session mailbox 后再次查回执，检查删除、revision、busy 与恢复状态。
+3. 进入该 Session mailbox 后才获取执行 scope，再查回执并检查删除、revision、busy 与恢复状态；空闲释放也在同一 mailbox 内进行，避免误释放下一条命令的 generation。
 4. bridge inspectCommand 产生 terminal 结果或可提交决定；校验目标 Session。
 5. commit 将回执与业务变化落入所属事务。Host 重读持久回执并确认与 commit 返回一致。
 6. 执行 activation、刷新 Session projection，再调度 prepared execution；cancel/close 走对应生命周期操作。
@@ -15,7 +15,7 @@
 
 ## Mailbox 的边界
 
-`set_interaction_mode` 不进入 Host 的 execution lease 包装，也不在回执重放时恢复 Runtime。它保留同一 mailbox、digest、事务回执与通知顺序；每次命令从 Store 投影刷新 revision，避免其他设置写入者提交后仍按旧 registry 冲突。commit 失败后若已存在同命令的持久回执，返回其已知结果，不重试写入。执行 bridge 必须在具体提交处裁决：活动 State owner 继续验证执行权，无执行 owner 的专用设置事务须原子验证无并发执行者与 State revision。其他执行命令仍进入 execution scope。
+`set_interaction_mode` 不进入 Host 的 execution lease 包装，也不在回执重放时恢复 Runtime。它保留同一 mailbox、digest、事务回执与通知顺序；每次命令从 Store 投影刷新 revision，避免其他设置写入者提交后仍按旧 registry 冲突。commit 失败后若已存在同命令的持久回执，返回其已知结果，不重试写入。执行 bridge 必须在具体提交处裁决：活动 State owner 继续验证执行权，无执行 owner 的专用设置事务须原子验证无并发执行者与 State revision。`recover_session` 同样不获取旧执行权，而是在同一 mailbox 内交由专用 CAS 恢复事务核对 cleanup 与 effect；回执重放不恢复 Runtime。其余执行命令仍进入 execution scope。
 
 SessionMailbox 用 Promise tail 串行化单 Session 的操作，失败也将 tail 收敛为可继续的 Promise，避免污染后续队列；不同 Session 不共用一条队列。进程内串行不能替代 SQLite 多进程 writer fencing。
 

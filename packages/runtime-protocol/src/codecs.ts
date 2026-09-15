@@ -296,8 +296,16 @@ const respondInteractionCommands = z
 export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
   z
     .object({
+      ...sessionCommandBase,
+      type: z.literal('recover_session'),
+      expectedAuthorityRevision: safeRevision,
+    })
+    .strict(),
+  z
+    .object({
       ...commandBase,
       type: z.literal('create_session'),
+      workspace: inputText.optional(),
       bootstrapSessionId: identifier.optional(),
       model: z.object({ provider: identifier, name: inputText }).strict().optional(),
     })
@@ -371,6 +379,21 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
 export type RuntimeProtocolCommand = z.infer<typeof RUNTIME_PROTOCOL_COMMAND_SCHEMA_>;
 
 export const RUNTIME_PROTOCOL_QUERY_SCHEMA_ = z.discriminatedUnion('type', [
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('get_command_receipt'),
+      sessionId: identifier,
+      command: RUNTIME_PROTOCOL_COMMAND_SCHEMA_,
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('get_session_recovery'),
+      sessionId: identifier,
+    })
+    .strict(),
   z
     .object({ schema: z.literal('kite.runtime-query.v1'), type: z.literal('list_sessions') })
     .strict(),
@@ -930,6 +953,10 @@ const commandErrorCode = z.enum([
   'policy_denied',
   'runtime_busy',
   'session_unavailable',
+  'session_recovery_required',
+  'session_cleanup_pending',
+  'external_outcome_unknown',
+  'storage_unavailable',
   'unsupported',
   'already_closed',
 ]);
@@ -965,9 +992,39 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
   z
     .object({
       status: z.literal('ok'),
+      queryType: z.literal('get_command_receipt'),
+      receipt: RUNTIME_COMMAND_RECEIPT_SCHEMA_.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
       queryType: z.literal('list_sessions'),
       revision: safeRevision.optional(),
       sessions: z.array(RUNTIME_PROTOCOL_SESSION_SCHEMA_).max(10_000),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
+      queryType: z.literal('get_session_recovery'),
+      revision: safeRevision.optional(),
+      recovery: z
+        .object({
+          authorityRevision: safeRevision,
+          status: z.enum(['idle', 'active', 'detached', 'recovery_required']),
+          cleanupConfirmed: z.boolean(),
+          pendingEffectCount: safeRevision,
+          unknownEffectCount: safeRevision,
+          effects: z
+            .array(
+              z.object({ effectId: identifier, state: z.enum(['prepared', 'unknown']) }).strict(),
+            )
+            .max(20)
+            .optional(),
+          action: z.enum(['continue', 'wait', 'recover', 'inspect']),
+        })
+        .strict(),
     })
     .strict(),
   z
@@ -1028,6 +1085,8 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
       queryType: z.enum([
         'list_sessions',
         'get_session_projection',
+        'get_session_recovery',
+        'get_command_receipt',
         'get_context_status',
         'list_checkpoints',
         'get_rewind_preview',

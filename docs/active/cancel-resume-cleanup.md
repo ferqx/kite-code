@@ -327,3 +327,5 @@ resume 先恢复 queue/grant/continuation，再恢复 capability attempt，最�
 outer Tool；自动审查明确拒绝时，必须在同一个 batch 先将 parent capability 收敛为 confirmed failure，再让 outer Tool
 进入 rejected；技术异常或显式 ask_user 只推进原 queue record，不得终结 parent。每个 capability invocation 必须先获得
 Result/ack 或显式 unknown/reconciliation 终态。live/replay/restart 使用相同 generation/session guards。
+
+空闲释放由 Host mailbox 与命令串行，scheduled completion 和 coordinator 清理结束且无未决 effect/Provider 后才能释放 authority；下一条命令重新取得 generation。失权 cleanup 不能凭终态推断，显式恢复以 authority revision CAS 执行。相应回归见[Service 测试](../../apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)。

@@ -8,6 +8,7 @@ import type {
 } from '@kite-ai/runtime-storage-sqlite';
 import type { AdmittedWorkspace } from '../runtime-application';
 import type { RuntimeEvent, RuntimeState } from './runtime/state-runtime';
+import { hasPendingSubagentProviderRecovery } from './runtime/subagent-provider-recovery';
 
 const DEFAULT_EXECUTION_LEASE_MS = 30_000;
 const DEFAULT_RENEW_INTERVAL_MS = 10_000;
@@ -55,9 +56,14 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
   ): void;
   readSnapshot<Result>(operation: () => Result): Result;
   ownsSessionExecution(sessionId: string): boolean;
-  setExecutionLossHandler(handler: (sessionId: string) => void): void;
+  setExecutionLossHandler(handler: (sessionId: string) => Promise<void>): void;
+  commitRecoveryDecision: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['commitRecoveryDecision'];
   readonly recovery: KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>['recovery'];
   ownedSessionIds(): readonly string[];
+  releaseSessionExecution(sessionId: string, cleanup: () => Promise<void>): Promise<boolean>;
   releaseExecutions(cleanupConfirmed: boolean): void;
   disposeStorage(): void;
   close(): void;
@@ -93,9 +99,28 @@ export function createKiteSessionAppServerStorage(input: {
   const target = input.target;
   const owned = new Map<string, OwnedExecution>();
   const pendingRecoveryIdentities = new Map<string, string>();
-  let executionLossHandler: ((sessionId: string) => void) | undefined;
+  let executionLossHandler: ((sessionId: string) => Promise<void>) | undefined;
   const loseExecution = (sessionId: string): void => {
-    if (owned.delete(sessionId)) executionLossHandler?.(sessionId);
+    const execution = owned.get(sessionId);
+    if (!execution || !owned.delete(sessionId) || !executionLossHandler) return;
+    void executionLossHandler(sessionId)
+      .then(() => {
+        const current = target.authority.read(sessionId);
+        // Only the generation whose local cleanup we just awaited may confirm cleanup.
+        if (
+          current.status === 'recovery_required' &&
+          current.controllerGeneration === execution.record.controllerGeneration + 1 &&
+          !hasUnconfirmedExecution(target.storage.sessions.loadSnapshot<RuntimeState>(sessionId))
+        ) {
+          target.recovery.confirmCleanup({
+            sessionId,
+            expectedAuthorityRevision: current.revision,
+          });
+        }
+      })
+      .catch((error) =>
+        console.error('Session cleanup confirmation failed.', { sessionId, error }),
+      );
   };
   let hostClosed = false;
   let closed = false;
@@ -425,7 +450,42 @@ export function createKiteSessionAppServerStorage(input: {
       executionLossHandler = handler;
     },
     recovery: target.recovery,
+    commitRecoveryDecision: target.commitRecoveryDecision,
     ownedSessionIds: () => Object.freeze([...owned.keys()]),
+    async releaseSessionExecution(sessionId, cleanup) {
+      const execution = owned.get(sessionId);
+      if (!execution) {
+        await cleanup();
+        return false;
+      }
+      if (!target.storage.sessions.loadSnapshotRecord(sessionId)) {
+        await cleanup();
+        owned.delete(sessionId);
+        return true;
+      }
+      if (
+        target.recovery.inspect(sessionId).pendingEffects.length > 0 ||
+        hasUnconfirmedExecution(target.storage.sessions.loadSnapshot<RuntimeState>(sessionId))
+      )
+        return false;
+      await cleanup();
+      const current = target.authority.read(sessionId);
+      if (
+        current.status !== 'active' ||
+        current.hostInstanceId !== input.hostInstanceId ||
+        current.controllerGeneration !== execution.record.controllerGeneration
+      )
+        return false;
+      target.authority.release({
+        sessionId,
+        expectedRevision: current.revision,
+        controllerGeneration: current.controllerGeneration,
+        hostInstanceId: input.hostInstanceId,
+        cleanupConfirmed: true,
+      });
+      owned.delete(sessionId);
+      return true;
+    },
     releaseExecutions,
     disposeStorage: close,
     close,
@@ -471,4 +531,14 @@ function assertIdentity(value: unknown, label: string): asserts value is string 
 
 function assertPositive(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${label} is invalid.`);
+}
+
+function hasUnconfirmedExecution(state: RuntimeState | null): boolean {
+  return (
+    state !== null &&
+    (hasPendingSubagentProviderRecovery(state) ||
+      Object.values(state.modelInvocations).some(
+        (invocation) => invocation.status === 'dispatching',
+      ))
+  );
 }

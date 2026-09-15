@@ -226,21 +226,6 @@ export function App({ client }: { client: DesktopClient }) {
   }, [client, firstSubmission, selected, view.messages]);
   const activateForWork = async (target: string) => {
     await client.checkProject(target);
-    const current = client.getSnapshot();
-    if (target !== current.workspace && (current.connected || client.hasNativeConnection())) {
-      if (
-        (await client.hasActiveTasks()) &&
-        !(await client.confirm({
-          message: '切换执行项目将停止当前服务中的任务，已有修改不会撤销。',
-          title: '切换执行项目？',
-          kind: 'warning',
-          okLabel: '停止并继续',
-          cancelLabel: '保留当前任务',
-        }))
-      )
-        return false;
-      await client.disconnect();
-    }
     await client.activateProject(target);
     return true;
   };
@@ -524,6 +509,15 @@ export function App({ client }: { client: DesktopClient }) {
                   <AlertDialogDescription>{operationError}</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
+                  {view.recoverySessionId && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void act(() => client.checkSessionRecovery())}
+                    >
+                      检查恢复
+                    </Button>
+                  )}
                   <AlertDialogAction onClick={dismissOperationError}>确定</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

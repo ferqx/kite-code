@@ -88,3 +88,5 @@ Chromium 152 对实际 App 做弱引用与 GC 检查：依次离开 100 个 500 
 Figma 已同步并核验[首次加载](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4736)、[缓存命中／后台校准](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4772)及[校准失败](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4360-4808)。校准和失败态保留输入区域、禁用发送；重试进入校准，再回到实时就绪态。原型中的自动过渡用于状态演示，不是产品新增的定时器。
 
 2026-09-12 实时消息缺口恢复复验后，既有校准／失败画面保持不变；[Figma 画布外流程说明](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4469-160)同步了缺口触发、保留正文、禁用发送、补读后恢复及失败重试。首次加载画面未改动，技术代次信息不进入产品状态行。
+
+2026-09-15 执行恢复新增“操作未完成”弹窗内的“检查恢复”。仅用户继续或点击检查时核验恢复，读取历史不恢复；检查后保留草稿并重新校准，未知副作用和缺少清理证明仍显示具体原因。子 Agent 已同步 [Figma 恢复弹窗](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4721-4560)，并回读节点树及截图确认“检查恢复”与“确定”按钮。

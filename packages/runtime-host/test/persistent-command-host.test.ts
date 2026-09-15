@@ -35,6 +35,7 @@ interface Harness {
 }
 
 interface ReceiptBridgeOptions {
+  readonly executionGate?: Promise<void>;
   readonly commitGate?: Promise<void>;
   readonly commitFailure?: Error;
   readonly activationFailure?: Error;
@@ -102,6 +103,7 @@ class ReceiptBridge implements RuntimeHostExecutionBridge {
                       operation: 'turn' as const,
                       run: async () => {
                         this.#order.push('schedule');
+                        await this.#options.executionGate;
                       },
                     },
                   },
@@ -589,3 +591,101 @@ function receiptKey(
 ): string {
   return `${input.scopeSessionId}\u0000${input.commandId}`;
 }
+
+test('keeps execution authority until scheduled work and cleanup settle', async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const fixture = harness({ withExecution: true, executionGate: gate });
+  let released = 0;
+  const host = createRuntimeHost({
+    storage: fixture.storage,
+    modules: testRuntimeModules(() => fixture.bridge),
+    releaseSessionExecution: async () => {
+      released++;
+      return true;
+    },
+  });
+  try {
+    expect((await host.command(startCommand())).status).toBe('applied');
+    expect(released).toBe(0);
+    finish();
+    for (let count = 0; count < 30 && released === 0; count++) await Bun.sleep(1);
+    expect(released).toBe(1);
+    await host.command({ ...startCommand(), commandId: 'next-after-release' });
+    expect(fixture.bridge.recoveries).toHaveLength(2);
+  } finally {
+    finish();
+    await host[Symbol.asyncDispose]();
+  }
+});
+
+test('serializes authority acquisition with predecessor command completion and release', async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const fixture = harness({ commitGate: gate });
+  const authority: string[] = [];
+  const host = createRuntimeHost({
+    storage: fixture.storage,
+    modules: testRuntimeModules(() => fixture.bridge),
+    runWithSessionExecution: (_id, operation) => {
+      authority.push('acquire');
+      return operation();
+    },
+    releaseSessionExecution: async () => {
+      authority.push('release');
+      return true;
+    },
+  });
+  try {
+    const first = host.command(startCommand());
+    const second = host.command({ ...startCommand(), commandId: 'queued-command' });
+    await Bun.sleep(1);
+    expect(authority).toEqual(['acquire']);
+    finish();
+    await Promise.all([first, second]);
+    expect(authority).toEqual(['acquire', 'release', 'acquire', 'release']);
+  } finally {
+    finish();
+    await host[Symbol.asyncDispose]();
+  }
+});
+
+test('reads a lost command receipt without acquiring execution or replaying activation', async () => {
+  const fixture = harness();
+  let acquisitions = 0;
+  const host = createRuntimeHost({
+    storage: fixture.storage,
+    modules: testRuntimeModules(() => fixture.bridge),
+    runWithSessionExecution: (_id, operation) => {
+      acquisitions++;
+      return operation();
+    },
+  });
+  const command = startCommand();
+  const query = {
+    schema: 'kite.runtime-query.v1',
+    type: 'get_command_receipt',
+    sessionId: command.sessionId,
+    command,
+  } as const;
+  try {
+    expect(await host.query(query)).toEqual({ status: 'ok', queryType: 'get_command_receipt' });
+    await host.command(command);
+    expect(await host.query(query)).toMatchObject({
+      status: 'ok',
+      receipt: { status: 'idempotent_replay', commandId: command.commandId },
+    });
+    expect(await host.query({ ...query, sessionId: 'another-session' })).toMatchObject({
+      status: 'rejected',
+      code: 'invalid_command',
+    });
+    expect(acquisitions).toBe(1);
+    expect(fixture.bridge.commits).toHaveLength(1);
+  } finally {
+    await host[Symbol.asyncDispose]();
+  }
+});

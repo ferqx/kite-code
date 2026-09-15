@@ -428,3 +428,7 @@ RA-06 current Runtime State/SQLite Store 是新会话的唯一 production writer
 mismatch、fork/rollback/delete inconsistency 只隔离受影响 session，且都必须在 dispatch 前 fail closed；健康会话与新会话
 继续可用。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
 > 路径同步：runtime resilience 验证引用当前无版本命名的 state/store 实现路径；格式版本仍由 metadata 校验。
+
+## 空闲释放与显式恢复
+
+日常执行资格补充：完成且实际清理后的 Session 不再续租；确定性时钟推进超过租期后可取得新 generation 继续。终态先于清理不得提前释放，竞争服务仍只有一个 writer，旧 handle 不可 dispatch/commit。只读历史和恢复摘要不改变 authority 或业务 revision；恢复 CAS 与持久回执原子提交，未知 Provider/Shell/子任务不重放。实现验证入口：[Service 回归](../../apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)、[Host 清理与回执](../../packages/runtime-host/test/persistent-command-host.test.ts)、[Store 事务](../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)。这组协议/存储证据不替代 Electron 原生资格。

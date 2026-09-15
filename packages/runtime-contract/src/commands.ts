@@ -42,6 +42,11 @@ export interface ResumeSessionCommand extends RuntimeCommandBase {
   readonly afterRevision?: number;
 }
 
+export interface RecoverSessionCommand extends RuntimeSessionCommandBase {
+  readonly type: 'recover_session';
+  readonly expectedAuthorityRevision: number;
+}
+
 export interface StartTurnCommand extends RuntimeSessionCommandBase {
   readonly type: 'start_turn';
   readonly input: string;
@@ -157,6 +162,7 @@ export interface DeleteSessionCommand extends RuntimeSessionCommandBase {
 export type RuntimeCommand =
   | CreateSessionCommand
   | ResumeSessionCommand
+  | RecoverSessionCommand
   | StartTurnCommand
   | CancelTurnCommand
   | RespondInteractionCommand
@@ -179,6 +185,10 @@ export type RuntimeCommandErrorCode =
   | 'checkpoint_unavailable'
   | 'policy_denied'
   | 'runtime_busy'
+  | 'session_recovery_required'
+  | 'session_cleanup_pending'
+  | 'external_outcome_unknown'
+  | 'storage_unavailable'
   | 'session_unavailable'
   | 'unsupported'
   | 'already_closed';
@@ -216,6 +226,7 @@ export type RuntimeCommandReceipt =
 const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
   'create_session',
   'resume_session',
+  'recover_session',
   'start_turn',
   'cancel_turn',
   'respond_interaction',
@@ -264,6 +275,11 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
         isIdentifier(candidate.sessionId) &&
         (!Object.hasOwn(candidate, 'afterRevision') ||
           isNonNegativeSafeInteger(candidate.afterRevision))
+      );
+    case 'recover_session':
+      return (
+        isSessionCommand(candidate, ['expectedAuthorityRevision']) &&
+        isNonNegativeSafeInteger(candidate.expectedAuthorityRevision)
       );
     case 'start_turn':
       return (

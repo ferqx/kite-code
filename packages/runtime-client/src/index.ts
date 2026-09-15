@@ -15,6 +15,7 @@ export {
 } from '@kite-ai/runtime-contract';
 
 export * from './client';
+export * from './recovery';
 export * from './store';
 
 export const RUNTIME_CLIENT_BOUNDARY_ = Object.freeze({

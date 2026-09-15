@@ -100,3 +100,5 @@ Owner-local behavior changes update this README. Cross-package Runtime protocol,
 - [协议编码、版本与传输边界](docs/wire-format.md)
 
 History 会话摘要编码保留可选 Workspace membership；只读失败可携带稳定 detailCode 与 retryable，客户端不能从读取成功推导命令权限。
+
+按需恢复与原命令回执查询见[访问与恢复说明](docs/wire-format.md)。

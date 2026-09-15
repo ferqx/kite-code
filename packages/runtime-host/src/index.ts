@@ -238,6 +238,7 @@ export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unkn
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
@@ -249,6 +250,7 @@ export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unkno
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
   readonly contextCompiler?: ContextCompilerPort;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
   readonly modules?: never;
 }
@@ -276,6 +278,7 @@ export function createRuntimeHost<Event = unknown, State = unknown>(input: {
   readonly modules: readonly RuntimeModule[];
   readonly contextCompiler?: ContextCompilerPort;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
+  readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
 }): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
@@ -298,6 +301,9 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       capabilityRegistrySnapshot: moduleRegistry.snapshot(),
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
       ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.releaseSessionExecution
+        ? { releaseSessionExecution: input.releaseSessionExecution }
+        : {}),
       ...(input.runWithSessionExecution
         ? { runWithSessionExecution: input.runWithSessionExecution }
         : {}),
@@ -317,6 +323,9 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       capabilityRegistrySnapshot: input.capabilityRegistrySnapshot,
       ...(input.contextCompiler ? { contextCompiler: input.contextCompiler } : {}),
       ...(input.ownsSessionExecution ? { ownsSessionExecution: input.ownsSessionExecution } : {}),
+      ...(input.releaseSessionExecution
+        ? { releaseSessionExecution: input.releaseSessionExecution }
+        : {}),
       ...(input.runWithSessionExecution
         ? { runWithSessionExecution: input.runWithSessionExecution }
         : {}),

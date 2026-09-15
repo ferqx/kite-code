@@ -66,9 +66,14 @@ export type KiteSessionExecutionControl = Pick<
 >;
 
 export interface KiteSessionRecoveryPort {
+  confirmCleanup(input: {
+    readonly sessionId: string;
+    readonly expectedAuthorityRevision: number;
+  }): void;
   inspect(sessionId: string): Readonly<{
     authority: KiteSessionExecutionAuthorityRecord;
     pendingEffects: readonly KiteSessionEffectRecord[];
+    unknownEffects: readonly KiteSessionEffectRecord[];
   }>;
   reconcile(input: {
     readonly sessionId: string;
@@ -103,6 +108,11 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
   runWithExecution<Result>(handle: KiteSessionExecutionHandle, operation: () => Result): Result;
   readSnapshot<Result>(operation: () => Result): Result;
   /** Receipt-bearing, effect-free State decision when no execution writer is present. */
+  commitRecoveryDecision(
+    transaction: RuntimeTransactionInput<Event, State>,
+    expectedRevision: number,
+    expectedAuthorityRevision: number,
+  ): void;
   commitUnownedDecision(
     transaction: RuntimeTransactionInput<Event, State>,
     expectedRevision: number,
@@ -176,10 +186,18 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
   });
 
   const recovery: KiteSessionRecoveryPort = Object.freeze({
+    confirmCleanup: (request: Parameters<KiteSessionRecoveryPort['confirmCleanup']>[0]) => {
+      authority.confirmRecoveryCleanup({
+        sessionId: request.sessionId,
+        expectedRevision: request.expectedAuthorityRevision,
+        retainRecoveryRequired: true,
+      });
+    },
     inspect: (sessionId: string) =>
       Object.freeze({
         authority: authority.read(sessionId),
         pendingEffects: effectPort.listPrepared(sessionId),
+        unknownEffects: effectPort.listUnknown(sessionId),
       }),
     reconcile: (request: Parameters<KiteSessionRecoveryPort['reconcile']>[0]) =>
       rawWriter.run(() => {
@@ -536,6 +554,51 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     refreshExecution,
     runWithExecution,
     readSnapshot,
+    commitRecoveryDecision(transaction, expectedRevision, expectedAuthorityRevision) {
+      rawWriter.run(() => {
+        const stored = storage.sessions.loadSnapshot<State>(transaction.sessionId);
+        if (
+          !stored ||
+          !transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          transaction.runMutation ||
+          transaction.sessionModelRoute ||
+          transaction.commandReceipt.scopeSessionId !== transaction.sessionId ||
+          transaction.commandReceipt.targetSessionId !== transaction.sessionId ||
+          transaction.events.length !== 0 ||
+          input.codec.encodeState(stored) !== input.codec.encodeState(transaction.snapshot)
+        )
+          unsupported('Recovery decisions cannot rewrite Session history or State.');
+        const facts = recovery.inspect(transaction.sessionId);
+        if (facts.authority.revision !== expectedAuthorityRevision)
+          throw new KiteSessionMutationError('revision_conflict', 'Recovery authority changed.');
+        if (
+          facts.authority.status !== 'recovery_required' ||
+          !facts.authority.cleanupConfirmed ||
+          facts.pendingEffects.length > 0 ||
+          facts.unknownEffects.length > 0
+        )
+          throw new KiteSessionRuntimeStorageError(
+            'stale_execution_handle',
+            'Recovery requires confirmed cleanup and settled effects.',
+          );
+        if (selectRevision.get(transaction.sessionId)?.revision !== expectedRevision)
+          throw new KiteSessionMutationError(
+            'revision_conflict',
+            'Session changed before recovery.',
+          );
+        authority.confirmRecoveryCleanupInTransaction({
+          sessionId: transaction.sessionId,
+          expectedRevision: expectedAuthorityRevision,
+        });
+        committingUnownedDecision = true;
+        try {
+          base.storage.transactions.commitDecision(transaction);
+        } finally {
+          committingUnownedDecision = false;
+        }
+      });
+    },
     commitUnownedDecision(transaction, expectedRevision) {
       if (
         !Number.isSafeInteger(expectedRevision) ||

@@ -999,14 +999,15 @@ test('a preselected workspace stages its session model without mutating active w
   expect(client.selectedModels).toEqual([]);
 });
 
-test('cancelling an active-task workspace switch restores and re-enables the first draft', async () => {
+test('sending to another workspace does not ask to stop existing tasks', async () => {
   const client = new UiClient();
   client.view.projects = [
     { path: '/project', lastOpenedAt: 2 },
     { path: '/another', lastOpenedAt: 1 },
   ];
-  client.hasActiveTasks = async () => true;
-  client.confirm = async () => false;
+  client.confirm = async () => {
+    throw new Error('Workspace selection must not stop tasks');
+  };
   await render(<App client={client} />);
   await click(button('新对话'));
   await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
@@ -1019,9 +1020,8 @@ test('cancelling an active-task workspace switch restores and re-enables the fir
   await key(input(), 'Enter');
   await act(() => Bun.sleep(0));
 
-  expect(client.created).toBe(0);
-  expect(input().value).toBe('不要丢失这条需求');
-  expect(button('发送').disabled).toBe(false);
+  expect(client.created).toBe(1);
+  expect(client.sent).toEqual(['不要丢失这条需求']);
 });
 
 test('a non-Git workspace omits the branch selector', async () => {
@@ -1164,7 +1164,6 @@ test('space new conversation icon targets that project without toggling its list
     { path: '/project', lastOpenedAt: 2 },
     { path: '/another', lastOpenedAt: 1 },
   ];
-  client.hasActiveTasks = async () => false;
   await render(<App client={client} />);
   const trigger = document.querySelector<HTMLButtonElement>(
     '[aria-label="在 another 中新建对话"]',
@@ -1191,7 +1190,6 @@ test('workspace switching keeps the existing session list mounted and visually e
     { path: '/project', lastOpenedAt: 2 },
     { path: '/another', lastOpenedAt: 1 },
   ];
-  client.hasActiveTasks = async () => false;
   let activations = 0;
   let branchReads = 0;
   client.activateProject = async () => {
@@ -1942,4 +1940,24 @@ test('opening a projection without updatedAt preserves the directory time and so
   await click(button('工作 0'));
   expect(titles()).toEqual(['工作 0', '工作 1']);
   expect(client.view.directory[1]?.updatedAt).toBe('2026-09-12T10:00:00Z');
+});
+
+test('explicit recovery inspection preserves draft and does not submit a task', async () => {
+  const client = new UiClient();
+  let checks = 0;
+  client.checkSessionRecovery = async () => {
+    checks++;
+    client.clearError();
+  };
+  await render(<App client={client} />);
+  await write(input(), '等待恢复后的草稿');
+  await act(() => client.update({ error: '旧执行清理尚未确认', recoverySessionId: 'session-a' }));
+  const recovery = [...document.querySelectorAll('button')].find(
+    (button) => button.textContent === '检查恢复',
+  );
+  expect(recovery).toBeDefined();
+  await click(recovery!);
+  expect(checks).toBe(1);
+  expect(client.sent).toEqual([]);
+  expect(input().value).toBe('等待恢复后的草稿');
 });

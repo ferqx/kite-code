@@ -11,6 +11,7 @@ import type {
 import {
   RUNTIME_PROTOCOL_COMMAND_SCHEMA_,
   RUNTIME_PROTOCOL_EVENT_SCHEMA_,
+  RUNTIME_PROTOCOL_QUERY_SCHEMA_,
   RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   type RuntimeProtocolCommand,
@@ -33,6 +34,7 @@ export function mapProtocolCommandToRuntimeCommand(
   switch (command.type) {
     case 'create_session':
       return { ...command, workspace: context.workspace };
+    case 'recover_session':
     case 'resume_session':
     case 'start_turn':
     case 'cancel_turn':
@@ -54,9 +56,9 @@ export function mapRuntimeCommandToProtocol(
 ): RuntimeProtocolCommand | undefined {
   switch (command.type) {
     case 'create_session': {
-      const { workspace: _workspace, ...wire } = command;
-      return wire;
+      return RUNTIME_PROTOCOL_COMMAND_SCHEMA_.safeParse(command).data;
     }
+    case 'recover_session':
     case 'resume_session':
     case 'start_turn':
     case 'cancel_turn':
@@ -76,7 +78,15 @@ export function mapRuntimeCommandToProtocol(
 
 export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): RuntimeQuery {
   switch (query.type) {
+    case 'get_command_receipt':
+      return {
+        ...query,
+        command: mapProtocolCommandToRuntimeCommand(query.command, {
+          workspace: query.command.type === 'create_session' ? (query.command.workspace ?? '') : '',
+        }),
+      };
     case 'list_sessions':
+    case 'get_session_recovery':
     case 'get_session_projection':
     case 'get_context_status':
     case 'list_checkpoints':
@@ -89,7 +99,10 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
 
 export function mapRuntimeQueryToProtocol(query: RuntimeQuery): RuntimeProtocolQuery | undefined {
   switch (query.type) {
+    case 'get_command_receipt':
+      return RUNTIME_PROTOCOL_QUERY_SCHEMA_.safeParse(query).data;
     case 'list_sessions':
+    case 'get_session_recovery':
     case 'get_session_projection':
     case 'get_context_status':
     case 'list_checkpoints':
@@ -367,6 +380,9 @@ export function mapRuntimeQueryResultToProtocol(
         ...(result.revision === undefined ? {} : { revision: result.revision }),
         sessions: (result.sessions ?? []).map(mapSession),
       }).data;
+    case 'get_command_receipt':
+    case 'get_session_recovery':
+      return RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(result).data;
     case 'get_session_projection':
       return result.session === undefined
         ? undefined

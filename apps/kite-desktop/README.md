@@ -51,16 +51,20 @@ Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配�
 
 ## 本次验证与剩余项
 
-[设置面板](src/Settings.tsx)包含模型、默认编辑器及 [MCP／Skills](docs/extensions.md)分类，扩展调用沿已有 App Control；新入口的外部认证与原生资格需按该专题单独核对。[设置面板](src/Settings.tsx)和[问题/计划面板](src/Interaction.tsx)消费现有 connection。计划正文由 Service 投影，缺失或截断时只允许反馈/取消。先选择并验证目录，再确认项目切换并等待旧服务清理；取消选择时保留原连接。只有实际切换执行项目且当前服务有活动任务时确认停止。
+[设置面板](src/Settings.tsx)包含模型、默认编辑器及 [MCP／Skills](docs/extensions.md)分类，扩展调用沿已有 App Control；新入口的外部认证与原生资格需按该专题单独核对。[设置面板](src/Settings.tsx)和[问题/计划面板](src/Interaction.tsx)消费现有 connection。计划正文由 Service 投影，缺失或截断时只允许反馈/取消。选择并验证目标目录后，仅替换逻辑连接、授权上下文和订阅；同一配套 Service 继续管理其他空间任务，切换空间不再确认停止全服务。取消选择时保留原连接。
 
-[凭据结果测试](test/models.test.ts)覆盖拒绝、未知结果及不重放；Service 的[计划正文测试](../kite-service/test/runtime-plan-review.test.ts)覆盖正文、脱敏、限额与身份漂移。[导航集成测试](test/navigation.test.ts)通过实际 App Server 验证项目目录隔离、允许外项目历史读取并拒绝未激活的外项目发送、快速切换时忽略旧响应与断开清理。[开发闭环测试](test/development.test.ts)验证代码写入、测试输出、重启历史和继续会话。协议证据与原生窗口证据分别记录；迁移前阶段 1 的本机 macOS 日常开发闭环仍是 Tauri 历史证据，Electron 当前的独立服务与原生窗口自动验收见下文。
+[凭据结果测试](test/models.test.ts)覆盖拒绝、未知结果及不重放；Service 的[计划正文测试](../kite-service/test/runtime-plan-review.test.ts)覆盖正文、脱敏、限额与身份漂移。[导航集成测试](test/navigation.test.ts)通过实际 App Server 验证项目目录隔离、允许外项目历史读取，按持久 workspace identity 与授权路由执行、快速切换时忽略旧响应与断开清理。[开发闭环测试](test/development.test.ts)验证代码写入、测试输出、重启历史和继续会话。协议证据与原生窗口证据分别记录；迁移前阶段 1 的本机 macOS 日常开发闭环仍是 Tauri 历史证据，Electron 当前的独立服务与原生窗口自动验收见下文。
 
 [原生验收](docs/native-validation.md)保留 2026-09-07 Tauri 版本在本机 macOS 的制品、隔离条件、真实窗口与生命周期证据，并另列宿主无关的 Service 证据。这些历史结果不作为 Electron 资格；同一记录现已登记 Electron 44.3.0 独立包的准确身份、隔离原生验收与剩余人工验证。
 
-当前 [Electron lifecycle](electron/main.ts)在关窗时隐藏主窗口；明确退出使用主进程 `before-quit` 确认，并在 Service 清理完成后再次退出。renderer 的项目切换确认通过具名 bridge 调用绑定主窗口的异步消息框。标题栏非交互区由 CSS drag region 交给 Electron，双击才调用封闭的最大化切换。窗口、preload、重接、退出和崩溃清理需重复真实 Electron 场景，不能用单元测试或浏览器预览替代。
+当前 [Electron lifecycle](electron/main.ts)在关窗时隐藏主窗口；明确退出使用主进程 `before-quit` 确认，并在 Service 清理完成后再次退出。空间切换不关闭 Service；明确退出仍由原生异步消息框确认。标题栏非交互区由 CSS drag region 交给 Electron，双击才调用封闭的最大化切换。窗口、preload、重接、退出和崩溃清理需重复真实 Electron 场景，不能用单元测试或浏览器预览替代。
 
 会话切换/重连保持订阅代次边界；跨项目清除旧选中状态，加载会话显示提示并在 20 秒后有界失败。`tool.cancelled`/`tool.rejected` 在历史与实时投影中均为终态，迟到进度不能覆盖。其余范围见首版计划。
 
 阶段 2 的[大历史回归](test/history.test.ts)通过真实 App Server 写入 20 轮、每轮约 32 KiB 回答，重启后完整分页恢复且每帧不超过 1 MiB；[丢失回执回归](test/resilience.test.ts)在文件已写入后丢弃 start_turn 回执，确认连接 ready 失效、结果未知提示和重连无重放。大会话渲染、与安装版 TUI 的同会话竞争、损坏制品拒绝及手动替换应用后的数据保留目前只有 Tauri 版本的历史原生证据；Electron 与 host 无关的 Service 回归分别记录，正式签名分发升级另行验收。
 
 历史目录、无项目启动、跨空间阅读与有界自动重接见[历史与恢复](docs/history-and-recovery.md)。
+
+恢复错误通过共享 Runtime 契约传递；现有错误弹窗的“检查恢复”调用只读摘要及 CAS 恢复命令，成功后清除旧准入缓存并重新校准，保留草稿且不发送。丢回执查询原命令的持久结果，查询失败仍显示未知。相关验证见[UI 测试](test/ui.test.tsx)、[Service 跨空间回归](../kite-service/test/isolated/app-server-process.test.ts)。
+
+Git 分支切换保留关闭与重连以重新构建配置、MCP 与 sandbox owner；在执行前确认整个配套 Service 没有活动任务，防止重载取消其他空间任务。按空间重建依赖尚未实现，不能把保留 Service 的普通空间切换逻辑直接用于 Git 环境变更。

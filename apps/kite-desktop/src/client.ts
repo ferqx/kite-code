@@ -14,6 +14,8 @@ import {
 import {
   RuntimeClientError,
   type RuntimeClientNotificationWithGeneration,
+  readCommandReceipt,
+  recoverSessionIfSafe,
 } from '@kite-ai/runtime-client';
 import type {
   RuntimeApprovalInteraction,
@@ -72,6 +74,7 @@ export interface DesktopView {
   connected: boolean;
   error?: string;
   commandError?: string;
+  recoverySessionId?: string;
   trust?: WorkspaceTrustQueryResponse;
   models?: ProviderModelSnapshot;
   mcp?: AppMcpSnapshot;
@@ -186,6 +189,7 @@ export class DesktopClient {
     this.#publish({
       error: undefined,
       commandError: undefined,
+      recoverySessionId: undefined,
       projectError: undefined,
       branchError: undefined,
     });
@@ -232,9 +236,8 @@ export class DesktopClient {
     return path;
   }
   async activateProject(path: string) {
-    if (this.#connection) {
-      if (this.#view.workspace !== path) throw new Error('请先断开当前项目。');
-    } else {
+    if (this.#connection && this.#view.workspace !== path) await this.#detach();
+    if (!this.#connection) {
       await this.#native().activateWorkspace(path);
       await this.connect({ refreshDirectory: false });
     }
@@ -268,15 +271,6 @@ export class DesktopClient {
       throw error;
     }
   }
-  async hasActiveTasks() {
-    if (this.#connection?.status !== 'active') return this.hasNativeConnection();
-    const result = await this.#connection.runtime.query({
-      schema: 'kite.runtime-query.v1',
-      type: 'list_sessions',
-    });
-    if (result.status !== 'ok' || !result.sessions || result.sessions.length >= 1000) return true;
-    return result.sessions.some(isActiveRun);
-  }
   async switchBranch(name: string) {
     const expected = this.#view.branch;
     if (!expected || expected.workspace !== this.#view.workspace)
@@ -298,6 +292,8 @@ export class DesktopClient {
       )
     )
       throw new Error('项目中有运行或等待中的任务，请先结束任务再切换分支。');
+    if (directory.sessions.some(isActiveRun))
+      throw new Error('切换分支需要重新加载项目配置，请等待其他空间的任务结束后再切换。');
     const actual = await this.refreshBranch();
     if (!actual || !sameEnvironment(expected, actual))
       throw new Error('项目或分支已改变，请重新选择。');
@@ -805,13 +801,20 @@ export class DesktopClient {
     if (result.outcome !== 'applied' && result.outcome !== 'already_selected')
       throw new Error(`模型未确认切换（${result.outcome}），请检查最新配置后重新选择。`);
   }
-  async #command(command: RuntimeCommand) {
+  async #command(
+    command: RuntimeCommand,
+    allowRecovery = true,
+  ): Promise<Awaited<ReturnType<KiteAppServerConnection['runtime']['command']>>> {
     const connection = this.#requireConnection();
     this.#publish({ commandError: undefined });
     let receipt: Awaited<ReturnType<typeof connection.runtime.command>>;
     try {
       receipt = await connection.runtime.command(command);
     } catch (cause) {
+      try {
+        const committed = await readCommandReceipt(connection.runtime, command);
+        if (committed) return committed;
+      } catch {}
       if (
         cause instanceof RuntimeClientError &&
         cause.code !== 'connection_closed' &&
@@ -831,10 +834,86 @@ export class DesktopClient {
       this.#publish({ commandError: error.message });
       throw error;
     }
-    if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay')
-      throw new Error(`操作未执行：${receipt.code}`);
+    if (
+      receipt.status === 'rejected' &&
+      receipt.code === 'session_recovery_required' &&
+      allowRecovery &&
+      'sessionId' in command &&
+      command.type !== 'recover_session'
+    ) {
+      const recovered = await recoverSessionIfSafe(
+        connection.runtime,
+        command.sessionId,
+        crypto.randomUUID(),
+      );
+      if (recovered?.status === 'applied' || recovered?.status === 'idempotent_replay') {
+        if (this.#connection !== connection) throw new Error('连接已变化，请重新加载会话。');
+        this.#admitted.delete(command.sessionId);
+        return this.#command(command, false);
+      }
+    }
+    if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
+      const reasons: Partial<Record<typeof receipt.code, string>> = {
+        session_recovery_required:
+          '会话需要恢复核对。旧执行的清理或外部结果尚未确认；不会重发旧操作。',
+        session_cleanup_pending: '旧执行尚未确认清理完成，请等待原服务结束相关执行后重试。',
+        external_outcome_unknown: '存在结果未知的外部操作，请先核对实际结果；不会自动重跑。',
+        runtime_busy: '此会话正在执行或等待清理，请稍后重试。',
+        storage_unavailable: '会话存储当前不可用，请检查服务与存储后重试。',
+      };
+      if (
+        'sessionId' in command &&
+        [
+          'session_recovery_required',
+          'session_cleanup_pending',
+          'external_outcome_unknown',
+        ].includes(receipt.code)
+      ) {
+        this.#admitted.delete(command.sessionId);
+        this.#publish({
+          recoverySessionId: command.sessionId,
+          ...(this.#view.selected === command.sessionId ? { ready: false } : {}),
+        });
+      }
+      throw new Error(reasons[receipt.code] ?? `操作未执行：${receipt.code}`);
+    }
     return receipt;
   }
+  async checkSessionRecovery() {
+    const sessionId = this.#view.recoverySessionId;
+    if (!sessionId) return;
+    const connection = this.#requireConnection();
+    const result = await connection.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'get_session_recovery',
+      sessionId,
+    });
+    if (result.status !== 'ok' || !result.recovery)
+      throw new Error('无法读取恢复状态，请检查连接后重试。');
+    if (result.recovery.action === 'recover') {
+      const recovered = await recoverSessionIfSafe(
+        connection.runtime,
+        sessionId,
+        crypto.randomUUID(),
+      );
+      if (recovered?.status !== 'applied' && recovered?.status !== 'idempotent_replay')
+        throw new Error('恢复状态已变化，请重新检查。');
+    } else if (result.recovery.action !== 'continue') {
+      throw new Error(
+        result.recovery.pendingEffectCount || result.recovery.unknownEffectCount
+          ? `旧操作的外部结果尚未确认。请核对相关文件或外部服务；此次检查没有重跑操作。${result.recovery.effects?.length ? ` 操作：${result.recovery.effects.map((effect) => effect.effectId).join('、')}` : ''}`
+          : '旧执行尚未确认清理完成。请让原服务结束相关执行后再检查；历史仍可阅读。',
+      );
+    }
+    if (this.#connection !== connection) throw new Error('连接已变化，请重新加载会话。');
+    this.#admitted.delete(sessionId);
+    this.clearError();
+    if (this.#view.selected === sessionId) {
+      this.#publish({ ready: false });
+      await this.selectSession(sessionId);
+    }
+  }
+
   async newSession(model?: { readonly provider: string; readonly name: string }): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const connection = this.#requireConnection();

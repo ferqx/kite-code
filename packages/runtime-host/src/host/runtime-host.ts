@@ -45,6 +45,7 @@ import {
 } from '../storage';
 import {
   createRuntimeCommandCommitEvidence,
+  digestRuntimeCommand,
   parseRuntimeStoredCommandReceipt,
   resolveRuntimeCommandReceipt,
 } from './command-receipt';
@@ -103,6 +104,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   readonly #deletedSessions = new Set<string>();
   readonly #activeAccesses = new Set<Promise<unknown>>();
   readonly #ownsSessionExecution: (sessionId: string) => boolean;
+  readonly #releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly #runWithSessionExecution?: <Result>(
     sessionId: string,
     operation: () => Result,
@@ -118,6 +120,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
     readonly contextCompiler?: ContextCompilerPort;
     readonly ownsSessionExecution?: (sessionId: string) => boolean;
+    readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
     readonly runWithSessionExecution?: <Result>(
       sessionId: string,
       operation: () => Result,
@@ -126,6 +129,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     this.storage = input.storage;
     this.#ownsSessionExecution = input.ownsSessionExecution ?? (() => true);
     this.#runWithSessionExecution = input.runWithSessionExecution;
+    this.#releaseSessionExecution = input.releaseSessionExecution;
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
     assertRuntimeHostRegistrySnapshot(input.moduleRegistry, input.capabilityRegistrySnapshot);
@@ -169,10 +173,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     command: RuntimeCommand,
     context?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeCommandReceipt> {
-    const execute = () => this.#beginAccess(() => this.#executeCommand(command, context));
-    return command.type === 'create_session' || command.type === 'set_interaction_mode'
-      ? execute()
-      : this.#withSessionExecution(runtimeCommandSessionId(command), execute);
+    return this.#beginAccess(() => this.#executeCommand(command, context));
   }
 
   async #executeCommand(
@@ -199,86 +200,115 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       return replay ? this.#replayAfterLookup(command, replay) : settled;
     }
 
-    const mailbox = this.#registry.mailbox(evidence.scopeSessionId);
+    const mailboxSessionId =
+      command.type === 'create_session' ? evidence.targetSessionId : evidence.scopeSessionId;
+    const mailbox = this.#registry.mailbox(mailboxSessionId);
     const execution = mailbox.run(async () => {
-      const queued = this.#lookupCommandReceipt(command, evidence.requestDigest);
-      if (queued) return this.#replayAfterLookup(command, queued);
-
-      if (isDeletedSessionCommand(command, this.#deletedSessions)) {
-        return {
-          status: 'not_found',
-          commandId: command.commandId,
-          code: 'session_not_found',
-        } satisfies RuntimeCommandReceipt;
-      }
-
-      const conflict = await this.#revisionConflict(command);
-      if (conflict) return conflict;
-      if (command.type === 'delete_session') return this.#deleteSession(command, evidence);
-      const allowQueuedSuccessor =
-        command.type === 'start_turn' &&
-        isTerminalRunProjection(this.#registry.projection(command.sessionId));
-      if (
-        (command.type === 'start_turn' || command.type === 'compact_session') &&
-        !this.#lifecycle.canSchedule(command.sessionId) &&
-        !allowQueuedSuccessor
-      ) {
-        return {
-          status: 'rejected',
-          commandId: command.commandId,
-          code: 'runtime_busy',
-          currentRevision: this.#registry.projection(command.sessionId)?.revision,
-        } satisfies RuntimeCommandReceipt;
-      }
-      if (
-        command.type === 'resume_session' ||
-        command.type === 'start_turn' ||
-        command.type === 'compact_session'
-      ) {
-        await this.#recoverSession(command.sessionId);
-      }
-
-      const inspected = await this.#inspectCommand(
-        command,
-        targetSessionIdFor(command),
-        pinnedContext,
-      );
-      if (inspected.kind === 'terminal') return assertTerminalReceipt(command, inspected);
-      const expectedTarget = targetSessionIdFor(command);
-      if (inspected.decision.targetSessionId !== expectedTarget) {
-        throw new Error('Runtime Host inspected command target identity is invalid.');
-      }
-      let committed: Awaited<ReturnType<typeof inspected.decision.commit>>;
       try {
-        committed = await inspected.decision.commit(
-          Object.freeze({ ...evidence, targetSessionId: expectedTarget }),
-        );
-      } catch (error) {
-        if (command.type === 'set_interaction_mode') {
-          const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
-          if (replay) return this.#replayAfterLookup(command, replay);
-        }
-        throw error;
-      }
-      assertAppliedReceipt(command, committed.receipt, expectedTarget);
-      const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
-      if (!stored) throw new Error('Runtime Host command receipt was not persisted by commit.');
-      const durable = parseRuntimeStoredCommandReceipt(stored);
-      if (!sameAppliedReceipt(durable, committed.receipt)) {
-        throw new Error('Runtime Host persisted command receipt does not match commit result.');
-      }
+        const execute = async () => {
+          const queued = this.#lookupCommandReceipt(command, evidence.requestDigest);
+          if (queued) return this.#replayAfterLookup(command, queued);
 
-      await committed.activation?.((notification) => this.#notifications.publish(notification));
-      await this.#refreshReceiptSession(committed.receipt);
-      const prepared = committed.preparedExecution;
-      if (prepared?.execution)
-        this.#schedulePreparedExecution(command, committed.receipt, prepared, allowQueuedSuccessor);
-      if (command.type === 'cancel_turn') {
-        this.#lifecycle.abort(committed.receipt.sessionId, 'Runtime turn cancelled.');
-      } else if (command.type === 'close_session') {
-        this.#lifecycle.close(committed.receipt.sessionId, 'Runtime session closed.');
+          if (isDeletedSessionCommand(command, this.#deletedSessions)) {
+            return {
+              status: 'not_found',
+              commandId: command.commandId,
+              code: 'session_not_found',
+            } satisfies RuntimeCommandReceipt;
+          }
+
+          const conflict = await this.#revisionConflict(command);
+          if (conflict) return conflict;
+          if (command.type === 'delete_session') return this.#deleteSession(command, evidence);
+          const allowQueuedSuccessor =
+            command.type === 'start_turn' &&
+            isTerminalRunProjection(this.#registry.projection(command.sessionId));
+          if (
+            (command.type === 'start_turn' || command.type === 'compact_session') &&
+            !this.#lifecycle.canSchedule(command.sessionId) &&
+            !allowQueuedSuccessor
+          ) {
+            return {
+              status: 'rejected',
+              commandId: command.commandId,
+              code: 'runtime_busy',
+              currentRevision: this.#registry.projection(command.sessionId)?.revision,
+            } satisfies RuntimeCommandReceipt;
+          }
+          if (
+            command.type !== 'create_session' &&
+            command.type !== 'set_interaction_mode' &&
+            command.type !== 'recover_session'
+          ) {
+            await this.#recoverSession(runtimeCommandSessionId(command));
+          }
+
+          const inspected = await this.#inspectCommand(
+            command,
+            targetSessionIdFor(command),
+            pinnedContext,
+          );
+          if (inspected.kind === 'terminal') return assertTerminalReceipt(command, inspected);
+          const expectedTarget = targetSessionIdFor(command);
+          if (inspected.decision.targetSessionId !== expectedTarget) {
+            throw new Error('Runtime Host inspected command target identity is invalid.');
+          }
+          let committed: Awaited<ReturnType<typeof inspected.decision.commit>>;
+          try {
+            committed = await inspected.decision.commit(
+              Object.freeze({ ...evidence, targetSessionId: expectedTarget }),
+            );
+          } catch (error) {
+            if (command.type === 'set_interaction_mode') {
+              const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
+              if (replay) return this.#replayAfterLookup(command, replay);
+            }
+            throw error;
+          }
+          assertAppliedReceipt(command, committed.receipt, expectedTarget);
+          const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
+          if (!stored) throw new Error('Runtime Host command receipt was not persisted by commit.');
+          const durable = parseRuntimeStoredCommandReceipt(stored);
+          if (!sameAppliedReceipt(durable, committed.receipt)) {
+            throw new Error('Runtime Host persisted command receipt does not match commit result.');
+          }
+
+          await committed.activation?.((notification) => this.#notifications.publish(notification));
+          await this.#refreshReceiptSession(committed.receipt);
+          const prepared = committed.preparedExecution;
+          if (prepared?.execution)
+            this.#schedulePreparedExecution(
+              command,
+              committed.receipt,
+              prepared,
+              allowQueuedSuccessor,
+            );
+          if (command.type === 'cancel_turn') {
+            this.#lifecycle.abort(committed.receipt.sessionId, 'Runtime turn cancelled.');
+          } else if (command.type === 'close_session') {
+            this.#lifecycle.close(committed.receipt.sessionId, 'Runtime session closed.');
+          }
+          return receiptFromStoredReceipt(stored);
+        };
+        return await (command.type === 'create_session' ||
+        command.type === 'set_interaction_mode' ||
+        command.type === 'recover_session'
+          ? execute()
+          : this.#withSessionExecution(runtimeCommandSessionId(command), execute));
+      } finally {
+        await this.#releaseIdleSession(mailboxSessionId);
+        if (command.type === 'fork_session') {
+          void this.#registry
+            .mailbox(evidence.targetSessionId)
+            .run(() => this.#releaseIdleSession(evidence.targetSessionId))
+            .catch((error) =>
+              console.error('Fork execution release failed.', {
+                sessionId: evidence.targetSessionId,
+                error,
+              }),
+            );
+        }
       }
-      return receiptFromStoredReceipt(stored);
     });
     this.#pendingCommands.set(identity, { digest: evidence.requestDigest, promise: execution });
     try {
@@ -326,6 +356,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     // must never call App recovery or recreate a snapshot/Runtime owner.
     if (
       command.type === 'delete_session' ||
+      command.type === 'recover_session' ||
       command.type === 'start_turn' ||
       command.type === 'set_interaction_mode'
     )
@@ -401,11 +432,27 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       operation: execution.operation,
       execute: run,
       onSkipped: execution.cancel,
+      onSettled: () => {
+        void this.#registry
+          .mailbox(receipt.sessionId)
+          .run(() => this.#releaseIdleSession(receipt.sessionId))
+          .catch((error) =>
+            console.error('Session execution release failed.', {
+              sessionId: receipt.sessionId,
+              error,
+            }),
+          );
+      },
       ...(allowQueuedSuccessor ? { allowQueuedSuccessor: true } : {}),
     });
     if (!scheduled) {
       throw new Error(`Runtime session operation could not be scheduled: ${receipt.sessionId}`);
     }
+  }
+
+  async #releaseIdleSession(sessionId: string): Promise<void> {
+    if (this.#lifecycle.isActive(sessionId) || !this.#releaseSessionExecution) return;
+    if (await this.#releaseSessionExecution(sessionId)) this.#recoveredSessions.delete(sessionId);
   }
 
   #withSessionExecution<Result>(sessionId: string, operation: () => Result): Result {
@@ -420,6 +467,15 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   async #executeQuery(query: RuntimeQuery): Promise<RuntimeQueryResult> {
     await this.start();
+    if (query.type === 'get_command_receipt') {
+      if (runtimeCommandSessionId(query.command) !== query.sessionId)
+        return { status: 'rejected', queryType: query.type, code: 'invalid_command' };
+      const receipt = this.#lookupCommandReceipt(
+        query.command,
+        digestRuntimeCommand(query.command),
+      );
+      return { status: 'ok', queryType: query.type, ...(receipt ? { receipt } : {}) };
+    }
     if (query.type === 'list_sessions') {
       return {
         status: 'ok',
@@ -694,7 +750,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     // Settings can have independent Store writers. Read their current CAS without publishing
     // a snapshot ahead of an active bridge's still-queued canonical events.
     const current =
-      command.type === 'set_interaction_mode'
+      command.type === 'set_interaction_mode' || !this.#recoveredSessions.has(sessionId)
         ? await this.#bridge.query({
             schema: RUNTIME_QUERY_SCHEMA_,
             type: 'get_session_projection',
@@ -702,7 +758,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           })
         : undefined;
     const projection =
-      command.type === 'set_interaction_mode'
+      command.type === 'set_interaction_mode' || !this.#recoveredSessions.has(sessionId)
         ? current?.status === 'ok'
           ? current.session
           : undefined

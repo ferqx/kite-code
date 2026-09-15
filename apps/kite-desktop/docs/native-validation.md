@@ -135,3 +135,11 @@ macOS 的 `app.getPath('home')` 不受 shell HOME 覆盖，packaged Electron 也
 源码外的实际 `.app` 使用真实 preload、封闭 IPC 与配套 Service 建立两个会话。测试调试器只延迟其中一次 history page 响应 2 秒：切回首个会话后，两次 animation frame 探针在 9.5ms 读到已缓存的用户／助手正文，未出现整页加载；旧草稿恢复且可以继续编辑，发送保持禁用，校准完成后恢复。延迟位于通过身份与参数校验后的 IPC 返回边界，不改变产品 bridge，也未给 renderer 开放额外能力。这个单次短会话样本不是 500 消息／30 次 p95 资格，不能替代[换型前的性能记录](history-and-recovery.md#缓存性能验证)。
 
 同次 smoke 继续通过沙箱／contextIsolation、隐藏恢复、流式刷新重接、标题栏最大化与还原、取消退出和确认退出；模型请求未重放。原生目录选择与确认框仍由 fixture 代答，人工系统输入法等既有边界不变。[校准回归](../test/session-calibration.test.ts)另验证：当前缓存校准期间，明确发送到新创建会话的请求仍保持原目标，而当前阅读会话不能提前发送或审批。
+
+## 执行恢复与空间独立运行（2026-09-15）
+
+Electron 44.3.0／macOS arm64 隔离包，配套 Service candidate `5acc1708999929050e0404e2`，Service SHA-256 `6a2169f0457e13b4f7c8d5265307879455ef9678ebf03ebf542bf36f54578f05`，app.asar SHA-256 `6ac050ffbbcc957618587a6a20e22232baba0f99d647aa0d3f6e5176fadbfe8c`。独立临时 HOME、appData、项目、模拟 Provider；仅桩替换原生目录选择与确认框响应，没有操作用户现有 profile 或真实外部服务。最终打包复用本机同版本 Electron 缓存 ZIP，产品构建脚本未增加缓存旁路。
+
+`bun run apps/kite-desktop/scripts/native-smoke.ts --execution-recovery` 已通过实际打包宿主、sandboxed preload、IPC／Service、流式刷新、隐藏再打开、两空间并发与确认退出。A 流式运行时创建 B 并执行，再切回 A；B 完成时通过只读隔离 Store 确认 A 仍为 active，随后两者完整结束；包含前置两轮的模型请求总数恰为 4，不取消或重放。最终原生窗口截图已人工检查。该场景不证明正式签名、公证或所有平台资格。
+
+默认完整视觉 smoke 另外发现复制按钮 hover 可见性及文件面板开启后阅读区几何断言失败，尚未解决；专用执行场景明确排除这些无关视觉断言，不把默认 smoke 报告成通过。复制按钮预期尺寸按当前 20px 组件修正，未改变组件视觉。恢复弹窗保留草稿且不发送任务由 UI 回归证明；安全恢复、缺清理证据拒绝、过期 authority CAS、未知外部结果和失权取消由 Service／Host／Store 回归证明，不将这部分单元证据称为原生恢复故障注入。

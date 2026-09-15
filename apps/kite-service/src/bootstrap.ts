@@ -55,6 +55,7 @@ import type {
   RuntimeStorage,
   RuntimeStoredRun,
 } from '@kite-ai/runtime-host/storage';
+import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
@@ -906,8 +907,11 @@ export interface KiteRuntimeStorageOwner {
   readonly commitUnownedInteractionMode?: KiteSessionAppServerStorageOwner['commitUnownedInteractionMode'];
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
-  readonly setExecutionLossHandler?: (handler: (sessionId: string) => void) => void;
+  readonly setExecutionLossHandler?: (handler: (sessionId: string) => Promise<void>) => void;
+  readonly commitRecoveryDecision?: KiteSessionAppServerStorageOwner['commitRecoveryDecision'];
   readonly ownedSessionIds?: () => readonly string[];
+  readonly recovery?: KiteSessionAppServerStorageOwner['recovery'];
+  readonly releaseSessionExecution?: KiteSessionAppServerStorageOwner['releaseSessionExecution'];
   readonly releaseExecutions?: (cleanupConfirmed: boolean) => void;
   readonly disposeStorage?: () => void;
 }
@@ -1235,7 +1239,8 @@ function createKiteRuntimeHost(
   ) => RuntimeHostExecutionBridge,
   ownsSessionExecution?: (sessionId: string) => boolean,
   runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result,
-  setExecutionLossHandler?: (handler: (sessionId: string) => void) => void,
+  setExecutionLossHandler?: (handler: (sessionId: string) => Promise<void>) => void,
+  releaseSessionExecution?: (sessionId: string) => Promise<boolean>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
   const host = createRuntimeHost({
     storage,
@@ -1245,11 +1250,11 @@ function createKiteRuntimeHost(
     contextCompiler: createBuiltinContextCompilerPort(),
     ...(ownsSessionExecution ? { ownsSessionExecution } : {}),
     ...(runWithSessionExecution ? { runWithSessionExecution } : {}),
+    ...(releaseSessionExecution ? { releaseSessionExecution } : {}),
   });
-  setExecutionLossHandler?.((sessionId) => {
-    void host.cancelSession(sessionId, 'Session execution ownership lost.').catch((error) => {
-      console.error('Local execution cleanup after ownership loss failed.', { sessionId, error });
-    });
+  setExecutionLossHandler?.(async (sessionId) => {
+    await host.cancelSession(sessionId, 'Session execution ownership lost.');
+    await releaseSessionExecution?.(sessionId);
   });
   return host;
 }
@@ -1347,6 +1352,12 @@ function createKiteCliRuntimeHost(
     owner.ownsSessionExecution,
     owner.runWithSessionExecution,
     owner.setExecutionLossHandler,
+    owner.releaseSessionExecution
+      ? (sessionId) =>
+          owner.releaseSessionExecution!(sessionId, () =>
+            runtimeCoordinatorBinding.access().release(sessionId),
+          )
+      : undefined,
   );
   return host;
 }
@@ -1778,6 +1789,79 @@ export function createKiteMultiWorkspaceRuntimeServer(
           command: RuntimeCommand,
           commandContext: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
         ): Promise<RuntimeHostCommandInspection> => {
+          if (command.type === 'recover_session') {
+            const state = owner.loadCurrentSnapshot(command.sessionId);
+            if (!state || !owner.recovery || !owner.commitRecoveryDecision)
+              return {
+                kind: 'terminal',
+                receipt: {
+                  status: 'rejected',
+                  commandId: command.commandId,
+                  code: state ? 'unsupported' : 'session_not_found',
+                },
+              };
+            const facts = owner.recovery.inspect(command.sessionId);
+            const code =
+              facts.authority.revision !== command.expectedAuthorityRevision
+                ? 'revision_conflict'
+                : facts.authority.status !== 'recovery_required'
+                  ? 'runtime_busy'
+                  : !facts.authority.cleanupConfirmed
+                    ? 'session_cleanup_pending'
+                    : facts.pendingEffects.length > 0 || facts.unknownEffects.length > 0
+                      ? 'external_outcome_unknown'
+                      : undefined;
+            if (code)
+              return {
+                kind: 'terminal',
+                receipt: {
+                  status: code === 'revision_conflict' ? 'conflict' : 'rejected',
+                  commandId: command.commandId,
+                  code,
+                },
+              };
+            return {
+              kind: 'accepted',
+              decision: {
+                targetSessionId: command.sessionId,
+                commit: async (evidence) => {
+                  const receipt = createRuntimeStoredCommandReceipt(evidence, state.revision);
+                  owner.commitRecoveryDecision!(
+                    {
+                      sessionId: command.sessionId,
+                      snapshot: state,
+                      events: [],
+                      commandReceipt: receipt,
+                    },
+                    command.expectedRevision,
+                    command.expectedAuthorityRevision,
+                  );
+                  return {
+                    receipt: {
+                      status: 'applied',
+                      commandId: command.commandId,
+                      sessionId: command.sessionId,
+                      revision: state.revision,
+                    },
+                  };
+                },
+              },
+            };
+          }
+          if (
+            command.type === 'set_interaction_mode' &&
+            runtimeCoordinatorBinding.access().get(command.sessionId) &&
+            owner.ownsSessionExecution?.(command.sessionId) === false
+          ) {
+            return {
+              kind: 'terminal',
+              receipt: {
+                status: 'rejected',
+                commandId: command.commandId,
+                code: 'session_cleanup_pending',
+              },
+            };
+          }
           // Settings do not instantiate Workspace configuration, models, or an execution Runtime.
           // A live coordinator remains the sole State owner and uses its existing fenced commit.
           if (
@@ -1881,6 +1965,12 @@ export function createKiteMultiWorkspaceRuntimeServer(
     owner.ownsSessionExecution,
     owner.runWithSessionExecution,
     owner.setExecutionLossHandler,
+    owner.releaseSessionExecution
+      ? (sessionId) =>
+          owner.releaseSessionExecution!(sessionId, () =>
+            runtimeCoordinatorBinding.access().release(sessionId),
+          )
+      : undefined,
   );
   const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
     authorize: async () => ({
@@ -1924,6 +2014,48 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 : undefined;
             })
             .filter((projection) => projection !== undefined),
+        };
+      }
+      if (query.type === 'get_session_recovery') {
+        if (!owner.recovery)
+          return {
+            status: 'unavailable' as const,
+            queryType: query.type,
+            code: 'unsupported' as const,
+          };
+        if (!owner.loadCurrentSnapshot(query.sessionId))
+          return {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'session_not_found' as const,
+          };
+        const { authority, pendingEffects, unknownEffects } = owner.recovery.inspect(
+          query.sessionId,
+        );
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          recovery: {
+            authorityRevision: authority.revision,
+            status: authority.status,
+            cleanupConfirmed: authority.cleanupConfirmed,
+            pendingEffectCount: pendingEffects.length,
+            unknownEffectCount: unknownEffects.length,
+            effects: [...pendingEffects, ...unknownEffects].slice(0, 20).map((effect) => ({
+              effectId: effect.effectId,
+              state: effect.state === 'unknown' ? ('unknown' as const) : ('prepared' as const),
+            })),
+            action:
+              authority.status === 'idle'
+                ? ('continue' as const)
+                : authority.status !== 'recovery_required'
+                  ? ('wait' as const)
+                  : authority.cleanupConfirmed &&
+                      pendingEffects.length === 0 &&
+                      unknownEffects.length === 0
+                    ? ('recover' as const)
+                    : ('inspect' as const),
+          },
         };
       }
       if (query.type === 'get_session_projection') return queryStoredProjection(query.sessionId);
@@ -2127,7 +2259,7 @@ function appServerCommandFailure(
 ) {
   if (error instanceof KiteHomeWriteError && error.code === 'write_failed') error = error.cause;
   if (
-    command.type === 'set_interaction_mode' &&
+    (command.type === 'set_interaction_mode' || command.type === 'recover_session') &&
     error instanceof KiteSessionExecutionAuthorityError &&
     error.code === 'session_not_found'
   ) {
@@ -2147,7 +2279,7 @@ function appServerCommandFailure(
   if (
     error instanceof KiteSessionMutationError &&
     error.code === 'revision_conflict' &&
-    command.type === 'set_interaction_mode'
+    (command.type === 'set_interaction_mode' || command.type === 'recover_session')
   ) {
     const state = owner.loadCurrentSnapshot(command.sessionId);
     if (state)
@@ -2168,7 +2300,13 @@ function appServerCommandFailure(
     status: 'rejected' as const,
     commandId: command.commandId,
     code:
-      error.code === 'session_busy' ? ('runtime_busy' as const) : ('session_unavailable' as const),
+      error.code === 'session_busy'
+        ? ('runtime_busy' as const)
+        : error.code === 'recovery_required'
+          ? ('session_recovery_required' as const)
+          : error.code === 'storage_closed'
+            ? ('storage_unavailable' as const)
+            : ('session_unavailable' as const),
   };
 }
 
