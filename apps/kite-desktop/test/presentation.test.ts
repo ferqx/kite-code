@@ -499,3 +499,66 @@ test('Ask history retains exact tool ownership and pairs option labels with each
   expect(messages).toHaveLength(1);
   expect(messages[0]?.ask?.answers?.q1).toBe('先不动，到此为止');
 });
+
+test('reasoning timing retains its first observation and freezes on completion or cancellation', () => {
+  const event = {
+    type: 'reasoning.activity',
+    requestId: 'r',
+    segmentId: 's',
+    text: '检查',
+    state: 'streaming',
+  } as const;
+  const first = projectEventWithIdentity([], event, { turnId: 't', observedAt: 1000 });
+  const updated = projectEventWithIdentity(first, event, { turnId: 't', observedAt: 3000 });
+  expect(updated[0]?.thinkingStartedAt).toBe(1000);
+  const completed = projectEventWithIdentity(
+    updated,
+    { ...event, state: 'completed' },
+    { observedAt: 5500 },
+  );
+  expect(completed[0]).toMatchObject({
+    settled: true,
+    thinkingStartedAt: 1000,
+    thinkingEndedAt: 5500,
+  });
+  const cancelled = projectEventWithIdentity(
+    updated,
+    { type: 'turn.terminal', turnId: 't', status: 'cancelled' },
+    { observedAt: 4000 },
+  );
+  expect(cancelled[0]).toMatchObject({ settled: true, thinkingEndedAt: 4000 });
+  expect(
+    projectEventWithIdentity([], { ...event, state: 'completed' })[0]?.thinkingStartedAt,
+  ).toBeUndefined();
+});
+
+test('interrupted reasoning is settled once and late streaming cannot restart its clock', () => {
+  const event = {
+    type: 'reasoning.activity',
+    requestId: 'r',
+    segmentId: 's',
+    text: '检查',
+    state: 'streaming',
+  } as const;
+  for (const status of ['cancelled', 'failed', 'aborted'] as const) {
+    const first = projectEventWithIdentity([], event, { turnId: 't', observedAt: 1000 });
+    const stopped = projectEventWithIdentity(
+      first,
+      { type: 'turn.terminal', turnId: 't', status },
+      { observedAt: 4600 },
+    );
+    expect(stopped[0]).toMatchObject({
+      settled: true,
+      thinkingStartedAt: 1000,
+      thinkingEndedAt: 4600,
+    });
+    const late = projectEventWithIdentity(stopped, event, { observedAt: 6000 });
+    expect(late).toEqual(stopped);
+    const completed = projectEventWithIdentity(
+      late,
+      { ...event, state: 'completed' },
+      { observedAt: 8000 },
+    );
+    expect(completed[0]?.thinkingEndedAt).toBe(4600);
+  }
+});

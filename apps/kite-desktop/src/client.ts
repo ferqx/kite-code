@@ -1219,6 +1219,7 @@ export class DesktopClient {
           this.#publish({
             messages: projectEventWithIdentity(this.#view.messages, event, {
               turnId: notification.turnId,
+              observedAt: Date.now(),
             }),
             ...(event.type === 'interaction_mode.changed' ? { interactionMode: event.mode } : {}),
           });

@@ -26,8 +26,15 @@ export async function projectHistory(
   let unchanged = messages.length === previous.length;
   const shared: Message[] = [];
   for (let index = 0; index < messages.length; index++) {
-    const next = messages[index]!;
+    let next = messages[index]!;
     const old = byId.get(next.id);
+    if (next.role === 'thinking' && old?.thinkingStartedAt !== undefined) {
+      next = {
+        ...next,
+        thinkingStartedAt: old.thinkingStartedAt,
+        ...(old.thinkingEndedAt !== undefined ? { thinkingEndedAt: old.thinkingEndedAt } : {}),
+      };
+    }
     const message = old && equalDisplayValue(old, next) ? old : next;
     shared.push(message);
     unchanged &&= message === previous[index];

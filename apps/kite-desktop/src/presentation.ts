@@ -18,8 +18,23 @@ export function projectEvent(
 export function projectEventWithIdentity(
   messages: readonly Message[],
   event: RuntimeClientEvent,
-  identity: Readonly<{ turnId?: string }> = {},
+  identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
+  if (event.type === 'turn.terminal' || event.type === 'run.terminal') {
+    return messages.map((message) =>
+      message.role === 'thinking' &&
+      !message.settled &&
+      (event.type !== 'turn.terminal' || !message.turnId || message.turnId === event.turnId)
+        ? {
+            ...message,
+            settled: true,
+            ...(message.thinkingStartedAt !== undefined && identity.observedAt !== undefined
+              ? { thinkingEndedAt: identity.observedAt }
+              : {}),
+          }
+        : message,
+    );
+  }
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;
     const previous = messages.find((message) => message.id === id);
@@ -147,14 +162,27 @@ export function projectEventWithIdentity(
       };
       break;
     }
-    case 'reasoning.activity':
+    case 'reasoning.activity': {
+      const previous = messages.find(
+        (message) => message.id === `thinking:${event.requestId}:${event.segmentId}`,
+      );
+      const startedAt =
+        previous?.thinkingStartedAt ??
+        (event.state === 'streaming' ? identity.observedAt : undefined);
       next = {
         id: `thinking:${event.requestId}:${event.segmentId}`,
         role: 'thinking',
         text: event.text,
         settled: event.state === 'completed',
+        ...(startedAt !== undefined ? { thinkingStartedAt: startedAt } : {}),
+        ...(event.state === 'completed' &&
+        startedAt !== undefined &&
+        identity.observedAt !== undefined
+          ? { thinkingEndedAt: previous?.thinkingEndedAt ?? identity.observedAt }
+          : {}),
       };
       break;
+    }
     case 'subagent.started':
       next = {
         id: `subagent:${event.subagentId}`,

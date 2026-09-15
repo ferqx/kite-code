@@ -553,7 +553,7 @@ body {
     width: fit-content;
   }
   .message.user {
-    margin-bottom: 24px;
+    margin-bottom: 32px;
   }
   .message.user.sending {
     opacity: 0.78;
@@ -563,7 +563,10 @@ body {
   }
   .message.assistant {
     position: relative;
-    margin-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  .message.assistant[data-final-reply="false"] {
+    margin-bottom: 8px;
   }
   .delivery-status {
     position: absolute;
@@ -1559,6 +1562,21 @@ body {
   font-size: var(--conversation-text-size);
   font-family: var(--font-geist, inherit);
 }
+.kite-client .reading-column > :is(.tool-activity, .message-group:has(.thinking-activity))
+  + .message-group:has(> .message.assistant) {
+  margin-top: 16px;
+}
+.kite-client .reading-column > .message-group:has(> .thinking-activity) {
+  display: flow-root;
+  margin: 8px 0;
+}
+.kite-client .reading-column > .message-group > .thinking-activity {
+  margin: 0;
+}
+.kite-client .reading-column > :is(.tool-activity, .message-group:has(> .thinking-activity))
+  + .message-group:has(> .message.assistant[data-final-reply="false"]) {
+  margin-top: 8px;
+}
 .kite-client .tool-activity-summary {
   display: flex;
   align-items: center;
@@ -1581,7 +1599,10 @@ body {
 }
 .kite-client .tool-activity-summary:hover:not(:disabled),
 .kite-client .tool-activity-step:hover,
-.kite-client .tool-activity-summary:focus-visible {
+.kite-client .tool-activity-summary:focus-visible,
+.kite-client .tool-activity-summary[aria-expanded="true"],
+.kite-client .tool-edit-heading:has(.tool-diff-toggle[aria-expanded="true"]),
+.kite-client .thinking-activity details[open] > .tool-activity-summary {
   background: transparent;
   color: var(--foreground);
 }
@@ -1775,6 +1796,7 @@ body {
   border: 0;
   color: var(--destructive);
 }
+.kite-client .thinking-activity.is-running .tool-label,
 .kite-client .is-running > .tool-activity-summary .tool-label,
 .kite-client .tool-activity-step.running .tool-label,
 .kite-client .context-compacted.running .tool-label {
@@ -1793,6 +1815,7 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .kite-client .thinking-activity.is-running .tool-label,
   .kite-client .is-running > .tool-activity-summary .tool-label,
   .kite-client .tool-activity-step.running .tool-label,
   .kite-client .context-compacted.running .tool-label {
@@ -2171,4 +2194,57 @@ body {
   line-clamp: 5;
   max-height: 120px;
   overflow: hidden;
+}
+
+/* Compact disclosure headers share hover, focus and expanded visibility. */
+.kite-client .tool-activity-summary { column-gap: 6px; }
+.kite-client .tool-activity-chevron,
+.kite-client .tool-diff-toggle {
+  opacity: 0;
+
+}
+.kite-client .tool-activity-summary:hover .tool-activity-chevron,
+.kite-client .tool-activity-summary:focus-visible .tool-activity-chevron,
+.kite-client .tool-activity-summary[aria-expanded="true"] .tool-activity-chevron,
+.kite-client .tool-edit-heading:hover .tool-diff-toggle,
+.kite-client .tool-edit-heading:focus-within .tool-diff-toggle,
+.kite-client .tool-diff-toggle[aria-expanded="true"],
+.kite-client .thinking-activity details[open] .tool-activity-chevron {
+  opacity: 1;
+}
+.kite-client .thinking-activity summary {
+  cursor: pointer;
+  list-style: none;
+}
+.kite-client .thinking-activity summary::-webkit-details-marker {
+  display: none;
+}
+.kite-client .tool-activity-chevron,
+.kite-client .tool-diff-toggle > svg {
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+.kite-client .tool-activity-summary[aria-expanded="true"] .tool-activity-chevron,
+.kite-client .tool-diff-toggle[aria-expanded="true"] > svg {
+  transform: rotate(0);
+}
+.kite-client .thinking-activity details[open] .tool-activity-chevron {
+  transform: rotate(0);
+}
+.kite-client .thinking-activity .tool-output {
+  margin: 4px 0 0;
+  padding-left: calc(1em + 8px);
+  max-height: 240px;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .kite-client .tool-activity-chevron,
+  .kite-client .tool-diff-toggle > svg {
+    transition: none;
+  }
 }

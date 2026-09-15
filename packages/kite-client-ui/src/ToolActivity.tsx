@@ -1,6 +1,5 @@
 import {
   ArrowDown01Icon,
-  ArrowRight01Icon,
   BookOpen01Icon,
   BotIcon,
   Edit02Icon,
@@ -170,6 +169,17 @@ function activitySummary(messages: readonly Message[]) {
   return parts.join(' · ') || `${messages.length} 项工具操作`;
 }
 
+function stoppedDuringAutoReview(message: Message): boolean {
+  return (
+    message.settled &&
+    message.status === 'cancelled' &&
+    message.approval?.source === 'auto' &&
+    message.approval.state === 'reviewing' &&
+    !message.toolProgress &&
+    !message.toolResult
+  );
+}
+
 function approvalLabel(message: Message): string | undefined {
   const approval = message.approval;
   if (!approval) return;
@@ -190,6 +200,7 @@ function approvalLabel(message: Message): string | undefined {
 }
 
 function executionLabel(message: Message) {
+  if (stoppedDuringAutoReview(message)) return '未执行';
   if (message.approval?.state === 'reviewing' && !message.settled) return '';
   if (message.approval?.state === 'awaiting_user' && !message.settled) return '等待人工审批';
   if (message.approval?.state === 'rejected') return '未执行';
@@ -211,12 +222,20 @@ function ShellOutput({ message }: { message: Message }) {
   const stdout = result?.stdout ?? message.toolProgress?.stdout;
   const stderr = result?.stderr ?? message.toolProgress?.stderr;
   const streams = [stdout, stderr].filter(Boolean).join('\n');
+  const lineCount = (text: string | undefined) =>
+    text ? text.replace(/\r?\n$/, '').split('\n').length : 0;
+  const truncated =
+    result?.totalLines !== undefined && result.totalLines > lineCount(stdout) + lineCount(stderr);
+  const stoppedBeforeExecution = stoppedDuringAutoReview(message);
   const reason =
     message.approval?.state === 'rejected' || message.approval?.state === 'awaiting_user'
       ? message.approval.reason
       : undefined;
-  const output =
-    reason || streams || (message.status === 'completed' ? '命令执行成功，无输出。' : message.text);
+  const output = stoppedBeforeExecution
+    ? '任务在自动审批期间停止，命令未开始执行。'
+    : reason ||
+      streams ||
+      (message.status === 'completed' ? '命令执行成功，无输出。' : message.text);
   // biome-ignore lint/correctness/useExhaustiveDependencies: output commits change the scroll height.
   useLayoutEffect(() => {
     if (follow.current && viewport.current)
@@ -248,6 +267,7 @@ function ShellOutput({ message }: { message: Message }) {
       <span className="shell-result" role="status">
         {executionLabel(message)}
         {result?.exitCode !== undefined ? ` · 退出码 ${result.exitCode}` : ''}
+        {truncated ? ' · 输出已截断' : ''}
         {result?.status === 'exhausted' ? ' · 输出已达到工具限制' : ''}
       </span>
       {!following && (
@@ -414,6 +434,7 @@ export function ToolActivity({
         ) : (
           <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
         ))}
+      {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
       {approval && (
         <span className="tool-approval" role="status">
           {approval}
@@ -427,12 +448,6 @@ export function ToolActivity({
         >
           {status}
         </span>
-      )}
-      {canExpand && (
-        <HugeiconsIcon
-          className="tool-activity-chevron"
-          icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-        />
       )}
     </>
   );
@@ -463,7 +478,7 @@ export function ToolActivity({
               aria-expanded={open}
               onClick={() => onToggle(!open)}
             >
-              <HugeiconsIcon icon={open ? ArrowDown01Icon : ArrowRight01Icon} />
+              <HugeiconsIcon icon={ArrowDown01Icon} />
             </Button>
           )}
           {approval && (

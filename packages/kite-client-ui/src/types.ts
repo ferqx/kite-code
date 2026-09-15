@@ -5,6 +5,9 @@ export interface Message {
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;
+  /** Client-observed reasoning segment timing, in epoch milliseconds. */
+  readonly thinkingStartedAt?: number;
+  readonly thinkingEndedAt?: number;
   /** A settled model response with no following tool calls is the Turn's final reply. */
   readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */

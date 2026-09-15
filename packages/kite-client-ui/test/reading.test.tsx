@@ -876,7 +876,7 @@ test('reasoning and plan progress remain readable without raw tool metadata', as
       ]}
     />,
   );
-  expect(document.body.textContent).toContain('思考过程');
+  expect(document.body.textContent).toContain('思考中');
   expect(document.body.textContent).toContain('计划进度');
   expect(document.body.textContent).toContain('正在工作');
   expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe('true');
@@ -1397,4 +1397,107 @@ test('single Ask keeps its question in the heading and cancelled Ask hides answe
   );
   expect(document.querySelector('.tool-ask-answers')?.textContent).toBe('已取消');
   expect(document.querySelector('.tool-ask-prefix')).toBeNull();
+});
+
+test('Shell reports truncated output from total lines without treating a complete trailing newline as truncation', async () => {
+  const message: Message = {
+    id: 'tool:truncated',
+    role: 'tool',
+    toolName: 'shell_execute',
+    text: '',
+    settled: true,
+    status: 'completed',
+    toolResult: {
+      ok: true,
+      stdout: 'one\ntwo\n',
+      stderr: 'warning\n',
+      totalLines: 100,
+      exitCode: 0,
+    },
+  };
+  await render(
+    <Conversation messages={[message]} selected connected loading={false} saveReading={() => {}} />,
+  );
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.shell-result')?.textContent).toContain(
+    '成功 · 退出码 0 · 输出已截断',
+  );
+  await act(() =>
+    root!.render(
+      <Conversation
+        messages={[{ ...message, toolResult: { ...message.toolResult!, totalLines: 3 } }]}
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  expect(document.querySelector('.shell-result')?.textContent).not.toContain('输出已截断');
+});
+
+test('Shell distinguishes stopping automatic review from cancellation after execution', async () => {
+  const message: Message = {
+    id: 'tool:cancel-review',
+    role: 'tool',
+    toolName: 'shell_execute',
+    text: '任务已停止',
+    settled: true,
+    status: 'cancelled',
+    approval: { source: 'auto', state: 'reviewing' },
+  };
+  await render(
+    <Conversation messages={[message]} selected connected loading={false} saveReading={() => {}} />,
+  );
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.shell-output pre')?.textContent).toBe(
+    '任务在自动审批期间停止，命令未开始执行。',
+  );
+  expect(document.querySelector('.shell-result')?.textContent).toBe('未执行');
+  await act(() =>
+    root!.render(
+      <Conversation
+        messages={[
+          {
+            ...message,
+            approval: { source: 'auto', state: 'approved' },
+            toolProgress: { stdout: '命令正在执行' },
+          },
+        ]}
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  expect(document.querySelector('.shell-output pre')?.textContent).toContain('命令正在执行');
+  expect(document.querySelector('.shell-output')?.textContent).not.toContain('未执行');
+  expect(document.querySelector('.shell-output')?.textContent).not.toContain('未开始执行');
+});
+
+test('thinking seconds update while collapsed and freeze when settled', async () => {
+  const startedAt = Date.now() - 2000;
+  const message: Message = {
+    id: 'timed-thinking',
+    role: 'thinking',
+    text: '检查',
+    settled: false,
+    thinkingStartedAt: startedAt,
+  };
+  const view = (item: Message) => (
+    <Conversation loading={false} selected connected saveReading={() => {}} messages={[item]} />
+  );
+  await render(view(message));
+  expect(document.body.textContent).toContain('思考中 · 2 秒');
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  });
+  expect(document.body.textContent).toContain('思考中 · 3 秒');
+  await render(view({ ...message, settled: true, thinkingEndedAt: startedAt + 4000 }));
+  expect(document.body.textContent).toContain('已思考 · 4 秒');
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  });
+  expect(document.body.textContent).toContain('已思考 · 4 秒');
 });

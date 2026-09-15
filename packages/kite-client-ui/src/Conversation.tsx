@@ -1,4 +1,11 @@
-import { Copy01Icon, CopyCheckIcon, CopyXIcon, KiteIcon } from '@hugeicons/core-free-icons';
+import {
+  ArrowDown01Icon,
+  BulbIcon,
+  Copy01Icon,
+  CopyCheckIcon,
+  CopyXIcon,
+  KiteIcon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ScrollArea } from './components/ui/scroll-area';
@@ -23,6 +30,28 @@ function isVisibleTool(message: Message): boolean {
     message.status === 'rejected' ||
     message.status === 'cancelled' ||
     message.status === 'unknown'
+  );
+}
+
+function ThinkingLabel({ message }: { message: Message }) {
+  const [now, setNow] = useState(Date.now);
+  const startedAt = message.thinkingStartedAt;
+  useEffect(() => {
+    if (message.settled || startedAt === undefined) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [message.settled, startedAt]);
+  const end = message.settled ? message.thinkingEndedAt : now;
+  const seconds =
+    startedAt !== undefined && end !== undefined
+      ? Math.max(0, Math.floor((end - startedAt) / 1000))
+      : undefined;
+  return (
+    <span className="tool-label">
+      {message.settled ? '已思考' : '思考中'}
+      {seconds !== undefined && ` · ${seconds} 秒`}
+    </span>
   );
 }
 
@@ -68,20 +97,19 @@ const MessageItem = memo(function MessageItem({
   };
   if (message.role === 'thinking')
     return (
-      <article className="message tool">
+      <article
+        className={`message tool-activity thinking-activity${!message.settled ? ' is-running' : ''}`}
+      >
         <details
           open={expanded}
           onToggle={(event) => onToggle(message.id, event.currentTarget.open)}
         >
-          <summary>
-            <span>思考过程</span>
-            {!message.settled && (
-              <span className="message-status" role="status">
-                正在思考
-              </span>
-            )}
+          <summary className="tool-activity-summary">
+            <HugeiconsIcon className="tool-activity-kind-icon" icon={BulbIcon} />
+            <ThinkingLabel message={message} />
+            <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />
           </summary>
-          <pre className="tool-output">{message.text}</pre>
+          <pre className="tool-output">{message.text.trimEnd()}</pre>
         </details>
       </article>
     );
@@ -174,6 +202,7 @@ const MessageItem = memo(function MessageItem({
       className={`message ${message.role}${message.delivery ? ` ${message.delivery}` : ''}${
         message.role === 'assistant' && !message.settled ? ' responding' : ''
       }`}
+      data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
       aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
     >
       {message.role === 'assistant' ? (
