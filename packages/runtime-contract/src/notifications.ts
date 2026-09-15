@@ -268,7 +268,12 @@ export type RuntimeClientEvent =
       readonly type: 'input.requested';
       readonly interaction: Extract<RuntimeClientInteraction, { readonly kind: 'input' }>;
     }
-  | { readonly type: 'input.answered'; readonly interactionId: string; readonly summary?: string }
+  | {
+      readonly type: 'input.answered';
+      readonly interactionId: string;
+      readonly summary?: string;
+      readonly answers?: Readonly<Record<string, string>>;
+    }
   | { readonly type: 'input.cancelled'; readonly interactionId: string }
   | {
       readonly type: 'plan.review_requested';
@@ -704,6 +709,7 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
     !hasOnlyKeys(value, [
       'kind',
       'interactionId',
+      'toolCallId',
       'sessionRevision',
       'title',
       'summary',
@@ -753,9 +759,10 @@ export function isRuntimeClientInteraction(value: unknown): value is RuntimeClie
           presentKeys(
             value,
             ['kind', 'interactionId', 'sessionRevision', 'question', 'allowFreeText'],
-            ['title', 'summary', 'options', 'questions'],
+            ['title', 'summary', 'options', 'questions', 'toolCallId'],
           ),
         ) &&
+        (!Object.hasOwn(value, 'toolCallId') || isIdentifier(value.toolCallId)) &&
         isBoundedUserText(value.question) &&
         typeof value.allowFreeText === 'boolean' &&
         (!Object.hasOwn(value, 'options') || isInputOptions(value.options)) &&
@@ -1061,8 +1068,18 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'input.answered':
       return (
-        hasExactKeys(value, presentKeys(value, ['type', 'interactionId'], ['summary'])) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'interactionId'], ['summary', 'answers']),
+        ) &&
         isIdentifier(value.interactionId) &&
+        (!Object.hasOwn(value, 'answers') ||
+          (isRecord(value.answers) &&
+            Object.keys(value.answers).length >= 1 &&
+            Object.keys(value.answers).length <= 3 &&
+            Object.entries(value.answers).every(
+              ([key, answer]) => isIdentifier(key) && isBoundedUserText(answer),
+            ))) &&
         optionalSummary(value)
       );
     case 'input.cancelled':

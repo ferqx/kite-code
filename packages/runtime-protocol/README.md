@@ -102,3 +102,5 @@ Owner-local behavior changes update this README. Cross-package Runtime protocol,
 History 会话摘要编码保留可选 Workspace membership；只读失败可携带稳定 detailCode 与 retryable，客户端不能从读取成功推导命令权限。
 
 按需恢复与原命令回执查询见[访问与恢复说明](docs/wire-format.md)。
+
+Ask 展示字段 toolCallId 与 input.answered.answers 通过严格 codec 保留；answers 使用与文本回答相同的 1–3 项限制。缺省字段仍可读取，未知字段继续拒绝。

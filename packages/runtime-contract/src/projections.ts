@@ -76,6 +76,7 @@ export interface RuntimeApprovalInteraction extends RuntimeInteractionBase {
 
 export interface RuntimeInputInteraction extends RuntimeInteractionBase {
   readonly kind: 'input';
+  readonly toolCallId?: string;
   readonly question: string;
   readonly allowFreeText: boolean;
   readonly options?: readonly RuntimeInputOption[];

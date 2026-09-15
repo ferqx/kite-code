@@ -114,6 +114,7 @@ const interaction = z.discriminatedUnion('kind', [
     .object({
       ...interactionBase,
       kind: z.literal('input'),
+      toolCallId: identifier.optional(),
       question: inputText,
       allowFreeText: z.boolean(),
       options: z
@@ -1445,6 +1446,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .object({
       type: z.literal('input.answered'),
       interactionId: identifier,
+      answers: textResponse.shape.answers,
       summary: shortText.optional(),
     })
     .strict(),

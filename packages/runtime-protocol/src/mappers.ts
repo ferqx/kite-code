@@ -232,6 +232,7 @@ function mapInteraction(interaction: RuntimeClientInteraction): RuntimeClientInt
       return {
         ...base,
         kind: interaction.kind,
+        ...(interaction.toolCallId === undefined ? {} : { toolCallId: interaction.toolCallId }),
         question: interaction.question,
         allowFreeText: interaction.allowFreeText,
         ...(interaction.options === undefined

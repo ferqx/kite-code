@@ -2145,3 +2145,26 @@ body {
     max-width: 42%;
   }
 }
+
+.kite-client .tool-ask-brief {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 36ch;
+}
+.kite-client .tool-ask-answers {
+  display: grid;
+  gap: 12px;
+  padding: 8px 0;
+  line-height: 1.6;
+}
+.kite-client .tool-ask-answers p {
+  margin: 4px 0 0;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kite-client .tool-ask-question {
+  color: var(--muted-foreground);
+}

@@ -1305,3 +1305,60 @@ test('a failed file read keeps its failure status without a redundant error para
   expect(document.querySelector('.tool-step-preview')).toBeNull();
   expect(document.body.textContent).not.toContain('File not found.');
 });
+
+test('Ask renders one paired history record instead of the owned raw tool result', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:ask-1',
+          role: 'tool',
+          toolName: 'ask_user',
+          settled: true,
+          status: 'completed',
+          text: 'Completed.\n{"answer":"stop","answers":{"q1":"stop"}}',
+        },
+        {
+          id: 'interaction:ask-1',
+          role: 'system',
+          systemKind: 'ask',
+          title: '回答已提交',
+          settled: true,
+          text: 'Next?\nstop',
+          ask: {
+            toolCallId: 'ask-1',
+            questions: [
+              { id: 'q1', question: '接下来要我做什么？' },
+              { id: 'q2', question: '范围？' },
+            ],
+            answers: { q1: '先不动，到此为止', q2: '当前会话' },
+          },
+        },
+        {
+          id: 'tool:ask-unrelated',
+          role: 'tool',
+          toolName: 'ask_user',
+          settled: true,
+          status: 'failed',
+          text: '问题格式无效',
+        },
+      ]}
+    />,
+  );
+  expect(document.body.textContent).not.toContain('Completed.');
+  expect(document.body.textContent).not.toContain('"answers"');
+  expect(document.body.textContent).toContain('问题格式无效');
+  expect(document.querySelectorAll('.tool-ask-brief')).toHaveLength(1);
+  const button = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+  await click(button);
+  expect(
+    Array.from(document.querySelectorAll('.tool-ask-answers > div')).map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['接下来要我做什么？先不动，到此为止', '范围？当前会话']);
+  expect(document.querySelector('.tool-ask-answers pre')).toBeNull();
+});

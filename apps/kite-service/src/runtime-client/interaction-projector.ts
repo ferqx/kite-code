@@ -115,6 +115,7 @@ export function projectRuntimeClientInteraction(
       });
       return validInteraction({
         kind: 'input',
+        toolCallId: interaction.toolCallId,
         interactionId: interaction.interactionId,
         sessionRevision: revision,
         question: projectRuntimeClientText(interaction.request.question, 4_000),

@@ -195,6 +195,7 @@ export function projectRuntimeClientEvent(
         type: 'input.requested',
         interaction: {
           kind: 'input',
+          toolCallId: event.toolCallId,
           interactionId: event.interactionId,
           sessionRevision: context.sessionRevision,
           question: projectRuntimeClientText(event.request.question),
@@ -235,6 +236,16 @@ export function projectRuntimeClientEvent(
         type: 'input.answered',
         interactionId: event.interactionId,
         summary: projectRuntimeClientText(event.answer, 8_192),
+        ...(event.answers
+          ? {
+              answers: Object.fromEntries(
+                Object.entries(event.answers).map(([id, value]) => [
+                  id,
+                  projectRuntimeClientText(value),
+                ]),
+              ),
+            }
+          : {}),
       };
     case 'user_input.cancelled':
       return { type: 'input.cancelled', interactionId: event.interactionId };

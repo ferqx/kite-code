@@ -192,3 +192,5 @@ History 可按已观察的 `throughSequence` 重建历史前缀，模式、恢�
 同一本机 App Server 对已有会话按持久 canonical workspace identity 核对信任并路由；新会话请求显式 workspace，由服务规范化和验证授权。App Control 按请求所属的已验证 workspace 选择配置引用，不以进程启动目录代表全部空间。Electron 重接仅替换连接代次；一个 Service、Store、Host 持续管理所有空间，不增加进程池。
 
 Service 提供只读 get_session_recovery，摘要来自 authority/effect facts，最多返回 20 个待核对 effect identity。recover_session 绑定业务与 authority revision；有效执行者、未确认清理或未决/未知 effect 不能被接管。仅确认安全时原子保存恢复回执并回到 idle。get_command_receipt 查询原命令结果，不重放操作。失权而仍有本地 coordinator 时，权限设置返回 session_cleanup_pending，不能调用正在关闭的 Runtime。验证见[多空间与恢复](../test/isolated/runtime-server-multi-workspace.test.ts)、[原生 Service 进程](../test/isolated/app-server-process.test.ts)。
+
+Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 answers 映射为有界脱敏文本。客户端据问题选项恢复文案，不把执行结果包装 JSON 作为问答历史。

@@ -151,7 +151,7 @@ const MessageItem = memo(function MessageItem({
             ...message,
             role: 'tool',
             toolName: 'ask_user',
-            status: message.settled ? 'completed' : 'waiting',
+            status: message.status ?? (message.settled ? 'completed' : 'waiting'),
           },
         ]}
         expanded={expanded}
@@ -363,7 +363,14 @@ export function Conversation({
     const owner = message.presentationOwner.parentToolCallId;
     children.set(owner, [...(children.get(owner) ?? []), message]);
   }
+  const askToolIds = new Set(
+    messages
+      .filter((message) => message.systemKind === 'ask')
+      .map((message) => message.ask?.toolCallId)
+      .filter(Boolean),
+  );
   const shown = messages.filter((message) => {
+    if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
     if (message.role === 'system') return message.settled || !!message.status;
     if (message.role === 'tool')
       return (

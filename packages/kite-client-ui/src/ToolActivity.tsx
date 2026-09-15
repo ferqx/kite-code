@@ -328,6 +328,22 @@ export function ToolActivity({
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
 }) {
   const message = messages[0]!;
+  let ask = message.ask;
+  if (!ask && message.toolName === 'ask_user' && message.toolResult?.stdout) {
+    try {
+      const result: unknown = JSON.parse(message.toolResult.stdout);
+      if (
+        result &&
+        typeof result === 'object' &&
+        'answer' in result &&
+        typeof result.answer === 'string'
+      )
+        ask = { questions: [], summary: result.answer };
+    } catch {
+      /* A tool failure is not an answered question. */
+    }
+  }
+  const answerBrief = ask?.answers ? Object.values(ask.answers).join(' · ') : ask?.summary;
   const grouped = messages.length > 1;
   const shell = !grouped && message.toolName === 'shell_execute';
   const read =
@@ -380,6 +396,7 @@ export function ToolActivity({
         ) : (
           <span className="tool-step-target">{target}</span>
         ))}
+      {answerBrief && <span className="tool-ask-brief">{answerBrief}</span>}
       {approval && (
         <span className="tool-approval" role="status">
           {approval}
@@ -487,8 +504,23 @@ export function ToolActivity({
       )}
       {open && shell && <ShellOutput message={message} />}
       {open && hasDiff && <FileDiff message={message} />}
+      {open && ask && (
+        <div className="tool-ask-answers">
+          {ask.questions.map((question) => (
+            <div key={question.id}>
+              <span className="tool-ask-question">{question.question}</span>
+              {(ask.answers?.[question.id] ??
+                (ask.questions.length === 1 ? ask.summary : undefined)) && (
+                <p>{ask.answers?.[question.id] ?? ask.summary}</p>
+              )}
+            </div>
+          ))}
+          {!ask.answers && ask.questions.length !== 1 && ask.summary && <p>{ask.summary}</p>}
+        </div>
+      )}
       {open &&
         !grouped &&
+        !ask &&
         !shell &&
         !edit &&
         !read &&

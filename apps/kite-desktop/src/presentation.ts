@@ -223,6 +223,20 @@ export function projectEventWithIdentity(
             : event.interaction.kind === 'approval'
               ? 'approval'
               : undefined,
+        ...(event.interaction.kind === 'input'
+          ? {
+              ask: {
+                toolCallId: event.interaction.toolCallId,
+                questions: event.interaction.questions ?? [
+                  {
+                    id: 'question',
+                    question: event.interaction.question,
+                    options: event.interaction.options,
+                  },
+                ],
+              },
+            }
+          : {}),
         title: event.interaction.title,
         text:
           event.interaction.kind === 'approval'
@@ -274,6 +288,34 @@ export function projectEventWithIdentity(
             ? 'ask'
             : previous?.systemKind,
         title,
+        ...(previous?.ask
+          ? {
+              ask: {
+                ...previous.ask,
+                ...(event.type === 'input.answered'
+                  ? {
+                      summary: event.summary,
+                      answers: event.answers
+                        ? Object.fromEntries(
+                            Object.entries(event.answers).map(([id, answer]) => [
+                              id,
+                              previous.ask?.questions
+                                .find((question) => question.id === id)
+                                ?.options?.find((option) => option.id === answer)?.label ?? answer,
+                            ]),
+                          )
+                        : undefined,
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+        status:
+          event.type === 'input.cancelled'
+            ? 'cancelled'
+            : event.type === 'input.answered'
+              ? 'completed'
+              : previous?.status,
         text:
           event.type === 'input.answered' && event.summary !== undefined
             ? [previous?.text, event.summary].filter(Boolean).join('\n\n')

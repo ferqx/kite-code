@@ -462,3 +462,40 @@ test('each compaction keeps a single marker from requested through terminal resu
   expect(messages).toHaveLength(2);
   expect(messages[1]).toMatchObject({ title: '上下文已自动压缩', status: 'completed' });
 });
+
+test('Ask history retains exact tool ownership and pairs option labels with each question', () => {
+  const requested = {
+    type: 'input.requested',
+    interaction: {
+      kind: 'input',
+      interactionId: 'ask-1',
+      toolCallId: 'tool-ask-1',
+      sessionRevision: 1,
+      question: 'Next?',
+      allowFreeText: true,
+      questions: [
+        {
+          id: 'q1',
+          question: 'Next?',
+          allowFreeText: true,
+          options: [{ id: 'stop', label: '先不动，到此为止' }],
+        },
+        { id: 'q2', question: '范围？', allowFreeText: true },
+      ],
+    },
+  } as const;
+  let messages = projectEvent([], requested);
+  messages = projectEvent(messages, {
+    type: 'input.answered',
+    interactionId: 'ask-1',
+    summary: '回答摘要',
+    answers: { q1: 'stop', q2: '当前会话' },
+  });
+  expect(messages[0]?.ask).toMatchObject({
+    toolCallId: 'tool-ask-1',
+    answers: { q1: '先不动，到此为止', q2: '当前会话' },
+  });
+  messages = projectEvent(messages, requested);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.ask?.answers?.q1).toBe('先不动，到此为止');
+});

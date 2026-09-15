@@ -940,3 +940,25 @@ test('tool review decisions are a closed bounded display event and grants stay e
   expect(isRuntimeClientEvent({ ...grant, grant: 'same_command' })).toBe(true);
   expect(isRuntimeClientEvent({ ...grant, grant: 'always' })).toBe(false);
 });
+
+test('Ask history fields remain bounded and retain explicit ownership', () => {
+  expect(
+    isRuntimeClientEvent({
+      type: 'input.requested',
+      interaction: {
+        kind: 'input',
+        interactionId: 'i',
+        toolCallId: 't',
+        sessionRevision: 1,
+        question: '?',
+        allowFreeText: true,
+      },
+    }),
+  ).toBe(true);
+  expect(
+    isRuntimeClientEvent({ type: 'input.answered', interactionId: 'i', answers: { q1: 'answer' } }),
+  ).toBe(true);
+  expect(
+    isRuntimeClientEvent({ type: 'input.answered', interactionId: 'i', answers: { q1: 42 } }),
+  ).toBe(false);
+});

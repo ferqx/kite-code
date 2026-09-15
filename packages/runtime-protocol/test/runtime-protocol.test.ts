@@ -954,7 +954,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '5dd3af1f:7d3b7c4d';
+    const expectedDigest = '08154054:7d3b7c4d';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -1070,4 +1070,26 @@ test('root review and explicit grants survive the closed wire mapper', () => {
       RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({ ...event, privateKey: 'secret' }).success,
     ).toBe(false);
   }
+});
+
+test('Ask ownership and answers survive protocol projection', () => {
+  const input = {
+    type: 'input.requested',
+    interaction: {
+      kind: 'input',
+      toolCallId: 'ask-tool',
+      interactionId: 'ask',
+      sessionRevision: 1,
+      question: 'Next?',
+      allowFreeText: true,
+    },
+  } as const;
+  expect(mapRuntimeClientEventToProtocol(input)).toEqual(input);
+  const answered = {
+    type: 'input.answered',
+    interactionId: 'ask',
+    answers: { q1: 'choice' },
+    summary: 'Chosen',
+  } as const;
+  expect(mapRuntimeClientEventToProtocol(answered)).toEqual(answered);
 });

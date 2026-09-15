@@ -63,3 +63,5 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 空间摘要的可选 `muted` 仅控制名称的次级文字色，不禁用展开或会话操作。Desktop 用它表示本地目录缺失；共享组件不访问本地文件系统，Web 未提供该标记时保持原样。
 
 共享 SessionPage 的常驻窗口监听与导航回调不持有消息正文或文件变更的历史 props；messages/fileChanges 独立传给当前阅读组件，避免端侧淘汰缓存后首次正文仍被闭包保留。桌面缓存与校准由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)负责，Web 数据获取机制不变。
+
+Ask 历史通过 `Message.ask.toolCallId` 关联唯一工具调用，主列表保留交互记录并隐藏其重复执行行；`Message.ask` 保留问题与按问题 ID 对应的答案。没有关联交互但存在结构化工具回答时仅展示其中 answer，不输出包装 JSON；未关联的失败工具仍保留。

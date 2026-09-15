@@ -17,6 +17,16 @@ export interface Message {
     readonly grant?: 'approve_once' | 'same_command';
     readonly reason?: string;
   };
+  readonly ask?: {
+    readonly toolCallId?: string;
+    readonly questions: readonly {
+      readonly id: string;
+      readonly question: string;
+      readonly options?: readonly { readonly id: string; readonly label: string }[];
+    }[];
+    readonly answers?: Readonly<Record<string, string>>;
+    readonly summary?: string;
+  };
   readonly changedFile?: string;
   readonly changeConfirmed?: boolean;
   readonly toolResult?: {
