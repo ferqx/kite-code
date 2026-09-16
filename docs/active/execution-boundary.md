@@ -136,13 +136,12 @@ Hardened Shell environment从只读`/private/var/select/developer_dir`解析当�
 `DARWIN_USER_CACHE_DIR`，也不得为该cache扩大系统临时目录写权限。
 Git linked worktree或external gitfile的Workspace内`.git`会指向canonical Workspace之外的repository metadata；
 不能仅凭该文本扩大文件系统身份，也不能因它不是标准registered worktree就把只读操作伪装成repository损坏。
-Builtin scope discovery只解析Git实际需要读取的canonical `gitDir/commondir`，不授予权限；Service把排序后的exact
-roots及digest加入Workspace Trust snapshot/revision。TUI在Runtime connect前显示这些路径，decision同时绑定Trust
-revision与scope digest；legacy trust只有在external roots为空时继续有效。未确认、拒绝或identity drift时Runtime
-transport保持关闭，Seatbelt/bubblewrap获得零外部root；确认后Seatbelt只增加`file-read`，Linux bubblewrap只增加
-exact `--ro-bind`，都不授权primary working tree或外部Git metadata写入。该策略在Workspace scope层求值，与具体
-Shell命令名无关；typed Git broker仍单独用standard namespace、reciprocal backlink、no-symlink/no-alternates校验
-Git transaction authority。
+Builtin scope discovery 只解析 Git 实际需要读取的 canonical `gitDir/commondir`，不授予权限；普通 Workspace
+Trust 不调用该解析。Service 在 sandbox preparation 中单独核验历史明确授权的 exact roots 摘要；没有授权、
+解析失败或 identity drift 时提供零外部 root，但普通 Runtime transport 与模型会话仍可运行。
+未获 metadata grant 的 linked worktree 不自动扩权；隐式 Git 读取返回沙箱错误，显式外部 Git 路径按已有 Shell scope expansion 审批。
+已授权 roots 在 Seatbelt 只增加 `file-read`，Linux bubblewrap 只增加 exact `--ro-bind`，不授权 primary
+working tree 或外部 metadata 写入。新外部访问走现有 invocation 权限与 scope，不能从 Workspace trust 推导 Full。
 每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
 process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
 遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。最后一个
@@ -181,8 +180,8 @@ Workspace、path scope 与 no-follow target identity；批准后的文件 mutati
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
 `filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
-`shell_execute`、`git_inspect`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
-allowlist、native sandbox、typed Git broker 的 shared protected-path/repository admission、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
+`shell_execute`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
+allowlist、native sandbox、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
 filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 不按 protected 名称剪枝；`.gitignore`
 只作为搜索语义。文件读取即使没有外部 mutation approval也可使用 `external_read`。
 
@@ -296,23 +295,13 @@ supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的
 只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的
 kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating 继续 unavailable。
 
-### Brokered Git access（ADR-0097）
+### Git 通过 Shell 执行
 
-`ExecutionCapabilitySurface` 只投影只读 `gitInspect`，并绑定精确
-`brokered-git-r1` feature revision。Builtin catalog disclosure 与 Controller dispatch 继续原子绑定；
-generic process/read-only fallback 不能隐式产生 typed Git capability。ADR-0131 已取消 native `.git`
-deny/mask，因此 ADR-0097 原资格模型无法为当前 profile 产生新 qualified evidence；production
-`gitInspect` 保持 excluded，直到追加 ADR 定义不依赖 Workspace path deny 的资格模型。
+`git_inspect` 已从当前 Builtin catalog 和 Service 工具路由退役；文件工具迁至 filesystem module，继续保留原 operationId 和持久 provider identity。Agent 的 Git 请求使用 `shell_execute` 的现有治理路径。
 
-`git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Builtin broker 在任何 Git
-process 前验证 canonical repository/common-dir、Workspace 外受信 binary identity、受限 config、
-attributes、replace refs、grafts 与 shared protected-path evaluator；无法证明安全时零 dispatch。
-`core.excludesFile`、include/url/protocol/remote/credential 及其他可跨越仓库边界的 config 一律视为 hostile，且 broker 环境不得继承用户 Git 配置。`diff` 在 dispatch 前还要以有界历史/对象 provenance 证明请求路径从未由 protected 名称或 protected blob 派生；无法证明时只返回低信息量拒绝。每次 adapter request 都携带独立 stdout/stderr byte ceiling，App 以流式 UTF-8 安全读取并在溢出时终止 process tree。Unix adapter 在 timeout、取消或输出超限后还要在有界窗口内等待 detached process group 消失；只有系统返回 `ESRCH` 才记录 `cleanupConfirmed=true`，超时、权限错误或其他无法证明的结果继续 fail closed。
-`.gitattributes`、`.git/info/attributes`、grafts、`refs/replace` 与 `packed-refs` 在读取前逐级验证 metadata boundary、拒绝任意 symlink；packed refs 中出现 replace ref 同样视为 hostile。
-命令 argv 和环境由 broker 构造，禁用 system/global config、credential/askpass、hooks、filters、
-pager、external diff 和可执行 attributes。`log` 只返回 hash/time 等 metadata，不读取 subject、blob
-或 protected 内容。每次 terminal 产生绑定 repo、binary、schema、operation 与可信
-timing 的 typed evidence/receipt；App process adapter 只执行 broker 已准入的 invocation。
+专用 Broker 实现、Git mechanism/SPI、配置与资格字段已退役。release probe 继续验证普通 Shell 的 protected path 与沙箱边界，不再发布专用 Git 能力资格。
+
+Seatbelt 不再由 `brokeredGitFeatureRevision` 推导是否读取用户 `.gitconfig` 或 `.config/git/config`，也不隐式添加这些文件。外部读取仅按既有明确的 scope/已授权 runtime roots 投影。只读 Shell 的中性 HOME、Git config 禁用规则不变。
 
 按 ADR-0136，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
 classifier 不再产生免审授权。批准后，匹配 ADR-0134 grammar 的 status/log 仍可使用 hardened Shell
@@ -320,17 +309,8 @@ environment，由 preparation 在POSIX使用中性`HOME/XDG_CONFIG_HOME`，固�
 optional locks与repository fsmonitor，并且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git当成待执行的
 空helper，不能用于关闭。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
 reviewer 与 sandbox scope 的结构化事实。
-`brokered-git-r1` 不按 raw Git token hard deny 或强制返回 `nextCapability=git_inspect`。Planning、关键系统
-destructive 与 capability admission 仍独立治理；typed `git_inspect` 不从 generic Shell authority 推导
-production qualification。
-
-现有三平台 probe 仍记录旧 native metadata read/write deny 字段，但当前 profile 按设计不会令其
-`enforced`，因此 brokered Git production qualification 明确为 excluded；开发 fixture 通过不产生
-production support。未来 probe 必须随新的追加 ADR 更换资格事实，不能把 Workspace path deny 重新加回。
-未来 `qualified` evidence 必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema
-revision、repository/executable identity 与 invocation receipt UUID，并符合后续 ADR 定义的新资格事实；
-由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地
-positive/hostile 控制通过也保持 excluded。
+普通 Shell 的 Planning、关键系统 destructive 和 capability admission 继续独立治理；不按 raw Git token
+强制转交已退役的 `git_inspect`。Git config 不因 Broker revision 获得隐式读取权限。
 
 `createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
 `tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`

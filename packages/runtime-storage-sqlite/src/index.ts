@@ -117,8 +117,6 @@ export {
   KITE_HOME_STORE_INDEXES,
   KITE_HOME_STORE_SCHEMA_VERSION,
   KITE_HOME_STORE_TABLE_COLUMNS,
-  KITE_SESSION_STORE_FORMAT_EPOCH,
-  KITE_SESSION_STORE_SCHEMA_VERSION,
   KITE_SESSION_STORE_TABLE_COLUMNS,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
@@ -166,9 +164,13 @@ export {
   type KiteSessionMutationPort,
 } from './kite-session-mutation';
 export {
+  checkKiteSessionStoreCompatibility,
+  type KiteSessionStoreCompatibility,
+  type KiteSessionStoreMetadata,
   KiteSessionStoreOpenError,
   type KiteSessionStoreOpenErrorCode,
   openKiteSessionStoreDatabase,
+  readKiteSessionStoreMetadata,
   validateKiteSessionStoreDatabase,
 } from './kite-session-runtime-file';
 export {
@@ -179,6 +181,10 @@ export {
   type KiteSessionRuntimeStorageOwner,
   openKiteSessionRuntimeStorage,
 } from './kite-session-runtime-storage';
+export {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
 export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,

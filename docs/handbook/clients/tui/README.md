@@ -1,5 +1,8 @@
 # TUI 使用手册
 
+> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../../../plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+
+
 系统学习从[完整流程](../../flows/tui-development.md)开始；解决具体问题直接进入下面的专题。当前能力见[跨客户端对照](../../capabilities.md)。
 
 ## 开始使用

@@ -8,7 +8,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-service/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
 tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
 apps/kite-service/test/sandbox/network-boundary.test.ts apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts
-apps/kite-service/test/git-broker.test.ts apps/kite-service/test/runtime/git-tool-controller.test.ts
+apps/kite-service/test/runtime/git-tool-controller.test.ts
 apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
@@ -54,12 +54,7 @@ owner-only DACL与non-reparse verifier，并把ACL drift负向测试接入Window
 推导Windows process support。Service可被打包也不表示Shell、writer、Skill child或local stdio MCP获得production
 execution admission。
 
-ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
-TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
-名称级 read/write deny；依赖该 native deny 的既有 qualification 模型不再可满足，当前三平台
-`brokeredGit.currentOutcome` 固定为 `excluded`。probe 不得用代码存在、generic read/process evidence 或
-旧 protected-path artifact 替代新的治理决定。后续若要披露 `gitInspect`，必须先由追加 ADR 定义不缩小
-Workspace 的资格模型，并取得新鲜 broker/schema/repository/executable/invocation receipt 与入口证据。
+专用 Git Broker、typed schema 与发布 probe 已退役。Git 命令通过普通 Shell 治理；发行证据仍需证明原生沙箱对受保护 `.git` 路径的读取和写入约束。linked worktree 的外部 metadata 仅在 Workspace Trust 精确授权后作为只读 root 提供，不由 Git 命令名自动放开。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
 安装器，不要求目标机预装 Node。开发依赖安装不再执行仓库自定义 root `postinstall`；Git hook 安装由

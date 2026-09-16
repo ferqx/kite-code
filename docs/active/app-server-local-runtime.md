@@ -1,5 +1,8 @@
 # 本机 App Server 与 Durable Session Runtime
 
+> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+
+
 状态：active
 
 读取时机：修改TUI/CLI/Electron桌面本机连接、App Server进程、Session Store fencing、显式daemon/Web、profile或release升级语义时。
@@ -12,7 +15,7 @@
 
 开发中的 [Electron 桌面客户端](../../apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Electron main 持有 stdio 进程，沙箱 renderer 通过冻结的具名 preload bridge 复用环境无关 TypeScript client。host 与 renderer 构建和分层测试已经接入，packaged 原生窗口已通过[本机自动验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)；迁移前 Tauri 的阶段 0 结果不自动成为 Electron 资格。下图列出既有正式入口。
 
-`prepare:service` 复用 release owner 验证 candidate，只提取当前目标的 stdio Service 与 `desktop.json`。`build:electron` 要求该清单存在，并把 candidate build ID、服务摘要、expected server version 与环境变量名白名单编入 main bundle；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。开发包使用现有 checkout digest 规则隔离 source profile，打包版使用用户 canonical profile；数据目录校验类型、owner 并限制为私有权限。Electron carrier 的单消费者、16 帧有界队列、1 MiB 帧、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
+`prepare:service` 复用 release owner 验证 candidate，只提取当前目标的 stdio Service 与 `desktop.json`。`build:electron` 要求该清单存在，并把 candidate build ID、服务摘要、expected server version 与环境变量名白名单编入 main bundle；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。开发包使用 canonical config root、checkout 与 Store epoch 的共享 digest 规则隔离 source profile（不按每次 schema 变化分目录），打包版使用用户 canonical profile；数据目录校验类型、owner 并限制为私有权限。Electron carrier 的单消费者、16 帧有界队列、1 MiB 帧、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
 
 Electron `before-quit` 进入绑定主窗口的确认；确认后先关闭 stdin，Service 清理完成才再次退出。重复退出请求不得提前取得退出许可；窗口关闭只隐藏应用。崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。上述生命周期仍须 packaged Electron 原生场景确认。
 
@@ -97,6 +100,10 @@ alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式
 
 - installed：`<kite-home>/kite-session.sqlite`；
 - source：`<kite-home>/source-profiles/<digest>/kite-session.sqlite`。
+
+启动先只读检查 Store 元数据与受支持结构。当前只支持 schema 10 的完整读写；未知 epoch/较新 schema 返回 `store_incompatible`，同 epoch 较旧 schema 返回 `store_migration_required`，均不自动迁移。Desktop 将握手前的有限结构化错误展示为明确错误码和实际/预期 schema；不展示任意 stderr。
+
+加入 epoch 后的 source profile 不再使用旧的无 epoch digest 目录；旧目录保留且不会自动导入，切换分支不能把不同 epoch 的 Run 输入/恢复语义混写。
 
 旧 `kite.sqlite` 原样保留但不可见，不导入、迁移、dual write 或 fallback。source/installed 使用相同 schema、fencing 与 recovery。
 Provider/config/credential/Trust 使用共享 canonical config root 的 file-local lock/revision CAS。

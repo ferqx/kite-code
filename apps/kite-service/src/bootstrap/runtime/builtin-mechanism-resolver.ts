@@ -1,6 +1,5 @@
 import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite-ai/builtin-runtime/filesystem';
 import {
-  type BuiltinGitExecutionMechanism,
   type BuiltinMechanismRecord,
   type BuiltinShellExecutionResult,
   isReadOnlyShellCommand,
@@ -10,7 +9,6 @@ import type {
   CapabilityExecutionMechanism,
   CapabilityPolicyEffects,
   CapabilitySandboxScopeFact,
-  GitInspectRequest,
   RuntimeJsonValue,
   WorkspaceFilesystemOperation,
 } from '#runtime-spi';
@@ -46,7 +44,6 @@ export interface AppBuiltinPreassembledMechanismResolverInput {
   readonly policyEffects: Readonly<CapabilityPolicyEffects>;
   readonly signal: AbortSignal;
   readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcher>;
-  readonly gitBroker?: Readonly<BuiltinGitExecutionMechanism>;
   readonly shellExecutor?: Readonly<AppBuiltinShellExecutor>;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** One exact wrapper for web, MCP, Skill, or planning. */
@@ -96,7 +93,7 @@ function resolveBuiltinMechanisms(
     case 'filesystem':
       return filesystemMechanism(input);
     case 'git':
-      return gitMechanism(input);
+      return fail('unsupported_mechanism');
     case 'shell':
       return shellMechanism(input);
     case 'web':
@@ -168,23 +165,6 @@ function scopeFilesystemOperation(
   // the Builtin filesystem owner unchanged; the Provider alone resolves and
   // canonicalizes the target under the protected boundary.
   return Object.freeze({ ...operation, pathScope });
-}
-
-function gitMechanism(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
-): BuiltinMechanismRecord {
-  if (input.preassembledMechanism !== undefined || !input.gitBroker) {
-    fail('mechanism_missing');
-  }
-  const broker = input.gitBroker;
-  const mechanism = Object.freeze({
-    inspect: (request: GitInspectRequest, signal?: AbortSignal) =>
-      broker.inspect(request, signal ?? input.signal),
-  });
-  return mergeBuiltinMechanismBundle({
-    executionMechanism: 'git',
-    prepared: Object.freeze({ git: mechanism }),
-  });
 }
 
 function shellMechanism(

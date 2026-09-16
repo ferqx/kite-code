@@ -24,3 +24,10 @@ SessionMailbox 用 Promise tail 串行化单 Session 的操作，失败也将 ta
 query 可以读取 Store 中尚未进入本进程 registry 的 Session，并通过 projector hydrate 订阅者。query 不凭空提交业务事件。App 注入 ownsSessionExecution 时，只发布本进程实际拥有的执行投影；不能把能读到的 Session 都视为本进程可取消对象。
 
 验证：[mailbox](../test/session-mailbox.test.ts)、[持久命令](../test/persistent-command-host.test.ts)、[crash windows](../test/persistent-command-crash-windows.test.ts)、[notification](../test/notification-projector.test.ts)。
+
+
+Service 可为严格识别的旧全局 Provider admission 返回 `resume_session` 的 prepared turn；Host 与 start/respond 一样要求先有 applied 持久回执，再派发原 Run。waiting→running 仍由 State interaction 的既有投影在同一 Run 事务中产生，不增加 waiting→queued 中间状态。
+
+同一 `resume_session` 回执重放时，Host 先取得 Session execution owner，再恢复并请求 bridge 证明原 Turn 仍可安全续跑：当前 State revision 与已提交回执相同、原 Run 仍为 running、完整 journal 只含匹配的旧准入及其结算，且没有模型准备、派发、工具、副作用、未决审批或清理证据。证明成立且本进程尚无活动执行时，Host 调度原 Run 一次；拿不到 owner、证明失败或其他命令的回执重放只返回已提交结果。不同 commandId 不能绕过这些证据。验证见[真实 Store 与 Host 恢复测试](../../../apps/kite-service/test/runtime/runtime-session-coordinator.test.ts)及[Host 崩溃窗口测试](../test/persistent-command-crash-windows.test.ts)。
+
+恢复派发使用本次请求经认证并冻结的 `commandContext`，沿 Host replay、Service wrapper 和 continuation 传递到工具执行。并发同 commandId 的请求各自持有自己的上下文，不从旧回执恢复连接绑定，也不把上下文写入持久回执。Worker 工具组合仍重新核验本次 binding 与有效控制权；缺失或失效时拒绝执行。

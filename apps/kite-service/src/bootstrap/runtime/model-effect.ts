@@ -202,7 +202,6 @@ export function resolveContextProjectionEnvironment(input: {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -241,7 +240,6 @@ export function resolveContextProjectionEnvironment(input: {
   const toolInput = {
     workspace: input.state.session.workspace,
     shellExecutor: input.shellExecutor,
-    gitBroker: input.gitBroker,
     mcpManager: input.mcpManager,
     mcpBindings: persistedBindings,
     toolSearch: getFeatureFlags(input.config).toolSearch && input.model.supportsToolCalls !== false,
@@ -272,7 +270,6 @@ export function resolveContextProjectionEnvironment(input: {
     phase: toolInput.phase,
     interactionMode: toolInput.interactionMode,
     hasTaskAdapter: Boolean(toolInput.subagentEventSink && toolInput.config),
-    hasGitBroker: Boolean(toolInput.gitBroker),
     toolSearchEnabled: toolInput.toolSearch,
     activeSkillFrames: toolInput.activeSkillFrames,
     skillCatalog: toolInput.skillCatalog,
@@ -338,7 +335,6 @@ export async function projectPrimaryModelEffect(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -504,7 +500,6 @@ export async function projectPrimaryModelEffect(params: {
   const toolInput = {
     workspace: state.session.workspace,
     shellExecutor: params.shellExecutor,
-    gitBroker: params.gitBroker,
     mcpManager: params.mcpManager,
     mcpBindings,
     toolSearch: flags.toolSearch && params.model.supportsToolCalls !== false,
@@ -535,7 +530,6 @@ export async function projectPrimaryModelEffect(params: {
     phase: toolInput.phase,
     interactionMode: toolInput.interactionMode,
     hasTaskAdapter: Boolean(toolInput.subagentEventSink && toolInput.config),
-    hasGitBroker: Boolean(toolInput.gitBroker),
     toolSearchEnabled: toolInput.toolSearch,
     activeSkillFrames: toolInput.activeSkillFrames,
     skillCatalog: toolInput.skillCatalog,
@@ -565,7 +559,6 @@ export async function projectPrimaryModelEffect(params: {
     config: params.config,
     model: params.model,
     shellExecutor: params.shellExecutor,
-    gitBroker: params.gitBroker,
     mcpManager: params.mcpManager,
     skills: params.skills,
     skillOptions: params.skillOptions,

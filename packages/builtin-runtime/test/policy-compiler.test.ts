@@ -23,12 +23,9 @@ const CONTEXT: CapabilityPolicyContext = Object.freeze({
   turnId: 'turn-policy',
   toolSearchEnabled: true,
   hasTaskAdapter: true,
-  hasGitBroker: true,
-  brokeredGitFeatureRevision: 'brokered-git-r1',
   activeSkillFrameIds: Object.freeze(['skill-frame']),
   availableSkillIds: Object.freeze(['skill']),
   featureFlags: Object.freeze({
-    brokeredGit: true,
     skillWorkflow: true,
     skillActivation: true,
   }),
@@ -147,9 +144,9 @@ describe('Builtin operation policy compiler', () => {
     const result = projection();
     const model = result.entries.filter((entry) => entry.visibility === 'model');
     const internal = result.entries.filter((entry) => entry.visibility === 'internal');
-    expect(result.entries).toHaveLength(28);
+    expect(result.entries).toHaveLength(27);
     expect(model).toHaveLength(19);
-    expect(internal).toHaveLength(9);
+    expect(internal).toHaveLength(8);
     expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
     expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);
     expect(internal.find((entry) => entry.operationId === 'mcp:dynamic_tool')).toBeDefined();
@@ -558,7 +555,7 @@ describe('Builtin operation policy compiler', () => {
     ] as const;
     const legacyShellContext = {
       ...CONTEXT,
-      featureFlags: { ...CONTEXT.featureFlags, brokeredGit: false },
+      featureFlags: { ...CONTEXT.featureFlags },
     };
     for (const vector of corpus) {
       expect(compile('shell_execute', vector.input, legacyShellContext)).toMatchObject(

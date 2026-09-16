@@ -1,5 +1,7 @@
 # Service 组装与执行交接
 
+模型前的 required MCP 全量门禁已移除；Provider 认证、授权与可用性继续由实际操作检查。Service 不再注入或路由专用 Git Broker，Agent Git 操作走 Shell。专用 Git 配置与资格链已删除。普通 Workspace Trust 不解析 Git metadata；native Shell preparation 单独核验已有外部只读授权，路径变化不扩大权限。
+
 入口：[composition](../src/composition.ts)、[bootstrap](../src/bootstrap.ts)、[App Server](../src/app-server.ts)、[daemon](../src/app-server-daemon.ts)、[runtime composition](../src/workspace-worker/runtime-composition.ts)。
 
 Service 解析 profile/workspace，打开当前 Store，构造 Host、Builtin modules、execution bridge、projection 和 App Control。CLI/Web 不承担该组合职责。默认 stdio 与显式 daemon 复用业务 composition，差异在进程所有权、连接与 Web listener。

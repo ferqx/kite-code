@@ -1,9 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join, parse, resolve } from 'node:path';
+import { dirname, parse, resolve } from 'node:path';
 import type { FilesystemScope } from './types';
-
-/** Whether the native profile may read the user's external Git configuration. */
-export type SandboxGitAccess = 'deny' | 'allow';
 
 export interface SandboxProfileOptions {
   network?: 'disabled' | 'allow_all';
@@ -11,13 +8,6 @@ export interface SandboxProfileOptions {
   sandboxRuntimeDir?: string;
   sandboxControlBase?: string;
   runtimeReadOnlyRoots?: readonly string[];
-  /**
-   * When `'allow'`, the profile additionally reads the user's external Git
-   * configuration. The canonical Workspace itself is admitted as one complete
-   * filesystem identity. A linked worktree's external metadata must be added
-   * separately as an authority-validated runtimeReadOnlyRoot.
-   */
-  gitAccess?: SandboxGitAccess;
 }
 
 /**
@@ -37,11 +27,10 @@ export function generateSandboxProfile(
     : undefined;
   const filesystemScope = options.filesystemScope ?? 'workspace_write';
   const runtimeReadOnlyRoots = canonicalizeReadOnlyRoots(options.runtimeReadOnlyRoots ?? []);
-  const gitAccess = options.gitAccess ?? 'deny';
 
   return [
     SEATBELT_BASE_POLICY,
-    fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots, gitAccess, filesystemScope),
+    fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots, filesystemScope),
     fileWritePolicy(workspaceRoot, runtimeRoot, filesystemScope),
     hostControlPolicy(controlBase),
     networkPolicy(options.network ?? 'disabled'),
@@ -186,18 +175,11 @@ const SYSTEM_READ_FILES = [
   '/private/var/select/developer_dir',
 ];
 
-/** Existing user git config files (global + XDG) git reads under the sandbox. */
-function discoverGitConfigReadFiles(): string[] {
-  const home = process.env.HOME;
-  if (!home) return [];
-  return [join(home, '.gitconfig'), join(home, '.config', 'git', 'config')].filter(existsSync);
-}
-
+/** Project only explicitly admitted roots and fixed system dependencies. */
 function fileReadPolicy(
   workspaceRoot: string,
   runtimeRoot: string | undefined,
   runtimeReadOnlyRoots: readonly string[],
-  gitAccess: SandboxGitAccess,
   filesystemScope: FilesystemScope,
 ): string {
   if (filesystemScope === 'full_access') {
@@ -210,14 +192,9 @@ function fileReadPolicy(
   const roots = [
     ...new Set([workspaceRoot, runtimeRoot, ...runtimeReadOnlyRoots, ...canonicalSystemReadRoots]),
   ].filter((path): path is string => path !== undefined);
-  const gitConfigReadFiles = gitAccess === 'allow' ? discoverGitConfigReadFiles() : [];
   const readFilters = [
     ...roots.map(subpathFilter),
     ...SYSTEM_READ_FILES.filter(existsSync).flatMap((path) => [
-      literalFilter(resolve(path)),
-      literalFilter(canonicalExistingPath(path)),
-    ]),
-    ...gitConfigReadFiles.flatMap((path) => [
       literalFilter(resolve(path)),
       literalFilter(canonicalExistingPath(path)),
     ]),

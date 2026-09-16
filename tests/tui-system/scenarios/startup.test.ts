@@ -63,7 +63,7 @@ describe('TUI PTY System — Startup', () => {
           const viewport = tui.viewport();
           return (
             screenContains(viewport, '会话列表') &&
-            screenHasSessionRow(viewport, 'tui-', { selected: true, active: true })
+            screenHasSessionRow(viewport, '新会话', { selected: true, active: true })
           );
         },
         'fresh current session row after the incompatible historical Store is ignored',

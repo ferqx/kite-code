@@ -1,4 +1,3 @@
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
 import { isDescriptorAdmittedByInProcessReadOnlyCatalog } from './in-process-read-only';
 import type { ExecutionCapabilitySurface } from './types';
 
@@ -44,15 +43,6 @@ export function isDescriptorAdmittedByExecutionCapabilitySurface(input: {
   descriptor: SandboxCapabilityDescriptor;
 }): boolean {
   const { surface, descriptor } = input;
-
-  // Brokered Git is an independent capability axis.  It remains available on
-  // a no-process/no-generic-write surface only when disclosure, dispatch and
-  // native metadata denial all name the same feature revision.
-  if (descriptor.kind === 'builtin_tool' && descriptor.capabilityId === 'builtin:git_inspect') {
-    return (
-      surface.gitInspect && surface.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
-    );
-  }
 
   if (!surface.process && !surface.write) {
     return Boolean(

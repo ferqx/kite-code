@@ -51,7 +51,7 @@ Project MCP declaration 在 transport construction 前通过 Workspace/source/na
 
 MCP protocol result 被归一化为 `@kite-ai/runtime-contract` 的唯一 JSON-safe `CapabilityResult`。每个真实 Tool attempt 在协议请求前 durable ack；已知 terminal 写入 private Capability Artifact，并与 Tool terminal 原子提交。write/unknown effect 在 dispatch 后缺可信 terminal 时保持 `execution_unknown`，不因 SDK/provider error 自动重放。Safe-read retry 仍要求新的 Runtime attempt acknowledgement。
 
-`McpSupervisor` 是唯一 App-facing control plane；Runtime 只依赖 `McpRuntimeProvider`，TUI 只依赖 App controller 和 immutable control snapshot。Generation token 阻止 late connect/discovery/list-changed 恢复旧能力。Provider action/required-provider admission 使用持久 Runtime interaction；waiver 只释放当前 admission，不创造 descriptor、binding 或 availability。
+`McpSupervisor` 是唯一 App-facing control plane；Runtime 只依赖 `McpRuntimeProvider`，TUI 只依赖 App controller 和 immutable control snapshot。Generation token 阻止 late connect/discovery/list-changed 恢复旧能力。实际 Provider action 使用持久 Runtime interaction；模型前不再产生 required-provider 全局准入。历史 admission 记录只在已授权的继续入口按来源与执行证据处理，不能写用户 waiver 或创造 descriptor、binding、availability。
 
 ## 禁止事项
 

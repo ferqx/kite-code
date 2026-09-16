@@ -88,7 +88,6 @@ export interface SubAgentRunnerInput {
   name: string;
   task: string;
   shellExecutor?: import('@kite-ai/builtin-runtime/sandbox').ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
   skills?: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
   skillOptions?: import('@kite-ai/builtin-runtime/skills').SkillScanOptions;

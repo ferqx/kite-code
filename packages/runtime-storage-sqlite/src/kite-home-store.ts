@@ -1,9 +1,17 @@
 import type { Database } from 'bun:sqlite';
 
+import {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
+
 export const KITE_HOME_STORE_SCHEMA_VERSION = 9;
 export const KITE_HOME_STORE_FORMAT_EPOCH = 'kite-home-single-service-v1-2026-08-30';
-export const KITE_SESSION_STORE_SCHEMA_VERSION = 10;
-export const KITE_SESSION_STORE_FORMAT_EPOCH = 'kite-session-app-server-2026-09-02';
+
+export {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
 
 export const KITE_HOME_STORE_TABLE_COLUMNS = Object.freeze({
   kite_meta: ['key', 'value'],

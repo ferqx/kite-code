@@ -262,7 +262,6 @@ export function createAppRuntimeEffectExecutor(
       state,
       config: dependencies.config,
       shellExecutor: dependencies.shellExecutor,
-      gitBroker: dependencies.gitBroker,
       sandboxBackend: dependencies.sandboxBackend,
       mcpManager: dependencies.mcpManager,
       skills: dependencies.skills,
@@ -390,7 +389,6 @@ async function projectAutoReviewEffect(
       workspace: state.session.workspace,
       threadId: state.session.threadId,
       config: dependencies.config,
-      hasGitBroker: Boolean(dependencies.gitBroker),
     }),
     builtinToolCatalog,
   );

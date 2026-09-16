@@ -20,7 +20,6 @@ export interface AppToolTurnContextInput {
   readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   readonly workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
   readonly hasTaskAdapter?: boolean;
-  readonly hasGitBroker?: boolean;
   readonly toolSearchEnabled?: boolean;
   readonly activeSkillFrames?: readonly { readonly activationId: string }[];
   readonly skillCatalog?: SkillCatalogSnapshot;
@@ -44,10 +43,7 @@ export function createAppToolTurnContext(input: AppToolTurnContextInput): AppToo
     phase: input.phase,
     workspaceTrust: input.workspaceTrust,
     featureFlags,
-    brokeredGitFeatureRevision:
-      input.config?.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: input.hasTaskAdapter,
-    hasGitBroker: input.hasGitBroker,
     toolSearchEnabled: input.toolSearchEnabled,
     activeSkillFrames: input.activeSkillFrames,
     skillCatalog: input.skillCatalog,

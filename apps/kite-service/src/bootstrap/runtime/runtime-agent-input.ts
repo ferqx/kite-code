@@ -17,7 +17,6 @@ export interface BuildRunTaskParams {
   workspace: string;
   config: AgentConfig;
   shellExecutor: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   signal: AbortSignal;
   thinkingLevel: string | null;
   skills: SkillManifest[];
@@ -56,7 +55,6 @@ export function buildRunAgentParams(p: BuildRunTaskParams): ServiceRuntimeInput 
         reasoningEffort: p.thinkingLevel ?? p.config.reasoningEffort ?? null,
       }),
     shellExecutor: p.shellExecutor,
-    gitBroker: p.gitBroker,
     mcpManager: p.mcpManager ?? undefined,
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,

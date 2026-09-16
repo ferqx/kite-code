@@ -48,6 +48,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 
 ## 关键不变量
 
+- required MCP 的可用性不再成为模型调用前置条件；真实工具认证与授权保持按需检查。专用 Git Broker 不再进入 Service Runtime 工具执行链，文件工具由 Builtin filesystem module 提供。
+
 - source 与 installed 使用相同协议、Store schema 和 execution 语义；source 按 canonical checkout 隔离 profile，installed 使用
   canonical profile。
 - parent-owned App Server 必须与 client exact build 配对；显式 daemon 只按 fixed protocol/capability 判断兼容，build 仅用于诊断。

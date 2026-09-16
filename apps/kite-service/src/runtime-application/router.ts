@@ -230,6 +230,17 @@ export function createRuntimeExecutionBridgeRouter(
       await context.bridge.recoverSession(sessionId, publish);
     },
 
+    async recoverCommittedResume(command, committedRevision, publish, commandContext) {
+      const context = await contextForSession(command.sessionId);
+      assertOpen();
+      return context.bridge.recoverCommittedResume?.(
+        command,
+        committedRevision,
+        publish,
+        commandContext,
+      );
+    },
+
     async inspectCommand(
       command: RuntimeCommand,
       context: RuntimeHostCommandInspectionContext,

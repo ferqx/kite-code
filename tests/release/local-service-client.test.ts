@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
+import { KITE_SESSION_STORE_FORMAT_EPOCH } from '../../packages/runtime-storage-sqlite/src/kite-session-store-format';
 import {
   installedKiteSessionStorePath,
   resolveInstalledReleaseExecutable,
@@ -98,6 +100,8 @@ test('Session Store profiles separate installed data from each canonical source 
       .update(kiteHome)
       .update('\0')
       .update(firstRepository)
+      .update('\0')
+      .update(KITE_SESSION_STORE_FORMAT_EPOCH)
       .digest('hex')
       .slice(0, 32);
     expect(sourceKiteSessionStorePath(kiteHome, firstRepository)).toBe(
@@ -106,6 +110,13 @@ test('Session Store profiles separate installed data from each canonical source 
     expect(sourceKiteSessionStorePath(kiteHome, secondRepository)).not.toBe(
       sourceKiteSessionStorePath(kiteHome, firstRepository),
     );
+    expect(
+      sourceKiteSessionStoreDirectoryFromCanonicalRoots(
+        kiteHome,
+        firstRepository,
+        `${KITE_SESSION_STORE_FORMAT_EPOCH}-next`,
+      ),
+    ).not.toBe(join(kiteHome, 'source-profiles', firstDigest));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -11,14 +11,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { editorFileTarget } from '../electron/editor';
-import { queryBranch, switchBranch } from '../electron/git';
+import { editorFileTarget } from '../../electron/editor';
+import { queryBranch, switchBranch } from '../../electron/git';
 import {
   knownProject,
   readProjectDisplay,
   readProjects,
   rememberProject,
-} from '../electron/projects';
+} from '../../electron/projects';
 
 test('project registry is explicit, canonical, deduplicated and preserves missing entries', () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-projects-')));

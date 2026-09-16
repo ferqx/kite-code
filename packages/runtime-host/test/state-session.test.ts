@@ -358,6 +358,64 @@ describe('Runtime Host State session', () => {
     });
   });
 
+  test('settles an old admission and resumes its waiting Run in the command transaction', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-1' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-1', phase: 'building' },
+    });
+    session.activateRun('run-1');
+    session.processEvent({
+      type: 'provider.admission_required',
+      interactionId: 'old-global-gate',
+      providerId: 'offline-provider',
+      source: 'explicit',
+      providerStatus: 'login_required',
+      retryable: true,
+    });
+    expect(f.runs.get('state-session-test\0run-1')?.status).toBe('waiting');
+    const before = session.getState();
+    f.failCommit = true;
+    expect(() =>
+      session.commitCommandBatch(
+        [
+          {
+            type: 'provider.admission_cancelled',
+            interactionId: 'old-global-gate',
+            providerId: 'offline-provider',
+          },
+        ],
+        commandEvidence(),
+      ),
+    ).toThrow('commit refused');
+    expect(session.getState()).toBe(before);
+    expect(f.runs.get('state-session-test\0run-1')?.status).toBe('waiting');
+
+    f.failCommit = false;
+    const committed = session.commitCommandBatch(
+      [
+        {
+          type: 'provider.admission_cancelled',
+          interactionId: 'old-global-gate',
+          providerId: 'offline-provider',
+        },
+      ],
+      commandEvidence(),
+    );
+    const transaction = f.writes.at(-1);
+    expect(transaction?.events.map((event) => event.type)).toEqual([
+      'provider.admission_cancelled',
+    ]);
+    expect(transaction?.commandReceipt).toEqual(committed.receipt);
+    expect(transaction?.runMutation).toMatchObject({
+      type: 'transition',
+      transition: { next: { runId: 'run-1', status: 'running' } },
+    });
+    expect(f.runs.get('state-session-test\0run-1')?.status).toBe('running');
+    expect(session.getState().providerAdmission.waivers).toEqual({});
+  });
+
   test('keeps a queued Run unchanged when its activation transaction fails', () => {
     const f = fixture(initialState(), true);
     const session = createRuntimeHostStateSession(f.input);

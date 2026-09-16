@@ -86,4 +86,4 @@ HTTP 401 产生的 `login_required` 从 Detail 进入 authenticate route；只�
 
 Runtime 已在默认关闭的 `mcpProviderAction` 后提供持久 Provider Action lifecycle。它只向 App shell 请求固定 `login`、`approve` 或 `retry`，不获得配置 mutation API。TUI 使用既有 foreground/background interrupt routing 收集显式决定，再由 `TuiMcpController` 调用相同 control-plane command；完成后返回新的 directory revision，Runtime 以新 turn 重新进入模型边界。CLI 没有该 App controller 时安全 defer。Provider Action 与 `/mcp` Overlay 是两个入口，但共享 controller 与 Runtime facts。
 
-同一 flag 还在新 Agent run 的首次模型调用前检查 effective required Provider。`ready`/`degraded` 直接准入，其他状态进入 Runtime gate；TUI interrupt 提供 Retry、Session Waive 或 Cancel Run。Waive 只写 Runtime session 事实，不修改 control snapshot 或 capability 可见性。
+模型调用前不再检查全部 required Provider。离线、未登录或尚未批准的 MCP 不阻止无关请求；只有实际使用对应能力时进入既有可用性、认证和授权检查。`mcpProviderAction` 仍控制真实 Provider Action，不再控制全局准入。`required` 暂保留在配置和管理投影中以表示原配置事实，不再产生会话等待或豁免。历史全局等待的定向接续见 [Service Runtime](../../apps/kite-service/docs/runtime-application.md)。

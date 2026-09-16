@@ -4,6 +4,8 @@ import {
   advanceToolRecoveryResponse,
   createToolRecoveryJournal,
   decideAutoReview,
+  hasPendingSandboxCleanupAuthority,
+  hasPendingSubagentCleanupAuthority,
   isToolRecoveryJournalInvalid,
   type KernelEvent,
   normalizeToolRecoveryJournal,
@@ -29,6 +31,9 @@ export const runtimeHostStateRecordRecoveryInvocation = recordRecoveryInvocation
 export const runtimeHostStateRecordToolOwnedProgress = recordToolOwnedProgress;
 export const runtimeHostStateToolFailureInstanceId = toolFailureInstanceId;
 export const runtimeHostStateToolInvocationFingerprint = toolInvocationFingerprint;
+export const runtimeHostStateHasPendingSandboxCleanupAuthority = hasPendingSandboxCleanupAuthority;
+export const runtimeHostStateHasPendingSubagentCleanupAuthority =
+  hasPendingSubagentCleanupAuthority;
 
 export type RuntimeHostStateRestartRecoveryFacts = StateRestartRecoveryFacts;
 export type StateToolRecoveryJournal = ToolRecoveryJournal;

@@ -2,12 +2,19 @@ import { Buffer } from 'node:buffer';
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
+import {
+  describeServiceStartupFailure,
+  MAX_SERVICE_STARTUP_STDERR_BYTES,
+  parseServiceStartupDiagnostic,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { AsyncMutex } from '../async-mutex';
 
 export const MAX_FRAME_BYTES = 1_048_576;
 const QUEUED_FRAMES = 16;
 const CLOSE_TIMEOUT_MS = 15_000;
 const SEND_TIMEOUT_MS = 5_000;
+const STARTUP_EXIT_WAIT_MS = 1_000;
+const STARTUP_CLEANUP_TIMEOUT_MS = 2_000;
 
 type QueueWaiter<T> = {
   resolve: (value: T) => void;
@@ -132,7 +139,12 @@ export class ServiceProcess {
   #settleReceiver: (() => void) | undefined;
   #finished = false;
   #closing = false;
+  #initialized = false;
+  #startupStderr = '';
+  #startupStderrOverflow = false;
+  readonly #stderrClosed: Promise<void>;
   #closePromise?: Promise<void>;
+  #startupFailurePromise?: Promise<void>;
   readonly #ready: Promise<void>;
   readonly #exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 
@@ -170,7 +182,22 @@ export class ServiceProcess {
     this.#child.stdin.on('error', () => undefined);
     this.#child.stdout.on('error', () => undefined);
     this.#child.stderr.on('error', () => undefined);
-    this.#child.stderr.resume();
+    this.#stderrClosed = new Promise<void>((resolve) => {
+      this.#child.stderr.on('data', (value: Buffer | string) => {
+        if (this.#initialized || this.#startupStderrOverflow) return;
+        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+        if (
+          Buffer.byteLength(this.#startupStderr, 'utf8') + chunk.length >
+          MAX_SERVICE_STARTUP_STDERR_BYTES
+        ) {
+          this.#startupStderr = '';
+          this.#startupStderrOverflow = true;
+          return;
+        }
+        this.#startupStderr += chunk.toString('utf8');
+      });
+      this.#child.stderr.once('close', resolve);
+    });
     this.#ready = new Promise((resolve, reject) => {
       this.#child.once('spawn', resolve);
       this.#child.once('error', () =>
@@ -196,12 +223,16 @@ export class ServiceProcess {
     return this.#finished;
   }
 
+  markInitialized(): void {
+    this.#initialized = true;
+    this.#startupStderr = '';
+  }
+
   async send(frame: string): Promise<void> {
     if (
       Buffer.byteLength(frame, 'utf8') > MAX_FRAME_BYTES ||
       frame.includes('\n') ||
       frame.includes('\r') ||
-      this.#finished ||
       this.#closing
     )
       throw new Error('消息无效或连接已关闭。');
@@ -212,7 +243,10 @@ export class ServiceProcess {
       throw new Error('无效的协议消息。');
     }
     if (!isRecord(value)) throw new Error('无效的协议消息。');
+    const initializing = value.method === 'initialize' && !this.#initialized;
+    if (this.#finished && initializing) return;
     return this.#write.run(async () => {
+      if (initializing && (this.#finished || !this.#child.stdin.writable)) return;
       if (this.#finished || this.#closing || !this.#child.stdin.writable)
         throw new Error('连接已关闭。');
       try {
@@ -222,6 +256,10 @@ export class ServiceProcess {
           '发送超时，提交结果未知。',
         );
       } catch (error) {
+        if (initializing && !(error instanceof OperationTimeout)) {
+          await this.#failStartup();
+          return;
+        }
         void this.close().catch(() => undefined);
         if (error instanceof Error && error.message.includes('超时')) throw error;
         throw new Error('发送结果未知，请检查会话。');
@@ -269,7 +307,11 @@ export class ServiceProcess {
       await withTimeout(this.#exit, 5_000, 'kill timeout').catch(() => undefined);
       throw new Error('服务清理超时，已终止自有进程；任务副作用需要检查。');
     }
-    if (result.code !== 0) throw new Error('配套服务异常退出，请检查任务结果。');
+    // Before initialize succeeds the Service cannot have accepted a Runtime
+    // task, so its startup failure is already reported to the renderer and
+    // must not prevent the application from quitting.
+    if (result.code !== 0 && this.#initialized)
+      throw new Error('配套服务异常退出，请检查任务结果。');
   }
 
   async #readOutput(stream: Readable): Promise<void> {
@@ -296,7 +338,11 @@ export class ServiceProcess {
         }
       }
       if (frame.length) throw new Error('服务输出消息被截断。');
-      this.#output.end(new Error('配套服务连接已关闭。'));
+      if (!this.#initialized && !this.#closing) {
+        await this.#failStartup();
+      } else {
+        this.#output.end(new Error('配套服务连接已关闭。'));
+      }
     } catch (error) {
       this.#output.end(
         error instanceof TypeError
@@ -307,7 +353,43 @@ export class ServiceProcess {
       );
       // Invalid, oversized or truncated stdout invalidates the protocol peer.
       // EOF gives the owned Service its normal cancellation/cleanup path.
-      void this.close().catch(() => undefined);
+      if (!this.#startupFailurePromise) void this.close().catch(() => undefined);
+    }
+  }
+
+  #failStartup(): Promise<void> {
+    this.#startupFailurePromise ??= this.#settleStartupFailure();
+    return this.#startupFailurePromise;
+  }
+
+  async #settleStartupFailure(): Promise<void> {
+    const exit = await withTimeout(this.#exit, STARTUP_EXIT_WAIT_MS, 'startup exit wait').catch(
+      () => ({ code: null, signal: null }),
+    );
+    await withTimeout(this.#stderrClosed, STARTUP_EXIT_WAIT_MS, 'startup stderr wait').catch(
+      () => undefined,
+    );
+    const diagnostic = this.#startupStderrOverflow
+      ? undefined
+      : parseServiceStartupDiagnostic(this.#startupStderr);
+    this.#output.end(new Error(describeServiceStartupFailure(diagnostic, exit.code)));
+    // Do not discard the diagnostic before initialize's receiver consumes it.
+    // A peer that closes stdout but remains alive still needs owned cleanup.
+    if (exit.code === null) {
+      this.#closePromise ??= this.#cleanupFailedStartup();
+      void this.#closePromise.catch(() => undefined);
+    }
+  }
+
+  async #cleanupFailedStartup(): Promise<void> {
+    this.#closing = true;
+    if (!this.#child.stdin.destroyed) this.#child.stdin.end();
+    try {
+      await withTimeout(this.#exit, STARTUP_CLEANUP_TIMEOUT_MS, 'startup cleanup timeout');
+    } catch (error) {
+      if (!(error instanceof OperationTimeout)) return;
+      this.#child.kill('SIGKILL');
+      await withTimeout(this.#exit, 5_000, 'startup kill timeout').catch(() => undefined);
     }
   }
 }

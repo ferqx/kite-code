@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BUILTIN_ASK_USER_SCHEMA_,
-  BUILTIN_GIT_INSPECT_SCHEMA_,
   BUILTIN_WRITE_PLAN_SCHEMA_,
   buildDescription,
   digestCapabilityBindingValue,
@@ -118,88 +117,8 @@ function builtinEntry(name: string, context: CapabilityTurnContext = {}) {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
-  test('git_inspect uses operation-discriminated strict schemas without irrelevant fields', () => {
-    expect(
-      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'status', revision: 'HEAD' }).success,
-    ).toBe(false);
-    expect(
-      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'branch_list', paths: ['safe.txt'] })
-        .success,
-    ).toBe(false);
-    expect(
-      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({
-        operation: 'diff',
-        max_records: 5,
-        paths: ['safe.txt'],
-      }).success,
-    ).toBe(false);
-    expect(
-      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({
-        operation: 'log',
-        paths: ['safe.txt'],
-        revision: 'HEAD',
-      }).success,
-    ).toBe(true);
-    expect(BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'unknown' }).success).toBe(false);
-  });
-
-  test('git log revision grammar is identical at Provider and Registry boundaries', () => {
-    for (const revision of ['HEAD', 'abcdef0', 'refs/heads/main', 'refs/tags/v1']) {
-      expect(
-        BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
-          .success,
-      ).toBe(true);
-    }
-    for (const revision of ['--all', 'HEAD~1', 'main', 'refs/remotes/origin/main', 'HEAD;echo']) {
-      expect(
-        BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
-          .success,
-      ).toBe(false);
-    }
-  });
-  test('keeps brokered Git internal even when its execution surface is available', () => {
-    const gitBroker = {
-      featureRevision: 'brokered-git-r1' as const,
-      inspect: async () => ({ ok: true, output: '' }),
-    };
-    const baseConfig = { features: { brokeredGit: true } } as AgentConfig;
-    expect(
-      toolNames(createAgentTools({ workspace: '/workspace', config: baseConfig, gitBroker })),
-    ).not.toContain('git_inspect');
-    const sealedConfig = {
-      ...baseConfig,
-      executionCapabilitySurface: {
-        inProcessReadOnlyTools: null,
-        network: false,
-        process: false,
-        write: false,
-        workspaceWrite: false,
-        shell: false,
-        skillChild: false,
-        localStdioMcp: false,
-        gitInspect: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1' as const,
-      },
-    };
-    const inspectOnly = toolNames(
-      createAgentTools({ workspace: '/workspace', config: sealedConfig, gitBroker }),
-    );
-    expect(inspectOnly).not.toContain('git_inspect');
-    expect(
-      toolNames(
-        createAgentTools({
-          workspace: '/workspace',
-          config: {
-            ...sealedConfig,
-            executionCapabilitySurface: {
-              ...sealedConfig.executionCapabilitySurface,
-              brokeredGitFeatureRevision: null,
-            },
-          },
-          gitBroker,
-        }),
-      ),
-    ).not.toContain('git_inspect');
+  test('does not publish the retired Git inspect tool', () => {
+    expect(toolNames(createAgentTools({ workspace: '/workspace' }))).not.toContain('git_inspect');
   });
   test('normalizes remote MCP tool names into stable model-safe identifiers', () => {
     expect(exposedMcpToolName('docs', 'search_docs')).toBe('mcp__docs__search_docs');

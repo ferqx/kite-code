@@ -6,6 +6,7 @@ import { registerDesktopIpc } from './ipc';
 import { sameRendererDocument } from './security';
 
 declare const __KITE_DESKTOP_SERVICE_MANIFEST__: unknown;
+declare const __KITE_DESKTOP_SOURCE_STORE_EPOCH__: string;
 
 const DEVELOPMENT_RENDERER_URL = 'http://127.0.0.1:1420/';
 const LEGACY_APP_DATA_DIRECTORY = 'dev.kite-code.desktop';
@@ -32,6 +33,7 @@ void app
         : join(appPath, 'service'),
       repositoryDirectory: join(appPath, '../..'),
       debug: !app.isPackaged,
+      sourceStoreEpoch: __KITE_DESKTOP_SOURCE_STORE_EPOCH__,
       serviceManifest: __KITE_DESKTOP_SERVICE_MANIFEST__,
     });
     mainWindow = createMainWindow(rendererUrl, app.isPackaged);

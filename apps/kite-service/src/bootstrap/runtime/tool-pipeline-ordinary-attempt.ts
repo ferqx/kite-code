@@ -71,7 +71,6 @@ export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_ =
  * schema, parser, effects, or availability authority.
  */
 export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_ = Object.freeze([
-  'builtin:git_inspect',
   'builtin:read_file',
   'builtin:search_files',
   'builtin:search_content',

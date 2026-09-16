@@ -290,7 +290,6 @@ export function createSandboxExecutor(
     maxProcessTreeTasks?: number;
     startupProbe?: boolean;
     selectedBackend?: SandboxBackend;
-    brokeredGitFeatureRevision?: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
     executionBoundaryDigest?: string;
     protectedPathRevision?: string;
   },
@@ -313,7 +312,6 @@ export function createSandboxExecutor(
     canonicalWorkspace: options.workspace,
     filesystemScope: options.filesystemScope,
     runtimeReadOnlyRoots: options.runtimeReadOnlyRoots,
-    brokeredGitFeatureRevision: options.brokeredGitFeatureRevision,
     startupProbe: options.startupProbe,
     bubblewrapPath: backend === 'bubblewrap' ? (findUsableBubblewrap() ?? undefined) : undefined,
     cgroupPidsRunner:

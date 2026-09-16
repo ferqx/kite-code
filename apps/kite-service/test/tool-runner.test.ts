@@ -71,11 +71,8 @@ function testBuiltinCatalogForWorkspace(workspace: string) {
   return testBuiltinToolCatalog().forTurn({
     workspace,
     hasTaskAdapter: true,
-    hasGitBroker: true,
     toolSearchEnabled: true,
-    brokeredGitFeatureRevision: 'brokered-git-r1',
     featureFlags: {
-      brokeredGit: true,
       skillWorkflow: true,
       skillActivation: true,
     },

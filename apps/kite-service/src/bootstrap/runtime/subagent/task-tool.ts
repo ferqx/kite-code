@@ -116,7 +116,6 @@ export interface TaskToolDeps {
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -312,7 +311,6 @@ export async function executePipelineIssuedSubagentStart(
         name: args.name,
         task: args.task,
         shellExecutor: deps.shellExecutor,
-        gitBroker: deps.gitBroker,
         mcpManager: deps.mcpManager,
         skills: deps.skills,
         skillOptions: deps.skillOptions,
@@ -584,7 +582,6 @@ export async function executePipelineIssuedSubagentResume(
         name: continuation.name ?? 'Delegated task',
         task: continuation.task,
         shellExecutor: deps.shellExecutor,
-        gitBroker: deps.gitBroker,
         mcpManager: deps.mcpManager,
         skills: deps.skills,
         skillOptions: deps.skillOptions,

@@ -12,9 +12,7 @@ export interface BuiltinCapabilityTurnContextInput {
   readonly phase?: CapabilityTurnContext['phase'];
   readonly workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
   readonly featureFlags?: CapabilityTurnContext['featureFlags'];
-  readonly brokeredGitFeatureRevision?: string | null;
   readonly hasTaskAdapter?: boolean;
-  readonly hasGitBroker?: boolean;
   readonly toolSearchEnabled?: boolean;
   readonly activeSkillFrames?: readonly { readonly activationId: string }[];
   readonly activeSkillFrameIds?: readonly string[];
@@ -40,9 +38,7 @@ export function createBuiltinCapabilityTurnContext(
     ...(input.modelMessageId ? { modelMessageId: input.modelMessageId } : {}),
     ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
     ...(input.phase ? { phase: input.phase } : {}),
-    brokeredGitFeatureRevision: input.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: input.hasTaskAdapter === true,
-    hasGitBroker: input.hasGitBroker === true,
     toolSearchEnabled: input.toolSearchEnabled === true,
     activeSkillFrameIds: Object.freeze(
       [

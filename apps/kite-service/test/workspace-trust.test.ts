@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveWorkspaceExternalReadScope } from '#kite-service/config/workspace-external-read-scope';
 import {
   getTrustedWorkspaceExternalReadRoots,
   getWorkspaceTrustSnapshot,
@@ -38,6 +39,28 @@ describe('workspace trust store', () => {
   test('unknown workspace has no trust record', () => {
     const storePath = tempStorePath();
     expect(getWorkspaceTrustStatus(workspace, storePath)).toBe('unknown');
+  });
+
+  test('a non-repository and broken Git marker keep ordinary Workspace Trust usable', () => {
+    const storePath = tempStorePath();
+    const plain = mkdtempSync(join(tmpdir(), 'kite-trust-no-git-'));
+    try {
+      expect(getWorkspaceTrustSnapshot(plain, storePath)).toMatchObject({
+        status: 'unknown',
+        externalReadScope: { roots: [] },
+      });
+      expect(trustWorkspace({ workspace: plain, storePath }).status).toBe('recorded');
+      expect(getWorkspaceTrustStatus(plain, storePath)).toBe('trusted');
+
+      writeFileSync(join(plain, '.git'), 'gitdir: /nonexistent/kite-git-metadata\n');
+      expect(getWorkspaceTrustSnapshot(plain, storePath)).toMatchObject({
+        status: 'trusted',
+        externalReadScope: { roots: [] },
+      });
+      expect(getTrustedWorkspaceExternalReadRoots(plain, storePath)).toEqual([]);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
   });
 
   test('trustWorkspace persists a record and marks the workspace trusted', () => {
@@ -87,7 +110,7 @@ describe('workspace trust store', () => {
   });
 
   test.skipIf(process.platform === 'win32')(
-    'external repository metadata requires an exact Workspace Trust decision and identity drift prompts again',
+    'historical exact external grants remain scoped while metadata drift does not revoke ordinary trust',
     () => {
       const storePath = tempStorePath();
       const primary = mkdtempSync(join(tmpdir(), 'kite-trust-primary-'));
@@ -104,7 +127,7 @@ describe('workspace trust store', () => {
         const observed = getWorkspaceTrustSnapshot(linked, storePath);
         expect(observed).toMatchObject({
           status: 'unknown',
-          externalReadScope: { roots: [commonDir] },
+          externalReadScope: { roots: [] },
         });
         expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([]);
 
@@ -116,10 +139,44 @@ describe('workspace trust store', () => {
           }).status,
         ).toBe('recorded');
         expect(getWorkspaceTrustStatus(linked, storePath)).toBe('trusted');
+        expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([]);
+
+        // Supported persisted grant from the previous explicit scope prompt.
+        const store = readWorkspaceTrustStore(storePath);
+        if (store.status !== 'ready') throw new Error('Expected readable trust store');
+        const record = Object.values(store.records)[0]!;
+        writeFileSync(
+          storePath,
+          JSON.stringify({
+            version: 1,
+            records: {
+              [record.workspaceKey]: {
+                ...record,
+                externalReadScopeDigest: resolveWorkspaceExternalReadScope(linked).digest,
+              },
+            },
+          }),
+        );
         expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([commonDir]);
+        expect(trustWorkspace({ workspace: linked, storePath }).status).toBe('recorded');
+        expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([commonDir]);
+        const beforeDrift = getWorkspaceTrustSnapshot(linked, storePath)!;
+        const unrelatedMetadata = join(primary, 'other.git');
+        mkdirSync(unrelatedMetadata);
+        git(unrelatedMetadata, 'init', '--bare', '--quiet');
+        writeFileSync(join(linked, '.git'), `gitdir: ${unrelatedMetadata}\n`);
+        expect(resolveWorkspaceExternalReadScope(linked).roots).toEqual([
+          realpathSync.native(unrelatedMetadata),
+        ]);
+        expect(getWorkspaceTrustSnapshot(linked, storePath)).toEqual(beforeDrift);
+        expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([]);
+        expect(trustWorkspace({ workspace: linked, storePath }).status).toBe('recorded');
+        expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([]);
+        const afterRetrust = getWorkspaceTrustSnapshot(linked, storePath)!;
 
         writeFileSync(join(linked, '.git'), 'gitdir: /nonexistent/kite-worktree\n');
-        expect(getWorkspaceTrustStatus(linked, storePath)).toBe('unknown');
+        expect(getWorkspaceTrustStatus(linked, storePath)).toBe('trusted');
+        expect(getWorkspaceTrustSnapshot(linked, storePath)).toEqual(afterRetrust);
         expect(getTrustedWorkspaceExternalReadRoots(linked, storePath)).toEqual([]);
       } finally {
         rmSync(linked, { recursive: true, force: true });
@@ -128,7 +185,7 @@ describe('workspace trust store', () => {
     },
   );
 
-  test('an unregistered external repository is surfaced for confirmation instead of rejected', () => {
+  test('adding external metadata does not expand a new or repeated Workspace Trust decision', () => {
     const storePath = tempStorePath();
     const opened = mkdtempSync(join(tmpdir(), 'kite-trust-external-workspace-'));
     const externalGitDir = mkdtempSync(join(tmpdir(), 'kite-trust-external-gitdir-'));
@@ -140,8 +197,8 @@ describe('workspace trust store', () => {
       writeFileSync(join(opened, '.git'), `gitdir: ${externalGitDir}\n`);
       const observed = getWorkspaceTrustSnapshot(opened, storePath);
       expect(observed).toMatchObject({
-        status: 'unknown',
-        externalReadScope: { roots: [realpathSync.native(externalGitDir)] },
+        status: 'trusted',
+        externalReadScope: { roots: [] },
       });
       expect(getTrustedWorkspaceExternalReadRoots(opened, storePath)).toEqual([]);
 
@@ -152,9 +209,7 @@ describe('workspace trust store', () => {
           expectedRevision: observed!.revision,
         }).status,
       ).toBe('recorded');
-      expect(getTrustedWorkspaceExternalReadRoots(opened, storePath)).toEqual([
-        realpathSync.native(externalGitDir),
-      ]);
+      expect(getTrustedWorkspaceExternalReadRoots(opened, storePath)).toEqual([]);
     } finally {
       rmSync(opened, { recursive: true, force: true });
       rmSync(externalGitDir, { recursive: true, force: true });

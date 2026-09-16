@@ -5,9 +5,6 @@ import type {
   CapabilityExecutionMechanism,
   CapabilityExecutor,
   ExecutionReceipt,
-  GitBrokerFailureCode,
-  GitBrokerResult,
-  GitInspectRequest,
   RuntimeJsonValue,
   RuntimeModule,
   RuntimeModuleRegistryWriter,
@@ -42,35 +39,34 @@ import { createBuiltinPolicyCompiler, fileBuiltinPolicyRule } from '../policy-co
 import { builtinToolDescription } from '../tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from '../tool-schemas';
 
-export const GIT_PROVIDER_ID_ = 'kite-builtin-runtime-git' as const;
+// Persisted provider identity is retained for existing file-tool receipts.
+export const FILESYSTEM_PROVIDER_ID_ = 'kite-builtin-runtime-git' as const;
 
-export const GIT_OPERATION_IDS_ = Object.freeze([
+export const FILESYSTEM_OPERATION_IDS_ = Object.freeze([
   'builtin:read_file',
   'builtin:search_content',
   'builtin:search_files',
   'builtin:write_file',
   'builtin:edit_file',
-  'builtin:git_inspect',
 ] as const);
 
-export type GitOperationId = (typeof GIT_OPERATION_IDS_)[number];
+export type FilesystemOperationId = (typeof FILESYSTEM_OPERATION_IDS_)[number];
 
 export const READ_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:read_file'];
 export const SEARCH_CONTENT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:search_content'];
 export const SEARCH_FILES_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:search_files'];
 export const WRITE_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:write_file'];
 export const EDIT_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:edit_file'];
-export const GIT_INSPECT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:git_inspect'];
 
-const INPUT_SCHEMAS_: Readonly<Record<GitOperationId, Readonly<Record<string, RuntimeJsonValue>>>> =
-  Object.freeze({
-    'builtin:read_file': READ_FILE_INPUT_SCHEMA_,
-    'builtin:search_content': SEARCH_CONTENT_INPUT_SCHEMA_,
-    'builtin:search_files': SEARCH_FILES_INPUT_SCHEMA_,
-    'builtin:write_file': WRITE_FILE_INPUT_SCHEMA_,
-    'builtin:edit_file': EDIT_FILE_INPUT_SCHEMA_,
-    'builtin:git_inspect': GIT_INSPECT_INPUT_SCHEMA_,
-  });
+const INPUT_SCHEMAS_: Readonly<
+  Record<FilesystemOperationId, Readonly<Record<string, RuntimeJsonValue>>>
+> = Object.freeze({
+  'builtin:read_file': READ_FILE_INPUT_SCHEMA_,
+  'builtin:search_content': SEARCH_CONTENT_INPUT_SCHEMA_,
+  'builtin:search_files': SEARCH_FILES_INPUT_SCHEMA_,
+  'builtin:write_file': WRITE_FILE_INPUT_SCHEMA_,
+  'builtin:edit_file': EDIT_FILE_INPUT_SCHEMA_,
+});
 
 const EFFECTS_ = Object.freeze({
   'builtin:read_file': Object.freeze({
@@ -98,49 +94,45 @@ const EFFECTS_ = Object.freeze({
     network: 'none',
     externalState: 'none',
   }),
-  'builtin:git_inspect': Object.freeze({
-    filesystem: 'read',
-    network: 'none',
-    externalState: 'none',
-  }),
 });
 
-const EXECUTION_MECHANISMS_: Readonly<Record<GitOperationId, CapabilityExecutionMechanism>> =
+const EXECUTION_MECHANISMS_: Readonly<Record<FilesystemOperationId, CapabilityExecutionMechanism>> =
   Object.freeze({
     'builtin:read_file': 'filesystem',
     'builtin:search_content': 'filesystem',
     'builtin:search_files': 'filesystem',
     'builtin:write_file': 'filesystem',
     'builtin:edit_file': 'filesystem',
-    'builtin:git_inspect': 'git',
   });
 
-export const GIT_CAPABILITY_REVISIONS_: Readonly<Record<GitOperationId, string>> = Object.freeze(
-  Object.fromEntries(
-    GIT_OPERATION_IDS_.map((operationId) => [
-      operationId,
-      digestCapabilityBindingValue({
-        schema: 'kite.git-operation-capability.current',
+export const FILESYSTEM_CAPABILITY_REVISIONS_: Readonly<Record<FilesystemOperationId, string>> =
+  Object.freeze(
+    Object.fromEntries(
+      FILESYSTEM_OPERATION_IDS_.map((operationId) => [
         operationId,
-        inputSchema: INPUT_SCHEMAS_[operationId],
-        effects: EFFECTS_[operationId],
-      }),
-    ]),
-  ) as Record<GitOperationId, string>,
-);
+        digestCapabilityBindingValue({
+          schema: 'kite.git-operation-capability.current',
+          operationId,
+          inputSchema: INPUT_SCHEMAS_[operationId],
+          effects: EFFECTS_[operationId],
+        }),
+      ]),
+    ) as Record<FilesystemOperationId, string>,
+  );
 
-export const GIT_EXECUTOR_REVISIONS_: Readonly<Record<GitOperationId, string>> = Object.freeze(
-  Object.fromEntries(
-    GIT_OPERATION_IDS_.map((operationId) => [
-      operationId,
-      digestCapabilityBindingValue({
-        schema: 'kite.git-operation-executor.current',
+export const FILESYSTEM_EXECUTOR_REVISIONS_: Readonly<Record<FilesystemOperationId, string>> =
+  Object.freeze(
+    Object.fromEntries(
+      FILESYSTEM_OPERATION_IDS_.map((operationId) => [
         operationId,
-        capabilityRevision: GIT_CAPABILITY_REVISIONS_[operationId],
-      }),
-    ]),
-  ) as Record<GitOperationId, string>,
-);
+        digestCapabilityBindingValue({
+          schema: 'kite.git-operation-executor.current',
+          operationId,
+          capabilityRevision: FILESYSTEM_CAPABILITY_REVISIONS_[operationId],
+        }),
+      ]),
+    ) as Record<FilesystemOperationId, string>,
+  );
 
 export interface BuiltinFilesystemPipelineResult {
   readonly ok: boolean;
@@ -157,80 +149,59 @@ export interface BuiltinFilesystemExecutionMechanism {
   dispatch(operation: WorkspaceFilesystemOperation): Promise<BuiltinFilesystemPipelineResult>;
 }
 
-export interface BuiltinGitExecutionMechanism {
-  inspect(request: GitInspectRequest, signal?: AbortSignal): Promise<GitBrokerResult>;
-}
-
-export interface GitExecutionMechanisms extends Readonly<Record<string, unknown>> {
+export interface FilesystemExecutionMechanisms extends Readonly<Record<string, unknown>> {
   readonly filesystem?: BuiltinFilesystemExecutionMechanism;
-  readonly git?: BuiltinGitExecutionMechanism;
 }
 
-export function createGitRuntimeModule(): RuntimeModule {
+export function createFilesystemRuntimeModule(): RuntimeModule {
   return defineRuntimeModule({
-    moduleId: 'kite-builtin-runtime-git',
-    providerId: GIT_PROVIDER_ID_,
+    moduleId: 'kite-builtin-runtime-filesystem',
+    providerId: FILESYSTEM_PROVIDER_ID_,
     revision: 'git-current',
-    operationIds: GIT_OPERATION_IDS_,
-    register: (registry) => registerGitOperations(registry),
+    operationIds: FILESYSTEM_OPERATION_IDS_,
+    register: (registry) => registerFilesystemOperations(registry),
   });
 }
 
-function registerGitOperations(registry: RuntimeModuleRegistryWriter): void {
-  for (const operationId of GIT_OPERATION_IDS_) {
-    const capabilityRevision = GIT_CAPABILITY_REVISIONS_[operationId];
-    const executorRevision = GIT_EXECUTOR_REVISIONS_[operationId];
+function registerFilesystemOperations(registry: RuntimeModuleRegistryWriter): void {
+  for (const operationId of FILESYSTEM_OPERATION_IDS_) {
+    const capabilityRevision = FILESYSTEM_CAPABILITY_REVISIONS_[operationId];
+    const executorRevision = FILESYSTEM_EXECUTOR_REVISIONS_[operationId];
     registry.registerCapability(
       defineBuiltinCapabilityContract(
         {
           capabilityId: operationId,
           revision: capabilityRevision,
-          providerId: GIT_PROVIDER_ID_,
+          providerId: FILESYSTEM_PROVIDER_ID_,
           title: `Builtin Runtime operation ${operationId}`,
           executionMechanism: EXECUTION_MECHANISMS_[operationId],
-          ...(operationId.startsWith('builtin:') && operationId !== 'builtin:git_inspect'
-            ? {
-                toolName: operationId.slice('builtin:'.length),
-                description: builtinToolDescription(operationId.slice('builtin:'.length)),
-                visibility: 'model' as const,
-              }
-            : { visibility: 'internal' as const }),
+          toolName: operationId.slice('builtin:'.length),
+          description: builtinToolDescription(operationId.slice('builtin:'.length)),
+          visibility: 'model' as const,
           effects: EFFECTS_[operationId],
           inputSchema: INPUT_SCHEMAS_[operationId],
           inputSchemaDigest: digestCapabilityBindingValue(INPUT_SCHEMAS_[operationId]),
         },
-        gitContractOptions(operationId, capabilityRevision, EFFECTS_[operationId]),
+        filesystemContractOptions(operationId, capabilityRevision, EFFECTS_[operationId]),
       ),
     );
     registry.registerExecutor({
-      providerId: GIT_PROVIDER_ID_,
+      providerId: FILESYSTEM_PROVIDER_ID_,
       capabilityId: operationId,
       capabilityRevision,
       executorRevision,
-      execute: (request, context) => executeGitOperation(operationId, request, context),
+      execute: (request, context) =>
+        executeFilesystemBuiltinOperation(operationId, request, context),
     } satisfies CapabilityExecutor);
   }
 }
 
-function gitContractOptions(
-  operationId: GitOperationId,
+function filesystemContractOptions(
+  operationId: FilesystemOperationId,
   revision: string,
   effects: CapabilityEffects,
 ) {
   const parser = parserForBuiltinOperation(operationId, revision);
-  if (operationId === 'builtin:git_inspect') {
-    return {
-      parser,
-      kind: 'internal_runtime' as const,
-      effectsClassifier: staticEffectsClassifier(
-        'read_only',
-        false,
-        'Internal Git inspection is read-only and broker-bound.',
-        effects,
-      ),
-      execution: { retry: 'safe_read' as const },
-    };
-  }
   const readOnly =
     operationId === 'builtin:read_file' ||
     operationId === 'builtin:search_content' ||
@@ -245,13 +216,7 @@ function gitContractOptions(
     parser,
     kind: 'computer' as const,
     minimumApproval: 'none' as const,
-    ...(operationId === 'builtin:read_file' ||
-    operationId === 'builtin:search_content' ||
-    operationId === 'builtin:search_files' ||
-    operationId === 'builtin:write_file' ||
-    operationId === 'builtin:edit_file'
-      ? { governanceRevision: 'trusted-workspace-file-access-v1' }
-      : {}),
+    governanceRevision: 'trusted-workspace-file-access-v1',
     effectsClassifier: staticEffectsClassifier(
       readOnly ? 'read_only' : workspaceWrite ? 'workspace_write' : 'unknown',
       workspaceWrite,
@@ -287,8 +252,8 @@ function gitContractOptions(
   };
 }
 
-async function executeGitOperation(
-  operationId: GitOperationId,
+async function executeFilesystemBuiltinOperation(
+  operationId: FilesystemOperationId,
   request: Parameters<CapabilityExecutor['execute']>[0],
   context: CapabilityExecutionContext,
 ): Promise<ExecutionReceipt> {
@@ -297,18 +262,13 @@ async function executeGitOperation(
   if (!input) {
     return failedReceipt(operationId, request.invocationId, context, 'invalid_input');
   }
-  const mechanisms = context.environment.mechanisms as GitExecutionMechanisms | undefined;
-  let value: BuiltinOperationExecutionValue;
-  if (operationId === 'builtin:git_inspect') {
-    value = await executeGitInspect(input, context, mechanisms?.git);
-  } else {
-    value = await executeFilesystemOperation(operationId, input, mechanisms?.filesystem);
-  }
+  const mechanisms = context.environment.mechanisms as FilesystemExecutionMechanisms | undefined;
+  const value = await executeFilesystemOperation(operationId, input, mechanisms?.filesystem);
   return succeededReceipt(operationId, request.invocationId, context, value);
 }
 
 async function executeFilesystemOperation(
-  operationId: Exclude<GitOperationId, 'builtin:git_inspect'>,
+  operationId: FilesystemOperationId,
   input: Readonly<Record<string, unknown>>,
   mechanism: BuiltinFilesystemExecutionMechanism | undefined,
 ): Promise<BuiltinOperationExecutionValue> {
@@ -645,116 +605,8 @@ function projectEditFile(
   );
 }
 
-async function executeGitInspect(
-  input: Readonly<Record<string, unknown>>,
-  context: CapabilityExecutionContext,
-  mechanism: BuiltinGitExecutionMechanism | undefined,
-): Promise<BuiltinOperationExecutionValue> {
-  if (!mechanism) {
-    return projectGitResult({
-      ok: false,
-      output: 'Typed Git inspect broker is unavailable.',
-      failureCode: 'sandbox_capability_missing',
-    });
-  }
-  const request = gitRequest(input);
-  if (!request) return operationFailure('Git inspect input is invalid.');
-  return projectGitResult(await mechanism.inspect(request, context.signal));
-}
-
-function gitRequest(input: Readonly<Record<string, unknown>>): GitInspectRequest | undefined {
-  const operation = input.operation;
-  if (
-    operation !== 'status' &&
-    operation !== 'diff' &&
-    operation !== 'log' &&
-    operation !== 'branch_list'
-  ) {
-    return undefined;
-  }
-  const paths = Array.isArray(input.paths) ? (input.paths as string[]) : undefined;
-  return {
-    operation,
-    ...(paths ? { paths } : {}),
-    ...(typeof input.revision === 'string' ? { revision: input.revision } : {}),
-    ...(optionalIntegerValue(input.max_records) === undefined
-      ? {}
-      : { maxRecords: optionalIntegerValue(input.max_records) }),
-    ...(optionalIntegerValue(input.max_output_bytes) === undefined
-      ? {}
-      : { maxOutputBytes: optionalIntegerValue(input.max_output_bytes) }),
-    ...(optionalIntegerValue(input.timeout_ms) === undefined
-      ? {}
-      : { timeoutMs: optionalIntegerValue(input.timeout_ms) }),
-  };
-}
-
-function projectGitResult(output: GitBrokerResult): BuiltinOperationExecutionValue {
-  const modelContent = JSON.stringify({
-    ok: output.ok,
-    output: output.output,
-    ...(output.failureCode ? { failure_code: output.failureCode } : {}),
-    ...(output.nextCapability ? { next_capability: output.nextCapability } : {}),
-    ...(output.receipt ? { receipt: output.receipt } : {}),
-  });
-  const resultMeta: Record<string, RuntimeJsonValue> = {
-    ...(output.failureCode ? { gitFailureCode: output.failureCode } : {}),
-    ...(output.nextCapability ? { nextCapability: output.nextCapability } : {}),
-    ...(output.receipt
-      ? {
-          invocationId: output.receipt.invocationId,
-          capabilityRevision: output.receipt.featureRevision,
-          gitReceipt: output.receipt as unknown as RuntimeJsonValue,
-        }
-      : {}),
-  };
-  return operationEnvelope(
-    output.ok,
-    output.ok ? modelContent : '',
-    output.ok ? '' : modelContent,
-    resultMeta,
-    {
-      ...(output.failureCode
-        ? { classifierAdvice: gitClassifierAdvice(output.failureCode, output.nextCapability) }
-        : {}),
-      ...(output.failureCode === 'timed_out'
-        ? { terminationReason: 'timed_out' }
-        : output.failureCode === 'cancelled'
-          ? { terminationReason: 'cancelled' }
-          : {}),
-    },
-  );
-}
-
-function gitClassifierAdvice(
-  failureCode: GitBrokerFailureCode,
-  nextCapability?: 'git_inspect',
-): Readonly<Record<string, RuntimeJsonValue>> {
-  const detailCode = {
-    sandbox_capability_missing: 'sandbox_capability_missing',
-    protected_path_denied: 'protected_path_denied',
-    git_operation_unsupported: 'git_operation_unsupported',
-    managed_network_setup_required: 'managed_network_setup_required',
-    repository_invalid: 'repository_invalid',
-    repository_hostile: 'repository_hostile',
-    binary_untrusted: 'binary_untrusted',
-    lock: 'repository_lock',
-    cancelled: 'cancelled_by_user',
-    timed_out: 'timed_out',
-    process_failed: 'tool_reported_failure',
-    receipt_invalid: 'receipt_invalid',
-  }[failureCode];
-  return Object.freeze({
-    detailCode,
-    disposition: 'never',
-    maximumAdditionalCalls: 0,
-    safeAutomaticRetry: false,
-    ...(nextCapability ? { capabilityIntent: nextCapability } : {}),
-  });
-}
-
 function succeededReceipt(
-  operationId: GitOperationId,
+  operationId: FilesystemOperationId,
   invocationId: string,
   context: CapabilityExecutionContext,
   value: BuiltinOperationExecutionValue,
@@ -762,8 +614,8 @@ function succeededReceipt(
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: GIT_PROVIDER_ID_,
-    executorRevision: GIT_EXECUTOR_REVISIONS_[operationId],
+    providerId: FILESYSTEM_PROVIDER_ID_,
+    executorRevision: FILESYSTEM_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -773,7 +625,7 @@ function succeededReceipt(
 }
 
 function failedReceipt(
-  operationId: GitOperationId,
+  operationId: FilesystemOperationId,
   invocationId: string,
   context: CapabilityExecutionContext,
   code: string,
@@ -781,8 +633,8 @@ function failedReceipt(
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: GIT_PROVIDER_ID_,
-    executorRevision: GIT_EXECUTOR_REVISIONS_[operationId],
+    providerId: FILESYSTEM_PROVIDER_ID_,
+    executorRevision: FILESYSTEM_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',

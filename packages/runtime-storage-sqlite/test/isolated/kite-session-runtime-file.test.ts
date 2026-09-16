@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  checkKiteSessionStoreCompatibility,
   initializeKiteHomeStoreSchema,
   KITE_SESSION_STORE_FORMAT_EPOCH,
   KITE_SESSION_STORE_SCHEMA_VERSION,
@@ -33,6 +34,59 @@ describe('Kite Session Store physical file', () => {
         const reopened = openKiteSessionStoreDatabase(path);
         expect(metadata(reopened, 'format_epoch')).toBe(KITE_SESSION_STORE_FORMAT_EPOCH);
         reopened.close(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('admits only proven read/write schema and distinguishes conversion from unknown formats', () => {
+    const check = (schemaVersion: number | null, formatEpoch = KITE_SESSION_STORE_FORMAT_EPOCH) =>
+      checkKiteSessionStoreCompatibility({ schemaVersion, formatEpoch });
+    expect(check(10)).toEqual({ status: 'compatible', access: 'read_write' });
+    expect(check(9)).toMatchObject({
+      status: 'migration_required',
+      actualSchema: 9,
+      expectedSchema: 10,
+    });
+    expect(check(11)).toMatchObject({ status: 'incompatible', reason: 'store_too_new' });
+    expect(check(11, 'kite-session-accepted-runs-2026-09-15')).toMatchObject({
+      status: 'incompatible',
+      reason: 'unknown_format',
+    });
+    expect(check(null)).toMatchObject({ status: 'incompatible', reason: 'unsupported_schema' });
+  });
+
+  test('refuses unsupported stores without altering database bytes or metadata', () => {
+    for (const [version, epoch, code] of [
+      [9, KITE_SESSION_STORE_FORMAT_EPOCH, 'store_migration_required'],
+      [11, KITE_SESSION_STORE_FORMAT_EPOCH, 'store_incompatible'],
+      [11, 'kite-session-accepted-runs-2026-09-15', 'store_incompatible'],
+    ] as const) {
+      const root = temporaryRoot('kite-session-store-compatibility-');
+      const path = join(root, 'kite-session.sqlite');
+      try {
+        const database = openKiteSessionStoreDatabase(path);
+        database
+          .query("UPDATE kite_meta SET value = ? WHERE key = 'schema_version'")
+          .run(String(version));
+        database.query("UPDATE kite_meta SET value = ? WHERE key = 'format_epoch'").run(epoch);
+        database.run(`PRAGMA user_version = ${version}`);
+        database.run('PRAGMA wal_checkpoint(TRUNCATE)');
+        database.close(false);
+        const before = readFileSync(path);
+        let failure: unknown;
+        try {
+          openKiteSessionStoreDatabase(path);
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toBeInstanceOf(KiteSessionStoreOpenError);
+        expect(failure).toMatchObject({
+          code,
+          compatibility: { actualSchema: version, expectedSchema: 10 },
+        });
+        expect(readFileSync(path)).toEqual(before);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -75,14 +129,14 @@ describe('Kite Session Store physical file', () => {
       initializeKiteHomeStoreSchema(incompatible);
       incompatible.close(false);
       if (process.platform !== 'win32') chmodSync(targetPath, 0o600);
-      expectStoreUpgradeRequired(() => openKiteSessionStoreDatabase(targetPath));
+      expectStoreIncompatible(() => openKiteSessionStoreDatabase(targetPath));
       expect(readFileSync(oldPath)).toEqual(before);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  test('maps partial and corrupt target files to store_upgrade_required', () => {
+  test('maps partial and corrupt target files to store_incompatible', () => {
     for (const contents of ['CREATE TABLE partial(value TEXT)', 'not a sqlite database']) {
       const root = temporaryRoot('kite-session-store-invalid-');
       const path = join(root, 'kite-session.sqlite');
@@ -95,7 +149,7 @@ describe('Kite Session Store physical file', () => {
         } else {
           writeFileSync(path, contents, { mode: 0o600 });
         }
-        expectStoreUpgradeRequired(() => openKiteSessionStoreDatabase(path));
+        expectStoreIncompatible(() => openKiteSessionStoreDatabase(path));
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -130,12 +184,12 @@ function metadata(database: Database, key: string): string | undefined {
     .get(key)?.value;
 }
 
-function expectStoreUpgradeRequired(operation: () => unknown): void {
+function expectStoreIncompatible(operation: () => unknown): void {
   try {
     operation();
-    throw new Error('Expected store_upgrade_required.');
+    throw new Error('Expected store_incompatible.');
   } catch (error) {
     expect(error).toBeInstanceOf(KiteSessionStoreOpenError);
-    expect((error as KiteSessionStoreOpenError).code).toBe('store_upgrade_required');
+    expect((error as KiteSessionStoreOpenError).code).toBe('store_incompatible');
   }
 }

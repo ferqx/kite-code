@@ -30,11 +30,6 @@ import {
   wrapWindowsRestrictedTokenCommand,
 } from '@kite-ai/builtin-runtime/sandbox';
 import { z } from 'zod';
-import type { AgentConfig } from '#kite-service/config';
-import {
-  composeAppGitBroker,
-  resolveAppGitExecutable,
-} from '../../apps/kite-service/src/git/composition';
 import { composeAppSandboxExecutor } from '../../apps/kite-service/src/sandbox/composition';
 import { canonicalJsonBytes } from './canonical-json';
 
@@ -121,62 +116,6 @@ export const platformCapabilityEvidenceSchema = z
     processCapabilitySurface: z
       .object({ shell: z.boolean(), forkedSkill: z.boolean(), localStdioMcp: z.boolean() })
       .strict(),
-    brokeredGit: z
-      .object({
-        featureRevision: z.literal('brokered-git-r1'),
-        nativeShellReadDeny: nativeProbeVerdictSchema,
-        nativeShellWriteDeny: nativeProbeVerdictSchema,
-        brokerPositive: nativeProbeVerdictSchema,
-        brokerHostile: nativeProbeVerdictSchema,
-        evidenceBindings: z
-          .object({
-            profileRevision: boundedIdentitySchema,
-            profileDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-            protectedRulesDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-            brokerRevision: z.literal('git-broker-v1'),
-            operationSchemaRevision: z.literal('git-operation-schema-v1'),
-            repositoryBinding: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-            executableIdentity: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-            nativeDenyEvidenceIdentity: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-            invocationId: z.string().uuid(),
-          })
-          .strict()
-          .optional(),
-        outcome: z.enum(['qualified', 'excluded']),
-        reason: z
-          .enum([
-            'native_metadata_read_deny_unproven',
-            'native_metadata_write_deny_unproven',
-            'broker_positive_and_hostile_not_proven',
-            'production_entrypoint_composition_unproven',
-          ])
-          .optional(),
-      })
-      .strict()
-      .superRefine((git, context) => {
-        if (git.outcome === 'excluded' && !git.reason) {
-          context.addIssue({
-            code: 'custom',
-            path: ['reason'],
-            message: 'excluded Git requires reason',
-          });
-        }
-        if (git.outcome === 'qualified' && git.reason) {
-          context.addIssue({
-            code: 'custom',
-            path: ['reason'],
-            message: 'qualified Git has no exclusion reason',
-          });
-        }
-        if (git.outcome === 'qualified' && !git.evidenceBindings) {
-          context.addIssue({
-            code: 'custom',
-            path: ['evidenceBindings'],
-            message:
-              'qualified Git requires concrete profile, policy and broker receipt identities',
-          });
-        }
-      }),
     source: platformCapabilitySourceSchema.optional(),
     environmentIdentity: z.object({ exactOsVersion: nativeProbeVerdictSchema }).strict(),
     backendIsolation: z.object({ syscallFilter: nativeProbeVerdictSchema }).strict(),
@@ -229,30 +168,6 @@ export interface PlatformCapabilityEvidence {
     shell: boolean;
     forkedSkill: boolean;
     localStdioMcp: boolean;
-  };
-  brokeredGit: {
-    featureRevision: 'brokered-git-r1';
-    nativeShellReadDeny: NativeProbeVerdict;
-    nativeShellWriteDeny: NativeProbeVerdict;
-    brokerPositive: NativeProbeVerdict;
-    brokerHostile: NativeProbeVerdict;
-    evidenceBindings?: {
-      profileRevision: string;
-      profileDigest: string;
-      protectedRulesDigest: string;
-      brokerRevision: 'git-broker-v1';
-      operationSchemaRevision: 'git-operation-schema-v1';
-      repositoryBinding: string;
-      executableIdentity: string;
-      nativeDenyEvidenceIdentity: string;
-      invocationId: string;
-    };
-    outcome: 'qualified' | 'excluded';
-    reason?:
-      | 'native_metadata_read_deny_unproven'
-      | 'native_metadata_write_deny_unproven'
-      | 'broker_positive_and_hostile_not_proven'
-      | 'production_entrypoint_composition_unproven';
   };
   source?: {
     repository: string;
@@ -356,13 +271,6 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
     const processTree = await probeProcessTree(backend, workspace);
     const entrypoints = await probeEntrypoints(backend, workspace);
     const syscallFilter = await probeSyscallFilter(backend, workspace);
-    const brokeredGit = await probeBrokeredGit(
-      backend,
-      root,
-      filesystem.protectedGitReadDeny,
-      filesystem.protectedGitWriteDeny,
-      entrypoints,
-    );
     const partial: Omit<EvidenceWithoutDigest, 'outcome' | 'productionSupported' | 'limitations'> =
       {
         version: 1,
@@ -380,7 +288,6 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
           forkedSkill: false,
           localStdioMcp: false,
         },
-        brokeredGit,
         ...githubEvidenceSource(environmentIdentity),
         environmentIdentity: {
           exactOsVersion: environmentIdentity.exactOsVersionAvailable ? 'enforced' : 'unavailable',
@@ -934,175 +841,6 @@ async function probeSyscallFilter(
   return denied.exitCode === 77 || denied.exitCode === 159 ? 'enforced' : 'unsupported';
 }
 
-export async function probeBrokeredGit(
-  backend: SandboxBackend,
-  root: string,
-  nativeShellReadDeny: NativeProbeVerdict,
-  nativeShellWriteDeny: NativeProbeVerdict,
-  entrypoints: PlatformCapabilityEvidence['entrypoints'],
-): Promise<PlatformCapabilityEvidence['brokeredGit']> {
-  const base = {
-    featureRevision: 'brokered-git-r1' as const,
-    nativeShellReadDeny,
-    nativeShellWriteDeny,
-  };
-  if (nativeShellReadDeny !== 'enforced') {
-    return {
-      ...base,
-      brokerPositive: 'unavailable',
-      brokerHostile: 'unavailable',
-      outcome: 'excluded',
-      reason: 'native_metadata_read_deny_unproven',
-    };
-  }
-  if (nativeShellWriteDeny !== 'enforced') {
-    return {
-      ...base,
-      brokerPositive: 'unavailable',
-      brokerHostile: 'unavailable',
-      outcome: 'excluded',
-      reason: 'native_metadata_write_deny_unproven',
-    };
-  }
-  const executable = resolveAppGitExecutable();
-  if (!executable || backend === 'none') {
-    return {
-      ...base,
-      brokerPositive: 'unavailable',
-      brokerHostile: 'unavailable',
-      outcome: 'excluded',
-      reason: 'broker_positive_and_hostile_not_proven',
-    };
-  }
-  const workspace = join(root, 'brokered-git-production-composition');
-  mkdirSync(workspace);
-  const runGit = (...args: string[]): boolean =>
-    Bun.spawnSync([executable, ...args], {
-      cwd: workspace,
-      stdout: 'ignore',
-      stderr: 'ignore',
-      env: {
-        HOME: '/nonexistent',
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        PATH: '/usr/bin:/bin',
-      },
-    }).exitCode === 0;
-  try {
-    if (
-      !runGit('init', '--quiet') ||
-      !runGit('config', 'user.name', 'Kite Qualification') ||
-      !runGit('config', 'user.email', 'kite@example.invalid')
-    ) {
-      throw new Error('git_fixture_unavailable');
-    }
-    writeFileSync(join(workspace, 'safe.txt'), 'qualification\n');
-    if (!runGit('add', '--', 'safe.txt') || !runGit('commit', '--quiet', '-m', 'fixture')) {
-      throw new Error('git_fixture_unavailable');
-    }
-    // This local probe can exercise broker behavior, but cannot mint release
-    // profile/protected-rule evidence. Placeholder label hashes are forbidden.
-    const shellDenyEvidence = {
-      featureRevision: 'brokered-git-r1' as const,
-      platform:
-        process.platform === 'darwin' || process.platform === 'win32'
-          ? process.platform
-          : ('linux' as const),
-      backend,
-      outcome: 'qualified' as const,
-      metadataReadDeny: true,
-      metadataWriteDeny: true,
-      profileRevision: 'platform-capability-probe-v1',
-      profileDigest: `sha256:${'0'.repeat(64)}`,
-      protectedRulesDigest: `sha256:${'0'.repeat(64)}`,
-    };
-    const config = {
-      apiKey: 'qualification-only',
-      baseURL: 'http://127.0.0.1.invalid',
-      modelName: 'qualification-only',
-      providerName: 'qualification-only',
-      providerType: 'openai-compatible',
-      features: { brokeredGit: true },
-      sandbox: { enabled: true },
-      executionBoundary: {
-        filesystemScope: 'workspace_write',
-        workspaceRoot: workspace,
-        networkMode: 'off',
-        networkAllowlist: [],
-        allowLocalAndPrivateNetwork: false,
-        protectedPathPolicy: 'deny',
-        maxProcessTreeSizePerShellInvocation: 32,
-        sandboxRequired: true,
-        sandboxUnavailable: 'fail',
-      },
-      executionCapabilitySurface: {
-        inProcessReadOnlyTools: null,
-        network: false,
-        process: true,
-        write: true,
-        workspaceWrite: true,
-        shell: true,
-        skillChild: false,
-        localStdioMcp: false,
-        gitInspect: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1',
-      },
-    } as AgentConfig;
-    const broker = composeAppGitBroker({
-      workspace,
-      executable,
-      config,
-      shellDenyEvidence,
-    });
-    const positive = await broker?.inspect({ operation: 'status', paths: ['safe.txt'] });
-    const brokerPositive =
-      positive?.ok &&
-      positive.receipt?.featureRevision === 'brokered-git-r1' &&
-      /^sha256:[a-f0-9]{64}$/u.test(positive.receipt.executableIdentity)
-        ? ('enforced' as const)
-        : ('unsupported' as const);
-    writeFileSync(join(workspace, '.git', 'config'), '[include]\npath=/tmp/private\n');
-    const hostile = await broker?.inspect({ operation: 'status', paths: ['safe.txt'] });
-    const brokerHostile =
-      hostile?.ok === false && hostile.failureCode === 'repository_hostile'
-        ? ('enforced' as const)
-        : ('unsupported' as const);
-    if (brokerPositive !== 'enforced' || brokerHostile !== 'enforced') {
-      return {
-        ...base,
-        brokerPositive,
-        brokerHostile,
-        outcome: 'excluded',
-        reason: 'broker_positive_and_hostile_not_proven',
-      };
-    }
-    if (entrypoints.tui !== 'enforced' || entrypoints.foregroundCli !== 'enforced') {
-      return {
-        ...base,
-        brokerPositive,
-        brokerHostile,
-        outcome: 'excluded',
-        reason: 'production_entrypoint_composition_unproven',
-      };
-    }
-    return {
-      ...base,
-      brokerPositive,
-      brokerHostile,
-      outcome: 'excluded',
-      reason: 'production_entrypoint_composition_unproven',
-    };
-  } catch {
-    return {
-      ...base,
-      brokerPositive: 'unavailable',
-      brokerHostile: 'unavailable',
-      outcome: 'excluded',
-      reason: 'broker_positive_and_hostile_not_proven',
-    };
-  }
-}
-
 async function probeEntrypoints(
   backend: SandboxBackend,
   _workspace: string,
@@ -1148,8 +886,6 @@ function technicalAppExecutor(
         shell: true,
         skillChild: false,
         localStdioMcp: false,
-        gitInspect: false,
-        brokeredGitFeatureRevision: null,
       },
     },
   });
@@ -1463,11 +1199,6 @@ export function collectLimitations(
   evidence: Omit<EvidenceWithoutDigest, 'outcome' | 'productionSupported' | 'limitations'>,
 ): string[] {
   const limitations: string[] = [];
-  if (evidence.brokeredGit.outcome === 'excluded') {
-    limitations.push(
-      `brokered_git_excluded:${evidence.brokeredGit.reason ?? 'broker_positive_and_hostile_not_proven'}`,
-    );
-  }
   if (evidence.environmentIdentity.exactOsVersion !== 'enforced')
     limitations.push('exact_os_version_not_available');
   if (evidence.backend === 'bubblewrap' && syscallFilterVerdict(evidence) !== 'enforced') {

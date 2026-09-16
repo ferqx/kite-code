@@ -8,19 +8,93 @@ import {
   assertKiteSessionStoreSchema,
   assertKiteStoreIntegrity,
   initializeKiteSessionStoreIfNeeded,
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
 import { assertNoFollowDatabasePath } from './preflight';
 
-export type KiteSessionStoreOpenErrorCode = 'store_upgrade_required' | 'store_busy';
+export type KiteSessionStoreOpenErrorCode =
+  | 'store_incompatible'
+  | 'store_migration_required'
+  | 'store_busy';
+
+export interface KiteSessionStoreMetadata {
+  schemaVersion: number | null;
+  formatEpoch: string | null;
+}
+
+export type KiteSessionStoreCompatibility =
+  | { status: 'compatible'; access: 'read_write' }
+  | {
+      status: 'incompatible' | 'migration_required';
+      reason: 'unknown_format' | 'store_too_new' | 'unsupported_schema';
+      actualSchema: number | null;
+      expectedSchema: number;
+      actualEpoch: string | null;
+      expectedEpoch: string;
+    };
+
+/** Metadata only: callers must also validate the supported schema's structure. */
+export function readKiteSessionStoreMetadata(database: Database): KiteSessionStoreMetadata {
+  const rows = database
+    .query<{ key: string; value: string }, []>(
+      "SELECT key, value FROM kite_meta WHERE key IN ('schema_version', 'format_epoch')",
+    )
+    .all();
+  const metadata = new Map(rows.map((row) => [row.key, row.value]));
+  const rawSchema = metadata.get('schema_version');
+  const parsed = rawSchema && /^(0|[1-9][0-9]*)$/.test(rawSchema) ? Number(rawSchema) : null;
+  return {
+    schemaVersion: parsed !== null && Number.isSafeInteger(parsed) ? parsed : null,
+    formatEpoch: metadata.get('format_epoch') ?? null,
+  };
+}
+
+/** No version ranges are admitted without a proven reader AND writer implementation. */
+export function checkKiteSessionStoreCompatibility(
+  metadata: KiteSessionStoreMetadata,
+): KiteSessionStoreCompatibility {
+  const detail = {
+    actualSchema: metadata.schemaVersion,
+    expectedSchema: KITE_SESSION_STORE_SCHEMA_VERSION,
+    actualEpoch: metadata.formatEpoch,
+    expectedEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
+  };
+  if (metadata.formatEpoch !== KITE_SESSION_STORE_FORMAT_EPOCH) {
+    return { status: 'incompatible', reason: 'unknown_format', ...detail };
+  }
+  if (metadata.schemaVersion === KITE_SESSION_STORE_SCHEMA_VERSION) {
+    return { status: 'compatible', access: 'read_write' };
+  }
+  if (
+    metadata.schemaVersion !== null &&
+    metadata.schemaVersion < KITE_SESSION_STORE_SCHEMA_VERSION
+  ) {
+    return { status: 'migration_required', reason: 'unsupported_schema', ...detail };
+  }
+  return {
+    status: 'incompatible',
+    reason: metadata.schemaVersion === null ? 'unsupported_schema' : 'store_too_new',
+    ...detail,
+  };
+}
 
 export class KiteSessionStoreOpenError extends Error {
   readonly code: KiteSessionStoreOpenErrorCode;
+  readonly compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
 
-  constructor(code: KiteSessionStoreOpenErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: KiteSessionStoreOpenErrorCode,
+    message: string,
+    options?: ErrorOptions & {
+      compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
+    },
+  ) {
     super(message, options);
     this.name = 'KiteSessionStoreOpenError';
     this.code = code;
+    this.compatibility = options?.compatibility;
   }
 }
 
@@ -46,7 +120,7 @@ export function openKiteSessionStoreDatabase(databasePath: string): Database {
     } catch (error) {
       if (error instanceof KiteHomeStoreSchemaError || isStoreFormatFailure(error)) {
         throw new KiteSessionStoreOpenError(
-          'store_upgrade_required',
+          'store_incompatible',
           'Kite Session Store format is incompatible or corrupt.',
           { cause: error },
         );
@@ -108,9 +182,22 @@ function inspectKiteSessionStoreDatabase(databasePath: string, fullIntegrity: bo
       )
       .get();
     if (tables?.count === 0) return;
+    const compatibility = checkKiteSessionStoreCompatibility(
+      readKiteSessionStoreMetadata(database),
+    );
+    if (compatibility.status !== 'compatible') {
+      throw new KiteSessionStoreOpenError(
+        compatibility.status === 'migration_required'
+          ? 'store_migration_required'
+          : 'store_incompatible',
+        'Kite Session Store cannot be safely opened by this Runtime; no data migration was performed.',
+        { compatibility },
+      );
+    }
     assertKiteSessionStoreSchema(database);
     if (fullIntegrity) assertKiteStoreIntegrity(database);
   } catch (error) {
+    if (error instanceof KiteSessionStoreOpenError) throw error;
     const code =
       typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
     if (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')) {
@@ -121,7 +208,7 @@ function inspectKiteSessionStoreDatabase(databasePath: string, fullIntegrity: bo
       );
     }
     throw new KiteSessionStoreOpenError(
-      'store_upgrade_required',
+      'store_incompatible',
       'Kite Session Store format is incompatible or unavailable; no data migration was performed.',
       { cause: error },
     );

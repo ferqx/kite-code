@@ -165,7 +165,9 @@ describe('release App Server client pairing', () => {
         writes.filter(
           (result) =>
             result.status === 'rejected' ||
-            (result.status === 'fulfilled' && result.value.status === 'rejected'),
+            (result.status === 'fulfilled' &&
+              result.value.status === 'conflict' &&
+              result.value.code === 'revision_conflict'),
         ),
       ).toHaveLength(1);
     } finally {

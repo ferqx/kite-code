@@ -110,43 +110,6 @@ function fatalModelFailure(error: unknown):
   };
 }
 
-/** Build redacted admission facts for unavailable required providers before model execution. */
-export function requiredProviderAdmissionEvents(
-  state: Readonly<RuntimeState>,
-  mcpManager: McpRuntimeProvider | undefined,
-  enabled: boolean,
-): RuntimeEvent[] {
-  if (
-    !enabled ||
-    !mcpManager ||
-    (state.interactions.kind !== 'idle' &&
-      state.interactions.kind !== 'awaiting_provider_admission')
-  ) {
-    return [];
-  }
-  const pending = new Set(state.providerAdmission.pending.map((entry) => entry.providerId));
-  return mcpManager
-    .getProviderDirectorySnapshot()
-    .entries.filter(
-      (entry) =>
-        entry.required &&
-        entry.status !== 'ready' &&
-        entry.status !== 'degraded' &&
-        !pending.has(entry.providerId) &&
-        !state.providerAdmission.waivers[entry.providerId],
-    )
-    .sort((left, right) => left.providerId.localeCompare(right.providerId))
-    .map((entry) => ({
-      type: 'provider.admission_required' as const,
-      interactionId: randomUUID(),
-      providerId: entry.providerId,
-      source: entry.source,
-      providerStatus: entry.status,
-      ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
-      retryable: entry.retryable,
-    }));
-}
-
 /** Inputs for the graph-free runtime entry point. */
 export interface RuntimeTurnInput {
   task: string;
@@ -161,7 +124,6 @@ export interface RuntimeTurnInput {
   /** App-selected concrete Model binding; Core never constructs a Provider model. */
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Runtime Host registry port; required by capability-backed production tools. */
   capabilityExecution?: CapabilityExecutionPort;
@@ -710,27 +672,10 @@ export async function* executeRuntimeTurn(
       }
     }
 
-    // Provider admission gates model execution, but it must not hide stale
-    // Tool ownership from the successor-turn recovery above. Creating this
-    // session-owned interaction only after the user turn is durably accepted
-    // also prevents an admission prompt from swallowing that user message.
-    const admissionEvents = requiredProviderAdmissionEvents(
-      kernel.getState(),
-      input.mcpManager,
-      getFeatureFlags(input.config).mcpProviderAction,
-    );
-    for (const event of admissionEvents) {
-      for (const applied of kernel.processEventBatch([event])) {
-        collector.recordRuntime(applied);
-        yield applied;
-      }
-    }
-
     const executorDependencies: RuntimeExecutorDependencies = {
       config: input.config,
       model,
       shellExecutor: input.shellExecutor,
-      gitBroker: input.gitBroker,
       sandboxBackend: input.sandboxBackend,
       mcpManager: input.mcpManager,
       capabilityExecution: input.capabilityExecution,
@@ -795,7 +740,6 @@ export async function* executeRuntimeTurn(
               config: input.config,
               model,
               shellExecutor: input.shellExecutor,
-              gitBroker: input.gitBroker,
               sandboxBackend: input.sandboxBackend,
               mcpManager: input.mcpManager,
               builtinToolCatalog: modelInvocationRuntime.builtinToolCatalog,

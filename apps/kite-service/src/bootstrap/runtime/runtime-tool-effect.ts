@@ -211,7 +211,6 @@ export async function executeAppRuntimeToolsEffect(
           state,
           toolCallIds,
           shellExecutor: dependencies.shellExecutor,
-          gitBroker: dependencies.gitBroker,
           mcpManager: dependencies.mcpManager,
           capabilityExecution: dependencies.capabilityExecution,
           builtinToolCatalog: requireBuiltinToolCatalog(dependencies),

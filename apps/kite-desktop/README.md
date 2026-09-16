@@ -1,5 +1,8 @@
 # kite-desktop
 
+> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+
+
 本 workspace 是 Electron 桌面 presentation 与本机宿主 owner：React/shadcn UI 在沙箱 renderer 中运行，Electron 主进程提供受限本机能力，业务执行继续由独立 Kite Runtime Host 承担。迁移实现与本机自动原生验收已完成，制品身份和验证边界见[原生验收](docs/native-validation.md#electron-本机迁移验收)。
 
 迁移前的 Tauri 版本曾完成[首版计划](../../docs/plans/desktop-client.md)中的本机 macOS 接入、日常开发闭环与稳定性验收；这些结果只保留为当时版本的历史证据，不能作为 Electron 制品、窗口或生命周期资格。当前仍以本机开发和内部测试为主，正式签名、公证及分发资格延后。
@@ -36,7 +39,7 @@
 
 开发窗口的 CSP 允许 Vite 注入的 React Refresh 内联初始化脚本；打包窗口的 `script-src` 只允许自身资源。修改开发加载方式后须验证真实 Electron 开发窗口的首次渲染和刷新，打包窗口 smoke 不覆盖 Vite 注入路径。
 
-`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包采用现有 checkout digest 的 source profile，打包版使用用户 canonical profile 保存持久数据；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
+`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包采用 canonical config root、checkout 与 Store format epoch 的共享 digest 作为 source profile（schema 数字不参与），打包版使用用户 canonical profile 保存持久数据；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
 
 检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
 
@@ -68,3 +71,5 @@ Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配�
 恢复错误通过共享 Runtime 契约传递；现有错误弹窗的“检查恢复”调用只读摘要及 CAS 恢复命令，成功后清除旧准入缓存并重新校准，保留草稿且不发送。丢回执查询原命令的持久结果，查询失败仍显示未知。相关验证见[UI 测试](test/ui.test.tsx)、[Service 跨空间回归](../kite-service/test/isolated/app-server-process.test.ts)。
 
 Git 分支切换保留关闭与重连以重新构建配置、MCP 与 sandbox owner；在执行前确认整个配套 Service 没有活动任务，防止重载取消其他空间任务。按空间重建依赖尚未实现，不能把保留 Service 的普通空间切换逻辑直接用于 Git 环境变更。
+
+Store 启动失败通过 Service stderr 的有限结构化诊断传到初始化错误：仅接收错误码和 schema 数字，原始 stderr 不进入界面。握手前退出显示具体 Store 错误或退出码；握手成功后仍采用正常断连处理。原生三场景验收运行 `bun run scripts/startup-store-smoke.ts`，覆盖新目录、已有历史重启、拒绝不兼容数据库且字节不变。

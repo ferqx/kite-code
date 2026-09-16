@@ -58,5 +58,4 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
   invocationInput?: unknown;
   beforeExecute?: () => void | Promise<void>;
   protectedPathEvaluator?: ProtectedPathEvaluator;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
 }

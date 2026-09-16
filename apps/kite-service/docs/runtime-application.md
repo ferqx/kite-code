@@ -194,3 +194,16 @@ History 可按已观察的 `throughSequence` 重建历史前缀，模式、恢�
 Service 提供只读 get_session_recovery，摘要来自 authority/effect facts，最多返回 20 个待核对 effect identity。recover_session 绑定业务与 authority revision；有效执行者、未确认清理或未决/未知 effect 不能被接管。仅确认安全时原子保存恢复回执并回到 idle。get_command_receipt 查询原命令结果，不重放操作。失权而仍有本地 coordinator 时，权限设置返回 session_cleanup_pending，不能调用正在关闭的 Runtime。验证见[多空间与恢复](../test/isolated/runtime-server-multi-workspace.test.ts)、[原生 Service 进程](../test/isolated/app-server-process.test.ts)。
 
 Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 answers 映射为有界脱敏文本。客户端据问题选项恢复文案，不把执行结果包装 JSON 作为问答历史。
+
+
+## 可选能力与旧全局准入
+
+模型调用前不再枚举并阻塞全部 required MCP。真实 MCP 工具、资源和 Provider Action 仍在实际使用时检查绑定、认证、项目批准及权限；`mcpProviderAction` 保留这些操作消费者，不再产生全局 admission。
+
+`resume_session` 在已持有合法执行 scope、Coordinator 空闲且原 Run 为 waiting 时，可读取完整 journal，确认同一活动 Turn 的等待来自支持的 State26/State27 全局准入写入路径。当前 Turn 已有模型准备、工具、未知 capability/effect、未决审批或清理时不结算。真实 `awaiting_provider_action` 不属于该路径。
+
+匹配时，Service 通过 Coordinator 的 `commitObsoleteAdmissionResumeCommand` 记录事件对应的 revision/State，再由 `commitCommandBatch` 结算 `provider.admission_cancelled`，原 State、Run waiting→running 与 command receipt 由 Host/Store 一次提交；随后沿原交互 continuation 执行，不重新发送用户消息，不写用户 waiver。查询和历史订阅不触发该修复。
+
+结算已提交但派发前崩溃时，同 commandId 的回执重放先取得 Session execution owner，再经 Bridge 的 `recoverCommittedResume` 重新核对完整 journal、当前 revision 与原 Run 身份；只有无模型准备、尝试、工具或其他副作用证据且无本地活动执行时，Host 才调度同一 Turn。模型网关在出站前持久记录 `model.invocation_prepared`、`model.invocation_attempt_started` 和 `model.requested`，因此一旦出现这些事实，回执只重放结果，不重做模型调用。不同 commandId 也必须通过相同分类条件。真实 Store 8 与 Host 的崩溃、并发和拒绝重放验证见[Coordinator 测试](../test/runtime/runtime-session-coordinator.test.ts)；恢复的权限边界见 [ADR 0188](../../../docs/adr/0188-on-demand-capabilities-and-filesystem-owner.md)。
+
+恢复派发使用本次请求经认证并冻结的 `commandContext`，沿 Host replay、Service wrapper 和 continuation 传递到工具执行。并发同 commandId 的请求各自持有自己的上下文，不从旧回执恢复连接绑定，也不把上下文写入持久回执。Worker 工具组合仍重新核验本次 binding 与有效控制权；缺失或失效时拒绝执行。

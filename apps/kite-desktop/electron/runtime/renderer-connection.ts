@@ -23,6 +23,7 @@ export interface ServiceProcessCarrier {
   receive(signal?: AbortSignal): Promise<string>;
   waitForReceiver(): Promise<void>;
   close(): Promise<void>;
+  markInitialized?(): void;
 }
 
 /** One protocol peer survives renderer reloads while its paired Service remains alive. */
@@ -138,7 +139,27 @@ export class RendererConnection {
         if (outcome.kind === 'error') continue;
       }
       controller.abort();
-      if (outcome.kind === 'error') throw asError(outcome.error);
+      if (outcome.kind === 'error') {
+        const failure = asError(outcome.error);
+        const reply = await this.#lock.run(() => {
+          const waiter = this.#state.initializeWaiter;
+          if (!waiter || waiter.generation !== generation || this.#state.initialized)
+            return undefined;
+          this.#state.initializeWaiter = undefined;
+          this.#state.initializing = false;
+          return JSON.stringify({
+            jsonrpc: '2.0',
+            id: waiter.id,
+            error: {
+              code: -32603,
+              message: failure.message.slice(0, 256),
+              data: { code: 'internal_error', retryable: false },
+            },
+          });
+        });
+        if (reply !== undefined) return reply;
+        throw failure;
+      }
 
       let message: Record<string, Json>;
       try {
@@ -169,7 +190,10 @@ export class RendererConnection {
   ): { retry?: true; unsubscribe?: string; error?: string; frame?: string } {
     if (message.id === INITIALIZE_ID) {
       this.#state.initializing = false;
-      if (isJsonRecord(message.result)) this.#state.initialized = message.result;
+      if (isJsonRecord(message.result)) {
+        this.#state.initialized = message.result;
+        this.#service.markInitialized?.();
+      }
       const waiter = this.#state.initializeWaiter;
       this.#state.initializeWaiter = undefined;
       if (waiter && waiter.generation === this.#state.generation) {

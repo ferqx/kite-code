@@ -71,7 +71,6 @@ function requireBuiltinToolCatalog(input: SubAgentRunnerInput): BuiltinToolCatal
 function createSubagentToolTurnContext(input: {
   workspace: string;
   config: SubAgentRunnerInput['config'];
-  gitBroker?: SubAgentRunnerInput['gitBroker'];
   eventSink?: SubAgentRunnerInput['eventSink'];
   toolSearchEnabled?: boolean;
   skillCatalog?: import('@kite-ai/builtin-runtime/skills').SkillCatalogSnapshot;
@@ -90,10 +89,7 @@ function createSubagentToolTurnContext(input: {
     taskId: input.taskId,
     phase: input.phase,
     featureFlags,
-    brokeredGitFeatureRevision:
-      input.config.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: Boolean(input.eventSink),
-    hasGitBroker: Boolean(input.gitBroker),
     toolSearchEnabled: input.toolSearchEnabled,
     activeSkillFrames: input.activeSkillFrames,
     skillCatalog: input.skillCatalog,
@@ -384,7 +380,6 @@ export async function executeSubagentResumeWithCoreToolAdapter(
     : undefined;
   const resumeAvailability = createSubagentToolTurnContext({
     workspace: input.workspace,
-    gitBroker: input.gitBroker,
     config: input.config,
     phase: input.phase,
     threadId: input.threadId,
@@ -541,7 +536,6 @@ async function executeCoreSubagentToolAdapter(
 
   const availabilityContext = createSubagentToolTurnContext({
     workspace: input.workspace,
-    gitBroker: input.gitBroker,
     config: input.config,
     phase: input.phase,
     interactionMode: effectiveInteractionMode(input),

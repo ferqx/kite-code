@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
+import { KITE_SESSION_STORE_FORMAT_EPOCH } from '../../packages/runtime-storage-sqlite/src/kite-session-store-format';
 
 const KITE_SERVICE_ENVIRONMENT_ALLOWLIST = Object.freeze([
   'PATH',
@@ -63,14 +65,14 @@ export function sourceKiteSessionStorePathFromCanonicalRoots(
   canonicalKiteHome: string,
   canonicalRepositoryRoot: string,
 ): string {
-  const profileDigest = createHash('sha256')
-    .update('kite-source-runtime-profile\0')
-    .update(canonicalKiteHome)
-    .update('\0')
-    .update(canonicalRepositoryRoot)
-    .digest('hex')
-    .slice(0, 32);
-  return join(canonicalKiteHome, 'source-profiles', profileDigest, 'kite-session.sqlite');
+  return join(
+    sourceKiteSessionStoreDirectoryFromCanonicalRoots(
+      canonicalKiteHome,
+      canonicalRepositoryRoot,
+      KITE_SESSION_STORE_FORMAT_EPOCH,
+    ),
+    'kite-session.sqlite',
+  );
 }
 
 export function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {

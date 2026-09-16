@@ -118,16 +118,16 @@ Planning 非 Full 使用 Workspace read-only baseline 直接运行已知可承�
 Full 直接执行并保持 Plan lifecycle。空命令、关键系统递归删除和针对关键系统 repository 的 destructive Git 继续 hard
 deny，任何 mode 都不能覆盖。`isReadOnlyShellCommand`同时拥有可证明只读的免审事实、hardened environment、只读
 Subagent role ceiling与scheduler metadata；未命中只能生成`uncertainEffects`真人审批，不能生成destructive deny。
-`git_inspect`只保留为internal Runtime capability，所有模型Git/脚本命令统一通过`shell_execute`。
+`git_inspect` 已从 Runtime capability registry 退役，所有模型 Git/脚本命令统一通过 `shell_execute`。
 主Agent的当前Prompt同时约束常规Workspace检查：优先使用file/search能力；Shell已经运行在当前Workspace，因此不生成冗余`cd`或当前Workspace的`git -C`，Git读取优先拆成单条简单命令，也不只为拼接、分组或裁剪输出引入`&&`、pipe和loop。该约束只降低无谓的unknown/审批与展示碎片，不能替代Builtin只读grammar，也不能让未证明命令取得read-only授权。
 
 ADR-0161把只读证明收敛到Builtin-owned、冻结的v1 Shell semantics registry；registry digest必须进入
 `shell_execute` capability revision，语义升级不能复用旧binding。普通只读program由descriptor声明，参数敏感program
 由descriptor选择局部inspector；未注册或未命中只生成低基数本地诊断，不产生allow，也不进入远程telemetry。
 
-RM-12 只迁移该链路的物理 owner，不改变上述授权：五个文件 Builtin catalog entry 与 `git_inspect` 已移除旧的
-`execute/projectResult`，唯一 Builtin Runtime executor 只能消费 Tool Pipeline 在 exact invocation 完成 Policy、
-approval、protected-path 与 durable attempt acknowledgement 后注入的 filesystem/Git mechanism。缺少 Host
+RM-12 只迁移该链路的物理 owner，不改变上述授权：五个文件 Builtin catalog entry 已移除旧的
+`execute/projectResult`，由 filesystem Runtime module 消费 Tool Pipeline 在 exact invocation 完成 Policy、
+approval、protected-path 与 durable attempt acknowledgement 后注入的 filesystem mechanism。`git_inspect` 已退役；Git 通过受治理的 Shell 执行。缺少 Host
 execution port、binding 不一致或 mechanism 缺失均 fail closed，不回到旧 handler；当前使用 State 27/SAQ epoch 的
 Runtime State 与 SQLite Store。`kite-runtime-modularization-v1-2026-08-19` 仅是 RM-12 的历史迁移标识，不是当前授权格式。
 
@@ -141,8 +141,8 @@ Plan/child mechanism。Builtin Subagent role ceiling 可收紧 allowed tool 与 
 
 ADR-0131 把同一 identity 规则扩展到 Shell、MCP executable/cwd 与原生 sandbox：canonical Workspace
 内 read/write/execute 不得因 `.git`、`.env`、Agent/MCP 配置、credential-looking 名称或 additional deny
-二次拒绝。internal typed Git broker与Skill reference仍有独立schema、repository/reference integrity和capability
-routing；internal broker不进入模型ToolSet，也不构成Workspace名称级deny。下文的`externalRead`/sealed
+二次拒绝。Skill reference 仍有独立 schema 和 capability routing；Git 命令统一受 Shell 的 Policy、approval、
+sandbox 与 receipt 治理，不构成 Workspace 名称级 deny。下文的`externalRead`/sealed
 `filesystem=full_access` scope 只描述
 Shell invocation；Workspace 外 destructive、提权、关键系统删除、credential/persistence 等极高风险进程
 操作仍可在审批前 fail closed。

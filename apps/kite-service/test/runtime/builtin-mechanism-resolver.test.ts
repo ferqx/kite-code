@@ -9,7 +9,6 @@ import {
 } from '#kite-service/bootstrap/runtime/builtin-mechanism-resolver';
 import type {
   CapabilityPolicyEffects,
-  GitInspectRequest,
   RuntimeJsonValue,
   WorkspaceFilesystemOperation,
 } from '#runtime-spi';
@@ -162,25 +161,9 @@ describe('App Builtin mechanism resolver', () => {
     expect(calls[0]?.pathScope).toBe('approved_external');
   });
 
-  test('keeps git inspect and shell cancellation/progress/timeout facts exact', async () => {
+  test('keeps shell cancellation/progress/timeout facts exact', async () => {
     const controller = new AbortController();
-    let inspectedSignal: AbortSignal | undefined;
-    const gitBroker = Object.freeze({
-      inspect: async (_request: GitInspectRequest, signal?: AbortSignal) => {
-        inspectedSignal = signal;
-        return { ok: true, output: 'status' };
-      },
-    });
     const resolve = createAppBuiltinMechanismResolver();
-    const gitMap = resolve(
-      baseInput({ executionMechanism: 'git', signal: controller.signal, gitBroker }),
-    );
-    const git = gitMap.git as {
-      readonly inspect: (request: GitInspectRequest, signal?: AbortSignal) => Promise<unknown>;
-    };
-    await git.inspect({ operation: 'status' });
-    expect(inspectedSignal).toBe(controller.signal);
-
     const progress: unknown[] = [];
     const shellInputs: AppBuiltinShellExecutorInput[] = [];
     const shellExecutor = Object.freeze({

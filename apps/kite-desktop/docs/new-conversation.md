@@ -46,4 +46,4 @@ Git 失败、超时或回执未知不会触发重试和自动切回。刷新失�
 
 [UI 测试](../test/ui.test.tsx)覆盖全局入口、草稿隔离、建议追加、菜单键盘与焦点、项目／分支／模型暂存、首次发送和失败后不重复创建。[导航测试](../test/navigation.test.ts)用真实 App Server 与受控 Native 回执验证环境变化、活动任务阻止切换、切换回执丢失后读取实际状态，以及创建回执未知后的同 sessionId 恢复。[丢失回执测试](../test/resilience.test.ts)覆盖新对话检查后实际写入且不重放任务。
 
-[Electron 本机操作测试](../test/host-native-operations.test.ts)覆盖项目列表持久化／去重／失效、已有分支切换、工作区改动、子目录和编辑器路径边界；[renderer 连接测试](../test/host-renderer-connection.test.ts)覆盖 initialize 复用、旧代次隔离与旧订阅清理。配套 Service 与窗口 smoke 分开记录。这些测试不替代系统目录选择器、真实窗口鼠标操作或外部 Provider 资格；HTML 预览使用生产组件与隔离测试数据，Electron 原生 smoke 成功前仍保持待验状态。
+[Electron 本机操作测试](../test/isolated/host-native-operations.test.ts)覆盖项目列表持久化／去重／失效、已有分支切换、工作区改动、子目录和编辑器路径边界；[renderer 连接测试](../test/host-renderer-connection.test.ts)覆盖 initialize 复用、旧代次隔离与旧订阅清理。配套 Service 与窗口 smoke 分开记录。这些测试不替代系统目录选择器、真实窗口鼠标操作或外部 Provider 资格；HTML 预览使用生产组件与隔离测试数据，Electron 原生 smoke 成功前仍保持待验状态。

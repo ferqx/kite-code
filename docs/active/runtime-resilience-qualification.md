@@ -12,7 +12,7 @@
 
 KASD-01 Store前置已取得局部资格：两个真实Bun进程可在同一空`kite-session.sqlite`上并发首次open并收敛到唯一exact epoch；同Workspace两个
 真实进程可分别写不同Session，争用同一Session只有一个generation writer。旧epoch、partial与corrupt target均fail closed为
-`store_upgrade_required`，现有`kite.sqlite`保持不变。全部Session write port进入统一mutation scope；并发open的深验固定单一read snapshot；
+`store_incompatible` 或 `store_migration_required`，现有`kite.sqlite`保持不变。全部Session write port进入统一mutation scope；并发open的深验固定单一read snapshot；
 fork source fence、target generation 1与全部target事实同事务并覆盖后段fault rollback。
 
 effect matrix证明prepare/dispatch/renew、State receipt settle、late terminal与unknown generation binding。真实SIGKILL fixture在prepared effect后杀死

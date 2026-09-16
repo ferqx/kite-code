@@ -1,5 +1,8 @@
 # Kite Local Runtime
 
+> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+
+
 ## 定位
 
 `@kite-ai/kite-local-runtime` 提供本机 App client 与 App Server 之间的 typed transport、profile/config filesystem primitive
@@ -31,7 +34,7 @@ Session generation、credential 或启动意图。
 ## Profile 与配置
 
 installed Runtime Store 为 `<kite-home>/kite-session.sqlite`；source Store 为
-`<kite-home>/source-profiles/<checkout-digest>/kite-session.sqlite`。两者使用相同 exact schema，不扫描或迁移旧 `kite.sqlite`。
+`<kite-home>/source-profiles/<checkout-and-store-epoch-digest>/kite-session.sqlite`。两者使用相同 exact schema，不扫描或迁移旧 `kite.sqlite`。
 Provider/config/credential/Trust 继续共享 canonical config root，通过 file-local CAS 序列化；不存在 global writer lease。
 
 profile 与 private state directory 必须是 canonical、non-link、owner-only 路径。POSIX 收紧为 `0700`；Windows 使用 current-user
@@ -60,3 +63,5 @@ protected DACL。路径或 owner 证据不确定时拒绝，不自动修复外�
 - [Native 连接与 App Control](docs/native-client-and-control.md)
 
 生命周期客户端位于 [lifecycle](src/client/lifecycle.ts)，只连接已选 owner-only endpoint，一次请求不自动重试 mutation；业务 codec 的升级不影响此入口。
+
+Source profile 的 CLI 与 Desktop 路径由 `source-profile` 的共享纯 Node 函数计算，参数为 canonical config root、checkout、Store epoch；schema 数字不参与摘要。`startup-diagnostic` 只编码与接收 Service 启动失败的有限错误码及 schema 数字，不把原始 stderr、路径或其他元数据转发给界面。

@@ -11,7 +11,6 @@ import {
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { MODEL_ATTEMPT_OUTCOME_SCHEMA_ } from '@kite-ai/runtime-spi';
-import { requiredProviderAdmissionEvents } from '#kite-service/bootstrap/runtime/turn-coordinator';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../../../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../../../../scripts/support/runtime-storage';
 import { createMockModel } from '../../../../../tests/helpers/mock-model';
@@ -427,7 +426,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
   }
 });
 
-test('Runtime gates an unavailable required MCP provider before the model and persists waiver', async () => {
+test('Runtime answers with an unavailable required MCP provider without admission or waiver', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-required-provider-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
@@ -471,36 +470,23 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
         },
       },
       {
-        requestAction: async (effect) => {
-          if (effect.type !== 'request_provider_admission') {
-            return { type: 'cancel', interactionId: effect.interactionId };
-          }
-          return {
-            type: 'provider_admission_decision',
-            interactionId: effect.interactionId,
-            decision: { kind: 'waive' },
-          };
+        requestAction: async () => {
+          throw new Error('An unrelated Provider must not request admission');
         },
       },
     )) {
       events.push(event);
     }
 
-    expect(events.map((event) => event.type)).toContain('provider.admission_required');
-    expect(events.findIndex((event) => event.type === 'user.message_appended')).toBeLessThan(
-      events.findIndex((event) => event.type === 'provider.admission_required'),
-    );
-    expect(events.map((event) => event.type)).toContain('provider.admission_waived');
-    expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
-      events.findIndex((event) => event.type === 'model.requested'),
-    );
+    expect(events.map((event) => event.type)).not.toContain('provider.admission_required');
+    expect(events.map((event) => event.type)).not.toContain('provider.admission_waived');
+    expect(mockModel.callCount.count).toBe(1);
+    expect(events.at(-1)?.type).toBe('turn.completed');
     const store = openStateStoreForTest(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('required-provider-waiver');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
-    expect(snapshot.providerAdmission.waivers.github).toMatchObject({
-      source: 'project',
-      reason: 'user_session_waiver',
-    });
+    expect(snapshot.providerAdmission.pending).toEqual([]);
+    expect(snapshot.providerAdmission.waivers).toEqual({});
     expect(snapshot.capabilities.bindings).toEqual({});
     store.close();
   } finally {
@@ -508,7 +494,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
   }
 });
 
-test('successor recovery settles a stale Tool before opening required Provider admission', async () => {
+test('successor recovery settles a stale Tool without opening unrelated Provider admission', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-provider-after-recovery-'));
   const storePath = join(workspace, 'runtime.db');
   const threadId = 'provider-after-recovery';
@@ -594,139 +580,16 @@ test('successor recovery settles a stale Tool before opening required Provider a
     const message = events.findIndex(
       (event) => event.type === 'user.message_appended' && event.content === 'new message',
     );
-    const admission = events.findIndex((event) => event.type === 'provider.admission_required');
+    const modelRequest = events.findIndex((event) => event.type === 'model.requested');
+    expect(events.some((event) => event.type === 'provider.admission_required')).toBe(false);
     expect(cancelled).toBeGreaterThanOrEqual(0);
     expect(message).toBeGreaterThan(cancelled);
-    expect(admission).toBeGreaterThan(message);
+    expect(modelRequest).toBeGreaterThan(message);
     expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
     expect(events.at(-1)?.type).toBe('turn.completed');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
-});
-
-test('required provider admission failure is recorded as an error, not a user cancellation', async () => {
-  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-provider-admission-error-'));
-  const storePath = join(workspace, 'runtime.db');
-  const manager = new McpConnectionManager();
-  manager.getProviderDirectorySnapshot = () => ({
-    revision: 'directory-r1',
-    entries: [
-      {
-        providerId: 'github',
-        status: 'login_required',
-        required: true,
-        source: 'project',
-        lastKnownCapabilityNames: ['publish'],
-        retryable: true,
-      },
-    ],
-  });
-
-  try {
-    const events: RuntimeEvent[] = [];
-    for await (const event of runTestRuntimeAgent(
-      {
-        task: 'recover GitHub admission',
-        threadId: 'required-provider-admission-error',
-        userId: 'test',
-        workspace,
-        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
-        model: createMockModel([]) as SupportedChatModel,
-        mcpManager: manager,
-        config: {
-          providerName: 'test',
-          providerType: 'openai-compatible',
-          apiKey: 'test',
-          baseURL: 'http://localhost:1',
-          modelName: 'test',
-          sandbox: { enabled: true },
-          features: { mcpProviderAction: true },
-        },
-      },
-      {
-        requestAction: async () => {
-          throw new Error('admission UI disconnected');
-        },
-      },
-    )) {
-      events.push(event);
-    }
-
-    expect(events).toContainEqual(
-      expect.objectContaining({ type: 'run.error', message: 'admission UI disconnected' }),
-    );
-    expect(events).toContainEqual(
-      expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
-    );
-    expect(events.map((event) => event.type)).not.toContain('provider.admission_cancelled');
-    expect(events.map((event) => event.type)).not.toContain('task.cancelled');
-  } finally {
-    rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('required provider admission accepts ready/degraded and queues every other required entry', () => {
-  const state = createRuntimeHostStateInitialState({
-    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
-    threadId: 'required-provider-projection',
-    userId: 'test',
-    workspace: '/',
-  });
-  const manager = new McpConnectionManager();
-  manager.getProviderDirectorySnapshot = () => ({
-    revision: 'directory',
-    entries: [
-      {
-        providerId: 'ready',
-        status: 'ready',
-        required: true,
-        source: 'user',
-        lastKnownCapabilityNames: [],
-        retryable: false,
-      },
-      {
-        providerId: 'degraded',
-        status: 'degraded',
-        required: true,
-        source: 'user',
-        lastKnownCapabilityNames: [],
-        retryable: true,
-      },
-      {
-        providerId: 'failed',
-        status: 'failed',
-        required: true,
-        source: 'user',
-        lastKnownCapabilityNames: [],
-        retryable: true,
-      },
-      {
-        providerId: 'optional',
-        status: 'failed',
-        required: false,
-        source: 'user',
-        lastKnownCapabilityNames: [],
-        retryable: true,
-      },
-      {
-        providerId: 'login',
-        status: 'login_required',
-        required: true,
-        source: 'project',
-        lastKnownCapabilityNames: [],
-        diagnosticCode: 'auth_required',
-        retryable: false,
-      },
-    ],
-  });
-
-  expect(
-    requiredProviderAdmissionEvents(state, manager, true).map((event) =>
-      event.type === 'provider.admission_required' ? event.providerId : '',
-    ),
-  ).toEqual(['failed', 'login']);
-  expect(requiredProviderAdmissionEvents(state, manager, false)).toEqual([]);
 });
 
 test('Runtime Kernel persists a direct model answer as a completed turn', async () => {

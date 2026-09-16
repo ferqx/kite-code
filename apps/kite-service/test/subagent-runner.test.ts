@@ -110,7 +110,6 @@ function directUnitToolDispatcher(input: {
   workspace: string;
   config: AgentConfig;
   shellExecutor?: import('@kite-ai/builtin-runtime/sandbox').ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
   skills?: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
   skillOptions?: import('@kite-ai/builtin-runtime/skills').SkillScanOptions;
@@ -175,13 +174,9 @@ function directUnitToolDispatcher(input: {
             builtinToolCatalog: testBuiltinToolCatalog().forTurn({
               workspace: input.workspace,
               phase: input.phase ?? 'building',
-              hasGitBroker: Boolean(input.gitBroker),
-              brokeredGitFeatureRevision:
-                input.config.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
               featureFlags: input.config.features,
             }),
             shellExecutor: input.shellExecutor,
-            gitBroker: input.gitBroker,
             mcpManager: input.mcpManager,
             taskConfig: completeFixtureConfig(input.config),
             sandboxAvailable: true,
@@ -533,7 +528,6 @@ describe('SubAgentRunner integration', () => {
 
   test('keeps typed Git internal when a code child attempts to call it', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
-    let brokerCalls = 0;
     let modelCalls = 0;
     const model = {
       model: {
@@ -573,7 +567,6 @@ describe('SubAgentRunner integration', () => {
         config: {
           providerName: 'fixture',
           modelName: 'fixture',
-          features: { brokeredGit: true },
           executionCapabilitySurface: {
             inProcessReadOnlyTools: null,
             network: false,
@@ -583,8 +576,6 @@ describe('SubAgentRunner integration', () => {
             shell: true,
             skillChild: false,
             localStdioMcp: false,
-            gitInspect: true,
-            brokeredGitFeatureRevision: 'brokered-git-r1',
           },
         } as AgentConfig,
         workspace,
@@ -594,16 +585,8 @@ describe('SubAgentRunner integration', () => {
         signal: new AbortController().signal,
         eventSink: mockEventSink().sink,
         model,
-        gitBroker: {
-          featureRevision: 'brokered-git-r1',
-          inspect: async () => {
-            brokerCalls += 1;
-            return { ok: true, output: 'clean' };
-          },
-        },
       });
       expect(result).toMatchObject({ ok: true });
-      expect(brokerCalls).toBe(0);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

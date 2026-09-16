@@ -1,16 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import {
-  BROKERED_GIT_FEATURE_REVISION_,
-  type PreparedSandboxExecution,
-  type SandboxCleanupGrant,
-  type SandboxExecutionBackend,
-  type SandboxExecutionProvider,
-  type SandboxExecutionProviderFailureCode,
-  type SandboxExecutionProviderResult,
-  type SandboxPreparation,
-  type SandboxPreparationGrant,
+import type {
+  PreparedSandboxExecution,
+  SandboxCleanupGrant,
+  SandboxExecutionBackend,
+  SandboxExecutionProvider,
+  SandboxExecutionProviderFailureCode,
+  SandboxExecutionProviderResult,
+  SandboxPreparation,
+  SandboxPreparationGrant,
 } from '@kite-ai/runtime-spi';
 import { generateBwrapArgs } from '../bwrap';
 import type { CgroupPidsRunner } from '../cgroup-pids-contract';
@@ -41,7 +40,6 @@ export interface LocalSandboxExecutionProviderOptions {
   readonly canonicalWorkspace: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
   readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
-  readonly brokeredGitFeatureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_;
   readonly startupProbe?: boolean;
   readonly bubblewrapPath?: string;
   readonly cgroupPidsRunner?: CgroupPidsRunner;
@@ -276,10 +274,6 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
         sandboxRuntimeDir: runtimeRoots.dataRoot,
         sandboxControlBase: dirname(runtimeRoots.controlRoot),
         runtimeReadOnlyRoots,
-        gitAccess:
-          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
-            ? 'deny'
-            : 'allow',
       });
       argv = ['/usr/bin/sandbox-exec', '-p', profile, shell, '-c', wrappedCommand];
     } else {

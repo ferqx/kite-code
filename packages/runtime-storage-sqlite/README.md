@@ -1,5 +1,8 @@
 # Runtime SQLite Storage
 
+> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+
+
 `@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite concrete adapter。默认 App Server 的物理数据库由 Session Store owner 管理；历史 adapter 与迁移代码仍有独立消费者，不代表普通启动有多个可选 writer。
 
 ## 格式与实际入口
@@ -20,7 +23,7 @@
 
 ## 当前数据库与执行所有权
 
-[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件严格检查 Session schema/epoch；旧 epoch、partial 或 corrupt 返回 `store_upgrade_required`。它不自动探测、导入或改写 `kite.sqlite`。
+[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件先只读读取 schema/epoch 并分类兼容性，再检查受支持的完整结构。当前只证明 schema 10 / `kite-session-app-server-2026-09-02` 可读写；同 epoch 较旧 schema 返回 `store_migration_required`（不提供自动迁移），未知 epoch、较新 schema、partial 或 corrupt 返回 `store_incompatible`。兼容性错误携带实际与预期 schema；拒绝发生在读写打开前。不能用数字范围或仅能解析历史来声明完整 Runtime 只读兼容。它不自动探测、导入或改写 `kite.sqlite`。
 
 [Session runtime storage](src/kite-session-runtime-storage.ts) 为各 WAL connection 提供执行 scope。[execution authority](src/kite-session-execution-authority.ts) 持久保存 generation、revision、lease deadline 与 cleanup 状态，acquire/renew/detach/release 使用 SQLite CAS。fresh Session 的 generation 1 与 Session 创建同事务；过期且 cleanup 未确认的 owner 进入恢复边界，不能直接重放。
 

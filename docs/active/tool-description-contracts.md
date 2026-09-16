@@ -16,10 +16,10 @@
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
 - 修改 `packages/builtin-runtime/src/tool-contracts.ts` 中的契约结构或内容。
-- 修改工具的实际行为（`packages/builtin-runtime/src/git/runtime-module.ts`、
+- 修改工具的实际行为（`packages/builtin-runtime/src/filesystem/runtime-module.ts`、
   `packages/builtin-runtime/src/planning/runtime-module.ts` 或 Builtin sandbox consumer），需要同步更新契约。
 - 新增 Builtin operation 到 `packages/builtin-runtime/src/model/runtime-module.ts`、
-  `packages/builtin-runtime/src/git/runtime-module.ts`、`packages/builtin-runtime/src/planning/runtime-module.ts`、
+  `packages/builtin-runtime/src/filesystem/runtime-module.ts`、`packages/builtin-runtime/src/planning/runtime-module.ts`、
   `packages/builtin-runtime/src/subagent/runtime-module.ts` 或 `packages/builtin-runtime/src/verification/runtime-module.ts`。
 
 相关：
@@ -40,8 +40,8 @@
 
 当前单一事实源是已冻结的 `CapabilityRegistrySnapshot`：
 `createBuiltinToolCatalogProjection()` 从同一 SPI snapshot 投影模型 ToolSet、parser/canonicalizer、
-availability、effects、traits、descriptor 与 operation/executor revision。包测试机械断言该 projection 的 28
-个 operation 中恰有 20 个 `visibility: model` 和 8 个 `visibility: internal`，并逐项比较 schema、revision、
+availability、effects、traits、descriptor 与 operation/executor revision。包测试机械断言该 projection 的 27
+个 operation 中恰有 19 个 `visibility: model` 和 8 个 `visibility: internal`，并逐项比较 schema、revision、
 executor revision 与 effects；这些数字不是手工文档事实。App Tool Pipeline 与 Tool Controller 只消费 projection，不能重新声明
 schema、parser、effects 或 executor owner。旧 Core Tool Runner 已物理删除；Kernel 只拥有 governance/admission decision。
 源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，RM-16 final
@@ -53,8 +53,8 @@ manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当�
 
 Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen`、`returns`、`constraints`、`recovery` 五类独立事实。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 Builtin operation result projection 或 Kernel-owned user-input normalization 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-19个model-visible Builtin catalog entry已全部绑定唯一的`ToolContractSection`结构化事实。internal `git_inspect`
-不拥有模型工具契约，也不进入模型ToolSet。不存在旧契约输入、双描述格式或回滚分支；`toolContractSection()`只验证并返回当前结构。
+19个model-visible Builtin catalog entry已全部绑定唯一的`ToolContractSection`结构化事实。已退役的 `git_inspect`
+不在 Builtin catalog 或模型 ToolSet 中。不存在旧契约输入、双描述格式或回滚分支；`toolContractSection()`只验证并返回当前结构。
 
 ### 契约存放与绑定
 
@@ -66,7 +66,7 @@ Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen
 - 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 - `task` 契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
 - `task` 的 raw 模型输入形态是严格闭合的 `{name, subagent_type, task}`。`name` 是主 Agent 显式提供、用于 TUI 与 Runtime Event 的公开名称，必须简短说明子 Agent 正在做什么；它本来就是展示字段，不按隐私数据处理，也不得再从任务正文第一行推导。Model Controller 必须在 queue commit 前把任务正文写入 private Artifact，durable 形态只允许独立的 `{name, subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。当前格式不恢复已持久化 raw Task，也不把任务正文暴露到模型 schema。
-- internal `git_inspect`不创建`ToolContractSection`且不得向模型披露；模型发出的Git、构建、测试与其他project script
+- 已退役的 `git_inspect` 不创建 `ToolContractSection`；模型发出的 Git、构建、测试与其他 project script
   全部使用`shell_execute`。
 - 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
   `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
@@ -82,7 +82,7 @@ SPI registry。模型 surface、Runner recovery guidance 与 capability descript
 `apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 Service composition bridge，不能成为第二 authority。
 确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts` 与 schema-parity 测试守护。
 
-Builtin catalog conformance必须枚举当前19个model-visible entry与9个internal entry，并在
+Builtin catalog conformance必须枚举当前19个model-visible entry与8个internal entry，并在
 planning/building 的合法 availability context 中验证 Skill catalog、active frame、task adapter、tool search
 与 phase/role 的真实可用形态；可用集合与 projection 一致，description 来自同一 resolved contract，Builtin parser
 与 model JSON Schema projection 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})`

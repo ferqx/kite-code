@@ -1,7 +1,4 @@
-import type {
-  GitShellDenyEvidence,
-  ExecutionBackendCapabilities as SpiExecutionBackendCapabilities,
-} from '@kite-ai/runtime-spi';
+import type { ExecutionBackendCapabilities as SpiExecutionBackendCapabilities } from '@kite-ai/runtime-spi';
 import type { SandboxBackend } from './platform';
 
 export type ExecutionBackendCapabilities = SpiExecutionBackendCapabilities;
@@ -90,12 +87,6 @@ export interface ProductionExecutionQualification {
     shell: boolean;
     skillChild: boolean;
     localStdioMcp: boolean;
-    /** Optional brokered-Git qualification; absence means both Git axes are excluded. */
-    brokeredGit?: {
-      featureRevision: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
-      inspect: boolean;
-      shellDenyEvidence: GitShellDenyEvidence;
-    };
   };
   inProcessReadOnlyTools: InProcessReadOnlyToolCatalog;
 }
@@ -121,12 +112,6 @@ export interface ExecutionCapabilitySurface {
   shell: boolean;
   skillChild: boolean;
   localStdioMcp: boolean;
-  /** App-owned typed Git broker axes; generic process/read/write never imply them. */
-  gitInspect: boolean;
-  /** Disclosure, dispatch and native shell metadata deny must match this exact revision. */
-  brokeredGitFeatureRevision:
-    | typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_
-    | null;
 }
 
 export type ExecutionBoundaryAdmissionReason =
@@ -163,7 +148,6 @@ export interface ExecutionBoundaryAdmission {
     registryDigest: string;
     qualificationId: string;
     evidenceDigest: string;
-    brokeredGitShellDenyEvidence?: GitShellDenyEvidence;
   };
 }
 

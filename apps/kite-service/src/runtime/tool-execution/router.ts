@@ -112,7 +112,6 @@ export async function executeAppRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Host-owned registry execution port for Runtime SPI capability owners. */
   capabilityExecution?: CapabilityExecutionPort;
@@ -665,7 +664,6 @@ export async function executeAppRuntimeTools(params: {
         workspace: liveState.session.workspace,
         threadId: liveState.session.threadId,
         config: params.taskConfig,
-        hasGitBroker: Boolean(params.gitBroker),
         hasTaskAdapter: true,
         toolSearchEnabled: productionFlags?.toolSearch === true,
         skillCatalog: params.skillCatalog,
@@ -961,9 +959,6 @@ export async function executeAppRuntimeTools(params: {
                         stream,
                       }),
                   }
-                : {}),
-              ...(cutoverExecutionMechanism === 'git' && params.gitBroker
-                ? { gitBroker: params.gitBroker }
                 : {}),
               ...(cutoverExecutionMechanism === 'mcp' && params.mcpManager
                 ? {

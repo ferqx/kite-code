@@ -189,7 +189,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       committedAt: Date.now(),
     });
     const persisted = this.#lookupCommandReceipt(command, evidence.requestDigest);
-    if (persisted) return this.#replayAfterLookup(command, persisted);
+    if (persisted) return this.#replayAfterLookup(command, persisted, pinnedContext);
 
     const identity = `${evidence.scopeSessionId}\u0000${command.commandId}`;
     const pending = this.#pendingCommands.get(identity);
@@ -197,7 +197,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       if (pending.digest !== evidence.requestDigest) return invalidCommand(command.commandId);
       const settled = await pending.promise;
       const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
-      return replay ? this.#replayAfterLookup(command, replay) : settled;
+      return replay ? this.#replayAfterLookup(command, replay, pinnedContext) : settled;
     }
 
     const mailboxSessionId =
@@ -207,7 +207,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       try {
         const execute = async () => {
           const queued = this.#lookupCommandReceipt(command, evidence.requestDigest);
-          if (queued) return this.#replayAfterLookup(command, queued);
+          if (queued) return this.#replayAfterLookup(command, queued, pinnedContext);
 
           if (isDeletedSessionCommand(command, this.#deletedSessions)) {
             return {
@@ -261,7 +261,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           } catch (error) {
             if (command.type === 'set_interaction_mode') {
               const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
-              if (replay) return this.#replayAfterLookup(command, replay);
+              if (replay) return this.#replayAfterLookup(command, replay, pinnedContext);
             }
             throw error;
           }
@@ -315,7 +315,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       const receipt = await execution;
       if (command.type === 'set_interaction_mode' && receipt.status !== 'applied') {
         const replay = this.#lookupCommandReceipt(command, evidence.requestDigest);
-        if (replay) return this.#replayAfterLookup(command, replay);
+        if (replay) return this.#replayAfterLookup(command, replay, pinnedContext);
       }
       return receipt;
     } finally {
@@ -348,6 +348,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   async #replayAfterLookup(
     command: RuntimeCommand,
     receipt: RuntimeCommandReceipt,
+    commandContext?: Readonly<RuntimeCommandContext>,
   ): Promise<RuntimeCommandReceipt> {
     if (receipt.status !== 'idempotent_replay') {
       return receipt;
@@ -361,6 +362,45 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       command.type === 'set_interaction_mode'
     )
       return receipt;
+    if (command.type === 'resume_session' && this.#bridge.recoverCommittedResume) {
+      let enteredExecutionOwner = false;
+      try {
+        return await this.#withSessionExecution(receipt.sessionId, async () => {
+          enteredExecutionOwner = true;
+          await this.#recoverSession(receipt.sessionId);
+          if (this.#lifecycle.isActive(receipt.sessionId)) return receipt;
+          // The execution fence is acquired before the App re-reads the
+          // current-Turn journal and revision. A competing Host cannot prove
+          // and dispatch the same receipt under a second execution owner.
+          const prepared = await this.#bridge.recoverCommittedResume!(
+            command,
+            receipt.originalRevision,
+            (notification) => this.#notifications.publish(notification),
+            commandContext,
+          );
+          if (prepared?.execution && !this.#lifecycle.isActive(receipt.sessionId)) {
+            this.#schedulePreparedExecution(
+              command,
+              {
+                status: 'applied',
+                commandId: receipt.commandId,
+                sessionId: receipt.sessionId,
+                revision: receipt.originalRevision,
+              },
+              prepared,
+            );
+          }
+          return receipt;
+        });
+      } catch (error) {
+        // Ownership can be held by another Host. Its durable receipt remains
+        // replayable, but this Host must not reconstruct or dispatch the Run.
+        if (!enteredExecutionOwner) return receipt;
+        throw error;
+      } finally {
+        if (enteredExecutionOwner) await this.#releaseIdleSession(receipt.sessionId);
+      }
+    }
     await this.#recoverSession(receipt.sessionId);
     return receipt;
   }
@@ -821,7 +861,9 @@ function authorizePreparedExecution(
     throw new Error('Runtime Host prepared execution requires an applied receipt.');
   }
   const expectedOperation =
-    command.type === 'start_turn' || command.type === 'respond_interaction'
+    command.type === 'start_turn' ||
+    command.type === 'respond_interaction' ||
+    command.type === 'resume_session'
       ? 'turn'
       : command.type === 'compact_session'
         ? 'compaction'

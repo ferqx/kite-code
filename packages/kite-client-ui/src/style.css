@@ -1562,7 +1562,9 @@ body {
   font-size: var(--conversation-text-size);
   font-family: var(--font-geist, inherit);
 }
-.kite-client .reading-column > :is(.tool-activity, .message-group:has(.thinking-activity))
+.kite-client
+  .reading-column
+  > :is(.tool-activity, .message-group:has(.thinking-activity))
   + .message-group:has(> .message.assistant) {
   margin-top: 16px;
 }
@@ -1573,7 +1575,9 @@ body {
 .kite-client .reading-column > .message-group > .thinking-activity {
   margin: 0;
 }
-.kite-client .reading-column > :is(.tool-activity, .message-group:has(> .thinking-activity))
+.kite-client
+  .reading-column
+  > :is(.tool-activity, .message-group:has(> .thinking-activity))
   + .message-group:has(> .message.assistant[data-final-reply="false"]) {
   margin-top: 8px;
 }
@@ -2197,11 +2201,12 @@ body {
 }
 
 /* Compact disclosure headers share hover, focus and expanded visibility. */
-.kite-client .tool-activity-summary { column-gap: 6px; }
+.kite-client .tool-activity-summary {
+  column-gap: 6px;
+}
 .kite-client .tool-activity-chevron,
 .kite-client .tool-diff-toggle {
   opacity: 0;
-
 }
 .kite-client .tool-activity-summary:hover .tool-activity-chevron,
 .kite-client .tool-activity-summary:focus-visible .tool-activity-chevron,
@@ -2240,7 +2245,6 @@ body {
   overflow-wrap: anywhere;
   overflow: auto;
 }
-
 
 @media (prefers-reduced-motion: reduce) {
   .kite-client .tool-activity-chevron,

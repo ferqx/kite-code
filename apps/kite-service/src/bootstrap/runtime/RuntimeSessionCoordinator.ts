@@ -190,6 +190,11 @@ export interface RuntimeSessionCoordinator {
   commitInteractionCommand?(
     input: RuntimeInteractionCommandCommitInput,
   ): CommittedInteractionCommand;
+  /** Commits the old global-admission settlement through the canonical revision projector. */
+  commitObsoleteAdmissionResumeCommand(
+    events: readonly Extract<RuntimeEvent, { type: 'provider.admission_cancelled' }>[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): Readonly<{ receipt: RuntimeStoredCommandReceipt; events: readonly RuntimeEvent[] }>;
   /** Commits the inspected manual-compaction intent and retains each exact post-event State. */
   commitCompactionCommandEvents?(
     events: readonly RuntimeEvent[],
@@ -643,6 +648,20 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     const result = commitInteractionCommand(this.session, input);
     this.#recordLastAppliedEventRevisions(before);
     return result;
+  }
+
+  commitObsoleteAdmissionResumeCommand(
+    events: readonly Extract<RuntimeEvent, { type: 'provider.admission_cancelled' }>[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): Readonly<{ receipt: RuntimeStoredCommandReceipt; events: readonly RuntimeEvent[] }> {
+    this.#assertOpen();
+    if (this.#activeOperation || events.length === 0) {
+      throw new Error('Runtime obsolete admission resume is unavailable.');
+    }
+    const before = this.session.getState();
+    const committed = this.session.commitCommandBatch(events, evidence);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
   }
 
   commitCompactionCommandEvents(

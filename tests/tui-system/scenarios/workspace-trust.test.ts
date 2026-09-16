@@ -11,6 +11,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getTrustedWorkspaceExternalReadRoots } from '../../../apps/kite-service/src/config/workspace-trust';
+import { resolveWorkspaceGitMetadataReadOnlyRoots } from '../../../packages/builtin-runtime/src/git/metadata-scope';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
@@ -47,6 +49,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     execFileSync('git', ['init', '--bare', '--quiet', externalGitDir]);
     externalGitDir = realpathSync(externalGitDir);
     writeFileSync(join(workspace.workspace, '.git'), `gitdir: ${externalGitDir}\n`);
+    expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace.workspace)).toEqual([externalGitDir]);
 
     server.setResponses([]);
 
@@ -75,8 +78,9 @@ describe('TUI PTY System — Workspace Trust', () => {
       expect(screenContains(out, GATE_TEXT)).toBe(true);
       // The folder path must be visible so the user knows what they trust.
       expect(screenContains(out, realpathSync(workspace.workspace))).toBe(true);
-      expect(screenContains(out, 'This workspace also requires read-only access to:')).toBe(true);
-      expect(screenContains(out, externalGitDir)).toBe(true);
+      // Ordinary Workspace Trust never includes linked Git metadata authority.
+      expect(screenContains(out, 'This workspace also requires read-only access to:')).toBe(false);
+      expect(screenContains(out, externalGitDir)).toBe(false);
       expect(screenContains(out, 'Trust this workspace and continue')).toBe(true);
       expect(screenContains(out, 'Exit Kite Code')).toBe(true);
       // The main UI must not mount before a decision is made.
@@ -102,14 +106,15 @@ describe('TUI PTY System — Workspace Trust', () => {
         version: number;
         records: Record<
           string,
-          { workspacePath: string; source: string; externalReadScopeDigest: string }
+          { workspacePath: string; source: string; externalReadScopeDigest?: string }
         >;
       };
       expect(file.version).toBe(1);
       const records = Object.values(file.records);
       expect(records.length).toBe(1);
       expect(records[0]?.source).toBe('user');
-      expect(records[0]?.externalReadScopeDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+      expect(records[0]?.externalReadScopeDigest).toBeUndefined();
+      expect(getTrustedWorkspaceExternalReadRoots(workspace.workspace, trustFile)).toEqual([]);
       console.log('  Trust record persisted');
     },
     TIMEOUT,

@@ -2,6 +2,13 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  encodeServiceStartupDiagnostic,
+  parseServiceStartupDiagnostic,
+  SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
+import { RuntimeClient } from '@kite-ai/runtime-client';
+import { RendererConnection } from '../electron/runtime/renderer-connection';
 import { ServiceProcess } from '../electron/runtime/service-process';
 
 test('stdio carrier retains frame order and closes cleanly by EOF', async () => {
@@ -72,6 +79,151 @@ test('start reports an unlaunchable paired executable before opening the rendere
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('store startup failure reaches initialize with only public code and schema', async () => {
+  const diagnostic = `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+    code: 'store_incompatible',
+    actualSchema: 11,
+    expectedSchema: 10,
+  })}`;
+  await withFixture(
+    `process.stderr.write(${JSON.stringify(diagnostic + '\n')});
+process.stderr.write('secret epoch and path must stay private\\n');
+process.exit(1);`,
+    async (carrier) => {
+      const connection = new RendererConnection(carrier, 'fixture');
+      await connection.attach(1);
+      await connection
+        .send(
+          1,
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 7,
+            method: 'initialize',
+            params: { protocolVersion: 2 },
+          }),
+        )
+        .catch(() => undefined);
+      const frame = JSON.parse(await withDeadline(connection.receive(1), 3_000));
+      expect(frame.id).toBe(7);
+      expect(frame.error.message).toContain('STORE_INCOMPATIBLE');
+      expect(frame.error.message).toContain('11');
+      expect(frame.error.message).toContain('10');
+      expect(frame.error.message).not.toContain('epoch');
+      expect(frame.error.message).not.toContain('path');
+    },
+  );
+});
+
+test('malformed startup stderr stays private and reports the exit code', async () => {
+  await withFixture(
+    `process.stderr.write('private storage path /Users/example\\n'); process.exit(7);`,
+    async (carrier) => {
+      await expect(withDeadline(carrier.receive(), 3_000)).rejects.toThrow('退出码 7');
+      await expect(carrier.receive()).rejects.not.toThrow('/Users/example');
+    },
+  );
+});
+
+test('failed pre-initialize Service does not prevent Desktop shutdown', async () => {
+  await withFixture(`process.exit(1);`, async (carrier) => {
+    await expect(withDeadline(carrier.receive(), 3_000)).rejects.toThrow('退出码 1');
+    await expect(carrier.close()).resolves.toBeUndefined();
+  });
+});
+
+test('nonzero exit after initialize still requires task-result inspection', async () => {
+  await withFixture(
+    `process.stdin.resume(); process.stdin.on('end', () => process.exit(1));`,
+    async (carrier) => {
+      carrier.markInitialized();
+      await expect(carrier.close()).rejects.toThrow('请检查任务结果');
+    },
+  );
+});
+
+test('startup EOF from a still-live Service fails promptly and cleans up the owned process', async () => {
+  await withFixture(
+    `require('node:fs').closeSync(1);
+process.stdin.resume();
+process.stdin.on('end', () => process.exit(0));
+setInterval(() => {}, 1000);`,
+    async (carrier) => {
+      await expect(withDeadline(carrier.receive(), 3_000)).rejects.toThrow('退出码 未知');
+      await withDeadline(
+        (async () => {
+          while (!carrier.finished) await new Promise((resolve) => setTimeout(resolve, 1));
+        })(),
+        3_000,
+      );
+      expect(carrier.finished).toBe(true);
+    },
+  );
+});
+
+test('startup diagnostic codec excludes paths and epochs and rejects added fields', () => {
+  const line = encodeServiceStartupDiagnostic({
+    name: 'KiteSessionStoreOpenError',
+    code: 'store_incompatible',
+    message: '/private/path',
+    compatibility: {
+      actualSchema: 11,
+      expectedSchema: 10,
+      actualEpoch: 'private-epoch',
+      expectedEpoch: 'expected-epoch',
+    },
+  });
+  expect(line).toBeDefined();
+  expect(line).not.toContain('/private/path');
+  expect(line).not.toContain('epoch');
+  expect(parseServiceStartupDiagnostic(line!)).toEqual({
+    code: 'store_incompatible',
+    actualSchema: 11,
+    expectedSchema: 10,
+  });
+  expect(
+    parseServiceStartupDiagnostic(line!.trimEnd().replace('}', ',"path":"secret"}')),
+  ).toBeUndefined();
+});
+
+test('a Service that exits before initialize still reports its store error through RuntimeClient', async () => {
+  const diagnostic = `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+    code: 'store_migration_required',
+    actualSchema: 9,
+    expectedSchema: 10,
+  })}`;
+  await withFixture(
+    `process.stderr.write(${JSON.stringify(diagnostic + '\n')}); process.exit(1);`,
+    async (carrier) => {
+      await withDeadline(
+        (async () => {
+          while (!carrier.finished) await new Promise((resolve) => setTimeout(resolve, 1));
+        })(),
+        3_000,
+      );
+      const connection = new RendererConnection(carrier, 'fixture');
+      await connection.attach(1);
+      const runtime = new RuntimeClient({
+        clientInfo: { name: 'test', version: '1', instanceId: 'test' },
+        transport: {
+          async connect() {
+            return {
+              send: (message) => connection.send(1, JSON.stringify(message)),
+              async *messages() {
+                for (;;) yield JSON.parse(await connection.receive(1));
+              },
+              close: async () => undefined,
+            };
+          },
+        },
+      });
+      await expect(withDeadline(runtime.connect(), 3_000)).rejects.toThrow(
+        'STORE_MIGRATION_REQUIRED',
+      );
+      await runtime.close();
+    },
+  );
 });
 
 async function withFixture(

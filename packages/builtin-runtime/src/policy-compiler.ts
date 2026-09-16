@@ -258,11 +258,7 @@ export function readOnlyBuiltinPolicyRule(
       effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
-  if (
-    operationId === 'builtin:read_skill_reference' ||
-    operationId === 'builtin:complete_skill' ||
-    operationId === 'builtin:git_inspect'
-  ) {
+  if (operationId === 'builtin:read_skill_reference' || operationId === 'builtin:complete_skill') {
     const toolName = operationId.slice('builtin:'.length);
     return allowRule({
       risk: 'read',

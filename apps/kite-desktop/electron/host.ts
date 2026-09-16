@@ -9,6 +9,7 @@ import {
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
 import type {
   BranchSnapshot,
   DesktopConnectionInfo,
@@ -51,6 +52,8 @@ export interface DesktopHostOptions {
   serviceDirectory: string;
   repositoryDirectory: string;
   debug: boolean;
+  /** Build-pinned source Store epoch; used only for debug source profiles. */
+  sourceStoreEpoch?: string;
   serviceManifest: unknown;
   platform?: NodeJS.Platform;
   createPeer?: (options: ServiceProcessOptions, serverVersion: string) => RuntimePeer;
@@ -169,12 +172,13 @@ export class DesktopHost {
           throw new Error('源码工作区不可用。');
         }
         const canonicalConfig = realpathSync.native(configRoot);
-        const digest = sha256(
-          `kite-source-runtime-profile\0${canonicalConfig}\0${repository}`,
-        ).slice(0, 32);
         const parent = join(canonicalConfig, 'source-profiles');
         ensurePrivateDirectory(parent, home, this.#options.platform ?? process.platform);
-        runtimeRoot = join(parent, digest);
+        runtimeRoot = sourceKiteSessionStoreDirectoryFromCanonicalRoots(
+          canonicalConfig,
+          repository,
+          sourceStoreEpoch(this.#options.sourceStoreEpoch),
+        );
         ensurePrivateDirectory(runtimeRoot, home, this.#options.platform ?? process.platform);
       }
       const processOptions: ServiceProcessOptions = {
@@ -363,4 +367,11 @@ function sha256(value: string | Buffer): string {
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
+}
+
+function sourceStoreEpoch(value: unknown): string {
+  if (typeof value !== 'string' || !/^kite-session-[A-Za-z0-9._-]{1,128}$/u.test(value)) {
+    throw new Error('源码 Store format epoch 不可用。');
+  }
+  return value;
 }

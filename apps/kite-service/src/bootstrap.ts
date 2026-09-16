@@ -26,6 +26,7 @@ import {
   type RuntimeAccess,
   type RuntimeCommand,
   type RuntimeCommandContext,
+  type RuntimeNotification,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
@@ -1691,6 +1692,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
               sessionId: string,
               publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
             ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
+            recoverCommittedResume: async (
+              command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+              committedRevision: number,
+              publish: (notification: RuntimeNotification) => void,
+              commandContext?: Readonly<RuntimeCommandContext>,
+            ) =>
+              (await bridgeForSession(command.sessionId)).recoverCommittedResume?.(
+                command,
+                committedRevision,
+                publish,
+                commandContext,
+              ),
             inspectCommand: async (
               command: RuntimeCommand,
               context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],

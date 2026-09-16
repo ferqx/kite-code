@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import type { GitBroker } from '@kite-ai/builtin-runtime/git';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
 import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
@@ -61,7 +60,11 @@ import type {
   RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
 import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-dependencies';
-import type { RuntimeUserAction } from './state-actions';
+import {
+  canContinueSettledGlobalAdmission,
+  obsoleteGlobalAdmissionSettlementEvents,
+  type RuntimeUserAction,
+} from './state-actions';
 import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
@@ -84,7 +87,6 @@ export interface CliRuntimeBridgeInput {
     readonly name: string;
   }) => AgentConfig;
   readonly shellExecutor: ShellExecutor;
-  readonly gitBroker?: GitBroker;
   readonly interactionMode: InteractionMode;
   readonly sandboxBackend: SandboxBackend;
   /** Narrow Workspace-owned provider; the bridge never owns or stops its supervisor. */
@@ -228,6 +230,44 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       revision: this.#revision,
       projection: { kind: 'session', session: this.#projection() },
     });
+  }
+
+  /** Rebuild only an already-committed resume with no durable dispatch facts. */
+  async recoverCommittedResume(
+    command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+    committedRevision: number,
+    publish: (notification: RuntimeNotification) => void,
+    commandContext?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeHostPreparedExecution | undefined> {
+    if (command.sessionId !== this.#input.sessionId) return undefined;
+    const coordinator = this.#runtimeSessionCoordinator.get(command.sessionId);
+    if (!coordinator || coordinator.isTurnActive() || coordinator.lifecycle !== 'idle') return;
+    const state = coordinator.getState();
+    const run = coordinator.session.getLifecycleProjection().currentRun;
+    if (
+      state.revision !== committedRevision ||
+      run?.status !== 'running' ||
+      run.activeTurnId !== state.turn.turnId ||
+      run.taskId !== state.activeTaskId ||
+      !canContinueSettledGlobalAdmission(
+        state,
+        coordinator.getStateRuntimeStorage().sessions.loadEventsStrict(command.sessionId),
+      )
+    )
+      return;
+    const prepared = this.#preparedInteractionResume(
+      command.commandId,
+      coordinator,
+      {
+        status: 'applied',
+        commandId: command.commandId,
+        sessionId: command.sessionId,
+        revision: committedRevision,
+      },
+      commandContext,
+    );
+    this.#activePublish = publish;
+    return prepared;
   }
 
   async inspectCommand(
@@ -387,6 +427,65 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       };
     }
     if (command.type === 'resume_session') {
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (coordinator && !coordinator.isTurnActive() && coordinator.lifecycle === 'idle') {
+        const state = coordinator.getState();
+        const run = coordinator.session.getLifecycleProjection().currentRun;
+        if (
+          (run?.status === 'waiting' || run?.status === 'running') &&
+          run.activeTurnId === state.turn.turnId &&
+          run.taskId === state.activeTaskId
+        ) {
+          const journal = coordinator
+            .getStateRuntimeStorage()
+            .sessions.loadEventsStrict(this.#input.sessionId);
+          const events =
+            run.status === 'waiting' ? obsoleteGlobalAdmissionSettlementEvents(state, journal) : [];
+          const settledBeforeDispatch =
+            run.status === 'running' && canContinueSettledGlobalAdmission(state, journal);
+          if (events.length > 0 || settledBeforeDispatch) {
+            return {
+              kind: 'accepted',
+              decision: {
+                targetSessionId: this.#input.sessionId,
+                commit: async (evidence) => {
+                  // The command receipt, admission settlement and original Run
+                  // waiting-to-running transition share the Host transaction.
+                  const committed =
+                    events.length > 0
+                      ? coordinator.commitObsoleteAdmissionResumeCommand(events, evidence)
+                      : {
+                          receipt: coordinator.session.commitCommandSnapshot(evidence),
+                          events: [],
+                        };
+                  const receipt = receiptFromStored(committed.receipt);
+                  return {
+                    receipt,
+                    activation: async (publish) => {
+                      this.#revision = receipt.revision;
+                      this.#created = true;
+                      this.#closed = false;
+                      this.#activePublish = publish;
+                      this.#publishCommittedEvents(
+                        committed.events,
+                        receipt.revision,
+                        publish,
+                        'turn',
+                      );
+                    },
+                    preparedExecution: this.#preparedInteractionResume(
+                      command.commandId,
+                      coordinator,
+                      receipt,
+                      context.commandContext,
+                    ),
+                  };
+                },
+              },
+            };
+          }
+        }
+      }
       return this.#snapshotDecision((coordinator) => ({
         activate: () => {
           this.#revision = coordinator.getState().revision;
@@ -1102,7 +1201,6 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           config: execution.config,
           model: createChatModel(execution.config),
           shellExecutor: this.#input.shellExecutor,
-          gitBroker: this.#input.gitBroker,
           mcpManager: this.#input.mcpManager,
           interactionMode: this.#input.interactionMode,
           sandboxBackend: this.#input.sandboxBackend,

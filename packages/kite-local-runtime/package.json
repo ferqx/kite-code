@@ -9,10 +9,12 @@
     "./config": "./src/config/index.ts",
     "./coordinator": "./src/coordinator/index.ts",
     "./service": "./src/service/index.ts",
-    "./client/protocol": "./src/client/protocol-connection.ts"
+    "./source-profile": "./src/source-profile.ts",
+    "./client/protocol": "./src/client/protocol-connection.ts",
+    "./startup-diagnostic": "./src/service-startup-diagnostic.ts"
   },
   "scripts": {
-    "build": "bun build ./src/client/index.ts ./src/config/index.ts ./src/coordinator/index.ts ./src/service/index.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/client/index.ts ./src/config/index.ts ./src/coordinator/index.ts ./src/service/index.ts ./src/source-profile.ts ./src/service-startup-diagnostic.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

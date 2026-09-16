@@ -27,7 +27,7 @@ MCP 提供外部工具和资源，Skills 提供可发现的任务指导或工作
 | 字段 | 用途 |
 | --- | --- |
 | `type` | stdio 或 http |
-| `enabled` / `required` | 是否启用、不可用时是否影响运行准入 |
+| `enabled` / `required` | 是否启用／原配置标记；`required` 不再因 Provider 不可用而阻止普通对话 |
 | `command`、`args`、`cwd`、`env` | stdio 启动与环境 |
 | `url`、`headers` | HTTP 地址与请求头，避免直接存储真实秘密 |
 | `auth` | none、credential 或 oauth；使用凭据引用及对应认证参数 |

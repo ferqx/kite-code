@@ -1,6 +1,8 @@
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
+  runtimeHostStateHasPendingSandboxCleanupAuthority as hasPendingSandboxCleanupAuthority,
+  runtimeHostStateHasPendingSubagentCleanupAuthority as hasPendingSubagentCleanupAuthority,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall as interactionToolCall,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
@@ -18,6 +20,141 @@ const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
   'cancelled',
   'exhausted',
 ]);
+
+/**
+ * Classify the sole provider.admission_required producer in the supported
+ * State26/State27 epochs. In each epoch this event was written only by the
+ * required-provider check between accepted user input and model dispatch;
+ * actual provider authentication used provider.action_required. Require the
+ * complete current-Turn journal so an unrelated or ambiguous wait stays put.
+ */
+export function obsoleteGlobalAdmissionSettlementEvents(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): Extract<RuntimeEvent, { type: 'provider.admission_cancelled' }>[] {
+  const original = classifyObsoleteGlobalAdmission(state, journal, 'waiting');
+  return (
+    original?.map((admission) => ({
+      type: 'provider.admission_cancelled' as const,
+      interactionId: admission.interactionId,
+      providerId: admission.providerId,
+    })) ?? []
+  );
+}
+
+/**
+ * The settlement receipt may outlive the process before its prepared Turn is
+ * dispatched. Model invocation_prepared and attempt_started are durably
+ * acknowledged before outbound transport; Tool dispatch follows those facts.
+ * A fully settled journal with no such fact can continue the original Run.
+ */
+export function canContinueSettledGlobalAdmission(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): boolean {
+  return classifyObsoleteGlobalAdmission(state, journal, 'settled') !== undefined;
+}
+
+function classifyObsoleteGlobalAdmission(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+  phase: 'waiting' | 'settled',
+): Extract<RuntimeEvent, { type: 'provider.admission_required' }>[] | undefined {
+  if (
+    state.recoveryState.kind !== 'normal' ||
+    state.turn.status !== 'active' ||
+    (phase === 'waiting'
+      ? state.interactions.kind !== 'awaiting_provider_admission'
+      : state.interactions.kind !== 'idle') ||
+    !state.activeTaskId ||
+    state.tasks[state.activeTaskId]?.status !== 'active' ||
+    state.pendingApprovals.size !== 0 ||
+    state.toolRecovery.qualityGuard.blocked ||
+    Object.values(state.toolRecovery.failures).some((failure) => failure.status === 'unresolved') ||
+    hasPendingSandboxCleanupAuthority(state) ||
+    hasPendingSubagentCleanupAuthority(state) ||
+    Object.values(state.capabilities.invocations).some((invocation) =>
+      ['unknown', 'running', 'recorded'].includes(invocation.status),
+    ) ||
+    Object.values(state.resourceBudget.reservations).some((reservation) =>
+      ['reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
+    ) ||
+    (state.resourceBudget.status === 'active' &&
+      Object.values(state.resourceBudget.waiters).some(
+        (waiter) => waiter.state === 'waiting' || waiter.state === 'promoted',
+      )) ||
+    journal.at(-1)?.revision !== state.revision
+  )
+    return undefined;
+
+  let turnIndex = -1;
+  for (let index = 0; index < journal.length; index += 1) {
+    const event = journal[index]?.event;
+    if (event?.type === 'turn.started' && event.turnId === state.turn.turnId) turnIndex = index;
+  }
+  if (turnIndex < 1 || journal[turnIndex - 1]?.event.type !== 'user.message_appended')
+    return undefined;
+  const firstAdmissionIndex = journal.findIndex(
+    ({ event }, index) => index > turnIndex && event.type === 'provider.admission_required',
+  );
+  if (firstAdmissionIndex < 0) return undefined;
+  if (
+    journal
+      .slice(turnIndex + 1, firstAdmissionIndex)
+      .some(
+        ({ event }) =>
+          event.type !== 'skill.catalog_refreshed' && event.type !== 'skill.activation_started',
+      )
+  )
+    return undefined;
+  const suffix = journal.slice(firstAdmissionIndex);
+  const required = suffix.flatMap(({ event }) =>
+    event.type === 'provider.admission_required' ? [event] : [],
+  );
+  const cancelled = suffix.flatMap(({ event }) =>
+    event.type === 'provider.admission_cancelled' ? [event] : [],
+  );
+  const pending = state.providerAdmission.pending;
+  if (
+    required.length === 0 ||
+    (phase === 'waiting'
+      ? pending.length !== required.length ||
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== pending[0]?.interactionId ||
+        cancelled.length !== 0
+      : pending.length !== 0 || cancelled.length !== required.length) ||
+    suffix.some(
+      ({ event }) =>
+        event.type !== 'provider.admission_required' &&
+        event.type !== 'provider.admission_retry_requested' &&
+        event.type !== 'provider.admission_retry_failed' &&
+        event.type !== 'provider.admission_cancelled',
+    ) ||
+    (phase === 'settled' &&
+      suffix
+        .slice(-cancelled.length)
+        .some(({ event }) => event.type !== 'provider.admission_cancelled')) ||
+    Object.values(state.modelInvocations).some(
+      (invocation) => invocation.preparedStateRevision >= journal[turnIndex]!.revision!,
+    ) ||
+    Object.values(state.tools.calls).some((call) => call.createdAtTurnId === state.turn.turnId)
+  )
+    return undefined;
+  for (const [index, original] of required.entries()) {
+    const admission = pending[index];
+    if (
+      (phase === 'waiting' &&
+        (original.interactionId !== admission?.interactionId ||
+          original.providerId !== admission.providerId ||
+          original.source !== admission.source)) ||
+      (phase === 'settled' &&
+        (original.interactionId !== cancelled[index]?.interactionId ||
+          original.providerId !== cancelled[index]?.providerId))
+    )
+      return undefined;
+  }
+  return required;
+}
 
 /**
  * Build the durable facts for stopping the current turn.

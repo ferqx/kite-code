@@ -181,29 +181,21 @@ describe('sandbox profile generation', () => {
     expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
   });
 
-  test('brokered revision does not reintroduce a Workspace metadata deny', () => {
-    const profile = generateSandboxProfile(workspace, { gitAccess: 'deny' });
-    const metadata = seatbeltSubpath(join(canonicalWorkspace, '.git'));
-    expect(profile).not.toContain(metadata);
-  });
-
-  test('git access allows CLT developer dir and user git config reads', () => {
-    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
-    if (existsSync('/private/var/select/developer_dir')) {
-      expect(profile).toContain('(literal "/private/var/select/developer_dir")');
+  test('external Git config is admitted only through an explicit read-only root', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'sandbox-git-config-test-'));
+    const config = join(outside, '.gitconfig');
+    writeFileSync(config, '[core]\n');
+    try {
+      const defaultProfile = generateSandboxProfile(workspace);
+      expect(defaultProfile).not.toContain(seatbeltLiteral(config));
+      const scopedProfile = generateSandboxProfile(workspace, {
+        runtimeReadOnlyRoots: [config],
+      });
+      expect(scopedProfile).toContain(seatbeltSubpath(realpathSync.native(config)));
+      expect(scopedProfile).not.toContain('(deny file-read* file-map-executable file-write*');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
     }
-    const home = process.env.HOME;
-    if (home && existsSync(join(home, '.gitconfig'))) {
-      expect(profile).toContain(`(literal "${join(home, '.gitconfig')}")`);
-    }
-  });
-
-  test('git config opt-in does not change complete Workspace admission', () => {
-    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
-    for (const path of ['.git', '.ssh', '.git-credentials', '.env']) {
-      expect(profile).not.toContain(seatbeltString(join(canonicalWorkspace, path)));
-    }
-    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 
   test('read-only scope omits workspace from writable filters', () => {
