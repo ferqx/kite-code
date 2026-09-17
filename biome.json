@@ -13,7 +13,11 @@
   },
   "overrides": [
     {
-      "includes": ["apps/kite-desktop/src/tailwind.css", "apps/kite-web/src/styles/globals.css"],
+      "includes": [
+        "apps/kite-desktop/src/tailwind.css",
+        "apps/kite-web/src/styles/globals.css",
+        "packages/kite-client-ui/src/style.css"
+      ],
       "css": { "parser": { "tailwindDirectives": true } }
     }
   ],
