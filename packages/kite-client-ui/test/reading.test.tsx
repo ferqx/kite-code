@@ -33,6 +33,9 @@ const globals = {
   DOMRect: dom.window.DOMRect,
   getComputedStyle: dom.window.getComputedStyle,
   ResizeObserver: TestResizeObserver,
+  requestAnimationFrame: (callback: FrameRequestCallback) =>
+    setTimeout(() => callback(Date.now()), 0),
+  cancelAnimationFrame: (handle: number) => clearTimeout(handle),
   IS_REACT_ACT_ENVIRONMENT: true,
 };
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -469,6 +472,8 @@ test('tool activity keeps failures visible and groups adjacent tools without raw
   };
   await render(<Conversation {...props} messages={[read]} />);
   expect(document.querySelector('.tool-activity-summary')).toBeNull();
+  expect(document.querySelector('.tool-activity-step[data-slot="marker"]')).not.toBeNull();
+  expect(document.querySelector('.tool-activity-step [data-slot="marker-icon"]')).not.toBeNull();
   expect(document.querySelector('.tool-activity-step')?.textContent).toContain('读取');
   await act(() =>
     root!.render(
@@ -498,6 +503,9 @@ test('tool activity keeps failures visible and groups adjacent tools without raw
   expect(document.querySelector('.shell-activity .tool-activity-summary')?.textContent).toContain(
     '运行',
   );
+  expect(
+    document.querySelector('.shell-activity .tool-activity-summary')?.getAttribute('data-slot'),
+  ).toBe('marker');
   expect(document.body.textContent).not.toContain('查看参数与输出');
   expect(document.querySelector('.tool-arguments')).toBeNull();
   expect(document.querySelector('.file-link')).toBeNull();
@@ -1370,6 +1378,9 @@ test('compaction uses an inline marker and Ask history discloses the recorded an
   expect(document.querySelector('.context-compacted [role="status"]')?.textContent).toBe(
     '上下文自动压缩失败',
   );
+  expect(
+    document.querySelector('.context-compacted [data-slot="marker"]')?.getAttribute('data-variant'),
+  ).toBe('separator');
   expect(document.querySelector('.context-compacted')?.textContent).toContain('请求超时');
   expect(document.querySelector('.tool-detail')).toBeNull();
   await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);

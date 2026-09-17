@@ -14,6 +14,8 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
+import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
 import { FileDiff } from './FileChanges';
 import { childStatusLabel, statusLabel } from './status';
 import type { Message } from './types';
@@ -310,12 +312,14 @@ export function ToolRow({
   const approval = approvalLabel(message);
   const status = executionLabel(message);
   return (
-    <div
+    <Marker
       className={`tool-activity-step ${!message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
     >
-      <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
-      <div className="tool-step-content">
-        <div className="tool-step-heading">
+      <MarkerIcon className="tool-step-marker-icon">
+        <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
+      </MarkerIcon>
+      <MarkerContent className="tool-step-content">
+        <span className="tool-step-heading">
           <span className="tool-step-title tool-label">{toolTitle(message)}</span>
           {target && (
             <span className="tool-step-target">
@@ -344,7 +348,7 @@ export function ToolRow({
                 {status}
               </span>
             )}
-        </div>
+        </span>
         {(message.approval?.state === 'awaiting_user' ||
           ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
           resultPreview(message, showReadFailure) && (
@@ -352,8 +356,8 @@ export function ToolRow({
               {resultPreview(message, showReadFailure)}
             </span>
           )}
-      </div>
-    </div>
+      </MarkerContent>
+    </Marker>
   );
 }
 
@@ -414,7 +418,7 @@ export function ToolActivity({
   );
   const childIssue = childProcess && issues.length > 0;
   const open = expanded ?? (grouped && active);
-  const children = messages.map((item) => renderChildren(item.id.slice(5), open));
+  const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
   const pendingReview =
     !message.childLifecycle && !message.settled && message.approval?.state === 'reviewing';
@@ -454,17 +458,21 @@ export function ToolActivity({
         : executionLabel(message);
   const heading = (
     <>
-      <HugeiconsIcon
-        className="tool-activity-kind-icon"
-        icon={grouped ? Search01Icon : toolIcon(message)}
-      />
-      <span className="tool-activity-title tool-label">{label}</span>
-      {target &&
-        (shell ? (
-          <code className="tool-command tool-label">{target}</code>
-        ) : (
-          <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
-        ))}
+      <MarkerIcon className="tool-activity-marker-icon">
+        <HugeiconsIcon
+          className="tool-activity-kind-icon"
+          icon={grouped ? Search01Icon : toolIcon(message)}
+        />
+      </MarkerIcon>
+      <MarkerContent className="tool-activity-marker-content">
+        <span className="tool-activity-title tool-label">{label}</span>
+        {target &&
+          (shell ? (
+            <code className="tool-command tool-label">{target}</code>
+          ) : (
+            <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
+          ))}
+      </MarkerContent>
       {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
       {approval && (
         <span className="tool-approval" role="status">
@@ -504,126 +512,134 @@ export function ToolActivity({
     </>
   );
   return (
-    <article
-      className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
-      aria-label={`${label}${status ? ` · ${status}` : ''}`}
-    >
-      {read && !childIssue ? (
-        <ToolRow message={message} openFile={openFile} />
-      ) : edit && !childIssue ? (
-        <div className="tool-activity-summary tool-edit-heading">
-          <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
-          <span className="tool-label">{label}</span>
-          {target &&
-            (openFile ? (
-              <Button className="file-link" onClick={() => openFile(target)}>
-                {target}
+    <Collapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
+      <article
+        className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
+        aria-label={`${label}${status ? ` · ${status}` : ''}`}
+      >
+        {read && !childIssue ? (
+          <ToolRow message={message} openFile={openFile} />
+        ) : edit && !childIssue ? (
+          <Marker className="tool-activity-summary tool-edit-heading">
+            <MarkerIcon className="tool-activity-marker-icon">
+              <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
+            </MarkerIcon>
+            <MarkerContent className="tool-activity-marker-content">
+              <span className="tool-label">{label}</span>
+              {target &&
+                (openFile ? (
+                  <Button className="file-link" onClick={() => openFile(target)}>
+                    {target}
+                  </Button>
+                ) : (
+                  <span className="tool-step-target">{target}</span>
+                ))}
+            </MarkerContent>
+            {hasDiff && (
+              <Button
+                variant="ghost"
+                className="tool-diff-toggle"
+                aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
+                aria-expanded={open}
+                onClick={() => onToggle(!open)}
+              >
+                <HugeiconsIcon icon={ArrowDown01Icon} />
               </Button>
-            ) : (
-              <span className="tool-step-target">{target}</span>
-            ))}
-          {hasDiff && (
-            <Button
-              variant="ghost"
-              className="tool-diff-toggle"
-              aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
-              aria-expanded={open}
-              onClick={() => onToggle(!open)}
-            >
-              <HugeiconsIcon icon={ArrowDown01Icon} />
-            </Button>
-          )}
-          {approval && (
-            <span className="tool-approval" role="status">
-              {approval}
-            </span>
-          )}
-          {status &&
-            status !== '成功' &&
-            status !== approval &&
-            (message.status !== 'running' || message.childLifecycle) && (
-              <span className="tool-step-status" data-status={message.status}>
-                {status}
+            )}
+            {approval && (
+              <span className="tool-approval" role="status">
+                {approval}
               </span>
             )}
-          {!hasDiff &&
-            (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
-            resultPreview(message) && (
-              <span className="tool-step-preview" title={resultPreview(message)}>
-                {resultPreview(message)}
-              </span>
-            )}
-        </div>
-      ) : canExpand ? (
-        <Button
-          variant="ghost"
-          className="tool-activity-summary"
-          aria-expanded={open}
-          onClick={() => onToggle(!open)}
-        >
-          {heading}
-        </Button>
-      ) : (
-        <div className="tool-activity-summary">{heading}</div>
-      )}
-      {open && grouped && (
-        <div className="tool-activity-steps">
-          {messages.map((item) =>
-            item.toolName === 'shell_execute' ? (
-              <ToolActivity
-                key={item.id}
-                messages={[item]}
-                expanded={expandedItems?.[item.id]}
-                onToggle={(next) => onToggleItem?.(item.id, next)}
-                openFile={openFile}
-                renderChildren={renderChildren}
-              />
-            ) : (
-              <ToolRow key={item.id} message={item} openFile={openFile} />
-            ),
-          )}
-        </div>
-      )}
-      {open && shell && <ShellOutput message={message} />}
-      {open && hasDiff && <FileDiff message={message} />}
-      {open && ask && (
-        <div className="tool-ask-answers">
-          {message.status === 'cancelled' ? (
-            <span>已取消</span>
-          ) : askMultiple ? (
-            ask.questions.map((question, index) => (
-              <div className="tool-ask-answer" key={question.id}>
-                <span className="tool-ask-prefix">{index + 1}. </span>
-                <span className="tool-ask-text">
-                  {question.question.replace(/[：:]\s*$/, '')}：
-                  {ask.answers?.[question.id] ?? '尚未回答'}
+            {status &&
+              status !== '成功' &&
+              status !== approval &&
+              (message.status !== 'running' || message.childLifecycle) && (
+                <span className="tool-step-status" data-status={message.status}>
+                  {status}
                 </span>
-              </div>
-            ))
-          ) : (
-            <div className="tool-ask-answer">
-              <span className="tool-ask-prefix">回答：</span>
-              <span className="tool-ask-text">
-                {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-      {open &&
-        !grouped &&
-        !ask &&
-        !shell &&
-        (!edit || childIssue) &&
-        (!read || childIssue) &&
-        message.toolName !== 'task' &&
-        !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
-        (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
-          <pre className="tool-detail">
-            {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
-          </pre>
+              )}
+            {!hasDiff &&
+              (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
+              resultPreview(message) && (
+                <span className="tool-step-preview" title={resultPreview(message)}>
+                  {resultPreview(message)}
+                </span>
+              )}
+          </Marker>
+        ) : canExpand ? (
+          <CollapsibleTrigger asChild>
+            <Marker asChild className="tool-activity-summary">
+              <Button variant="ghost">{heading}</Button>
+            </Marker>
+          </CollapsibleTrigger>
+        ) : (
+          <Marker className="tool-activity-summary">{heading}</Marker>
         )}
-      {open && <div className="tool-activity-children">{children}</div>}
-    </article>
+        <CollapsibleContent className="tool-activity-content">
+          <div className="tool-activity-reveal">
+            <div className="tool-activity-reveal-inner">
+              {grouped && (
+                <div className="tool-activity-steps">
+                  {messages.map((item) =>
+                    item.toolName === 'shell_execute' ? (
+                      <ToolActivity
+                        key={item.id}
+                        messages={[item]}
+                        expanded={expandedItems?.[item.id]}
+                        onToggle={(next) => onToggleItem?.(item.id, next)}
+                        openFile={openFile}
+                        renderChildren={renderChildren}
+                      />
+                    ) : (
+                      <ToolRow key={item.id} message={item} openFile={openFile} />
+                    ),
+                  )}
+                </div>
+              )}
+              {shell && <ShellOutput message={message} />}
+              {hasDiff && <FileDiff message={message} />}
+              {ask && (
+                <div className="tool-ask-answers">
+                  {message.status === 'cancelled' ? (
+                    <span>已取消</span>
+                  ) : askMultiple ? (
+                    ask.questions.map((question, index) => (
+                      <div className="tool-ask-answer" key={question.id}>
+                        <span className="tool-ask-prefix">{index + 1}. </span>
+                        <span className="tool-ask-text">
+                          {question.question.replace(/[：:]\s*$/, '')}：
+                          {ask.answers?.[question.id] ?? '尚未回答'}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="tool-ask-answer">
+                      <span className="tool-ask-prefix">回答：</span>
+                      <span className="tool-ask-text">
+                        {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!grouped &&
+                !ask &&
+                !shell &&
+                (!edit || childIssue) &&
+                (!read || childIssue) &&
+                message.toolName !== 'task' &&
+                !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
+                (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
+                  <pre className="tool-detail">
+                    {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
+                  </pre>
+                )}
+              <div className="tool-activity-children">{children}</div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </article>
+    </Collapsible>
   );
 }

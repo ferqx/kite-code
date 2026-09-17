@@ -8,6 +8,8 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
+import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
 import { statusLabel } from './status';
@@ -118,21 +120,36 @@ const MessageItem = memo(function MessageItem({
   };
   if (message.role === 'thinking')
     return (
-      <article
-        className={`message tool-activity thinking-activity${!message.settled ? ' is-running' : ''}`}
+      <Collapsible
+        asChild
+        open={Boolean(expanded)}
+        onOpenChange={(open) => onToggle(message.id, open)}
       >
-        <details
-          open={expanded}
-          onToggle={(event) => onToggle(message.id, event.currentTarget.open)}
+        <article
+          className={`message tool-activity thinking-activity${!message.settled ? ' is-running' : ''}`}
         >
-          <summary className="tool-activity-summary">
-            <HugeiconsIcon className="tool-activity-kind-icon" icon={BulbIcon} />
-            <ThinkingLabel message={message} />
-            <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />
-          </summary>
-          <pre className="tool-output">{message.text.trimEnd()}</pre>
-        </details>
-      </article>
+          <CollapsibleTrigger asChild>
+            <Marker asChild className="tool-activity-summary">
+              <Button variant="ghost">
+                <MarkerIcon className="tool-activity-marker-icon">
+                  <HugeiconsIcon className="tool-activity-kind-icon" icon={BulbIcon} />
+                </MarkerIcon>
+                <MarkerContent className="tool-activity-marker-content">
+                  <ThinkingLabel message={message} />
+                </MarkerContent>
+                <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />
+              </Button>
+            </Marker>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="tool-activity-content">
+            <div className="tool-activity-reveal">
+              <div className="tool-activity-reveal-inner">
+                <pre className="tool-output">{message.text.trimEnd()}</pre>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </article>
+      </Collapsible>
     );
   if (message.role === 'tool') return null;
   if (message.role === 'subagent') {
@@ -219,11 +236,9 @@ const MessageItem = memo(function MessageItem({
   if (message.systemKind === 'compaction')
     return (
       <article className={`message context-compacted ${message.status ?? ''}`}>
-        <div role="status">
-          <span aria-hidden="true" />
-          <span className="tool-label">{message.title}</span>
-          <span aria-hidden="true" />
-        </div>
+        <Marker variant="separator" role="status">
+          <MarkerContent className="tool-label">{message.title}</MarkerContent>
+        </Marker>
         {message.status === 'failed' && message.text && <p>{message.text}</p>}
       </article>
     );
