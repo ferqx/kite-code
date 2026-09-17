@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AppMcpServer } from '@kite-ai/kite-app-contract';
@@ -8,12 +16,20 @@ import {
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeClientConnection } from '@kite-ai/runtime-client';
+import { createMockModelServer } from '../../../tests/tui-system/harness/fixtures';
 import { DesktopClient } from '../src/client';
 import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 test('desktop reads across projects, isolates execution, and ignores a superseded selection', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-navigation-')));
-  for (const name of ['a', 'b', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['a', 'b', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
+  const model = createMockModelServer();
+  model.setResponses([
+    { message: { content: 'original workspace response one' } },
+    { message: { content: 'original workspace response two' } },
+    { message: { content: 'conversation continues after directory deletion' } },
+  ]);
   writeFileSync(
     join(root, 'config/kite-code.jsonc'),
     JSON.stringify({
@@ -21,13 +37,13 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
         test: {
           type: 'openai-compatible',
           apiKey: 'fixture',
-          baseURL: 'http://127.0.0.1:1/v1',
+          baseURL: model.baseURL,
           model: 'test-model',
           models: ['test-model'],
         },
       },
       model: { default: { provider: 'test', name: 'test-model' } },
-      sandbox: { enabled: false },
+      sandbox: { enabled: true },
       mcpServers: {},
     }),
   );
@@ -97,7 +113,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
       const connection = await createBunStdioChildRuntimeClientTransport({
         argv: [
           process.execPath,
-          resolve('scripts/release/entrypoints/service.ts'),
+          resolve('apps/kite-desktop/test/fixtures/isolated-store-service.ts'),
           'app-server',
           'run-stdio',
         ],
@@ -107,6 +123,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
           KITE_CODE_CONFIG_HOME: join(root, 'config'),
           KITE_APP_SERVER_WORKSPACE: workspace,
           KITE_APP_SERVER_BUILD_ID: 'desktop-navigation',
+          KITE_DESKTOP_TEST_ROOT: root,
           HOME: join(root, 'home'),
           USERPROFILE: join(root, 'home'),
           PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -406,7 +423,12 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     ).toBe(true);
     await client.selectSession(first);
     expect(client.getSnapshot().ready).toBe(true);
-    await expect(client.send('must not run in a different project')).rejects.toThrow('工作目录');
+    await client.send('continue in the original session while viewing another project');
+    await waitFor(() => client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(client.getSnapshot().projection?.workspaceDigest).toBe(
+      client.getSnapshot().directory?.find((entry) => entry.sessionId === first)?.workspaceDigest,
+    );
+    expect(client.getSnapshot().workspace).toBe(workspace);
     const permissionConnection = generation;
     const permissionCloses = closes;
     losePermissionResult = true;
@@ -419,9 +441,10 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(client.getSnapshot().workspace).toBe(workspace);
     expect(generation).toBe(permissionConnection);
     expect(closes).toBe(permissionCloses);
-    await expect(client.send('permission must not admit cross-project execution')).rejects.toThrow(
-      '工作目录',
-    );
+    await client.send('continue without changing the selected workspace');
+    await waitFor(() => client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(client.getSnapshot().selected).toBe(first);
+    expect(client.getSnapshot().workspace).toBe(workspace);
     const trustPath = join(root, 'config/workspace-trust.jsonc');
     const savedTrust = readFileSync(trustPath, 'utf8');
     const trustFile = JSON.parse(savedTrust);
@@ -492,6 +515,30 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
       client.getSnapshot().sessions.filter((session) => session.sessionId === attempted),
     ).toHaveLength(1);
     expect(client.getSnapshot().ready).toBe(true);
+    // A deleted directory must not turn a persisted conversation into read-only history.
+    await client.disconnect();
+    rmSync(join(root, 'a'), { recursive: true, force: true });
+    await client.connect();
+    await client.selectSession(first);
+    const revisionBeforeDeletedDirectoryTurn = client.getSnapshot().projection!.revision;
+    await client.send('continue our conversation after deleting its local directory');
+    await waitFor(
+      () =>
+        client.getSnapshot().projection!.revision > revisionBeforeDeletedDirectoryTurn &&
+        client.getSnapshot().projection?.currentRun?.status === 'completed',
+    );
+    expect(client.getSnapshot().selected).toBe(first);
+    expect(
+      client
+        .getSnapshot()
+        .messages.some(
+          (message) =>
+            message.role === 'assistant' &&
+            message.text.includes('conversation continues after directory deletion'),
+        ),
+    ).toBe(true);
+    expect(creations).toBe(beforeCreation + 1);
+    expect(existsSync(join(root, 'a'))).toBe(false);
     // Persisted history survives loss of the last selected directory and invalid model config.
     await client.disconnect();
     rmSync(workspace, { recursive: true, force: true });
@@ -508,6 +555,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     release?.();
     await client.disconnect();
     await Promise.all([...carriers.values()].map((carrier) => carrier.connection.close()));
+    model.stop();
     rmSync(root, { recursive: true, force: true });
   }
 }, 20_000);

@@ -17,7 +17,25 @@
  * so they resolve the same production Runtime Store path.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  createKiteHomeWorkspaceAuthority,
+  createKiteHomeWriteTransactionPort,
+} from '../../../packages/runtime-storage-sqlite/src';
+import {
+  assertKiteHomeStoreSchema,
+  initializeKiteHomeStoreSchema,
+  KITE_HOME_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE_TABLE_COLUMNS,
+} from '../../../packages/runtime-storage-sqlite/src/kite-home-store';
+import {
+  assertKiteSessionStore11Schema,
+  KITE_SESSION_STORE11_DDL,
+} from '../../../packages/runtime-storage-sqlite/src/kite-session-store11-conversion';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -34,7 +52,9 @@ import { createTestWorkspace, observePersistedUserMessageSession } from '../harn
 
 const TIMEOUT = 30000;
 
-describe('TUI PTY System — Session Persistence', () => {
+describe.each([
+  10, 9, 11,
+] as const)('TUI PTY System - Session Persistence from Store %i', (sourceSchema) => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui1: PtyProcess;
@@ -112,6 +132,8 @@ describe('TUI PTY System — Session Persistence', () => {
       // Wait for tui1 process to exit (handleExit calls process.exit(0) after 300ms)
       const exitCode = await tui1.waitForExit();
       console.log(`  tui1 exit code: ${exitCode}`);
+      expect(exitCode).toBe(0);
+      if (sourceSchema !== 10) materializeHistoricalStore(workspace.home, sourceSchema);
 
       // Restart and session selection do not call the model.
       server.setResponses([]);
@@ -240,6 +262,14 @@ describe('TUI PTY System — Session Persistence', () => {
       const output = tui2.viewport();
       expect(screenContains(output, 'Message after restart')).toBe(true);
       expect(screenContains(output, 'Follow-up after restart received.')).toBe(true);
+      await waitForCondition(
+        () => {
+          const saved = observePersistedUserMessageSession(workspace, 'Message after restart');
+          return saved.status === 'ready' && saved.value?.threadId === persistedThreadId;
+        },
+        'follow-up remains in the exact pre-upgrade Session',
+        10_000,
+      );
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,
@@ -251,3 +281,120 @@ describe('TUI PTY System — Session Persistence', () => {
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
   );
 });
+
+/** Exact supported layout fixture; all business rows were written by the first real TUI. */
+function materializeHistoricalStore(home: string, version: 9 | 11): void {
+  const canonical = join(home, '.kite-code/kite-session.sqlite');
+  const historical =
+    version === 9
+      ? join(home, '.kite-code/kite.sqlite')
+      : join(home, '.kite-code/source-profiles', '1'.repeat(32), 'kite-session.sqlite');
+  mkdirSync(dirname(historical), { recursive: true, mode: 0o700 });
+  if (version === 11) chmodSync(join(home, '.kite-code/source-profiles'), 0o700);
+  chmodSync(dirname(historical), 0o700);
+  const source = new Database(canonical, { readonly: true });
+  const target = new Database(historical, { strict: true });
+  chmodSync(historical, 0o600);
+  try {
+    if (version === 9) initializeKiteHomeStoreSchema(target);
+    else {
+      for (const ddl of KITE_SESSION_STORE11_DDL) target.run(ddl);
+      target.run(
+        "INSERT INTO kite_meta VALUES ('schema_version','11'), ('format_epoch','kite-session-accepted-runs-2026-09-15')",
+      );
+      target.run('PRAGMA user_version=11');
+    }
+    const tableColumns =
+      version === 9 ? KITE_HOME_STORE_TABLE_COLUMNS : KITE_SESSION_STORE_TABLE_COLUMNS;
+    for (const [table, columns] of Object.entries(tableColumns)) {
+      if (table === 'kite_meta') continue;
+      const insert = target.query(
+        `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`,
+      );
+      for (const row of source
+        .query<Record<string, string | number | Uint8Array | null>, []>(
+          `SELECT ${columns.join(',')} FROM ${table}`,
+        )
+        .iterate()) {
+        insert.run(...columns.map((column: string) => row[column]!));
+      }
+    }
+    for (const row of source
+      .query<{ key: string; value: string }, []>(
+        "SELECT key,value FROM kite_meta WHERE key NOT IN ('schema_version','format_epoch')",
+      )
+      .iterate()) {
+      if (version === 9 && row.key.startsWith('session_execution/')) continue;
+      target.query('INSERT INTO kite_meta VALUES (?,?)').run(row.key, row.value);
+    }
+    if (version === 9) {
+      writeReleasedStore9Authority(target);
+      assertKiteHomeStoreSchema(target);
+    } else assertKiteSessionStore11Schema(target);
+    expect(
+      target.query<{ integrity_check: string }, []>('PRAGMA integrity_check').get()
+        ?.integrity_check,
+    ).toBe('ok');
+  } finally {
+    source.close();
+    target.close(false);
+  }
+  for (const path of [canonical, `${canonical}-wal`, `${canonical}-shm`])
+    rmSync(path, { force: true });
+}
+
+/** Use the historical authority writer, never a fabricated settled lease row. */
+function writeReleasedStore9Authority(target: Database): void {
+  const writer = createKiteHomeWriteTransactionPort(target);
+  const workspaceRow = target
+    .query<
+      {
+        workspace_id: string;
+        canonical_path: string;
+        workspace_identity_digest: string;
+        project_id: string;
+        workspace_digest: string;
+        display_name: string;
+      },
+      []
+    >(
+      'SELECT workspace_id,canonical_path,workspace_identity_digest,project_id,workspace_digest,display_name FROM workspaces',
+    )
+    .get();
+  if (!workspaceRow) throw new Error('Workspace fixture is missing.');
+  const authority = createKiteHomeWorkspaceAuthority({
+    database: target,
+    writer,
+    workspace: {
+      workspaceId: workspaceRow.workspace_id,
+      canonicalPath: workspaceRow.canonical_path,
+      workspaceIdentityDigest: workspaceRow.workspace_identity_digest,
+      projectId: workspaceRow.project_id,
+      workspaceDigest: workspaceRow.workspace_digest,
+      displayName: workspaceRow.display_name,
+    },
+    nowMs: () => 10,
+  });
+  for (const row of target
+    .query<{ session_id: string }, []>('SELECT session_id FROM runtime_sessions')
+    .iterate()) {
+    const acquired = authority.controller.requestControl({
+      sessionId: row.session_id,
+      requestId: `fixture-acquire-${row.session_id}`,
+      requestDigest: '1'.repeat(64),
+      clientId: 'fixture-client',
+      connectionGeneration: 1,
+      workerInstanceId: 'fixture-service',
+      resumeSecret: Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1)).toString('base64url'),
+      resumeExpiresAtMs: 100,
+    });
+    assert.equal(acquired.status, 'applied');
+    assert.ok(acquired.lease);
+    const released = authority.controller.releaseControl({
+      ...acquired.lease,
+      requestId: `fixture-release-${row.session_id}`,
+      requestDigest: '2'.repeat(64),
+    });
+    assert.equal(released.status, 'applied');
+  }
+}

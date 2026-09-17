@@ -3,6 +3,7 @@ import {
   KITE_APP_SERVER_DAEMON_VERSION_,
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
+import { formatTuiStartupProgress } from '../../../apps/kite-cli/src/tui/startup-diagnostic';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { createManagedLocalAppServerComposition } from '../app-server-client';
 import { createManagedLocalAppServerDaemon } from '../app-server-daemon';
@@ -18,11 +19,13 @@ if (process.argv.includes('--version')) {
     ? createManagedLocalAppServerDaemon({
         argv: process.argv,
         executableMode,
+        onStartupProgress: (progress) => console.error(formatTuiStartupProgress(progress)),
         endpoint: serverEndpoint,
       })
     : createManagedLocalAppServerComposition({
         argv: process.argv,
         executableMode,
+        onStartupProgress: (progress) => console.error(formatTuiStartupProgress(progress)),
       });
   runTui({
     connectRuntime: appServer.connector,

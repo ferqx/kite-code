@@ -29,11 +29,20 @@ import {
   type KiteSessionExecutionAuthorityRecord,
 } from './kite-session-execution-authority';
 import {
+  acquireKiteSessionStoreMaintenance,
+  type KiteSessionWindowsPathSecurity,
+} from './kite-session-maintenance';
+import {
   createKiteSessionMutationPort,
   KiteSessionMutationError,
   type KiteSessionMutationInput,
 } from './kite-session-mutation';
-import { openKiteSessionStoreDatabase } from './kite-session-runtime-file';
+import {
+  KiteSessionStoreOpenError,
+  openKiteSessionStoreDatabase,
+} from './kite-session-runtime-file';
+import { inspectKiteSessionPublication } from './kite-session-store-publication';
+import { assertKiteSessionStoreSourcesReconciled } from './kite-session-store-sources';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 import type {
   InitialControllerTransactionPort,
@@ -97,6 +106,21 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
   readonly artifactStore: KiteHomeArtifactStore;
   readonly authority: KiteSessionExecutionControl;
   readonly recovery: KiteSessionRecoveryPort;
+  /** Settle a fenced, fully terminal Session without changing its historical State or Runs. */
+  reconcileSettledSession(input: {
+    readonly sessionId: string;
+    readonly expectedAuthorityRevision: number;
+    readonly isSettledState: (state: Readonly<State>) => boolean;
+  }): boolean;
+  /** Fence recovery facts and lease an execution generation for terminal cleanup only. */
+  beginRecoveryExecution(input: {
+    readonly sessionId: string;
+    readonly expectedAuthorityRevision: number;
+    readonly hostInstanceId: string;
+    readonly clientId: string | null;
+    readonly connectionGeneration: number;
+    readonly leaseUntilMs: number;
+  }): KiteSessionExecutionAuthorityRecord;
   sessionCreationForWorkspace(
     workspaceId: string,
   ): SqliteWorkspaceSessionCreationPort<Event, State>;
@@ -124,6 +148,7 @@ interface ExecutionHandleState {
   current: KiteSessionMutationInput;
   leaseUntilMs: number;
   deleted: boolean;
+  recoveryOnly: boolean;
 }
 
 /**
@@ -132,6 +157,43 @@ interface ExecutionHandleState {
  * Receipt-bearing unowned decisions have a separate atomic no-execution-owner/revision check.
  */
 export function openKiteSessionRuntimeStorage<Event, State>(input: {
+  readonly databasePath: string;
+  readonly windowsPathSecurity?: KiteSessionWindowsPathSecurity;
+  readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
+  readonly stateSchemaVersion: number;
+  readonly formatEpoch: string;
+  readonly artifacts?: ArtifactPort;
+  readonly now?: () => number;
+}): KiteSessionRuntimeStorageOwner<Event, State> {
+  const maintenance = acquireKiteSessionStoreMaintenance(input.databasePath, 'shared', {
+    ...(input.windowsPathSecurity ? { windowsPathSecurity: input.windowsPathSecurity } : {}),
+  });
+  try {
+    // Publication holds the exclusive counterpart. Recheck both admission facts
+    // only after this shared lock is held, before an absent Store can be created.
+    if (inspectKiteSessionPublication(input.databasePath).status === 'pending') {
+      throw new KiteSessionStoreOpenError(
+        'store_busy',
+        'Store publication is pending; retry startup so its maintenance can resume.',
+      );
+    }
+    assertKiteSessionStoreSourcesReconciled(input.databasePath);
+    const owner = openAdmittedKiteSessionRuntimeStorage(input);
+    const close = () => {
+      try {
+        owner.close();
+      } finally {
+        maintenance?.release();
+      }
+    };
+    return Object.freeze({ ...owner, close, [Symbol.asyncDispose]: async () => close() });
+  } catch (error) {
+    maintenance?.release();
+    throw error;
+  }
+}
+
+function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
   readonly databasePath: string;
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
   readonly stateSchemaVersion: number;
@@ -158,6 +220,9 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
   // Synchronous and private: callers cannot use this scope for arbitrary Store writes.
   let committingUnownedDecision = false;
   const handles = new WeakMap<object, ExecutionHandleState>();
+  // A recovery lease can be used to persist old execution facts, never to dispatch new work.
+  // This marker is connection-local and is tied to the exact fenced generation.
+  const recoveryGenerations = new Map<string, number>();
   const effectLeaseRevisions = new Map<string, number>();
   const selectRevision = database.query<{ revision: number }, [string]>(
     'SELECT revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
@@ -284,6 +349,12 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
       expiresAtMs: number,
     ) {
       const { handle, key } = activeEffect(sessionId, effectId, ownerId);
+      if (handle.recoveryOnly) {
+        throw new KiteSessionRuntimeStorageError(
+          'unsupported_mutation',
+          'Recovery execution cannot dispatch a new effect.',
+        );
+      }
       const prepared = effectPort.prepare({
         ...handle.current,
         effectId,
@@ -447,10 +518,27 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     ...base.storage.runs,
     forkSession: () => unsupported('Cross-Session Run fork requires atomic target authority.'),
   });
+  const transactions: RuntimeStorage<Event, State>['transactions'] = Object.freeze({
+    ...base.storage.transactions,
+    commitAttemptStart(
+      transaction: Parameters<
+        RuntimeStorage<Event, State>['transactions']['commitAttemptStart']
+      >[0],
+    ) {
+      if (currentHandle().recoveryOnly) {
+        throw new KiteSessionRuntimeStorageError(
+          'unsupported_mutation',
+          'Recovery execution cannot start a new attempt.',
+        );
+      }
+      base.storage.transactions.commitAttemptStart(transaction);
+    },
+  });
   const storage = Object.freeze({
     ...base.storage,
     effects: runtimeEffects,
     runs,
+    transactions,
   });
   const artifactStore = disableArtifactGarbageCollection(base.artifactStore);
 
@@ -474,6 +562,7 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
       current: binding,
       leaseUntilMs: requiredLeaseUntil(record),
       deleted: false,
+      recoveryOnly: recoveryGenerations.get(record.sessionId) === record.controllerGeneration,
     };
     const handle: KiteSessionExecutionHandle = {
       sessionId: record.sessionId,
@@ -507,6 +596,7 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     authority.assertActive(next);
     handle.current = next;
     handle.leaseUntilMs = requiredLeaseUntil(record);
+    handle.recoveryOnly = recoveryGenerations.get(record.sessionId) === record.controllerGeneration;
   };
 
   const runWithExecution = <Result>(
@@ -549,6 +639,72 @@ export function openKiteSessionRuntimeStorage<Event, State>(input: {
     artifactStore,
     authority: executionControl,
     recovery,
+    reconcileSettledSession(request) {
+      return rawWriter.run(() => {
+        const current = authority.read(request.sessionId);
+        if (
+          current.revision !== request.expectedAuthorityRevision ||
+          current.status !== 'recovery_required' ||
+          current.hostInstanceId !== null ||
+          current.clientId !== null ||
+          current.leaseUntilMs !== null ||
+          effectPort.listPrepared(request.sessionId).length !== 0 ||
+          effectPort.listUnknown(request.sessionId).length !== 0 ||
+          storage.runs.getActive(request.sessionId) !== null ||
+          storage.runs.list({ sessionId: request.sessionId, status: 'unknown', limit: 1 }).entries
+            .length !== 0
+        ) {
+          return false;
+        }
+        const state = storage.sessions.loadSnapshot<State>(request.sessionId);
+        if (state === null || !request.isSettledState(state)) return false;
+        authority.confirmRecoveryCleanupInTransaction({
+          sessionId: request.sessionId,
+          expectedRevision: current.revision,
+        });
+        return true;
+      });
+    },
+    beginRecoveryExecution(request) {
+      const acquired = rawWriter.run(() => {
+        const current = authority.read(request.sessionId);
+        if (
+          current.revision !== request.expectedAuthorityRevision ||
+          current.status !== 'recovery_required' ||
+          current.hostInstanceId !== null ||
+          current.clientId !== null ||
+          current.leaseUntilMs !== null
+        ) {
+          throw new KiteSessionRuntimeStorageError(
+            'stale_execution_handle',
+            'Session recovery authority changed before execution could be acquired.',
+          );
+        }
+        const prepared = effectPort.listPrepared(request.sessionId);
+        if (current.controllerGeneration < 2 && prepared.length > 0) {
+          throw new KiteSessionRuntimeStorageError(
+            'stale_execution_handle',
+            'Prepared effects have no previous execution generation to reconcile.',
+          );
+        }
+        if (current.controllerGeneration >= 2) {
+          effectPort.markGenerationUnknownInTransaction({
+            sessionId: request.sessionId,
+            controllerGeneration: current.controllerGeneration - 1,
+          });
+        }
+        return authority.acquireRecoveryInTransaction({
+          sessionId: request.sessionId,
+          expectedRevision: current.revision,
+          hostInstanceId: request.hostInstanceId,
+          clientId: request.clientId,
+          connectionGeneration: request.connectionGeneration,
+          leaseUntilMs: request.leaseUntilMs,
+        });
+      });
+      recoveryGenerations.set(request.sessionId, acquired.controllerGeneration);
+      return acquired;
+    },
     sessionCreationForWorkspace: (workspaceId) => base.sessionCreationForWorkspace(workspaceId),
     bindExecution,
     refreshExecution,

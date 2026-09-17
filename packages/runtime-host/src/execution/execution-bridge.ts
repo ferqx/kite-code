@@ -1,4 +1,5 @@
 import type {
+  RuntimeAbortReason,
   RuntimeCommand,
   RuntimeCommandContext,
   RuntimeCommandReceipt,
@@ -17,7 +18,10 @@ export interface RuntimeHostPreparedExecution {
     readonly operationId: string;
     readonly committedRevision: number;
     readonly operation: 'turn' | 'compaction' | 'rewind';
-    readonly run: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
+    readonly run: (
+      signal: AbortSignal,
+      requestAbort: (reason: RuntimeAbortReason | string) => void,
+    ) => Promise<void>;
     readonly cancel?: (reason: string) => void;
   };
 }

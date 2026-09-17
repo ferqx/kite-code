@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { McpCredentialStore } from '@kite-ai/builtin-runtime/mcp';
 import type { KiteAppServerConnection } from '@kite-ai/kite-local-runtime/client';
 import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-client';
@@ -13,7 +13,6 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '#kite-service/bootstrap';
 import type { AppShellExecutor } from '#kite-service/sandbox/composition';
-import { sourceKiteSessionStorePath } from '../../../scripts/release/local-service-client';
 
 /**
  * Delivery races that are only meaningful at the PTY boundary.  These hooks
@@ -190,10 +189,9 @@ export function createInProcessTuiServiceConnector(
       const identity = appControl.admitWorkspace(workspace);
       const runtimeInputs = appControl.runtimeInputsFor(identity);
       await runtimeInputs.workspaceReady;
-      const repositoryRoot = realpathSync.native(resolve(import.meta.dir, '..', '..', '..'));
-      const databasePath = sourceKiteSessionStorePath(codeRoot, repositoryRoot);
+      const databasePath = join(codeRoot, 'kite-session.sqlite');
       mkdirSync(dirname(databasePath), { recursive: true });
-      const storageOwner = createKiteSessionAppServerStorageComposition({
+      const storageOwner = await createKiteSessionAppServerStorageComposition({
         databasePath,
         hostInstanceId: `tui_fixture_host_${randomUUID()}`,
       });

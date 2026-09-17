@@ -288,8 +288,18 @@ export async function executeAppRuntimeToolsEffect(
     const subagentConcurrencyGroupId = parallelSubagentBatch
       ? `subagent-batch:${effect.toolCallIds[0]!}`
       : undefined;
+    // Persist each settled sibling's remaining terminal facts before waiting
+    // for slower siblings. The parent Tool outcome may already be durable;
+    // its child completion must not remain in memory until the whole batch ends.
     const batches = await Promise.allSettled(
-      effect.toolCallIds.map((toolCallId) => execute([toolCallId], subagentConcurrencyGroupId)),
+      effect.toolCallIds.map(async (toolCallId) => {
+        const events = await execute([toolCallId], subagentConcurrencyGroupId);
+        return persistSettledSiblingTerminalEvents(
+          toolCallId,
+          events,
+          executionContext?.persistEvents,
+        );
+      }),
     );
     const terminalEventBatches: RuntimeEvent[][] = [];
     for (let index = 0; index < batches.length; index++) {
@@ -299,6 +309,7 @@ export async function executeAppRuntimeToolsEffect(
         continue;
       }
       const toolCallId = effect.toolCallIds[index]!;
+      if (batch.reason instanceof SiblingTerminalPersistenceError) throw batch.reason;
       const currentState = (executionContext?.getState?.() as RuntimeState | undefined) ?? state;
       if (batch.reason instanceof DescendantResourceAdmissionError) {
         terminalEventBatches.push(
@@ -341,4 +352,41 @@ export async function executeAppRuntimeToolsEffect(
       ),
     }));
   }
+}
+
+class SiblingTerminalPersistenceError extends Error {
+  constructor(toolCallId: string, cause?: unknown) {
+    super(`Settled sibling Tool ${toolCallId} could not persist its terminal facts.`, { cause });
+    this.name = 'SiblingTerminalPersistenceError';
+  }
+}
+
+/** A settled sibling's remaining terminal facts receive one acknowledged write. */
+export async function persistSettledSiblingTerminalEvents(
+  toolCallId: string,
+  events: RuntimeEvent[],
+  persistEvents?: (events: RuntimeEvent[]) => Promise<boolean>,
+): Promise<RuntimeEvent[]> {
+  if (
+    !persistEvents ||
+    !events.some(
+      (event) =>
+        event.type === 'subagent.completed' ||
+        event.type === 'subagent.failed' ||
+        ((event.type === 'tool.finished' ||
+          event.type === 'tool.failed' ||
+          event.type === 'tool.rejected' ||
+          event.type === 'tool.cancelled') &&
+          event.toolCallId === toolCallId),
+    )
+  ) {
+    return events;
+  }
+  try {
+    if (!(await persistEvents(events))) throw new SiblingTerminalPersistenceError(toolCallId);
+  } catch (error) {
+    if (error instanceof SiblingTerminalPersistenceError) throw error;
+    throw new SiblingTerminalPersistenceError(toolCallId, error);
+  }
+  return [];
 }

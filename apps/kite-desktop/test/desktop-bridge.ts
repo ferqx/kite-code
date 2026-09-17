@@ -7,6 +7,8 @@ export function createTestDesktopBridge(call: DesktopTestCall): KiteDesktopBridg
   return {
     listProjects: () => call('list_projects'),
     runtimeStatus: () => call('runtime_status'),
+    runtimeStartupStatus: () => call('runtime_startup_status'),
+    saveStartupDiagnostic: () => call('save_startup_diagnostic'),
     pickWorkspace: () => call('pick_workspace'),
     activateWorkspace: (path) => call('activate_workspace', { path }),
     checkWorkspace: (path) => call('check_workspace', { path }),

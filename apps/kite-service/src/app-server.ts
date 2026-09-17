@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import {
   type KiteAppControlClient,
   WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
@@ -13,7 +14,11 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import { createKiteSessionAppServerStorageComposition } from './bootstrap';
+import {
+  createKiteSessionAppServerStorageComposition,
+  type KiteStoreStartupProgress,
+  type KiteStoreWriterAdmission,
+} from './bootstrap';
 import type { KiteSessionAppServerStorageOwner } from './bootstrap/kite-session-app-server-storage';
 import {
   createNodeRuntimeStdioOutput,
@@ -24,6 +29,8 @@ import {
   createKiteServiceRuntimeComposition,
   type KiteServiceRuntimeComposition,
 } from './composition';
+import { persistedWorkspaceIdentity } from './config/persisted-workspace-identity';
+import { getPersistedWorkspaceTrustStatus } from './config/workspace-trust';
 
 export interface KiteAppServerEnvironment {
   readonly runtimeRoot: string;
@@ -34,11 +41,17 @@ export interface KiteAppServerEnvironment {
 }
 
 export interface KiteAppServerMainDependencies {
+  readonly onStoreStartupProgress?: KiteStoreStartupProgress;
+  readonly shouldStopStartup?: () => boolean;
+  readonly beforeStorePublication?: () => Promise<'commit' | 'cancel'>;
+  readonly assertRetiredStoreWritersStopped?: (
+    databasePath: string,
+  ) => ReturnType<KiteStoreWriterAdmission>;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly createStorage?: (input: {
     readonly databasePath: string;
     readonly hostInstanceId: string;
-  }) => KiteSessionAppServerStorageOwner;
+  }) => KiteSessionAppServerStorageOwner | Promise<KiteSessionAppServerStorageOwner>;
   readonly createComposition?: typeof createKiteServiceRuntimeComposition;
   readonly stdin?: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
   readonly stdout?: Parameters<typeof createNodeRuntimeStdioOutput>[0];
@@ -82,24 +95,68 @@ export async function runKiteAppServerMain(
     throw new Error('Kite App Server requires exact `app-server run-stdio` arguments.');
   }
   const environment = resolveKiteAppServerEnvironment(dependencies.environment);
-  const owner = createKiteAppServerRuntimeOwner(environment, dependencies);
+  const signals = dependencies.signals ?? process;
+  let stopRequested = false;
+  const requestStop = (): void => {
+    stopRequested = true;
+  };
+  signals.on('SIGINT', requestStop);
+  signals.on('SIGTERM', requestStop);
+  const releaseStartupSignals = (): void => {
+    signals.off('SIGINT', requestStop);
+    signals.off('SIGTERM', requestStop);
+  };
+  let owner: KiteAppServerRuntimeOwner;
+  try {
+    owner = await createKiteAppServerRuntimeOwner(environment, {
+      ...dependencies,
+      shouldStopStartup: () => stopRequested || dependencies.shouldStopStartup?.() === true,
+      async beforeStorePublication() {
+        const decision = await dependencies.beforeStorePublication?.();
+        // Give queued process signals a chance to record a request before the commit boundary.
+        // Once this check returns commit, publication is synchronous and must finish.
+        await nextTurn();
+        return stopRequested || decision === 'cancel' ? 'cancel' : 'commit';
+      },
+    });
+    await nextTurn();
+    if (stopRequested) {
+      await owner.composition[Symbol.asyncDispose]();
+      releaseStartupSignals();
+      return;
+    }
+  } catch (error) {
+    releaseStartupSignals();
+    throw error;
+  }
   const { composition, admission, appControl } = owner;
   const stdin = dependencies.stdin ?? process.stdin;
   const stdout = dependencies.stdout ?? process.stdout;
   const stderr = dependencies.stderr ?? process.stderr;
-  const signals = dependencies.signals ?? process;
-  const carrier = createRuntimeStdioCarrier({
-    server: composition.server,
-    admission,
-    stdin,
-    stdout: createNodeRuntimeStdioOutput(stdout),
-    stderr,
-    signals: createProcessRuntimeStdioSignals(signals),
-    history: composition.history,
-    appControl,
-    credential: composition.appControl.credentialClient,
-    shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
-  });
+  let carrier: ReturnType<typeof createRuntimeStdioCarrier>;
+  try {
+    carrier = createRuntimeStdioCarrier({
+      server: composition.server,
+      admission,
+      stdin,
+      stdout: createNodeRuntimeStdioOutput(stdout),
+      stderr,
+      signals: createProcessRuntimeStdioSignals(signals),
+      history: composition.history,
+      appControl,
+      credential: composition.appControl.credentialClient,
+      shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
+    });
+  } catch (error) {
+    try {
+      await composition[Symbol.asyncDispose]();
+    } finally {
+      releaseStartupSignals();
+    }
+    throw error;
+  }
+  // The carrier owns the same signals before startup relinquishes them.
+  releaseStartupSignals();
   let primaryError: unknown;
   try {
     await carrier.done;
@@ -115,16 +172,37 @@ export async function runKiteAppServerMain(
   if (primaryError !== undefined) throw primaryError;
 }
 
-export function createKiteAppServerRuntimeOwner(
+export async function createKiteAppServerRuntimeOwner(
   environment: KiteAppServerEnvironment,
-  dependencies: Pick<KiteAppServerMainDependencies, 'createStorage' | 'createComposition'> = {},
+  dependencies: Pick<
+    KiteAppServerMainDependencies,
+    | 'createStorage'
+    | 'createComposition'
+    | 'assertRetiredStoreWritersStopped'
+    | 'onStoreStartupProgress'
+    | 'shouldStopStartup'
+    | 'beforeStorePublication'
+  > = {},
   options: { readonly daemonProtocol?: boolean; readonly instanceId?: string } = {},
-): KiteAppServerRuntimeOwner {
+): Promise<KiteAppServerRuntimeOwner> {
   const instanceId = options.instanceId ?? `app-server_${randomUUID()}`;
   const databasePath = join(environment.runtimeRoot, 'kite-session.sqlite');
   const createStorage =
-    dependencies.createStorage ?? ((input) => createKiteSessionAppServerStorageComposition(input));
-  const storageOwner = createStorage({ databasePath, hostInstanceId: instanceId });
+    dependencies.createStorage ??
+    ((input) =>
+      createKiteSessionAppServerStorageComposition({
+        ...input,
+        onStoreStartupProgress: dependencies.onStoreStartupProgress,
+        shouldStopStartup: dependencies.shouldStopStartup,
+        beforeStorePublication: dependencies.beforeStorePublication,
+        ...(dependencies.assertRetiredStoreWritersStopped
+          ? {
+              assertRetiredStoreWritersStopped: () =>
+                dependencies.assertRetiredStoreWritersStopped!(input.databasePath),
+            }
+          : {}),
+      }));
+  const storageOwner = await createStorage({ databasePath, hostInstanceId: instanceId });
   const createComposition = dependencies.createComposition ?? createKiteServiceRuntimeComposition;
   let composition: KiteServiceRuntimeComposition;
   try {
@@ -207,8 +285,22 @@ export function createKiteAppServerRuntimeOwner(
           .catch(() => undefined);
         // The target may disappear during canonicalization. Admission has not
         // dispatched anything, so this is a definite availability failure.
-        if (!trust || trust.status === 'corrupt' || trust.status === 'unavailable')
-          return { allowed: false as const, reason: 'unavailable' as const };
+        if (!trust || trust.status === 'corrupt' || trust.status === 'unavailable') {
+          const identity = persistedWorkspaceIdentity(session.workspace);
+          const persistedIdentityMatches =
+            identity !== undefined &&
+            session.canonicalWorkspaceDigest === identity.workspaceDigest &&
+            session.projectId === identity.projectId;
+          const status = persistedIdentityMatches
+            ? getPersistedWorkspaceTrustStatus(
+                session.workspace,
+                join(environment.configRoot, 'workspace-trust.jsonc'),
+              )
+            : 'unavailable';
+          return status === 'trusted'
+            ? { allowed: true as const, workspace: session.workspace }
+            : { allowed: false as const, reason: 'unavailable' as const };
+        }
         if (
           trust.status !== 'trusted' ||
           trust.workspace.canonicalPath !== session.workspace ||

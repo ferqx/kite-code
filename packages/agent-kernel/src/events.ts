@@ -77,6 +77,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'owner',
   ],
   'auto_review.completed': ['reviewId', 'toolCallId', 'result', 'owner'],
+  'auto_review.started': ['reviewId', 'toolCallId', 'owner'],
   'auto_review.requested': [
     'reviewId',
     'toolCallId',
@@ -534,8 +535,8 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
-/** The State union has 137 current events plus one read-only compatibility event. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 139 as const;
+/** Count of current State event discriminants; read-only compatibility remains separate. */
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 140 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -543,6 +544,7 @@ export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 139 as const;
  * case in one of the fixed domain reducers.
  */
 export const STATE_DIAGNOSTIC_EVENT_TYPES = [
+  'auto_review.started',
   'approval.command_replaced',
   'model.cache_metrics',
   'model.context_metrics',
@@ -586,7 +588,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 139 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 140 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -692,6 +694,7 @@ type SubAgentStartPayload =
       id: string;
       role: SubAgentRole;
       name: string;
+      status?: 'creating' | 'running';
       parentToolCallId?: string;
       concurrencyGroupId?: string;
     }
@@ -700,6 +703,7 @@ type SubAgentStartPayload =
       id: string;
       role: SubAgentRole;
       task: string;
+      status?: 'creating' | 'running';
       parentToolCallId?: string;
       concurrencyGroupId?: string;
     };
@@ -752,6 +756,7 @@ type SubAgentFailureDiagnostic = {
 type SubAgentErrorPayload = {
   id: string;
   error: string;
+  status?: 'failed' | 'interrupted' | 'cancelled';
   summary?: string;
   toolCallCount?: number;
   durationMs?: number;
@@ -804,7 +809,13 @@ type ModelInvocationLimits = {
 type SandboxExecutionBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 type SandboxPreparationResourceSemantics = 'pure' | 'allocating';
 export type SessionRewindScope = 'conversation_only' | 'conversation_and_workspace' | 'code_only';
-type SubagentObservationStatus = 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+type SubagentObservationStatus =
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'cancelled'
+  | 'exhausted'
+  | 'blocked';
 
 type SubagentObservation = {
   status: SubagentObservationStatus;
@@ -1482,6 +1493,12 @@ type StateEventMap = ResourceBudgetEventMap &
       requestFingerprint?: string;
       createdAt?: string;
     };
+    'auto_review.started': {
+      type: 'auto_review.started';
+      reviewId: string;
+      toolCallId: string;
+      owner: KernelInteractionOwner;
+    };
     'auto_review.completed': {
       type: 'auto_review.completed';
       reviewId: string;
@@ -1864,7 +1881,7 @@ export type ContextCompactionResetEvent = StateEventMap['context.compaction_rese
 
 type EventForType<EventType extends RuntimeEventType> = StateEventMap[EventType];
 
-/** The State union has one exact object type for each of its 139 discriminants. */
+/** The State union has one exact object type for each of its 140 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

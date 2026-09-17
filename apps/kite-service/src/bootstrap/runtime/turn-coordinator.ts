@@ -14,7 +14,15 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite-ai/builtin-runtime/skills';
-import type { InteractionMode, RuntimeCommandContext } from '@kite-ai/runtime-contract';
+import {
+  createRuntimeAbortReason,
+  type InteractionMode,
+  type RuntimeAbortCause,
+  type RuntimeAbortReason,
+  type RuntimeCommandContext,
+  runtimeAbortCause,
+  runtimeAbortMessage,
+} from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -47,7 +55,12 @@ import {
 import type { CapabilityExecutionPort } from '#runtime-spi';
 import { recordRuntimeFailure } from './failures';
 import { projectRuntimeSchedulerFacts } from './scheduler-facts';
-import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state-actions';
+import {
+  eventsForRunCancellation,
+  eventsForSettledSubagentHistory,
+  eventsForSupersededTurnRecovery,
+  hasSettledSubagentHistoryCandidate,
+} from './state-actions';
 import {
   type RuntimeActionProvider,
   type RuntimeStateSessionPort,
@@ -176,7 +189,7 @@ export interface RuntimeTurnInput {
   /** Optional Worker-owned effect composition factory bound to that context. */
   workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
   /** Host-owned controller callback; production execution always supplies it. */
-  abortExecution?: (reason: string) => void;
+  abortExecution?: (reason: RuntimeAbortReason | string) => void;
   /** Exact State 27 session owned by the App/Host session coordinator. */
   runtimeSession: RuntimeStateSessionPort & {
     readonly runtimeStore: StateRuntimeStorage;
@@ -194,7 +207,9 @@ export interface RuntimeTurnInput {
   onSessionLoggingStatus?: (status: { mode: SessionLoggingMode }) => void;
   onSessionLoggingDiagnostic?: (message: string) => void;
   /** Runtime coordinator registration for ordinary non-command cancellation. */
-  registerRunCancellation?: (cancelRun: ((reason?: string) => RuntimeEvent[]) | null) => void;
+  registerRunCancellation?: (
+    cancelRun: ((reason?: string, cause?: RuntimeAbortCause) => RuntimeEvent[]) | null,
+  ) => void;
   /** Command cancellation consumes already-committed events and must not persist another batch. */
   registerCommittedCommandCancellation?: (
     cancel: RuntimeCommittedCommandCancellation | null,
@@ -290,9 +305,10 @@ export async function* executeRuntimeTurn(
   }
   const localExecutionController = input.abortExecution ? undefined : new AbortController();
   const executionSignal = input.abortExecution ? input.signal! : localExecutionController!.signal;
-  const abortExecution = (reason: string): void => {
-    if (input.abortExecution) input.abortExecution(reason);
-    else localExecutionController!.abort(reason);
+  const abortExecution = (reason: string, cause: RuntimeAbortCause = 'error'): void => {
+    const abortReason = createRuntimeAbortReason(cause, reason);
+    if (input.abortExecution) input.abortExecution(abortReason);
+    else localExecutionController!.abort(abortReason);
   };
   const cancelRun = (
     reason = 'Cancelled by user.',
@@ -310,7 +326,7 @@ export async function* executeRuntimeTurn(
     } finally {
       // A fenced/failed durable cancellation must still stop local Provider I/O.
       // Only successfully committed events above may be published as terminal facts.
-      abortExecution(reason);
+      abortExecution(reason, cause);
     }
   };
   const interruptClosedStream = (): void => {
@@ -352,7 +368,7 @@ export async function* executeRuntimeTurn(
     runCancelled = true;
     exitStatus = 'aborted';
     for (const event of events) collector.recordRuntime(event);
-    abortExecution(reason);
+    abortExecution(reason, 'user');
   };
   const cancelForDeadline = (): RuntimeEvent[] => {
     const cancellationEvents = cancelRun('Runtime deadline exceeded.', 'error');
@@ -386,18 +402,16 @@ export async function* executeRuntimeTurn(
     for (const event of canonicalErrorEvents) collector.recordRuntime(event);
     return [...cancellationEvents, ...canonicalErrorEvents];
   };
-  const externalAbortReason = (): string => {
-    const reason = input.signal?.reason;
-    if (reason instanceof Error && reason.message) return reason.message;
-    if (typeof reason === 'string' && reason.trim()) return reason;
-    return 'Runtime cancelled by external signal.';
-  };
+  const externalAbortReason = (): string => runtimeAbortMessage(input.signal?.reason);
   const forwardExternalAbort = () => {
     // The public AbortSignal is a real cancellation boundary, not merely a
     // transport hint. Persist the same durable cancellation transaction used
     // by the TUI before unblocking any effect/interaction wait.
     try {
-      externalCancellationEvents = cancelRun(externalAbortReason(), 'user');
+      externalCancellationEvents = cancelRun(
+        externalAbortReason(),
+        runtimeAbortCause(input.signal?.reason),
+      );
     } catch (error) {
       // Do not throw from AbortSignal dispatch: other Provider abort listeners
       // must still run, even after this Session has lost write authority.
@@ -416,7 +430,9 @@ export async function* executeRuntimeTurn(
       deadlineCancellationEvents = cancelForDeadline();
     }, remainingMs);
   };
-  input.registerRunCancellation?.((reason?: string) => cancelRun(reason));
+  input.registerRunCancellation?.((reason?: string, cause?: RuntimeAbortCause) =>
+    cancelRun(reason, cause),
+  );
   input.registerCommittedCommandCancellation?.(cancelAfterCommittedCommand);
   try {
     if (externalCancellationEvents.length > 0) {
@@ -790,7 +806,7 @@ export async function* executeRuntimeTurn(
       // project that canonical settlement before Host aborts the shared root
       // signal; otherwise the outer lifecycle can correctly reject all
       // post-abort events while accidentally hiding the rejection itself.
-      if (abortReasonAfterProjection) abortExecution(abortReasonAfterProjection);
+      if (abortReasonAfterProjection) abortExecution(abortReasonAfterProjection, 'user');
     }
     // A cancelled concurrent tool batch can exhaust the generic effect
     // cleanup grace while its Subagent Provider handles are still durable.
@@ -909,6 +925,15 @@ export async function* executeRuntimeTurn(
             kernel.getState().turn.abortCause === 'user' ? 'preserve_user_cancellation' : 'unknown',
           );
           for (const event of recovery.events) collector.recordRuntime(event);
+        }
+        if (!runnerCompleted && hasSettledSubagentHistoryCandidate(kernel.getState())) {
+          const history = input.runtimeSession.runtimeStore.sessions
+            .loadEventsStrict(input.threadId)
+            .map((entry) => entry.event);
+          const terminals = eventsForSettledSubagentHistory(kernel.getState(), history);
+          if (terminals.length > 0) {
+            for (const event of kernel.processEventBatch(terminals)) collector.recordRuntime(event);
+          }
         }
       } finally {
         if (runDeadlineTimer) clearTimeout(runDeadlineTimer);

@@ -71,7 +71,7 @@ test('Store 6 reopens committed create/start receipts after a provider connectio
     // Read through a newly opened Store owner, not the closed first Host. The
     // receipt's original applied revision remains the command decision,
     // while shutdown/recovery may have advanced State to a terminal revision.
-    const reopenedStore = createKiteSessionAppServerStorageComposition({
+    const reopenedStore = await createKiteSessionAppServerStorageComposition({
       databasePath: join(workspace, 'kite-session.sqlite'),
       hostInstanceId: 'restart-receipt-observer',
     });
@@ -200,7 +200,7 @@ test('a pending approval stays durable while a crashed execution owner remains f
     child.kill('SIGKILL');
     expect(await child.exited).not.toBe(0);
 
-    const store = createKiteSessionAppServerStorageComposition({
+    const store = await createKiteSessionAppServerStorageComposition({
       databasePath: join(resolve(checkpointPath, '..'), 'kite-session.sqlite'),
       hostInstanceId: 'restart-interaction-observer',
     });
@@ -314,7 +314,7 @@ async function waitForPersistedInteraction(
   interactionId: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
-    const store = createKiteSessionAppServerStorageComposition({
+    const store = await createKiteSessionAppServerStorageComposition({
       databasePath: join(resolve(checkpointPath, '..'), 'kite-session.sqlite'),
       hostInstanceId: `restart-interaction-observer-${attempt}`,
     });

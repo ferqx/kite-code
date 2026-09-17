@@ -12,7 +12,11 @@ import {
   resolveProjectInstructionSnapshot,
 } from '@kite-ai/builtin-runtime/model';
 import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS, getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
-import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import {
+  type CapabilityBinding,
+  type CapabilityDescriptor,
+  createRuntimeAbortReason,
+} from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
@@ -1927,6 +1931,7 @@ describe('SubAgentRunner integration', () => {
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('review');
     expect(events[0]!.data.name).toBe('Review auth.ts');
+    expect(events[0]!.data.status).toBe('running');
   });
 
   test('error event when aborted before model invoke', async () => {
@@ -1958,17 +1963,9 @@ describe('SubAgentRunner integration', () => {
     const { events, sink } = mockEventSink();
     const ac = new AbortController();
 
-    // Use a model that delays in invoke, giving us time to abort.
-    let _invokeCount = 0;
-    const model = {
-      bindTools: () => model,
-      invoke: async (_msgs: unknown, _opts?: unknown) => {
-        _invokeCount++;
-        // Delay 300ms on first invoke; abort fires at 100ms
-        await new Promise((r) => setTimeout(r, 300));
-        return { content: 'done' };
-      },
-    } as unknown as SupportedChatModel;
+    const model = new StreamingMockModel({
+      responses: [{ message: aiMessage({ content: 'done' }), delay: 300 }],
+    }) as unknown as SupportedChatModel;
 
     // Abort after 100ms — during first model invoke
     setTimeout(() => ac.abort(), 100);
@@ -1984,9 +1981,11 @@ describe('SubAgentRunner integration', () => {
       model: model,
     });
 
-    // The abort should cause the subagent to fail.
+    // An unclassified external abort is interruption, never invented user intent.
     expect(result.ok).toBe(false);
-    expect(events.some((e) => e.type === 'error')).toBe(true);
+    expect(result.terminalStatus).toBe('interrupted');
+    expect(events.find((event) => event.type === 'error')?.data.status).toBe('interrupted');
+    expect(events.some((event) => event.type === 'error')).toBe(true);
   });
 
   test('classifies the role deadline separately from parent cancellation', async () => {
@@ -2041,13 +2040,14 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(result.ok).toBe(false);
-      expect(result.terminalStatus).toBe('failed');
+      expect(result.terminalStatus).toBe('interrupted');
       expect(result.failureDiagnostic?.code).toBe('timed_out');
       expect(events).toContainEqual(
         expect.objectContaining({
           type: 'error',
           data: expect.objectContaining({
             summary: 'Sub-agent execution timed out.',
+            status: 'interrupted',
             diagnostic: expect.objectContaining({ code: 'timed_out' }),
           }),
         }),
@@ -2168,10 +2168,13 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('aborts immediately when signal is already aborted', async () => {
+  test.each([
+    'user',
+    'error',
+  ] as const)('classifies an already aborted %s parent signal', async (cause) => {
     const { events, sink } = mockEventSink();
     const ac = new AbortController();
-    ac.abort(); // Abort before calling runSubAgent
+    ac.abort(createRuntimeAbortReason(cause, 'Parent stopped.')); // Explicit cancellation
 
     const model = new StreamingMockModel({
       responses: [{ message: { content: 'done' } as unknown as AIMessage, delay: 5 }],
@@ -2189,8 +2192,10 @@ describe('SubAgentRunner integration', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.terminalStatus).toBe('cancelled');
-    expect(result.summary).toBe('Cancelled');
+    expect(result.terminalStatus).toBe(cause === 'user' ? 'cancelled' : 'interrupted');
+    expect(result.summary).toBe(
+      cause === 'user' ? 'Cancelled' : 'Sub-agent execution interrupted.',
+    );
     expect(result.failureDiagnostic).toEqual({
       code: 'aborted',
       stage: 'next_round_preparation',
@@ -2199,5 +2204,8 @@ describe('SubAgentRunner integration', () => {
       code: 'aborted',
       stage: 'next_round_preparation',
     });
+    expect(events.find((e) => e.type === 'error')?.data.status).toBe(
+      cause === 'user' ? 'cancelled' : 'interrupted',
+    );
   });
 });

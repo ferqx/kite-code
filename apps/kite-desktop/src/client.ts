@@ -219,6 +219,12 @@ export class DesktopClient {
   hasNativeConnection() {
     return this.#connectionId !== undefined;
   }
+  readStartupStatus() {
+    return this.#native().runtimeStartupStatus();
+  }
+  saveStartupDiagnostic() {
+    return this.#native().saveStartupDiagnostic();
+  }
   async restoreWorkspace() {
     if (this.#connection?.status === 'active') {
       await this.#workspacePreparation;
@@ -1253,15 +1259,8 @@ export class DesktopClient {
     // Explicit creation targets remain independent of the current reading selection.
     if (sessionId === this.#view.selected && (!this.#view.ready || this.#view.loadingSession))
       throw new Error('会话尚未同步完成，请稍后再试。');
-    const trust = this.#view.trust;
-    if (trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
-    const trustedWorkspaceDigest = trust.workspace.workspaceDigest;
-    const knownSession =
-      this.#view.selected === sessionId
-        ? this.#view.projection
-        : this.#view.directory?.find((session) => session.sessionId === sessionId);
-    if (knownSession?.workspaceDigest && knownSession.workspaceDigest !== trustedWorkspaceDigest)
-      throw new Error('请先选择此会话的工作目录再继续任务。');
+    // Existing Sessions are admitted by the Service against their persisted workspace.
+    // A renderer project selection or local directory is not a prerequisite for conversation.
     if (!this.#admitted.has(sessionId)) {
       await this.#command({
         schema: 'kite.runtime-command.v1',
@@ -1278,8 +1277,6 @@ export class DesktopClient {
       sessionId,
     });
     if (result.status !== 'ok' || !result.session) throw new Error('会话当前不可用。');
-    if (result.session.workspaceDigest !== trustedWorkspaceDigest)
-      throw new Error('请先选择此会话的工作目录再继续任务。');
     await this.#command({
       schema: 'kite.runtime-command.v1',
       commandId: crypto.randomUUID(),

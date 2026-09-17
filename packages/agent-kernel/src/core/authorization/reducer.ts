@@ -912,6 +912,10 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
         interactions: focusedInteraction(pendingApprovals, activeApprovalId),
       };
     }
+    case 'auto_review.started':
+      // A durable observation that review execution actually began. Requested
+      // already owns the queue; this fact neither admits nor decides it.
+      return state;
     case 'auto_review.completed': {
       const toolCallId = nonEmptyStringField(payload, 'toolCallId');
       const reviewId = nonEmptyStringField(payload, 'reviewId');

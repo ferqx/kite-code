@@ -18,6 +18,13 @@ import {
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { atomicReplaceInLockedWindowsDirectory } from '@kite-ai/builtin-runtime/filesystem';
+import {
+  acquireManagedReleaseSelectionLock,
+  assertManagedStoreMaintenanceContract,
+  MANAGED_STORE_MAINTENANCE_MARKER,
+  MANAGED_STORE_MAINTENANCE_SCRATCH,
+  recoverManagedStoreMaintenanceScratch,
+} from '@kite-ai/kite-local-runtime/service';
 import { z } from 'zod';
 import {
   currentOssReleaseTarget,
@@ -58,69 +65,137 @@ export async function installOssCandidate(input: {
 }): Promise<InstallMarker> {
   const candidate = await verifyOssCandidate(input.archivePath, currentOssReleaseTarget().id);
   const root = prepareManagedRoot(input.prefix);
-  const existing = loadMarkerIfPresent(root);
-  if (!existing && readdirSync(root).length > 0) {
+  if (!loadMarkerIfPresent(root) && hasUnexpectedUninstalledEntry(root)) {
     throw new Error('Install prefix is not empty and is not managed by Kite Code.');
   }
-  if (existing) {
-    assertMarkerRoot(root, existing);
-    assertManagedTreeForUninstall(root, existing, 128);
-    if (existing.target !== candidate.manifest.target.id) {
-      throw new Error(
-        `Managed install target ${existing.target} cannot be replaced by ${candidate.manifest.target.id}.`,
-      );
+  const releaseSelection = acquireReleaseSelectionForMutation(root);
+  try {
+    if (releaseSelection) recoverManagedStoreMaintenanceScratch(releaseSelection);
+    const existing = loadMarkerIfPresent(root);
+    if (!existing && hasUnexpectedUninstalledEntry(root)) {
+      throw new Error('Install prefix is not empty and is not managed by Kite Code.');
     }
+    assertStoreMaintenanceTargetAllowed(root, candidate.manifest);
+    if (existing) {
+      assertMarkerRoot(root, existing);
+      assertManagedTreeForUninstall(root, existing, 128);
+      if (existing.target !== candidate.manifest.target.id) {
+        throw new Error(
+          `Managed install target ${existing.target} cannot be replaced by ${candidate.manifest.target.id}.`,
+        );
+      }
+    }
+    const releaseRoot = join(root, 'releases', candidate.candidateId);
+    materializeRelease(candidate, releaseRoot);
+    const manifest = verifyMaterializedRelease(releaseRoot, candidate.candidateId);
+    assertInstallableRelease(manifest);
+    assertStoreMaintenanceTargetAllowed(root, manifest);
+    assertMarkerWriteReady(root);
+    activateRelease(root, releaseRoot, manifest);
+    const marker: InstallMarker = {
+      schema: 'KiteCodeManagedInstall',
+      version: INSTALL_MARKER_VERSION,
+      canonicalRoot: realpathSync.native(root),
+      currentCandidateId: candidate.candidateId,
+      previousCandidateId:
+        existing && existing.currentCandidateId !== candidate.candidateId
+          ? existing.currentCandidateId
+          : (existing?.previousCandidateId ?? null),
+      target: candidate.manifest.target.id,
+      activePointer: ACTIVE_RELEASE_POINTER_FILE,
+    };
+    writeActiveReleasePointer(root, candidate.candidateId);
+    writeMarker(root, marker);
+    return marker;
+  } finally {
+    releaseSelection?.release();
   }
-  const releaseRoot = join(root, 'releases', candidate.candidateId);
-  materializeRelease(candidate, releaseRoot);
-  const manifest = verifyMaterializedRelease(releaseRoot, candidate.candidateId);
-  assertInstallableRelease(manifest);
-  assertMarkerWriteReady(root);
-  activateRelease(root, releaseRoot, manifest);
-  const marker: InstallMarker = {
-    schema: 'KiteCodeManagedInstall',
-    version: INSTALL_MARKER_VERSION,
-    canonicalRoot: realpathSync.native(root),
-    currentCandidateId: candidate.candidateId,
-    previousCandidateId:
-      existing && existing.currentCandidateId !== candidate.candidateId
-        ? existing.currentCandidateId
-        : (existing?.previousCandidateId ?? null),
-    target: candidate.manifest.target.id,
-    activePointer: ACTIVE_RELEASE_POINTER_FILE,
-  };
-  writeActiveReleasePointer(root, candidate.candidateId);
-  writeMarker(root, marker);
-  return marker;
 }
 
 export function rollbackOssCandidate(prefix: string): InstallMarker {
   const root = requireManagedRoot(prefix);
-  const marker = loadMarker(root);
-  assertManagedTreeForUninstall(root, marker, 128);
-  if (!marker.previousCandidateId) throw new Error('No previous Kite Code candidate is available.');
-  const releaseRoot = join(root, 'releases', marker.previousCandidateId);
-  const manifest = verifyMaterializedRelease(releaseRoot, marker.previousCandidateId);
-  assertInstallableRelease(manifest);
-  assertMarkerWriteReady(root);
-  activateRelease(root, releaseRoot, manifest);
-  const next: InstallMarker = {
-    ...marker,
-    currentCandidateId: marker.previousCandidateId,
-    previousCandidateId: marker.currentCandidateId,
-    target: manifest.target.id,
-  };
-  writeActiveReleasePointer(root, marker.previousCandidateId);
-  writeMarker(root, next);
-  return next;
+  const releaseSelection = acquireReleaseSelectionForMutation(root);
+  try {
+    if (releaseSelection) recoverManagedStoreMaintenanceScratch(releaseSelection);
+    const marker = loadMarker(root);
+    assertManagedTreeForUninstall(root, marker, 128);
+    if (!marker.previousCandidateId)
+      throw new Error('No previous Kite Code candidate is available.');
+    const releaseRoot = join(root, 'releases', marker.previousCandidateId);
+    const manifest = verifyMaterializedRelease(releaseRoot, marker.previousCandidateId);
+    assertInstallableRelease(manifest);
+    assertStoreMaintenanceTargetAllowed(root, manifest);
+    assertMarkerWriteReady(root);
+    activateRelease(root, releaseRoot, manifest);
+    const next: InstallMarker = {
+      ...marker,
+      currentCandidateId: marker.previousCandidateId,
+      previousCandidateId: marker.currentCandidateId,
+      target: manifest.target.id,
+    };
+    writeActiveReleasePointer(root, marker.previousCandidateId);
+    writeMarker(root, next);
+    return next;
+  } finally {
+    releaseSelection?.release();
+  }
 }
 
 export function uninstallOssCandidate(prefix: string): void {
   const root = requireManagedRoot(prefix);
-  const marker = loadMarker(root);
-  assertMarkerRoot(root, marker);
-  assertManagedTreeForUninstall(root, marker, 128);
-  rmSync(root, { recursive: true, force: false });
+  const releaseSelection = acquireReleaseSelectionForMutation(root);
+  try {
+    if (releaseSelection) recoverManagedStoreMaintenanceScratch(releaseSelection);
+    const marker = loadMarker(root);
+    assertMarkerRoot(root, marker);
+    assertManagedTreeForUninstall(root, marker, 128);
+    if (releaseSelection) {
+      // Keep the locked inode and contract marker stable across uninstall/reinstall.
+      releaseSelection.revalidate();
+      rmSync(join(root, 'bin'), { recursive: true, force: false });
+      rmSync(join(root, 'releases'), { recursive: true, force: false });
+      rmSync(join(root, ACTIVE_RELEASE_POINTER_FILE), { force: false });
+      rmSync(markerPath(root), { force: false });
+      syncDirectory(root);
+      releaseSelection.revalidate();
+    } else {
+      rmSync(root, { recursive: true, force: false });
+    }
+  } finally {
+    releaseSelection?.release();
+  }
+}
+
+function hasUnexpectedUninstalledEntry(root: string): boolean {
+  if (existsSync(join(root, MANAGED_STORE_MAINTENANCE_MARKER))) {
+    assertManagedStoreMaintenanceContract(root);
+  }
+  return readdirSync(root).some(
+    (name) =>
+      name !== '.release-selection.lock' &&
+      name !== MANAGED_STORE_MAINTENANCE_MARKER &&
+      name !== MANAGED_STORE_MAINTENANCE_SCRATCH,
+  );
+}
+
+function acquireReleaseSelectionForMutation(root: string) {
+  // Windows installation remains supported, but Store migration itself is not qualified there.
+  return process.platform === 'darwin' || process.platform === 'linux'
+    ? acquireManagedReleaseSelectionLock(root, 'exclusive')
+    : undefined;
+}
+
+function assertStoreMaintenanceTargetAllowed(
+  root: string,
+  manifest: z.infer<typeof ossCandidateManifestSchema>,
+): void {
+  if (!existsSync(join(root, MANAGED_STORE_MAINTENANCE_MARKER))) return;
+  assertManagedStoreMaintenanceContract(root);
+  if (manifest.storeMaintenanceContract !== 'managed-release-selection-v1') {
+    throw new Error(
+      'This candidate cannot be selected for a Store that uses managed release maintenance. Keep the current compatible candidate active and install a maintenance-aware candidate before rollback.',
+    );
+  }
 }
 
 export function readInstallStatus(prefix: string): InstallMarker {
@@ -530,7 +605,17 @@ function assertManagedTreeForUninstall(
   marker: InstallMarker,
   maxEntries: number,
 ): void {
-  const expected = new Set<string>([MARKER_FILE, ACTIVE_RELEASE_POINTER_FILE, 'bin', 'releases']);
+  const expected = new Set<string>([
+    MARKER_FILE,
+    ACTIVE_RELEASE_POINTER_FILE,
+    'bin',
+    'releases',
+    '.release-selection.lock',
+  ]);
+  if (existsSync(join(root, MANAGED_STORE_MAINTENANCE_MARKER))) {
+    assertManagedStoreMaintenanceContract(root);
+    expected.add(MANAGED_STORE_MAINTENANCE_MARKER);
+  }
   const windows = marker.target.startsWith('windows-');
   const suffix = windows ? '.exe' : '';
   expected.add(`bin/kite${suffix}`);

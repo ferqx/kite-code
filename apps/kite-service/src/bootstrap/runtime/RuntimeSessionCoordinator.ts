@@ -27,6 +27,7 @@ import type {
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
+import { persistedWorkspaceIdentity } from '../../config/persisted-workspace-identity';
 import type {
   InstalledKiteRuntimeComposition,
   InstalledKiteRuntimeCompositionFactory,
@@ -83,7 +84,7 @@ export interface AuthorizedExecutionControl {
   getState: () => Readonly<RuntimeState>;
   processEvent: (event: RuntimeEvent) => void;
   processEventBatch: (events: RuntimeEvent[]) => RuntimeEvent[];
-  cancelRun: (reason?: string) => RuntimeEvent[];
+  cancelRun: (reason?: string, cause?: 'user' | 'error') => RuntimeEvent[];
 }
 
 export interface RuntimeSessionCoordinatorIdentity {
@@ -143,7 +144,9 @@ export interface RuntimeSessionCoordinator {
   /** Applies the Host-prepared sandbox fact before the next turn. */
   updateSandboxAvailable(available: boolean): void;
   getSandboxAvailable(): boolean | undefined;
-  setActiveCancelRun(cancelRun: (reason?: string) => RuntimeEvent[]): void;
+  setActiveCancelRun(
+    cancelRun: (reason?: string, cause?: 'user' | 'error') => RuntimeEvent[],
+  ): void;
   clearActiveCancelRun(): void;
   commitInteractionModeCommand(
     command: Extract<RuntimeCommand, { readonly type: 'set_interaction_mode' }>,
@@ -243,7 +246,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   readonly recoveryChanged: boolean;
   #lifecycle: RuntimeSessionCoordinator['lifecycle'] = 'idle';
   #activeOperation: 'turn' | 'compacting' | null = null;
-  #activeCancelRun: (reason?: string) => RuntimeEvent[] = () => [];
+  #activeCancelRun: (reason?: string, cause?: 'user' | 'error') => RuntimeEvent[] = () => [];
   #activeCommittedCommandCancel: RuntimeCommittedCommandCancellation = () => undefined;
   #operationCompletion: Promise<void> = Promise.resolve();
   #resolveOperationCompletion: (() => void) | null = null;
@@ -298,7 +301,15 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     // comparison intentionally case-folds Windows paths, but re-hashing that
     // separate projection would invalidate durable identities created from
     // native realpaths (notably 8.3 aliases and drive-letter casing).
-    const projectIdentity = resolveProjectIdentity(identity.workspace);
+    const projectIdentity = (() => {
+      try {
+        return resolveProjectIdentity(identity.workspace);
+      } catch {
+        const persisted = persistedWorkspaceIdentity(identity.workspace);
+        if (!persisted) throw new Error('Runtime session Workspace is unavailable.');
+        return persisted;
+      }
+    })();
     if (
       !identity.projectId.startsWith('project_') ||
       identity.canonicalWorkspaceDigest !== projectIdentity.workspaceDigest
@@ -423,11 +434,11 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         this.#recordLastAppliedEventRevisions(before);
         return applied;
       },
-      cancelRun: (reason?: string) => {
+      cancelRun: (reason?: string, cause?: 'user' | 'error') => {
         this.#assertOpen();
         // The registered turn cancellation persists through #runtimePort,
         // which records the exact State for every canonical event.
-        return this.#activeCancelRun(reason);
+        return this.#activeCancelRun(reason, cause);
       },
     });
   }
@@ -511,7 +522,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     return this.#sandboxAvailable;
   }
 
-  setActiveCancelRun(cancelRun: (reason?: string) => RuntimeEvent[]): void {
+  setActiveCancelRun(
+    cancelRun: (reason?: string, cause?: 'user' | 'error') => RuntimeEvent[],
+  ): void {
     this.#assertOpen();
     this.#activeCancelRun = cancelRun;
   }
@@ -542,7 +555,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   ): CommittedControlCommand {
     this.#assertOpen();
     const before = this.session.getState();
-    const committed = commitCancelTurnCommand(this.session, command, evidence);
+    const history = this.#store.sessions
+      .loadEventsStrict(this.sessionId)
+      .map((entry) => entry.event);
+    const committed = commitCancelTurnCommand(this.session, command, evidence, history);
     this.#recordLastAppliedEventRevisions(before);
     this.#activeCommittedCommandCancel(committed.events, 'Cancelled by user.');
     return committed;
@@ -557,7 +573,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
     }
     const before = this.session.getState();
-    const committed = commitCloseSessionCommand(this.session, command, evidence);
+    const history = this.#store.sessions
+      .loadEventsStrict(this.sessionId)
+      .map((entry) => entry.event);
+    const committed = commitCloseSessionCommand(this.session, command, evidence, history);
     this.#recordLastAppliedEventRevisions(before);
     if (committed.wasActive) {
       this.#activeCommittedCommandCancel(committed.events, 'Runtime session closed.');

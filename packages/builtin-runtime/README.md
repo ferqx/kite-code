@@ -64,7 +64,7 @@
 - 已证明只读的POSIX Shell使用固定非登录`/bin/sh`、Workspace外的可信`PATH`与中性`HOME/XDG_CONFIG_HOME`；
   Git关闭system/global config、credential prompt、pager、optional locks与fsmonitor，且不从Runtime环境注入
   `GIT_EXTERNAL_DIFF`。空字符串会让Git尝试执行空helper，不得作为关闭方式。
-- 未通过只读grammar且无法完整确定effects的Shell固定编译为exact真人审批；Auto/Full不绕过这次确认。危险程序名只在
+- 未通过只读grammar且无法完整确定effects的Shell固定编译为需审批；Auto交由审批模型判断，Accept Edits/Full请求真人审批。危险程序名只在
   executable位置匹配，参数或输出中的`format`/`diskpart`等词不能生成destructive事实。审批仍绑定原sandbox scope，
   不因effects未知自动取得网络、Workspace外路径或Full authority。
 - Shell进程已经确定退出且`ok=false`时投影低基数`tool_reported_failure` classifier advice并固定不自动重试；

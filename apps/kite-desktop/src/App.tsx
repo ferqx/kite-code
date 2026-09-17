@@ -1,11 +1,4 @@
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
   Approval,
   Button,
   Dialog,
@@ -20,7 +13,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import appIcon from '../app-icon.svg';
 import { CommandResultUnknown, type DesktopClient } from './client';
 import { Interaction } from './Interaction';
-import { isActiveRun } from './presentation';
+import { OperationToast } from './OperationToast';
+import { isActiveRun, projectEvent } from './presentation';
 import { Settings } from './Settings';
 import './startup.css';
 
@@ -80,6 +74,9 @@ export function App({ client }: { client: DesktopClient }) {
   >('auto');
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
+  const [startupMessage, setStartupMessage] = useState<string | null>(null);
+  const [diagnosticAvailable, setDiagnosticAvailable] = useState(false);
+  const [diagnosticSaveError, setDiagnosticSaveError] = useState('');
   const [startupAttempt, setStartupAttempt] = useState(0);
   const busyRef = useRef(false);
   const submittingRef = useRef(false);
@@ -107,6 +104,28 @@ export function App({ client }: { client: DesktopClient }) {
       ? newConversationBranch
       : view.branch;
   const preparingActiveWorkspace = !preparing || conversationWorkspace === workspace;
+
+  useEffect(() => {
+    if (startup === 'ready') return;
+    let active = true;
+    const refresh = () => {
+      void client.readStartupStatus().then(
+        (status) => {
+          if (active) {
+            setStartupMessage(status?.message ?? null);
+            setDiagnosticAvailable(status?.diagnosticAvailable ?? false);
+          }
+        },
+        () => undefined,
+      );
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 200);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [client, startup]);
   const operationError =
     view.commandError ||
     view.projectError ||
@@ -121,8 +140,7 @@ export function App({ client }: { client: DesktopClient }) {
   const selectedWorkspace =
     selectedSession?.workspace ??
     (projection?.workspaceDigest === view.trust?.workspace.workspaceDigest ? workspace : undefined);
-  const readingWorkspace = selectedWorkspace ?? selectedSession?.workspaceId ?? workspace;
-  const draftKey = preparing ? 'new-conversation' : `${readingWorkspace}\0${selected}`;
+  const draftKey = preparing ? 'new-conversation' : `session:${selected}`;
   const draft = drafts[draftKey] ?? '';
   const stopping =
     isActiveRun(projection) &&
@@ -297,7 +315,7 @@ export function App({ client }: { client: DesktopClient }) {
   const model = preparing
     ? (newConversationModel ?? view.models?.selected)
     : selected
-      ? (sessionModels[selected] ?? projection?.model ?? view.models?.selected)
+      ? (sessionModels[selected] ?? projection?.model)
       : undefined;
   const submissionInFlight =
     !!firstSubmission &&
@@ -311,9 +329,7 @@ export function App({ client }: { client: DesktopClient }) {
     !submissionInFlight &&
     (preparing || selectingSession === undefined) &&
     connected &&
-    (preparing
-      ? !!conversationWorkspace
-      : ready && !loadingSession && !!selected && !!selectedWorkspace);
+    (preparing ? !!conversationWorkspace : ready && !loadingSession && !!selected);
   const submissionVisible =
     !!firstSubmission &&
     (firstSubmission.sessionId
@@ -341,17 +357,23 @@ export function App({ client }: { client: DesktopClient }) {
           !firstSubmission?.baselineUserIds.includes(message.id),
       )
     : -1;
+  const pendingAskMessages =
+    interaction &&
+    interaction.kind === 'input' &&
+    !view.messages.some((message) => message.id === `interaction:${interaction.interactionId}`)
+      ? projectEvent(view.messages, { type: 'interaction.available', interaction })
+      : view.messages;
   const displayedMessages = optimisticMessage
     ? preparing
       ? [optimisticMessage]
       : optimisticRuntimeIndex < 0
-        ? [...view.messages, optimisticMessage]
-        : view.messages.map((message, index) =>
+        ? [...pendingAskMessages, optimisticMessage]
+        : pendingAskMessages.map((message, index) =>
             index === optimisticRuntimeIndex ? optimisticMessage : message,
           )
     : workbenchView || scheduledTasksView || preparing
       ? []
-      : view.messages;
+      : pendingAskMessages;
   const directory = directorySnapshot ?? view.sessions;
   if (startup !== 'ready')
     return (
@@ -364,14 +386,29 @@ export function App({ client }: { client: DesktopClient }) {
           <img src={appIcon} width="56" height="56" alt="" />
           <h1>kite</h1>
           {startup === 'loading' ? (
-            <p role="status">正在准备你的工作空间…</p>
+            <p role="status">{startupMessage ?? '正在准备你的工作空间…'}</p>
           ) : (
             <>
               <p role="alert">启动未完成：{startupError}</p>
+              {diagnosticAvailable && (
+                <Button
+                  onClick={() => {
+                    void client.saveStartupDiagnostic().catch((error: unknown) => {
+                      setDiagnosticSaveError(error instanceof Error ? error.message : '保存失败。');
+                    });
+                  }}
+                >
+                  保存诊断
+                </Button>
+              )}
+              {diagnosticSaveError && <p role="alert">{diagnosticSaveError}</p>}
               <Button
                 onClick={() => {
                   setStartup('loading');
                   setStartupError('');
+                  setStartupMessage(null);
+                  setDiagnosticAvailable(false);
+                  setDiagnosticSaveError('');
                   client.clearError();
                   setStartupAttempt((attempt) => attempt + 1);
                 }}
@@ -501,28 +538,13 @@ export function App({ client }: { client: DesktopClient }) {
       }
       notices={
         <>
-          {operationError && (
-            <AlertDialog open>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>操作未完成</AlertDialogTitle>
-                  <AlertDialogDescription>{operationError}</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  {view.recoverySessionId && (
-                    <Button
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => void act(() => client.checkSessionRecovery())}
-                    >
-                      检查恢复
-                    </Button>
-                  )}
-                  <AlertDialogAction onClick={dismissOperationError}>确定</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
+          <OperationToast
+            message={operationError}
+            recovery={operationError === view.error && !!view.recoverySessionId}
+            busy={busy}
+            onDismiss={dismissOperationError}
+            onRecover={() => void act(() => client.checkSessionRecovery())}
+          />
           {view.trust &&
             preparingActiveWorkspace &&
             view.trust.status !== 'trusted' &&
@@ -752,7 +774,7 @@ export function App({ client }: { client: DesktopClient }) {
                               sessionId: targetSession,
                             });
                             const current = client.getSnapshot();
-                            submittedKey = `${current.workspace}\0${targetSession}`;
+                            submittedKey = `session:${targetSession}`;
                             setDrafts((values) => ({
                               ...values,
                               [submittedKey]: values[draftKey] ?? '',
@@ -771,20 +793,6 @@ export function App({ client }: { client: DesktopClient }) {
                           }
                           if (!preparing) {
                             targetSession = selected;
-                            if (selectedWorkspace !== client.getSnapshot().workspace) {
-                              if (
-                                !selectedWorkspace ||
-                                !(await activateForWork(selectedWorkspace))
-                              ) {
-                                abandonPendingSend();
-                                return;
-                              }
-                              if (navigationRevision.current !== submittedNavigation) {
-                                abandonPendingSend();
-                                return;
-                              }
-                              await client.selectSession(selected!);
-                            }
                             if (retryingFirst && firstSubmission.permissionRequired) {
                               await client.setInteractionMode(
                                 targetSession!,
@@ -819,7 +827,7 @@ export function App({ client }: { client: DesktopClient }) {
                               targetSession
                             ) {
                               const current = client.getSnapshot();
-                              submittedKey = `${current.workspace}\0${targetSession}`;
+                              submittedKey = `session:${targetSession}`;
                               const permissionRequired =
                                 current.selected !== targetSession ||
                                 current.interactionMode !== newConversationPermission;
@@ -839,7 +847,7 @@ export function App({ client }: { client: DesktopClient }) {
                             const current = client.getSnapshot();
                             targetSession = sessionCreated ? targetSession : error.sessionId;
                             if (targetSession) {
-                              submittedKey = `${current.workspace}\0${targetSession}`;
+                              submittedKey = `session:${targetSession}`;
                               if (navigationRevision.current === submittedNavigation) {
                                 setNewConversation(false);
                                 rememberNavigation(current.workspace, targetSession);

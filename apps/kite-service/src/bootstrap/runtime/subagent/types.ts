@@ -203,7 +203,7 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
-  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
+  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
   error?: string;
   /** Content-free reason retained across the private Provider observation seam. */
   failureDiagnostic?: SubAgentFailureDiagnostic;

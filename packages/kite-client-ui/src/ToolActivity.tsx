@@ -15,7 +15,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react';
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { FileDiff } from './FileChanges';
-import { statusLabel } from './status';
+import { childStatusLabel, statusLabel } from './status';
 import type { Message } from './types';
 import { Button } from './ui';
 
@@ -99,10 +99,12 @@ function toolTarget(message: Message): string | undefined {
   }
 }
 
-function resultPreview(message: Message): string | undefined {
+function resultPreview(message: Message, showReadFailure = false): string | undefined {
+  if (message.status === 'cancelled') return undefined;
   if (message.approval?.reason && ['rejected', 'awaiting_user'].includes(message.approval.state))
     return message.approval.reason;
-  if (message.toolName === 'read_file') return undefined;
+  if (message.toolName === 'read_file' && !(showReadFailure && message.status === 'failed'))
+    return undefined;
   if (message.toolResult?.terminationReason === 'timed_out') return '执行超时';
   if (message.toolResult?.terminationReason === 'cancelled') return '执行已取消';
   if (message.toolResult?.terminationReason === 'sandbox_denied') return '执行被沙箱拒绝';
@@ -200,6 +202,8 @@ function approvalLabel(message: Message): string | undefined {
 }
 
 function executionLabel(message: Message) {
+  if (message.toolName === 'task' && message.childLifecycle)
+    return childStatusLabel(message.childLifecycle);
   if (stoppedDuringAutoReview(message)) return '未执行';
   if (message.approval?.state === 'reviewing' && !message.settled) return '';
   if (message.approval?.state === 'awaiting_user' && !message.settled) return '等待人工审批';
@@ -235,7 +239,11 @@ function ShellOutput({ message }: { message: Message }) {
     ? '任务在自动审批期间停止，命令未开始执行。'
     : reason ||
       streams ||
-      (message.status === 'completed' ? '命令执行成功，无输出。' : message.text);
+      (message.status === 'completed'
+        ? '命令执行成功，无输出。'
+        : message.status === 'cancelled'
+          ? '命令已停止。'
+          : message.text);
   // biome-ignore lint/correctness/useExhaustiveDependencies: output commits change the scroll height.
   useLayoutEffect(() => {
     if (follow.current && viewport.current)
@@ -260,6 +268,7 @@ function ShellOutput({ message }: { message: Message }) {
         {streams &&
         ['cancelled', 'failed', 'rejected'].includes(message.status ?? '') &&
         message.text &&
+        message.text !== 'Tool execution cancelled.' &&
         !streams.includes(message.text)
           ? `\n${message.text}`
           : ''}
@@ -287,7 +296,15 @@ function ShellOutput({ message }: { message: Message }) {
   );
 }
 
-function ToolRow({ message, openFile }: { message: Message; openFile?: (path: string) => void }) {
+export function ToolRow({
+  message,
+  openFile,
+  showReadFailure,
+}: {
+  message: Message;
+  openFile?: (path: string) => void;
+  showReadFailure?: boolean;
+}) {
   const target = toolTarget(message);
   const file = ['read_file', 'edit_file', 'write_file'].includes(message.toolName ?? '');
   const approval = approvalLabel(message);
@@ -316,15 +333,25 @@ function ToolRow({ message, openFile }: { message: Message; openFile?: (path: st
               {approval}
             </span>
           )}
-          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
-            <span className="tool-step-status" data-status={message.status}>
-              {status}
-            </span>
-          )}
+          {status &&
+            status !== '成功' &&
+            status !== approval &&
+            (message.status !== 'running' || message.childLifecycle) && (
+              <span
+                className="tool-step-status"
+                data-status={message.childLifecycle ?? message.status}
+              >
+                {status}
+              </span>
+            )}
         </div>
         {(message.approval?.state === 'awaiting_user' ||
           ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
-          resultPreview(message) && <p className="tool-step-preview">{resultPreview(message)}</p>}
+          resultPreview(message, showReadFailure) && (
+            <span className="tool-step-preview" title={resultPreview(message, showReadFailure)}>
+              {resultPreview(message, showReadFailure)}
+            </span>
+          )}
       </div>
     </div>
   );
@@ -336,8 +363,10 @@ export function ToolActivity({
   onToggle,
   openFile,
   renderChildren,
+  suppressGenericFailure,
   expandedItems,
   onToggleItem,
+  childProcess = false,
 }: {
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
@@ -346,6 +375,8 @@ export function ToolActivity({
   onToggle: (open: boolean) => void;
   openFile?: (path: string) => void;
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
+  suppressGenericFailure?: boolean;
+  childProcess?: boolean;
 }) {
   const message = messages[0]!;
   let ask = message.ask;
@@ -373,18 +404,24 @@ export function ToolActivity({
     );
   const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
   const active = messages.some((item) => !item.settled);
-  const running = messages.some((item) => !item.settled && item.status === 'running');
+  const running = messages.some((item) =>
+    item.childLifecycle
+      ? item.childLifecycle === 'creating' || item.childLifecycle === 'running'
+      : !item.settled && item.status === 'running',
+  );
   const issues = messages.filter((item) =>
     ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
   );
+  const childIssue = childProcess && issues.length > 0;
   const open = expanded ?? (grouped && active);
   const children = messages.map((item) => renderChildren(item.id.slice(5), open));
   const approval = approvalLabel(message);
-  const pendingReview = !message.settled && message.approval?.state === 'reviewing';
+  const pendingReview =
+    !message.childLifecycle && !message.settled && message.approval?.state === 'reviewing';
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
-    !read &&
-    (!edit || hasDiff) &&
+    (!read || childIssue) &&
+    (!edit || hasDiff || childIssue) &&
     !pendingReview &&
     (grouped ||
       shell ||
@@ -413,13 +450,7 @@ export function ToolActivity({
         ? undefined
         : '已取消'
       : grouped
-        ? issues.length
-          ? `${issues.length} 项异常`
-          : running
-            ? '正在执行'
-            : active
-              ? '等待执行'
-              : ''
+        ? undefined
         : executionLabel(message);
   const heading = (
     <>
@@ -443,12 +474,33 @@ export function ToolActivity({
       {status && (grouped || !shell || !open) && status !== '成功' && status !== approval && (
         <span
           className="tool-activity-state"
-          data-status={issues.length ? 'issue' : 'neutral'}
+          data-status={
+            message.childLifecycle
+              ? ['failed', 'interrupted', 'cancelled'].includes(message.childLifecycle)
+                ? 'issue'
+                : 'neutral'
+              : issues.length
+                ? 'issue'
+                : 'neutral'
+          }
           role="status"
         >
           {status}
         </span>
       )}
+      {!childProcess &&
+        !open &&
+        !grouped &&
+        !shell &&
+        !read &&
+        !edit &&
+        issues.length > 0 &&
+        !(suppressGenericFailure && message.text === 'Tool execution failed.') &&
+        resultPreview(message) && (
+          <span className="tool-step-preview" title={resultPreview(message)}>
+            {resultPreview(message)}
+          </span>
+        )}
     </>
   );
   return (
@@ -456,9 +508,9 @@ export function ToolActivity({
       className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
       aria-label={`${label}${status ? ` · ${status}` : ''}`}
     >
-      {read ? (
+      {read && !childIssue ? (
         <ToolRow message={message} openFile={openFile} />
-      ) : edit ? (
+      ) : edit && !childIssue ? (
         <div className="tool-activity-summary tool-edit-heading">
           <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
           <span className="tool-label">{label}</span>
@@ -486,11 +538,21 @@ export function ToolActivity({
               {approval}
             </span>
           )}
-          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
-            <span className="tool-step-status" data-status={message.status}>
-              {status}
-            </span>
-          )}
+          {status &&
+            status !== '成功' &&
+            status !== approval &&
+            (message.status !== 'running' || message.childLifecycle) && (
+              <span className="tool-step-status" data-status={message.status}>
+                {status}
+              </span>
+            )}
+          {!hasDiff &&
+            (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
+            resultPreview(message) && (
+              <span className="tool-step-preview" title={resultPreview(message)}>
+                {resultPreview(message)}
+              </span>
+            )}
         </div>
       ) : canExpand ? (
         <Button
@@ -504,18 +566,6 @@ export function ToolActivity({
       ) : (
         <div className="tool-activity-summary">{heading}</div>
       )}
-      {edit && !hasDiff && (issues.length > 0 || message.approval?.state === 'awaiting_user') && (
-        <p className="tool-step-preview">{resultPreview(message)}</p>
-      )}
-      {!open &&
-        grouped &&
-        issues
-          .filter((item) => resultPreview(item))
-          .map((item) => (
-            <p className="tool-step-preview" key={item.id}>
-              {toolTarget(item)} · {resultPreview(item)}
-            </p>
-          ))}
       {open && grouped && (
         <div className="tool-activity-steps">
           {messages.map((item) =>
@@ -545,7 +595,8 @@ export function ToolActivity({
               <div className="tool-ask-answer" key={question.id}>
                 <span className="tool-ask-prefix">{index + 1}. </span>
                 <span className="tool-ask-text">
-                  {question.question}：{ask.answers?.[question.id] ?? '尚未回答'}
+                  {question.question.replace(/[：:]\s*$/, '')}：
+                  {ask.answers?.[question.id] ?? '尚未回答'}
                 </span>
               </div>
             ))
@@ -563,13 +614,15 @@ export function ToolActivity({
         !grouped &&
         !ask &&
         !shell &&
-        !edit &&
-        !read &&
+        (!edit || childIssue) &&
+        (!read || childIssue) &&
         message.toolName !== 'task' &&
-        message.text && <pre className="tool-detail">{message.text}</pre>}
-      {!open && !grouped && !shell && !read && !edit && issues.length > 0 && (
-        <p className="tool-step-preview">{resultPreview(message)}</p>
-      )}
+        !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
+        (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
+          <pre className="tool-detail">
+            {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
+          </pre>
+        )}
       {open && <div className="tool-activity-children">{children}</div>}
     </article>
   );

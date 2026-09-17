@@ -1,6 +1,6 @@
 # kite-desktop
 
-> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+> 实施中：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)已统一正式数据入口，并验证 macOS 已知格式的自动整理、历史来源归并和原会话保留。未知格式保留原数据，不切换空库；完整方案与未验证平台的边界以计划中的最新验收记录为准。
 
 
 本 workspace 是 Electron 桌面 presentation 与本机宿主 owner：React/shadcn UI 在沙箱 renderer 中运行，Electron 主进程提供受限本机能力，业务执行继续由独立 Kite Runtime Host 承担。迁移实现与本机自动原生验收已完成，制品身份和验证边界见[原生验收](docs/native-validation.md#electron-本机迁移验收)。

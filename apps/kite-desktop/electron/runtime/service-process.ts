@@ -6,6 +6,10 @@ import {
   describeServiceStartupFailure,
   MAX_SERVICE_STARTUP_STDERR_BYTES,
   parseServiceStartupDiagnostic,
+  parseServiceStartupProgress,
+  SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
+  type ServiceStartupDiagnostic,
+  type ServiceStartupPhase,
 } from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { AsyncMutex } from '../async-mutex';
 
@@ -127,6 +131,10 @@ export interface ServiceProcessOptions {
   runtimeRoot: string;
   buildId: string;
   environmentKeys: readonly string[];
+  pairedManifestSha256?: string;
+  sourceRepositoryRoot?: string;
+  onStartupPhase?: (phase: ServiceStartupPhase) => void;
+  onStartupDiagnostic?: (diagnostic: ServiceStartupDiagnostic) => void;
 }
 
 /** One exact paired Service child with bounded stdout retention and EOF-owned cleanup. */
@@ -142,19 +150,32 @@ export class ServiceProcess {
   #initialized = false;
   #startupStderr = '';
   #startupStderrOverflow = false;
+  #startupLine = '';
+  #startupLineOverflow = false;
   readonly #stderrClosed: Promise<void>;
   #closePromise?: Promise<void>;
   #startupFailurePromise?: Promise<void>;
+  readonly #onStartupDiagnostic?: (diagnostic: ServiceStartupDiagnostic) => void;
   readonly #ready: Promise<void>;
   readonly #exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 
-  static async start(options: ServiceProcessOptions): Promise<ServiceProcess> {
+  static async start(
+    options: ServiceProcessOptions,
+    onCreated?: (process: ServiceProcess) => void,
+  ): Promise<ServiceProcess> {
     const process = new ServiceProcess(options);
+    try {
+      onCreated?.(process);
+    } catch (error) {
+      await process.close().catch(() => undefined);
+      throw error;
+    }
     await process.#ready;
     return process;
   }
 
   private constructor(options: ServiceProcessOptions) {
+    this.#onStartupDiagnostic = options.onStartupDiagnostic;
     const source = process.env;
     const environment: NodeJS.ProcessEnv = {
       HOME: options.home,
@@ -168,9 +189,20 @@ export class ServiceProcess {
     };
     if (options.workspace) environment.KITE_APP_SERVER_WORKSPACE = options.workspace;
     for (const key of options.environmentKeys) {
+      const reserved = key.toUpperCase();
+      if (reserved.startsWith('KITE_') || ['HOME', 'USERPROFILE', 'NODE_ENV'].includes(reserved)) {
+        throw new Error(
+          'The paired Service environment cannot override its pinned data or build identity.',
+        );
+      }
       const value = source[key];
       if (value !== undefined) environment[key] = value;
     }
+    if (options.pairedManifestSha256) {
+      environment.KITE_DESKTOP_PAIRED_MANIFEST_SHA256 = options.pairedManifestSha256;
+    }
+    if (options.sourceRepositoryRoot)
+      environment.KITE_DESKTOP_SOURCE_ROOT = options.sourceRepositoryRoot;
     this.#child = spawn(options.executable, ['app-server', 'run-stdio'], {
       cwd: options.home,
       env: environment,
@@ -184,19 +216,13 @@ export class ServiceProcess {
     this.#child.stderr.on('error', () => undefined);
     this.#stderrClosed = new Promise<void>((resolve) => {
       this.#child.stderr.on('data', (value: Buffer | string) => {
-        if (this.#initialized || this.#startupStderrOverflow) return;
-        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-        if (
-          Buffer.byteLength(this.#startupStderr, 'utf8') + chunk.length >
-          MAX_SERVICE_STARTUP_STDERR_BYTES
-        ) {
-          this.#startupStderr = '';
-          this.#startupStderrOverflow = true;
-          return;
-        }
-        this.#startupStderr += chunk.toString('utf8');
+        if (this.#initialized) return;
+        this.#consumeStartupStderr(Buffer.isBuffer(value) ? value : Buffer.from(value), options);
       });
-      this.#child.stderr.once('close', resolve);
+      this.#child.stderr.once('close', () => {
+        this.#finishStartupLine(options);
+        resolve();
+      });
     });
     this.#ready = new Promise((resolve, reject) => {
       this.#child.once('spawn', resolve);
@@ -223,9 +249,69 @@ export class ServiceProcess {
     return this.#finished;
   }
 
+  /** A request, not a cancellation acknowledgement. Publication may still need to settle. */
+  requestStartupCancellation(): void {
+    if (process.platform === 'win32' || this.#initialized || this.#finished) return;
+    void this.#ready.then(
+      () => {
+        if (this.#initialized || this.#finished) return;
+        try {
+          this.#child.kill('SIGTERM');
+        } catch {
+          // Startup may have exited concurrently; close still waits for its actual exit.
+        }
+      },
+      () => undefined,
+    );
+  }
+
   markInitialized(): void {
     this.#initialized = true;
     this.#startupStderr = '';
+    this.#startupLine = '';
+  }
+
+  #consumeStartupStderr(chunk: Buffer, options: ServiceProcessOptions): void {
+    for (const byte of chunk) {
+      if (byte === 0x0a) {
+        this.#finishStartupLine(options);
+        continue;
+      }
+      if (this.#startupLineOverflow) continue;
+      if (this.#startupLine.length >= MAX_SERVICE_STARTUP_STDERR_BYTES) {
+        this.#startupLine = '';
+        this.#startupLineOverflow = true;
+        continue;
+      }
+      this.#startupLine += String.fromCharCode(byte);
+    }
+  }
+
+  #finishStartupLine(options: ServiceProcessOptions): void {
+    if (this.#startupLineOverflow) {
+      this.#startupLineOverflow = false;
+      return;
+    }
+    const line = this.#startupLine;
+    this.#startupLine = '';
+    if (!line || this.#initialized) return;
+    const progress = parseServiceStartupProgress(line);
+    if (progress) {
+      try {
+        options.onStartupPhase?.(progress.phase);
+      } catch {
+        // UI observers cannot change the owned Service lifecycle.
+      }
+      return;
+    }
+    if (!line.startsWith(SERVICE_STARTUP_DIAGNOSTIC_PREFIX)) return;
+    if (this.#startupStderrOverflow) return;
+    if (this.#startupStderr.length + line.length + 1 > MAX_SERVICE_STARTUP_STDERR_BYTES) {
+      this.#startupStderr = '';
+      this.#startupStderrOverflow = true;
+      return;
+    }
+    this.#startupStderr += `${line}\n`;
   }
 
   async send(frame: string): Promise<void> {
@@ -292,12 +378,20 @@ export class ServiceProcess {
   }
 
   async #close(): Promise<void> {
+    const starting = !this.#initialized;
     this.#closing = true;
     // Once shutdown owns the peer, no renderer may consume retained output.
     // Release queue backpressure and keep the stdout task draining so the
     // Service can observe stdin EOF and finish its own cleanup.
     this.#output.discard(new Error('连接已关闭。'));
     if (!this.#child.stdin.destroyed) this.#child.stdin.end();
+    if (starting && process.platform !== 'win32') {
+      this.requestStartupCancellation();
+      // Store publication is synchronous and crash-recoverable, but killing it on a
+      // timer would misreport cancellation and interrupt the protected commit.
+      await this.#exit;
+      return;
+    }
     let result: { code: number | null; signal: NodeJS.Signals | null };
     try {
       result = await withTimeout(this.#exit, CLOSE_TIMEOUT_MS, 'timeout');
@@ -372,6 +466,13 @@ export class ServiceProcess {
     const diagnostic = this.#startupStderrOverflow
       ? undefined
       : parseServiceStartupDiagnostic(this.#startupStderr);
+    if (diagnostic) {
+      try {
+        this.#onStartupDiagnostic?.(diagnostic);
+      } catch {
+        // Diagnostic observers cannot change the owned Service lifecycle.
+      }
+    }
     this.#output.end(new Error(describeServiceStartupFailure(diagnostic, exit.code)));
     // Do not discard the diagnostic before initialize's receiver consumes it.
     // A peer that closes stdout but remains alive still needs owned cleanup.
@@ -384,6 +485,11 @@ export class ServiceProcess {
   async #cleanupFailedStartup(): Promise<void> {
     this.#closing = true;
     if (!this.#child.stdin.destroyed) this.#child.stdin.end();
+    if (process.platform !== 'win32') {
+      this.requestStartupCancellation();
+      await this.#exit;
+      return;
+    }
     try {
       await withTimeout(this.#exit, STARTUP_CLEANUP_TIMEOUT_MS, 'startup cleanup timeout');
     } catch (error) {

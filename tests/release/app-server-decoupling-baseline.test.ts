@@ -61,7 +61,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(tui).not.toContain('discoverWeb');
     expect(cli).toContain('runtimeConnector: connector');
     expect(cli).toContain('createManagedLocalAppServerDaemon');
-    expect(source('scripts/release/app-server-client.ts')).toContain('sourceKiteSessionStorePath');
+    expect(source('scripts/release/app-server-client.ts')).toContain('runtimeRoot: home.root');
   });
 
   test('binds the accepted decision and archived completion evidence', () => {

@@ -6,8 +6,12 @@ import {
   replaceConfigFileAtomically,
 } from '@kite-ai/kite-local-runtime/config';
 import { type ParseError, parse } from 'jsonc-parser';
-import { canonicalWorkspaceKey } from './mcp-project-approvals';
+import {
+  canonicalWorkspaceKey,
+  canonicalWorkspaceKeyForPersistedPath,
+} from './mcp-project-approvals';
 import { workspaceTrustPath } from './paths';
+import { persistedWorkspaceIdentity } from './persisted-workspace-identity';
 import {
   EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE,
   resolveWorkspaceExternalReadScope,
@@ -119,6 +123,19 @@ export function readWorkspaceTrustStore(path = workspaceTrustPath()): WorkspaceT
     return { status: 'corrupt', message: 'Workspace trust store contains an invalid record.' };
   }
   return { status: 'ready', records: records as Record<string, WorkspaceTrustRecord> };
+}
+
+/** Existing user trust for a persisted Session, without recreating its missing directory. */
+export function getPersistedWorkspaceTrustStatus(
+  canonicalPath: string,
+  storePath = workspaceTrustPath(),
+): WorkspaceTrustStatus {
+  if (!persistedWorkspaceIdentity(canonicalPath)) return 'unavailable';
+  const store = readWorkspaceTrustStore(storePath);
+  if (store.status !== 'ready') return store.status;
+  return store.records[canonicalWorkspaceKeyForPersistedPath(canonicalPath)]
+    ? 'trusted'
+    : 'unknown';
 }
 
 function writeStore(path: string, file: WorkspaceTrustFile): void {

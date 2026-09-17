@@ -25,6 +25,7 @@ test('keeps interactive and Subagent lifecycle facts client-visible', () => {
     'approval.granted',
     'approval.rejected',
     'auto_review.requested',
+    'auto_review.started',
     'auto_review.completed',
     'subagent.started',
     'subagent.suspended',
@@ -337,6 +338,15 @@ function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], 
         owner: ROOT_OWNER,
         queueGeneration: 1,
         queueSequence: 1,
+      }),
+    ],
+    [
+      'auto_review.started',
+      event({
+        type: 'auto_review.started',
+        reviewId: 'review-1',
+        toolCallId: 'child-tool-1',
+        owner: CHILD_OWNER,
       }),
     ],
     [

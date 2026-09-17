@@ -1,15 +1,10 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
-import { KITE_SESSION_STORE_FORMAT_EPOCH } from '../../packages/runtime-storage-sqlite/src/kite-session-store-format';
 import {
-  installedKiteSessionStorePath,
   resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
-  sourceKiteSessionStorePath,
   sourceServiceBuildIdentity,
 } from '../../scripts/release/local-service-client';
 
@@ -80,43 +75,6 @@ test('source release build identity includes paired App Server bundle inputs', (
     expect(trackedDirty).toMatch(/^dev:[0-9a-f]{40}:dirty:[0-9a-f]{64}$/u);
     expect(trackedChangedAgain).not.toBe(trackedDirty);
     expect(withUntracked).not.toBe(trackedChangedAgain);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('Session Store profiles separate installed data from each canonical source checkout', () => {
-  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'kite-session-profiles-')));
-  const kiteHome = join(root, 'kite-home');
-  const firstRepository = join(root, 'first-repository');
-  const secondRepository = join(root, 'second-repository');
-  mkdirSync(kiteHome);
-  mkdirSync(firstRepository);
-  mkdirSync(secondRepository);
-  try {
-    expect(installedKiteSessionStorePath(kiteHome)).toBe(join(kiteHome, 'kite-session.sqlite'));
-    const firstDigest = createHash('sha256')
-      .update('kite-source-runtime-profile\0')
-      .update(kiteHome)
-      .update('\0')
-      .update(firstRepository)
-      .update('\0')
-      .update(KITE_SESSION_STORE_FORMAT_EPOCH)
-      .digest('hex')
-      .slice(0, 32);
-    expect(sourceKiteSessionStorePath(kiteHome, firstRepository)).toBe(
-      join(kiteHome, 'source-profiles', firstDigest, 'kite-session.sqlite'),
-    );
-    expect(sourceKiteSessionStorePath(kiteHome, secondRepository)).not.toBe(
-      sourceKiteSessionStorePath(kiteHome, firstRepository),
-    );
-    expect(
-      sourceKiteSessionStoreDirectoryFromCanonicalRoots(
-        kiteHome,
-        firstRepository,
-        `${KITE_SESSION_STORE_FORMAT_EPOCH}-next`,
-      ),
-    ).not.toBe(join(kiteHome, 'source-profiles', firstDigest));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -2,8 +2,6 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
-import { KITE_SESSION_STORE_FORMAT_EPOCH } from '../../packages/runtime-storage-sqlite/src/kite-session-store-format';
 
 const KITE_SERVICE_ENVIRONMENT_ALLOWLIST = Object.freeze([
   'PATH',
@@ -50,30 +48,6 @@ const SOURCE_SERVICE_BUILD_PATHS = Object.freeze([
 ] as const);
 const MAX_SOURCE_BUILD_UNTRACKED_FILES = 1_024;
 const MAX_SOURCE_BUILD_UNTRACKED_BYTES = 64 * 1024 * 1024;
-
-export function installedKiteSessionStorePath(kiteHomeRoot: string): string {
-  return join(realpathSync.native(kiteHomeRoot), 'kite-session.sqlite');
-}
-
-export function sourceKiteSessionStorePath(kiteHomeRoot: string, repositoryRoot: string): string {
-  const canonicalKiteHome = realpathSync.native(kiteHomeRoot);
-  const canonicalRepositoryRoot = realpathSync.native(repositoryRoot);
-  return sourceKiteSessionStorePathFromCanonicalRoots(canonicalKiteHome, canonicalRepositoryRoot);
-}
-
-export function sourceKiteSessionStorePathFromCanonicalRoots(
-  canonicalKiteHome: string,
-  canonicalRepositoryRoot: string,
-): string {
-  return join(
-    sourceKiteSessionStoreDirectoryFromCanonicalRoots(
-      canonicalKiteHome,
-      canonicalRepositoryRoot,
-      KITE_SESSION_STORE_FORMAT_EPOCH,
-    ),
-    'kite-session.sqlite',
-  );
-}
 
 export function explicitKiteHomeArgument(argv: readonly string[]): string | undefined {
   const positions = argv.flatMap((value, index) => (value === '--kite-home' ? [index] : []));

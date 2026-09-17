@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { authorizeEffect } from '@kite-ai/agent-kernel';
 import {
   assertRuntimeCommand,
+  createRuntimeAbortReason,
   freezeRuntimeCommandContext,
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
@@ -144,7 +145,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           compile: () => Promise.reject(new Error('Runtime Context Compiler is unavailable.')),
         });
     const services = new EffectSupervisor(input.storage, Date.now, (sessionId) => {
-      this.#lifecycle.abort(sessionId, 'Runtime effect lease was lost.');
+      this.#lifecycle.abort(
+        sessionId,
+        createRuntimeAbortReason('error', 'Runtime effect lease was lost.'),
+      );
     }).services;
     const capabilities = createRuntimeHostCapabilityExecutionPortFromSnapshot(
       this.capabilityRegistrySnapshot,
@@ -284,9 +288,15 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               allowQueuedSuccessor,
             );
           if (command.type === 'cancel_turn') {
-            this.#lifecycle.abort(committed.receipt.sessionId, 'Runtime turn cancelled.');
+            this.#lifecycle.abort(
+              committed.receipt.sessionId,
+              createRuntimeAbortReason('user', 'Runtime turn cancelled.'),
+            );
           } else if (command.type === 'close_session') {
-            this.#lifecycle.close(committed.receipt.sessionId, 'Runtime session closed.');
+            this.#lifecycle.close(
+              committed.receipt.sessionId,
+              createRuntimeAbortReason('user', 'Runtime session closed.'),
+            );
           }
           return receiptFromStoredReceipt(stored);
         };
@@ -524,8 +534,14 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       };
     }
     if (query.type === 'get_session_projection') {
-      const projection =
-        this.#registry.projection(query.sessionId) ?? (await this.#loadProjection(query.sessionId));
+      // A subscribed historical Session can advance in the Store while this Host
+      // has no execution owner (for example, during reentry reconciliation).
+      // Refresh through the bridge so the query and subscriber share its latest
+      // durable watermark. An executing owner keeps the canonical event stream.
+      const projection = this.#ownsSessionExecution(query.sessionId)
+        ? (this.#registry.projection(query.sessionId) ??
+          (await this.#loadProjection(query.sessionId)))
+        : await this.#loadProjection(query.sessionId);
       return projection
         ? {
             status: 'ok',
@@ -641,7 +657,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     } finally {
       // Losing write authority must not leave this process's provider work alive.
       // Aborting local work is not a durable cancellation or cleanup receipt.
-      this.#lifecycle.abort(sessionId, reason);
+      this.#lifecycle.abort(sessionId, createRuntimeAbortReason('error', reason));
     }
   }
 
@@ -711,7 +727,8 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         failures.push(error);
       }
     }
-    for (const sessionId of sessionIds) this.#lifecycle.close(sessionId, 'Runtime Host disposed.');
+    for (const sessionId of sessionIds)
+      this.#lifecycle.close(sessionId, createRuntimeAbortReason('error', 'Runtime Host disposed.'));
     await Promise.all([...sessionIds].map((sessionId) => this.#lifecycle.waitForIdle(sessionId)));
     try {
       await this.#bridge.close();
@@ -819,11 +836,19 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   async #loadProjection(sessionId: string): Promise<RuntimeSessionProjection | undefined> {
     if (this.#deletedSessions.has(sessionId)) return undefined;
-    const result = await this.#bridge.query({
+    let result = await this.#bridge.query({
       schema: RUNTIME_QUERY_SCHEMA_,
       type: 'get_session_projection',
       sessionId,
     });
+    const current = this.#registry.projection(sessionId);
+    // A storage-only reader cannot reconstruct this Host's closed lifecycle.
+    // New cleanup/recovery facts must advance the projection without reopening
+    // it; reopening requires an authoritative lifecycle transition, not a read.
+    if (result.status === 'ok' && result.session && current?.lifecycle === 'closed') {
+      if (current.revision >= result.session.revision) return current;
+      result = { ...result, session: { ...result.session, lifecycle: 'closed' } };
+    }
     this.#commitQueryProjection(result);
     return result.status === 'ok' ? result.session : undefined;
   }
@@ -894,7 +919,10 @@ function authorizePreparedExecution(
 function createSingleUsePreparedDispatch(
   run: NonNullable<RuntimeHostPreparedExecution['execution']>['run'],
   authorizedEffect: ReturnType<typeof authorizeEffect>,
-): (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void> {
+): (
+  signal: AbortSignal,
+  requestAbort: (reason: import('@kite-ai/runtime-contract').RuntimeAbortReason | string) => void,
+) => Promise<void> {
   let started = false;
   return async (signal, requestAbort) => {
     if (started) throw new Error('Runtime Host prepared execution is single-use.');

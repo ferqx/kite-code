@@ -384,6 +384,7 @@ export function projectRuntimeClientEvent(
       return {
         type: 'subagent.started',
         subagentId: event.subagent.id,
+        ...(event.subagent.status === undefined ? {} : { status: event.subagent.status }),
         role: event.subagent.role,
         name: projectRuntimeClientText(
           'name' in event.subagent ? event.subagent.name : event.subagent.task,
@@ -446,7 +447,7 @@ export function projectRuntimeClientEvent(
         subagentId: event.subagentId,
         parentToolCallId: event.parentToolCallId,
         status: 'suspended',
-        approvalState: 'authorized_queued',
+        approvalState: event.approvalState ?? 'authorized_queued',
         ...(event.interactionId === undefined ? {} : { interactionId: event.interactionId }),
       };
     case 'auto_review.requested':
@@ -459,6 +460,22 @@ export function projectRuntimeClientEvent(
             toolCallId: event.owner.toolCallId,
             status: 'queued',
             summary: projectRuntimeClientText(event.reason, 8_192),
+          }
+        : {
+            type: 'tool.review',
+            toolId: event.owner.toolCallId,
+            reviewId: event.reviewId,
+            status: 'reviewing',
+          };
+    case 'auto_review.started':
+      return event.owner.kind === 'subagent_tool'
+        ? {
+            type: 'subagent.review',
+            subagentId: event.owner.subagentId,
+            parentToolCallId: event.owner.parentToolCallId,
+            reviewId: event.reviewId,
+            toolCallId: event.owner.toolCallId,
+            status: 'reviewing',
           }
         : {
             type: 'tool.review',
@@ -501,10 +518,17 @@ export function projectRuntimeClientEvent(
         toolCallCount: event.subagent.toolCallCount,
         durationMs: event.subagent.durationMs,
       };
-    case 'subagent.failed':
+    case 'subagent.failed': {
+      const status =
+        event.subagent.status ??
+        (event.subagent.diagnostic?.code === 'aborted' ||
+        event.subagent.diagnostic?.code === 'timed_out'
+          ? 'interrupted'
+          : undefined);
       return {
         type: 'subagent.failed',
         subagentId: event.subagent.id,
+        ...(status === undefined ? {} : { status }),
         summary: projectRuntimeClientText(event.subagent.summary ?? event.subagent.error, 8_192),
         ...(event.subagent.toolCallCount === undefined
           ? {}
@@ -521,6 +545,7 @@ export function projectRuntimeClientEvent(
               },
             }),
       };
+    }
     case 'context.compaction_requested':
       return {
         type: 'context.compaction',

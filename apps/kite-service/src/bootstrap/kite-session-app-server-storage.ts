@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
+import { isRuntimeHostStateSettledForMigration } from '@kite-ai/runtime-host';
 import type { RuntimeStorage, RuntimeTransactionInput } from '@kite-ai/runtime-host/storage';
 import type {
   KiteSessionExecutionAuthorityRecord,
@@ -7,6 +8,10 @@ import type {
   KiteSessionRuntimeStorageOwner,
 } from '@kite-ai/runtime-storage-sqlite';
 import type { AdmittedWorkspace } from '../runtime-application';
+import {
+  eventsForSettledSubagentHistory,
+  hasSettledSubagentHistoryCandidate,
+} from './runtime/state-actions';
 import type { RuntimeEvent, RuntimeState } from './runtime/state-runtime';
 import { hasPendingSubagentProviderRecovery } from './runtime/subagent-provider-recovery';
 
@@ -50,6 +55,10 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
   runWithSessionExecution<Result>(sessionId: string, operation: () => Result): Result;
+  reconcileInterruptedSession(
+    sessionId: string,
+    recover: (generation: number, assertCurrent: () => boolean) => Promise<void>,
+  ): Promise<void>;
   commitUnownedInteractionMode(
     transaction: RuntimeTransactionInput<RuntimeEvent, RuntimeState>,
     expectedRevision: number,
@@ -145,7 +154,7 @@ export function createKiteSessionAppServerStorage(input: {
 
   const ensureExecution = (sessionId: string): OwnedExecution => {
     assertOpen();
-    const current = target.authority.read(sessionId);
+    let current = target.authority.read(sessionId);
     if (
       current.status === 'active' &&
       current.hostInstanceId === input.hostInstanceId &&
@@ -182,12 +191,27 @@ export function createKiteSessionAppServerStorage(input: {
       return bind(current);
     }
     if (current.status === 'recovery_required') {
+      // A previous Store generation may have fenced a completed Session solely
+      // because a rejected, never-dispatched Tool left a historical recovery
+      // journal entry. Check all durable execution facts under one writer
+      // transaction before admitting a new turn on the same Session.
+      if (
+        target.reconcileSettledSession({
+          sessionId,
+          expectedAuthorityRevision: current.revision,
+          isSettledState: isCompletedStateWithoutUnconfirmedExecution,
+        })
+      ) {
+        current = target.authority.read(sessionId);
+      }
+    }
+    if (current.status === 'recovery_required') {
       throw new KiteAppServerSessionError(
         'recovery_required',
         'Session requires explicit effect reconciliation before resume.',
       );
     }
-    const acquired = target.authority.acquire({
+    let acquired = target.authority.acquire({
       sessionId,
       expectedRevision: current.revision,
       hostInstanceId: input.hostInstanceId,
@@ -196,10 +220,31 @@ export function createKiteSessionAppServerStorage(input: {
       leaseUntilMs: leaseUntil(),
     });
     if (acquired.status === 'recovery_required') {
-      throw new KiteAppServerSessionError(
-        'recovery_required',
-        'Session requires explicit effect reconciliation before resume.',
-      );
+      // An expired old owner may only become fenced during this acquire.
+      // Apply the same complete-facts check to that new fence on this send.
+      if (
+        target.reconcileSettledSession({
+          sessionId,
+          expectedAuthorityRevision: acquired.authority.revision,
+          isSettledState: isCompletedStateWithoutUnconfirmedExecution,
+        })
+      ) {
+        const settled = target.authority.read(sessionId);
+        acquired = target.authority.acquire({
+          sessionId,
+          expectedRevision: settled.revision,
+          hostInstanceId: input.hostInstanceId,
+          clientId,
+          connectionGeneration,
+          leaseUntilMs: leaseUntil(),
+        });
+      }
+      if (acquired.status === 'recovery_required') {
+        throw new KiteAppServerSessionError(
+          'recovery_required',
+          'Session requires explicit effect reconciliation before resume.',
+        );
+      }
     }
     if (acquired.status === 'busy') {
       throw new KiteAppServerSessionError(
@@ -213,6 +258,123 @@ export function createKiteSessionAppServerStorage(input: {
   const runWithSessionExecution = <Result>(sessionId: string, operation: () => Result): Result => {
     const execution = ensureExecution(sessionId);
     return target.runWithExecution(execution.handle, operation);
+  };
+
+  const recovering = new Map<string, Promise<void>>();
+  const reconcileInterruptedSession = (
+    sessionId: string,
+    recover: (generation: number, assertCurrent: () => boolean) => Promise<void>,
+  ): Promise<void> => {
+    const pending = recovering.get(sessionId);
+    if (pending) return pending;
+    const recovery = (async () => {
+      assertOpen();
+      if (owned.has(sessionId)) return;
+      const state = target.storage.sessions.loadSnapshot<RuntimeState>(sessionId);
+      if (!state) return;
+      let current = target.authority.read(sessionId);
+      // A live owner survives renderer reconnects. Only an expired lease may be fenced.
+      if (
+        (current.status === 'active' || current.status === 'detached') &&
+        current.leaseUntilMs !== null &&
+        current.leaseUntilMs > now()
+      )
+        return;
+      // Terminal business State can still have an unmatched historical start.
+      // Inspect history only when durable Tool/lifecycle facts prove a candidate.
+      const needsHistoryCorrection =
+        hasSettledSubagentHistoryCandidate(state) &&
+        eventsForSettledSubagentHistory(
+          state,
+          target.storage.sessions.loadEventsStrict(sessionId).map((entry) => entry.event),
+        ).length > 0;
+      if (
+        !needsHistoryCorrection &&
+        current.status === 'idle' &&
+        state.turn.status !== 'active' &&
+        !hasUnconfirmedExecution(state)
+      )
+        return;
+      if (
+        !needsHistoryCorrection &&
+        current.status === 'recovery_required' &&
+        target.reconcileSettledSession({
+          sessionId,
+          expectedAuthorityRevision: current.revision,
+          isSettledState: isRuntimeHostStateSettledForMigration,
+        })
+      )
+        return;
+      if (current.status !== 'recovery_required') {
+        const acquired = target.authority.acquire({
+          sessionId,
+          expectedRevision: current.revision,
+          hostInstanceId: input.hostInstanceId,
+          clientId,
+          connectionGeneration,
+          leaseUntilMs: leaseUntil(),
+        });
+        if (acquired.status === 'busy') return;
+        current = acquired.authority;
+        if (acquired.status === 'acquired') {
+          // Even a cleanly released owner can leave unfinished business State.
+          // Fence the recovery attempt before claiming a scoped recovery writer.
+          current = target.authority.release({
+            sessionId,
+            expectedRevision: current.revision,
+            controllerGeneration: current.controllerGeneration,
+            hostInstanceId: input.hostInstanceId,
+            cleanupConfirmed: false,
+          });
+        }
+      }
+      const execution = bind(
+        target.beginRecoveryExecution({
+          sessionId,
+          expectedAuthorityRevision: current.revision,
+          hostInstanceId: input.hostInstanceId,
+          clientId,
+          connectionGeneration,
+          leaseUntilMs: leaseUntil(),
+        }),
+      );
+      let cleaned = false;
+      try {
+        await target.runWithExecution(execution.handle, () =>
+          recover(execution.record.controllerGeneration, () => {
+            const observed = target.authority.read(sessionId);
+            return (
+              observed.status === 'active' &&
+              observed.hostInstanceId === input.hostInstanceId &&
+              observed.controllerGeneration === execution.record.controllerGeneration &&
+              observed.leaseUntilMs !== null &&
+              observed.leaseUntilMs > now()
+            );
+          }),
+        );
+        cleaned = true;
+      } finally {
+        const observed = target.authority.read(sessionId);
+        if (
+          observed.status === 'active' &&
+          observed.hostInstanceId === input.hostInstanceId &&
+          observed.controllerGeneration === execution.record.controllerGeneration
+        ) {
+          target.authority.release({
+            sessionId,
+            expectedRevision: observed.revision,
+            controllerGeneration: observed.controllerGeneration,
+            hostInstanceId: input.hostInstanceId,
+            cleanupConfirmed: cleaned,
+          });
+        }
+        owned.delete(sessionId);
+      }
+    })();
+    recovering.set(sessionId, recovery);
+    return recovery.finally(() => {
+      if (recovering.get(sessionId) === recovery) recovering.delete(sessionId);
+    });
   };
 
   const renewTimer = setInterval(() => {
@@ -435,6 +597,7 @@ export function createKiteSessionAppServerStorage(input: {
     loadCurrentSnapshot: (sessionId) => storage.sessions.loadSnapshot<RuntimeState>(sessionId),
     getCurrentSessionModelRoute: (sessionId) => storage.sessions.getSessionModelRoute(sessionId),
     runWithSessionExecution,
+    reconcileInterruptedSession,
     commitUnownedInteractionMode(transaction, expectedRevision) {
       if (
         transaction.events.length > 1 ||
@@ -540,5 +703,14 @@ function hasUnconfirmedExecution(state: RuntimeState | null): boolean {
       Object.values(state.modelInvocations).some(
         (invocation) => invocation.status === 'dispatching',
       ))
+  );
+}
+
+function isCompletedStateWithoutUnconfirmedExecution(state: Readonly<RuntimeState>): boolean {
+  return (
+    state.turn.status === 'completed' &&
+    state.terminalOutcome?.status === 'completed' &&
+    state.terminalOutcome.pendingVerification === false &&
+    isRuntimeHostStateSettledForMigration(state)
   );
 }

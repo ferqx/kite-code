@@ -413,6 +413,36 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('auto_review.completed escalation disposition is invalid.');
       }
       break;
+    case 'auto_review.started':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'reviewId');
+      requireNonEmptyString(value, 'toolCallId');
+      if (!validInteractionOwner(value.owner))
+        throw new Error('auto_review.started owner binding is invalid.');
+      break;
+    case 'subagent.started': {
+      const subagent = isRecord(value.subagent) ? value.subagent : undefined;
+      if (
+        !subagent ||
+        (subagent.status !== undefined &&
+          subagent.status !== 'creating' &&
+          subagent.status !== 'running')
+      )
+        throw new Error('subagent.started status is invalid.');
+      break;
+    }
+    case 'subagent.failed': {
+      const subagent = isRecord(value.subagent) ? value.subagent : undefined;
+      if (
+        !subagent ||
+        (subagent.status !== undefined &&
+          subagent.status !== 'failed' &&
+          subagent.status !== 'interrupted' &&
+          subagent.status !== 'cancelled')
+      )
+        throw new Error('subagent.failed status is invalid.');
+      break;
+    }
     case 'subagent.step':
       if (!validSubagentStepPayload(value.subagent, true)) {
         throw new Error('subagent.step payload is invalid.');
@@ -631,7 +661,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         !Number.isSafeInteger(value.attempt) ||
         Number(value.attempt) < 1 ||
         !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
-        !['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
+        !['completed', 'failed', 'interrupted', 'cancelled', 'exhausted', 'blocked'].includes(
           String(value.status),
         ) ||
         !validTimestamp(value.observedAt)

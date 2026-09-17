@@ -61,7 +61,7 @@ describe('runtime workspace package gate', () => {
     expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
     writeFileSync(renderer, "import '../electron/host';\n");
     expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
-    for (const entry of ['source-profile', 'startup-diagnostic']) {
+    for (const entry of ['startup-diagnostic', 'desktop-manifest']) {
       writeFileSync(renderer, `import '@kite-ai/kite-local-runtime/${entry}';\n`);
       expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
     }

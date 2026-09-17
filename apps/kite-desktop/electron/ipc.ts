@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import {
   type BrowserWindow,
   clipboard,
@@ -7,6 +8,7 @@ import {
 } from 'electron';
 import { DESKTOP_IPC_CHANNELS, type DesktopIpcChannel, type DesktopIpcResult } from '../src/bridge';
 import type { DesktopHost } from './host';
+import { saveStartupDiagnosticReport } from './runtime/startup-report';
 import {
   assertTrustedIpc,
   clipboardTextPayload,
@@ -52,6 +54,29 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
   handle(DESKTOP_IPC_CHANNELS.runtimeStatus, (_event, payload) => {
     noPayload(payload);
     return options.host.runtimeStatus();
+  });
+  handle(DESKTOP_IPC_CHANNELS.runtimeStartupStatus, (_event, payload) => {
+    noPayload(payload);
+    return options.host.runtimeStartupStatus();
+  });
+  handle(DESKTOP_IPC_CHANNELS.saveStartupDiagnostic, async (_event, payload) => {
+    noPayload(payload);
+    try {
+      return await saveStartupDiagnosticReport(
+        options.host.startupDiagnosticReport(),
+        async () => {
+          const selected = await dialog.showSaveDialog(requireWindow(options.getWindow()), {
+            title: '保存启动诊断',
+            defaultPath: 'kite-startup-diagnostic.json',
+            filters: [{ name: 'JSON', extensions: ['json'] }],
+          });
+          return selected.canceled ? null : (selected.filePath ?? null);
+        },
+        (path, report) => writeFile(path, report, { encoding: 'utf8', flag: 'wx', mode: 0o600 }),
+      );
+    } catch {
+      throw new Error('保存启动诊断失败，请选择新的文件名并重试。');
+    }
   });
   handle(DESKTOP_IPC_CHANNELS.pickWorkspace, async (_event, payload) => {
     noPayload(payload);

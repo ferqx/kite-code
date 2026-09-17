@@ -9,6 +9,7 @@ import {
   assertRuntimeQuery,
   assertRuntimeSessionIndexNotification,
   assertRuntimeSubscriptionSpec,
+  createRuntimeAbortReason,
   isAcceptedPresentationEnvelope,
   isRuntimeClientEvent,
   isRuntimeClientInteraction,
@@ -22,9 +23,20 @@ import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
+  runtimeAbortCause,
+  runtimeAbortMessage,
 } from '@kite-ai/runtime-contract';
 
 describe('runtime contract package boundary', () => {
+  test('classifies typed execution aborts without guessing from human messages', () => {
+    const user = createRuntimeAbortReason('user', 'Stopped by client.');
+    const shutdown = createRuntimeAbortReason('error', 'Runtime Host shutdown.');
+    expect(runtimeAbortCause(user)).toBe('user');
+    expect(runtimeAbortCause(shutdown)).toBe('error');
+    expect(runtimeAbortCause('Cancelled by user.')).toBe('error');
+    expect(runtimeAbortMessage(user)).toBe('Stopped by client.');
+    expect(runtimeAbortMessage(new Error('Lease was lost.'))).toBe('Lease was lost.');
+  });
   test('is a frozen private in-process Contract', () => {
     expect(RUNTIME_CONTRACT_BOUNDARY_).toEqual({
       audience: 'kite-app',
@@ -504,6 +516,26 @@ describe('runtime contract package boundary', () => {
         concurrencyGroupId: 'subagent-batch:tool-1',
       }),
     ).toBe(true);
+    for (const status of ['creating', 'running']) {
+      expect(
+        isRuntimeClientEvent({
+          type: 'subagent.started',
+          subagentId: 'subagent-1',
+          role: 'explore',
+          name: 'Inspect the runtime',
+          status,
+        }),
+      ).toBe(true);
+    }
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        status: 'waiting',
+      }),
+    ).toBe(false);
     expect(
       isRuntimeClientEvent({
         type: 'subagent.started',
@@ -541,6 +573,24 @@ describe('runtime contract package boundary', () => {
         diagnostic: { code: 'model_step_failed', stage: 'model_step' },
       }),
     ).toBe(true);
+    for (const status of ['failed', 'interrupted', 'cancelled']) {
+      expect(
+        isRuntimeClientEvent({
+          type: 'subagent.failed',
+          subagentId: 'subagent-1',
+          summary: 'Inspection ended.',
+          status,
+        }),
+      ).toBe(true);
+    }
+    expect(
+      isRuntimeClientEvent({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection ended.',
+        status: 'completed',
+      }),
+    ).toBe(false);
     expect(
       isRuntimeClientEvent({
         type: 'subagent.failed',

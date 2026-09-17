@@ -461,7 +461,7 @@ export const KITE_HOME_STORE_DDL = Object.freeze([
   'CREATE INDEX runtime_session_tombstones_workspace_deleted ON runtime_session_tombstones(workspace_id, deleted_at DESC, session_id)',
 ] as const);
 
-const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
+export const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
   session_id TEXT NOT NULL REFERENCES runtime_sessions(session_id) ON DELETE CASCADE,
   effect_id TEXT NOT NULL,
   owner_id TEXT NOT NULL,
@@ -482,7 +482,7 @@ const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
     (state = 'unknown' AND outcome = 'unknown' AND terminal_digest IS NULL AND certainty = 'uncertain'))
 ) STRICT`;
 
-const KITE_SESSION_STORE_DDL = Object.freeze(
+export const KITE_SESSION_STORE_DDL = Object.freeze(
   KITE_HOME_STORE_DDL.map((statement) =>
     statement.startsWith('CREATE TABLE runtime_effect_leases')
       ? KITE_SESSION_EFFECT_LEASE_DDL

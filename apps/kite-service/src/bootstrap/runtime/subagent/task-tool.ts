@@ -19,6 +19,7 @@ import {
   subagentDispatchIntentDigest,
   subagentTaskDigest,
 } from '@kite-ai/builtin-runtime/subagent';
+import { runtimeAbortCause } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   type DescendantResourceAdmission,
@@ -300,6 +301,11 @@ export async function executePipelineIssuedSubagentStart(
       parentToolCallId: deps.modelInvocationParentToolCallId,
     },
   });
+  let driverTerminalObserved = false;
+  const forwardDriverEvent: SubAgentEventSink = (event) => {
+    if (event.type === 'done' || event.type === 'error') driverTerminalObserved = true;
+    deps.eventSink(event);
+  };
   driver.registerStart(
     grant.grantId,
     createCoreSubagentStartRegistration({
@@ -323,7 +329,7 @@ export async function executePipelineIssuedSubagentStart(
         recoveryIdentityKey: deps.recoveryIdentityKey,
         timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
         signal: deps.signal ?? new AbortController().signal,
-        eventSink: deps.eventSink,
+        eventSink: forwardDriverEvent,
         model: deps.model,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
@@ -353,7 +359,10 @@ export async function executePipelineIssuedSubagentStart(
   try {
     let dispatchIntentDigest: string;
     try {
-      dispatchIntentDigest = await recordSubagentDispatchIntent(deps, grant);
+      dispatchIntentDigest = await recordSubagentDispatchIntent(deps, grant, {
+        name: args.name,
+        role: args.subagent_type,
+      });
     } catch (error) {
       driver.abandon(grant);
       throw error;
@@ -361,7 +370,7 @@ export async function executePipelineIssuedSubagentStart(
     const started = await provider.start({ grant, signal: deps.signal });
     if (!started.ok) {
       if (await finalizeUndispatchedSubagentIntent(deps, grant, dispatchIntentDigest)) {
-        return failed(started.failure.message);
+        return confirmedProviderFailure(deps, grant, started.failure);
       }
       throw new SubagentProviderRecoveryRequiredError(
         'Subagent preparation failed without durable undispatched cleanup.',
@@ -391,7 +400,9 @@ export async function executePipelineIssuedSubagentStart(
         started.value,
         dispatchIntentDigest,
       );
-      if (cleanupConfirmed) return failed(activated.failure.message);
+      if (cleanupConfirmed) {
+        return confirmedProviderFailure(deps, grant, activated.failure);
+      }
       throw new SubagentProviderRecoveryRequiredError(
         'Subagent activation failed without confirmed cleanup.',
       );
@@ -410,8 +421,14 @@ export async function executePipelineIssuedSubagentStart(
       if (observed.failure.code === 'recovery_required') {
         await provider.cancel({ handle: started.value, reason: observed.failure.message });
       }
-      if (observed.failure.code === 'cancelled' && cleanupConfirmed)
-        return failed(observed.failure.message);
+      if (observed.failure.code === 'cancelled' && cleanupConfirmed) {
+        if (!driverTerminalObserved) return confirmedProviderFailure(deps, grant, observed.failure);
+        return {
+          ...failed(observed.failure.message),
+          terminalStatus:
+            runtimeAbortCause(deps.signal?.reason) === 'user' ? 'cancelled' : 'interrupted',
+        };
+      }
       throw new SubagentProviderRecoveryRequiredError(
         `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
       );
@@ -571,6 +588,11 @@ export async function executePipelineIssuedSubagentResume(
     blockedRuntimeToolCallId: continuation.blockedTool.runtimeToolCallId,
     resumeAttempt: deps.subagentInvocationIdentity.attempt,
   });
+  let driverTerminalObserved = false;
+  const forwardDriverEvent: SubAgentEventSink = (event) => {
+    if (event.type === 'done' || event.type === 'error') driverTerminalObserved = true;
+    deps.eventSink(event);
+  };
   driver.registerResume(
     grant.grantId,
     createCoreSubagentResumeRegistration({
@@ -594,7 +616,7 @@ export async function executePipelineIssuedSubagentResume(
         recoveryIdentityKey: deps.recoveryIdentityKey,
         timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
         signal: deps.signal ?? new AbortController().signal,
-        eventSink: deps.eventSink,
+        eventSink: forwardDriverEvent,
         model: deps.model,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
@@ -634,7 +656,7 @@ export async function executePipelineIssuedSubagentResume(
     const resumed = await provider.resume({ grant, signal: deps.signal });
     if (!resumed.ok) {
       if (await finalizeUndispatchedSubagentIntent(deps, grant, dispatchIntentDigest)) {
-        return failed(resumed.failure.message);
+        return confirmedProviderFailure(deps, grant, resumed.failure);
       }
       throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume preparation failed without durable undispatched cleanup.',
@@ -664,11 +686,23 @@ export async function executePipelineIssuedSubagentResume(
         resumed.value,
         dispatchIntentDigest,
       );
-      if (cleanupConfirmed) return failed(activated.failure.message);
+      if (cleanupConfirmed) {
+        return confirmedProviderFailure(deps, grant, activated.failure);
+      }
       throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume activation failed without confirmed cleanup.',
       );
     }
+    deps.eventSink({
+      type: 'start',
+      data: {
+        id: grant.childInvocationId,
+        role: grant.role,
+        name: continuation.name ?? 'Delegated task',
+        parentToolCallId: grant.parentToolCallId,
+        status: 'running',
+      },
+    });
     driver.abandon(grant);
     registrationOwned = false;
     const observed = await provider.observe({ handle: resumed.value, signal: deps.signal });
@@ -683,8 +717,14 @@ export async function executePipelineIssuedSubagentResume(
       if (observed.failure.code === 'recovery_required') {
         await provider.cancel({ handle: resumed.value, reason: observed.failure.message });
       }
-      if (observed.failure.code === 'cancelled' && cleanupConfirmed)
-        return failed(observed.failure.message);
+      if (observed.failure.code === 'cancelled' && cleanupConfirmed) {
+        if (!driverTerminalObserved) return confirmedProviderFailure(deps, grant, observed.failure);
+        return {
+          ...failed(observed.failure.message),
+          terminalStatus:
+            runtimeAbortCause(deps.signal?.reason) === 'user' ? 'cancelled' : 'interrupted',
+        };
+      }
       throw new SubagentProviderRecoveryRequiredError(
         `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
       );
@@ -755,6 +795,7 @@ async function recordSubagentDispatchIntent(
     | import('@kite-ai/runtime-spi').SubagentDelegationGrant
     | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
+  creating?: { readonly name: string; readonly role: 'explore' | 'plan' | 'code' | 'review' },
 ): Promise<string> {
   if (!deps.subagentLifecyclePersistence) {
     throw new SubagentProviderRecoveryRequiredError(
@@ -774,6 +815,20 @@ async function recordSubagentDispatchIntent(
       dispatchIntentDigest,
       recordedAt,
     },
+    ...(creating && grant.purpose === 'start'
+      ? [
+          {
+            type: 'subagent.started' as const,
+            subagent: {
+              id: grant.childInvocationId,
+              role: creating.role,
+              name: creating.name,
+              parentToolCallId: grant.parentToolCallId,
+              status: 'creating' as const,
+            },
+          },
+        ]
+      : []),
   ]);
   const fact =
     deps.subagentLifecyclePersistence.getState().capabilities.invocations[grant.parentInvocationId]
@@ -788,6 +843,37 @@ async function recordSubagentDispatchIntent(
     );
   }
   return dispatchIntentDigest;
+}
+
+function confirmedProviderFailure(
+  deps: TaskToolDeps,
+  grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
+  failure: Readonly<{ code: string; message: string }>,
+): SubAgentResult {
+  // Only called after a durable, confirmed Provider cleanup. The Tool's
+  // terminal is still committed by the parent execution pipeline.
+  const status =
+    failure.code === 'cancelled'
+      ? runtimeAbortCause(deps.signal?.reason) === 'user'
+        ? 'cancelled'
+        : 'interrupted'
+      : 'failed';
+  deps.eventSink({
+    type: 'error',
+    data: {
+      id: grant.childInvocationId,
+      error: failure.message,
+      summary: failure.message,
+      toolCallCount: 0,
+      durationMs: 0,
+      status,
+      diagnostic: {
+        code: status === 'failed' ? 'internal_error' : 'aborted',
+        stage: grant.purpose === 'resume' ? 'next_round_preparation' : 'initialization',
+      },
+    },
+  });
+  return { ...failed(failure.message), terminalStatus: status };
 }
 
 async function recordSubagentHandleReady(
@@ -1098,13 +1184,15 @@ function toLocalSubagentDriverResult(
     childInvocationId,
     status: result.blocked
       ? 'blocked'
-      : result.terminalStatus === 'cancelled'
-        ? 'cancelled'
-        : result.terminalStatus === 'exhausted'
-          ? 'exhausted'
-          : result.ok
-            ? 'completed'
-            : 'failed',
+      : result.terminalStatus === 'interrupted'
+        ? 'interrupted'
+        : result.terminalStatus === 'cancelled'
+          ? 'cancelled'
+          : result.terminalStatus === 'exhausted'
+            ? 'exhausted'
+            : result.ok
+              ? 'completed'
+              : 'failed',
     summary: result.summary,
     toolCallCount: result.toolCallCount,
     durationMs: result.durationMs,

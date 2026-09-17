@@ -26,6 +26,19 @@ export interface DesktopRuntimeStatus {
   connectionId: number | null;
 }
 
+export interface DesktopStartupStatus {
+  phase:
+    | 'inspecting'
+    | 'acquiring_maintenance'
+    | 'waiting_for_store'
+    | 'preparing'
+    | 'publishing'
+    | 'ready'
+    | null;
+  message: string | null;
+  diagnosticAvailable: boolean;
+}
+
 export type DesktopEditor = 'vscode' | 'zed' | 'textedit';
 
 export interface DesktopConfirmOptions {
@@ -42,6 +55,8 @@ export type DesktopIpcResult<T> = { ok: true; value: T } | { ok: false; error: s
 export interface KiteDesktopBridge {
   listProjects(): Promise<DesktopProject[]>;
   runtimeStatus(): Promise<DesktopRuntimeStatus>;
+  runtimeStartupStatus(): Promise<DesktopStartupStatus>;
+  saveStartupDiagnostic(): Promise<boolean>;
   pickWorkspace(): Promise<string | null>;
   activateWorkspace(path: string): Promise<string>;
   checkWorkspace(path: string): Promise<void>;
@@ -61,6 +76,8 @@ export interface KiteDesktopBridge {
 export const DESKTOP_IPC_CHANNELS = {
   listProjects: 'kite:desktop:list-projects',
   runtimeStatus: 'kite:desktop:runtime-status',
+  runtimeStartupStatus: 'kite:desktop:runtime-startup-status',
+  saveStartupDiagnostic: 'kite:desktop:save-startup-diagnostic',
   pickWorkspace: 'kite:desktop:pick-workspace',
   activateWorkspace: 'kite:desktop:activate-workspace',
   checkWorkspace: 'kite:desktop:check-workspace',

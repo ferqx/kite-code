@@ -17,6 +17,7 @@ import { runtimeHostCurrentStateEventTypes } from '@kite-ai/runtime-host';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent } from '../bootstrap/runtime/state-runtime';
 import { projectRuntimeLogEventPage } from '../logs/runtime-log-presentation';
+import { childRuntimeToolCallId } from '../runtime/tool-execution/subagent-tool-identity';
 import { projectRuntimeClientEvent, projectRuntimeModelResponseRequestId } from './event-projector';
 import { projectRuntimeClientText, projectRuntimeSessionTitle } from './safe-text';
 
@@ -237,6 +238,142 @@ function stableReasoningSegmentId(
   return `history-reasoning-${(hash >>> 0).toString(36)}`;
 }
 
+type HistoricalSource = Readonly<{ sequence: number; event: RuntimeEvent }>;
+type HistoricalRecord = {
+  sequence: number;
+  events: readonly RuntimeClientEvent[];
+  identity?: RuntimeHistoryRecordIdentity;
+};
+
+/** Rebuild only ownership proven by the bounded durable journal being loaded. */
+function repairLegacyHistoryOwnership(
+  records: readonly HistoricalRecord[],
+  sources: readonly HistoricalSource[],
+): HistoricalRecord[] {
+  const invocations = new Map<string, Array<{ parentToolCallId: string; sequence: number }>>();
+  const children = new Map<string, Array<{ invocationId: string; sequence: number }>>();
+  for (const { sequence, event } of sources) {
+    if (event.type === 'capability.invocation_recorded') {
+      const candidates = invocations.get(event.invocationId) ?? [];
+      candidates.push({ parentToolCallId: event.toolCallId, sequence });
+      invocations.set(event.invocationId, candidates);
+    } else if (event.type === 'capability.subagent_dispatch_intent_recorded') {
+      const candidates = children.get(event.childInvocationId) ?? [];
+      candidates.push({ invocationId: event.invocationId, sequence });
+      children.set(event.childInvocationId, candidates);
+    }
+  }
+  const parentForChild = (childId: string, throughSequence: number): string | undefined => {
+    const allParents = new Set<string>();
+    const parentsAtSequence = new Set<string>();
+    for (const child of children.get(childId) ?? []) {
+      for (const invocation of invocations.get(child.invocationId) ?? []) {
+        allParents.add(invocation.parentToolCallId);
+        if (child.sequence <= throughSequence && invocation.sequence <= throughSequence) {
+          parentsAtSequence.add(invocation.parentToolCallId);
+        }
+      }
+    }
+    return allParents.size === 1 && parentsAtSequence.size === 1
+      ? [...parentsAtSequence][0]
+      : undefined;
+  };
+  const taskToolIds = new Set(
+    sources.flatMap(({ event }) =>
+      event.type === 'tool.queued' && event.name === 'task' ? [event.toolCallId] : [],
+    ),
+  );
+  const provenParentTasks = new Set(
+    [...children.keys()]
+      .map((childId) => parentForChild(childId, Number.POSITIVE_INFINITY))
+      .filter((id): id is string => id !== undefined && taskToolIds.has(id)),
+  );
+  const durableToolIds = new Set(
+    sources.flatMap(({ event }) =>
+      event.type.startsWith('tool.') && 'toolCallId' in event ? [event.toolCallId] : [],
+    ),
+  );
+  const stepToolIds = new Map<string, Set<string>>();
+  const toolSteps = new Map<
+    string,
+    Array<{ subagentId: string; parentToolCallId: string; sequence: number }>
+  >();
+  for (const { sequence, event } of sources) {
+    if (event.type !== 'subagent.step' || !event.subagent.modelInvocationId) continue;
+    const parentToolCallId = parentForChild(event.subagent.id, sequence);
+    if (!parentToolCallId) continue;
+    const toolId = childRuntimeToolCallId({
+      parentToolCallId,
+      subagentId: event.subagent.id,
+      modelInvocationId: event.subagent.modelInvocationId,
+      modelToolCallId: event.subagent.toolCallId,
+      toolName: event.subagent.toolName,
+      args: event.subagent.toolArgs,
+    });
+    if (durableToolIds.has(toolId)) {
+      const key = JSON.stringify([event.subagent.id, event.subagent.stepId]);
+      const ids = stepToolIds.get(key) ?? new Set<string>();
+      ids.add(toolId);
+      stepToolIds.set(key, ids);
+    }
+    const candidates = toolSteps.get(toolId) ?? [];
+    candidates.push({ subagentId: event.subagent.id, parentToolCallId, sequence });
+    toolSteps.set(toolId, candidates);
+  }
+  const ownerForTool = (toolId: string, sequence: number) => {
+    const candidates = (toolSteps.get(toolId) ?? []).filter((entry) => entry.sequence <= sequence);
+    const owners = new Set(
+      candidates.map((entry) => `${entry.subagentId}\0${entry.parentToolCallId}`),
+    );
+    if (owners.size !== 1) return undefined;
+    const candidate = candidates[0]!;
+    return { subagentId: candidate.subagentId, parentToolCallId: candidate.parentToolCallId };
+  };
+  return records.map((record) => ({
+    ...record,
+    events: record.events.map((projected): RuntimeClientEvent => {
+      if (projected.type === 'subagent.step') {
+        // The model call id differs from the durable child Tool id. Match the
+        // existing Tool exactly so clients can fold its step into that row.
+        const ids = stepToolIds.get(JSON.stringify([projected.subagentId, projected.stepId]));
+        if (ids?.size === 1) return { ...projected, toolCallId: [...ids][0]! };
+        return projected;
+      }
+      if (projected.type === 'subagent.started') {
+        if (projected.parentToolCallId !== undefined) return projected;
+        const parentToolCallId = parentForChild(projected.subagentId, record.sequence);
+        return parentToolCallId === undefined ? projected : { ...projected, parentToolCallId };
+      }
+      if (
+        projected.type === 'tool.queued' ||
+        projected.type === 'tool.finished' ||
+        projected.type === 'tool.failed' ||
+        projected.type === 'tool.rejected' ||
+        projected.type === 'tool.cancelled'
+      ) {
+        const owner = ownerForTool(projected.toolId, record.sequence);
+        if (owner === undefined) {
+          // Older journals hid even the parent Task. Only a uniquely proven
+          // dispatch relationship may restore its history entry.
+          return projected.presentation === 'hidden' &&
+            projected.presentationOwner === undefined &&
+            provenParentTasks.has(projected.toolId)
+            ? { ...projected, presentation: 'standalone' }
+            : projected;
+        }
+        if (
+          projected.presentationOwner !== undefined &&
+          (projected.presentationOwner.subagentId !== owner.subagentId ||
+            projected.presentationOwner.parentToolCallId !== owner.parentToolCallId)
+        )
+          return projected;
+        return { ...projected, presentationOwner: owner, presentation: 'hidden' };
+      }
+      return projected;
+    }),
+  }));
+}
+
 /**
  * Durable model completion folds the ephemeral live stream into one persisted
  * fact. Re-expand only its closed presentation sequence here so live and
@@ -326,11 +463,8 @@ export function createKiteRuntimeHistoryClient(
         session = { ...session, lastSequence: throughSequence };
       }
       const records = withLogs(logs, (reader) => {
-        const all: Array<{
-          sequence: number;
-          events: readonly RuntimeClientEvent[];
-          identity?: RuntimeHistoryRecordIdentity;
-        }> = [];
+        const all: HistoricalRecord[] = [];
+        const sources: HistoricalSource[] = [];
         const pendingIdentityRecords: number[] = [];
         let afterSequence: number | undefined;
         let stableRunId: string | undefined;
@@ -351,6 +485,7 @@ export function createKiteRuntimeHistoryClient(
               throw new Error('Runtime history pagination did not advance.');
             }
             afterSequence = record.sequence;
+            sources.push({ sequence: record.sequence, event: record.event });
             if (record.event.type === 'task.started') {
               activeTaskId = record.event.taskId;
               // `task.started.turnId` identifies the State turn which admitted
@@ -434,7 +569,10 @@ export function createKiteRuntimeHistoryClient(
                 turnId: `legacy-turn-${identitySequence}`,
               };
             }
-            return { records: all, restartRequired: openTurnIds.size > 0 };
+            return {
+              records: repairLegacyHistoryOwnership(all, sources),
+              restartRequired: openTurnIds.size > 0,
+            };
           }
           if (page.nextCursor === undefined || page.nextCursor !== afterSequence) {
             throw new Error('Runtime history pagination cursor is invalid.');

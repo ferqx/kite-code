@@ -306,6 +306,8 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
       ];
     }
     if (field === 'subagent') {
+      if (type === 'subagent.started') return { id: 'fixture', role: 'explore', name: 'fixture' };
+      if (type === 'subagent.failed') return { id: 'fixture', error: 'fixture' };
       if (type === 'subagent.step') {
         return {
           id: 'fixture',
@@ -880,8 +882,8 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(139);
-    expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(140);
+    expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
     expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(10);
   });
 
@@ -917,6 +919,9 @@ describe('agent kernel package boundary', () => {
         ];
       }
       if (field === 'subagent') {
+        if (eventType === 'subagent.started')
+          return { id: 'fixture', role: 'explore', name: 'fixture' };
+        if (eventType === 'subagent.failed') return { id: 'fixture', error: 'fixture' };
         if (eventType === 'subagent.step') {
           return {
             id: 'fixture',
@@ -1082,12 +1087,12 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
   });
 
-  test('classifies all 139 events into one static owner or an explicit default no-op', () => {
+  test('classifies all 140 events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(139);
-    expect(new Set(covered).size).toBe(139);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(129);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(139);
+    expect(covered).toHaveLength(140);
+    expect(new Set(covered).size).toBe(140);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(130);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(140);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -1116,7 +1121,7 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, requested)).toEqual(state);
   });
 
-  test('runs the complete 129-case compatibility switch corpus and proves ten default events are no-op', () => {
+  test('runs the complete 130-case compatibility switch corpus and proves ten default events are no-op', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);

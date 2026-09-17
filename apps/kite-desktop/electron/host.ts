@@ -9,7 +9,17 @@ import {
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
+import {
+  type PairedDesktopServiceManifest,
+  pairedDesktopManifestDigest,
+  parsePairedDesktopServiceManifest,
+} from '@kite-ai/kite-local-runtime/desktop-manifest';
+import {
+  describeServiceStartupProgress,
+  formatServiceStartupReport,
+  type ServiceStartupDiagnostic,
+  type ServiceStartupPhase,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import type {
   BranchSnapshot,
   DesktopConnectionInfo,
@@ -30,13 +40,6 @@ import {
 import { RendererConnection } from './runtime/renderer-connection';
 import { ServiceProcess, type ServiceProcessOptions } from './runtime/service-process';
 
-interface ServiceManifest {
-  buildId: string;
-  executableSha256: string;
-  expectedServerVersion: string;
-  environmentKeys: string[];
-}
-
 interface RuntimePeer {
   readonly serverVersion: string;
   readonly finished: boolean;
@@ -50,11 +53,8 @@ export interface DesktopHostOptions {
   appDataDirectory: string;
   homeDirectory: string;
   serviceDirectory: string;
-  repositoryDirectory: string;
-  debug: boolean;
-  /** Build-pinned source Store epoch; used only for debug source profiles. */
-  sourceStoreEpoch?: string;
   serviceManifest: unknown;
+  sourceRepositoryRoot?: string;
   platform?: NodeJS.Platform;
   createPeer?: (options: ServiceProcessOptions, serverVersion: string) => RuntimePeer;
 }
@@ -62,17 +62,23 @@ export interface DesktopHostOptions {
 /** Native filesystem, Git and exact paired Service authority for one Electron app instance. */
 export class DesktopHost {
   readonly #options: DesktopHostOptions;
-  readonly #manifest: ServiceManifest;
+  readonly #manifest: PairedDesktopServiceManifest;
   readonly #lock = new AsyncMutex();
   #workspace?: string;
   #generation = 0;
   #process?: RuntimePeer;
+  #openingProcess?: ServiceProcess;
   #quitting = false;
+  #startupPhase: ServiceStartupPhase | null = null;
+  #startupDiagnostic: ServiceStartupDiagnostic | null = null;
 
   constructor(options: DesktopHostOptions) {
     this.#options = options;
-    if (!isManifest(options.serviceManifest)) throw new Error('服务制品清单无效。');
-    this.#manifest = structuredClone(options.serviceManifest);
+    try {
+      this.#manifest = parsePairedDesktopServiceManifest(options.serviceManifest);
+    } catch {
+      throw new Error('服务制品清单无效。');
+    }
   }
 
   async rememberPickedWorkspace(selected: string): Promise<string> {
@@ -121,6 +127,29 @@ export class DesktopHost {
     }));
   }
 
+  /** Independent of the Runtime peer lock, which is held while a child is opening. */
+  runtimeStartupStatus(): {
+    phase: ServiceStartupPhase | null;
+    message: string | null;
+    diagnosticAvailable: boolean;
+  } {
+    const waitingForSafeExit = this.#quitting && (this.#openingProcess || this.#process);
+    return {
+      phase: this.#startupPhase,
+      message: waitingForSafeExit
+        ? '已请求退出，正在等待会话数据安全取消或提交结算。'
+        : this.#startupPhase
+          ? describeServiceStartupProgress({ phase: this.#startupPhase })
+          : null,
+      diagnosticAvailable: this.#startupDiagnostic !== null,
+    };
+  }
+
+  /** The native save dialog receives only the validated fixed-field report. */
+  startupDiagnosticReport(): string | null {
+    return this.#startupDiagnostic ? formatServiceStartupReport(this.#startupDiagnostic) : null;
+  }
+
   async runtimeOpen(): Promise<DesktopConnectionInfo> {
     return this.#lock.run(async () => {
       if (this.#quitting) throw new Error('应用正在退出。');
@@ -143,6 +172,9 @@ export class DesktopHost {
         };
       }
 
+      this.#startupPhase = null;
+      this.#startupDiagnostic = null;
+
       const manifest = this.#manifest;
       const executable = join(
         this.#options.serviceDirectory,
@@ -163,24 +195,7 @@ export class DesktopHost {
       }
       const configRoot = join(home, '.kite-code');
       ensurePrivateDirectory(configRoot, home, this.#options.platform ?? process.platform);
-      let runtimeRoot = configRoot;
-      if (this.#options.debug) {
-        let repository: string;
-        try {
-          repository = realpathSync.native(this.#options.repositoryDirectory);
-        } catch {
-          throw new Error('源码工作区不可用。');
-        }
-        const canonicalConfig = realpathSync.native(configRoot);
-        const parent = join(canonicalConfig, 'source-profiles');
-        ensurePrivateDirectory(parent, home, this.#options.platform ?? process.platform);
-        runtimeRoot = sourceKiteSessionStoreDirectoryFromCanonicalRoots(
-          canonicalConfig,
-          repository,
-          sourceStoreEpoch(this.#options.sourceStoreEpoch),
-        );
-        ensurePrivateDirectory(runtimeRoot, home, this.#options.platform ?? process.platform);
-      }
+      const runtimeRoot = realpathSync.native(configRoot);
       const processOptions: ServiceProcessOptions = {
         executable,
         workspace,
@@ -188,21 +203,52 @@ export class DesktopHost {
         runtimeRoot,
         buildId: manifest.buildId,
         environmentKeys: manifest.environmentKeys,
+        pairedManifestSha256: pairedDesktopManifestDigest(manifest),
+        onStartupPhase: (phase) => {
+          this.#startupPhase = phase;
+        },
+        onStartupDiagnostic: (diagnostic) => {
+          this.#startupDiagnostic = diagnostic;
+        },
+        ...(this.#options.sourceRepositoryRoot
+          ? { sourceRepositoryRoot: this.#options.sourceRepositoryRoot }
+          : {}),
       };
-      const peer = this.#options.createPeer
-        ? this.#options.createPeer(processOptions, manifest.expectedServerVersion)
-        : new RendererConnection(
-            await ServiceProcess.start(processOptions),
-            manifest.expectedServerVersion,
-          );
-      const generation = this.#nextGeneration();
-      await peer.attach(generation);
-      this.#process = peer;
-      return {
-        connectionId: generation,
-        workspace,
-        expectedServerVersion: manifest.expectedServerVersion,
-      };
+      let peer: RuntimePeer | undefined;
+      try {
+        peer = this.#options.createPeer
+          ? this.#options.createPeer(processOptions, manifest.expectedServerVersion)
+          : new RendererConnection(
+              await ServiceProcess.start(processOptions, (created) => {
+                this.#openingProcess = created;
+                if (this.#quitting) created.requestStartupCancellation();
+              }),
+              manifest.expectedServerVersion,
+            );
+        const generation = this.#nextGeneration();
+        await peer.attach(generation);
+        if (this.#quitting) throw new Error('应用正在退出。');
+        this.#process = peer;
+        this.#openingProcess = undefined;
+        return {
+          connectionId: generation,
+          workspace,
+          expectedServerVersion: manifest.expectedServerVersion,
+        };
+      } catch (error) {
+        if (peer) {
+          try {
+            await peer.close();
+            this.#openingProcess = undefined;
+          } catch {
+            // Preserve the owner so a later quit can retry or report the incomplete cleanup.
+            this.#process = peer;
+          }
+        } else if (this.#openingProcess?.finished) {
+          this.#openingProcess = undefined;
+        }
+        throw error;
+      }
     });
   }
 
@@ -219,11 +265,8 @@ export class DesktopHost {
   async runtimeClose(connectionId: number): Promise<void> {
     await this.#lock.run(async () => {
       if (connectionId !== this.#generation) throw new Error('连接已被替换。');
-      try {
-        await this.#process?.close();
-      } finally {
-        this.#process = undefined;
-      }
+      await this.#process?.close();
+      this.#process = undefined;
     });
   }
 
@@ -252,12 +295,16 @@ export class DesktopHost {
   }
 
   async quit(): Promise<void> {
+    this.#quitting = true;
+    this.#openingProcess?.requestStartupCancellation();
     await this.#lock.run(async () => {
-      this.#quitting = true;
       const process = this.#process;
-      this.#process = undefined;
+      const opening = this.#openingProcess;
       try {
         await process?.close();
+        await opening?.close();
+        this.#process = undefined;
+        this.#openingProcess = undefined;
       } catch (error) {
         this.#quitting = false;
         throw error;
@@ -329,49 +376,10 @@ export function ensurePrivateDirectory(
   }
 }
 
-function isManifest(value: unknown): value is ServiceManifest {
-  if (
-    !isExactRecord(value, [
-      'buildId',
-      'environmentKeys',
-      'executableSha256',
-      'expectedServerVersion',
-    ])
-  )
-    return false;
-  return (
-    typeof value.buildId === 'string' &&
-    value.buildId.length > 0 &&
-    value.buildId.length <= 1024 &&
-    typeof value.executableSha256 === 'string' &&
-    /^[a-f0-9]{64}$/u.test(value.executableSha256) &&
-    typeof value.expectedServerVersion === 'string' &&
-    value.expectedServerVersion.length > 0 &&
-    Array.isArray(value.environmentKeys) &&
-    value.environmentKeys.length <= 128 &&
-    value.environmentKeys.every(
-      (key) => typeof key === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key),
-    )
-  );
-}
-
-function isExactRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const actual = Object.keys(value);
-  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-}
-
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-function sourceStoreEpoch(value: unknown): string {
-  if (typeof value !== 'string' || !/^kite-session-[A-Za-z0-9._-]{1,128}$/u.test(value)) {
-    throw new Error('源码 Store format epoch 不可用。');
-  }
-  return value;
 }

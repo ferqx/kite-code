@@ -34,7 +34,7 @@
 - Task 完成只由 `CanonicalTaskCompletionFact` 进入 completion reducer；该 normalization 完整保留 raw
   `run.completed` 的 output、guard、plan identity 与 outcome，供 Host 在同一事务中推进 Run 和 checkpoint。
 - Resource Budget限制整轮工具总量、Subagent与writer并发，但不把普通Tool或Shell按活动数量分批；一次模型响应中通过traits冲突检查的调用可直接并行。
-- Shell `uncertainEffects`在未持有exact approval时始终投影为真人审批；`risk`只描述风险，不能替代Compiler的
+- Shell `uncertainEffects`在Auto模式下进入审批模型，其他模式请求真人审批；`risk`只描述风险，不能替代Compiler的
   `allowed/decision/requiresApproval`生成第二个hard deny。
 
 ## 测试

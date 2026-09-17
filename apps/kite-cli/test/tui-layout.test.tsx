@@ -6986,6 +6986,27 @@ describe('App', () => {
 // ── SubAgent block rendering ──
 
 describe('SubAgentBlock rendering', () => {
+  test('distinguishes creation, reconciliation waiting, and interruption', () => {
+    const block = {
+      id: 1,
+      kind: 'subagent' as const,
+      subagentId: 'child-status',
+      role: 'review' as const,
+      task: '检查状态',
+      status: 'creating' as const,
+      summary: '',
+      toolCallCount: 0,
+      durationMs: 0,
+      steps: [],
+    };
+    const { lastFrame, rerender } = render(<SubAgentBlock block={block} />);
+    expect(lastFrame()).toContain('创建中');
+    rerender(<SubAgentBlock block={{ ...block, status: 'suspended' }} />);
+    expect(lastFrame()).toContain('等待结果核对');
+    expect(lastFrame()).not.toContain('等待你的批准');
+    rerender(<SubAgentBlock block={{ ...block, status: 'interrupted' }} />);
+    expect(lastFrame()).toContain('已中断');
+  });
   test('renders running subagent block with steps', () => {
     const block = {
       id: 1,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  createRuntimeAbortReason,
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
@@ -30,6 +31,7 @@ import {
   type RuntimeModuleRegistry,
 } from '@kite-ai/runtime-spi';
 import { runtimeCommandOwner } from '../src/host/command-router';
+import { SessionLifecycleSupervisor } from '../src/lifecycle/session-lifecycle-supervisor';
 import {
   deferred,
   projection,
@@ -677,6 +679,71 @@ describe('runtime host command and projection authority', () => {
     await host[Symbol.asyncDispose]();
   });
 
+  test('refreshes an unowned historical Session and advances its subscriber watermark', async () => {
+    const bridge = new TestExecutionBridge();
+    const sessionId = 'historical-reentry';
+    bridge.projections.set(sessionId, projection(sessionId, 3));
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+      ownsSessionExecution: () => false,
+    });
+    await host.start();
+    const iterator = host
+      .subscribe({ spec: { scope: 'session', sessionId } })
+      [Symbol.asyncIterator]();
+    try {
+      expect((await iterator.next()).value).toMatchObject({ revision: 3 });
+      bridge.projections.set(sessionId, projection(sessionId, 5));
+      await expect(
+        host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'get_session_projection', sessionId }),
+      ).resolves.toMatchObject({ status: 'ok', revision: 5 });
+      expect((await iterator.next()).value).toMatchObject({
+        durability: 'durable',
+        revision: 5,
+        projection: { kind: 'snapshot', session: { sessionId, revision: 5 } },
+      });
+    } finally {
+      await iterator.return?.();
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('refreshes a closed Session watermark without reopening it from storage-only facts', async () => {
+    const bridge = new TestExecutionBridge();
+    const sessionId = 'closed-reentry';
+    bridge.projections.set(sessionId, { ...projection(sessionId, 3), lifecycle: 'closed' });
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+      ownsSessionExecution: () => false,
+    });
+    await host.start();
+    const iterator = host
+      .subscribe({ spec: { scope: 'session', sessionId } })
+      [Symbol.asyncIterator]();
+    try {
+      expect((await iterator.next()).value).toMatchObject({ revision: 3 });
+      for (const revision of [3, 5]) {
+        bridge.projections.set(sessionId, projection(sessionId, revision));
+        expect(
+          await host.query({
+            schema: RUNTIME_QUERY_SCHEMA_,
+            type: 'get_session_projection',
+            sessionId,
+          }),
+        ).toMatchObject({ status: 'ok', revision, session: { revision, lifecycle: 'closed' } });
+      }
+      expect((await iterator.next()).value).toMatchObject({
+        revision: 5,
+        projection: { session: { revision: 5, lifecycle: 'closed' } },
+      });
+    } finally {
+      await iterator.return?.();
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
   test('atomically deletes the durable Session, retains its receipt, and never recovers it on replay', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-1', projection('session-1', 3));
@@ -1278,7 +1345,7 @@ describe('runtime host command and projection authority', () => {
 
     await host.command(startCommand('turn-1', 'session-1', 0));
     await host.waitForSessionIdle('session-1');
-    expect(observedReason).toBe('deadline reached');
+    expect(observedReason).toEqual(createRuntimeAbortReason('error', 'deadline reached'));
     await host[Symbol.asyncDispose]();
   });
 
@@ -1564,6 +1631,41 @@ function startCommand(
     input: commandId,
   };
 }
+
+test('Host lifecycle preserves explicit abort causes and defaults legacy strings to error', async () => {
+  const lifecycle = new SessionLifecycleSupervisor();
+  const reasons: unknown[] = [];
+  for (const [operationId, abort] of [
+    ['user', createRuntimeAbortReason('user', 'Stopped by client.')],
+    ['shutdown', createRuntimeAbortReason('error', 'Runtime Host shutdown.')],
+    ['legacy', 'Lease lost.'],
+  ] as const) {
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    lifecycle.schedule(operationId, {
+      operationId,
+      operation: 'turn',
+      execute: async (signal) => {
+        started();
+        if (!signal.aborted)
+          await new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
+        reasons.push(signal.reason);
+      },
+    });
+    await didStart;
+    lifecycle.abort(operationId, abort);
+    await lifecycle.waitForIdle(operationId);
+  }
+  expect(reasons).toEqual([
+    createRuntimeAbortReason('user', 'Stopped by client.'),
+    createRuntimeAbortReason('error', 'Runtime Host shutdown.'),
+    createRuntimeAbortReason('error', 'Lease lost.'),
+  ]);
+});
 
 function respondInteractionCommand(): Extract<RuntimeCommand, { type: 'respond_interaction' }> {
   const interaction = {

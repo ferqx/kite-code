@@ -515,7 +515,9 @@ function boundedObservation(
 ): Readonly<SubagentObservation> {
   if (
     result.childInvocationId !== handle.childInvocationId ||
-    !['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(result.status) ||
+    !['completed', 'failed', 'interrupted', 'cancelled', 'exhausted', 'blocked'].includes(
+      result.status,
+    ) ||
     typeof result.summary !== 'string' ||
     result.summary.length > 1_000_000 ||
     !Number.isSafeInteger(result.toolCallCount) ||

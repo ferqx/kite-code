@@ -82,7 +82,7 @@ export function subagentResultFromObservation(
     !Array.isArray(payload.executionJournal) ||
     !isRecord(payload.exhaustedFingerprints) ||
     !isRecord(payload.toolRecovery) ||
-    ![null, 'completed', 'failed', 'cancelled', 'exhausted', 'suspended'].includes(
+    ![null, 'completed', 'failed', 'cancelled', 'interrupted', 'exhausted', 'suspended'].includes(
       payload.terminalStatus as null | string,
     ) ||
     !(payload.error === null || typeof payload.error === 'string') ||
@@ -136,6 +136,9 @@ export function subagentResultFromObservation(
   const statusMatches =
     (observation.status === 'completed' && payload.ok === true && terminalStatus === 'completed') ||
     (observation.status === 'failed' && payload.ok === false && terminalStatus === 'failed') ||
+    (observation.status === 'interrupted' &&
+      payload.ok === false &&
+      terminalStatus === 'interrupted') ||
     (observation.status === 'cancelled' &&
       payload.ok === false &&
       terminalStatus === 'cancelled') ||
@@ -152,7 +155,8 @@ export function subagentResultFromObservation(
   if (
     payload.failureDiagnostic !== null &&
     observation.status !== 'failed' &&
-    observation.status !== 'cancelled'
+    observation.status !== 'cancelled' &&
+    observation.status !== 'interrupted'
   ) {
     throw new Error('Subagent Provider failure diagnostic is inconsistent.');
   }

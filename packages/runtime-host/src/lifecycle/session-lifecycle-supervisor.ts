@@ -1,9 +1,18 @@
+import {
+  createRuntimeAbortReason,
+  type RuntimeAbortReason,
+  runtimeAbortMessage,
+} from '@kite-ai/runtime-contract';
+
 export type RuntimeSessionOperation = 'turn' | 'compaction' | 'rewind';
 
 export interface RuntimeSessionExecution {
   readonly operationId: string;
   readonly operation: RuntimeSessionOperation;
-  readonly execute: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
+  readonly execute: (
+    signal: AbortSignal,
+    requestAbort: (reason: RuntimeAbortReason | string) => void,
+  ) => Promise<void>;
   readonly onSettled?: () => void;
   readonly onSkipped?: (reason: string) => void;
   /** Host has observed the predecessor's durable terminal before cleanup settled. */
@@ -45,7 +54,11 @@ export class SessionLifecycleSupervisor {
           input.onSkipped?.(abortReason(controller.signal));
           return;
         }
-        await input.execute(controller.signal, (reason) => controller.abort(reason));
+        await input.execute(controller.signal, (reason) =>
+          controller.abort(
+            typeof reason === 'string' ? createRuntimeAbortReason('error', reason) : reason,
+          ),
+        );
       });
     const scheduled = { operationId: input.operationId, controller, completion };
     lifecycle.scheduled.set(input.operationId, scheduled);
@@ -60,15 +73,17 @@ export class SessionLifecycleSupervisor {
     return true;
   }
 
-  abort(sessionId: string, reason: string): void {
+  abort(sessionId: string, reason: RuntimeAbortReason | string): void {
     const lifecycle = this.#sessions.get(sessionId);
     if (!lifecycle) return;
     for (const execution of lifecycle.scheduled.values()) {
-      execution.controller.abort(reason);
+      execution.controller.abort(
+        typeof reason === 'string' ? createRuntimeAbortReason('error', reason) : reason,
+      );
     }
   }
 
-  close(sessionId: string, reason: string): void {
+  close(sessionId: string, reason: RuntimeAbortReason | string): void {
     const lifecycle = this.#session(sessionId);
     lifecycle.closed = true;
     this.abort(sessionId, reason);
@@ -106,7 +121,5 @@ export class SessionLifecycleSupervisor {
 }
 
 function abortReason(signal: AbortSignal): string {
-  if (typeof signal.reason === 'string' && signal.reason) return signal.reason;
-  if (signal.reason instanceof Error && signal.reason.message) return signal.reason.message;
-  return 'Operation cancelled.';
+  return runtimeAbortMessage(signal.reason);
 }

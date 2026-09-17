@@ -6,6 +6,7 @@ import type { InteractionMode, SkillManifest, SkillScanOptions } from '@kite-ai/
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
+  type RuntimeAbortReason,
   type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeCommandContext,
@@ -16,6 +17,7 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
+  runtimeAbortCause,
   sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
 import type {
@@ -52,6 +54,7 @@ import {
   resolveRuntimeInteractionEffect,
 } from '../../runtime-client/interaction-projector';
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
+import { KiteAppServerSessionError } from '../kite-session-app-server-storage';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import { assertPrecommittedRewind } from './command-rewind-decision';
@@ -60,6 +63,7 @@ import type {
   RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
 import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-dependencies';
+import { reconcileRuntimeSessionAfterRestart } from './session-restart-recovery';
 import {
   canContinueSettledGlobalAdmission,
   obsoleteGlobalAdmissionSettlementEvents,
@@ -75,6 +79,13 @@ import type {
 import type { RuntimeTurnInput } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInput {
+  readonly restartRecoveryOwnership?: () =>
+    | {
+        readonly kind: 'fenced_previous_execution';
+        readonly controllerGeneration: number;
+        readonly assertCurrent: () => boolean;
+      }
+    | undefined;
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
@@ -218,11 +229,35 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   ): Promise<void> {
     if (sessionId !== this.#input.sessionId) return;
     const coordinator = this.#ensureCoordinator();
+    const recoveryOwnership = this.#input.restartRecoveryOwnership?.();
+    if (recoveryOwnership) {
+      const result = await reconcileRuntimeSessionAfterRestart({
+        control: coordinator.control,
+        modelInvocationRuntime: this.#modelInvocationRuntimeFactory(this.#input.workspace),
+        shellExecutor: this.#input.shellExecutor,
+        recoveryOwnership,
+        historyEvents: coordinator
+          .getStateRuntimeStorage()
+          .sessions.loadEventsStrict(sessionId)
+          .map((entry) => entry.event),
+      });
+      if (!result.complete)
+        throw new KiteAppServerSessionError(
+          'recovery_required',
+          'Previous execution resources could not yet be reconciled.',
+        );
+    }
     this.#created = true;
     this.#closed = false;
     const state = coordinator.getState();
     this.#revision = state.revision;
-    if (!coordinator.recoveryChanged) return;
+    if (!coordinator.recoveryChanged && !recoveryOwnership) return;
+    // Resolve the restored Run at the committed revision before projecting
+    // intermediate recovery events from the same atomic batch.
+    coordinator.session.getLifecycleProjection();
+    // Drain restored events before a successor Run is created. Otherwise their
+    // old revisions would later be projected against the successor's Run.
+    this.#publishCommittedEvents([], this.#revision, publish, 'session');
     publish({
       schema: RUNTIME_NOTIFICATION_SCHEMA_,
       durability: 'durable',
@@ -562,7 +597,8 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     if (command.type === 'cancel_turn') {
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
       if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
-      if (!coordinator.isTurnActive()) return terminal(this.#rejected(command, 'turn_not_found'));
+      if (coordinator.getState().turn.status !== 'active')
+        return terminal(this.#rejected(command, 'turn_not_found'));
       if (coordinator.session.getLifecycleProjection().currentRun?.runId !== command.runId) {
         return terminal(this.#rejected(command, 'turn_not_found'));
       }
@@ -1142,7 +1178,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     execution: CliRuntimeTurnExecutionInput,
     coordinator: RuntimeSessionCoordinator,
     signal: AbortSignal,
-    requestAbort: (reason: string) => void,
+    requestAbort: (reason: RuntimeAbortReason | string) => void,
   ): Promise<void> {
     const publish = this.#activePublish;
     let publishedRevision = this.#revision;
@@ -1330,7 +1366,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         type: 'turn.aborted',
         turnId: state.turn.turnId,
         reason: 'Runtime presentation or bridge closure could not be confirmed.',
-        cause: signal?.aborted ? 'user' : 'error',
+        cause: signal?.aborted ? runtimeAbortCause(signal.reason) : 'error',
       },
     ]);
   }
@@ -1442,7 +1478,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     const runId = lifecycle?.currentRun?.runId;
     const taskId = lifecycle?.activeTask?.taskId ?? lifecycle?.currentRun?.taskId;
     const turnId = lifecycle?.currentRun?.activeTurnId ?? coordinator?.getState().turn.turnId;
-    const events = coordinator?.control.cancelRun(reason) ?? [];
+    const events = coordinator?.control.cancelRun(reason, 'error') ?? [];
     if (events.length > 0 && coordinator) {
       this.#publishCommittedEvents(events, coordinator.getState().revision, publish, 'turn', {
         ...(runId === undefined ? {} : { runId }),

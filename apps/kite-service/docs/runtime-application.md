@@ -137,7 +137,7 @@ Runtime已在`subagent.started` payload签发的`concurrencyGroupId`必须由Cli
 同一closed Contract与Protocol codec服务live订阅和History回放；不得丢弃该字段后让TUI按相邻child、名称或时间窗口猜测并发组。
 正常child启动还须保留父task的`parentToolCallId`。child内部tool lifecycle由Runtime在queued时写入、并在terminal时从canonical tool state延续closed
 `presentationOwner { subagentId, parentToolCallId }`；Client只据此隐藏顶层重复并把异常留在所属task过程，terminal-only replay也不得公开或解析
-`runtimeToolCallId`的命名格式。旧History缺少owner时继续保留独立异常入口。
+`runtimeToolCallId`的命名格式。旧 History 缺少 owner 时，由 Service 在本次读取的事件上界内，使用 capability invocation、child dispatch intent 的唯一身份关系补齐父工具归属；内部工具再按 subagent.step 与执行侧共用的工具身份计算核对。仅补展示 DTO，不改原事件、不读取上界之后的事实；缺证据或关联歧义时保留独立异常入口，不能按名称去重或隐藏。
 `subagent.completed`的Runtime实测`toolCallCount/durationMs`同样必须保留；failed事件可保留这两个计量与
 content-free `diagnostic.code/stage`，但必须删除`modelInvocationId`和raw provider/error correlation。
 `subagent.tool_result`的可选summary只有非空时才进入closed Client Event；成功但无匹配内容的read/search结果省略该字段，不能
@@ -207,3 +207,22 @@ Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 a
 结算已提交但派发前崩溃时，同 commandId 的回执重放先取得 Session execution owner，再经 Bridge 的 `recoverCommittedResume` 重新核对完整 journal、当前 revision 与原 Run 身份；只有无模型准备、尝试、工具或其他副作用证据且无本地活动执行时，Host 才调度同一 Turn。模型网关在出站前持久记录 `model.invocation_prepared`、`model.invocation_attempt_started` 和 `model.requested`，因此一旦出现这些事实，回执只重放结果，不重做模型调用。不同 commandId 也必须通过相同分类条件。真实 Store 8 与 Host 的崩溃、并发和拒绝重放验证见[Coordinator 测试](../test/runtime/runtime-session-coordinator.test.ts)；恢复的权限边界见 [ADR 0188](../../../docs/adr/0188-on-demand-capabilities-and-filesystem-owner.md)。
 
 恢复派发使用本次请求经认证并冻结的 `commandContext`，沿 Host replay、Service wrapper 和 continuation 传递到工具执行。并发同 commandId 的请求各自持有自己的上下文，不从旧回执恢复连接绑定，也不把上下文写入持久回执。Worker 工具组合仍重新核验本次 binding 与有效控制权；缺失或失效时拒绝执行。
+
+### 会话重新进入时的失效执行收尾
+
+Service 的会话投影访问及执行命令共用 `reconcileInterruptedSession`。目录与历史日志读取不扫描或修改所有会话。对目标会话，先保留有效租约的执行；失效执行经 Store CAS 隔离后取得受控恢复 scope，调用 `reconcileRuntimeSessionAfterRestart` 核对 Provider／沙箱资源，在持有当前代际时追加工具、子 Agent、Turn 的收尾事实，由同一 State 事务更新 Run。未知外部结果保留，调度与完成门禁按当前轮归属判断，不能因 Task 跨轮复用而阻塞新消息。
+
+恢复事件在创建后继 Run 前按旧 Run 身份完成投影；不能延迟到新轮激活时给旧 revision 配上新 runId。同一会话的恢复请求共享进行中的 Promise，重复进入已收尾会话不追加相同事件。清理失败后仍返回可读历史及持久恢复状态；执行请求保留明确失败，不能把检查失败当作清理成功。回归见[重新进入故障测试](../test/isolated/session-reentry-recovery.test.ts)。
+
+终态会话同样核对有持久证据的历史子 Agent 悬挂卡片：先从 State 筛选失败终态父工具与已确认清理的 Provider lifecycle，再读取事件验证唯一 childInvocationId 的 started 尚无 terminal。存在候选时不走 idle／settled authority 的提前返回，而进入相同恢复 writer 追加终态；已失败的旧 Task 不受当前 Task 过滤。成功父工具还必须同时匹配同一 invocation 的 completed observation、attempt／dispatch digest 一致的 cleanup、execution_succeeded 和成功 tool.finished，才补记 subagent.completed；子执行已有 completed observation 但父工具随后失败／取消、完整成功证据不足时保持待核验，不补写失败；身份歧义、未确认子执行清理及有效 owner 不被此规则改写。子 Agent 已有确证的终态在 Provider 核对后即提交，不因其他沙箱清理失败而延后；最终恢复仍保留清理失败，并使用已追加事实避免重复终态。
+
+并行子 Agent 每个 sibling 返回时，Service 即等待其尚未提交的子任务／父工具终态持久化，再等待整批结束；成功写入的事实不重复返回给聚合提交。持久化失败向执行 owner 传播，不能合成为工具执行失败。验证见[并行终态提交测试](../test/isolated/runtime/sibling-terminal-persistence.test.ts)。
+
+会话投影查询统一经过 Host 发布最新持久投影，包括恢复失败后从 Store 读取的结果。订阅注册后为初始边界查询得到的新 revision 必须同时进入该订阅，避免清理重试已推进 Store 水位、客户端却永远收不到对应 ready。该发布只同步观察状态，不取得执行权。
+
+
+主执行停止原因沿 AbortSignal 显式传递：只有主动取消命令使用 user，Host 关闭、租约丢失、执行错误及截止时间使用 error；未分类信号按中断处理，不通过错误文案猜测用户意图。Provider observation 保留 interrupted，避免丢失子终态后恢复时将中断误判为失败。取消收尾覆盖已暂停的子任务；同一子执行已有终态不重复追加，清理未确认不伪造取消成功。
+
+子 Agent 生命周期沿现有持久事件传递：派发意图与带 `status: creating` 的 `subagent.started` 在同一批次保存，实际开始／恢复的 started 为 running。`subagent.failed` 的可选 status 区分 failed、interrupted、cancelled，旧 payload 仍可读取；服务投影把旧的明确 aborted／timed_out 诊断分类为 interrupted，不猜测取消。创建失败也在确认准备资源收尾后提供子任务终态，避免卡在 creating。
+
+`auto_review.requested` 表示进入自动审批队列；执行器选中该审批并验证输入后，必须先确认 `auto_review.started` 持久化，再调用 reviewer。该事实只记录阶段，不授予权限或改变审批结果。审批模型请求必须接入当前主执行的停止信号；停止后不再派发请求或提交迟到的审批完成事件。客户端 review queued 对应等待，reviewing 对应自动审批中；审批返回之后仍须等真正的子任务恢复事实才能显示运行中。父工具状态与子任务状态分别维护，不能用父工具取消推断子任务已经停止。

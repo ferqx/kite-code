@@ -81,6 +81,7 @@ import type {
 } from '#runtime-spi';
 import { modelBuiltinEntry } from './builtin-executor';
 import { executeAppRuntimeTools } from './router';
+import { childRuntimeToolCallId } from './subagent-tool-identity';
 import { toRuntimeSubagentEvent } from './terminal-projection';
 
 class SubagentContinuationPersistenceError extends Error {
@@ -297,25 +298,6 @@ export function forkToolCeiling(input: {
 
 export function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
   return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
-}
-
-function childRuntimeToolCallId(input: {
-  parentToolCallId: string;
-  subagentId: string;
-  modelInvocationId: string;
-  modelToolCallId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-}): string {
-  return `subagent-tool:${digestCapabilityValue({
-    schema: 'kite.subagent-runtime-tool-identity.v1',
-    parentToolCallId: input.parentToolCallId,
-    subagentId: input.subagentId,
-    modelInvocationId: input.modelInvocationId,
-    modelToolCallId: input.modelToolCallId,
-    toolName: input.toolName,
-    arguments: input.args,
-  })}`;
 }
 
 export function isCurrentExactChildToolReservation(
@@ -610,7 +592,7 @@ export function blockedSubagentReviewEvent(input: {
     (blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
       originalRoute !== 'user' &&
       effectiveMode === 'auto' &&
-      !state.autoReview.circuitBreakerTripped)
+      (blocked.toolName === 'shell_execute' || !state.autoReview.circuitBreakerTripped))
   ) {
     return {
       type: 'auto_review.requested',
@@ -811,7 +793,7 @@ function exactBlockedSubagentPolicy(input: {
   const autoReviewFallback =
     blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
     effectiveSubagentInteractionMode(state, input.parentToolCallId) === 'auto' &&
-    !state.autoReview.circuitBreakerTripped;
+    (blocked.toolName === 'shell_execute' || !state.autoReview.circuitBreakerTripped);
   return {
     request: pendingToolRequestFromValidatedInvocation(validated.value, turnPipeline.projection),
     decision: reviewTerminal?.decision ?? facts.value.policy,

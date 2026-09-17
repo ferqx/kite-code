@@ -257,6 +257,14 @@ test('settled user and Agent messages copy their original text', async () => {
   await click(document.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!);
   expect(copied).toEqual(['用户原文', 'Agent 最终回复']);
   expect(document.querySelectorAll('[aria-label="已复制消息"]')).toHaveLength(2);
+  expect(
+    document.querySelector('[aria-label="已复制消息"] svg')?.classList.contains('size-[18px]'),
+  ).toBe(true);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+  });
+  expect(document.querySelectorAll('[aria-label="已复制消息"]')).toHaveLength(0);
+  expect(document.querySelectorAll('[aria-label="复制本轮Agent回复"]')).toHaveLength(1);
 });
 
 test('Markdown renders code and tables without executing HTML, loading images or enabling unsafe links', async () => {
@@ -583,6 +591,7 @@ test('tool activity preserves waiting, rejected and cancelled terminal states', 
       selected
       connected
       saveReading={() => {}}
+      initialReading={{ top: 0, follow: true, expanded: { 'activity:tool:waiting': false } }}
       messages={[
         tool('waiting', 'waiting', false),
         tool('running', 'running', false),
@@ -593,8 +602,13 @@ test('tool activity preserves waiting, rejected and cancelled terminal states', 
     />,
   );
   const activity = document.querySelector('.tool-activity')!;
-  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('2 项异常');
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('执行 5 项');
+  expect(activity.querySelector('.tool-activity-summary .tool-activity-state')).toBeNull();
+  expect(activity.querySelector('.tool-step-preview')).toBeNull();
   expect(activity.querySelector('.tool-activity-summary')?.textContent).not.toContain('进行中');
+  await click(activity.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(activity.querySelector('.tool-activity-summary .tool-activity-state')).toBeNull();
+  expect(activity.querySelectorAll('.tool-activity-steps .tool-step-preview')).toHaveLength(2);
   expect(activity.textContent).toContain('等待交互');
   expect(activity.textContent).toContain('已拒绝');
   expect(activity.textContent).toContain('已停止');
@@ -668,7 +682,7 @@ test('a child of a hidden parent has a tool entry without its result prose', asy
   expect(document.body.textContent).not.toContain('内部委派');
 });
 
-test('owned hidden terminal issues remain accessible when their parent is unavailable', async () => {
+test('owned hidden terminal issues stay inside the child container when their parent is unavailable', async () => {
   await render(
     <Conversation
       loading={false}
@@ -690,6 +704,19 @@ test('owned hidden terminal issues remain accessible when their parent is unavai
           status: 'rejected',
         },
         {
+          id: 'tool:owned-standalone',
+          role: 'tool',
+          title: '读取文件',
+          text: '读取中',
+          settled: false,
+          presentation: 'standalone',
+          presentationOwner: {
+            subagentId: 'hidden-child',
+            parentToolCallId: 'hidden-rejected',
+          },
+          status: 'running',
+        },
+        {
           id: 'subagent:hidden-child',
           role: 'subagent',
           parentToolCallId: 'hidden-rejected',
@@ -701,7 +728,22 @@ test('owned hidden terminal issues remain accessible when their parent is unavai
       ]}
     />,
   );
-  expect(document.body.textContent).toContain('权限不足');
+  expect(document.querySelectorAll('.reading-column > .message.tool-activity')).toHaveLength(0);
+  expect(document.querySelectorAll('.message-group > .message.tool-activity')).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('权限不足');
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.subagent-process')?.textContent).not.toContain('权限不足');
+  expect(document.querySelector('.subagent-process')?.textContent).toContain('读取文件');
+  expect(document.querySelectorAll('.subagent-process .message.tool-activity')).toHaveLength(2);
+  await click(
+    document.querySelector<HTMLButtonElement>('.subagent-process .tool-activity-summary')!,
+  );
+  expect(document.querySelector('.subagent-process .tool-detail')?.textContent).toContain(
+    '权限不足',
+  );
+  expect(
+    document.querySelector('.message-group > .message.tool-activity .subagent-process'),
+  ).not.toBeNull();
   expect(document.body.textContent).not.toContain('确认未执行');
 });
 
@@ -765,6 +807,7 @@ test('parent disclosure shows only child tool steps and preserves explicit foldi
   expect(document.body.textContent).not.toContain('内部读取');
   await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
   expect(document.querySelector('.subagent-process')?.textContent).toContain('内部读取');
+  expect(document.querySelector('.subagent-process > .tool-step-status')).toBeNull();
   expect(document.body.textContent).not.toContain('复核完成');
   await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
   expect(document.querySelector('.subagent-process')).toBeNull();
@@ -839,6 +882,132 @@ test('running and failed subagents do not claim that a result was sent to the ma
   expect(subagents[0]?.textContent).toContain('正在工作');
   expect(subagents[1]?.textContent).toContain('失败');
   expect(subagents.every((item) => !item.textContent?.includes('已发送给主 Agent'))).toBe(true);
+});
+
+test('finished subagents stop unfinished child tool animations without inventing tool results', async () => {
+  const child: Message = {
+    id: 'subagent:child',
+    role: 'subagent',
+    title: '检查文件',
+    text: '',
+    settled: false,
+    status: 'running',
+    steps: [{ id: 'search', toolName: 'search_files', text: '搜索文件', status: 'started' }],
+  };
+  const tool: Message = {
+    id: 'tool:read',
+    role: 'tool',
+    toolName: 'read_file',
+    title: '读取文件',
+    text: '',
+    settled: false,
+    status: 'running',
+    presentation: 'hidden',
+    presentationOwner: { subagentId: 'child', parentToolCallId: 'task' },
+  };
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(<Conversation {...props} messages={[child, tool]} />);
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelectorAll('.subagent-process .is-running')).toHaveLength(2);
+  await act(() =>
+    root!.render(
+      <Conversation {...props} messages={[{ ...child, settled: true, status: 'failed' }, tool]} />,
+    ),
+  );
+  expect(document.querySelectorAll('.subagent-process .is-running')).toHaveLength(0);
+  expect(document.querySelectorAll('.subagent-process [aria-label*="结果未知"]')).toHaveLength(2);
+});
+
+test('parent task heading follows all child lifecycle states even after parent tool completes', async () => {
+  const labels = {
+    creating: '创建中',
+    running: '运行中',
+    waiting: '等待中',
+    auto_reviewing: '自动审批中',
+    completed: '已完成',
+    interrupted: '已中断',
+    cancelled: '已取消',
+    failed: '已失败',
+  } as const;
+  for (const parentStatus of ['running', 'completed'] as const)
+    for (const [status, label] of Object.entries(labels) as [keyof typeof labels, string][]) {
+      const element = (
+        <Conversation
+          loading={false}
+          selected
+          connected
+          saveReading={() => {}}
+          messages={[
+            {
+              id: 'tool:parent',
+              role: 'tool',
+              toolName: 'task',
+              title: '检查仓库',
+              text: 'Parent result',
+              settled: parentStatus === 'completed',
+              status: parentStatus,
+              presentation: 'standalone',
+            },
+            {
+              id: 'subagent:child',
+              role: 'subagent',
+              parentToolCallId: 'parent',
+              title: '检查仓库',
+              text: '',
+              settled: ['completed', 'interrupted', 'cancelled', 'failed'].includes(status),
+              status,
+            },
+          ]}
+        />
+      );
+      if (!root) await render(element);
+      else await act(() => root!.render(element));
+      expect(document.querySelector('.tool-activity')?.textContent).toContain(label);
+      expect(document.querySelector('.tool-activity')?.classList.contains('is-running')).toBe(
+        status === 'creating' || status === 'running',
+      );
+    }
+});
+
+test('task generic failure is hidden only when a terminal child has a concrete reason', async () => {
+  const view = (status: 'failed' | 'interrupted' | 'cancelled', reason: string) => (
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:parent',
+          role: 'tool',
+          toolName: 'task',
+          title: '检查仓库',
+          text: 'Tool execution failed.',
+          settled: true,
+          status: 'failed',
+          presentation: 'standalone',
+        },
+        {
+          id: 'subagent:child',
+          role: 'subagent',
+          parentToolCallId: 'parent',
+          title: '检查仓库',
+          text: reason,
+          settled: true,
+          status,
+        },
+      ]}
+    />
+  );
+  for (const status of ['failed', 'interrupted', 'cancelled'] as const) {
+    if (!root) await render(view(status, '模型连接中断'));
+    else await act(() => root!.render(view(status, '模型连接中断')));
+    expect(document.querySelector('.tool-activity')?.textContent).not.toContain(
+      'Tool execution failed.',
+    );
+  }
+  await act(() => root!.render(view('failed', '')));
+  expect(document.querySelector('.tool-activity')?.textContent).toContain('Tool execution failed.');
 });
 
 test('reasoning and plan progress remain readable without raw tool metadata', async () => {
@@ -1306,6 +1475,73 @@ test('a failed file read keeps its failure status without a redundant error para
   expect(document.body.textContent).not.toContain('File not found.');
 });
 
+test('queued tools appear in the message list before execution finishes', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:shell',
+          role: 'tool',
+          toolName: 'shell_execute',
+          text: '',
+          settled: false,
+          status: 'queued',
+        },
+        {
+          id: 'tool:ask',
+          role: 'tool',
+          toolName: 'ask_user',
+          text: '',
+          settled: false,
+          status: 'queued',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelectorAll('.tool-activity-summary')).toHaveLength(2);
+  expect(document.body.textContent).toContain('询问用户');
+});
+
+test('pending Ask appears in the message list before the answer is submitted', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'tool:ask-pending',
+          role: 'tool',
+          toolName: 'ask_user',
+          settled: false,
+          status: 'running',
+          text: '',
+        },
+        {
+          id: 'interaction:ask-pending',
+          role: 'system',
+          systemKind: 'ask',
+          title: '请选择',
+          text: '接下来做什么？',
+          settled: false,
+          ask: {
+            toolCallId: 'ask-pending',
+            questions: [{ id: 'q1', question: '接下来做什么？' }],
+          },
+        },
+      ]}
+    />,
+  );
+  expect(document.body.textContent).toContain('询问用户');
+  expect(document.body.textContent).toContain('接下来做什么？');
+  expect(document.querySelectorAll('.tool-activity-summary')).toHaveLength(1);
+});
+
 test('Ask renders one paired history record instead of the owned raw tool result', async () => {
   await render(
     <Conversation
@@ -1333,7 +1569,7 @@ test('Ask renders one paired history record instead of the owned raw tool result
           ask: {
             toolCallId: 'ask-1',
             questions: [
-              { id: 'q1', question: '接下来要我做什么？' },
+              { id: 'q1', question: '接下来要我做什么：' },
               { id: 'q2', question: '范围？' },
             ],
             answers: { q1: '先不动，到此为止', q2: '当前会话' },
@@ -1360,7 +1596,7 @@ test('Ask renders one paired history record instead of the owned raw tool result
     Array.from(document.querySelectorAll('.tool-ask-answers > div')).map(
       (item) => item.textContent,
     ),
-  ).toEqual(['1. 接下来要我做什么？：先不动，到此为止', '2. 范围？：当前会话']);
+  ).toEqual(['1. 接下来要我做什么：先不动，到此为止', '2. 范围？：当前会话']);
   expect(document.querySelector('.tool-ask-answers pre')).toBeNull();
 });
 
@@ -1474,6 +1710,33 @@ test('Shell distinguishes stopping automatic review from cancellation after exec
   expect(document.querySelector('.shell-output pre')?.textContent).toContain('命令正在执行');
   expect(document.querySelector('.shell-output')?.textContent).not.toContain('未执行');
   expect(document.querySelector('.shell-output')?.textContent).not.toContain('未开始执行');
+});
+
+test('cancelled tool status does not repeat the generic event summary', async () => {
+  const cancelled: Message = {
+    id: 'tool:cancelled',
+    role: 'tool',
+    toolName: 'shell_execute',
+    arguments: { command: 'sleep 30' },
+    text: 'Tool execution cancelled.',
+    settled: true,
+    status: 'cancelled',
+  };
+  await render(
+    <Conversation
+      messages={[cancelled]}
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+    />,
+  );
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('已停止');
+  expect(document.querySelector('.tool-activity-summary')?.textContent).not.toContain(
+    'Tool execution cancelled.',
+  );
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.shell-output pre')?.textContent).toBe('命令已停止。');
 });
 
 test('thinking seconds update while collapsed and freeze when settled', async () => {

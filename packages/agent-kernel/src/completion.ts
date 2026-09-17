@@ -421,6 +421,18 @@ function blockedPlannedCompletion(
   };
 }
 
+function hasCurrentUnknownInvocation(state: AgentState): boolean {
+  return Object.values(state.capabilities.invocations).some((invocation) => {
+    if (invocation.status !== 'unknown') return false;
+    const call = state.tools.calls[invocation.toolCallId];
+    // One Task can continue across several user turns. An external outcome
+    // unknown in an interrupted turn remains in history; it cannot prevent
+    // completion of a newly accepted turn of that same Task.
+    if (call?.createdAtTurnId) return call.createdAtTurnId === state.turn.turnId;
+    return invocation.taskId === undefined || invocation.taskId === state.activeTaskId;
+  });
+}
+
 function commonBlocker(state: AgentState): UnplannedCompletionGuardBlocked | undefined {
   const planning = activePlanning(state).kind;
   if (state.interactions.kind !== 'idle')
@@ -434,11 +446,7 @@ function commonBlocker(state: AgentState): UnplannedCompletionGuardBlocked | und
     return blockedUnplannedCompletion(state, planning, 'tool_pending', 'wait_for_tool');
   if (hasCurrentSuspendedSubagent(state))
     return blockedUnplannedCompletion(state, planning, 'subagent_suspended', 'wait_for_subagent');
-  if (
-    Object.values(state.capabilities.invocations).some(
-      (invocation) => invocation.status === 'unknown',
-    )
-  )
+  if (hasCurrentUnknownInvocation(state))
     return blockedUnplannedCompletion(
       state,
       planning,
@@ -679,11 +687,7 @@ export function decidePlannedCompletion(state: AgentState): PlannedCompletionGua
     return block('interaction_pending', 'wait_for_interaction');
   if (hasCurrentNonTerminalTool(state)) return block('tool_pending', 'wait_for_tool');
   if (hasCurrentSuspendedSubagent(state)) return block('subagent_suspended', 'wait_for_subagent');
-  if (
-    Object.values(state.capabilities.invocations).some(
-      (invocation) => invocation.status === 'unknown',
-    )
-  )
+  if (hasCurrentUnknownInvocation(state))
     return block('unknown_external_invocation', 'reconcile_invocation');
   if (activeSkillFramesForCurrentWork(state)) return block('skill_active', 'complete_skill');
   if (

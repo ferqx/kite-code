@@ -84,6 +84,41 @@ describe('Kite Home Workspace Runtime journal', () => {
     ).toBe(SQLITE_RUNTIME_RUN_FORMAT_EPOCH);
   });
 
+  test('fails Session listing when its naming event cannot be decoded', () => {
+    using database = preparedDatabase();
+    const writer = createKiteHomeWriteTransactionPort(database);
+    const workspace = identity('a', 'b');
+    createKiteHomeWorkspaceAdmissionPort({ database, writer }).admit(workspace);
+    createJournal(database, writer, workspace).transactions.commitDecision({
+      sessionId: 'session-1',
+      events: [{ type: 'message', text: 'Original prompt' }],
+      metadata: [{ eventId: 'event-1', revision: 1 }],
+      snapshot: stateFor(workspace, 1),
+    });
+    database
+      .query('UPDATE runtime_events SET event_json = ? WHERE session_id = ?')
+      .run(JSON.stringify({ type: 'unsupported' }), 'session-1');
+    const reader = createKiteHomeWorkspaceRuntimeJournal<Event, State>({
+      database,
+      writer,
+      workspace,
+      codec: {
+        ...codec,
+        decodeEvent: (json: string) => {
+          const event = codec.decodeEvent(json);
+          if (event.type === 'unsupported') throw new Error('Unsupported persisted event');
+          return event;
+        },
+      },
+      stateSchemaVersion: 27,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+      now: () => 200,
+    });
+
+    expect(() => reader.sessions.listSessions()).toThrow('Unsupported persisted event');
+    expect(() => reader.sessions.listSessions('Original')).toThrow('Unsupported persisted event');
+  });
+
   test('persists resource receipt atomically and rejects a duplicate decision without partial rows', () => {
     using database = preparedDatabase();
     const writer = createKiteHomeWriteTransactionPort(database);

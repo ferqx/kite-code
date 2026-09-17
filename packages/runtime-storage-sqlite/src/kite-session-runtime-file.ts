@@ -1,5 +1,5 @@
 import { Database, constants as sqliteConstants } from 'bun:sqlite';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import {
   assertCanonicalKiteDatabasePath,
   ensurePrivateDatabaseFile,
@@ -12,12 +12,25 @@ import {
   KITE_SESSION_STORE_SCHEMA_VERSION,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
-import { assertNoFollowDatabasePath } from './preflight';
+import { assertNoFollowDatabasePath, SqliteRuntimeStorageOpenError } from './preflight';
 
 export type KiteSessionStoreOpenErrorCode =
   | 'store_incompatible'
   | 'store_migration_required'
-  | 'store_busy';
+  | 'store_insufficient_space'
+  | 'store_access_denied'
+  | 'store_corrupt'
+  | 'store_busy'
+  | 'store_preparation_cancelled'
+  | 'store_history_reconciliation_required';
+
+export type KiteSessionStorePreparationStage =
+  | 'inspecting'
+  | 'acquiring_maintenance'
+  | 'preparing'
+  | 'publishing'
+  | 'waiting_for_store'
+  | 'ready';
 
 export interface KiteSessionStoreMetadata {
   schemaVersion: number | null;
@@ -71,7 +84,7 @@ export function checkKiteSessionStoreCompatibility(
     metadata.schemaVersion !== null &&
     metadata.schemaVersion < KITE_SESSION_STORE_SCHEMA_VERSION
   ) {
-    return { status: 'migration_required', reason: 'unsupported_schema', ...detail };
+    return { status: 'incompatible', reason: 'unsupported_schema', ...detail };
   }
   return {
     status: 'incompatible',
@@ -83,54 +96,57 @@ export function checkKiteSessionStoreCompatibility(
 export class KiteSessionStoreOpenError extends Error {
   readonly code: KiteSessionStoreOpenErrorCode;
   readonly compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
+  readonly stage?: KiteSessionStorePreparationStage;
 
   constructor(
     code: KiteSessionStoreOpenErrorCode,
     message: string,
     options?: ErrorOptions & {
       compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
+      stage?: KiteSessionStorePreparationStage;
     },
   ) {
     super(message, options);
     this.name = 'KiteSessionStoreOpenError';
     this.code = code;
     this.compatibility = options?.compatibility;
+    this.stage = options?.stage;
   }
 }
 
 /** Opens only the accepted App Server Store file; it never probes or imports `kite.sqlite`. */
 export function openKiteSessionStoreDatabase(databasePath: string): Database {
-  const path = assertCanonicalKiteDatabasePath(databasePath, 'kite-session.sqlite');
-  assertNoFollowDatabasePath(path);
-  inspectKiteSessionStoreDatabase(path, false);
-  ensurePrivateDatabaseFile(path);
-  const database = new Database(
-    path,
-    sqliteConstants.SQLITE_OPEN_READWRITE |
-      sqliteConstants.SQLITE_OPEN_CREATE |
-      sqliteConstants.SQLITE_OPEN_NOFOLLOW,
-  );
+  const path = canonicalStorePath(databasePath);
+  let database: Database | undefined;
   try {
+    assertNoFollowDatabasePath(path);
+    inspectKiteSessionStoreDatabase(path, false);
     try {
-      database.run('PRAGMA busy_timeout = 5000');
-      database.run('PRAGMA foreign_keys = ON');
-      initializeKiteSessionStoreIfNeeded(database);
-      configureJournalMode(database);
-      database.run('PRAGMA synchronous = FULL');
+      ensurePrivateDatabaseFile(path);
     } catch (error) {
-      if (error instanceof KiteHomeStoreSchemaError || isStoreFormatFailure(error)) {
-        throw new KiteSessionStoreOpenError(
-          'store_incompatible',
-          'Kite Session Store format is incompatible or corrupt.',
-          { cause: error },
-        );
-      }
-      throw error;
+      if (['ENOSPC', 'EDQUOT', 'SQLITE_FULL'].includes(errorCode(error)))
+        throw classifyStoreOpenFailure(error);
+      throw new KiteSessionStoreOpenError(
+        'store_access_denied',
+        'Kite Session Store file is not privately accessible.',
+        { cause: error },
+      );
     }
+    database = new Database(
+      path,
+      sqliteConstants.SQLITE_OPEN_READWRITE |
+        sqliteConstants.SQLITE_OPEN_CREATE |
+        sqliteConstants.SQLITE_OPEN_NOFOLLOW,
+    );
+    database.run('PRAGMA busy_timeout = 5000');
+    database.run('PRAGMA foreign_keys = ON');
+    initializeKiteSessionStoreIfNeeded(database);
+    configureJournalMode(database);
+    database.run('PRAGMA synchronous = FULL');
     return database;
   } catch (error) {
-    database.close(false);
-    throw error;
+    database?.close(false);
+    throw classifyStoreOpenFailure(error, error instanceof KiteHomeStoreSchemaError);
   }
 }
 
@@ -153,23 +169,21 @@ function isStoreBusy(error: unknown): boolean {
   return code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED';
 }
 
-function isStoreFormatFailure(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const code = 'code' in error ? String(error.code) : '';
-  return code !== 'SQLITE_BUSY' && code !== 'SQLITE_LOCKED';
-}
-
 /** Full read-only integrity preflight used before a release stops an old owner. */
 export function validateKiteSessionStoreDatabase(databasePath: string): void {
   inspectKiteSessionStoreDatabase(databasePath, true);
 }
 
-function inspectKiteSessionStoreDatabase(databasePath: string, fullIntegrity: boolean): void {
-  const path = assertCanonicalKiteDatabasePath(databasePath, 'kite-session.sqlite');
-  assertNoFollowDatabasePath(path);
-  if (!existsSync(path)) return;
+export function inspectKiteSessionStoreDatabase(
+  databasePath: string,
+  fullIntegrity: boolean,
+): void {
+  const path = canonicalStorePath(databasePath);
   let database: Database | undefined;
   try {
+    assertNoFollowDatabasePath(path);
+    if (!existsSync(path)) return;
+    assertPrivateReadableExistingStoreFile(path);
     database = new Database(
       path,
       sqliteConstants.SQLITE_OPEN_READONLY | sqliteConstants.SQLITE_OPEN_NOFOLLOW,
@@ -194,25 +208,102 @@ function inspectKiteSessionStoreDatabase(databasePath: string, fullIntegrity: bo
         { compatibility },
       );
     }
-    assertKiteSessionStoreSchema(database);
-    if (fullIntegrity) assertKiteStoreIntegrity(database);
-  } catch (error) {
-    if (error instanceof KiteSessionStoreOpenError) throw error;
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
-    if (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')) {
-      throw new KiteSessionStoreOpenError(
-        'store_busy',
-        'Kite Session Store is busy; retry after the current operation completes.',
-        { cause: error },
-      );
+    try {
+      assertKiteSessionStoreSchema(database);
+      if (fullIntegrity) assertKiteStoreIntegrity(database);
+    } catch (error) {
+      throw classifyStoreOpenFailure(error, true);
     }
-    throw new KiteSessionStoreOpenError(
-      'store_incompatible',
-      'Kite Session Store format is incompatible or unavailable; no data migration was performed.',
-      { cause: error },
-    );
+  } catch (error) {
+    throw classifyStoreOpenFailure(error);
   } finally {
     database?.close(false);
   }
+}
+
+function classifyStoreOpenFailure(error: unknown, knownCurrent = false): KiteSessionStoreOpenError {
+  if (error instanceof KiteSessionStoreOpenError) return error;
+  const code = errorCode(error);
+  if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL')
+    return new KiteSessionStoreOpenError(
+      'store_insufficient_space',
+      'Session Store has insufficient writable space.',
+      { cause: error },
+    );
+  if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED')
+    return new KiteSessionStoreOpenError(
+      'store_busy',
+      'Kite Session Store is busy; retry after the current operation completes.',
+      { cause: error },
+    );
+  if (
+    error instanceof SqliteRuntimeStorageOpenError ||
+    [
+      'EACCES',
+      'EPERM',
+      'EROFS',
+      'SQLITE_CANTOPEN',
+      'SQLITE_PERM',
+      'SQLITE_READONLY',
+      'SQLITE_IOERR',
+    ].some((prefix) => code === prefix || code.startsWith(`${prefix}_`))
+  )
+    return new KiteSessionStoreOpenError(
+      'store_access_denied',
+      'Kite Session Store cannot be accessed with the required permissions.',
+      { cause: error },
+    );
+  if (
+    knownCurrent ||
+    error instanceof KiteHomeStoreSchemaError ||
+    code === 'SQLITE_NOTADB' ||
+    code.startsWith('SQLITE_CORRUPT')
+  )
+    return new KiteSessionStoreOpenError(
+      'store_corrupt',
+      'Kite Session Store contents failed integrity or current-schema validation.',
+      { cause: error },
+    );
+  return new KiteSessionStoreOpenError(
+    'store_incompatible',
+    'Kite Session Store format is incompatible, unsupported, or cannot be identified.',
+    { cause: error },
+  );
+}
+
+function assertPrivateReadableExistingStoreFile(path: string): void {
+  const stat = lstatSync(path);
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    (typeof process.getuid === 'function' && stat.uid !== process.getuid()) ||
+    (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
+  ) {
+    throw new KiteSessionStoreOpenError(
+      'store_access_denied',
+      'Kite Session Store file is not a private regular file.',
+    );
+  }
+}
+
+function canonicalStorePath(databasePath: string): string {
+  try {
+    return assertCanonicalKiteDatabasePath(databasePath, 'kite-session.sqlite');
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
+    return failedStorePath(error);
+  }
+}
+
+function failedStorePath(error: unknown): never {
+  throw new KiteSessionStoreOpenError(
+    'store_access_denied',
+    'Kite Session Store parent is unavailable or unsafe.',
+    { cause: error },
+  );
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
 }

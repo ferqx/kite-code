@@ -866,6 +866,147 @@ describe('retained TUI session coordinator', () => {
     }
   });
 
+  for (const commandType of ['cancel_turn', 'close_session'] as const) {
+    test(`${commandType} settles a confirmed waiting child even without an active runner`, async () => {
+      const sessionId = `retained-waiting-child-${commandType}`;
+      const fixture = createFixture(sessionId);
+      const access = fixture.binding.access();
+      try {
+        const coordinator = access.ensure(identity(sessionId));
+        const started = coordinator.commitStartTurnCommand(
+          startCommand(sessionId, coordinator.getState().revision),
+          commandEvidence(sessionId),
+        );
+        const state = coordinator.getState();
+        const parentToolCallId = 'waiting-parent';
+        const childInvocationId = 'waiting-child';
+        Object.assign(state.tools.calls, {
+          [parentToolCallId]: {
+            toolCallId: parentToolCallId,
+            modelMessageId: 'waiting-model-message',
+            name: 'task',
+            args: {},
+            status: 'awaiting_approval',
+            createdAtTurnId: started.descriptor.turnId,
+          },
+        });
+        Object.assign(state.capabilities.invocations, {
+          'waiting-invocation': {
+            invocationId: 'waiting-invocation',
+            toolCallId: parentToolCallId,
+            capabilityId: 'builtin:task',
+            capabilityRevision: 'revision',
+            argumentsDigest: 'arguments',
+            authorizationDigest: 'authorization',
+            effectiveEffectsDigest: 'effects',
+            status: 'running',
+            receiptRequirement: 'observation_receipt',
+            attemptsStarted: 1,
+            admissionDigest: 'admission',
+            recordedAt: '2026-08-25T00:00:00.000Z',
+            subagentProviderLifecycle: {
+              attempt: 1,
+              purpose: 'start',
+              childInvocationId,
+              taskArtifact: {
+                artifactId: `pa_${'7'.repeat(64)}`,
+                kind: 'subagent_task',
+                integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+                byteLength: 128,
+              },
+              dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+              status: 'cleanup_completed',
+              handleArtifact: {
+                artifactId: `pa_${'a'.repeat(64)}`,
+                kind: 'subagent_handle',
+                integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+                byteLength: 128,
+              },
+              handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
+              handleRecordedAt: '2026-08-25T00:00:00.000Z',
+              observationStatus: 'blocked',
+              observedAt: '2026-08-25T00:00:00.000Z',
+              recordedAt: '2026-08-25T00:00:00.000Z',
+              cleanupKind: 'handle_reconcile',
+              cleanupAttempt: 1,
+              cleanupStartedAt: '2026-08-25T00:00:00.000Z',
+              cleanupConfirmed: true,
+              cleanupCompletedAt: '2026-08-25T00:00:01.000Z',
+            },
+          },
+        });
+        coordinator.session.processEventBatch([
+          {
+            type: 'subagent.started',
+            subagent: {
+              id: childInvocationId,
+              role: 'explore',
+              name: 'Waiting child',
+              parentToolCallId,
+            },
+          },
+        ]);
+        expect(coordinator.isTurnActive()).toBe(false);
+        const revision = coordinator.getState().revision;
+        const committed =
+          commandType === 'cancel_turn'
+            ? coordinator.commitCancelTurnCommand(
+                {
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: 'cancel-waiting-child',
+                  type: commandType,
+                  sessionId,
+                  expectedRevision: revision,
+                  turnId: started.descriptor.turnId,
+                  runId: started.descriptor.turnId,
+                },
+                commandEvidence(sessionId, 'cancel-waiting-child'),
+              )
+            : coordinator.commitCloseSessionCommand(
+                closeCommand(sessionId, revision, 'close-waiting-child'),
+                commandEvidence(sessionId, 'close-waiting-child'),
+              );
+        expect(committed.events.filter((event) => event.type === 'subagent.failed')).toMatchObject([
+          { type: 'subagent.failed', subagent: { id: childInvocationId, status: 'cancelled' } },
+        ]);
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .filter((entry) => entry.event.type === 'subagent.failed'),
+        ).toHaveLength(1);
+        expect(coordinator.getState().turn.status).toBe('aborted');
+        expect(() =>
+          commandType === 'cancel_turn'
+            ? coordinator.commitCancelTurnCommand(
+                {
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: 'cancel-waiting-child-retry',
+                  type: commandType,
+                  sessionId,
+                  expectedRevision: revision,
+                  turnId: started.descriptor.turnId,
+                  runId: started.descriptor.turnId,
+                },
+                commandEvidence(sessionId, 'cancel-waiting-child-retry'),
+              )
+            : coordinator.commitCloseSessionCommand(
+                closeCommand(sessionId, revision, 'close-waiting-child-retry'),
+                commandEvidence(sessionId, 'close-waiting-child-retry'),
+              ),
+        ).toThrow();
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .filter((entry) => entry.event.type === 'subagent.failed'),
+        ).toHaveLength(1);
+      } finally {
+        await access.close();
+        fixture.storage.close();
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('does not abort or mutate State when a cancel command transaction fails', async () => {
     const sessionId = 'retained-command-cancel-rollback';
     let failCommandCommit = false;
@@ -2649,6 +2790,7 @@ describe('retained TUI session coordinator', () => {
     ['ask_user', true, true],
   ] as const)('projects reviewer %s as a distinct Runtime outcome', async (_decision, askUser, escalated) => {
     const state = autoReviewState(`retained-auto-review-${_decision}`);
+    const durable: RuntimeEvent[] = [];
     const dependencies: RuntimeExecutorDependencies = {
       config: config(),
       model: createChatModel(config()),
@@ -2656,15 +2798,20 @@ describe('retained TUI session coordinator', () => {
         RuntimeExecutorDependencies['modelInvocationGateway']
       >,
       modelEffectCoordinator: {
-        reviewToolApproval: async () => ({
-          ok: true,
-          suggestion: {
-            approved: false,
-            ...(askUser ? { requiresUserApproval: true as const } : {}),
-            grant: 'approve_once' as const,
-            reason: askUser ? 'user intent is required' : 'reviewer rejected the operation',
-          },
-        }),
+        reviewToolApproval: async () => {
+          expect(durable).toEqual([
+            expect.objectContaining({ type: 'auto_review.started', reviewId: 'retained-review-1' }),
+          ]);
+          return {
+            ok: true,
+            suggestion: {
+              approved: false,
+              ...(askUser ? { requiresUserApproval: true as const } : {}),
+              grant: 'approve_once' as const,
+              reason: askUser ? 'user intent is required' : 'reviewer rejected the operation',
+            },
+          };
+        },
       } as unknown as NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
       builtinToolCatalog,
       capabilityExecution,
@@ -2673,15 +2820,90 @@ describe('retained TUI session coordinator', () => {
     const events = await createAppRuntimeEffectExecutor(dependencies)(
       { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
       state,
+      undefined,
+      {
+        reservationIds: [],
+        getState: () => state,
+        persistEvent: async () => true,
+        persistEvents: async (events) => {
+          durable.push(...events);
+          return true;
+        },
+      },
     );
 
     expect(events[0]).toMatchObject({
       type: 'auto_review.completed',
       result: { approved: false, ...(escalated ? { escalatedToUser: true } : {}) },
     });
+    await expect(
+      createAppRuntimeEffectExecutor(dependencies)(
+        { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+        state,
+        undefined,
+        {
+          reservationIds: [],
+          getState: () => state,
+          persistEvent: async () => false,
+          persistEvents: async () => false,
+        },
+      ),
+    ).rejects.toThrow('Auto-review start could not be persisted');
     // Escalation keeps the same durable review identity; it must not synthesize
     // a second approval.requested event.
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test.each([
+    'after persisted start',
+    'during reviewer execution',
+  ] as const)('does not publish auto-review completion after parent cancellation %s', async (abortAt) => {
+    const state = autoReviewState(`retained-auto-review-cancel-${abortAt}`);
+    const controller = new AbortController();
+    const durable: RuntimeEvent[] = [];
+    let reviewerCalls = 0;
+    const dependencies: RuntimeExecutorDependencies = {
+      config: config(),
+      model: createChatModel(config()),
+      signal: controller.signal,
+      modelInvocationGateway: {} as NonNullable<
+        RuntimeExecutorDependencies['modelInvocationGateway']
+      >,
+      modelEffectCoordinator: {
+        reviewToolApproval: async ({ signal }: { signal: AbortSignal }) => {
+          reviewerCalls += 1;
+          expect(signal).toBe(controller.signal);
+          if (abortAt === 'during reviewer execution') {
+            controller.abort(new Error('Parent execution cancelled.'));
+          }
+          return { ok: true, suggestion: { approved: true, reason: 'Late approval' } };
+        },
+      } as unknown as NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
+      builtinToolCatalog,
+      capabilityExecution,
+    };
+
+    const events = await createAppRuntimeEffectExecutor(dependencies)(
+      { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+      state,
+      undefined,
+      {
+        reservationIds: [],
+        getState: () => state,
+        persistEvent: async () => true,
+        persistEvents: async (batch) => {
+          durable.push(...batch);
+          if (abortAt === 'after persisted start') {
+            controller.abort(new Error('Parent execution cancelled.'));
+          }
+          return true;
+        },
+      },
+    );
+
+    expect(durable.map((event) => event.type)).toEqual(['auto_review.started']);
+    expect(reviewerCalls).toBe(abortAt === 'after persisted start' ? 0 : 1);
+    expect(events).toEqual([]);
   });
 
   test('runs deterministic verification without model dispatch', async () => {

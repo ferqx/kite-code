@@ -176,7 +176,10 @@ function shellMechanism(
   const command = recordString(input.canonicalArguments, 'command');
   const sandboxScope = input.sandboxScope;
   if (!sandboxScope) fail('invalid_facts');
-  const readOnly = sandboxScope.filesystem === 'read_only' || isReadOnlyShellCommand(command);
+  // Read-only command proof cannot narrow an approved full filesystem scope.
+  const readOnly =
+    sandboxScope.filesystem !== 'full_access' &&
+    (sandboxScope.filesystem === 'read_only' || isReadOnlyShellCommand(command));
   // Authorization and scope remain separate: a durable grant permits the
   // invocation, while compiled effects select the minimum sandbox lane.
   const expandedAuthority = input.grantUsed !== 'none' || input.interactionMode === 'full';

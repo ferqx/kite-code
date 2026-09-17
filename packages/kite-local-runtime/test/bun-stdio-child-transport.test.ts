@@ -1,11 +1,190 @@
 import { describe, expect, test } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import {
+  RuntimeClient,
+  type RuntimeClientConnection,
+  RuntimeClientStartupError,
+} from '@kite-ai/runtime-client';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
   type BunStdioChild,
   BunStdioChildRuntimeClientTransport,
+  type BunStdioStartupSignals,
 } from '../src/client/bun-stdio-child-transport';
+import {
+  encodeServiceStartupProgress,
+  SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
+  type ServiceStartupProgress,
+} from '../src/service-startup-diagnostic';
 
 describe('Bun stdio child RuntimeClient transport', () => {
+  test('real child exit before initialize preserves only whitelisted Store startup facts', async () => {
+    for (const code of [
+      'store_incompatible',
+      'store_history_reconciliation_required',
+      'store_insufficient_space',
+    ] as const) {
+      const line = `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+        code,
+        actualSchema: 11,
+        expectedSchema: 10,
+      })}\n`;
+      const runtime = new RuntimeClient({
+        clientInfo: { name: 'test', version: '1', instanceId: 'startup-test' },
+        transport: new BunStdioChildRuntimeClientTransport({
+          argv: [
+            process.execPath,
+            '-e',
+            `process.stderr.write(${JSON.stringify(line)}); process.stderr.write('secret-path\\n'); process.exit(1);`,
+          ],
+          cwd: process.cwd(),
+          env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+        }),
+      });
+      try {
+        const error: unknown = await withTestDeadline(runtime.connect(), 3_000).catch(
+          (failure: unknown) => failure,
+        );
+        expect(error).toBeInstanceOf(RuntimeClientStartupError);
+        expect(error).toMatchObject({ diagnosticCode: code, actualSchema: 11, expectedSchema: 10 });
+        expect(String(error)).not.toContain('secret-path');
+      } finally {
+        await runtime.close();
+      }
+    }
+  });
+
+  test('real child arbitrary stderr remains a generic startup disconnect', async () => {
+    const runtime = new RuntimeClient({
+      clientInfo: { name: 'test', version: '1', instanceId: 'untrusted-startup-test' },
+      transport: new BunStdioChildRuntimeClientTransport({
+        argv: [process.execPath, '-e', `process.stderr.write('secret-path\\n'); process.exit(1);`],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      }),
+    });
+    try {
+      await expect(withTestDeadline(runtime.connect(), 3_000)).rejects.toMatchObject({
+        code: 'connection_closed',
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  test('initialize write failure racing stderr and EOF retains the typed startup fact', async () => {
+    const child = new FakeChild({ failWrite: true });
+    const runtime = new RuntimeClient({
+      clientInfo: { name: 'test', version: '1', instanceId: 'write-race-test' },
+      transport: transport(() => child),
+    });
+    const connecting = runtime.connect();
+    child.stderrText(
+      `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+        code: 'store_migration_required',
+        actualSchema: 9,
+        expectedSchema: 10,
+      })}\n`,
+    );
+    child.exit();
+    child.closeStreams();
+    await expect(withTestDeadline(connecting, 3_000)).rejects.toMatchObject({
+      code: 'startup_failure',
+      diagnosticCode: 'store_migration_required',
+    });
+    await runtime.close();
+  });
+
+  test('reports only complete strict progress and retains a terminal fact after long stderr', async () => {
+    const child = new FakeChild({ failWrite: true });
+    const progress: ServiceStartupProgress[] = [];
+    const runtime = new RuntimeClient({
+      clientInfo: { name: 'test', version: '1', instanceId: 'progress-test' },
+      transport: transport(() => child, { onStartupProgress: (event) => progress.push(event) }),
+    });
+    const connecting = runtime.connect();
+    child.stderrText(encodeServiceStartupProgress('inspecting').slice(0, 19));
+    child.stderrText(encodeServiceStartupProgress('inspecting').slice(19));
+    child.stderrText('secret='.concat('x'.repeat(12_000), '\n'));
+    child.stderrText(
+      `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+        code: 'store_access_denied',
+        actualSchema: null,
+        expectedSchema: 10,
+        stage: 'preparing',
+      })}\n`,
+    );
+    child.exit();
+    child.closeStreams();
+    await expect(withTestDeadline(connecting, 3_000)).rejects.toMatchObject({
+      code: 'startup_failure',
+      diagnosticCode: 'store_access_denied',
+      stage: 'preparing',
+    });
+    expect(progress).toEqual([{ phase: 'inspecting' }]);
+    await runtime.close();
+  });
+
+  test('disconnect after a valid initialize remains a generic connection failure', async () => {
+    const child = new FakeChild();
+    const progress: ServiceStartupProgress[] = [];
+    const connection = await transport(() => child, {
+      onStartupProgress: (event) => progress.push(event),
+    }).connect();
+    const messages = connection.messages()[Symbol.asyncIterator]();
+    await connection.send({
+      jsonrpc: '2.0',
+      id: 'initialize-1',
+      method: 'initialize',
+      params: {
+        protocolVersion: 2,
+        clientInfo: { name: 'test', version: '1', instanceId: 'test' },
+      },
+    });
+    child.stdoutText(
+      line({
+        jsonrpc: '2.0',
+        id: 'initialize-1',
+        result: {
+          protocolVersion: 2,
+          protocolSchema: 'kite.runtime-protocol.v2',
+          serverInfo: { version: '1', instanceId: 'server-1' },
+          capabilities: {
+            methods: [
+              'initialize',
+              'runtime/command',
+              'runtime/query',
+              'runtime/subscribe',
+              'runtime/unsubscribe',
+              'server/ping',
+            ],
+            subscriptions: ['session', 'sessions'],
+          },
+          limits: {
+            maxMessageBytes: 1024,
+            maxDepth: 8,
+            maxInFlightRequests: 8,
+            maxSubscriptions: 8,
+            maxOutboundMessages: 8,
+          },
+        },
+      }),
+    );
+    expect((await messages.next()).done).toBe(false);
+    child.stderrText(encodeServiceStartupProgress('preparing'));
+    child.stderrText(
+      `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+        code: 'store_incompatible',
+        actualSchema: 11,
+        expectedSchema: 10,
+      })}\n`,
+    );
+    child.exit();
+    child.closeStreams();
+    await expect(messages.next()).rejects.toThrow('Runtime stdio connection failed.');
+    expect(progress).toEqual([]);
+    await connection.close();
+  });
   test('decodes fragmented, multiple, and CRLF stdout JSONL frames', async () => {
     const child = new FakeChild();
     const connection = await transport(() => child).connect();
@@ -128,6 +307,7 @@ describe('Bun stdio child RuntimeClient transport', () => {
       closeDeadlineMs: 5,
       onDiagnostic: (code) => diagnostics.push(code),
     }).connect();
+    await initialize(stuckConnection, stuck);
     await stuckConnection.close();
     expect(diagnostics).toEqual(
       process.platform === 'win32'
@@ -135,6 +315,60 @@ describe('Bun stdio child RuntimeClient transport', () => {
         : ['stdio_close_deadline', 'stdio_close_deadline'],
     );
     expect(stuck.killCalls).toEqual(process.platform === 'win32' ? [9] : ['SIGTERM', 'SIGKILL']);
+  });
+
+  test('pre-initialize close waits beyond deadline for real exit without force kill', async () => {
+    const child = new FakeChild({ killCompletes: false });
+    const diagnostics: string[] = [];
+    const connection = await transport(() => child, {
+      closeDeadlineMs: 5,
+      onDiagnostic: (code) => diagnostics.push(code),
+    }).connect();
+    let closed = false;
+    const closing = connection.close().then(() => {
+      closed = true;
+    });
+    await Bun.sleep(25);
+    expect(closed).toBe(false);
+    expect(child.killCalls).toEqual(['SIGTERM']);
+    expect(diagnostics).toEqual([]);
+    child.exit();
+    child.closeStreams();
+    await withTestDeadline(closing, 1_000);
+    expect(closed).toBe(true);
+    expect(child.killCalls).toEqual(['SIGTERM']);
+  });
+
+  test('startup signal closes the owned child and keeps the listener until exit', async () => {
+    const child = new FakeChild({ killCompletes: false });
+    const signals = new EventEmitter();
+    const connection = await transport(() => child, {
+      closeDeadlineMs: 5,
+      startupSignals: signals,
+    }).connect();
+    expect(signals.listenerCount('SIGINT')).toBe(1);
+    expect(signals.listenerCount('SIGTERM')).toBe(1);
+    signals.emit('SIGINT');
+    await Bun.sleep(25);
+    expect(child.killCalls).toEqual(['SIGTERM']);
+    expect(signals.listenerCount('SIGINT')).toBe(1);
+    child.exit();
+    child.closeStreams();
+    await withTestDeadline(connection.close(), 1_000);
+    expect(signals.listenerCount('SIGINT')).toBe(0);
+    expect(signals.listenerCount('SIGTERM')).toBe(0);
+  });
+
+  test('successful initialize removes temporary startup signal listeners', async () => {
+    const child = new FakeChild();
+    const signals = new EventEmitter();
+    const connection = await transport(() => child, { startupSignals: signals }).connect();
+    await initialize(connection, child);
+    expect(signals.listenerCount('SIGINT')).toBe(0);
+    expect(signals.listenerCount('SIGTERM')).toBe(0);
+    signals.emit('SIGINT');
+    expect(child.killCalls).toEqual([]);
+    await connection.close();
   });
 
   test('spawns a fresh child for every reconnect', async () => {
@@ -165,6 +399,8 @@ function transport(
     readonly maxLineBytes?: number;
     readonly maxQueuedMessages?: number;
     readonly onDiagnostic?: (code: string) => void;
+    readonly onStartupProgress?: (progress: ServiceStartupProgress) => void;
+    readonly startupSignals?: BunStdioStartupSignals;
   } = {},
 ): BunStdioChildRuntimeClientTransport {
   return new BunStdioChildRuntimeClientTransport({
@@ -188,6 +424,49 @@ function line(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+async function initialize(connection: RuntimeClientConnection, child: FakeChild): Promise<void> {
+  const messages = connection.messages()[Symbol.asyncIterator]();
+  await connection.send({
+    jsonrpc: '2.0',
+    id: 'initialize-1',
+    method: 'initialize',
+    params: {
+      protocolVersion: 2,
+      clientInfo: { name: 'test', version: '1', instanceId: 'test' },
+    },
+  });
+  child.stdoutText(
+    line({
+      jsonrpc: '2.0',
+      id: 'initialize-1',
+      result: {
+        protocolVersion: 2,
+        protocolSchema: 'kite.runtime-protocol.v2',
+        serverInfo: { version: '1', instanceId: 'server-1' },
+        capabilities: {
+          methods: [
+            'initialize',
+            'runtime/command',
+            'runtime/query',
+            'runtime/subscribe',
+            'runtime/unsubscribe',
+            'server/ping',
+          ],
+          subscriptions: ['session', 'sessions'],
+        },
+        limits: {
+          maxMessageBytes: 1024,
+          maxDepth: 8,
+          maxInFlightRequests: 8,
+          maxSubscriptions: 8,
+          maxOutboundMessages: 8,
+        },
+      },
+    }),
+  );
+  expect((await messages.next()).done).toBe(false);
+}
+
 class FakeChild implements BunStdioChild {
   readonly stdin: FakeStdin;
   readonly stdout: ReadableStream<Uint8Array>;
@@ -200,8 +479,14 @@ class FakeChild implements BunStdioChild {
   #finished = false;
   readonly #killCompletes: boolean;
 
-  constructor(options: { readonly blockFlush?: boolean; readonly killCompletes?: boolean } = {}) {
-    this.stdin = new FakeStdin(options.blockFlush);
+  constructor(
+    options: {
+      readonly blockFlush?: boolean;
+      readonly killCompletes?: boolean;
+      readonly failWrite?: boolean;
+    } = {},
+  ) {
+    this.stdin = new FakeStdin(options.blockFlush, options.failWrite);
     this.#killCompletes = options.killCompletes ?? true;
     this.stdout = new ReadableStream({
       start: (controller) => {
@@ -232,6 +517,11 @@ class FakeChild implements BunStdioChild {
     this.#resolveExited();
   }
 
+  closeStreams(): void {
+    this.#stdoutController.close();
+    this.#stderrController.close();
+  }
+
   kill(signal?: string | number): void {
     this.killCalls.push(signal);
     if (!this.#killCompletes || this.#finished) return;
@@ -244,11 +534,13 @@ class FakeChild implements BunStdioChild {
 
 class FakeStdin {
   readonly writes: string[] = [];
+  readonly failWrite: boolean;
   endCalls = 0;
   #flush: Promise<void> = Promise.resolve();
   #resolveFlush: (() => void) | undefined;
 
-  constructor(blockFlush = false) {
+  constructor(blockFlush = false, failWrite = false) {
+    this.failWrite = failWrite;
     if (blockFlush) {
       this.#flush = new Promise((resolve) => {
         this.#resolveFlush = resolve;
@@ -257,6 +549,7 @@ class FakeStdin {
   }
 
   write(chunk: Uint8Array): void {
+    if (this.failWrite) throw new Error('EPIPE private detail');
     this.writes.push(new TextDecoder().decode(chunk));
   }
 
@@ -271,4 +564,13 @@ class FakeStdin {
   releaseFlush(): void {
     this.#resolveFlush?.();
   }
+}
+
+function withTestDeadline<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error('test deadline exceeded')), milliseconds),
+    ),
+  ]);
 }

@@ -19,3 +19,21 @@
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+
+/* A zero-height anchor keeps feedback centered over the session, not the sidebar. */
+.operation-toast-anchor {
+  position: relative;
+  flex: none;
+  height: 0;
+  width: 100%;
+}
+.operation-toast-anchor [data-sonner-toaster] {
+  position: absolute;
+  top: 12px;
+  width: min(480px, calc(100% - 32px));
+  --width: min(480px, calc(100vw - 32px));
+}
+.operation-toast-anchor [data-sonner-toast] {
+  width: 100%;
+  overflow-wrap: anywhere;
+}

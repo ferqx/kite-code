@@ -398,12 +398,23 @@ export interface ToolApprovalPayload {
 
 // ── 子 Agent 事件 / Sub-agent events ──
 export type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
+export type SubagentLifecycleStatus =
+  | 'creating'
+  | 'running'
+  | 'waiting'
+  | 'auto_reviewing'
+  | 'completed'
+  | 'interrupted'
+  | 'cancelled'
+  | 'failed';
 
 export interface SubAgentStartPayload {
   id: string;
   role: SubAgentRole;
   /** Explicit public name; full delegated task body stays in private Artifact storage. */
   name: string;
+  /** Omitted by old records; consumers treat absence as running. */
+  status?: 'creating' | 'running';
   /** Exact parent task-tool identity; omitted only for legacy or detached child records. */
   parentToolCallId?: string;
   /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
@@ -482,6 +493,8 @@ export interface SubAgentFailureDiagnostic {
 export interface SubAgentErrorPayload {
   id: string;
   error: string;
+  /** Omitted by old records; consumers treat absence as failed. */
+  status?: 'failed' | 'interrupted' | 'cancelled';
   summary?: string;
   toolCallCount?: number;
   durationMs?: number;

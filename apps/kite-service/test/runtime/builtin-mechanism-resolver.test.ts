@@ -196,12 +196,54 @@ describe('App Builtin mechanism resolver', () => {
       command: 'pwd',
       timeoutMs: 321,
       signal: controller.signal,
-      readOnly: true,
+      readOnly: false,
       networkAccess: 'approved',
       filesystemAccess: 'approved_external',
     });
     shellInputs[0]?.onProgress?.('progress', 'stdout');
     expect(progress).toEqual(['progress']);
+
+    const approvedExternalRead = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({
+          command: 'ls -a -d ~/.kite* ~/.config/kite* 2>/dev/null',
+        }),
+        grantUsed: 'approve_once',
+        authorizationKind: 'approved_call',
+        policyEffects: Object.freeze({ externalRead: true }),
+        sandboxScope: Object.freeze({
+          kind: 'expanded',
+          filesystem: 'full_access',
+          network: 'disabled',
+          digest: 'scope-external-read',
+        }),
+        shellExecutor,
+      }),
+    );
+    await (approvedExternalRead.shell as typeof shell).execute({
+      command: 'ls -a -d ~/.kite* ~/.config/kite* 2>/dev/null',
+      timeoutMs: 100,
+    });
+    expect(shellInputs[1]).toMatchObject({
+      readOnly: false,
+      networkAccess: 'none',
+      filesystemAccess: 'approved_external',
+    });
+
+    const baselineRead = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'pwd' }),
+        shellExecutor,
+      }),
+    );
+    await (baselineRead.shell as typeof shell).execute({ command: 'pwd', timeoutMs: 100 });
+    expect(shellInputs[2]).toMatchObject({
+      readOnly: true,
+      networkAccess: 'none',
+      filesystemAccess: 'workspace_only',
+    });
 
     const unsafeMap = resolve(
       baseInput({
@@ -212,7 +254,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const unsafeShell = unsafeMap.shell as typeof shell;
     await unsafeShell.execute({ command: 'echo x > file', timeoutMs: 100 });
-    expect(shellInputs[1]?.readOnly).toBe(false);
+    expect(shellInputs[3]?.readOnly).toBe(false);
 
     const uncertainMap = resolve(
       baseInput({
@@ -225,7 +267,7 @@ describe('App Builtin mechanism resolver', () => {
       }),
     );
     await (uncertainMap.shell as typeof shell).execute({ command: 'custom-tool', timeoutMs: 100 });
-    expect(shellInputs[2]).toMatchObject({
+    expect(shellInputs[4]).toMatchObject({
       networkAccess: 'none',
       filesystemAccess: 'workspace_only',
     });

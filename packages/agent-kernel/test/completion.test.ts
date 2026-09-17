@@ -19,6 +19,49 @@ function initialState(): AgentState {
   });
 }
 
+test('completion keeps an old-turn unknown outcome without blocking a new turn of the same Task', () => {
+  const state = initialState();
+  const unknown = {
+    invocationId: 'old-invocation',
+    toolCallId: 'old-tool',
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: 'revision',
+    argumentsDigest: 'arguments',
+    authorizationDigest: 'authorization',
+    effectiveEffectsDigest: 'effects',
+    taskId: 'continued-task',
+    status: 'unknown' as const,
+    recordedAt: '2026-08-20T00:00:00.000Z',
+  };
+  const oldCall = {
+    toolCallId: 'old-tool',
+    taskId: 'continued-task',
+    name: 'shell_execute',
+    modelMessageId: 'old-message',
+    args: {},
+    status: 'failed' as const,
+    createdAtTurnId: 'old-turn',
+  };
+  const withHistory = {
+    ...state,
+    activeTaskId: 'continued-task',
+    tools: { ...state.tools, calls: { [oldCall.toolCallId]: oldCall } },
+    capabilities: { ...state.capabilities, invocations: { [unknown.invocationId]: unknown } },
+  };
+  expect(decideUnplannedCompletion(withHistory)).not.toMatchObject({
+    code: 'unknown_external_invocation',
+  });
+  expect(
+    decideUnplannedCompletion({
+      ...withHistory,
+      tools: {
+        ...withHistory.tools,
+        calls: { [oldCall.toolCallId]: { ...oldCall, createdAtTurnId: state.turn.turnId } },
+      },
+    }),
+  ).toMatchObject({ code: 'unknown_external_invocation' });
+});
+
 function structuralDigest(
   document: Pick<PlanDocument, 'title' | 'bodyMarkdown' | 'steps'>,
 ): string {

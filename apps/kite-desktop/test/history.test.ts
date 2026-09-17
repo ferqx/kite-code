@@ -16,7 +16,8 @@ import { projectEvent } from '../src/presentation';
 
 test('large durable history crosses frame boundaries and restores every response after restart', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-history-')));
-  for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['workspace', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
   const workspace = join(root, 'workspace');
   const model = createMockModelServer();
   const responses = Array.from(
@@ -48,7 +49,7 @@ test('large durable history crosses frame boundaries and restores every response
     const transport = createBunStdioChildRuntimeClientTransport({
       argv: [
         process.execPath,
-        resolve('scripts/release/entrypoints/service.ts'),
+        resolve('apps/kite-desktop/test/fixtures/isolated-store-service.ts'),
         'app-server',
         'run-stdio',
       ],
@@ -58,6 +59,7 @@ test('large durable history crosses frame boundaries and restores every response
         KITE_CODE_CONFIG_HOME: join(root, 'config'),
         KITE_APP_SERVER_WORKSPACE: workspace,
         KITE_APP_SERVER_BUILD_ID: 'desktop-history',
+        KITE_DESKTOP_TEST_ROOT: root,
         HOME: join(root, 'home'),
         USERPROFILE: join(root, 'home'),
         PATH: process.env.PATH ?? '/usr/bin:/bin',

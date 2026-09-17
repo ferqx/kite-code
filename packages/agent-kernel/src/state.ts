@@ -623,7 +623,13 @@ export interface AgentSubagentProviderLifecycleState {
   readonly handleArtifact?: AgentSubagentHandleArtifactRef;
   readonly handleIntegrityIdentifier?: string;
   readonly handleRecordedAt?: string;
-  readonly observationStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+  readonly observationStatus?:
+    | 'completed'
+    | 'failed'
+    | 'interrupted'
+    | 'cancelled'
+    | 'exhausted'
+    | 'blocked';
   readonly observedAt?: string;
   readonly cleanupAttempt?: number;
   readonly cleanupKind?: 'undispatched' | 'handle_reconcile';

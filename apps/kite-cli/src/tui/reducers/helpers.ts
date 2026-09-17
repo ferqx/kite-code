@@ -227,11 +227,14 @@ export function freezePresentationBlock(
     case 'subagent':
       return {
         ...block,
-        ...(block.status === 'running' || block.status === 'suspended'
+        ...(block.status === 'creating' ||
+        block.status === 'running' ||
+        block.status === 'suspended'
           ? {
-              status: pendingToolStatus === 'error' ? ('error' as const) : ('cancelled' as const),
-              summary: block.summary || fallbackSummary,
-              error: pendingToolStatus === 'error' ? fallbackSummary : 'Cancelled',
+              // Run terminality does not establish the child Tool's outcome.
+              status: 'suspended' as const,
+              approvalState: undefined,
+              awaitingApproval: false,
               expanded: false,
             }
           : {}),
@@ -269,7 +272,11 @@ function presentationNeedsFreeze(block: OutputBlock): boolean {
       block.tools.some((tool) => tool.status === 'queued' || tool.status === 'running')
     );
   }
-  return block.kind === 'subagent' && (block.status === 'running' || block.status === 'suspended');
+  return (
+    block.kind === 'subagent' &&
+    block.presentationState !== 'sealed' &&
+    (block.status === 'creating' || block.status === 'running' || block.status === 'suspended')
+  );
 }
 
 /** Seal every currently visible presentation entity at a Run terminal. */

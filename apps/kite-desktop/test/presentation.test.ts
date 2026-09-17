@@ -1,4 +1,10 @@
 import { expect, test } from 'bun:test';
+import {
+  mapRuntimeClientEventToProtocol,
+  RUNTIME_PROTOCOL_EVENT_SCHEMA_,
+} from '@kite-ai/runtime-protocol';
+import type { RuntimeEvent } from '../../kite-service/src/bootstrap/runtime/state-runtime';
+import { projectRuntimeClientEvent } from '../../kite-service/src/runtime-client/event-projector';
 import { projectEvent, projectEventWithIdentity } from '../src/presentation';
 
 test('confirmed file changes retain the matching durable diff regardless of event arrival order', () => {
@@ -226,7 +232,14 @@ test('subagents keep explicit parent identity, stable steps, and terminal result
       summary: '检查边界',
     });
   expect(messages[0]?.steps).toEqual([
-    { id: 'step', toolCallId: 'child-tool', text: '检查边界', status: 'completed' },
+    {
+      id: 'step',
+      toolCallId: 'child-tool',
+      toolName: 'shell_execute',
+      text: 'shell_execute',
+      summary: '检查边界',
+      status: 'completed',
+    },
   ]);
   messages = projectEvent(messages, {
     type: 'subagent.completed',
@@ -251,6 +264,120 @@ test('subagents keep explicit parent identity, stable steps, and terminal result
     settled: true,
   });
   expect(messages[0]).not.toHaveProperty('delivery');
+});
+
+test('subagent lifecycle keeps review waiting distinct from terminal outcomes', () => {
+  let messages = projectEvent([], {
+    type: 'subagent.started',
+    subagentId: 'child-lifecycle',
+    role: 'review',
+    name: 'Review',
+    status: 'creating',
+  });
+  expect(messages[0]?.status).toBe('creating');
+  messages = projectEvent(messages, {
+    type: 'subagent.started',
+    subagentId: 'child-lifecycle',
+    role: 'review',
+    name: 'Review',
+    status: 'running',
+  });
+  expect(messages[0]?.status).toBe('running');
+  messages = projectEvent(messages, {
+    type: 'subagent.review',
+    subagentId: 'child-lifecycle',
+    parentToolCallId: 'parent',
+    reviewId: 'review',
+    toolCallId: 'tool',
+    status: 'queued',
+  });
+  expect(messages[0]?.status).toBe('waiting');
+  messages = projectEvent(messages, {
+    type: 'subagent.review',
+    subagentId: 'child-lifecycle',
+    parentToolCallId: 'parent',
+    reviewId: 'review',
+    toolCallId: 'tool',
+    status: 'reviewing',
+  });
+  expect(messages[0]?.status).toBe('auto_reviewing');
+  messages = projectEvent(messages, {
+    type: 'subagent.review',
+    subagentId: 'child-lifecycle',
+    parentToolCallId: 'parent',
+    reviewId: 'review',
+    toolCallId: 'tool',
+    status: 'approved',
+  });
+  expect(messages[0]?.status).toBe('waiting');
+  messages = projectEvent(messages, {
+    type: 'subagent.failed',
+    subagentId: 'child-lifecycle',
+    status: 'interrupted',
+    summary: 'Process exited',
+    toolCallCount: 0,
+    durationMs: 1,
+  });
+  expect(messages[0]).toMatchObject({ status: 'interrupted', settled: true });
+  const terminal = messages;
+  messages = projectEvent(messages, {
+    type: 'subagent.started',
+    subagentId: 'child-lifecycle',
+    role: 'review',
+    name: 'Review',
+    status: 'running',
+  });
+  expect(messages).toBe(terminal);
+});
+
+test('Service lifecycle facts survive the protocol codec before Desktop projection', () => {
+  const owner = {
+    kind: 'subagent_tool' as const,
+    subagentId: 'wire-child',
+    parentToolCallId: 'parent',
+    toolCallId: 'internal',
+  };
+  const events: RuntimeEvent[] = [
+    {
+      type: 'subagent.started',
+      subagent: {
+        id: 'wire-child',
+        role: 'review',
+        name: 'Review',
+        parentToolCallId: 'parent',
+        status: 'creating',
+      },
+    },
+    {
+      type: 'subagent.started',
+      subagent: {
+        id: 'wire-child',
+        role: 'review',
+        name: 'Review',
+        parentToolCallId: 'parent',
+        status: 'running',
+      },
+    },
+    {
+      type: 'auto_review.started',
+      reviewId: 'review',
+      toolCallId: 'parent',
+      owner,
+    } as RuntimeEvent,
+    {
+      type: 'subagent.failed',
+      subagent: { id: 'wire-child', error: 'Process exited', status: 'interrupted' },
+    },
+  ];
+  let messages: ReturnType<typeof projectEvent> = [];
+  for (const fact of events) {
+    const projected = projectRuntimeClientEvent(fact, { sessionRevision: 1 });
+    expect(projected).toBeDefined();
+    const wire = mapRuntimeClientEventToProtocol(projected!);
+    const decoded = RUNTIME_PROTOCOL_EVENT_SCHEMA_.parse(JSON.parse(JSON.stringify(wire)));
+    messages = projectEvent(messages, decoded);
+  }
+  expect(messages[0]).toMatchObject({ status: 'interrupted', settled: true });
 });
 
 test('owned hidden child tools never duplicate at top level while legacy failures remain visible', () => {
@@ -498,6 +625,48 @@ test('Ask history retains exact tool ownership and pairs option labels with each
   messages = projectEvent(messages, requested);
   expect(messages).toHaveLength(1);
   expect(messages[0]?.ask?.answers?.q1).toBe('先不动，到此为止');
+});
+
+test('completed turns identify their final assistant reply for copying', () => {
+  let messages = projectEventWithIdentity(
+    [],
+    {
+      type: 'model.responded',
+      requestId: 'r',
+      messageId: 'm',
+      summary: '最终答复',
+      toolCallCount: 1,
+    },
+    { turnId: 't' },
+  );
+  expect(messages[0]).toMatchObject({ settled: true, finalReply: false });
+  messages = projectEventWithIdentity(messages, {
+    type: 'turn.terminal',
+    turnId: 't',
+    status: 'completed',
+  });
+  expect(messages[0]).toMatchObject({ settled: true, finalReply: true });
+  const withTool = projectEventWithIdentity(
+    [
+      { id: 'model:r', role: 'assistant', turnId: 'other', text: '另一轮', settled: true },
+      {
+        id: 'model:t',
+        role: 'assistant',
+        turnId: 't',
+        text: '工具前说明',
+        settled: true,
+        finalReply: true,
+      },
+      { id: 'tool:x', role: 'tool', turnId: 't', text: '', settled: true },
+    ],
+    { type: 'turn.terminal', turnId: 't', status: 'completed' },
+  );
+  expect(withTool[1]?.finalReply).toBe(false);
+  expect(withTool[0]?.finalReply).toBeUndefined();
+  expect(
+    projectEventWithIdentity(messages, { type: 'turn.terminal', turnId: 't', status: 'failed' })[0]
+      ?.finalReply,
+  ).toBe(false);
 });
 
 test('reasoning timing retains its first observation and freezes on completion or cancellation', () => {

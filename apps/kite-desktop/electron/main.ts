@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { DesktopHost } from './host';
@@ -6,7 +6,6 @@ import { registerDesktopIpc } from './ipc';
 import { sameRendererDocument } from './security';
 
 declare const __KITE_DESKTOP_SERVICE_MANIFEST__: unknown;
-declare const __KITE_DESKTOP_SOURCE_STORE_EPOCH__: string;
 
 const DEVELOPMENT_RENDERER_URL = 'http://127.0.0.1:1420/';
 const LEGACY_APP_DATA_DIRECTORY = 'dev.kite-code.desktop';
@@ -31,10 +30,8 @@ void app
       serviceDirectory: app.isPackaged
         ? join(process.resourcesPath, 'service')
         : join(appPath, 'service'),
-      repositoryDirectory: join(appPath, '../..'),
-      debug: !app.isPackaged,
-      sourceStoreEpoch: __KITE_DESKTOP_SOURCE_STORE_EPOCH__,
       serviceManifest: __KITE_DESKTOP_SERVICE_MANIFEST__,
+      ...(!app.isPackaged ? { sourceRepositoryRoot: resolve(appPath, '../..') } : {}),
     });
     mainWindow = createMainWindow(rendererUrl, app.isPackaged);
     registerDesktopIpc({

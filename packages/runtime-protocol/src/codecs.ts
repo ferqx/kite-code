@@ -1503,6 +1503,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       subagentId: identifier,
       role: z.enum(['explore', 'plan', 'code', 'review']),
       name: shortText,
+      status: z.enum(['creating', 'running']).optional(),
       parentToolCallId: identifier.optional(),
       concurrencyGroupId: identifier.optional(),
     })
@@ -1568,6 +1569,7 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       summary: shortText,
       toolCallCount: safeRevision.optional(),
       durationMs: safeRevision.optional(),
+      status: z.enum(['failed', 'interrupted', 'cancelled']).optional(),
       diagnostic: z
         .object({
           code: z.enum([

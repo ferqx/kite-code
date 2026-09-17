@@ -12,6 +12,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join, parse, resolve } from 'node:path';
 import {
+  acquireManagedReleaseSelectionLock,
+  declareManagedStoreMaintenanceContract,
+} from '@kite-ai/kite-local-runtime/service';
+import {
   installOssCandidate as installCandidate,
   readInstallStatus,
   rollbackOssCandidate as rollbackCandidate,
@@ -47,6 +51,43 @@ afterEach(() => {
 });
 
 describe('managed candidate install lifecycle', () => {
+  test('a declared Store maintenance contract blocks rollback to an old candidate', async () => {
+    if (process.platform !== 'darwin' && process.platform !== 'linux') return;
+    const old = await createOssCandidateFixture('0.1.0');
+    const current = await createOssCandidateFixture(
+      '0.1.1',
+      currentOssReleaseTarget(),
+      undefined,
+      'managed-release-selection-v1',
+    );
+    roots.push(old.root, current.root);
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-maintenance-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    await installOssCandidate({ archivePath: old.archivePath, prefix });
+    const selected = await installOssCandidate({ archivePath: current.archivePath, prefix });
+    const lock = acquireManagedReleaseSelectionLock(prefix, 'exclusive');
+    try {
+      expect(() => rollbackOssCandidate(prefix)).toThrow('busy');
+      declareManagedStoreMaintenanceContract(lock);
+    } finally {
+      lock.release();
+    }
+    expect(() => rollbackOssCandidate(prefix)).toThrow('maintenance-aware');
+    expect(readInstallStatus(prefix)).toEqual(selected);
+    uninstallOssCandidate(prefix);
+    expect(existsSync(join(prefix, '.release-selection.lock'))).toBe(true);
+    expect(existsSync(join(prefix, '.store-maintenance-contract'))).toBe(true);
+    expect(existsSync(join(prefix, 'active'))).toBe(false);
+    await expect(installOssCandidate({ archivePath: old.archivePath, prefix })).rejects.toThrow(
+      'maintenance-aware',
+    );
+    const scratch = join(prefix, '.store-maintenance-contract.next');
+    writeFileSync(scratch, 'partial', { mode: 0o600 });
+    await installOssCandidate({ archivePath: current.archivePath, prefix });
+    expect(existsSync(scratch)).toBe(false);
+    uninstallOssCandidate(prefix);
+  });
   test('installs, upgrades, rolls back, and uninstalls inside one marked prefix', async () => {
     const first = await createOssCandidateFixture('0.1.0');
     const second = await createOssCandidateFixture('0.1.1');
@@ -63,7 +104,14 @@ describe('managed candidate install lifecycle', () => {
     expect(rolledBack.currentCandidateId).toBe(firstMarker.currentCandidateId);
     expect(readInstallStatus(prefix)).toEqual(rolledBack);
     uninstallOssCandidate(prefix);
-    expect(existsSync(prefix)).toBe(false);
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      expect(existsSync(join(prefix, '.release-selection.lock'))).toBe(true);
+      expect(existsSync(join(prefix, 'active'))).toBe(false);
+      await installOssCandidate({ archivePath: first.archivePath, prefix });
+      uninstallOssCandidate(prefix);
+    } else {
+      expect(existsSync(prefix)).toBe(false);
+    }
   });
 
   test('fails closed when the active pointer no longer matches its marker', async () => {

@@ -628,6 +628,18 @@ describe('State capability reducer', () => {
       observedAt: STARTED_AT,
     } as KernelEvent);
     expect(JSON.stringify(staleObservation)).toBe(JSON.stringify(state));
+    const interruptedObservation = reduceCapabilityState(state, {
+      type: 'capability.subagent_observation_recorded',
+      invocationId: 'task-invocation',
+      attempt: 1,
+      dispatchIntentDigest: 'dispatch',
+      status: 'interrupted',
+      observedAt: STARTED_AT,
+    } as KernelEvent);
+    expect(
+      interruptedObservation.capabilities.invocations['task-invocation']?.subagentProviderLifecycle
+        ?.observationStatus,
+    ).toBe('interrupted');
     state = reduceCapabilityState(state, {
       type: 'capability.subagent_observation_recorded',
       invocationId: 'task-invocation',

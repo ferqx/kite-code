@@ -18,6 +18,8 @@ import {
   probeAgentConfig,
 } from '#kite-service/config';
 import { defaultCheckpointPath, skillDirs } from '#kite-service/config/paths';
+import { persistedWorkspaceIdentity } from '#kite-service/config/persisted-workspace-identity';
+import { getPersistedWorkspaceTrustStatus } from '#kite-service/config/workspace-trust';
 import { composeObservability } from '#kite-service/observability/composition';
 import { resolveTelemetryConsent } from '#kite-service/observability/consent';
 import {
@@ -264,8 +266,21 @@ export function createKiteInProcessAppControlComposition<
     operationGate,
     credentialClient,
     admitWorkspace(workspace: string): KiteWorkspaceIdentity {
-      const canonicalPath = realpathSync.native(workspace);
-      const project = resolveProjectIdentity(canonicalPath);
+      let canonicalPath: string;
+      let missingIdentity: ReturnType<typeof persistedWorkspaceIdentity>;
+      try {
+        canonicalPath = realpathSync.native(workspace);
+      } catch {
+        if (
+          getPersistedWorkspaceTrustStatus(workspace, options.workspaceTrustStorePath) !== 'trusted'
+        ) {
+          throw new Error('Runtime Workspace identity is unavailable.');
+        }
+        missingIdentity = persistedWorkspaceIdentity(workspace);
+        if (!missingIdentity) throw new Error('Runtime Workspace identity is unavailable.');
+        canonicalPath = workspace;
+      }
+      const project = missingIdentity ?? resolveProjectIdentity(canonicalPath);
       return Object.freeze({
         canonicalPath,
         projectId: project.projectId,

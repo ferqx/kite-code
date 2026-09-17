@@ -763,8 +763,8 @@ function validateImports(
       !(
         isInside(join(edge.owner.absolutePath, 'electron'), edge.source) &&
         [
-          '@kite-ai/kite-local-runtime/source-profile',
           '@kite-ai/kite-local-runtime/startup-diagnostic',
+          '@kite-ai/kite-local-runtime/desktop-manifest',
         ].includes(edge.specifier)
       )
     ) {

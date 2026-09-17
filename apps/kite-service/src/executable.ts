@@ -7,10 +7,13 @@ import {
   runPosixSupervisorChild,
   runProcessTreeChild,
 } from '@kite-ai/runtime-host';
-import { runKiteAppServerMain } from './app-server';
+import { type KiteAppServerMainDependencies, runKiteAppServerMain } from './app-server';
 import { runKiteAppServerDaemonMain } from './app-server-daemon';
 
 export interface KiteServiceMainDependencies {
+  readonly onStoreStartupProgress?: KiteAppServerMainDependencies['onStoreStartupProgress'];
+  readonly beforeStorePublication?: KiteAppServerMainDependencies['beforeStorePublication'];
+  readonly assertRetiredStoreWritersStopped?: KiteAppServerMainDependencies['assertRetiredStoreWritersStopped'];
   /** Parent-provided explicit child environment; defaults to the process environment at entry. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
 }
@@ -29,9 +32,19 @@ export async function runKiteServiceMain(
   }
   if (args[0] === 'app-server') {
     if (args[1] === 'run-daemon') {
-      await runKiteAppServerDaemonMain(args, { environment: dependencies.environment });
+      await runKiteAppServerDaemonMain(args, {
+        environment: dependencies.environment,
+        assertRetiredStoreWritersStopped: dependencies.assertRetiredStoreWritersStopped,
+        onStoreStartupProgress: dependencies.onStoreStartupProgress,
+        beforeStorePublication: dependencies.beforeStorePublication,
+      });
     } else {
-      await runKiteAppServerMain(args, { environment: dependencies.environment });
+      await runKiteAppServerMain(args, {
+        environment: dependencies.environment,
+        assertRetiredStoreWritersStopped: dependencies.assertRetiredStoreWritersStopped,
+        onStoreStartupProgress: dependencies.onStoreStartupProgress,
+        beforeStorePublication: dependencies.beforeStorePublication,
+      });
     }
     return;
   }

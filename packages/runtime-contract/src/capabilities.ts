@@ -337,7 +337,13 @@ export interface SubagentProviderLifecycleRecord {
   handleArtifact?: SubagentHandleArtifactRef;
   handleIntegrityIdentifier?: string;
   handleRecordedAt?: string;
-  observationStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+  observationStatus?:
+    | 'completed'
+    | 'failed'
+    | 'interrupted'
+    | 'cancelled'
+    | 'exhausted'
+    | 'blocked';
   observedAt?: string;
   cleanupAttempt?: number;
   cleanupKind?: 'undispatched' | 'handle_reconcile';

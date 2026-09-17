@@ -49,6 +49,7 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 ## 关键不变量
 
 - required MCP 的可用性不再成为模型调用前置条件；真实工具认证与授权保持按需检查。专用 Git Broker 不再进入 Service Runtime 工具执行链，文件工具由 Builtin filesystem module 提供。
+- Shell 的只读命令判定只在受限文件系统范围内投影为只读沙箱信任；已批准的工作区外读取或 Full 模式使用完整文件系统范围时，不同时附加互斥的只读信任，原有审批仍生效。
 
 - source 与 installed 使用相同协议、Store schema 和 execution 语义；source 按 canonical checkout 隔离 profile，installed 使用
   canonical profile。
@@ -119,3 +120,5 @@ App Server、Session/Store authority、daemon/Web、Trust、安全、恢复或re
 稳定生命周期首帧分流由 [lifecycle carrier](src/carrier/daemon-lifecycle.ts) 拥有，独立于 Runtime initialize。daemon 在 Store 初始化前取得 endpoint，在资源释放后清理 endpoint，空闲停止复用既有 mutation gate 与 Host activeOperations。
 
 桌面历史通过同一 Store 的有界目录、索引会话读取与快照投影，不依赖项目路径、Git 或模型初始化。可启动无执行工作区的 stdio App Server；历史只读与实际执行授权分开，契约见[本地 App Server](../../docs/active/app-server-local-runtime.md)，客户端编排见[历史与恢复](../kite-desktop/docs/history-and-recovery.md)。
+
+已持久化会话的原工作区目录删除后，Runtime 仍按 Store 中的原路径、项目身份和现有 Workspace Trust 准入原会话续聊。缺失路径不会被创建或改用其他工作目录；实际 Shell 和文件工具在尝试访问该路径时返回工具级错误。路径重新指向别处或信任记录被撤销时继续拒绝执行。创建新会话仍要求工作区目录存在并通过正常授权。

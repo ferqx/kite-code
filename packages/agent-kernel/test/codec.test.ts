@@ -8,6 +8,26 @@ import {
 import type { KernelEvent } from '../src/events';
 
 describe('State event codec', () => {
+  test('round-trips interrupted Provider observations while retaining old terminal statuses', () => {
+    for (const status of [
+      'completed',
+      'failed',
+      'interrupted',
+      'cancelled',
+      'exhausted',
+      'blocked',
+    ] as const) {
+      const event = {
+        type: 'capability.subagent_observation_recorded',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        dispatchIntentDigest: `sha256:${'a'.repeat(64)}`,
+        status,
+        observedAt: '2026-01-01T00:00:00.000Z',
+      } as const;
+      expect(decodeCurrentRuntimeEventJson(encodeCurrentRuntimeEventJson(event))).toEqual(event);
+    }
+  });
   test('round-trips a canonical accepted event with identical JSON bytes', () => {
     const event: KernelEvent = {
       type: 'user.message_appended',
@@ -134,6 +154,80 @@ describe('State event codec', () => {
         failure: { kind: 'tool_error', message: 'missing' },
       }),
     ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'subagent.started',
+        subagent: { id: 'child-1', role: 'explore', name: 'Inspect' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        type: 'subagent.started',
+        subagent: { id: 'child-1', role: 'explore', name: 'Inspect', status: 'creating' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'subagent.started',
+        subagent: { id: 'child-1', role: 'explore', name: 'Inspect', status: 'waiting' },
+      }),
+    ).toThrow('status is invalid');
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'subagent.failed',
+        subagent: { id: 'child-1', error: 'Ended' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        type: 'subagent.failed',
+        subagent: { id: 'child-1', error: 'Ended', status: 'interrupted' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'subagent.failed',
+        subagent: { id: 'child-1', error: 'Ended', status: 'completed' },
+      }),
+    ).toThrow('status is invalid');
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        type: 'auto_review.started',
+        reviewId: 'review-1',
+        toolCallId: 'tool-1',
+        owner: { kind: 'root_tool', toolCallId: 'tool-1' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        type: 'auto_review.started',
+        reviewId: 'review-1',
+        toolCallId: 'tool-1',
+        owner: { kind: 'subagent_tool', toolCallId: 'tool-1' },
+      }),
+    ).toThrow('owner binding is invalid');
+  });
+
+  test('round-trips lifecycle statuses and actual review-start facts through storage JSON', () => {
+    const events = [
+      {
+        type: 'subagent.started',
+        subagent: { id: 'child-1', role: 'explore', name: 'Inspect', status: 'creating' },
+      },
+      {
+        type: 'subagent.failed',
+        subagent: { id: 'child-1', error: 'Interrupted', status: 'interrupted' },
+      },
+      {
+        type: 'auto_review.started',
+        reviewId: 'review-1',
+        toolCallId: 'tool-1',
+        owner: { kind: 'root_tool', toolCallId: 'tool-1' },
+      },
+    ] as const;
+    for (const event of events) {
+      expect(decodeCurrentRuntimeEventJson(encodeCurrentRuntimeEventJson(event))).toEqual(event);
+    }
   });
 
   test('keeps approval batch and session-clear facts exact and receipt-safe', () => {

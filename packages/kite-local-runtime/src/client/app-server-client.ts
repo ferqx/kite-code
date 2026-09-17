@@ -3,8 +3,10 @@ import { isAbsolute, resolve } from 'node:path';
 import type { RuntimeClientInfo } from '@kite-ai/runtime-client';
 import type { RuntimeProtocolMethod } from '@kite-ai/runtime-protocol';
 import type { KiteLocalRuntimeEndpoint } from '../service';
+import type { ServiceStartupProgress } from '../service-startup-diagnostic';
 import {
   type BunStdioChildSpawnFactory,
+  type BunStdioStartupSignals,
   createBunStdioChildRuntimeClientTransport,
 } from './bun-stdio-child-transport';
 import { createNodeSocketRuntimeClientTransport } from './node-socket-transport';
@@ -39,6 +41,8 @@ export interface KiteAppServerClientOptions {
   readonly environment?: Readonly<Record<string, string>>;
   readonly clientInfo: RuntimeClientInfo;
   readonly spawn?: BunStdioChildSpawnFactory;
+  readonly onStartupProgress?: (progress: ServiceStartupProgress) => void;
+  readonly startupSignals?: BunStdioStartupSignals;
 }
 
 export interface KiteAppServerDaemonClientOptions {
@@ -84,6 +88,8 @@ export function createKiteAppServerClient(
       USERPROFILE: osHome,
     },
     ...(options.spawn ? { spawn: options.spawn } : {}),
+    ...(options.onStartupProgress ? { onStartupProgress: options.onStartupProgress } : {}),
+    ...(options.startupSignals ? { startupSignals: options.startupSignals } : {}),
   });
   return createAppServerProtocolConnection(
     transport,

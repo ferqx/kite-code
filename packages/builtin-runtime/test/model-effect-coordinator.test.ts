@@ -237,6 +237,53 @@ describe('BuiltinModelEffectCoordinator', () => {
     expect(fixture.counts()).toEqual({ gatewayInvocations: 1, sourceInvocations: 1 });
   });
 
+  test('stops an in-flight reviewer when its parent execution is cancelled', async () => {
+    const controller = new AbortController();
+    let invoked!: () => void;
+    const started = new Promise<void>((resolve) => {
+      invoked = resolve;
+    });
+    let gatewaySignal: AbortSignal | undefined;
+    const gateway = {
+      invoke: async ({ signal }: { signal: AbortSignal }) => {
+        gatewaySignal = signal;
+        invoked();
+        return {
+          invocationId: 'cancelled-reviewer',
+          commit: () =>
+            new Promise<never>((_resolve, reject) => {
+              const onAbort = () => reject(signal.reason);
+              if (signal.aborted) onAbort();
+              else signal.addEventListener('abort', onAbort, { once: true });
+            }),
+        };
+      },
+    } as unknown as ModelInvocationGateway;
+    const review = new BuiltinModelEffectCoordinator(gateway).reviewToolApproval({
+      config: CONFIG,
+      model: MODEL,
+      persistence: createPersistence(),
+      signal: controller.signal,
+      payload: {
+        risk: 'read',
+        expectedEffects: ['Reads a sensitive external path'],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+        summary: 'Review sensitive external access',
+        reason: 'Mode-aware auto review is required.',
+      },
+      request: { id: 'reviewed-tool', name: 'read_file', args: { path: '~/.ssh/config' } },
+    });
+    await started;
+    controller.abort(new Error('Parent execution cancelled.'));
+    expect(gatewaySignal?.aborted).toBe(true);
+    expect(await review).toMatchObject({
+      ok: false,
+      failureType: 'technical',
+      reason: 'Parent execution cancelled.',
+    });
+  });
+
   test.each([
     [
       'legacy approve decision',

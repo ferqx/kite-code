@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  createKiteAppServerClient,
   createKiteAppServerDaemonClient,
   KITE_APP_SERVER_DAEMON_PROTOCOL_METHODS_,
   KITE_APP_SERVER_DAEMON_STATUS_REQUEST_SCHEMA_,
@@ -19,8 +20,20 @@ import {
   readKiteLocalRuntimeLifecycleReservation,
   resolveKiteAppServerDaemonEndpoint,
 } from '@kite-ai/kite-local-runtime/service';
+import {
+  describeServiceStartupFailure,
+  formatServiceStartupReport,
+  MAX_SERVICE_STARTUP_STDERR_BYTES,
+  parseServiceStartupDiagnostic,
+  parseServiceStartupProgress,
+  type ServiceStartupDiagnostic,
+  type ServiceStartupProgress,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { RuntimeClientError, type RuntimeClientInfo } from '@kite-ai/runtime-client';
-import { validateKiteSessionStoreDatabase } from '@kite-ai/runtime-storage-sqlite';
+import {
+  assertKiteSessionStoreSourcesReconciled,
+  validateKiteSessionStoreDatabase,
+} from '@kite-ai/runtime-storage-sqlite';
 import { preflightWebGatewayStaticAssets } from '../../apps/kite-service/src/web-gateway';
 import {
   type ManagedLocalAppServerOptions,
@@ -262,7 +275,41 @@ export function createManagedLocalAppServerDaemon(
       }
       validateWebStaticRoot(preparedTarget.webStaticRoot);
       preflightWebGatewayStaticAssets(preparedTarget.webStaticRoot);
-      validateKiteSessionStoreDatabase(join(preparedTarget.runtimeRoot, 'kite-session.sqlite'));
+      // The CLI-owned stdio Service has the qualified writer admission. Initialize only:
+      // Store preparation finishes before any Session command, then its process and leases close.
+      const preparation = createKiteAppServerClient({
+        startupSignals: process,
+        executable: preparedTarget.executable,
+        argumentsPrefix: preparedTarget.argumentsPrefix,
+        buildId: preparedTarget.buildId,
+        runtimeRoot: preparedTarget.runtimeRoot,
+        configRoot: preparedTarget.configRoot,
+        osHome: preparedTarget.systemHome,
+        workspace: canonicalWorkspace,
+        cwd: runtimeParent,
+        environment: preparedTarget.environment,
+        clientInfo: {
+          name: 'kite-daemon-preparation',
+          version: '0.1.0',
+          instanceId: `daemon_preparation_${randomUUID()}`,
+        },
+        ...(options.onStartupProgress ? { onStartupProgress: options.onStartupProgress } : {}),
+      });
+      try {
+        await preparation.prepareAppControl();
+      } finally {
+        // Even a successful initialize cannot license daemon spawn until the
+        // temporary Service has released every connection and maintenance lock.
+        await preparation.close('daemon-preparation-complete');
+      }
+      const afterPreparation = await readStatus();
+      if (afterPreparation.state !== 'absent') {
+        return afterPreparation.state === 'ready' &&
+          (afterPreparation.workspace !== canonicalWorkspace ||
+            afterPreparation.buildId !== target.buildId)
+          ? { ...afterPreparation, state: 'incompatible' }
+          : afterPreparation;
+      }
       await clearDeadEndpoint(endpoint);
       const env = daemonEnvironment(preparedTarget, endpoint, canonicalWorkspace);
       const child = Bun.spawn({
@@ -276,10 +323,11 @@ export function createManagedLocalAppServerDaemon(
         env,
         stdin: 'ignore',
         stdout: 'ignore',
-        stderr: 'ignore',
+        stderr: 'pipe',
         detached: true,
       });
       child.unref();
+      const stderr = captureStartupStderr(child.stderr, options.onStartupProgress);
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline) {
         const status = await readStatus();
@@ -288,15 +336,24 @@ export function createManagedLocalAppServerDaemon(
           status.state === 'draining' ||
           status.state === 'incompatible'
         ) {
-          return status;
+          await stderr.stop();
+          return status.state === 'ready' &&
+            (status.buildId !== target.buildId || status.workspace !== canonicalWorkspace)
+            ? { ...status, state: 'incompatible' }
+            : status;
         }
         if (child.exitCode !== null) {
+          const diagnostic = await stderr.finish();
           throw new Error(
-            `App Server startup failed (exit ${child.exitCode}); check the selected installation and configuration.`,
+            describeServiceStartupFailure(diagnostic, child.exitCode) +
+              (diagnostic
+                ? `\n可将以下脱敏诊断保存，用于排查：\n${formatServiceStartupReport(diagnostic)}`
+                : ''),
           );
         }
         await Bun.sleep(50);
       }
+      await stderr.stop();
       throw new Error('App Server start_timeout; inspect server status before retrying.');
     },
     async restart(workspace?: string, cancel = false): Promise<AppServerDaemonStatus> {
@@ -309,7 +366,16 @@ export function createManagedLocalAppServerDaemon(
       const prepared = prepareManagedLocalAppServerTarget(target);
       validateWebStaticRoot(prepared.webStaticRoot);
       preflightWebGatewayStaticAssets(prepared.webStaticRoot);
-      validateKiteSessionStoreDatabase(join(prepared.runtimeRoot, 'kite-session.sqlite'));
+      if (current.state !== 'absent') {
+        // Existing Service is drained only after its current Store and every known source
+        // are fully validated. Historical conversion here would require a separate
+        // candidate and retired-writer admission before stopping the old instance.
+        const storePath = join(prepared.runtimeRoot, 'kite-session.sqlite');
+        validateKiteSessionStoreDatabase(storePath);
+        assertKiteSessionStoreSourcesReconciled(storePath);
+        if (pathExists(join(prepared.runtimeRoot, 'kite-session-publication.json')))
+          throw new Error('Store publication is pending; the existing App Server was preserved.');
+      }
       if (current.state !== 'absent') await stopInstance(current, cancel);
       const started = await daemon.start(canonicalWorkspace);
       if (
@@ -447,6 +513,77 @@ function pathExists(path: string): boolean {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
     throw error;
   }
+}
+
+/** Keep only the bounded trusted startup envelope; never surface arbitrary Service stderr. */
+function captureStartupStderr(
+  stream: ReadableStream<Uint8Array>,
+  onStartupProgress?: (progress: ServiceStartupProgress) => void,
+): {
+  finish(): Promise<ServiceStartupDiagnostic | undefined>;
+  stop(): Promise<void>;
+} {
+  const reader = stream.getReader();
+  const line = new Uint8Array(MAX_SERVICE_STARTUP_STDERR_BYTES);
+  let length = 0;
+  let discard = false;
+  let diagnostic: ServiceStartupDiagnostic | undefined;
+  let acceptingProgress = true;
+  const completed = (async () => {
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        for (const byte of chunk.value) {
+          if (byte === 0x0a) {
+            if (!discard) {
+              try {
+                const payloadLength = length > 0 && line[length - 1] === 0x0d ? length - 1 : length;
+                const text = new TextDecoder('utf-8', { fatal: true }).decode(
+                  line.subarray(0, payloadLength),
+                );
+                const progress = parseServiceStartupProgress(text);
+                if (progress) {
+                  try {
+                    if (acceptingProgress) onStartupProgress?.(progress);
+                  } catch {
+                    // A display callback cannot change daemon startup.
+                  }
+                } else {
+                  diagnostic = parseServiceStartupDiagnostic(text) ?? diagnostic;
+                }
+              } catch {
+                // Never expose malformed or arbitrary Service stderr.
+              }
+            }
+            length = 0;
+            discard = false;
+          } else if (!discard) {
+            if (length === line.length) {
+              length = 0;
+              discard = true;
+            } else {
+              line[length++] = byte;
+            }
+          }
+        }
+      }
+    } catch {
+      // Startup diagnostics are optional; an unreadable pipe never supplies authority.
+    }
+    return diagnostic;
+  })();
+  return {
+    async finish() {
+      await Promise.race([completed, Bun.sleep(1_000)]);
+      await reader.cancel().catch(() => undefined);
+      return diagnostic;
+    },
+    async stop() {
+      acceptingProgress = false;
+      await reader.cancel().catch(() => undefined);
+    },
+  };
 }
 
 function validateWebStaticRoot(path: string): void {

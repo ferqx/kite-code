@@ -12,10 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { sourceKiteSessionStoreDirectoryFromCanonicalRoots } from '@kite-ai/kite-local-runtime/source-profile';
-import { KITE_SESSION_STORE_FORMAT_EPOCH } from '../../../packages/runtime-storage-sqlite/src/kite-session-store-format';
-import { sourceKiteSessionStorePathFromCanonicalRoots } from '../../../scripts/release/local-service-client';
+import { join } from 'node:path';
 import { DesktopHost, ensurePrivateDirectory } from '../electron/host';
 
 class FakePeer {
@@ -69,8 +66,6 @@ test('host preserves the Service across renderer generations and fences stale cl
       appDataDirectory: join(root, 'data'),
       homeDirectory: home,
       serviceDirectory,
-      repositoryDirectory: root,
-      debug: false,
       platform: 'darwin',
       serviceManifest: manifest,
       createPeer: (_options, version) => {
@@ -125,14 +120,111 @@ test('host preserves the Service across renderer generations and fences stale cl
   }
 });
 
-test('Desktop debug and CLI use one epoch-scoped source Store profile', async () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-source-profile-')));
+test('quit retains a Service whose cleanup failed and retries the same owner', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-quit-owner-')));
   try {
     const home = join(root, 'home');
-    const repository = join(root, 'repository');
     const serviceDirectory = join(root, 'service');
     mkdirSync(home);
-    mkdirSync(repository);
+    mkdirSync(serviceDirectory);
+    const executable = join(serviceDirectory, 'kite-service');
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const buildId = 'quit-owner-test';
+    const peer = new FakePeer(`kite-app-server-v1-${digest(buildId)}`);
+    let failClose = true;
+    peer.close = async () => {
+      peer.closeCount++;
+      if (failClose) throw new Error('cleanup still pending');
+      peer.finished = true;
+    };
+    let created = 0;
+    const host = new DesktopHost({
+      appDataDirectory: join(root, 'data'),
+      homeDirectory: home,
+      serviceDirectory,
+      platform: 'darwin',
+      serviceManifest: {
+        buildId,
+        environmentKeys: [],
+        executableSha256: digest(readFileSync(executable)),
+        expectedServerVersion: peer.serverVersion,
+      },
+      createPeer: () => {
+        created++;
+        return peer;
+      },
+    });
+    const opened = await host.runtimeOpen();
+    const quitting = host.quit();
+    expect(host.runtimeStartupStatus().message).toContain('正在等待会话数据安全取消或提交结算');
+    await expect(quitting).rejects.toThrow('cleanup still pending');
+    expect((await host.runtimeStatus()).connectionId).toBe(opened.connectionId);
+    await host.runtimeOpen();
+    expect(created).toBe(1);
+    failClose = false;
+    await host.quit();
+    expect(peer.closeCount).toBe(2);
+    expect((await host.runtimeStatus()).connectionId).toBeNull();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('quit requested while runtimeOpen holds the lock closes its peer before returning', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-opening-quit-')));
+  try {
+    const home = join(root, 'home');
+    const serviceDirectory = join(root, 'service');
+    mkdirSync(home);
+    mkdirSync(serviceDirectory);
+    const executable = join(serviceDirectory, 'kite-service');
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const buildId = 'opening-quit-test';
+    const peer = new FakePeer(`kite-app-server-v1-${digest(buildId)}`);
+    let releaseAttach!: () => void;
+    const attaching = new Promise<void>((resolve) => {
+      releaseAttach = resolve;
+    });
+    let enteredAttach!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enteredAttach = resolve;
+    });
+    peer.attach = async (generation) => {
+      peer.attachments.push(generation);
+      enteredAttach();
+      await attaching;
+    };
+    const host = new DesktopHost({
+      appDataDirectory: join(root, 'data'),
+      homeDirectory: home,
+      serviceDirectory,
+      platform: 'darwin',
+      serviceManifest: {
+        buildId,
+        environmentKeys: [],
+        executableSha256: digest(readFileSync(executable)),
+        expectedServerVersion: peer.serverVersion,
+      },
+      createPeer: () => peer,
+    });
+    const opening = host.runtimeOpen();
+    await entered;
+    const quitting = host.quit();
+    releaseAttach();
+    await expect(opening).rejects.toThrow('应用正在退出');
+    await quitting;
+    expect(peer.closeCount).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Desktop source and installed clients use the canonical config Store root', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-canonical-store-')));
+  try {
+    const home = join(root, 'home');
+    const serviceDirectory = join(root, 'service');
+    mkdirSync(home);
     mkdirSync(serviceDirectory);
     const executable = join(serviceDirectory, 'kite-service');
     writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
@@ -147,9 +239,6 @@ test('Desktop debug and CLI use one epoch-scoped source Store profile', async ()
       appDataDirectory: join(root, 'data'),
       homeDirectory: home,
       serviceDirectory,
-      repositoryDirectory: repository,
-      debug: true,
-      sourceStoreEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
       platform: 'darwin',
       serviceManifest: manifest,
       createPeer: (options, version) => {
@@ -159,46 +248,24 @@ test('Desktop debug and CLI use one epoch-scoped source Store profile', async ()
     });
     await host.runtimeOpen();
     const canonicalHome = realpathSync.native(join(home, '.kite-code'));
-    const canonicalRepository = realpathSync.native(repository);
-    const cliStore = sourceKiteSessionStorePathFromCanonicalRoots(
-      canonicalHome,
-      canonicalRepository,
-    );
-    expect(runtimeRoot).toBe(dirname(cliStore));
-    expect(runtimeRoot).toBe(
-      sourceKiteSessionStoreDirectoryFromCanonicalRoots(
-        canonicalHome,
-        canonicalRepository,
-        KITE_SESSION_STORE_FORMAT_EPOCH,
-      ),
-    );
-    expect(runtimeRoot).not.toBe(
-      sourceKiteSessionStoreDirectoryFromCanonicalRoots(
-        canonicalHome,
-        canonicalRepository,
-        `${KITE_SESSION_STORE_FORMAT_EPOCH}-next`,
-      ),
-    );
+    expect(runtimeRoot).toBe(canonicalHome);
     await host.quit();
-    const missingEpoch = new DesktopHost({
+    const secondHost = new DesktopHost({
       appDataDirectory: join(root, 'data'),
       homeDirectory: home,
       serviceDirectory,
-      repositoryDirectory: repository,
-      debug: true,
       platform: 'darwin',
       serviceManifest: manifest,
       createPeer: (_options, version) => new FakePeer(version),
     });
-    await expect(missingEpoch.runtimeOpen()).rejects.toThrow('Store format epoch');
+    await secondHost.runtimeOpen();
+    await secondHost.quit();
     expect(
       () =>
         new DesktopHost({
           appDataDirectory: join(root, 'data'),
           homeDirectory: home,
           serviceDirectory,
-          repositoryDirectory: repository,
-          debug: false,
           platform: 'darwin',
           serviceManifest: { ...manifest, storeFormatEpoch: 'untrusted-archive-value' },
         }),
