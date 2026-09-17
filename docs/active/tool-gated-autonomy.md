@@ -29,7 +29,7 @@
 
 Builtin capability 的 schema/parser/canonicalizer、availability、effects、traits、contract 与 operation identity
 只来自一个 frozen `CapabilityRegistrySnapshot` 及其 `createBuiltinToolCatalogProjection()`；package tests
-机械断言 projection 为 28 entries、19 model-visible、9 internal；`git_inspect`是internal entry，不能在文档或App bridge中
+机械断言 projection 为 27 entries、19 model-visible、8 internal；`git_inspect` 已退役，不能在文档或 App bridge 中
 手工复制这些事实或重新暴露第二个模型脚本入口。
 对应 package/manifests checks 与 RM-16 final manifest/docs/journey/fault/soak Gate 均已通过，并由完成记录绑定
 implementation final SHA。
@@ -193,10 +193,10 @@ typed pre-dispatch unavailable 且 cleanup receipt 已确认后，为同一条�
 
 Development Shell 的文件系统能力是逐 invocation 的：Planning 非 Full 使用 Workspace read-only baseline，Building 非 Full 使用
 Workspace read/write baseline；默认 baseline 使用 native backend。`externalRead`、`externalWrite`在命令启动前按phase/mode
-路由；`uncertainEffects`在Accept Edits、Auto与Full中固定进入exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
+路由；`uncertainEffects`在Auto中先进入审批模型，在Accept Edits/Full中请求exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
 host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
-模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常、无效响应和 circuit breaker 也升级
-真人审批。显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
+模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常和无效响应升级真人审批；此前审查的 circuit breaker 不让新的 Shell 命令跳过模型。
+显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
 `sensitiveExternalAccess`。Workspace 外固定 credential/persistence/system identity 也必须投影该 fact：Full 直接授权，Auto 三态
 审查，其他模式进入 exact user approval；显式敏感 identity 不允许 same-command 静默复用；Auto reviewer 的新响应使用
 `approve_once|reject|ask_user`；旧/未知或矛盾
@@ -206,16 +206,16 @@ host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启
 Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
 qualification evidence。
 
-Shell command surface不可穷举。ADR-0160规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；未命中且
-无法完整确定effects时生成`uncertainEffects`并请求exact真人审批，而不是fixed-list hard deny。已知Workspace mutation与
-已知扩scope继续按既有phase/mode矩阵治理。Auto reviewer不接管uncertain Shell，也不接管关键系统hard deny或native
+Shell command surface不可穷举。ADR-0160规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；ADR-0189调整Auto路由。未命中且
+无法完整确定effects时生成`uncertainEffects`并按模式审批，而不是fixed-list hard deny。已知Workspace mutation与
+已知扩scope继续按既有phase/mode矩阵治理。Auto reviewer接管uncertain Shell的审批判断，但不接管关键系统hard deny或native
 capability qualification；Full同样不能绕过uncertain Shell的exact确认。
 新配置与新 TUI 会话默认 Auto；显式配置和 live `/permissions` mode 不被覆盖。内部 Runtime/child grant 缺少
 mode 时仍回退 Accept Edits，以区分“产品推荐的 reviewer 路径”和“缺失授权事实时的 fail-safe 行为”。Full 只由
 interactionMode 表达，不能由 approval grant 或 reviewer payload 产生第二个 Full authority。
 
 Shell的read-only classifier是唯一可证明只读的免审事实来源，并同时用于只读Subagent role ceiling、scheduler metadata与
-hardened execution environment；未命中不表示写入或破坏，只表示必须进入exact真人审批。
+hardened execution environment；未命中不表示写入或破坏，只表示必须按当前模式审批。
 classifier的program/shape事实来自Builtin-owned冻结v1 semantics registry；registry digest进入`shell_execute`
 capability revision。缺项只能扩展descriptor或局部inspector，App、TUI与Sandbox不得复制白名单。unknown reason只使用
 `unregistered_program|unsupported_invocation|output_redirect|dynamic_expansion|background_execution|empty_or_multiline`
@@ -263,8 +263,8 @@ Workspace mutation或人工审批。已知external/sensitive scope才按当前mo
 命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment：POSIX固定将`HOME/XDG_CONFIG_HOME`
 投影到不存在的中性路径，关闭system/global config、credential prompt、pager、optional locks与repository fsmonitor helper，
 且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git解释为待执行的空helper，不能用于关闭。Planning 与关键系统
-destructive hard deny保持独立且只匹配高置信executable位置；参数或输出中的危险词不能触发。`git_inspect`只保留为
-internal Runtime capability，所有模型Git命令统一走Shell Policy、approval、Sandbox与receipt链路。
+destructive hard deny保持独立且只匹配高置信executable位置；参数或输出中的危险词不能触发。`git_inspect` 已退役，
+所有模型 Git 命令统一走 Shell Policy、approval、Sandbox 与 receipt 链路。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcome`；current reducer
 及其消费者不从其他 result 字段推导 outcome，并且只投影一个成对 ToolMessage。当前 epoch 缺失或
@@ -402,12 +402,10 @@ TUI 对 tool 和 Subagent 生命周期的可见标签可以按用户语言本地
 不得绘制 `├─`、竖线或伪父子树。该布局只消费 Runtime 已签发的 group、child status 与 step
 事实，不得改变调度、审批顺序、reservation 或并发判断。
 
-ADR-0134 的 direct status/log 闭集同时提供`proven_read_only`与hardening分类，不依赖`gitInspect` surface。typed
-`git_inspect`不再向模型披露，只保留internal broker机制。status/log等已证明只读Shell按phase baseline直接执行；
-stage、commit等已知mutation按mode治理；remote、未知raw Git与其他无法完整确定effects的命令请求exact真人审批。
-Git log revision使用internal broker、Provider schema与Builtin catalog共用的闭集grammar；Runtime预算/资源admission与
-internal mechanism必须接收同一个`gitBroker` dependency，模型surface不得披露该entry。Git process stdout/stderr在App
-adapter内流式限界，溢出是typed terminal，不把异常或protected历史正文投影给模型。
+ADR-0134 的 direct status/log 闭集同时提供 `proven_read_only` 与 hardening 分类，不依赖专用 Git surface。
+`git_inspect` 与 internal broker 已退役。status/log 等已证明只读 Shell 按 phase baseline 直接执行；
+stage、commit 等已知 mutation 按 mode 治理；remote、未知 raw Git 与其他无法完整确定 effects 的命令请求 exact 真人审批。
+Git 进程由 Shell executor 承载，其 stdout/stderr 继续按 Shell 的有界输出与 receipt 规则处理。
 
 V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径，shell 与 code task 至少使用已解析 cwd/Workspace 根；若目标首次引入当前模型快照未见的嵌套 `CLAUDE.md`/`AGENTS.md`，或适用文档 digest 已变化，本次副作用以可恢复的 `project_instructions_changed` 拒绝。下一轮重新投影后模型可重新发起，审批与 sandbox 不得绕过此检查。
 
@@ -465,13 +463,13 @@ RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、
 App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 的公开模型投影由 Builtin
 `projectSubagentResult()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`
-与 RM schema parity 测试棘轮守护：Builtin catalog 的 28/19/9、exact schema/revision/executor/effects、model
+与 RM schema parity 测试棘轮守护：Builtin catalog 的 27/19/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution
 path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用分类和审计 `action.intent` 可由命令形态
 派生，但审批 payload 不接受模型建议授权或 prefix rule。ADR-0137 的回归语料必须证明 `ls`、`pwd`、`rg`、
 direct `git status`/无patch `git log`在phase baseline内可direct，Workspace mutation与local Git扩scope进入既有
-mode-aware route，未知脚本固定进入exact真人审批。`git_inspect`保持internal capability，不进入model ToolSet。
+mode-aware route，未知脚本在Auto中进入审批模型、在其他模式请求exact真人审批。`git_inspect` 已退役，不进入 model ToolSet。
 
 生产静态模型工具面必须直接由 `createBuiltinToolCatalogProjection(snapshot).toolSet` 投影；
 App tool composition 只合并独立 Runtime-issued MCP overlay，不拥有第二 schema/effects table。

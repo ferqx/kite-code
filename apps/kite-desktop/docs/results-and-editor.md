@@ -10,6 +10,6 @@
 
 路径展示不授予打开权限，检查在 Electron 主进程重新执行；其他平台返回尚未验证的限制。原生窗口和实际编辑器启动资格应独立于路径单元测试记录。
 
-验证：[投影配对测试](../test/presentation.test.ts)、[真实服务开发闭环测试](../test/development.test.ts)和 [Electron 本机操作测试](../test/host-native-operations.test.ts)。开发闭环测试使用隔离目录与本机模型 fixture，执行真实文件写入及 Bun 测试，校验用户已有文件不变，并重启服务继续同一会话；host 测试覆盖路径、普通文件和 symlink 逃逸边界。它们不替代真实 Provider、preload 或编辑器窗口证据。
+验证：[投影配对测试](../test/presentation.test.ts)、[真实服务开发闭环测试](../test/development.test.ts)和 [Electron 本机操作测试](../test/isolated/host-native-operations.test.ts)。开发闭环测试使用隔离目录与本机模型 fixture，执行真实文件写入及 Bun 测试，校验用户已有文件不变，并重启服务继续同一会话；host 测试覆盖路径、普通文件和 symlink 逃逸边界。它们不替代真实 Provider、preload 或编辑器窗口证据。
 
 迁移前 Tauri 版本的本机 macOS 验收曾确认 VS Code 打开对应测试文件；TextEdit 仅验证启动分发，Zed 未安装。详细范围见[原生验收](native-validation.md)。Electron 版本仍需重新验证真实 IPC 与编辑器窗口，不将历史结果或路径测试视作当前平台资格。

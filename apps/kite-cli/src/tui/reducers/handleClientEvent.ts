@@ -519,13 +519,29 @@ function reducePresentationBlocks(
             event.summary ?? `Verification is ${event.status}.`,
           );
     case 'subagent.started':
-      if (
-        findBlock(
+      {
+        const existing = findBlock(
           state,
           (block) => block.kind === 'subagent' && block.subagentId === event.subagentId,
-        )
-      ) {
-        return state;
+        );
+        if (existing?.kind === 'subagent') {
+          if (
+            existing.status === 'done' ||
+            existing.status === 'error' ||
+            existing.status === 'interrupted' ||
+            existing.status === 'cancelled' ||
+            event.status === 'creating'
+          )
+            return state;
+          return replaceBlockById(state, existing.id, {
+            ...existing,
+            status: 'running',
+            presentationState: 'live',
+            approvalState: undefined,
+            awaitingApproval: false,
+            ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
+          });
+        }
       }
       {
         const prepared = settlePresentationBoundary(state);
@@ -536,7 +552,7 @@ function reducePresentationBlocks(
           subagentId: event.subagentId,
           role: event.role,
           task: event.name,
-          status: pendingTerminal?.status ?? ('running' as const),
+          status: pendingTerminal?.status ?? event.status ?? ('running' as const),
           presentationState: pendingTerminal ? 'sealed' : 'live',
           summary: pendingTerminal?.summary ?? '',
           toolCallCount: pendingTerminal?.toolCallCount ?? 0,
@@ -546,7 +562,7 @@ function reducePresentationBlocks(
           ...(pendingTerminal?.diagnostic === undefined
             ? {}
             : { failureDiagnostic: pendingTerminal.diagnostic }),
-          ...(pendingTerminal?.status === 'error'
+          ...(pendingTerminal?.status === 'error' || pendingTerminal?.status === 'interrupted'
             ? { error: pendingTerminal.summary }
             : pendingTerminal?.status === 'cancelled'
               ? { error: 'Cancelled' }
@@ -566,7 +582,17 @@ function reducePresentationBlocks(
     case 'subagent.completed':
       return settleSubagent(state, event.subagentId, 'done', event, envelope);
     case 'subagent.failed':
-      return settleSubagent(state, event.subagentId, 'error', event, envelope);
+      return settleSubagent(
+        state,
+        event.subagentId,
+        event.status === 'interrupted'
+          ? 'interrupted'
+          : event.status === 'cancelled'
+            ? 'cancelled'
+            : 'error',
+        event,
+        envelope,
+      );
     case 'tool.review':
       // Graphical clients display this metadata; TUI keeps its existing approval projection.
       return state;
@@ -2908,7 +2934,12 @@ function updateSubagentApproval(
     (candidate) => candidate.kind === 'subagent' && candidate.subagentId === owner.subagentId,
   );
   if (block?.kind !== 'subagent') return state;
-  if (block.status === 'done' || block.status === 'error' || block.status === 'cancelled') {
+  if (
+    block.status === 'done' ||
+    block.status === 'error' ||
+    block.status === 'interrupted' ||
+    block.status === 'cancelled'
+  ) {
     return state;
   }
   const steps = block.steps.map((step) =>
@@ -2986,7 +3017,12 @@ function projectSubagentStep(
     (candidate) => candidate.kind === 'subagent' && candidate.subagentId === event.subagentId,
   );
   if (block?.kind !== 'subagent') return state;
-  if (block.status === 'done' || block.status === 'error' || block.status === 'cancelled') {
+  if (
+    block.status === 'done' ||
+    block.status === 'error' ||
+    block.status === 'interrupted' ||
+    block.status === 'cancelled'
+  ) {
     // A child terminal is a one-way fence.  Replayed/late child tool facts
     // remain diagnostic-only and can never reopen the sealed card.
     return state;
@@ -3079,6 +3115,14 @@ function projectSubagentStep(
     ...block,
     steps,
     toolCallCount: steps.length,
+    ...(event.status === 'started'
+      ? {
+          status: 'running' as const,
+          presentationState: 'live' as const,
+          approvalState: undefined,
+          awaitingApproval: false,
+        }
+      : {}),
   });
 }
 
@@ -3088,7 +3132,12 @@ function projectSubagentPhase(state: TuiState, event: SubagentPhaseEvent): TuiSt
     (candidate) => candidate.kind === 'subagent' && candidate.subagentId === event.subagentId,
   );
   if (block?.kind !== 'subagent') return state;
-  if (block.status === 'done' || block.status === 'error' || block.status === 'cancelled') {
+  if (
+    block.status === 'done' ||
+    block.status === 'error' ||
+    block.status === 'interrupted' ||
+    block.status === 'cancelled'
+  ) {
     return state;
   }
   const waiting =
@@ -3102,6 +3151,7 @@ function projectSubagentPhase(state: TuiState, event: SubagentPhaseEvent): TuiSt
   let next = replaceBlockById(state, block.id, {
     ...block,
     status: event.status,
+    presentationState: 'live',
     parentToolCallId: event.parentToolCallId,
     ...(clearApprovalState
       ? { approvalState: undefined }
@@ -3147,7 +3197,12 @@ function projectSubagentReview(state: TuiState, event: SubagentReviewEvent): Tui
     (candidate) => candidate.kind === 'subagent' && candidate.subagentId === event.subagentId,
   );
   if (block?.kind !== 'subagent') return state;
-  if (block.status === 'done' || block.status === 'error' || block.status === 'cancelled') {
+  if (
+    block.status === 'done' ||
+    block.status === 'error' ||
+    block.status === 'interrupted' ||
+    block.status === 'cancelled'
+  ) {
     return state;
   }
   const stepIndex = [...block.steps]
@@ -3184,6 +3239,7 @@ function projectSubagentReview(state: TuiState, event: SubagentReviewEvent): Tui
   return replaceBlockById(state, block.id, {
     ...block,
     status: 'suspended',
+    presentationState: 'live',
     parentToolCallId: event.parentToolCallId,
     approvalState,
     awaitingApproval: true,
@@ -3195,7 +3251,7 @@ function projectSubagentReview(state: TuiState, event: SubagentReviewEvent): Tui
 function settleSubagent(
   state: TuiState,
   subagentId: string,
-  status: 'done' | 'error',
+  status: 'done' | 'error' | 'interrupted' | 'cancelled',
   event: Extract<RuntimeClientEvent, { type: 'subagent.completed' | 'subagent.failed' }>,
   envelope: AcceptedPresentationEnvelope,
 ): TuiState {
@@ -3206,7 +3262,12 @@ function settleSubagent(
   if (block?.kind === 'subagent') {
     // Child terminality is monotonic.  A reconnect/replay duplicate and a
     // contradictory late terminal must not rewrite a sealed child card.
-    if (block.status === 'done' || block.status === 'error' || block.status === 'cancelled') {
+    if (
+      block.status === 'done' ||
+      block.status === 'error' ||
+      block.status === 'interrupted' ||
+      block.status === 'cancelled'
+    ) {
       return state;
     }
     return replaceBlockById(state, block.id, {
@@ -3216,7 +3277,7 @@ function settleSubagent(
       summary: event.summary,
       ...(event.toolCallCount === undefined ? {} : { toolCallCount: event.toolCallCount }),
       ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
-      ...(status === 'error' ? { error: event.summary } : {}),
+      ...(status !== 'done' ? { error: event.summary } : {}),
       ...(event.type === 'subagent.failed' && event.diagnostic !== undefined
         ? { failureDiagnostic: event.diagnostic }
         : {}),

@@ -1,6 +1,5 @@
 import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
-import { isGitRevision } from './git/broker';
 
 /**
  * Builtin-owned input schemas. Operation registrations and the model ToolSet
@@ -8,12 +7,6 @@ import { isGitRevision } from './git/broker';
  * parser/canonicalizer uses the same definition. Registration-time parity
  * checks make a second schema authority impossible.
  */
-
-const boundedPath = z.string().min(1).max(512);
-const timeout = z.number().int().min(100).max(60_000).optional();
-const outputBound = z.number().int().min(1).max(262_144).optional();
-const recordBound = z.number().int().min(1).max(200).optional();
-const paths = z.array(boundedPath).min(1).max(128);
 
 export const BUILTIN_READ_FILE_SCHEMA_ = z.object({
   path: z.string().describe('Workspace-relative, absolute, or home-relative (~) path to the file'),
@@ -76,44 +69,6 @@ export const BUILTIN_EDIT_FILE_SCHEMA_ = z.object({
     .optional()
     .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
 });
-
-export const BUILTIN_GIT_INSPECT_SCHEMA_ = z.discriminatedUnion('operation', [
-  z
-    .object({
-      operation: z.literal('status'),
-      paths: paths.optional(),
-      max_records: recordBound,
-      max_output_bytes: outputBound,
-      timeout_ms: timeout,
-    })
-    .strict(),
-  z
-    .object({
-      operation: z.literal('diff'),
-      paths,
-      max_output_bytes: outputBound,
-      timeout_ms: timeout,
-    })
-    .strict(),
-  z
-    .object({
-      operation: z.literal('log'),
-      paths,
-      revision: z.string().min(1).max(128).refine(isGitRevision).optional(),
-      max_records: recordBound,
-      max_output_bytes: outputBound,
-      timeout_ms: timeout,
-    })
-    .strict(),
-  z
-    .object({
-      operation: z.literal('branch_list'),
-      max_records: recordBound,
-      max_output_bytes: outputBound,
-      timeout_ms: timeout,
-    })
-    .strict(),
-]);
 
 export const BUILTIN_WEB_FETCH_SCHEMA_ = z.object({
   url: z.string().min(1).max(8192).describe('Public http/https URL to fetch (max 8192 chars)'),
@@ -411,7 +366,6 @@ export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
   'builtin:search_files': BUILTIN_SEARCH_FILES_SCHEMA_,
   'builtin:write_file': BUILTIN_WRITE_FILE_SCHEMA_,
   'builtin:edit_file': BUILTIN_EDIT_FILE_SCHEMA_,
-  'builtin:git_inspect': BUILTIN_GIT_INSPECT_SCHEMA_,
   'builtin:web_fetch': BUILTIN_WEB_FETCH_SCHEMA_,
   'builtin:list_mcp_resources': BUILTIN_LIST_MCP_RESOURCES_SCHEMA_,
   'builtin:list_mcp_tools': BUILTIN_LIST_MCP_TOOLS_SCHEMA_,

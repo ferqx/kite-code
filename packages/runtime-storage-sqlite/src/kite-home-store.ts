@@ -1,9 +1,17 @@
 import type { Database } from 'bun:sqlite';
 
+import {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
+
 export const KITE_HOME_STORE_SCHEMA_VERSION = 9;
 export const KITE_HOME_STORE_FORMAT_EPOCH = 'kite-home-single-service-v1-2026-08-30';
-export const KITE_SESSION_STORE_SCHEMA_VERSION = 10;
-export const KITE_SESSION_STORE_FORMAT_EPOCH = 'kite-session-app-server-2026-09-02';
+
+export {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
 
 export const KITE_HOME_STORE_TABLE_COLUMNS = Object.freeze({
   kite_meta: ['key', 'value'],
@@ -453,7 +461,7 @@ export const KITE_HOME_STORE_DDL = Object.freeze([
   'CREATE INDEX runtime_session_tombstones_workspace_deleted ON runtime_session_tombstones(workspace_id, deleted_at DESC, session_id)',
 ] as const);
 
-const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
+export const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
   session_id TEXT NOT NULL REFERENCES runtime_sessions(session_id) ON DELETE CASCADE,
   effect_id TEXT NOT NULL,
   owner_id TEXT NOT NULL,
@@ -474,7 +482,7 @@ const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases (
     (state = 'unknown' AND outcome = 'unknown' AND terminal_digest IS NULL AND certainty = 'uncertain'))
 ) STRICT`;
 
-const KITE_SESSION_STORE_DDL = Object.freeze(
+export const KITE_SESSION_STORE_DDL = Object.freeze(
   KITE_HOME_STORE_DDL.map((statement) =>
     statement.startsWith('CREATE TABLE runtime_effect_leases')
       ? KITE_SESSION_EFFECT_LEASE_DDL

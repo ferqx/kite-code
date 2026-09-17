@@ -405,8 +405,6 @@ export interface AgentConfig {
   executionBoundary?: ExecutionBoundary;
   /** Exact capability surface admitted by the sealed production gate. */
   executionCapabilitySurface?: ExecutionCapabilitySurface;
-  /** Release-owned native evidence; never accepted from project/user config. */
-  brokeredGitShellDenyEvidence?: import('@kite-ai/runtime-spi').GitShellDenyEvidence;
   /** Resolved artifact + user + project session logging policy. */
   sessionLoggingPolicy?: SessionLoggingPolicy;
   /** Source-aware telemetry preferences; App consent composition remains authoritative. */
@@ -734,7 +732,6 @@ export function loadProductionAgentConfig(
     executionCapabilitySurface: networkBoundaryRolloutEnabled
       ? decision.surface
       : { ...decision.surface, network: false },
-    brokeredGitShellDenyEvidence: decision.qualificationProof.brokeredGitShellDenyEvidence,
     sandbox: { enabled: true },
     productionExecution: decision.qualificationProof,
   } as ProductionAgentConfig;

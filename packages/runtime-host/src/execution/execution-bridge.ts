@@ -1,4 +1,5 @@
 import type {
+  RuntimeAbortReason,
   RuntimeCommand,
   RuntimeCommandContext,
   RuntimeCommandReceipt,
@@ -17,7 +18,10 @@ export interface RuntimeHostPreparedExecution {
     readonly operationId: string;
     readonly committedRevision: number;
     readonly operation: 'turn' | 'compaction' | 'rewind';
-    readonly run: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
+    readonly run: (
+      signal: AbortSignal,
+      requestAbort: (reason: RuntimeAbortReason | string) => void,
+    ) => Promise<void>;
     readonly cancel?: (reason: string) => void;
   };
 }
@@ -60,6 +64,13 @@ export interface RuntimeHostExecutionBridge {
     sessionId: string,
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void>;
+  /** Proof-gated reconstruction of a committed resume with no dispatched effect. */
+  recoverCommittedResume?(
+    command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+    committedRevision: number,
+    publish: (notification: RuntimeNotification) => void,
+    commandContext?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeHostPreparedExecution | undefined>;
   /** Pure admission/plan phase. It must not mutate State, publish, or dispatch. */
   inspectCommand(
     command: RuntimeCommand,

@@ -2,12 +2,23 @@ import { Buffer } from 'node:buffer';
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
+import {
+  describeServiceStartupFailure,
+  MAX_SERVICE_STARTUP_STDERR_BYTES,
+  parseServiceStartupDiagnostic,
+  parseServiceStartupProgress,
+  SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
+  type ServiceStartupDiagnostic,
+  type ServiceStartupPhase,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { AsyncMutex } from '../async-mutex';
 
 export const MAX_FRAME_BYTES = 1_048_576;
 const QUEUED_FRAMES = 16;
 const CLOSE_TIMEOUT_MS = 15_000;
 const SEND_TIMEOUT_MS = 5_000;
+const STARTUP_EXIT_WAIT_MS = 1_000;
+const STARTUP_CLEANUP_TIMEOUT_MS = 2_000;
 
 type QueueWaiter<T> = {
   resolve: (value: T) => void;
@@ -120,6 +131,10 @@ export interface ServiceProcessOptions {
   runtimeRoot: string;
   buildId: string;
   environmentKeys: readonly string[];
+  pairedManifestSha256?: string;
+  sourceRepositoryRoot?: string;
+  onStartupPhase?: (phase: ServiceStartupPhase) => void;
+  onStartupDiagnostic?: (diagnostic: ServiceStartupDiagnostic) => void;
 }
 
 /** One exact paired Service child with bounded stdout retention and EOF-owned cleanup. */
@@ -132,17 +147,35 @@ export class ServiceProcess {
   #settleReceiver: (() => void) | undefined;
   #finished = false;
   #closing = false;
+  #initialized = false;
+  #startupStderr = '';
+  #startupStderrOverflow = false;
+  #startupLine = '';
+  #startupLineOverflow = false;
+  readonly #stderrClosed: Promise<void>;
   #closePromise?: Promise<void>;
+  #startupFailurePromise?: Promise<void>;
+  readonly #onStartupDiagnostic?: (diagnostic: ServiceStartupDiagnostic) => void;
   readonly #ready: Promise<void>;
   readonly #exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 
-  static async start(options: ServiceProcessOptions): Promise<ServiceProcess> {
+  static async start(
+    options: ServiceProcessOptions,
+    onCreated?: (process: ServiceProcess) => void,
+  ): Promise<ServiceProcess> {
     const process = new ServiceProcess(options);
+    try {
+      onCreated?.(process);
+    } catch (error) {
+      await process.close().catch(() => undefined);
+      throw error;
+    }
     await process.#ready;
     return process;
   }
 
   private constructor(options: ServiceProcessOptions) {
+    this.#onStartupDiagnostic = options.onStartupDiagnostic;
     const source = process.env;
     const environment: NodeJS.ProcessEnv = {
       HOME: options.home,
@@ -156,9 +189,20 @@ export class ServiceProcess {
     };
     if (options.workspace) environment.KITE_APP_SERVER_WORKSPACE = options.workspace;
     for (const key of options.environmentKeys) {
+      const reserved = key.toUpperCase();
+      if (reserved.startsWith('KITE_') || ['HOME', 'USERPROFILE', 'NODE_ENV'].includes(reserved)) {
+        throw new Error(
+          'The paired Service environment cannot override its pinned data or build identity.',
+        );
+      }
       const value = source[key];
       if (value !== undefined) environment[key] = value;
     }
+    if (options.pairedManifestSha256) {
+      environment.KITE_DESKTOP_PAIRED_MANIFEST_SHA256 = options.pairedManifestSha256;
+    }
+    if (options.sourceRepositoryRoot)
+      environment.KITE_DESKTOP_SOURCE_ROOT = options.sourceRepositoryRoot;
     this.#child = spawn(options.executable, ['app-server', 'run-stdio'], {
       cwd: options.home,
       env: environment,
@@ -170,7 +214,16 @@ export class ServiceProcess {
     this.#child.stdin.on('error', () => undefined);
     this.#child.stdout.on('error', () => undefined);
     this.#child.stderr.on('error', () => undefined);
-    this.#child.stderr.resume();
+    this.#stderrClosed = new Promise<void>((resolve) => {
+      this.#child.stderr.on('data', (value: Buffer | string) => {
+        if (this.#initialized) return;
+        this.#consumeStartupStderr(Buffer.isBuffer(value) ? value : Buffer.from(value), options);
+      });
+      this.#child.stderr.once('close', () => {
+        this.#finishStartupLine(options);
+        resolve();
+      });
+    });
     this.#ready = new Promise((resolve, reject) => {
       this.#child.once('spawn', resolve);
       this.#child.once('error', () =>
@@ -196,12 +249,76 @@ export class ServiceProcess {
     return this.#finished;
   }
 
+  /** A request, not a cancellation acknowledgement. Publication may still need to settle. */
+  requestStartupCancellation(): void {
+    if (process.platform === 'win32' || this.#initialized || this.#finished) return;
+    void this.#ready.then(
+      () => {
+        if (this.#initialized || this.#finished) return;
+        try {
+          this.#child.kill('SIGTERM');
+        } catch {
+          // Startup may have exited concurrently; close still waits for its actual exit.
+        }
+      },
+      () => undefined,
+    );
+  }
+
+  markInitialized(): void {
+    this.#initialized = true;
+    this.#startupStderr = '';
+    this.#startupLine = '';
+  }
+
+  #consumeStartupStderr(chunk: Buffer, options: ServiceProcessOptions): void {
+    for (const byte of chunk) {
+      if (byte === 0x0a) {
+        this.#finishStartupLine(options);
+        continue;
+      }
+      if (this.#startupLineOverflow) continue;
+      if (this.#startupLine.length >= MAX_SERVICE_STARTUP_STDERR_BYTES) {
+        this.#startupLine = '';
+        this.#startupLineOverflow = true;
+        continue;
+      }
+      this.#startupLine += String.fromCharCode(byte);
+    }
+  }
+
+  #finishStartupLine(options: ServiceProcessOptions): void {
+    if (this.#startupLineOverflow) {
+      this.#startupLineOverflow = false;
+      return;
+    }
+    const line = this.#startupLine;
+    this.#startupLine = '';
+    if (!line || this.#initialized) return;
+    const progress = parseServiceStartupProgress(line);
+    if (progress) {
+      try {
+        options.onStartupPhase?.(progress.phase);
+      } catch {
+        // UI observers cannot change the owned Service lifecycle.
+      }
+      return;
+    }
+    if (!line.startsWith(SERVICE_STARTUP_DIAGNOSTIC_PREFIX)) return;
+    if (this.#startupStderrOverflow) return;
+    if (this.#startupStderr.length + line.length + 1 > MAX_SERVICE_STARTUP_STDERR_BYTES) {
+      this.#startupStderr = '';
+      this.#startupStderrOverflow = true;
+      return;
+    }
+    this.#startupStderr += `${line}\n`;
+  }
+
   async send(frame: string): Promise<void> {
     if (
       Buffer.byteLength(frame, 'utf8') > MAX_FRAME_BYTES ||
       frame.includes('\n') ||
       frame.includes('\r') ||
-      this.#finished ||
       this.#closing
     )
       throw new Error('消息无效或连接已关闭。');
@@ -212,7 +329,10 @@ export class ServiceProcess {
       throw new Error('无效的协议消息。');
     }
     if (!isRecord(value)) throw new Error('无效的协议消息。');
+    const initializing = value.method === 'initialize' && !this.#initialized;
+    if (this.#finished && initializing) return;
     return this.#write.run(async () => {
+      if (initializing && (this.#finished || !this.#child.stdin.writable)) return;
       if (this.#finished || this.#closing || !this.#child.stdin.writable)
         throw new Error('连接已关闭。');
       try {
@@ -222,6 +342,10 @@ export class ServiceProcess {
           '发送超时，提交结果未知。',
         );
       } catch (error) {
+        if (initializing && !(error instanceof OperationTimeout)) {
+          await this.#failStartup();
+          return;
+        }
         void this.close().catch(() => undefined);
         if (error instanceof Error && error.message.includes('超时')) throw error;
         throw new Error('发送结果未知，请检查会话。');
@@ -254,12 +378,20 @@ export class ServiceProcess {
   }
 
   async #close(): Promise<void> {
+    const starting = !this.#initialized;
     this.#closing = true;
     // Once shutdown owns the peer, no renderer may consume retained output.
     // Release queue backpressure and keep the stdout task draining so the
     // Service can observe stdin EOF and finish its own cleanup.
     this.#output.discard(new Error('连接已关闭。'));
     if (!this.#child.stdin.destroyed) this.#child.stdin.end();
+    if (starting && process.platform !== 'win32') {
+      this.requestStartupCancellation();
+      // Store publication is synchronous and crash-recoverable, but killing it on a
+      // timer would misreport cancellation and interrupt the protected commit.
+      await this.#exit;
+      return;
+    }
     let result: { code: number | null; signal: NodeJS.Signals | null };
     try {
       result = await withTimeout(this.#exit, CLOSE_TIMEOUT_MS, 'timeout');
@@ -269,7 +401,11 @@ export class ServiceProcess {
       await withTimeout(this.#exit, 5_000, 'kill timeout').catch(() => undefined);
       throw new Error('服务清理超时，已终止自有进程；任务副作用需要检查。');
     }
-    if (result.code !== 0) throw new Error('配套服务异常退出，请检查任务结果。');
+    // Before initialize succeeds the Service cannot have accepted a Runtime
+    // task, so its startup failure is already reported to the renderer and
+    // must not prevent the application from quitting.
+    if (result.code !== 0 && this.#initialized)
+      throw new Error('配套服务异常退出，请检查任务结果。');
   }
 
   async #readOutput(stream: Readable): Promise<void> {
@@ -296,7 +432,11 @@ export class ServiceProcess {
         }
       }
       if (frame.length) throw new Error('服务输出消息被截断。');
-      this.#output.end(new Error('配套服务连接已关闭。'));
+      if (!this.#initialized && !this.#closing) {
+        await this.#failStartup();
+      } else {
+        this.#output.end(new Error('配套服务连接已关闭。'));
+      }
     } catch (error) {
       this.#output.end(
         error instanceof TypeError
@@ -307,7 +447,55 @@ export class ServiceProcess {
       );
       // Invalid, oversized or truncated stdout invalidates the protocol peer.
       // EOF gives the owned Service its normal cancellation/cleanup path.
-      void this.close().catch(() => undefined);
+      if (!this.#startupFailurePromise) void this.close().catch(() => undefined);
+    }
+  }
+
+  #failStartup(): Promise<void> {
+    this.#startupFailurePromise ??= this.#settleStartupFailure();
+    return this.#startupFailurePromise;
+  }
+
+  async #settleStartupFailure(): Promise<void> {
+    const exit = await withTimeout(this.#exit, STARTUP_EXIT_WAIT_MS, 'startup exit wait').catch(
+      () => ({ code: null, signal: null }),
+    );
+    await withTimeout(this.#stderrClosed, STARTUP_EXIT_WAIT_MS, 'startup stderr wait').catch(
+      () => undefined,
+    );
+    const diagnostic = this.#startupStderrOverflow
+      ? undefined
+      : parseServiceStartupDiagnostic(this.#startupStderr);
+    if (diagnostic) {
+      try {
+        this.#onStartupDiagnostic?.(diagnostic);
+      } catch {
+        // Diagnostic observers cannot change the owned Service lifecycle.
+      }
+    }
+    this.#output.end(new Error(describeServiceStartupFailure(diagnostic, exit.code)));
+    // Do not discard the diagnostic before initialize's receiver consumes it.
+    // A peer that closes stdout but remains alive still needs owned cleanup.
+    if (exit.code === null) {
+      this.#closePromise ??= this.#cleanupFailedStartup();
+      void this.#closePromise.catch(() => undefined);
+    }
+  }
+
+  async #cleanupFailedStartup(): Promise<void> {
+    this.#closing = true;
+    if (!this.#child.stdin.destroyed) this.#child.stdin.end();
+    if (process.platform !== 'win32') {
+      this.requestStartupCancellation();
+      await this.#exit;
+      return;
+    }
+    try {
+      await withTimeout(this.#exit, STARTUP_CLEANUP_TIMEOUT_MS, 'startup cleanup timeout');
+    } catch (error) {
+      if (!(error instanceof OperationTimeout)) return;
+      this.#child.kill('SIGKILL');
+      await withTimeout(this.#exit, 5_000, 'startup kill timeout').catch(() => undefined);
     }
   }
 }

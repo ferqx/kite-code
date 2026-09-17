@@ -1895,6 +1895,81 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
+  test('projects child review phases and authoritative interruption without reopening terminal state', () => {
+    const dispatch = (state: TuiState, event: RuntimeClientEvent) =>
+      eventReducer(state, {
+        type: 'ACCEPT_PRESENTATION_ENVELOPE',
+        event,
+      });
+    let state = dispatch(createInitialState(), {
+      type: 'subagent.started',
+      subagentId: 'child-lifecycle',
+      role: 'review',
+      name: 'Review',
+      status: 'creating',
+    });
+    const child = (current: TuiState) =>
+      current.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.kind === 'subagent' && block.subagentId === 'child-lifecycle');
+    expect(child(state)).toMatchObject({ status: 'creating' });
+    state = dispatch(state, {
+      type: 'subagent.started',
+      subagentId: 'child-lifecycle',
+      role: 'review',
+      name: 'Review',
+      status: 'running',
+    });
+    expect(child(state)).toMatchObject({ status: 'running' });
+    state = dispatch(state, {
+      type: 'subagent.review',
+      subagentId: 'child-lifecycle',
+      parentToolCallId: 'parent',
+      reviewId: 'review',
+      toolCallId: 'tool',
+      status: 'queued',
+    });
+    expect(child(state)).toMatchObject({
+      status: 'suspended',
+      approvalState: 'queued_auto_review',
+    });
+    state = dispatch(state, {
+      type: 'subagent.review',
+      subagentId: 'child-lifecycle',
+      parentToolCallId: 'parent',
+      reviewId: 'review',
+      toolCallId: 'tool',
+      status: 'reviewing',
+    });
+    expect(child(state)).toMatchObject({ status: 'suspended', approvalState: 'auto_reviewing' });
+    state = dispatch(state, {
+      type: 'subagent.review',
+      subagentId: 'child-lifecycle',
+      parentToolCallId: 'parent',
+      reviewId: 'review',
+      toolCallId: 'tool',
+      status: 'approved',
+    });
+    expect(child(state)).toMatchObject({ status: 'suspended', approvalState: 'authorized_queued' });
+    state = dispatch(state, {
+      type: 'subagent.failed',
+      subagentId: 'child-lifecycle',
+      status: 'interrupted',
+      summary: 'Process exited',
+      toolCallCount: 0,
+      durationMs: 10,
+    });
+    expect(child(state)).toMatchObject({ status: 'interrupted' });
+    state = dispatch(state, {
+      type: 'subagent.started',
+      subagentId: 'child-lifecycle',
+      role: 'review',
+      name: 'Review',
+      status: 'running',
+    });
+    expect(child(state)).toMatchObject({ status: 'interrupted' });
+  });
+
   test('retains authoritative subagent duration, count, and bounded failure diagnostics', () => {
     let completed = eventReducer(createInitialState(), {
       type: 'ACCEPT_PRESENTATION_ENVELOPE',

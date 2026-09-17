@@ -65,6 +65,7 @@ export class RuntimeClientError extends Error {
   readonly code:
     | 'connection_closed'
     | 'connection_failed'
+    | 'startup_failure'
     | 'protocol_error'
     | 'server_mismatch'
     | 'unsupported_command'
@@ -77,6 +78,87 @@ export class RuntimeClientError extends Error {
     this.code = code;
     this.protocol = protocol;
   }
+}
+
+/** Fixed, client-safe startup fact; transports cannot supply arbitrary display text. */
+export class RuntimeClientStartupError extends RuntimeClientError {
+  readonly diagnosticCode:
+    | 'store_incompatible'
+    | 'store_migration_required'
+    | 'store_insufficient_space'
+    | 'store_access_denied'
+    | 'store_corrupt'
+    | 'store_preparation_cancelled'
+    | 'store_busy'
+    | 'store_history_reconciliation_required';
+  readonly actualSchema: number | null;
+  readonly expectedSchema: number | null;
+  readonly stage?:
+    | 'inspecting'
+    | 'acquiring_maintenance'
+    | 'waiting_for_store'
+    | 'preparing'
+    | 'publishing'
+    | 'ready';
+
+  constructor(input: {
+    readonly code: RuntimeClientStartupError['diagnosticCode'];
+    readonly actualSchema: number | null;
+    readonly expectedSchema: number | null;
+    readonly stage?: RuntimeClientStartupError['stage'];
+  }) {
+    const codes = [
+      'store_incompatible',
+      'store_migration_required',
+      'store_busy',
+      'store_insufficient_space',
+      'store_access_denied',
+      'store_corrupt',
+      'store_preparation_cancelled',
+      'store_history_reconciliation_required',
+    ];
+    if (
+      !codes.includes(input.code) ||
+      !validStartupSchema(input.actualSchema) ||
+      !validStartupSchema(input.expectedSchema) ||
+      (input.stage !== undefined &&
+        ![
+          'inspecting',
+          'acquiring_maintenance',
+          'waiting_for_store',
+          'preparing',
+          'publishing',
+          'ready',
+        ].includes(input.stage))
+    )
+      throw new TypeError('Invalid Runtime startup diagnostic.');
+    const actual = input.actualSchema === null ? '未知' : String(input.actualSchema);
+    const expected = input.expectedSchema === null ? '未知' : String(input.expectedSchema);
+    const message =
+      input.code === 'store_preparation_cancelled'
+        ? 'STORE_PREPARATION_CANCELLED：已在提交前取消会话数据整理，原会话数据保持不变，可以重新启动。'
+        : input.code === 'store_access_denied'
+          ? 'STORE_ACCESS_DENIED：无法访问会话数据。请检查数据目录的所有者、访问权限及磁盘可用状态后重新尝试；不要删除数据库。'
+          : input.code === 'store_corrupt'
+            ? 'STORE_CORRUPT：会话数据库未通过完整性检查。请保留当前数据库及恢复资料，保存诊断后通过恢复流程处理；不会自动清空或覆盖数据。'
+            : input.code === 'store_history_reconciliation_required'
+              ? 'STORE_HISTORY_RECONCILIATION_REQUIRED：会话数据自动整理尚未完成，原数据及恢复资料已保留。请关闭其他 Kite 客户端后重新尝试；若仍未完成，需要使用支持当前数据格式的版本继续整理。'
+              : input.code === 'store_insufficient_space'
+                ? 'STORE_INSUFFICIENT_SPACE：磁盘可用空间不足，暂时无法完成会话数据整理。请释放磁盘空间后重新尝试；不要删除 Kite 会话数据或恢复资料。'
+                : input.code === 'store_busy'
+                  ? 'STORE_BUSY：会话存储正忙，请稍后重试。'
+                  : `${input.code.toUpperCase()}：当前版本无法处理这份会话数据（数据格式 ${actual}，程序支持 ${expected}）。数据保持原样，请使用创建这份数据的版本或支持该格式的新版本后重新尝试。`;
+    super('startup_failure', message);
+    this.name = 'RuntimeClientStartupError';
+    this.diagnosticCode = input.code;
+    this.actualSchema = input.actualSchema;
+    this.expectedSchema = input.expectedSchema;
+    this.stage = input.stage;
+  }
+}
+
+function validStartupSchema(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
 
 interface PendingRequest {
@@ -626,7 +708,13 @@ export class RuntimeClient implements AsyncDisposable {
     });
     try {
       await connection.send({ jsonrpc: '2.0', id, method, params } as RuntimeProtocolMessage);
-    } catch {
+    } catch (error) {
+      if (method === 'initialize' && error instanceof RuntimeClientStartupError) {
+        const pending = this.#pending.get(id);
+        this.#pending.delete(id);
+        pending?.reject(error);
+        return response;
+      }
       const pending = this.#pending.get(id);
       this.#pending.delete(id);
       pending?.reject(
@@ -643,6 +731,7 @@ export class RuntimeClient implements AsyncDisposable {
   }
 
   async #receive(connection: RuntimeClientConnection, generation: number): Promise<void> {
+    let receiveError: unknown;
     try {
       for await (const value of connection.messages()) {
         if (
@@ -655,7 +744,8 @@ export class RuntimeClient implements AsyncDisposable {
         if (!decoded.success) continue;
         this.#handleMessage(decoded.data, generation);
       }
-    } catch {
+    } catch (error) {
+      receiveError = error;
       // The deterministic disconnect path below rejects only this generation.
     } finally {
       if (
@@ -663,11 +753,15 @@ export class RuntimeClient implements AsyncDisposable {
         generation === this.#connectionGeneration &&
         connection === this.#connection
       ) {
+        const status = this.#store.getSnapshot().status;
+        const initializing = status === 'connecting' || status === 'reconnecting';
         this.#connection = undefined;
         this.#store.setConnection({ generation, status: 'disconnected' });
         this.#rejectPending(
           generation,
-          new RuntimeClientError('connection_closed', 'Runtime connection closed.'),
+          initializing && receiveError instanceof RuntimeClientStartupError
+            ? receiveError
+            : new RuntimeClientError('connection_closed', 'Runtime connection closed.'),
         );
       }
     }

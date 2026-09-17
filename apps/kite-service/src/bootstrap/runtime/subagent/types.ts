@@ -88,7 +88,6 @@ export interface SubAgentRunnerInput {
   name: string;
   task: string;
   shellExecutor?: import('@kite-ai/builtin-runtime/sandbox').ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
   skills?: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
   skillOptions?: import('@kite-ai/builtin-runtime/skills').SkillScanOptions;
@@ -204,7 +203,7 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
-  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
+  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
   error?: string;
   /** Content-free reason retained across the private Provider observation seam. */
   failureDiagnostic?: SubAgentFailureDiagnostic;

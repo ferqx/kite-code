@@ -10,14 +10,25 @@ import {
   type ContextProjectionEnvironment,
   createChatModel,
   expectedCompactionSourceDigest,
+  type SingleAttemptTransport,
 } from '@kite-ai/builtin-runtime/model';
-import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
-import { type RuntimeHostExecutionServices, resolveProjectIdentity } from '@kite-ai/runtime-host';
+import {
+  RUNTIME_COMMAND_CONTEXT_SCHEMA_,
+  RUNTIME_COMMAND_SCHEMA_,
+  type RuntimeCommandContext,
+} from '@kite-ai/runtime-contract';
+import {
+  createRuntimeCommandCommitEvidence,
+  createRuntimeHost,
+  RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+  type RuntimeHostExecutionServices,
+  resolveProjectIdentity,
+} from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { VerificationSpec } from '@kite-ai/runtime-spi';
+import { defineRuntimeModule, type VerificationSpec } from '@kite-ai/runtime-spi';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
 import { createRuntimeHostStateStorageBinding } from '#runtime-host';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
@@ -26,6 +37,10 @@ import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../../../.
 import type { RuntimeSnapshotCodec } from '../../../../packages/runtime-host/src/storage';
 import { createStateStorageForTest } from '../../../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarness } from '../../../../tests/helpers/model-invocation';
+import {
+  testCapabilityArtifactWriter,
+  testWorkspaceFilesystemRuntime,
+} from '../../../../tests/helpers/runtime-model';
 import type { InstalledKiteRuntimeComposition } from '../../src/bootstrap/model-runtime-composition';
 import { createCliRuntimeBridge } from '../../src/bootstrap/runtime/CliRuntimeBridge';
 import {
@@ -34,8 +49,13 @@ import {
   type RuntimeSessionCoordinatorIdentity,
 } from '../../src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { createAppRuntimeEffectExecutor } from '../../src/bootstrap/runtime/runtime-effect-coordinator';
-import type { RuntimeExecutorDependencies } from '../../src/bootstrap/runtime/runtime-effect-dependencies';
+import type {
+  AppWorkspaceEffectCompositionFactory,
+  RuntimeExecutorDependencies,
+} from '../../src/bootstrap/runtime/runtime-effect-dependencies';
+import { obsoleteGlobalAdmissionSettlementEvents } from '../../src/bootstrap/runtime/state-actions';
 import type { StateRuntimeStorage } from '../../src/bootstrap/runtime/state-runtime';
+import { createAppToolPipelineComposition } from '../../src/bootstrap/runtime/tool-pipeline-composition';
 import {
   assertPrecommittedStartTurn,
   planStartTurnCommand,
@@ -70,13 +90,32 @@ function projectIdentityForWorkspace(workspace: string) {
   };
 }
 
-function modelRuntime(workspace: string, state: RuntimeState): InstalledKiteRuntimeComposition {
-  const runtime = createTestModelInvocationHarness({ workspace, state });
+function modelRuntime(
+  workspace: string,
+  state: RuntimeState,
+  transport?: SingleAttemptTransport,
+  withToolPipelineComposition = false,
+): InstalledKiteRuntimeComposition {
+  const runtime = createTestModelInvocationHarness({
+    workspace,
+    state,
+    ...(transport ? { transport } : {}),
+  });
   const modelEffects = new BuiltinModelEffectCoordinator(runtime.gateway);
+  const capabilityArtifacts = withToolPipelineComposition
+    ? testCapabilityArtifactWriter()
+    : undefined;
   return {
     status: 'available',
     gateway: runtime.gateway,
     modelEffects,
+    ...(withToolPipelineComposition
+      ? {
+          toolPipelineComposition: createAppToolPipelineComposition(builtinToolCatalog),
+          capabilityArtifacts: capabilityArtifacts!,
+          workspaceFilesystem: testWorkspaceFilesystemRuntime(workspace, capabilityArtifacts),
+        }
+      : {}),
   } as unknown as InstalledKiteRuntimeComposition;
 }
 
@@ -352,7 +391,12 @@ function createFixture(
   sessionId: string,
   requested?: RuntimeState,
   workspace = retainedWorkspace,
-  options: { readonly failCommandCommit?: () => boolean } = {},
+  options: {
+    readonly failCommandCommit?: () => boolean;
+    readonly storeRuns?: boolean;
+    readonly modelTransport?: SingleAttemptTransport;
+    readonly withToolPipelineComposition?: boolean;
+  } = {},
 ) {
   const state =
     requested ??
@@ -371,6 +415,17 @@ function createFixture(
     databasePath,
     codec,
     sessionId,
+    ...(options.storeRuns
+      ? {
+          workspaceBinding: {
+            layoutGeneration: 'retained-recovery-tests',
+            workerScopeId: 'retained-recovery-worker',
+            workspaceIdentityDigest:
+              projectIdentityForWorkspace(workspace).canonicalWorkspaceDigest,
+          },
+          targetStore: 'run' as const,
+        }
+      : {}),
   });
   const services = {
     sessions: storage.sessions,
@@ -400,8 +455,11 @@ function createFixture(
       release: storage.effects.releaseEffectLease,
       hasClaim: () => false,
     },
-    checkpoints: {} as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['checkpoints'],
+    checkpoints: options.storeRuns
+      ? storage.checkpoints
+      : ({} as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['checkpoints']),
     recoveryIdentities: storage.recoveryIdentities,
+    ...(options.storeRuns ? { runs: storage.runs } : {}),
   } as unknown as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
   const store = runtimeStoreView(services);
   storage.transactions.commitDecision({
@@ -409,7 +467,12 @@ function createFixture(
     events: [],
     snapshot: state,
   });
-  const runtime = modelRuntime(workspace, state);
+  const runtime = modelRuntime(
+    workspace,
+    state,
+    options.modelTransport,
+    options.withToolPipelineComposition,
+  );
   const binding = createRuntimeSessionCoordinatorBinding();
   let factoryCalls = 0;
   const factory = (workspace: string) => {
@@ -441,6 +504,7 @@ function createFixtureBridge(
   sessionId: string,
   fixture: ReturnType<typeof createFixture>,
   access: RuntimeSessionCoordinatorAccess,
+  workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory,
 ) {
   return createCliRuntimeBridge(
     {
@@ -469,6 +533,7 @@ function createFixtureBridge(
         projectAgentsSkillsDir: join(fixture.root, 'project-agent-skills'),
       },
       initialSkillActivations: [],
+      ...(workspaceEffectCompositionFactory ? { workspaceEffectCompositionFactory } : {}),
     },
     capabilityExecution,
     () => ({ ...fixture.runtime, builtinToolCatalog }),
@@ -800,6 +865,147 @@ describe('retained TUI session coordinator', () => {
       rmSync(fixture.root, { recursive: true, force: true });
     }
   });
+
+  for (const commandType of ['cancel_turn', 'close_session'] as const) {
+    test(`${commandType} settles a confirmed waiting child even without an active runner`, async () => {
+      const sessionId = `retained-waiting-child-${commandType}`;
+      const fixture = createFixture(sessionId);
+      const access = fixture.binding.access();
+      try {
+        const coordinator = access.ensure(identity(sessionId));
+        const started = coordinator.commitStartTurnCommand(
+          startCommand(sessionId, coordinator.getState().revision),
+          commandEvidence(sessionId),
+        );
+        const state = coordinator.getState();
+        const parentToolCallId = 'waiting-parent';
+        const childInvocationId = 'waiting-child';
+        Object.assign(state.tools.calls, {
+          [parentToolCallId]: {
+            toolCallId: parentToolCallId,
+            modelMessageId: 'waiting-model-message',
+            name: 'task',
+            args: {},
+            status: 'awaiting_approval',
+            createdAtTurnId: started.descriptor.turnId,
+          },
+        });
+        Object.assign(state.capabilities.invocations, {
+          'waiting-invocation': {
+            invocationId: 'waiting-invocation',
+            toolCallId: parentToolCallId,
+            capabilityId: 'builtin:task',
+            capabilityRevision: 'revision',
+            argumentsDigest: 'arguments',
+            authorizationDigest: 'authorization',
+            effectiveEffectsDigest: 'effects',
+            status: 'running',
+            receiptRequirement: 'observation_receipt',
+            attemptsStarted: 1,
+            admissionDigest: 'admission',
+            recordedAt: '2026-08-25T00:00:00.000Z',
+            subagentProviderLifecycle: {
+              attempt: 1,
+              purpose: 'start',
+              childInvocationId,
+              taskArtifact: {
+                artifactId: `pa_${'7'.repeat(64)}`,
+                kind: 'subagent_task',
+                integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+                byteLength: 128,
+              },
+              dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+              status: 'cleanup_completed',
+              handleArtifact: {
+                artifactId: `pa_${'a'.repeat(64)}`,
+                kind: 'subagent_handle',
+                integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+                byteLength: 128,
+              },
+              handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
+              handleRecordedAt: '2026-08-25T00:00:00.000Z',
+              observationStatus: 'blocked',
+              observedAt: '2026-08-25T00:00:00.000Z',
+              recordedAt: '2026-08-25T00:00:00.000Z',
+              cleanupKind: 'handle_reconcile',
+              cleanupAttempt: 1,
+              cleanupStartedAt: '2026-08-25T00:00:00.000Z',
+              cleanupConfirmed: true,
+              cleanupCompletedAt: '2026-08-25T00:00:01.000Z',
+            },
+          },
+        });
+        coordinator.session.processEventBatch([
+          {
+            type: 'subagent.started',
+            subagent: {
+              id: childInvocationId,
+              role: 'explore',
+              name: 'Waiting child',
+              parentToolCallId,
+            },
+          },
+        ]);
+        expect(coordinator.isTurnActive()).toBe(false);
+        const revision = coordinator.getState().revision;
+        const committed =
+          commandType === 'cancel_turn'
+            ? coordinator.commitCancelTurnCommand(
+                {
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: 'cancel-waiting-child',
+                  type: commandType,
+                  sessionId,
+                  expectedRevision: revision,
+                  turnId: started.descriptor.turnId,
+                  runId: started.descriptor.turnId,
+                },
+                commandEvidence(sessionId, 'cancel-waiting-child'),
+              )
+            : coordinator.commitCloseSessionCommand(
+                closeCommand(sessionId, revision, 'close-waiting-child'),
+                commandEvidence(sessionId, 'close-waiting-child'),
+              );
+        expect(committed.events.filter((event) => event.type === 'subagent.failed')).toMatchObject([
+          { type: 'subagent.failed', subagent: { id: childInvocationId, status: 'cancelled' } },
+        ]);
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .filter((entry) => entry.event.type === 'subagent.failed'),
+        ).toHaveLength(1);
+        expect(coordinator.getState().turn.status).toBe('aborted');
+        expect(() =>
+          commandType === 'cancel_turn'
+            ? coordinator.commitCancelTurnCommand(
+                {
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: 'cancel-waiting-child-retry',
+                  type: commandType,
+                  sessionId,
+                  expectedRevision: revision,
+                  turnId: started.descriptor.turnId,
+                  runId: started.descriptor.turnId,
+                },
+                commandEvidence(sessionId, 'cancel-waiting-child-retry'),
+              )
+            : coordinator.commitCloseSessionCommand(
+                closeCommand(sessionId, revision, 'close-waiting-child-retry'),
+                commandEvidence(sessionId, 'close-waiting-child-retry'),
+              ),
+        ).toThrow();
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .filter((entry) => entry.event.type === 'subagent.failed'),
+        ).toHaveLength(1);
+      } finally {
+        await access.close();
+        fixture.storage.close();
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+  }
 
   test('does not abort or mutate State when a cancel command transaction fails', async () => {
     const sessionId = 'retained-command-cancel-rollback';
@@ -1269,6 +1475,599 @@ describe('retained TUI session coordinator', () => {
       });
       expect(projection.status).toBe('ok');
     } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('resume settles a proven old global admission and rehydrates an undispatched Run', async () => {
+    const sessionId = 'retained-obsolete-provider-admission';
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, { storeRuns: true });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      coordinator.control.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'old-global-admission',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      const before = coordinator.getState();
+      expect(coordinator.session.getLifecycleProjection().currentRun?.status).toBe('waiting');
+      const journal = fixture.store.sessions.loadEventsStrict(sessionId);
+      const turnIndex = journal.findIndex(({ event }) => event.type === 'turn.started');
+      expect(
+        obsoleteGlobalAdmissionSettlementEvents(before, [
+          ...journal.slice(0, turnIndex + 1),
+          {
+            event: { type: 'model.requested', requestId: 'pre-admission-dispatch' },
+            revision: journal[turnIndex]!.revision,
+          },
+          ...journal.slice(turnIndex + 1),
+        ]),
+      ).toEqual([]);
+      expect(
+        obsoleteGlobalAdmissionSettlementEvents(
+          {
+            ...before,
+            interactions: {
+              kind: 'awaiting_provider_action',
+              interactionId: 'real-provider-action',
+              providerId: 'offline-provider',
+              action: 'login',
+              originatingToolCallId: 'actual-tool',
+              status: 'required',
+            },
+          },
+          journal,
+        ),
+      ).toEqual([]);
+      expect(
+        obsoleteGlobalAdmissionSettlementEvents(
+          {
+            ...before,
+            recoveryState: { kind: 'corrupted', reason: 'unknown external outcome' },
+          },
+          journal,
+        ),
+      ).toEqual([]);
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session' as const,
+        commandId: 'resume-original-run',
+        sessionId,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Resume was not accepted');
+      const committed = await inspected.decision.commit(
+        commandEvidence(sessionId, command.commandId),
+      );
+      expect(committed.preparedExecution?.execution).toMatchObject({
+        sessionId,
+        operationId: command.commandId,
+        committedRevision: committed.receipt.revision,
+      });
+      expect(coordinator.getState().turn.turnId).toBe(before.turn.turnId);
+      expect(coordinator.getState().activeTaskId).toBe(before.activeTaskId);
+      expect(coordinator.getState().transcript.messages).toEqual(before.transcript.messages);
+      expect(coordinator.getState().providerAdmission.pending).toHaveLength(0);
+      expect(coordinator.getState().providerAdmission.waivers).toEqual({});
+      expect(coordinator.session.getLifecycleProjection().currentRun).toMatchObject({
+        runId: started.descriptor.turnId,
+        status: 'running',
+      });
+      expect(fixture.store.sessions.loadEventsStrict(sessionId).at(-1)?.event.type).toBe(
+        'provider.admission_cancelled',
+      );
+      // The first receipt committed, but no prepared execution was dispatched.
+      // After rehydration, the complete journal still proves no model or Tool
+      // dispatch. A later command can continue this same Run.
+      await access.release(sessionId);
+      await bridge.recoverSession(sessionId, () => {});
+      const restored = access.get(sessionId);
+      expect(restored).toBeDefined();
+      expect(restored).not.toBe(coordinator);
+      expect(restored?.session.getLifecycleProjection().currentRun).toMatchObject({
+        runId: started.descriptor.turnId,
+        status: 'running',
+      });
+      expect(
+        await bridge.recoverCommittedResume?.(command, committed.receipt.revision, () => {}),
+      ).toMatchObject({
+        execution: {
+          sessionId,
+          operationId: command.commandId,
+          committedRevision: committed.receipt.revision,
+        },
+      });
+      const repeat = await bridge.inspectCommand(
+        { ...command, commandId: 'resume-again' },
+        { targetSessionId: sessionId },
+      );
+      if (repeat.kind !== 'accepted') throw new Error('Repeat resume was not accepted');
+      const repeated = await repeat.decision.commit(commandEvidence(sessionId, 'resume-again'));
+      expect(repeated.preparedExecution?.execution).toMatchObject({
+        sessionId,
+        operationId: 'resume-again',
+        committedRevision: repeated.receipt.revision,
+      });
+      expect(repeated.receipt.revision).toBe(committed.receipt.revision);
+      expect(
+        fixture.store.sessions
+          .loadEventsStrict(sessionId)
+          .filter(({ event }) => event.type === 'provider.admission_cancelled'),
+      ).toHaveLength(1);
+      expect(restored?.getState().transcript.messages).toEqual(before.transcript.messages);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a waiting old global admission resumes its original Turn through one model call', async () => {
+    const sessionId = 'retained-obsolete-admission-execution';
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      storeRuns: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Recovered answer.' }] },
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: 'recovered-answer-1' },
+        };
+      },
+    });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      coordinator.control.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'obsolete-gate-to-execute',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      const originalTurnId = coordinator.getState().turn.turnId;
+      const originalTaskId = coordinator.getState().activeTaskId;
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session' as const,
+        commandId: 'resume-and-execute-original',
+        sessionId,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Resume was not accepted');
+      const committed = await inspected.decision.commit(
+        commandEvidence(sessionId, command.commandId),
+      );
+      const notifications: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committed.activation?.((notification) => notifications.push(notification));
+      const controller = new AbortController();
+      await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      expect(controller.signal.aborted).toBe(false);
+      expect(modelCalls).toBe(1);
+      expect(coordinator.getState().turn).toMatchObject({
+        turnId: originalTurnId,
+        status: 'completed',
+      });
+      expect(coordinator.getState().tasks[originalTaskId!]).toMatchObject({
+        taskId: originalTaskId,
+        status: 'completed',
+      });
+      expect(
+        coordinator.getState().transcript.messages.filter((message) => message.kind === 'user'),
+      ).toHaveLength(1);
+      expect(coordinator.session.getLifecycleProjection().currentRun).toMatchObject({
+        runId: started.descriptor.turnId,
+        status: 'completed',
+      });
+      expect(
+        fixture.store.sessions
+          .loadEventsStrict(sessionId)
+          .filter(({ event }) => event.type === 'model.requested'),
+      ).toHaveLength(1);
+      expect(notifications.some((notification) => notification.durability === 'durable')).toBe(
+        true,
+      );
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('Host replays a committed resume from Store 8 after the pre-dispatch crash window', async () => {
+    const sessionId = 'retained-obsolete-admission-host-replay';
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      storeRuns: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Recovered once.' }] },
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: 'host-replay-response-1' },
+        };
+      },
+    });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    let host: ReturnType<typeof createRuntimeHost<RuntimeEvent, RuntimeState>> | undefined;
+    try {
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      coordinator.control.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'host-replay-obsolete-gate',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session' as const,
+        commandId: 'host-replay-resume',
+        sessionId,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Resume was not accepted');
+      const committed = await inspected.decision.commit(
+        createRuntimeCommandCommitEvidence({
+          command,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      expect(committed.preparedExecution?.execution).toBeDefined();
+      expect(modelCalls).toBe(0);
+      expect(
+        fixture.storage.commandReceipts.lookup({
+          scopeSessionId: sessionId,
+          commandId: command.commandId,
+          requestDigest: createRuntimeCommandCommitEvidence({
+            command,
+            targetSessionId: sessionId,
+            committedAt: Date.now(),
+          }).requestDigest,
+        }).status,
+      ).toBe('replay');
+
+      await access.release(sessionId);
+      await bridge.recoverSession(sessionId, () => {});
+      expect(
+        await bridge.recoverCommittedResume?.(command, committed.receipt.revision, () => {}),
+      ).toBeDefined();
+      const module = defineRuntimeModule({
+        moduleId: 'old-admission-host-replay-test',
+        revision: '1',
+        register: (registry) =>
+          registry.registerExecutionAdapter({
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+            revision: '1',
+            create: () => bridge,
+          }),
+      });
+      host = createRuntimeHost({ storage: fixture.storage, modules: [module] });
+      const [left, right] = await Promise.all([host.command(command), host.command(command)]);
+      expect(left).toMatchObject({
+        status: 'idempotent_replay',
+        originalRevision: committed.receipt.revision,
+      });
+      expect(right).toEqual(left);
+      await host.waitForSessionIdle(sessionId);
+      expect(modelCalls).toBe(1);
+      expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)).toMatchObject({
+        status: 'completed',
+      });
+      const events = fixture.store.sessions.loadEventsStrict(sessionId);
+      expect(
+        events.filter(({ event }) => event.type === 'provider.admission_cancelled'),
+      ).toHaveLength(1);
+      expect(events.filter(({ event }) => event.type === 'model.requested')).toHaveLength(1);
+      const eventCount = events.length;
+      await host.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId,
+      });
+      expect(fixture.store.sessions.loadEventsStrict(sessionId)).toHaveLength(eventCount);
+    } finally {
+      await host?.[Symbol.asyncDispose]();
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['fresh', 'fresh-worker-binding', true],
+    ['missing', null, false],
+    ['stale', 'stale-worker-binding', false],
+  ] as const)('replayed original Turn tool call enforces the %s command binding', async (scenario, bindingReference, shouldComplete) => {
+    const sessionId = `retained-obsolete-admission-${scenario}-binding`;
+    const fileName = 'fresh-binding-tool.txt';
+    writeFileSync(join(retainedWorkspace, fileName), 'fresh binding tool input\n');
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      storeRuns: true,
+      withToolPipelineComposition: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        return {
+          message:
+            modelCalls === 1
+              ? {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'tool_call',
+                      toolCallId: 'fresh-binding-read',
+                      toolName: 'read_file',
+                      input: { path: fileName },
+                    },
+                  ],
+                }
+              : { role: 'assistant', content: [{ type: 'text', text: 'Tool completed.' }] },
+          finishReason: modelCalls === 1 ? 'tool_calls' : 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: `fresh-binding-response-${modelCalls}` },
+        };
+      },
+    });
+    const contexts: Readonly<RuntimeCommandContext>[] = [];
+    const effectFactory: AppWorkspaceEffectCompositionFactory = (context) => {
+      contexts.push(context);
+      if (context.bindingReference !== 'fresh-worker-binding') {
+        throw new Error('Workspace effect factory rejected a stale command binding.');
+      }
+      return {
+        context: {} as ReturnType<AppWorkspaceEffectCompositionFactory>['context'],
+        gate: {
+          run: async (_attempt, dispatch) => ({ status: 'applied', result: await dispatch() }),
+        },
+        createAttempt: () => {
+          throw new Error('Read-only tool must not create a Workspace effect attempt.');
+        },
+      };
+    };
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({
+      ...identity(sessionId),
+      sandboxAvailable: false,
+      capabilityArtifactEvidence: fixture.runtime.capabilityArtifacts,
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access, effectFactory);
+    let host: ReturnType<typeof createRuntimeHost<RuntimeEvent, RuntimeState>> | undefined;
+    try {
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      coordinator.control.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'fresh-binding-obsolete-gate',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session' as const,
+        commandId: 'resume-fresh-binding',
+        sessionId,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Resume was not accepted');
+      await inspected.decision.commit(
+        createRuntimeCommandCommitEvidence({
+          command,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      await access.release(sessionId);
+      await bridge.recoverSession(sessionId, () => {});
+      const module = defineRuntimeModule({
+        moduleId: 'old-admission-fresh-binding-test',
+        revision: '1',
+        register: (registry) =>
+          registry.registerExecutionAdapter({
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+            revision: '1',
+            create: () => bridge,
+          }),
+      });
+      host = createRuntimeHost({ storage: fixture.storage, modules: [module] });
+      const freshContext: RuntimeCommandContext = {
+        schema: RUNTIME_COMMAND_CONTEXT_SCHEMA_,
+        connectionId: 'reconnected-client',
+        requestId: 'fresh-replay-request',
+        bindingReference,
+      };
+      expect(await host.command(command, freshContext)).toMatchObject({
+        status: 'idempotent_replay',
+      });
+      await host.waitForSessionIdle(sessionId);
+      if (shouldComplete) {
+        expect(contexts).toEqual([freshContext]);
+        expect(modelCalls).toBe(2);
+        expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)).toMatchObject({
+          status: 'completed',
+        });
+        expect(access.get(sessionId)?.getState().tools.calls['fresh-binding-read']).toMatchObject({
+          status: 'succeeded',
+        });
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .some(
+              ({ event }) =>
+                event.type === 'tool.finished' && event.toolCallId === 'fresh-binding-read',
+            ),
+        ).toBe(true);
+      } else {
+        expect(contexts).toEqual(bindingReference === null ? [] : [freshContext]);
+        expect(modelCalls).toBe(1);
+        expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)).toMatchObject({
+          status: 'unknown',
+          terminal: { safeRetry: false },
+        });
+        expect(
+          fixture.store.sessions
+            .loadEventsStrict(sessionId)
+            .some(
+              ({ event }) =>
+                event.type === 'tool.finished' && event.toolCallId === 'fresh-binding-read',
+            ),
+        ).toBe(false);
+      }
+    } finally {
+      await host?.[Symbol.asyncDispose]();
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    'prepared',
+    'attempt_started',
+  ] as const)('Host does not replay a committed resume with durable model %s evidence', async (dispatchEvidence) => {
+    const sessionId = `retained-obsolete-admission-${dispatchEvidence}`;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, { storeRuns: true });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    let host: ReturnType<typeof createRuntimeHost<RuntimeEvent, RuntimeState>> | undefined;
+    try {
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      coordinator.control.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'obsolete-gate-before-model',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session' as const,
+        commandId: `resume-before-${dispatchEvidence}`,
+        sessionId,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Resume was not accepted');
+      const committed = await inspected.decision.commit(
+        createRuntimeCommandCommitEvidence({
+          command,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      const invocationId = 'model-before-replay';
+      const surfaceArtifact = {
+        kind: 'model_surface' as const,
+        artifactId: `pa_${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      };
+      coordinator.control.processEvent({
+        type: 'model.invocation_prepared',
+        invocationId,
+        purpose: 'primary_agent',
+        surfaceArtifact,
+        surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+        routeFingerprint: `sha256:${'d'.repeat(64)}`,
+        budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+        limits: { maxAttempts: 1, perAttemptTimeoutMs: 1000, totalTimeBudgetMs: 1000 },
+        preparedStateRevision: committed.receipt.revision,
+        parentInvocationId: null,
+        parentToolCallId: null,
+      });
+      if (dispatchEvidence === 'attempt_started') {
+        coordinator.control.processEvent({
+          type: 'model.invocation_attempt_started',
+          invocationId,
+          attempt: 1,
+          maxAttempts: 1,
+        });
+      }
+      await access.release(sessionId);
+      await bridge.recoverSession(sessionId, () => {});
+      const eventCount = fixture.store.sessions.loadEventsStrict(sessionId).length;
+      const module = defineRuntimeModule({
+        moduleId: `old-admission-${dispatchEvidence}-test`,
+        revision: '1',
+        register: (registry) =>
+          registry.registerExecutionAdapter({
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+            revision: '1',
+            create: () => bridge,
+          }),
+      });
+      host = createRuntimeHost({ storage: fixture.storage, modules: [module] });
+      expect(await host.command(command)).toMatchObject({
+        status: 'idempotent_replay',
+        originalRevision: committed.receipt.revision,
+      });
+      expect(
+        await host.command({ ...command, commandId: `new-${command.commandId}` }),
+      ).toMatchObject({
+        status: 'applied',
+      });
+      await host.waitForSessionIdle(sessionId);
+      expect(fixture.store.sessions.loadEventsStrict(sessionId)).toHaveLength(eventCount);
+      expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)).toMatchObject({
+        status: 'running',
+      });
+      expect(
+        await bridge.recoverCommittedResume?.(command, committed.receipt.revision, () => {}),
+      ).toBeUndefined();
+    } finally {
+      await host?.[Symbol.asyncDispose]();
       await bridge.close();
       await access.close();
       fixture.storage.close();
@@ -1991,6 +2790,7 @@ describe('retained TUI session coordinator', () => {
     ['ask_user', true, true],
   ] as const)('projects reviewer %s as a distinct Runtime outcome', async (_decision, askUser, escalated) => {
     const state = autoReviewState(`retained-auto-review-${_decision}`);
+    const durable: RuntimeEvent[] = [];
     const dependencies: RuntimeExecutorDependencies = {
       config: config(),
       model: createChatModel(config()),
@@ -1998,15 +2798,20 @@ describe('retained TUI session coordinator', () => {
         RuntimeExecutorDependencies['modelInvocationGateway']
       >,
       modelEffectCoordinator: {
-        reviewToolApproval: async () => ({
-          ok: true,
-          suggestion: {
-            approved: false,
-            ...(askUser ? { requiresUserApproval: true as const } : {}),
-            grant: 'approve_once' as const,
-            reason: askUser ? 'user intent is required' : 'reviewer rejected the operation',
-          },
-        }),
+        reviewToolApproval: async () => {
+          expect(durable).toEqual([
+            expect.objectContaining({ type: 'auto_review.started', reviewId: 'retained-review-1' }),
+          ]);
+          return {
+            ok: true,
+            suggestion: {
+              approved: false,
+              ...(askUser ? { requiresUserApproval: true as const } : {}),
+              grant: 'approve_once' as const,
+              reason: askUser ? 'user intent is required' : 'reviewer rejected the operation',
+            },
+          };
+        },
       } as unknown as NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
       builtinToolCatalog,
       capabilityExecution,
@@ -2015,15 +2820,90 @@ describe('retained TUI session coordinator', () => {
     const events = await createAppRuntimeEffectExecutor(dependencies)(
       { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
       state,
+      undefined,
+      {
+        reservationIds: [],
+        getState: () => state,
+        persistEvent: async () => true,
+        persistEvents: async (events) => {
+          durable.push(...events);
+          return true;
+        },
+      },
     );
 
     expect(events[0]).toMatchObject({
       type: 'auto_review.completed',
       result: { approved: false, ...(escalated ? { escalatedToUser: true } : {}) },
     });
+    await expect(
+      createAppRuntimeEffectExecutor(dependencies)(
+        { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+        state,
+        undefined,
+        {
+          reservationIds: [],
+          getState: () => state,
+          persistEvent: async () => false,
+          persistEvents: async () => false,
+        },
+      ),
+    ).rejects.toThrow('Auto-review start could not be persisted');
     // Escalation keeps the same durable review identity; it must not synthesize
     // a second approval.requested event.
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test.each([
+    'after persisted start',
+    'during reviewer execution',
+  ] as const)('does not publish auto-review completion after parent cancellation %s', async (abortAt) => {
+    const state = autoReviewState(`retained-auto-review-cancel-${abortAt}`);
+    const controller = new AbortController();
+    const durable: RuntimeEvent[] = [];
+    let reviewerCalls = 0;
+    const dependencies: RuntimeExecutorDependencies = {
+      config: config(),
+      model: createChatModel(config()),
+      signal: controller.signal,
+      modelInvocationGateway: {} as NonNullable<
+        RuntimeExecutorDependencies['modelInvocationGateway']
+      >,
+      modelEffectCoordinator: {
+        reviewToolApproval: async ({ signal }: { signal: AbortSignal }) => {
+          reviewerCalls += 1;
+          expect(signal).toBe(controller.signal);
+          if (abortAt === 'during reviewer execution') {
+            controller.abort(new Error('Parent execution cancelled.'));
+          }
+          return { ok: true, suggestion: { approved: true, reason: 'Late approval' } };
+        },
+      } as unknown as NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
+      builtinToolCatalog,
+      capabilityExecution,
+    };
+
+    const events = await createAppRuntimeEffectExecutor(dependencies)(
+      { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+      state,
+      undefined,
+      {
+        reservationIds: [],
+        getState: () => state,
+        persistEvent: async () => true,
+        persistEvents: async (batch) => {
+          durable.push(...batch);
+          if (abortAt === 'after persisted start') {
+            controller.abort(new Error('Parent execution cancelled.'));
+          }
+          return true;
+        },
+      },
+    );
+
+    expect(durable.map((event) => event.type)).toEqual(['auto_review.started']);
+    expect(reviewerCalls).toBe(abortAt === 'after persisted start' ? 0 : 1);
+    expect(events).toEqual([]);
   });
 
   test('runs deterministic verification without model dispatch', async () => {

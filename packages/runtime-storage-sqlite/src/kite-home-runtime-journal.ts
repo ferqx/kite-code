@@ -214,12 +214,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
       return sessionMetadata
         .list(needle ? Math.max(limit, 200) : limit)
         .map((row) => {
-          let firstText = '';
-          try {
-            firstText = eventStore.findFirstSessionSummary(row.threadId)?.searchText ?? '';
-          } catch {
-            // Advisory naming cannot hide an otherwise healthy Session.
-          }
+          const firstText = eventStore.findFirstSessionSummary(row.threadId)?.searchText ?? '';
           return { row, firstText };
         })
         .filter(

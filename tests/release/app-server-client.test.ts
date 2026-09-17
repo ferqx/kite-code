@@ -16,10 +16,7 @@ import {
   createManagedLocalAppServerComposition,
   resolveManagedLocalAppServerTarget,
 } from '../../scripts/release/app-server-client';
-import {
-  sourceKiteSessionStorePath,
-  sourceServiceBuildIdentity,
-} from '../../scripts/release/local-service-client';
+import { sourceServiceBuildIdentity } from '../../scripts/release/local-service-client';
 
 describe('release App Server client pairing', () => {
   test('resolves a canonical pending profile without creating it', () => {
@@ -41,7 +38,7 @@ describe('release App Server client pairing', () => {
     }
   });
 
-  test('source uses the checked-in entrypoint and persistent worktree profile', async () => {
+  test('source uses the checked-in entrypoint and canonical Kite Home Store', async () => {
     const root = realpathSync.native(
       mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-source-')),
     );
@@ -86,9 +83,10 @@ describe('release App Server client pairing', () => {
       mode: 'source',
       buildId: expectedBuild,
       configRoot: kiteHome,
+      runtimeRoot: kiteHome,
     });
     expect(join(composition.runtimeRoot, 'kite-session.sqlite')).toBe(
-      sourceKiteSessionStorePath(kiteHome, repositoryRoot),
+      join(kiteHome, 'kite-session.sqlite'),
     );
     let createdRevision = -1;
     const client = composition.connect({
@@ -165,7 +163,9 @@ describe('release App Server client pairing', () => {
         writes.filter(
           (result) =>
             result.status === 'rejected' ||
-            (result.status === 'fulfilled' && result.value.status === 'rejected'),
+            (result.status === 'fulfilled' &&
+              result.value.status === 'conflict' &&
+              result.value.code === 'revision_conflict'),
         ),
       ).toHaveLength(1);
     } finally {

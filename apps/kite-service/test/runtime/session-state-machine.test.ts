@@ -11,7 +11,9 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   eventsForRestartedSessionRecovery,
+  eventsForSettledSubagentHistory,
   eventsForSupersededTurnRecovery,
+  hasSettledSubagentHistoryCandidate,
   type RuntimeUserAction,
 } from '#kite-service/bootstrap/runtime/state-actions';
 import { normalizeTerminalRuntimeEvent } from '#kite-service/bootstrap/runtime/terminal-outcome';
@@ -473,7 +475,10 @@ describe('session state-machine terminal matrix', () => {
       taskId: 'active-task',
     };
 
-    const events = eventsForRestartedSessionRecovery(initial);
+    const events = eventsForRestartedSessionRecovery(initial, [], {
+      kind: 'fenced_previous_execution',
+      controllerGeneration: 2,
+    });
     const replayed = events.reduce((state, event) => {
       const terminal = normalizeTerminalRuntimeEvent(event);
       return reduceRuntimeState(
@@ -497,5 +502,338 @@ describe('session state-machine terminal matrix', () => {
     expect(replayed.tools.calls['approval-tool']?.status).toBe('awaiting_approval');
     expect(replayed.interactions.kind).toBe('awaiting_tool_approval');
     expect(replayed.turn.status).toBe('active');
+  });
+
+  test('fenced restart closes only an approval that never crossed dispatch', () => {
+    const evidence = { kind: 'fenced_previous_execution' as const, controllerGeneration: 2 };
+    const pending = waitingToolState('approval', 'approval-tool');
+    expect(
+      eventsForRestartedSessionRecovery(pending, [], evidence).map((event) => event.type),
+    ).toEqual(['tool.cancelled', 'turn.aborted']);
+    const acknowledged = waitingToolState('approval', 'approval-tool');
+    const approval = acknowledged.pendingApprovals.get('approval-interaction')!;
+    (acknowledged.pendingApprovals as Map<string, typeof approval>).set(approval.interactionId, {
+      ...approval,
+      dispatchState: 'dispatch_acked',
+    });
+    expect(eventsForRestartedSessionRecovery(acknowledged, [], evidence)).toEqual([]);
+  });
+
+  test('a settled child from an older Task closes its historical card exactly once', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'settled-child-history',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state.activeTaskId = 'new-task';
+    state.tools.calls['old-parent'] = {
+      toolCallId: 'old-parent',
+      taskId: 'old-task',
+      modelMessageId: 'old-message',
+      name: 'task',
+      args: {},
+      status: 'failed',
+      createdAtTurnId: 'old-turn',
+    };
+    state.capabilities.invocations['old-invocation'] = {
+      invocationId: 'old-invocation',
+      toolCallId: 'old-parent',
+      taskId: 'old-task',
+      capabilityId: 'builtin:task',
+      capabilityRevision: 'revision',
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      effectiveEffectsDigest: 'effects',
+      status: 'unknown',
+      recordedAt: '2026-08-25T00:00:00.000Z',
+      subagentProviderLifecycle: {
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: 'old-child',
+        taskArtifact: {
+          artifactId: `pa_${'7'.repeat(64)}`,
+          kind: 'subagent_task',
+          integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+          byteLength: 128,
+        },
+        dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+        status: 'cleanup_completed',
+        recordedAt: '2026-08-25T00:00:00.000Z',
+        cleanupKind: 'handle_reconcile',
+        cleanupAttempt: 1,
+        cleanupConfirmed: true,
+        cleanupCompletedAt: '2026-08-25T00:00:01.000Z',
+      },
+    };
+    const started = {
+      type: 'subagent.started' as const,
+      subagent: { id: 'old-child', role: 'explore' as const, name: 'Old child' },
+    };
+    expect(hasSettledSubagentHistoryCandidate(state)).toBe(true);
+    const terminal = eventsForSettledSubagentHistory(state, [started]);
+    expect(terminal).toMatchObject([
+      { type: 'subagent.failed', subagent: { id: 'old-child', status: 'interrupted' } },
+    ]);
+    expect(eventsForSettledSubagentHistory(state, [started, ...terminal])).toEqual([]);
+    state.tools.calls['old-parent']!.status = 'cancelled';
+    expect(eventsForSettledSubagentHistory(state, [started])).toMatchObject([
+      { type: 'subagent.failed', subagent: { status: 'interrupted' } },
+    ]);
+    expect(
+      eventsForSettledSubagentHistory(state, [
+        started,
+        {
+          type: 'capability.execution_failed',
+          invocationId: 'old-invocation',
+          error: 'Provider reported failure.',
+          finishedAt: '2026-08-25T00:00:02.000Z',
+        },
+      ]),
+    ).toMatchObject([{ type: 'subagent.failed', subagent: { status: 'failed' } }]);
+    expect(
+      eventsForSettledSubagentHistory(state, [
+        started,
+        { type: 'turn.aborted', turnId: 'old-turn', reason: 'Cancelled', cause: 'user' },
+      ]),
+    ).toMatchObject([{ type: 'subagent.failed', subagent: { status: 'cancelled' } }]);
+    state.capabilities.invocations['old-invocation']!.subagentProviderLifecycle!.observationStatus =
+      'failed';
+    expect(
+      eventsForSettledSubagentHistory(state, [
+        started,
+        { type: 'turn.aborted', turnId: 'old-turn', reason: 'Cancelled', cause: 'user' },
+      ]),
+    ).toMatchObject([{ type: 'subagent.failed', subagent: { status: 'failed' } }]);
+    state.tools.calls['old-parent']!.status = 'failed';
+    state.capabilities.invocations['old-invocation']!.subagentProviderLifecycle!.observationStatus =
+      'failed';
+    expect(eventsForSettledSubagentHistory(state, [started])).toMatchObject([
+      { type: 'subagent.failed', subagent: { status: 'failed' } },
+    ]);
+    state.capabilities.invocations['old-invocation']!.subagentProviderLifecycle!.observationStatus =
+      'blocked';
+    expect(eventsForSettledSubagentHistory(state, [started])).toMatchObject([
+      { type: 'subagent.failed', subagent: { status: 'interrupted' } },
+    ]);
+    state.capabilities.invocations['old-invocation']!.subagentProviderLifecycle!.observationStatus =
+      'cancelled';
+    expect(eventsForSettledSubagentHistory(state, [started])).toMatchObject([
+      { type: 'subagent.failed', subagent: { status: 'interrupted' } },
+    ]);
+    state.capabilities.invocations['old-invocation']!.subagentProviderLifecycle!.cleanupConfirmed =
+      false;
+    expect(hasSettledSubagentHistoryCandidate(state)).toBe(false);
+    expect(eventsForSettledSubagentHistory(state, [started])).toEqual([]);
+  });
+
+  test('confirmed cleanup cancels every unfinished sibling but preserves a completed child', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'cancelled-sibling-history',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    const turnId = state.turn.turnId;
+    for (const id of ['waiting', 'running'] as const) {
+      state.tools.calls[`${id}-parent`] = {
+        toolCallId: `${id}-parent`,
+        modelMessageId: `${id}-message`,
+        name: 'task',
+        args: {},
+        status: 'cancelled',
+        createdAtTurnId: turnId,
+      };
+      state.capabilities.invocations[`${id}-invocation`] = {
+        invocationId: `${id}-invocation`,
+        toolCallId: `${id}-parent`,
+        capabilityId: 'builtin:task',
+        capabilityRevision: 'revision',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        effectiveEffectsDigest: 'effects',
+        status: 'failed',
+        recordedAt: '2026-08-25T00:00:00.000Z',
+        subagentProviderLifecycle: {
+          attempt: 1,
+          purpose: 'start',
+          childInvocationId: `${id}-child`,
+          taskArtifact: {
+            artifactId: `pa_${'7'.repeat(64)}`,
+            kind: 'subagent_task',
+            integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+            byteLength: 128,
+          },
+          dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+          status: 'cleanup_completed',
+          recordedAt: '2026-08-25T00:00:00.000Z',
+          cleanupKind: 'handle_reconcile',
+          cleanupAttempt: 1,
+          cleanupConfirmed: true,
+          cleanupCompletedAt: '2026-08-25T00:00:01.000Z',
+        },
+      };
+    }
+    const history = [
+      ...(['waiting', 'running', 'completed'] as const).map((id) => ({
+        type: 'subagent.started' as const,
+        subagent: {
+          id: `${id}-child`,
+          role: 'explore' as const,
+          name: id,
+          parentToolCallId: `${id}-parent`,
+        },
+      })),
+      {
+        type: 'subagent.completed' as const,
+        subagent: { id: 'completed-child', summary: 'Done', toolCallCount: 0, durationMs: 1 },
+      },
+      { type: 'turn.aborted' as const, turnId, reason: 'Cancelled', cause: 'user' as const },
+    ];
+    const terminals = eventsForSettledSubagentHistory(state, history);
+    expect(terminals).toMatchObject([
+      { type: 'subagent.failed', subagent: { id: 'waiting-child', status: 'cancelled' } },
+      { type: 'subagent.failed', subagent: { id: 'running-child', status: 'cancelled' } },
+    ]);
+    expect(eventsForSettledSubagentHistory(state, [...history, ...terminals])).toEqual([]);
+    state.capabilities.invocations['waiting-invocation']!
+      .subagentProviderLifecycle!.cleanupConfirmed = false;
+    expect(eventsForSettledSubagentHistory(state, history)).toMatchObject([
+      { type: 'subagent.failed', subagent: { id: 'running-child', status: 'cancelled' } },
+    ]);
+  });
+
+  test('a proven completed child keeps its successful outcome when the terminal card was lost', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'completed-child-history',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state.tools.calls['completed-parent'] = {
+      toolCallId: 'completed-parent',
+      taskId: 'old-task',
+      modelMessageId: 'old-message',
+      name: 'task',
+      args: {},
+      status: 'succeeded',
+      createdAtTurnId: 'old-turn',
+    };
+    state.capabilities.invocations['completed-invocation'] = {
+      invocationId: 'completed-invocation',
+      toolCallId: 'completed-parent',
+      taskId: 'old-task',
+      capabilityId: 'builtin:task',
+      capabilityRevision: 'revision',
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      effectiveEffectsDigest: 'effects',
+      status: 'succeeded',
+      recordedAt: '2026-08-25T00:00:00.000Z',
+      subagentProviderLifecycle: {
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: 'completed-child',
+        taskArtifact: {
+          artifactId: `pa_${'7'.repeat(64)}`,
+          kind: 'subagent_task',
+          integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+          byteLength: 128,
+        },
+        dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+        status: 'cleanup_completed',
+        recordedAt: '2026-08-25T00:00:00.000Z',
+        observationStatus: 'completed',
+        observedAt: '2026-08-25T00:00:01.000Z',
+        cleanupKind: 'handle_reconcile',
+        cleanupAttempt: 1,
+        cleanupConfirmed: true,
+        cleanupCompletedAt: '2026-08-25T00:00:02.000Z',
+      },
+    };
+    const history = [
+      {
+        type: 'subagent.started' as const,
+        subagent: { id: 'completed-child', role: 'explore' as const, name: 'Completed' },
+      },
+      {
+        type: 'capability.subagent_observation_recorded' as const,
+        invocationId: 'completed-invocation',
+        attempt: 1,
+        dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+        status: 'completed' as const,
+        observedAt: '2026-08-25T00:00:01.000Z',
+      },
+      {
+        type: 'capability.subagent_cleanup_completed' as const,
+        invocationId: 'completed-invocation',
+        attempt: 1,
+        dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+        cleanupAttempt: 1,
+        cleanupKind: 'handle_reconcile' as const,
+        cleanupConfirmed: true,
+        completedAt: '2026-08-25T00:00:02.000Z',
+      },
+      {
+        type: 'capability.execution_succeeded' as const,
+        invocationId: 'completed-invocation',
+        resultDigest: 'result',
+        evidenceDigest: 'evidence',
+        finishedAt: '2026-08-25T00:00:03.000Z',
+      },
+      {
+        type: 'tool.finished' as const,
+        toolCallId: 'completed-parent',
+        name: 'task',
+        createdAt: '2026-08-25T00:00:03.000Z',
+        result: { ok: true, exitCode: 0, stdout: 'Private child result' },
+        outcome: {
+          status: 'success',
+          timing: { source: 'runtime_boundary', queueMs: 0, executionMs: 123, totalActiveMs: 123 },
+        },
+      },
+    ];
+    expect(hasSettledSubagentHistoryCandidate(state)).toBe(true);
+    const terminal = eventsForSettledSubagentHistory(state, history as never);
+    expect(terminal).toEqual([
+      {
+        type: 'subagent.completed',
+        subagent: {
+          id: 'completed-child',
+          summary: 'The Subagent completed before the previous execution ended.',
+          toolCallCount: 0,
+          durationMs: 123,
+        },
+      },
+    ]);
+    expect(eventsForSettledSubagentHistory(state, [...history, ...terminal] as never)).toEqual([]);
+    expect(
+      eventsForSettledSubagentHistory(
+        state,
+        history.filter(
+          (event) => event.type !== 'capability.subagent_observation_recorded',
+        ) as never,
+      ),
+    ).toEqual([]);
+    expect(
+      eventsForSettledSubagentHistory(
+        state,
+        history.filter((event) => event.type !== 'capability.subagent_cleanup_completed') as never,
+      ),
+    ).toEqual([]);
+    expect(
+      eventsForSettledSubagentHistory(
+        state,
+        history.filter((event) => event.type !== 'tool.finished') as never,
+      ),
+    ).toEqual([]);
+    state.tools.calls['completed-parent']!.status = 'cancelled';
+    state.capabilities.invocations['completed-invocation']!.status = 'unknown';
+    expect(hasSettledSubagentHistoryCandidate(state)).toBe(true);
+    expect(eventsForSettledSubagentHistory(state, history as never)).toEqual([]);
+    state.tools.calls['completed-parent']!.status = 'succeeded';
+    state.capabilities.invocations['completed-invocation']!.status = 'unknown';
+    expect(hasSettledSubagentHistoryCandidate(state)).toBe(false);
+    expect(eventsForSettledSubagentHistory(state, history as never)).toEqual([]);
   });
 });

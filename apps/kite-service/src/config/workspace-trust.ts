@@ -6,9 +6,14 @@ import {
   replaceConfigFileAtomically,
 } from '@kite-ai/kite-local-runtime/config';
 import { type ParseError, parse } from 'jsonc-parser';
-import { canonicalWorkspaceKey } from './mcp-project-approvals';
-import { workspaceTrustPath } from './paths';
 import {
+  canonicalWorkspaceKey,
+  canonicalWorkspaceKeyForPersistedPath,
+} from './mcp-project-approvals';
+import { workspaceTrustPath } from './paths';
+import { persistedWorkspaceIdentity } from './persisted-workspace-identity';
+import {
+  EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE,
   resolveWorkspaceExternalReadScope,
   type WorkspaceExternalReadScope,
 } from './workspace-external-read-scope';
@@ -33,7 +38,7 @@ export interface WorkspaceTrustRecord {
   /** ISO 8601 timestamp of the decision. */
   trustedAt: string;
   source: WorkspaceTrustSource;
-  /** Exact external read scope approved with this Workspace trust decision. */
+  /** Historical exact external-read grant; ordinary trust never creates or expands it. */
   externalReadScopeDigest?: `sha256:${string}`;
 }
 
@@ -120,6 +125,19 @@ export function readWorkspaceTrustStore(path = workspaceTrustPath()): WorkspaceT
   return { status: 'ready', records: records as Record<string, WorkspaceTrustRecord> };
 }
 
+/** Existing user trust for a persisted Session, without recreating its missing directory. */
+export function getPersistedWorkspaceTrustStatus(
+  canonicalPath: string,
+  storePath = workspaceTrustPath(),
+): WorkspaceTrustStatus {
+  if (!persistedWorkspaceIdentity(canonicalPath)) return 'unavailable';
+  const store = readWorkspaceTrustStore(storePath);
+  if (store.status !== 'ready') return store.status;
+  return store.records[canonicalWorkspaceKeyForPersistedPath(canonicalPath)]
+    ? 'trusted'
+    : 'unknown';
+}
+
 function writeStore(path: string, file: WorkspaceTrustFile): void {
   replaceConfigFileAtomically(path, `${JSON.stringify(file, null, 2)}\n`, 0o600);
 }
@@ -130,18 +148,14 @@ export function getWorkspaceTrustStatus(
   storePath = workspaceTrustPath(),
 ): WorkspaceTrustStatus {
   let workspaceKey: string;
-  let externalReadScope: WorkspaceExternalReadScope;
   try {
     workspaceKey = canonicalWorkspaceKey(workspace);
-    externalReadScope = resolveWorkspaceExternalReadScope(workspace);
   } catch {
     return 'unavailable';
   }
   const store = readWorkspaceTrustStore(storePath);
   if (store.status !== 'ready') return store.status;
-  return recordMatchesExternalReadScope(store.records[workspaceKey], externalReadScope)
-    ? 'trusted'
-    : 'unknown';
+  return store.records[workspaceKey] ? 'trusted' : 'unknown';
 }
 
 /**
@@ -165,19 +179,6 @@ function trustStoreRevision(store: WorkspaceTrustStoreRead): string {
   return `sha256:${createHash('sha256').update(`kite.workspace-trust.v1\0${material}`).digest('hex')}`;
 }
 
-function recordMatchesExternalReadScope(
-  record: WorkspaceTrustRecord | undefined,
-  scope: WorkspaceExternalReadScope,
-): boolean {
-  if (!record) return false;
-  // Legacy records remain valid only for a Workspace with no external roots.
-  // Adding a linked/external identity always requires a fresh confirmation.
-  return (
-    record.externalReadScopeDigest === scope.digest ||
-    (record.externalReadScopeDigest === undefined && scope.roots.length === 0)
-  );
-}
-
 function trustSnapshotRevision(
   store: WorkspaceTrustStoreRead,
   externalReadScope: WorkspaceExternalReadScope,
@@ -197,14 +198,14 @@ export function getWorkspaceTrustSnapshot(
   try {
     const canonicalPath = realpathSync.native(resolve(workspace));
     const workspaceKey = canonicalWorkspaceKey(canonicalPath);
-    const externalReadScope = resolveWorkspaceExternalReadScope(canonicalPath);
+    const externalReadScope = EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE;
     const store = readWorkspaceTrustStore(storePath);
     return Object.freeze({
       canonicalPath,
       workspaceKey,
       status:
         store.status === 'ready'
-          ? recordMatchesExternalReadScope(store.records[workspaceKey], externalReadScope)
+          ? store.records[workspaceKey]
             ? 'trusted'
             : 'unknown'
           : store.status,
@@ -221,8 +222,17 @@ export function getTrustedWorkspaceExternalReadRoots(
   workspace: string,
   storePath = workspaceTrustPath(),
 ): readonly string[] {
-  const snapshot = getWorkspaceTrustSnapshot(workspace, storePath);
-  return snapshot?.status === 'trusted' ? snapshot.externalReadScope.roots : Object.freeze([]);
+  try {
+    const workspaceKey = canonicalWorkspaceKey(workspace);
+    const store = readWorkspaceTrustStore(storePath);
+    if (store.status !== 'ready') return Object.freeze([]);
+    const record = store.records[workspaceKey];
+    if (!record?.externalReadScopeDigest) return Object.freeze([]);
+    const scope = resolveWorkspaceExternalReadScope(workspace);
+    return record.externalReadScopeDigest === scope.digest ? scope.roots : Object.freeze([]);
+  } catch {
+    return Object.freeze([]);
+  }
 }
 
 /** Persist an explicit trust decision for one workspace. */
@@ -234,10 +244,9 @@ export function trustWorkspace(input: {
 }): WorkspaceTrustDecisionResult {
   const path = input.storePath ?? workspaceTrustPath();
   let workspaceKey: string;
-  let externalReadScope: WorkspaceExternalReadScope;
+  const externalReadScope = EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE;
   try {
     workspaceKey = canonicalWorkspaceKey(input.workspace);
-    externalReadScope = resolveWorkspaceExternalReadScope(input.workspace);
   } catch {
     return { status: 'store_unavailable', message: 'Workspace identity is unavailable.' };
   }
@@ -246,7 +255,6 @@ export function trustWorkspace(input: {
     workspacePath: resolve(input.workspace),
     trustedAt: new Date().toISOString(),
     source: input.source ?? 'user',
-    externalReadScopeDigest: externalReadScope.digest,
   };
   let releaseLock: (() => void) | undefined;
   try {
@@ -265,6 +273,10 @@ export function trustWorkspace(input: {
         message: 'Workspace trust state changed before the decision was recorded.',
       };
     }
+    // Preserve an earlier explicit grant verbatim; trusting a workspace does
+    // not authorize new external paths, including changed Git metadata targets.
+    const priorDigest = locked.records[workspaceKey]?.externalReadScopeDigest;
+    if (priorDigest !== undefined) record.externalReadScopeDigest = priorDigest;
     writeStore(path, { version: 1, records: { ...locked.records, [workspaceKey]: record } });
   } catch (err) {
     if (err instanceof Error && err.name === 'ConfigFileMutationLockError') {

@@ -13,7 +13,9 @@ for (const entry of ['main', 'preload']) {
     target: 'node',
     format: 'cjs',
     external: ['electron'],
-    define: { __KITE_DESKTOP_SERVICE_MANIFEST__: JSON.stringify(serviceManifest) },
+    define: {
+      __KITE_DESKTOP_SERVICE_MANIFEST__: JSON.stringify(serviceManifest),
+    },
     sourcemap: 'external',
   });
   if (!result.success) throw new AggregateError(result.logs, `Failed to build Electron ${entry}.`);

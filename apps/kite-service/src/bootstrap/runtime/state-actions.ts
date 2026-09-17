@@ -1,6 +1,8 @@
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
+  runtimeHostStateHasPendingSandboxCleanupAuthority as hasPendingSandboxCleanupAuthority,
+  runtimeHostStateHasPendingSubagentCleanupAuthority as hasPendingSubagentCleanupAuthority,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall as interactionToolCall,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
@@ -18,6 +20,141 @@ const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
   'cancelled',
   'exhausted',
 ]);
+
+/**
+ * Classify the sole provider.admission_required producer in the supported
+ * State26/State27 epochs. In each epoch this event was written only by the
+ * required-provider check between accepted user input and model dispatch;
+ * actual provider authentication used provider.action_required. Require the
+ * complete current-Turn journal so an unrelated or ambiguous wait stays put.
+ */
+export function obsoleteGlobalAdmissionSettlementEvents(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): Extract<RuntimeEvent, { type: 'provider.admission_cancelled' }>[] {
+  const original = classifyObsoleteGlobalAdmission(state, journal, 'waiting');
+  return (
+    original?.map((admission) => ({
+      type: 'provider.admission_cancelled' as const,
+      interactionId: admission.interactionId,
+      providerId: admission.providerId,
+    })) ?? []
+  );
+}
+
+/**
+ * The settlement receipt may outlive the process before its prepared Turn is
+ * dispatched. Model invocation_prepared and attempt_started are durably
+ * acknowledged before outbound transport; Tool dispatch follows those facts.
+ * A fully settled journal with no such fact can continue the original Run.
+ */
+export function canContinueSettledGlobalAdmission(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): boolean {
+  return classifyObsoleteGlobalAdmission(state, journal, 'settled') !== undefined;
+}
+
+function classifyObsoleteGlobalAdmission(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+  phase: 'waiting' | 'settled',
+): Extract<RuntimeEvent, { type: 'provider.admission_required' }>[] | undefined {
+  if (
+    state.recoveryState.kind !== 'normal' ||
+    state.turn.status !== 'active' ||
+    (phase === 'waiting'
+      ? state.interactions.kind !== 'awaiting_provider_admission'
+      : state.interactions.kind !== 'idle') ||
+    !state.activeTaskId ||
+    state.tasks[state.activeTaskId]?.status !== 'active' ||
+    state.pendingApprovals.size !== 0 ||
+    state.toolRecovery.qualityGuard.blocked ||
+    Object.values(state.toolRecovery.failures).some((failure) => failure.status === 'unresolved') ||
+    hasPendingSandboxCleanupAuthority(state) ||
+    hasPendingSubagentCleanupAuthority(state) ||
+    Object.values(state.capabilities.invocations).some((invocation) =>
+      ['unknown', 'running', 'recorded'].includes(invocation.status),
+    ) ||
+    Object.values(state.resourceBudget.reservations).some((reservation) =>
+      ['reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
+    ) ||
+    (state.resourceBudget.status === 'active' &&
+      Object.values(state.resourceBudget.waiters).some(
+        (waiter) => waiter.state === 'waiting' || waiter.state === 'promoted',
+      )) ||
+    journal.at(-1)?.revision !== state.revision
+  )
+    return undefined;
+
+  let turnIndex = -1;
+  for (let index = 0; index < journal.length; index += 1) {
+    const event = journal[index]?.event;
+    if (event?.type === 'turn.started' && event.turnId === state.turn.turnId) turnIndex = index;
+  }
+  if (turnIndex < 1 || journal[turnIndex - 1]?.event.type !== 'user.message_appended')
+    return undefined;
+  const firstAdmissionIndex = journal.findIndex(
+    ({ event }, index) => index > turnIndex && event.type === 'provider.admission_required',
+  );
+  if (firstAdmissionIndex < 0) return undefined;
+  if (
+    journal
+      .slice(turnIndex + 1, firstAdmissionIndex)
+      .some(
+        ({ event }) =>
+          event.type !== 'skill.catalog_refreshed' && event.type !== 'skill.activation_started',
+      )
+  )
+    return undefined;
+  const suffix = journal.slice(firstAdmissionIndex);
+  const required = suffix.flatMap(({ event }) =>
+    event.type === 'provider.admission_required' ? [event] : [],
+  );
+  const cancelled = suffix.flatMap(({ event }) =>
+    event.type === 'provider.admission_cancelled' ? [event] : [],
+  );
+  const pending = state.providerAdmission.pending;
+  if (
+    required.length === 0 ||
+    (phase === 'waiting'
+      ? pending.length !== required.length ||
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== pending[0]?.interactionId ||
+        cancelled.length !== 0
+      : pending.length !== 0 || cancelled.length !== required.length) ||
+    suffix.some(
+      ({ event }) =>
+        event.type !== 'provider.admission_required' &&
+        event.type !== 'provider.admission_retry_requested' &&
+        event.type !== 'provider.admission_retry_failed' &&
+        event.type !== 'provider.admission_cancelled',
+    ) ||
+    (phase === 'settled' &&
+      suffix
+        .slice(-cancelled.length)
+        .some(({ event }) => event.type !== 'provider.admission_cancelled')) ||
+    Object.values(state.modelInvocations).some(
+      (invocation) => invocation.preparedStateRevision >= journal[turnIndex]!.revision!,
+    ) ||
+    Object.values(state.tools.calls).some((call) => call.createdAtTurnId === state.turn.turnId)
+  )
+    return undefined;
+  for (const [index, original] of required.entries()) {
+    const admission = pending[index];
+    if (
+      (phase === 'waiting' &&
+        (original.interactionId !== admission?.interactionId ||
+          original.providerId !== admission.providerId ||
+          original.source !== admission.source)) ||
+      (phase === 'settled' &&
+        (original.interactionId !== cancelled[index]?.interactionId ||
+          original.providerId !== cancelled[index]?.providerId))
+    )
+      return undefined;
+  }
+  return required;
+}
 
 /**
  * Build the durable facts for stopping the current turn.
@@ -187,9 +324,10 @@ export function eventsForSupersededTurnRecovery(
 }
 
 /**
- * Settle work whose in-memory executor belonged to a process that no longer
- * exists, while retaining exact durable interactions/continuations that a
- * recovery-capable client may still resume.
+ * Settle work after the Store fenced its old execution generation and the
+ * Service confirmed process-owned provider and sandbox cleanup. The caller
+ * supplies the complete event journal so a settled Tool can close its visible
+ * Subagent card when the original projection missed a terminal event.
  *
  * A running Tool crossed the dispatch boundary, so its result is unknown and
  * must never be replayed. Work that had not started is cancelled by recovery.
@@ -198,8 +336,13 @@ export function eventsForSupersededTurnRecovery(
  */
 export function eventsForRestartedSessionRecovery(
   state: Readonly<RuntimeState>,
+  historyEvents: readonly RuntimeEvent[],
+  evidence: Readonly<{ kind: 'fenced_previous_execution'; controllerGeneration: number }>,
   reason = 'Runtime process ended before the operation completed.',
 ): RuntimeEvent[] {
+  if (evidence.kind !== 'fenced_previous_execution' || evidence.controllerGeneration < 1) {
+    throw new Error('Restart recovery requires a fenced execution generation.');
+  }
   const resumableToolCallIds = new Set<string>();
   if (interactionBelongsToCurrentWork(state)) {
     const interactionCall = interactionToolCall(state);
@@ -230,6 +373,60 @@ export function eventsForRestartedSessionRecovery(
       resumableToolCallIds.add(toolCallId);
     }
   }
+  // A fenced owner cannot resume a child Provider continuation after its
+  // process-owned handle was cleaned up. Approval and suspension records may
+  // still exist, but neither proves a live child executor.
+  const cleanedChildParentToolIds = new Set(
+    Object.values(state.capabilities.invocations)
+      .filter(
+        (invocation) =>
+          invocation.subagentProviderLifecycle?.status === 'cleanup_completed' &&
+          invocation.subagentProviderLifecycle.cleanupConfirmed === true,
+      )
+      .map((invocation) => invocation.toolCallId),
+  );
+  for (const toolCallId of cleanedChildParentToolIds) resumableToolCallIds.delete(toolCallId);
+  for (const pending of state.pendingApprovals.values()) {
+    if (pending.parentToolCallId && cleanedChildParentToolIds.has(pending.parentToolCallId)) {
+      resumableToolCallIds.delete(pending.toolCallId);
+    }
+  }
+
+  // An approval that never crossed dispatch cannot be resumed by the fenced
+  // owner. Close this one precise stale wait after authority/cleanup proof;
+  // preserve every wait with a dispatch acknowledgement or other live work.
+  const pendingApproval =
+    state.interactions.kind === 'awaiting_tool_approval'
+      ? state.pendingApprovals.get(state.interactions.interactionId)
+      : undefined;
+  const approvalCall = pendingApproval ? state.tools.calls[pendingApproval.toolCallId] : undefined;
+  const settleUndispatchedApproval =
+    state.interactions.kind === 'awaiting_tool_approval' &&
+    pendingApproval?.status === 'awaiting_user' &&
+    (pendingApproval.dispatchState === undefined ||
+      pendingApproval.dispatchState === 'before_dispatch') &&
+    approvalCall?.status === 'awaiting_approval' &&
+    state.pendingApprovals.size === 1 &&
+    Object.keys(state.suspendedSubagents).length === 0 &&
+    Object.values(state.tools.calls)
+      .filter((call) => toolCallBelongsToCurrentWork(state, call))
+      .every(
+        (call) =>
+          TERMINAL_TOOL_STATUSES.has(call.status) ||
+          (call.toolCallId === approvalCall.toolCallId && call.status === 'awaiting_approval'),
+      ) &&
+    Object.values(state.capabilities.invocations)
+      .filter((invocation) => invocation.toolCallId === approvalCall.toolCallId)
+      .every(
+        (invocation) =>
+          invocation.status === 'recorded' &&
+          (invocation.attemptsStarted ?? 0) === 0 &&
+          invocation.subagentProviderLifecycle === undefined,
+      ) &&
+    Object.values(state.resourceBudget.reservations).every(
+      (reservation) => reservation.state !== 'dispatch_started' && reservation.state !== 'unknown',
+    );
+  if (settleUndispatchedApproval) resumableToolCallIds.delete(approvalCall.toolCallId);
 
   const unfinished = Object.values(state.tools.calls)
     .filter((call) => toolCallBelongsToCurrentWork(state, call))
@@ -248,11 +445,21 @@ export function eventsForRestartedSessionRecovery(
           reason,
         },
   );
+  const settledSubagentEvents = settledSubagentHistoryEventsForToolIds(
+    state,
+    historyEvents,
+    new Set([...failedTerminalToolIds(state), ...unfinished.map((call) => call.toolCallId)]),
+    reason,
+  );
   const hasResumableProviderInteraction =
     state.interactions.kind === 'awaiting_provider_action' ||
     state.interactions.kind === 'awaiting_provider_admission';
-  const turnCanResume = resumableToolCallIds.size > 0 || hasResumableProviderInteraction;
+  const turnCanResume =
+    resumableToolCallIds.size > 0 ||
+    (hasResumableProviderInteraction &&
+      !cleanedChildParentToolIds.has(interactionToolCall(state)?.toolCallId ?? ''));
   const hasInterruptedWork =
+    settleUndispatchedApproval ||
     unfinished.length > 0 ||
     Object.values(state.modelInvocations).some(
       (invocation) =>
@@ -260,6 +467,7 @@ export function eventsForRestartedSessionRecovery(
     );
 
   return [
+    ...settledSubagentEvents,
     ...toolEvents,
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
@@ -274,6 +482,204 @@ export function eventsForRestartedSessionRecovery(
         ]
       : []),
   ];
+}
+
+function failedTerminalToolIds(state: Readonly<RuntimeState>): string[] {
+  return Object.values(state.tools.calls)
+    .filter((call) => ['failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status))
+    .map((call) => call.toolCallId);
+}
+
+function provenSuccessfulSubagentParent(
+  state: Readonly<RuntimeState>,
+  invocation: RuntimeState['capabilities']['invocations'][string],
+): boolean {
+  const lifecycle = invocation.subagentProviderLifecycle;
+  return (
+    invocation.status === 'succeeded' &&
+    state.tools.calls[invocation.toolCallId]?.status === 'succeeded' &&
+    lifecycle?.status === 'cleanup_completed' &&
+    lifecycle.observationStatus === 'completed' &&
+    lifecycle.cleanupConfirmed === true
+  );
+}
+
+/** Cheap State-only hint; the full journal still proves a missing child terminal. */
+export function hasSettledSubagentHistoryCandidate(state: Readonly<RuntimeState>): boolean {
+  const terminalTools = new Set(failedTerminalToolIds(state));
+  const childCounts = new Map<string, number>();
+  const candidates = new Set<string>();
+  for (const invocation of Object.values(state.capabilities.invocations)) {
+    const lifecycle = invocation.subagentProviderLifecycle;
+    if (!lifecycle) continue;
+    childCounts.set(
+      lifecycle.childInvocationId,
+      (childCounts.get(lifecycle.childInvocationId) ?? 0) + 1,
+    );
+    if (
+      (!terminalTools.has(invocation.toolCallId) &&
+        !provenSuccessfulSubagentParent(state, invocation)) ||
+      lifecycle.status !== 'cleanup_completed' ||
+      lifecycle.cleanupConfirmed !== true
+    )
+      continue;
+    candidates.add(lifecycle.childInvocationId);
+  }
+  return [...candidates].some((id) => childCounts.get(id) === 1);
+}
+
+/** Close stale history cards only when the parent Tool and Provider cleanup are terminal. */
+export function eventsForSettledSubagentHistory(
+  state: Readonly<RuntimeState>,
+  historyEvents: readonly RuntimeEvent[],
+  reason = 'The previous Subagent execution ended without a terminal presentation event.',
+): RuntimeEvent[] {
+  return settledSubagentHistoryEventsForToolIds(
+    state,
+    historyEvents,
+    new Set(failedTerminalToolIds(state)),
+    reason,
+  );
+}
+
+function settledSubagentHistoryEventsForToolIds(
+  state: Readonly<RuntimeState>,
+  historyEvents: readonly RuntimeEvent[],
+  settledToolIds: ReadonlySet<string>,
+  reason: string,
+): RuntimeEvent[] {
+  const unsettledSubagents = new Map<string, string | undefined>();
+  for (const event of historyEvents) {
+    if (event.type === 'subagent.started') {
+      unsettledSubagents.set(event.subagent.id, event.subagent.parentToolCallId);
+    }
+    if (event.type === 'subagent.completed' || event.type === 'subagent.failed') {
+      unsettledSubagents.delete(event.subagent.id);
+    }
+  }
+  const settledSubagentEvents: RuntimeEvent[] = [];
+  for (const [id, parentToolCallId] of unsettledSubagents) {
+    // Historical starts did not always carry parentToolCallId. The Provider
+    // lifecycle records the exact child invocation id and parent Tool id.
+    const matches = Object.values(state.capabilities.invocations).filter(
+      (candidate) =>
+        candidate.subagentProviderLifecycle?.childInvocationId === id &&
+        (parentToolCallId === undefined || candidate.toolCallId === parentToolCallId),
+    );
+    if (matches.length !== 1) continue;
+    const invocation = matches[0]!;
+    if (
+      invocation.subagentProviderLifecycle?.status !== 'cleanup_completed' ||
+      invocation.subagentProviderLifecycle.cleanupConfirmed !== true
+    )
+      continue;
+    if (provenSuccessfulSubagentParent(state, invocation)) {
+      const matchingObservation = historyEvents.some(
+        (event) =>
+          event.type === 'capability.subagent_observation_recorded' &&
+          event.invocationId === invocation.invocationId &&
+          event.attempt === invocation.subagentProviderLifecycle?.attempt &&
+          event.dispatchIntentDigest ===
+            invocation.subagentProviderLifecycle.dispatchIntentDigest &&
+          event.status === 'completed',
+      );
+      const matchingSuccess = historyEvents.some(
+        (event) =>
+          event.type === 'capability.execution_succeeded' &&
+          event.invocationId === invocation.invocationId,
+      );
+      const matchingCleanup = historyEvents.some(
+        (event) =>
+          event.type === 'capability.subagent_cleanup_completed' &&
+          event.invocationId === invocation.invocationId &&
+          event.attempt === invocation.subagentProviderLifecycle?.attempt &&
+          event.dispatchIntentDigest ===
+            invocation.subagentProviderLifecycle.dispatchIntentDigest &&
+          event.cleanupConfirmed === true,
+      );
+      const matchingTool = historyEvents.find(
+        (event) =>
+          event.type === 'tool.finished' &&
+          event.toolCallId === invocation.toolCallId &&
+          event.outcome?.status === 'success' &&
+          event.result.ok === true,
+      );
+      if (
+        !matchingObservation ||
+        !matchingCleanup ||
+        !matchingSuccess ||
+        !matchingTool ||
+        matchingTool.type !== 'tool.finished'
+      )
+        continue;
+      settledSubagentEvents.push({
+        type: 'subagent.completed',
+        subagent: {
+          id,
+          summary: 'The Subagent completed before the previous execution ended.',
+          toolCallCount: historyEvents.filter(
+            (event) => event.type === 'subagent.step' && event.subagent.id === id,
+          ).length,
+          durationMs: matchingTool.outcome?.timing?.executionMs ?? 0,
+        },
+      });
+      continue;
+    }
+    // A parent Tool can fail or be cancelled after the child Provider already
+    // observed completion. Without the full success receipt, leave that child
+    // for inspection rather than rewriting its known outcome as failure.
+    if (
+      invocation.subagentProviderLifecycle.observationStatus === 'completed' ||
+      !settledToolIds.has(invocation.toolCallId)
+    )
+      continue;
+    const parentTool = state.tools.calls[invocation.toolCallId];
+    const userCancellationConfirmed =
+      parentTool?.status === 'cancelled' &&
+      historyEvents.some(
+        (event) =>
+          event.type === 'turn.aborted' &&
+          event.cause === 'user' &&
+          event.turnId === parentTool.createdAtTurnId,
+      );
+    const observed = invocation.subagentProviderLifecycle.observationStatus;
+    const failureConfirmed =
+      observed === 'failed' ||
+      observed === 'exhausted' ||
+      historyEvents.some(
+        (event) =>
+          event.type === 'capability.execution_failed' &&
+          event.invocationId === invocation.invocationId,
+      );
+    const status =
+      observed === 'failed' || observed === 'exhausted'
+        ? 'failed'
+        : observed === 'interrupted'
+          ? 'interrupted'
+          : userCancellationConfirmed
+            ? 'cancelled'
+            : failureConfirmed
+              ? 'failed'
+              : 'interrupted';
+    settledSubagentEvents.push({
+      type: 'subagent.failed',
+      subagent: {
+        id,
+        error: reason,
+        summary:
+          status === 'cancelled'
+            ? 'The Subagent was cancelled.'
+            : status === 'failed'
+              ? 'The Subagent failed before the previous execution ended.'
+              : 'The previous execution was interrupted.',
+        status,
+        ...(status === 'failed'
+          ? {}
+          : { diagnostic: { code: 'aborted' as const, stage: 'terminal_projection' as const } }),
+      },
+    });
+  }
+  return settledSubagentEvents;
 }
 
 function approvalCancellationEvents(

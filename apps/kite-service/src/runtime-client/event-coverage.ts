@@ -13,6 +13,7 @@ const CLIENT_VISIBLE = [
   'approval.requested',
   'auto_review.completed',
   'auto_review.requested',
+  'auto_review.started',
   'context.compaction_completed',
   'context.compaction_failed',
   'context.compaction_requested',

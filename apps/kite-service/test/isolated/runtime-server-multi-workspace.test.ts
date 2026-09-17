@@ -29,7 +29,7 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
   const model = createMockModelServer();
   model.setResponses([{ message: { content: 'app-server-terminal' } }]);
   const databasePath = join(root, 'kite-session.sqlite');
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'app-server-host-1',
   });
@@ -53,7 +53,7 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
     await owner[Symbol.asyncDispose]();
   }
 
-  const successor = createKiteSessionAppServerStorageComposition({
+  const successor = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'app-server-host-2',
   });
@@ -74,6 +74,129 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
   }
 }, 30_000);
 
+test('a completed historical Session starts a new turn after an old recovery fence', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-completed-recovery-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const model = createMockModelServer();
+  model.setResponses([
+    { message: { content: 'historical answer' } },
+    { message: { content: 'continued answer' } },
+  ]);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const sessionId = 'completed-recovery-session';
+  let seed: Awaited<ReturnType<typeof createKiteSessionAppServerStorageComposition>> | undefined;
+  let first: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined;
+  let firstClient: RuntimeClient | undefined;
+  let successor:
+    | Awaited<ReturnType<typeof createKiteSessionAppServerStorageComposition>>
+    | undefined;
+  let second: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined;
+  let secondClient: RuntimeClient | undefined;
+  try {
+    seed = await createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'completed-seed',
+    });
+    first = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: databasePath,
+      storageOwner: seed,
+      workspaces: [runtimeInput(workspace, model.baseURL, 'completed-model')],
+    });
+    firstClient = client(first, admission(workspace), 'completed-first-client');
+    await createSession(firstClient, sessionId, workspace);
+    const firstNotifications = firstClient
+      .subscribe({ spec: { scope: 'session', sessionId } })
+      [Symbol.asyncIterator]();
+    await next(firstNotifications);
+    expect(await firstClient.command(start('historical-turn', sessionId, 'first'))).toMatchObject({
+      status: 'applied',
+    });
+    await waitForTerminal(firstNotifications, sessionId);
+    const historical = seed.loadCurrentSnapshot(sessionId)!;
+    expect(historical.turn.status).toBe('completed');
+    const historicalRun = seed.storage.runs?.list({ sessionId, limit: 10 }).entries.at(-1);
+    if (historicalRun?.status !== 'completed') throw new Error('Historical Run did not complete.');
+
+    // Reproduce an old active authority which survived after the historical
+    // turn had finished, then fence that generation without inventing cleanup.
+    seed.runWithSessionExecution(sessionId, () => undefined);
+    seed.releaseExecutions(false);
+    expect(seed.recovery.inspect(sessionId)).toMatchObject({
+      authority: { status: 'recovery_required', cleanupConfirmed: false },
+      pendingEffects: [],
+      unknownEffects: [],
+    });
+    await firstClient.close();
+    await first[Symbol.asyncDispose]();
+    firstClient = undefined;
+    first = undefined;
+    seed = undefined;
+
+    successor = await createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'completed-successor',
+    });
+    second = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: databasePath,
+      storageOwner: successor,
+      workspaces: [runtimeInput(workspace, model.baseURL, 'completed-model')],
+    });
+    secondClient = client(second, admission(workspace), 'completed-second-client');
+    const secondNotifications = secondClient
+      .subscribe({ spec: { scope: 'session', sessionId } })
+      [Symbol.asyncIterator]();
+    await next(secondNotifications);
+    const receipt = await secondClient.command(
+      start('continued-turn', sessionId, 'second', historical.revision),
+    );
+    expect(receipt).toMatchObject({ status: 'applied', sessionId });
+    if (receipt.status !== 'applied' || !receipt.resource)
+      throw new Error('Continuation Run was not accepted.');
+    const successorRuns = successor.storage.runs;
+    if (!successorRuns) throw new Error('Continuation Run storage is unavailable.');
+    for (
+      let attempt = 0;
+      attempt < 200 &&
+      successorRuns.get(sessionId, receipt.resource.run.runId)?.status !== 'completed';
+      attempt++
+    ) {
+      await Bun.sleep(10);
+    }
+    expect(successorRuns.get(sessionId, receipt.resource.run.runId)?.status).toBe('completed');
+    expect(model.getRequestCount()).toBe(2);
+    expect(successorRuns.get(sessionId, historicalRun.runId)).toEqual(historicalRun);
+    expect(successor.loadCurrentSnapshot(sessionId)?.session.threadId).toBe(sessionId);
+
+    // A settled turn does not excuse an actual external effect whose outcome
+    // became unknown when its owner was fenced.
+    successor.runWithSessionExecution(sessionId, () => {
+      expect(
+        successor!.storage.effects.tryAcquireEffectLease(
+          sessionId,
+          'uncertain-effect',
+          'uncertain-owner',
+          Date.now() + 30_000,
+        ),
+      ).toBe(true);
+    });
+    successor.releaseExecutions(false);
+    expect(successor.recovery.inspect(sessionId).unknownEffects).toHaveLength(1);
+    expect(() => successor!.runWithSessionExecution(sessionId, () => undefined)).toThrow(
+      'Session requires explicit effect reconciliation',
+    );
+  } finally {
+    await secondClient?.close();
+    await second?.[Symbol.asyncDispose]();
+    successor?.disposeStorage();
+    await firstClient?.close();
+    await first?.[Symbol.asyncDispose]();
+    seed?.disposeStorage();
+    model.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test('edits policy without recovery or Workspace initialization and observes other settings writers', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-policy-without-runtime-'));
   const workspace = join(root, 'workspace');
@@ -82,7 +205,7 @@ test('edits policy without recovery or Workspace initialization and observes oth
   process.env.KITE_CODE_HOME = root;
   const databasePath = join(root, 'kite-session.sqlite');
   const sessionId = 'policy-recovery-session';
-  const seedStorage = createKiteSessionAppServerStorageComposition({
+  const seedStorage = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'policy-seed',
   });
@@ -98,7 +221,7 @@ test('edits policy without recovery or Workspace initialization and observes oth
     await createSession(seedClient, sessionId, workspace);
     await seedClient.close();
     await seed[Symbol.asyncDispose]();
-    const repair = createKiteSessionAppServerStorageComposition({
+    const repair = await createKiteSessionAppServerStorageComposition({
       databasePath,
       hostInstanceId: 'policy-interrupted',
     });
@@ -108,8 +231,8 @@ test('edits policy without recovery or Workspace initialization and observes oth
     expect(before.authority.status).toBe('recovery_required');
     repair.disposeStorage();
     let templateLoads = 0;
-    const open = (hostInstanceId: string, beforePolicyCommit?: () => void) => {
-      const storage = createKiteSessionAppServerStorageComposition({
+    const open = async (hostInstanceId: string, beforePolicyCommit?: () => void) => {
+      const storage = await createKiteSessionAppServerStorageComposition({
         databasePath,
         hostInstanceId,
       });
@@ -135,8 +258,8 @@ test('edits policy without recovery or Workspace initialization and observes oth
       clients.push(runtime);
       return { owner, storage, runtime };
     };
-    const first = open('policy-first');
-    const second = open('policy-second');
+    const first = await open('policy-first');
+    const second = await open('policy-second');
     const command = {
       schema: RUNTIME_COMMAND_SCHEMA_,
       type: 'set_interaction_mode' as const,
@@ -174,7 +297,7 @@ test('edits policy without recovery or Workspace initialization and observes oth
       await first.runtime.command({ ...command, commandId: 'policy-current', expectedRevision: 2 }),
     ).toMatchObject({ status: 'applied', revision: 3 });
     expect(first.storage.recovery.inspect(sessionId)).toEqual(before);
-    const restarted = open('policy-restarted');
+    const restarted = await open('policy-restarted');
     expect(await restarted.runtime.command(command)).toMatchObject({
       status: 'idempotent_replay',
       originalRevision: 1,
@@ -186,16 +309,9 @@ test('edits policy without recovery or Workspace initialization and observes oth
     expect(
       restarted.storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event.type),
     ).toEqual(['interaction_mode.changed', 'interaction_mode.changed', 'interaction_mode.changed']);
-    expect(
-      await restarted.runtime.command({
-        schema: RUNTIME_COMMAND_SCHEMA_,
-        type: 'start_turn',
-        input: 'must not execute',
-        sessionId,
-        commandId: 'must-still-recover',
-        expectedRevision: 3,
-      }),
-    ).toMatchObject({ status: 'rejected', code: 'session_recovery_required' });
+    // Reading and changing policy must remain independent of Workspace setup.
+    // Starting a new turn now reconciles a stale empty authority automatically;
+    // it is covered by reentry tests rather than an obsolete recovery gate here.
     expect(templateLoads).toBe(0);
     expect(restarted.storage.recovery.inspect(sessionId)).toEqual(before);
     const raced = {
@@ -223,11 +339,11 @@ test('edits policy without recovery or Workspace initialization and observes oth
       sessionId,
       expectedAuthorityRevision: before.authority.revision,
     });
-    const deletionRace = open('policy-deletion-race', () => {
-      const deleter = createKiteSessionAppServerStorageComposition({
-        databasePath,
-        hostInstanceId: 'policy-deleter',
-      });
+    const deleter = await createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'policy-deleter',
+    });
+    const deletionRace = await open('policy-deletion-race', () => {
       try {
         deleter.runWithSessionExecution(sessionId, () =>
           deleter.storage.sessions.deleteSession(sessionId),
@@ -390,7 +506,7 @@ test('a second App Server reads another Host Session without acquiring or cancel
   const model = createMockModelServer();
   model.setResponses([{ message: { content: 'writer-still-active' } }]);
   const databasePath = join(root, 'kite-session.sqlite');
-  const writerStorage = createKiteSessionAppServerStorageComposition({
+  const writerStorage = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'read-only-writer-host',
   });
@@ -410,7 +526,7 @@ test('a second App Server reads another Host Session without acquiring or cancel
       hostInstanceId: 'read-only-writer-host',
     });
 
-    const readerStorage = createKiteSessionAppServerStorageComposition({
+    const readerStorage = await createKiteSessionAppServerStorageComposition({
       databasePath,
       hostInstanceId: 'read-only-reader-host',
     });
@@ -496,7 +612,7 @@ test('two canonical Workspaces execute through one real Host and SQLite Store wi
   modelB.setResponses([{ message: { content: 'workspace-b-terminal' } }]);
   const sessionA = 'real-workspace-a-session';
   const sessionB = 'real-workspace-b-session';
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath: join(root, 'kite-session.sqlite'),
     hostInstanceId: 'multi-workspace-host',
   });
@@ -975,7 +1091,7 @@ test('continuous Session writes renew a valid lease without waiting for the time
   process.env.KITE_CODE_HOME = root;
   const model = createMockModelServer();
   let clock = Date.now();
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath: join(root, 'kite-session.sqlite'),
     hostInstanceId: 'progress-owner',
     executionLeaseMs: 60,
@@ -1094,7 +1210,7 @@ test('execution lease loss aborts all three real subagent model connections and 
     },
   });
   let clock = Date.now();
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath: join(root, 'kite-session.sqlite'),
     hostInstanceId: 'lease-model-owner',
     executionLeaseMs: 60,
@@ -1162,11 +1278,11 @@ test('execution lease loss aborts all three real subagent model connections and 
         .some(({ event }) => event.type === 'run.completed' || event.type === 'turn.completed'),
     ).toBe(false);
     expect(requests).toBe(4);
-    expect(
-      storageOwner.storage.sessions
-        .loadEventsStrict(sessionId)
-        .filter(({ event }) => event.type === 'subagent.started'),
-    ).toHaveLength(3);
+    const childStarts = storageOwner.storage.sessions
+      .loadEventsStrict(sessionId)
+      .flatMap(({ event }) => (event.type === 'subagent.started' ? [event.subagent] : []));
+    expect(childStarts.filter((child) => child.status === 'creating')).toHaveLength(3);
+    expect(childStarts.filter((child) => child.status === 'running')).toHaveLength(3);
   } finally {
     for (const stream of responseStreams) {
       try {
@@ -1190,7 +1306,7 @@ test('completed idle Sessions survive lease expiry and acquire a fresh generatio
   model.setResponses([{ message: { content: 'first' } }, { message: { content: 'second' } }]);
   let clock = Date.now();
   const databasePath = join(root, 'kite-session.sqlite');
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'idle-owner',
     executionLeaseMs: 60,
@@ -1252,7 +1368,7 @@ test('recovery query is read-only and recovery command requires confirmed cleanu
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const databasePath = join(root, 'kite-session.sqlite');
-  const storageOwner = createKiteSessionAppServerStorageComposition({
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
     databasePath,
     hostInstanceId: 'recovery-owner',
   });

@@ -323,6 +323,8 @@ export type RuntimeClientEvent =
       readonly subagentId: string;
       readonly role: 'explore' | 'plan' | 'code' | 'review';
       readonly name: string;
+      /** Omitted by old records; consumers treat absence as running. */
+      readonly status?: 'creating' | 'running';
       /** Exact parent task-tool identity; absent for legacy or detached child records. */
       readonly parentToolCallId?: string;
       /** Opaque Runtime dispatch identity shared by concurrently admitted siblings. */
@@ -377,6 +379,8 @@ export type RuntimeClientEvent =
       readonly summary: string;
       readonly toolCallCount?: number;
       readonly durationMs?: number;
+      /** Omitted by old records; consumers treat absence as failed. */
+      readonly status?: 'failed' | 'interrupted' | 'cancelled';
       readonly diagnostic?: Pick<SubAgentFailureDiagnostic, 'code' | 'stage'>;
     }
   | {
@@ -1140,7 +1144,7 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'subagentId', 'role', 'name'],
-            ['parentToolCallId', 'concurrencyGroupId'],
+            ['parentToolCallId', 'concurrencyGroupId', 'status'],
           ),
         ) &&
         isIdentifier(value.subagentId) &&
@@ -1150,6 +1154,9 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value.role === 'plan' ||
           value.role === 'code' ||
           value.role === 'review') &&
+        (!Object.hasOwn(value, 'status') ||
+          value.status === 'creating' ||
+          value.status === 'running') &&
         isBoundedUserText(value.name, 8_192)
       );
     case 'subagent.phase':
@@ -1235,11 +1242,15 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           presentKeys(
             value,
             ['type', 'subagentId', 'summary'],
-            ['toolCallCount', 'durationMs', 'diagnostic'],
+            ['toolCallCount', 'durationMs', 'diagnostic', 'status'],
           ),
         ) &&
         isIdentifier(value.subagentId) &&
         isBoundedUserText(value.summary, 8_192) &&
+        (!Object.hasOwn(value, 'status') ||
+          value.status === 'failed' ||
+          value.status === 'interrupted' ||
+          value.status === 'cancelled') &&
         (!Object.hasOwn(value, 'toolCallCount') || isNonNegativeSafeInteger(value.toolCallCount)) &&
         (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs)) &&
         (!Object.hasOwn(value, 'diagnostic') || isRuntimeClientSubagentDiagnostic(value.diagnostic))

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { RuntimeClientError } from '@kite-ai/runtime-client';
-import { formatTuiStartupError } from '../src/tui/startup-diagnostic';
+import { RuntimeClientError, RuntimeClientStartupError } from '@kite-ai/runtime-client';
+import { formatTuiStartupError, formatTuiStartupProgress } from '../src/tui/startup-diagnostic';
 
 describe('TUI startup diagnostics', () => {
   test('treats a same-build mismatch as an incomplete installation', () => {
@@ -37,5 +37,24 @@ describe('TUI startup diagnostics', () => {
     expect(formatTuiStartupError(new Error('connection unavailable'), 'same_build')).toBe(
       'connection unavailable',
     );
+  });
+
+  test('shows a fixed preparation phase and a saveable redacted terminal report', () => {
+    expect(formatTuiStartupProgress({ phase: 'preparing' })).toContain('安全取消或提交结算');
+    const waiting = formatTuiStartupProgress({ phase: 'waiting_for_store' });
+    expect(waiting).toContain('正在自动重试');
+    expect(waiting).toContain('超时后请按提示重试');
+    expect(waiting).not.toContain('PID');
+    const report = formatTuiStartupError(
+      new RuntimeClientStartupError({
+        code: 'store_corrupt',
+        actualSchema: 10,
+        expectedSchema: 10,
+        stage: 'preparing',
+      }),
+    );
+    expect(report).toContain('可将以下脱敏诊断保存');
+    expect(report).toContain('"stage": "preparing"');
+    expect(report).not.toContain('sqlite');
   });
 });

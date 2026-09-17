@@ -29,7 +29,6 @@ export interface GovernedLocalSandboxCompositionOptions {
   readonly protectedPathRevision: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
   readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
-  readonly brokeredGitFeatureRevision?: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;
 }
@@ -66,7 +65,6 @@ export function createGovernedLocalSandboxExecutor(
         canonicalWorkspace: options.canonicalWorkspace,
         filesystemScope: options.filesystemScope,
         runtimeReadOnlyRoots: options.runtimeReadOnlyRoots,
-        brokeredGitFeatureRevision: options.brokeredGitFeatureRevision,
         bubblewrapPath,
         cgroupPidsRunner,
       });

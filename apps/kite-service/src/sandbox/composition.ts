@@ -362,7 +362,6 @@ export function composeAppSandboxExecutor(input: {
         canonicalWorkspace: workspace,
         runtimeReadOnlyRoots: () =>
           getTrustedWorkspaceExternalReadRoots(workspace, input.workspaceTrustStorePath),
-        brokeredGitFeatureRevision: surface?.brokeredGitFeatureRevision ?? undefined,
         executionBoundaryDigest: boundary
           ? computeExecutionBoundaryDigest(boundary)
           : 'development-sandbox-boundary-v1',

@@ -1,5 +1,8 @@
 # TUI 使用手册
 
+> 实施中：[会话存储兼容性与连续性 V1](../../../plans/session-store-compatibility-and-continuity.md)已统一正式数据入口，并验证 macOS 已知格式的自动整理、历史来源归并和原会话保留。未知格式保留原数据，不切换空库；完整方案与未验证平台的边界以计划中的最新验收记录为准。
+
+
 系统学习从[完整流程](../../flows/tui-development.md)开始；解决具体问题直接进入下面的专题。当前能力见[跨客户端对照](../../capabilities.md)。
 
 ## 开始使用

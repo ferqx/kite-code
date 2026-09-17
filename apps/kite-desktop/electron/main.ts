@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { DesktopHost } from './host';
@@ -30,9 +30,8 @@ void app
       serviceDirectory: app.isPackaged
         ? join(process.resourcesPath, 'service')
         : join(appPath, 'service'),
-      repositoryDirectory: join(appPath, '../..'),
-      debug: !app.isPackaged,
       serviceManifest: __KITE_DESKTOP_SERVICE_MANIFEST__,
+      ...(!app.isPackaged ? { sourceRepositoryRoot: resolve(appPath, '../..') } : {}),
     });
     mainWindow = createMainWindow(rendererUrl, app.isPackaged);
     registerDesktopIpc({

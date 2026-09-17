@@ -14,11 +14,9 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntry {
     turnContext: {
       toolSearchEnabled: true,
       hasTaskAdapter: true,
-      hasGitBroker: true,
-      brokeredGitFeatureRevision: 'brokered-git-r1',
       activeSkillFrameIds: ['skill-frame'],
       availableSkillIds: ['skill'],
-      featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
+      featureFlags: { skillWorkflow: true, skillActivation: true },
     },
   });
   const entry = projection.entries.find(

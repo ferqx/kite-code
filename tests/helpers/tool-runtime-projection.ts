@@ -23,7 +23,6 @@ import type { AgentConfig } from '#kite-service/config/index';
 export interface CreateAgentToolsInput {
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   toolSearch?: boolean;
@@ -62,7 +61,6 @@ export function toolAvailabilityContext(input: CreateAgentToolsInput): ToolAvail
     interactionMode: input.interactionMode,
     workspaceTrust: input.workspaceTrust,
     hasTaskAdapter: Boolean(input.subagentEventSink && input.config),
-    hasGitBroker: Boolean(input.gitBroker),
     toolSearchEnabled: input.toolSearch,
     activeSkillFrames: input.activeSkillFrames,
     skillCatalog: input.skillCatalog,

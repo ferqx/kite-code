@@ -38,3 +38,36 @@ test('formats Runtime History epoch-millisecond timestamps without multiplying t
   expect(firstRequest).toEqual({ limit: 100 });
   expect(Object.hasOwn(firstRequest!, 'cursor')).toBe(false);
 });
+
+test('does not present a partial or failed Runtime History page as an empty complete directory', async () => {
+  let calls = 0;
+  const history: RuntimeHistoryClient = {
+    async listSessions() {
+      calls++;
+      if (calls === 1)
+        return {
+          entries: [
+            {
+              sessionId: 'first',
+              displayName: 'First',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+          ],
+          hasMore: true,
+          nextCursor: { updatedAt: 1, sessionId: 'first' },
+        };
+      throw new Error('Second history page cannot be decoded');
+    },
+    async listEvents() {
+      throw new Error('not used');
+    },
+    async loadSession() {
+      throw new Error('not used');
+    },
+  };
+  await expect(createTuiHistoryFacade(history).listPersistedSessions()).rejects.toThrow(
+    'Second history page cannot be decoded',
+  );
+});

@@ -16,6 +16,7 @@ export async function createOssCandidateFixture(
   version: string,
   target: OssReleaseTarget = currentOssReleaseTarget(),
   argumentLogPath?: string,
+  storeMaintenanceContract?: 'managed-release-selection-v1',
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-oss-candidate-test-'));
   const archivePath = join(root, 'candidate.tar.gz');
@@ -54,6 +55,7 @@ export async function createOssCandidateFixture(
       compileMode: 'native',
     },
     integrity: 'sha256-only-unsigned',
+    ...(storeMaintenanceContract ? { storeMaintenanceContract } : {}),
     defaultCapabilities: {
       autoCompaction: 'off',
       effectfulCapabilities: 'off',

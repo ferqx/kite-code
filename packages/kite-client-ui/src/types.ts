@@ -61,19 +61,35 @@ export interface Message {
   readonly title?: string;
   readonly arguments?: Readonly<Record<string, unknown>>;
   readonly status?:
+    | 'creating'
     | 'queued'
     | 'running'
     | 'waiting'
+    | 'auto_reviewing'
     | 'completed'
+    | 'interrupted'
     | 'failed'
     | 'rejected'
     | 'cancelled'
     | 'unknown';
   readonly parentToolCallId?: string;
+  /** Exact child lifecycle shown on its parent Task card. */
+  readonly childLifecycle?:
+    | 'creating'
+    | 'running'
+    | 'waiting'
+    | 'auto_reviewing'
+    | 'completed'
+    | 'interrupted'
+    | 'cancelled'
+    | 'failed';
   readonly steps?: readonly {
     readonly id: string;
     readonly toolCallId?: string;
+    readonly toolName?: string;
     readonly text: string;
+    readonly arguments?: Readonly<Record<string, unknown>>;
+    readonly summary?: string;
     readonly status: 'started' | 'completed' | 'failed' | 'cancelled';
   }[];
 }

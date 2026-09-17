@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  RUNTIME_COMMAND_CONTEXT_SCHEMA_,
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeCommand,
+  type RuntimeCommandContext,
   type RuntimeNotification,
   type RuntimeQuery,
   type RuntimeQueryResult,
@@ -31,6 +33,7 @@ interface CrashBridgeOptions {
   readonly execute?: boolean;
   readonly holdBeforeAttempt?: boolean;
   readonly runFailure?: boolean;
+  readonly allowRecoveredResume?: boolean;
 }
 
 /**
@@ -70,6 +73,8 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
   readonly runs: string[] = [];
   readonly attempts: string[] = [];
   readonly terminals: string[] = [];
+  readonly recoveredResumes: string[] = [];
+  readonly recoveredContexts: (Readonly<RuntimeCommandContext> | undefined)[] = [];
   readonly #receiptPort: StrictReceiptPort;
   readonly #options: CrashBridgeOptions;
   readonly #beforeAttempt = deferred();
@@ -118,6 +123,23 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
   recoverSession(sessionId: string, _publish: (notification: RuntimeNotification) => void) {
     this.recoveries.push(sessionId);
     return Promise.resolve();
+  }
+
+  async recoverCommittedResume(
+    command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+    committedRevision: number,
+    _publish: (notification: RuntimeNotification) => void,
+    commandContext?: Readonly<RuntimeCommandContext>,
+  ) {
+    this.recoveredResumes.push(command.commandId);
+    this.recoveredContexts.push(commandContext);
+    if (!this.#options.allowRecoveredResume) return undefined;
+    return {
+      execution: {
+        ...this.#prepared(command, { targetSessionId: command.sessionId }),
+        committedRevision,
+      },
+    };
   }
 
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
@@ -171,17 +193,135 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
   }
 }
 
-function hostFor(receipts: StrictReceiptPort, bridge: CrashWindowBridge) {
+function hostFor(
+  receipts: StrictReceiptPort,
+  bridge: CrashWindowBridge,
+  runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result,
+) {
   const storage = {
     ...testStorage(),
     commandReceipts: {
       lookup: (input: RuntimeCommandReceiptLookupInput) => receipts.lookup(input),
     },
   } as RuntimeStorage;
-  return createRuntimeHost({ storage, modules: testRuntimeModules(() => bridge) });
+  return createRuntimeHost({
+    storage,
+    modules: testRuntimeModules(() => bridge),
+    ...(runWithSessionExecution ? { runWithSessionExecution } : {}),
+  });
 }
 
 describe('Host persistent command crash windows', () => {
+  test('two replaying clients dispatch one proof-gated committed resume after a lost commit response', async () => {
+    const receipts = new StrictReceiptPort();
+    const crashed = new CrashWindowBridge(receipts, { commitFailure: 'after_receipt' });
+    const beforeRestart = hostFor(receipts, crashed);
+    const oldContext: RuntimeCommandContext = {
+      schema: RUNTIME_COMMAND_CONTEXT_SCHEMA_,
+      connectionId: 'old-connection',
+      requestId: 'old-request',
+      bindingReference: 'old-binding',
+    };
+    await expect(beforeRestart.command(resumeSession(), oldContext)).rejects.toThrow(
+      'after receipt write',
+    );
+    expect(crashed.schedules).toHaveLength(0);
+    await beforeRestart[Symbol.asyncDispose]();
+
+    const recovery = new CrashWindowBridge(receipts, { allowRecoveredResume: true });
+    const restarted = hostFor(receipts, recovery);
+    const leftContext: RuntimeCommandContext = {
+      schema: RUNTIME_COMMAND_CONTEXT_SCHEMA_,
+      connectionId: 'left-connection',
+      requestId: 'left-request',
+      bindingReference: 'left-binding',
+    };
+    const rightContext: RuntimeCommandContext = {
+      schema: RUNTIME_COMMAND_CONTEXT_SCHEMA_,
+      connectionId: 'right-connection',
+      requestId: 'right-request',
+      bindingReference: 'right-binding',
+    };
+    const [left, right] = await Promise.all([
+      restarted.command(resumeSession(), leftContext),
+      restarted.command(resumeSession(), rightContext),
+    ]);
+    expect(left).toEqual({
+      status: 'idempotent_replay',
+      commandId: 'resume-1',
+      sessionId: 'session-1',
+      originalRevision: 1,
+    });
+    expect(right).toEqual(left);
+    await restarted.waitForSessionIdle('session-1');
+    expect(recovery.inspections).toHaveLength(0);
+    expect(recovery.commits).toHaveLength(0);
+    expect(recovery.recoveredResumes).toHaveLength(2);
+    expect(recovery.recoveredContexts).toHaveLength(2);
+    expect(recovery.recoveredContexts).toEqual(expect.arrayContaining([leftContext, rightContext]));
+    expect(recovery.recoveredContexts).not.toContain(oldContext);
+    expect(recovery.schedules).toEqual(['resume-1']);
+    expect(recovery.attempts).toEqual(['resume-1']);
+    expect(recovery.terminals).toEqual(['resume-1']);
+    expect(receipts.records).toHaveLength(1);
+    await restarted[Symbol.asyncDispose]();
+  });
+
+  test('two Hosts competing for the execution owner replay one receipt but only the owner dispatches', async () => {
+    const receipts = new StrictReceiptPort();
+    const crashed = new CrashWindowBridge(receipts, { commitFailure: 'after_receipt' });
+    const beforeRestart = hostFor(receipts, crashed);
+    await expect(beforeRestart.command(resumeSession())).rejects.toThrow('after receipt write');
+    await beforeRestart[Symbol.asyncDispose]();
+
+    let owner: 'left' | 'right' | undefined;
+    const owned =
+      (identity: 'left' | 'right') =>
+      <Result>(_sessionId: string, operation: () => Result): Result => {
+        if (owner && owner !== identity) throw new Error('session_busy');
+        owner = identity;
+        return operation();
+      };
+    const leftBridge = new CrashWindowBridge(receipts, { allowRecoveredResume: true });
+    const rightBridge = new CrashWindowBridge(receipts, { allowRecoveredResume: true });
+    const left = hostFor(receipts, leftBridge, owned('left'));
+    const right = hostFor(receipts, rightBridge, owned('right'));
+    try {
+      const [leftReceipt, rightReceipt] = await Promise.all([
+        left.command(resumeSession()),
+        right.command(resumeSession()),
+      ]);
+      expect(leftReceipt).toEqual(rightReceipt);
+      expect(leftReceipt.status).toBe('idempotent_replay');
+      await Promise.all([
+        left.waitForSessionIdle('session-1'),
+        right.waitForSessionIdle('session-1'),
+      ]);
+      expect([...leftBridge.attempts, ...rightBridge.attempts]).toEqual(['resume-1']);
+      expect([...leftBridge.recoveredResumes, ...rightBridge.recoveredResumes]).toEqual([
+        'resume-1',
+      ]);
+      expect(receipts.records).toHaveLength(1);
+    } finally {
+      await left[Symbol.asyncDispose]();
+      await right[Symbol.asyncDispose]();
+    }
+  });
+
+  test('a replayed resume with unknown dispatch evidence remains receipt-only', async () => {
+    const receipts = new StrictReceiptPort();
+    const crashed = new CrashWindowBridge(receipts, { commitFailure: 'after_receipt' });
+    const beforeRestart = hostFor(receipts, crashed);
+    await expect(beforeRestart.command(resumeSession())).rejects.toThrow('after receipt write');
+    await beforeRestart[Symbol.asyncDispose]();
+    const recovery = new CrashWindowBridge(receipts);
+    const restarted = hostFor(receipts, recovery);
+    await restarted.command(resumeSession());
+    expect(recovery.recoveredResumes).toEqual(['resume-1']);
+    expect(recovery.schedules).toHaveLength(0);
+    expect(recovery.attempts).toHaveLength(0);
+    await restarted[Symbol.asyncDispose]();
+  });
   test('a commit failure after inspection but before receipt write remains retryable and never activates', async () => {
     const receipts = new StrictReceiptPort();
     const failed = new CrashWindowBridge(receipts, {
@@ -374,6 +514,15 @@ function startTurn(input = 'hello', sessionId = 'session-1'): StartTurn {
     sessionId,
     expectedRevision: 0,
     input,
+  };
+}
+
+function resumeSession(): Extract<RuntimeCommand, { readonly type: 'resume_session' }> {
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId: 'resume-1',
+    type: 'resume_session',
+    sessionId: 'session-1',
   };
 }
 

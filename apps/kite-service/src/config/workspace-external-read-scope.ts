@@ -8,11 +8,19 @@ export interface WorkspaceExternalReadScope {
   readonly digest: `sha256:${string}`;
 }
 
+/** The ordinary trust protocol grants only the selected workspace. */
+export const EMPTY_WORKSPACE_EXTERNAL_READ_SCOPE: WorkspaceExternalReadScope = Object.freeze({
+  roots: Object.freeze([]),
+  digest: `sha256:${createHash('sha256')
+    .update('kite.workspace-external-read-scope.v1\0[]')
+    .digest('hex')}`,
+});
+
 /**
  * Resolve Workspace-associated read identities that live outside the canonical
  * Workspace. Discovery is mechanism-specific; authorization is not. The
- * resulting sorted roots and digest are consumed by Workspace Trust before any
- * Runtime transport or Shell process can be opened.
+ * resulting sorted roots and digest are checked at sandbox preparation against
+ * an existing exact external-read grant. Ordinary Workspace Trust never calls it.
  */
 export function resolveWorkspaceExternalReadScope(
   workspaceInput: string,

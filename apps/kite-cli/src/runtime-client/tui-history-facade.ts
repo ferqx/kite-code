@@ -128,31 +128,25 @@ export function createTuiHistoryFacade(history: RuntimeHistoryClient): {
 } {
   return Object.freeze({
     async listPersistedSessions(query = ''): Promise<SessionInfo[]> {
-      try {
-        const entries: SessionInfo[] = [];
-        let cursor: { readonly updatedAt: number; readonly sessionId: string } | undefined;
-        for (;;) {
-          const page = await history.listSessions({
-            limit: 100,
-            ...(cursor ? { cursor } : {}),
-            ...(query ? { query } : {}),
-          });
-          entries.push(
-            ...page.entries.map((session) => ({
-              threadId: session.sessionId,
-              name: session.displayName,
-              updatedAt: formatLocalDateTime(session.updatedAt),
-              needsSmartName: session.needsSmartName,
-            })),
-          );
-          if (!page.hasMore) return entries;
-          if (!page.nextCursor) throw new Error('Runtime history session cursor is invalid.');
-          cursor = page.nextCursor;
-        }
-      } catch {
-        // Discovery is advisory. An unavailable or corrupt current history
-        // never becomes an unsafe Store fallback.
-        return [];
+      const entries: SessionInfo[] = [];
+      let cursor: { readonly updatedAt: number; readonly sessionId: string } | undefined;
+      for (;;) {
+        const page = await history.listSessions({
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+          ...(query ? { query } : {}),
+        });
+        entries.push(
+          ...page.entries.map((session) => ({
+            threadId: session.sessionId,
+            name: session.displayName,
+            updatedAt: formatLocalDateTime(session.updatedAt),
+            needsSmartName: session.needsSmartName,
+          })),
+        );
+        if (!page.hasMore) return entries;
+        if (!page.nextCursor) throw new Error('Runtime history session cursor is invalid.');
+        cursor = page.nextCursor;
       }
     },
     async loadPersistedSession(sessionId: string): Promise<SessionData | null> {

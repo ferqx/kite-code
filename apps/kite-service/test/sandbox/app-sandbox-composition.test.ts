@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -28,8 +28,6 @@ const shellSurface: ExecutionCapabilitySurface = {
   shell: true,
   skillChild: false,
   localStdioMcp: false,
-  gitInspect: false,
-  brokeredGitFeatureRevision: null,
 };
 
 function boundary(workspace: string, networkMode: 'off' | 'allowlist'): ExecutionBoundary {
@@ -113,6 +111,44 @@ function acknowledgedShellInput(workspace: string, command: string): ShellInput 
 }
 
 describe('App sandbox composition', () => {
+  test('a deleted Session workspace leaves Shell at its original missing cwd', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-deleted-workspace-shell-'));
+    const workspace = join(root, 'removed');
+    mkdirSync(workspace);
+    rmSync(workspace, { recursive: true });
+    try {
+      const executor = composeAppSandboxExecutor({
+        entrypoint: 'tui',
+        workspace,
+        config: { sandbox: { enabled: false } },
+      });
+      const result = await executor(acknowledgedShellInput(workspace, 'pwd'));
+      expect(result.ok).toBe(false);
+      expect(existsSync(workspace)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('sandboxed Shell rejects a deleted workspace at the tool attempt', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-deleted-workspace-sandbox-'));
+    const workspace = join(root, 'removed');
+    mkdirSync(workspace);
+    rmSync(workspace, { recursive: true });
+    try {
+      const executor = composeAppSandboxExecutor({
+        entrypoint: 'tui',
+        workspace,
+        config: { sandbox: { enabled: true } },
+      });
+      const result = await executor(acknowledgedShellInput(workspace, 'pwd'));
+      expect(result.ok).toBe(false);
+      expect(existsSync(workspace)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('fails closed for a development sandbox override without a governed lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {

@@ -325,6 +325,9 @@ class NativeTuiRuntimeClient {
       resolveReady = resolve;
       rejectReady = reject;
     });
+    // Admission runs before the prompt has a consumer for readiness. Keep an
+    // early rejection handled; later awaiters still receive the same error.
+    void readyPromise.catch(() => undefined);
     const record: NativeSessionRecord = {
       threadId,
       workspace,

@@ -1,7 +1,16 @@
+import {
+  describeServiceStartupProgress,
+  formatServiceStartupReport,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
+import { RuntimeClientStartupError } from '@kite-ai/runtime-client';
 import { parseArgs, main as runCliMain } from '../../../apps/kite-cli/src/cli/index';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { createManagedLocalAppServerComposition } from '../app-server-client';
 import { createManagedLocalAppServerDaemon } from '../app-server-daemon';
+
+const onStartupProgress = (progress: Parameters<typeof describeServiceStartupProgress>[0]) => {
+  console.error(describeServiceStartupProgress(progress));
+};
 
 if (process.argv.includes('--version')) {
   console.log(`Kite Code ${packageJson.version}`);
@@ -20,6 +29,7 @@ if (process.argv.includes('--version')) {
             const daemon = createManagedLocalAppServerDaemon({
               argv: process.argv,
               executableMode,
+              onStartupProgress,
               ...(parsed?.serverEndpoint ? { endpoint: parsed.serverEndpoint } : {}),
             });
             return runCliMain({ appServerDaemon: daemon });
@@ -29,6 +39,7 @@ if (process.argv.includes('--version')) {
               const daemon = createManagedLocalAppServerDaemon({
                 argv: process.argv,
                 executableMode,
+                onStartupProgress,
                 ...(parsed?.serverEndpoint ? { endpoint: parsed.serverEndpoint } : {}),
               });
               return runCliMain({ appServerWeb: { discover: daemon.discoverWeb } });
@@ -38,11 +49,13 @@ if (process.argv.includes('--version')) {
                 ? createManagedLocalAppServerDaemon({
                     argv: process.argv,
                     executableMode,
+                    onStartupProgress,
                     endpoint: parsed.serverEndpoint,
                   }).connector
                 : createManagedLocalAppServerComposition({
                     argv: process.argv,
                     executableMode,
+                    onStartupProgress,
                   }).connector;
               return runCliMain({
                 runtimeConnector: connector,
@@ -50,6 +63,17 @@ if (process.argv.includes('--version')) {
             })();
   run.catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
+    if (error instanceof RuntimeClientStartupError) {
+      console.error('可将以下脱敏诊断保存，用于排查：');
+      console.error(
+        formatServiceStartupReport({
+          code: error.diagnosticCode,
+          actualSchema: error.actualSchema,
+          expectedSchema: error.expectedSchema,
+          ...(error.stage ? { stage: error.stage } : {}),
+        }),
+      );
+    }
     process.exitCode = 1;
   });
 }

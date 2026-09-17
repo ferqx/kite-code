@@ -20,6 +20,8 @@ export function createPreloadBridge(call: DesktopIpcInvoke): Readonly<KiteDeskto
   return Object.freeze({
     listProjects: () => invoke(DESKTOP_IPC_CHANNELS.listProjects),
     runtimeStatus: () => invoke(DESKTOP_IPC_CHANNELS.runtimeStatus),
+    runtimeStartupStatus: () => invoke(DESKTOP_IPC_CHANNELS.runtimeStartupStatus),
+    saveStartupDiagnostic: () => invoke(DESKTOP_IPC_CHANNELS.saveStartupDiagnostic),
     pickWorkspace: () => invoke(DESKTOP_IPC_CHANNELS.pickWorkspace),
     activateWorkspace: (path) => invoke(DESKTOP_IPC_CHANNELS.activateWorkspace, { path }),
     checkWorkspace: (path) => invoke(DESKTOP_IPC_CHANNELS.checkWorkspace, { path }),

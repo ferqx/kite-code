@@ -1,5 +1,16 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +30,8 @@ import {
 import { RuntimeClient } from '@kite-ai/runtime-client';
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMethod } from '@kite-ai/runtime-protocol';
+import { initializeKiteHomeStoreSchema } from '../../packages/runtime-storage-sqlite/src/kite-home-store';
+import { KITE_SESSION_STORE11_DDL } from '../../packages/runtime-storage-sqlite/src/kite-session-store11-conversion';
 import { createManagedLocalAppServerDaemon } from '../../scripts/release/app-server-daemon';
 
 describe('explicit App Server daemon lifecycle', () => {
@@ -162,6 +175,91 @@ describe('explicit App Server daemon lifecycle', () => {
       if ((await daemon.status()).lifecycle) await daemon.stop();
     }
   }, 30_000);
+
+  test('absent daemon delegates exact Store 11 preparation and surfaces an unqualified admission refusal', async () => {
+    if (process.platform === 'win32') return;
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-daemon-store11-')));
+    cleanup.push(root);
+    const home = join(root, 'home');
+    mkdirSync(home, { mode: 0o700 });
+    const storePath = join(home, 'kite-session.sqlite');
+    const store = new Database(storePath, { strict: true });
+    chmodSync(storePath, 0o600);
+    try {
+      for (const sql of KITE_SESSION_STORE11_DDL) store.run(sql);
+      store.query('INSERT INTO kite_meta(key,value) VALUES (?,?)').run('schema_version', '11');
+      store
+        .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
+        .run('format_epoch', 'kite-session-accepted-runs-2026-09-15');
+      store.run('PRAGMA user_version=11');
+    } finally {
+      store.close(false);
+    }
+    const before = createHash('sha256').update(readFileSync(storePath)).digest('hex');
+    const daemon = createManagedLocalAppServerDaemon({
+      argv: ['kite', '--kite-home', home],
+      systemHome: root,
+      sourceWebStaticRoot: createWebAssets(root),
+    });
+    await expect(daemon.start(root)).rejects.toThrow('STORE_HISTORY_RECONCILIATION_REQUIRED');
+    expect(createHash('sha256').update(readFileSync(storePath)).digest('hex')).toBe(before);
+    expect((await daemon.status()).state).toBe('absent');
+  }, 20_000);
+
+  test('restart preserves a ready daemon when historical source or publication intent appears', async () => {
+    if (process.platform === 'win32') return;
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-daemon-restart-guard-')));
+    cleanup.push(root);
+    const home = join(root, 'home');
+    const daemon = createManagedLocalAppServerDaemon({
+      argv: ['kite', '--kite-home', home],
+      systemHome: root,
+      sourceWebStaticRoot: createWebAssets(root),
+    });
+    const started = await daemon.start(root);
+    try {
+      const historicalPath = join(home, 'kite.sqlite');
+      const historical = new Database(historicalPath, { strict: true });
+      chmodSync(historicalPath, 0o600);
+      try {
+        initializeKiteHomeStoreSchema(historical);
+      } finally {
+        historical.close(false);
+      }
+      await expect(daemon.restart(root)).rejects.toThrow('Historical session data exists');
+      expect((await daemon.status()).instanceId).toBe(started.instanceId);
+      rmSync(historicalPath);
+      writeFileSync(join(home, 'kite-session-publication.json'), '{}', { mode: 0o600 });
+      await expect(daemon.restart(root)).rejects.toThrow('Store publication is pending');
+      expect((await daemon.status()).instanceId).toBe(started.instanceId);
+    } finally {
+      await daemon.stop();
+    }
+  }, 20_000);
+
+  test('two absent starters converge on one daemon after their temporary stdio Services close', async () => {
+    if (process.platform === 'win32') return;
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-daemon-absent-race-')));
+    cleanup.push(root);
+    const daemon = createManagedLocalAppServerDaemon({
+      argv: ['kite', '--kite-home', join(root, 'home')],
+      systemHome: root,
+      sourceWebStaticRoot: createWebAssets(root),
+    });
+    try {
+      const starts = await Promise.allSettled([daemon.start(root), daemon.start(root)]);
+      expect(starts.some((result) => result.status === 'fulfilled')).toBe(true);
+      await until(async () => (await daemon.status()).state === 'ready');
+      const final = await daemon.status();
+      expect(final).toMatchObject({ state: 'ready', buildId: daemon.target.buildId });
+      for (const result of starts) {
+        if (result.status === 'fulfilled' && result.value.state === 'ready')
+          expect(result.value.instanceId).toBe(final.instanceId);
+      }
+    } finally {
+      if ((await daemon.status()).lifecycle) await daemon.stop();
+    }
+  }, 20_000);
 
   test('starts explicitly, serves two clients over the exact protocol, and stops explicitly', async () => {
     if (process.platform === 'win32') return;

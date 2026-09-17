@@ -176,6 +176,7 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   // Decode-only legacy model-admission telemetry; no current producer emits it.
   'interaction_mode.changed',
   'auto_review.requested',
+  'auto_review.started',
   'user_input.cancelled',
   'turn.started',
   'user.message_appended',

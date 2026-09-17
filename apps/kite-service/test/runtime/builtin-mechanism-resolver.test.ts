@@ -9,7 +9,6 @@ import {
 } from '#kite-service/bootstrap/runtime/builtin-mechanism-resolver';
 import type {
   CapabilityPolicyEffects,
-  GitInspectRequest,
   RuntimeJsonValue,
   WorkspaceFilesystemOperation,
 } from '#runtime-spi';
@@ -162,25 +161,9 @@ describe('App Builtin mechanism resolver', () => {
     expect(calls[0]?.pathScope).toBe('approved_external');
   });
 
-  test('keeps git inspect and shell cancellation/progress/timeout facts exact', async () => {
+  test('keeps shell cancellation/progress/timeout facts exact', async () => {
     const controller = new AbortController();
-    let inspectedSignal: AbortSignal | undefined;
-    const gitBroker = Object.freeze({
-      inspect: async (_request: GitInspectRequest, signal?: AbortSignal) => {
-        inspectedSignal = signal;
-        return { ok: true, output: 'status' };
-      },
-    });
     const resolve = createAppBuiltinMechanismResolver();
-    const gitMap = resolve(
-      baseInput({ executionMechanism: 'git', signal: controller.signal, gitBroker }),
-    );
-    const git = gitMap.git as {
-      readonly inspect: (request: GitInspectRequest, signal?: AbortSignal) => Promise<unknown>;
-    };
-    await git.inspect({ operation: 'status' });
-    expect(inspectedSignal).toBe(controller.signal);
-
     const progress: unknown[] = [];
     const shellInputs: AppBuiltinShellExecutorInput[] = [];
     const shellExecutor = Object.freeze({
@@ -213,12 +196,54 @@ describe('App Builtin mechanism resolver', () => {
       command: 'pwd',
       timeoutMs: 321,
       signal: controller.signal,
-      readOnly: true,
+      readOnly: false,
       networkAccess: 'approved',
       filesystemAccess: 'approved_external',
     });
     shellInputs[0]?.onProgress?.('progress', 'stdout');
     expect(progress).toEqual(['progress']);
+
+    const approvedExternalRead = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({
+          command: 'ls -a -d ~/.kite* ~/.config/kite* 2>/dev/null',
+        }),
+        grantUsed: 'approve_once',
+        authorizationKind: 'approved_call',
+        policyEffects: Object.freeze({ externalRead: true }),
+        sandboxScope: Object.freeze({
+          kind: 'expanded',
+          filesystem: 'full_access',
+          network: 'disabled',
+          digest: 'scope-external-read',
+        }),
+        shellExecutor,
+      }),
+    );
+    await (approvedExternalRead.shell as typeof shell).execute({
+      command: 'ls -a -d ~/.kite* ~/.config/kite* 2>/dev/null',
+      timeoutMs: 100,
+    });
+    expect(shellInputs[1]).toMatchObject({
+      readOnly: false,
+      networkAccess: 'none',
+      filesystemAccess: 'approved_external',
+    });
+
+    const baselineRead = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'pwd' }),
+        shellExecutor,
+      }),
+    );
+    await (baselineRead.shell as typeof shell).execute({ command: 'pwd', timeoutMs: 100 });
+    expect(shellInputs[2]).toMatchObject({
+      readOnly: true,
+      networkAccess: 'none',
+      filesystemAccess: 'workspace_only',
+    });
 
     const unsafeMap = resolve(
       baseInput({
@@ -229,7 +254,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const unsafeShell = unsafeMap.shell as typeof shell;
     await unsafeShell.execute({ command: 'echo x > file', timeoutMs: 100 });
-    expect(shellInputs[1]?.readOnly).toBe(false);
+    expect(shellInputs[3]?.readOnly).toBe(false);
 
     const uncertainMap = resolve(
       baseInput({
@@ -242,7 +267,7 @@ describe('App Builtin mechanism resolver', () => {
       }),
     );
     await (uncertainMap.shell as typeof shell).execute({ command: 'custom-tool', timeoutMs: 100 });
-    expect(shellInputs[2]).toMatchObject({
+    expect(shellInputs[4]).toMatchObject({
       networkAccess: 'none',
       filesystemAccess: 'workspace_only',
     });

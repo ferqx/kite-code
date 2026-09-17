@@ -388,8 +388,6 @@ describe('production execution admission', () => {
       shell: false,
       skillChild: false,
       localStdioMcp: false,
-      gitInspect: false,
-      brokeredGitFeatureRevision: null,
     });
     expect(
       admitProductionExecutionBoundary({
@@ -616,8 +614,6 @@ describe('production execution admission', () => {
       shell: true,
       skillChild: false,
       localStdioMcp: false,
-      gitInspect: false,
-      brokeredGitFeatureRevision: null,
     });
   });
 
@@ -639,40 +635,6 @@ describe('production execution admission', () => {
     });
     expect(expanded.allowed).toBe(true);
     expect(expanded.surface).toMatchObject({ shell: true, skillChild: true, localStdioMcp: false });
-
-    const brokered = evaluateExecutionBoundaryQualification({
-      featureEnabled: true,
-      boundary: boundary(workspace),
-      workspaceRoot: workspace,
-      qualification: {
-        ...base,
-        processCapabilitySurface: {
-          shell: true,
-          skillChild: false,
-          localStdioMcp: false,
-          brokeredGit: {
-            featureRevision: 'brokered-git-r1',
-            inspect: true,
-            shellDenyEvidence: {
-              featureRevision: 'brokered-git-r1',
-              platform: 'darwin',
-              backend: 'seatbelt',
-              outcome: 'qualified',
-              metadataReadDeny: true,
-              metadataWriteDeny: true,
-              profileRevision: 'fixture-profile-r1',
-              profileDigest: `sha256:${'b'.repeat(64)}`,
-              protectedRulesDigest: `sha256:${'c'.repeat(64)}`,
-            },
-          },
-        },
-      },
-    });
-    expect(brokered.allowed).toBe(true);
-    expect(brokered.surface).toMatchObject({
-      gitInspect: true,
-      brokeredGitFeatureRevision: 'brokered-git-r1',
-    });
 
     expect(
       evaluateExecutionBoundaryQualification({
@@ -811,8 +773,6 @@ describe('production execution admission', () => {
       shell: false,
       skillChild: false,
       localStdioMcp: false,
-      gitInspect: false,
-      brokeredGitFeatureRevision: null,
     });
     expect(
       evaluateExecutionBoundaryQualification({
@@ -878,8 +838,6 @@ describe('production execution admission', () => {
         shell: false,
         skillChild: false,
         localStdioMcp: false,
-        gitInspect: false,
-        brokeredGitFeatureRevision: null,
       },
     };
     const disclosed = createAgentTools({ workspace, config });

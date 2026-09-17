@@ -1,13 +1,15 @@
 import type { RuntimeCommand } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
+  runtimeHostStateNormalizeToolOutcomeEvent,
+  runtimeHostStateProjectAcceptedEvent,
   type StateRuntimeSession,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeCommandCommitEvidence,
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
-import { eventsForRunCancellation } from './state-actions';
+import { eventsForRunCancellation, eventsForSettledSubagentHistory } from './state-actions';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 export interface CommittedControlCommand {
@@ -69,6 +71,7 @@ export function commitCancelTurnCommand(
   session: StateRuntimeSession,
   command: CancelTurnCommand,
   evidence: RuntimeCommandCommitEvidence,
+  historyEvents: readonly RuntimeEvent[],
 ): CommittedControlCommand {
   const state = session.getState() as RuntimeState;
   assertCommandSession(state, command.sessionId, command.expectedRevision, evidence);
@@ -76,7 +79,12 @@ export function commitCancelTurnCommand(
     throw new Error('Runtime cancel command does not match the active turn.');
   }
   const committed = session.commitCommandBatch(
-    eventsForRunCancellation(state, 'Cancelled by user.', 'user'),
+    cancellationAndSettledChildEvents(
+      state,
+      historyEvents,
+      'Cancelled by user.',
+      committedAtIso(evidence.committedAt),
+    ),
     evidence,
   );
   return Object.freeze({
@@ -125,6 +133,7 @@ export function commitCloseSessionCommand(
   session: StateRuntimeSession,
   command: CloseSessionCommand,
   evidence: RuntimeCommandCommitEvidence,
+  historyEvents: readonly RuntimeEvent[],
 ): CommittedCloseSessionCommand {
   const state = session.getState() as RuntimeState;
   assertCommandSession(state, command.sessionId, command.expectedRevision, evidence);
@@ -133,7 +142,12 @@ export function commitCloseSessionCommand(
       throw new Error('Runtime close command cannot cancel an unrelated active interaction.');
     }
     const committed = session.commitCommandBatch(
-      eventsForRunCancellation(state, 'Runtime session closed.', 'user'),
+      cancellationAndSettledChildEvents(
+        state,
+        historyEvents,
+        'Runtime session closed.',
+        committedAtIso(evidence.committedAt),
+      ),
       evidence,
     );
     return Object.freeze({
@@ -147,6 +161,27 @@ export function commitCloseSessionCommand(
     events: Object.freeze([]),
     wasActive: false,
   });
+}
+
+function cancellationAndSettledChildEvents(
+  state: Readonly<RuntimeState>,
+  historyEvents: readonly RuntimeEvent[],
+  reason: string,
+  occurredAt: string,
+): RuntimeEvent[] {
+  const cancellations = eventsForRunCancellation(state, reason, 'user');
+  const cancelledState = cancellations.reduce<RuntimeState>(
+    (current, event) =>
+      runtimeHostStateProjectAcceptedEvent(
+        current,
+        runtimeHostStateNormalizeToolOutcomeEvent(event, current, occurredAt),
+      ),
+    state,
+  );
+  return [
+    ...cancellations,
+    ...eventsForSettledSubagentHistory(cancelledState, [...historyEvents, ...cancellations]),
+  ];
 }
 
 function assertCommandSession(

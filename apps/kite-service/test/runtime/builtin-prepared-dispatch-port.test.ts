@@ -30,13 +30,10 @@ import { createRuntimeModuleRegistry } from '#runtime-spi';
 
 const turnContext: CapabilityTurnContext = Object.freeze({
   hasTaskAdapter: true,
-  hasGitBroker: true,
-  brokeredGitFeatureRevision: 'brokered-git-r1',
   toolSearchEnabled: true,
   activeSkillFrameIds: ['frame-1'],
   availableSkillIds: ['skill-1'],
   featureFlags: {
-    brokeredGit: true,
     skillWorkflow: true,
     skillActivation: true,
   },

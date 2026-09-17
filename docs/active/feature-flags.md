@@ -31,7 +31,6 @@ Prompt 分层、项目指令快照、简洁工具契约、phase-stable builtin/M
 | `boundedCancellation` | `false` | 启用 descendant/process-tree 的有界清理资格；run deadline 由 `resourceBudget` 持久化并执行，不由该开关创建或关闭 |
 | `terminalOutcome` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundary` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundary`；开启本身不产生平台资格或边界 artifact |
-| `brokeredGit` | `false` | 请求 ADR-0097 typed Git surface；ADR-0131 后既有 native-deny qualification 失效，只有后续 ADR 与新鲜平台 evidence 建立不缩小 Workspace 的资格模型时才可生效 |
 | `networkBoundary` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfile` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 | `observabilityMetrics` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
@@ -72,14 +71,7 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 任一 backend 维度未强制时，生产 capability surface 全部关闭；审批不能恢复。当前批准 registry
 为空支持集，因此本 flag 不产生 production artifact 或可运行的 production shell/writer。
 
-`brokeredGit=true` 也不会单独披露 Git。composition 还必须注入精确
-`brokered-git-r1` capability surface、共享 protected-path evaluator 与 App Git process adapter，并通过
-后续 ADR 定义的新资格模型。ADR-0131 禁止为了资格重新添加 Workspace `.git` 名称级 deny；缺少任一项时 `gitInspect` 为 false；
-不得从 generic `process`/`read_only_only` 推断。ADR-0134 删除 raw Git token 的强制 broker routing并保留
-`git status`/无 patch `git log` 的 hardened read environment；ADR-0136 要求所有 raw Git 在进入该 environment
-前按 Full、Auto、Accept Edits 治理，不从 read-only grammar、Workspace target 或 local subcommand 推导免审
-授权。这些规则都不推导或冒充 `gitInspect` capability。当前三平台 brokered Git
-qualification 均为 excluded；它们与唯一 Prompt/工具契约路径相互独立。
+专用 `brokeredGit` 开关和 `gitInspect` 执行链已退役。Git 命令由 `shell_execute` 按普通 Shell 策略治理；普通 Workspace Trust 不解析或授权 linked worktree 外部 Git metadata；sandbox preparation 单独核验历史精确 grant，新外部调用继续受 Shell scope 审批约束。
 
 `networkBoundary` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
 关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed

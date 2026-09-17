@@ -13,9 +13,9 @@ import {
   createToolSearchProviderFacts,
   DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_,
   digestCapabilityBindingValue,
-  GIT_CAPABILITY_REVISIONS_,
-  GIT_EXECUTOR_REVISIONS_,
-  GIT_OPERATION_IDS_,
+  FILESYSTEM_CAPABILITY_REVISIONS_,
+  FILESYSTEM_EXECUTOR_REVISIONS_,
+  FILESYSTEM_OPERATION_IDS_,
   isBuiltinOperationExecutionValue,
   isToolSearchExecutionValue,
   MODEL_CAPABILITY_REVISIONS_,
@@ -41,7 +41,6 @@ import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutionMechanism,
   type CapabilityExecutionPort,
-  type CapabilityTurnContext,
   createRuntimeModuleRegistry,
   type RuntimeJsonValue,
 } from '@kite-ai/runtime-spi';
@@ -180,7 +179,7 @@ describe('builtin runtime package boundary', () => {
   test('registers the exact RM-10 through RM-15 owners and executors', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
-    expect(registry.snapshot().capabilities).toHaveLength(28);
+    expect(registry.snapshot().capabilities).toHaveLength(27);
     expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
       capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
       revision: TOOL_SEARCH_CAPABILITY_REVISION_,
@@ -207,19 +206,22 @@ describe('builtin runtime package boundary', () => {
         providerId: 'kite-builtin-runtime-model',
       });
     }
-    for (const operationId of GIT_OPERATION_IDS_) {
-      expect(registry.operationOwner(operationId), operationId).toBe('kite-builtin-runtime-git');
+    for (const operationId of FILESYSTEM_OPERATION_IDS_) {
+      expect(registry.operationOwner(operationId), operationId).toBe(
+        'kite-builtin-runtime-filesystem',
+      );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: GIT_CAPABILITY_REVISIONS_[operationId],
+        revision: FILESYSTEM_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-git',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: GIT_CAPABILITY_REVISIONS_[operationId],
+        capabilityRevision: FILESYSTEM_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-git',
       });
     }
+    expect(registry.operationOwner('builtin:git_inspect')).toBeUndefined();
     for (const operationId of SUBAGENT_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
         'kite-builtin-runtime-subagent',
@@ -263,25 +265,23 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 28 registered operations and keeps internal Git inspection off the model surface', () => {
+  test('projects all 27 registered operations without Git inspection', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
         toolSearchEnabled: true,
         hasTaskAdapter: true,
-        hasGitBroker: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1',
         activeSkillFrameIds: ['skill-frame'],
         availableSkillIds: ['skill'],
-        featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
+        featureFlags: { skillWorkflow: true, skillActivation: true },
       },
     });
-    expect(projection.entries).toHaveLength(28);
+    expect(projection.entries).toHaveLength(27);
     expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(19);
-    expect(
-      projection.entries.find((entry) => entry.operationId === 'builtin:git_inspect')?.visibility,
-    ).toBe('internal');
-    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(9);
+    expect(projection.entries.some((entry) => entry.operationId === 'builtin:git_inspect')).toBe(
+      false,
+    );
+    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(8);
     const expectedMechanisms: Readonly<Record<string, CapabilityExecutionMechanism>> = {
       'builtin:tool_search': 'catalog',
       'builtin:web_fetch': 'web',
@@ -297,7 +297,6 @@ describe('builtin runtime package boundary', () => {
       'builtin:search_files': 'filesystem',
       'builtin:write_file': 'filesystem',
       'builtin:edit_file': 'filesystem',
-      'builtin:git_inspect': 'git',
       'builtin:shell_execute': 'shell',
       'builtin:ask_user': 'user_input',
       'builtin:read_plan': 'planning',
@@ -312,7 +311,7 @@ describe('builtin runtime package boundary', () => {
       'model:auto_review': 'model',
       'model:subagent': 'model',
     };
-    expect(Object.keys(expectedMechanisms)).toHaveLength(28);
+    expect(Object.keys(expectedMechanisms)).toHaveLength(27);
     expect(projection.entries.map((entry) => entry.operationId).sort()).toEqual(
       Object.keys(expectedMechanisms).sort(),
     );
@@ -348,7 +347,7 @@ describe('builtin runtime package boundary', () => {
       name: 'read_file',
       visibility: 'model',
       availability: 'available',
-      revision: GIT_CAPABILITY_REVISIONS_['builtin:read_file'],
+      revision: FILESYSTEM_CAPABILITY_REVISIONS_['builtin:read_file'],
       effects: { filesystem: 'read', network: 'none', externalState: 'none' },
     });
     expect(readFile?.inputSchema).toEqual(registry.capability('builtin:read_file')?.inputSchema);
@@ -438,12 +437,9 @@ describe('builtin runtime package boundary', () => {
       turnContext: {
         toolSearchEnabled: true,
         hasTaskAdapter: true,
-        hasGitBroker: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1',
         activeSkillFrameIds: ['frame-1'],
         availableSkillIds: ['skill-1'],
         featureFlags: {
-          brokeredGit: true,
           skillWorkflow: true,
           skillActivation: true,
         },
@@ -513,7 +509,6 @@ describe('builtin runtime package boundary', () => {
       minimumApproval: 'user',
       governanceRevision: 'shell-effects-v1',
     });
-    const git = projection.entries.find((entry) => entry.operationId === 'builtin:git_inspect');
     const writeFile = projection.entries.find(
       (entry) => entry.operationId === 'builtin:write_file',
     );
@@ -523,10 +518,9 @@ describe('builtin runtime package boundary', () => {
     const toolSearch = projection.entries.find(
       (entry) => entry.operationId === 'builtin:tool_search',
     );
-    if (!git || !writeFile || !updatePlan || !toolSearch) {
+    if (!writeFile || !updatePlan || !toolSearch) {
       throw new Error('expected traits parity entries are missing');
     }
-    expect(git.executionTraitsDeclaration).toBeUndefined();
     expect(writeFile.executionTraitsDeclaration).toBeUndefined();
     expect(updatePlan.executionTraitsDeclaration).toBeUndefined();
     expect(toolSearch.executionTraitsDeclaration).toBeUndefined();
@@ -628,11 +622,6 @@ describe('builtin runtime package boundary', () => {
         effectClass: 'workspace_write',
         sideEffect: true,
         reason: 'edit_file modifies workspace files.',
-      },
-      git_inspect: {
-        effectClass: 'read_only',
-        sideEffect: false,
-        reason: 'Typed Git inspect is read-only and broker-bound.',
       },
       web_fetch: {
         effectClass: 'read_only',
@@ -818,32 +807,17 @@ describe('builtin runtime package boundary', () => {
     const hidden = createBuiltinToolCatalogProjection(registry);
     const task = hidden.entries.find((entry) => entry.operationId === 'builtin:task');
     const toolSearch = hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search');
-    const git = hidden.entries.find((entry) => entry.operationId === 'builtin:git_inspect');
-    if (!task || !toolSearch || !git) throw new Error('task/tool_search/git entries are missing');
+    if (!task || !toolSearch) throw new Error('task/tool_search entries are missing');
     const fullTurn = hidden.forTurn({
       toolSearchEnabled: true,
       hasTaskAdapter: true,
-      hasGitBroker: true,
-      brokeredGitFeatureRevision: 'brokered-git-r1',
       activeSkillFrameIds: ['frame-1'],
       availableSkillIds: ['skill-1'],
-      featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
+      featureFlags: { skillWorkflow: true, skillActivation: true },
     });
     expect(hidden.revision).toBe(fullTurn.revision);
     expect(Object.keys(hidden.toolSet)).toHaveLength(14);
     expect(Object.keys(fullTurn.toolSet)).toHaveLength(19);
-    expect(git.visibility).toBe('internal');
-    expect(git.availability).toBe('available');
-    const forgedGitTopLevel = createBuiltinToolCatalogProjection(registry.snapshot(), {
-      turnContext: {
-        hasGitBroker: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1',
-        brokeredGit: true,
-      } as unknown as CapabilityTurnContext,
-    });
-    expect(
-      forgedGitTopLevel.entries.find((entry) => entry.operationId === 'builtin:git_inspect'),
-    ).toMatchObject({ visibility: 'internal', availability: 'available' });
     expect(
       hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search')?.descriptor
         .availability,
@@ -975,7 +949,7 @@ describe('builtin runtime package boundary', () => {
         };
       },
     };
-    const readRevision = GIT_CAPABILITY_REVISIONS_['builtin:read_file'];
+    const readRevision = FILESYSTEM_CAPABILITY_REVISIONS_['builtin:read_file'];
     const readSchemaDigest = registry.capability('builtin:read_file')?.inputSchemaDigest;
     if (!readSchemaDigest) throw new Error('read_file schema digest is missing');
     await expect(
@@ -1092,7 +1066,7 @@ describe('builtin runtime package boundary', () => {
           invocationId: invocation.request.invocationId,
           attemptId: invocation.attempt.attemptId,
           providerId: 'kite-builtin-runtime-git',
-          executorRevision: GIT_EXECUTOR_REVISIONS_['builtin:read_file'],
+          executorRevision: FILESYSTEM_EXECUTOR_REVISIONS_['builtin:read_file'],
           requestDigest: invocation.requestDigest,
           status: 'succeeded',
           dispatchCertainty: 'attempted',
@@ -1101,7 +1075,7 @@ describe('builtin runtime package boundary', () => {
         };
       },
     };
-    const revision = GIT_CAPABILITY_REVISIONS_['builtin:read_file'];
+    const revision = FILESYSTEM_CAPABILITY_REVISIONS_['builtin:read_file'];
     const schemaDigest = registry.capability('builtin:read_file')?.inputSchemaDigest;
     if (!schemaDigest) throw new Error('read_file schema digest is missing');
     const bindingId = digestCapabilityBindingValue({

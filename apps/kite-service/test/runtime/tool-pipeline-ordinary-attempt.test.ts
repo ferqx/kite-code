@@ -97,9 +97,6 @@ function harness() {
       interactionMode: 'accept_edits' as const,
       toolSearchEnabled: true,
       hasTaskAdapter: true,
-      hasGitBroker: true,
-      brokeredGitFeatureRevision: 'brokered-git-r1',
-      featureFlags: Object.freeze({ brokeredGit: true }),
     }),
   );
   const calls = { record: 0, host: 0, commit: 0, suspend: 0, unknown: 0 };
@@ -228,9 +225,6 @@ function input(
         toolCallId: 'call-1',
         phase: 'building' as const,
         toolSearchEnabled: true,
-        hasGitBroker: true,
-        brokeredGitFeatureRevision: 'brokered-git-r1',
-        featureFlags: Object.freeze({ brokeredGit: true }),
       }),
       bindings: Object.freeze([]),
       descriptors: Object.freeze([]),

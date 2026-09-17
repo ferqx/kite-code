@@ -743,3 +743,88 @@ test('root auto review exposes only bounded decision facts to the client', () =>
     expect(JSON.stringify(event)).not.toContain('private-model');
   }
 });
+
+test('projects child lifecycle without collapsing cancellation or queueing into failure or review execution', () => {
+  const context = { sessionRevision: 1 };
+  for (const status of ['creating', 'running'] as const) {
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'subagent.started',
+          subagent: {
+            id: 'child',
+            role: 'explore',
+            name: 'Inspect',
+            parentToolCallId: 'parent',
+            status,
+          },
+        },
+        context,
+      ),
+    ).toMatchObject({ type: 'subagent.started', status });
+  }
+  for (const status of ['failed', 'interrupted', 'cancelled'] as const) {
+    expect(
+      projectRuntimeClientEvent(
+        { type: 'subagent.failed', subagent: { id: 'child', error: 'Ended', status } },
+        context,
+      ),
+    ).toMatchObject({ type: 'subagent.failed', status });
+  }
+  const owner = {
+    kind: 'subagent_tool' as const,
+    subagentId: 'child',
+    parentToolCallId: 'parent',
+    toolCallId: 'internal',
+  };
+  expect(
+    projectRuntimeClientEvent(
+      {
+        type: 'auto_review.requested',
+        reviewId: 'review',
+        toolCallId: 'parent',
+        toolName: 'shell_execute',
+        reason: 'Review',
+        approval: {},
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
+        owner,
+      } as RuntimeEvent,
+      context,
+    ),
+  ).toMatchObject({ type: 'subagent.review', status: 'queued' });
+  expect(
+    projectRuntimeClientEvent(
+      { type: 'auto_review.started', reviewId: 'review', toolCallId: 'parent', owner },
+      context,
+    ),
+  ).toMatchObject({ type: 'subagent.review', status: 'reviewing' });
+  expect(
+    projectRuntimeClientEvent(
+      {
+        type: 'subagent.approval_deferred',
+        toolCallId: 'parent',
+        parentToolCallId: 'parent',
+        subagentId: 'child',
+        approvalState: 'awaiting_user',
+      },
+      context,
+    ),
+  ).toMatchObject({ type: 'subagent.phase', status: 'suspended', approvalState: 'awaiting_user' });
+});
+
+test('classifies legacy aborted child facts as interrupted, never as an inferred user cancellation', () => {
+  expect(
+    projectRuntimeClientEvent(
+      {
+        type: 'subagent.failed',
+        subagent: {
+          id: 'old-child',
+          error: 'Ended',
+          diagnostic: { code: 'aborted', stage: 'terminal_projection' },
+        },
+      },
+      { sessionRevision: 1 },
+    ),
+  ).toMatchObject({ type: 'subagent.failed', status: 'interrupted' });
+});

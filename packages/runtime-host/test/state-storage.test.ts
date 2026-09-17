@@ -5,7 +5,10 @@ import {
   encodeCurrentAgentStateJson,
   type RuntimeEvent,
 } from '@kite-ai/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
+import {
+  createRuntimeHostStateStorageBinding,
+  isRuntimeHostStateSettledForMigration,
+} from '@kite-ai/runtime-host';
 
 const RECOVERY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
@@ -20,6 +23,86 @@ function state(): AgentState {
 }
 
 describe('Runtime Host State storage binding', () => {
+  test('a completed pre-dispatch policy denial is history, while uncertain tool results still fence', () => {
+    const initial = state();
+    const outcome = {
+      schemaVersion: 1 as const,
+      status: 'rejected' as const,
+      failure: { kind: 'policy_denied' as const, detailCode: 'policy_denied' as const },
+      dispatchState: 'not_started' as const,
+      externalEffects: 'none' as const,
+      replaySafety: 'pre_dispatch' as const,
+      recovery: {
+        disposition: 'never' as const,
+        maximumAdditionalCalls: 0 as const,
+        requiresNewModelResponse: false,
+        safeAutomaticRetry: false,
+      },
+      timing: { source: 'runtime_boundary' as const },
+    };
+    const failure = {
+      failureInstanceId: 'failure-1',
+      toolCallId: 'tool-1',
+      toolName: 'shell',
+      invocationFingerprint: 'fingerprint',
+      modelMessageId: 'model-message-1',
+      turnId: initial.turn.turnId,
+      status: 'exhausted' as const,
+      resolution: 'next_response_elapsed' as const,
+      outcome,
+      modelCorrectionAttempts: 0,
+      automaticRetryAttempts: 0,
+      progressRevision: 0,
+    };
+    const settled: AgentState = {
+      ...initial,
+      turn: { ...initial.turn, status: 'completed' },
+      terminalOutcome: {
+        version: 1,
+        status: 'completed',
+        reasonCode: 'completed',
+        knownExternalEffects: 'known',
+        safeRetry: false,
+        recoveryEntry: 'none',
+        pendingVerification: false,
+      },
+      toolRecovery: {
+        ...initial.toolRecovery,
+        order: ['failure-1'],
+        failures: { 'failure-1': failure },
+      },
+    };
+    expect(isRuntimeHostStateSettledForMigration(settled)).toBe(true);
+    expect(
+      isRuntimeHostStateSettledForMigration({
+        ...settled,
+        toolRecovery: {
+          ...settled.toolRecovery,
+          failures: {
+            'failure-1': {
+              ...failure,
+              outcome: { ...outcome, dispatchState: 'unknown', externalEffects: 'unknown' },
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeHostStateSettledForMigration({
+        ...settled,
+        toolRecovery: {
+          ...settled.toolRecovery,
+          failures: { 'failure-1': { ...failure, status: 'unresolved' } },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeHostStateSettledForMigration({
+        ...settled,
+        terminalOutcome: { ...settled.terminalOutcome!, pendingVerification: true },
+      }),
+    ).toBe(false);
+  });
   test('owns exact event/state bytes and the session summary projection', () => {
     const binding = createRuntimeHostStateStorageBinding();
     const event: RuntimeEvent = {

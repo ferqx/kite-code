@@ -382,11 +382,7 @@ function toCapabilityTurnContext(context: BuiltinToolAvailabilityContext): Capab
     ...(context.threadId !== undefined ? { threadId: context.threadId } : {}),
     ...(context.phase !== undefined ? { phase: context.phase } : {}),
     ...(context.featureFlags !== undefined ? { featureFlags: context.featureFlags } : {}),
-    ...(context.brokeredGitFeatureRevision !== undefined
-      ? { brokeredGitFeatureRevision: context.brokeredGitFeatureRevision }
-      : {}),
     ...(context.hasTaskAdapter !== undefined ? { hasTaskAdapter: context.hasTaskAdapter } : {}),
-    ...(context.hasGitBroker !== undefined ? { hasGitBroker: context.hasGitBroker } : {}),
     ...(context.toolSearchEnabled !== undefined
       ? { toolSearchEnabled: context.toolSearchEnabled }
       : {}),

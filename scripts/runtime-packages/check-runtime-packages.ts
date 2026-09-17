@@ -759,7 +759,14 @@ function validateImports(
     if (
       edge.owner.name === '@kite-ai/kite-desktop' &&
       packageName === '@kite-ai/kite-local-runtime' &&
-      edge.specifier !== '@kite-ai/kite-local-runtime/client/protocol'
+      edge.specifier !== '@kite-ai/kite-local-runtime/client/protocol' &&
+      !(
+        isInside(join(edge.owner.absolutePath, 'electron'), edge.source) &&
+        [
+          '@kite-ai/kite-local-runtime/startup-diagnostic',
+          '@kite-ai/kite-local-runtime/desktop-manifest',
+        ].includes(edge.specifier)
+      )
     ) {
       addViolation(
         violations,

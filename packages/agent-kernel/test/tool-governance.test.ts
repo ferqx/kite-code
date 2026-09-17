@@ -412,7 +412,7 @@ describe('State tool governance authorization facts', () => {
     expect(auto).toMatchObject({ kind: 'request_auto_review' });
   });
 
-  test('routes uncertain Shell effects to exact manual approval in every non-approved mode', () => {
+  test('routes uncertain Shell effects through the selected approval mode', () => {
     for (const interactionMode of ['accept_edits', 'auto', 'full'] as const) {
       expect(
         authorizeToolGovernance(
@@ -427,8 +427,66 @@ describe('State tool governance authorization facts', () => {
             context: { interactionMode, executionMechanism: 'shell' },
           }),
         ),
-      ).toMatchObject({ kind: 'request_approval' });
+      ).toMatchObject({
+        kind: interactionMode === 'auto' ? 'request_auto_review' : 'request_approval',
+      });
     }
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: {
+            decision: 'ask',
+            allowed: true,
+            requiresApproval: true,
+            risk: 'unknown',
+            effects: { uncertainEffects: true },
+          },
+          context: {
+            interactionMode: 'auto',
+            executionMechanism: 'shell',
+            circuitBreakerTripped: true,
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_auto_review' });
+  });
+
+  test('does not apply ordinary mode review again after exact Auto approval', () => {
+    const approved = approvedFacts('approve_once', {
+      invocation: {
+        exposedToolName: 'shell_execute',
+        operationId: 'builtin:shell_execute',
+        capabilityId: 'builtin:shell_execute',
+        commandDigest: D,
+      },
+      policy: {
+        operationId: 'builtin:shell_execute',
+        decision: 'ask',
+        allowed: true,
+        requiresApproval: true,
+        risk: 'unknown',
+        effects: { uncertainEffects: true },
+      },
+      context: {
+        interactionMode: 'auto',
+        executionMechanism: 'shell',
+        circuitBreakerTripped: true,
+      },
+    });
+    expect(authorizeToolGovernance(approved)).toEqual({
+      kind: 'authorized',
+      authorizationKind: 'approved_call',
+      grantUsed: 'approve_once',
+    });
+    expect(
+      authorizeToolGovernance({
+        ...approved,
+        context: {
+          ...approved.context,
+          gates: { ...approved.context.gates, executionBoundary: 'blocked' },
+        },
+      }),
+    ).toMatchObject({ kind: 'reject', failureKind: 'mandatory_policy_unavailable' });
   });
 
   test('keeps deny and planning phase denial ahead of full_access', () => {
@@ -562,7 +620,7 @@ describe('State tool governance authorization facts', () => {
           context: { interactionMode: 'auto', circuitBreakerTripped: true },
         }),
       ),
-    ).toMatchObject({ kind: 'request_approval' });
+    ).toMatchObject({ kind: 'request_auto_review' });
     expect(
       authorizeToolGovernance(
         shellFacts({

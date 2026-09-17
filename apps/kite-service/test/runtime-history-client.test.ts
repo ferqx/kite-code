@@ -7,12 +7,282 @@ import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import { createKiteRuntimeStorageOwner } from '../src/bootstrap';
 import type { RuntimeEvent } from '../src/bootstrap/runtime/state-runtime';
+import { childRuntimeToolCallId } from '../src/runtime/tool-execution/subagent-tool-identity';
 import {
   createKiteRuntimeHistoryClient,
   createKiteRuntimeObserverHistoryClient,
 } from '../src/runtime-client/history-adapter';
 
+function historyLogs(events: readonly RuntimeEvent[]): RuntimeLogQueryPort<RuntimeEvent> {
+  return {
+    listSessions: () => ({
+      entries: [
+        {
+          sessionId: 'ownership-history',
+          name: 'History',
+          updatedAt: 42,
+          lastSequence: events.length,
+        },
+      ],
+      hasMore: false,
+    }),
+    listEvents: (request) => ({
+      entries: events
+        .map((event, index) => ({
+          sessionId: 'ownership-history',
+          sequence: index + 1,
+          eventId: `event-${index + 1}`,
+          createdAt: 42 + index,
+          event,
+        }))
+        .filter(
+          (entry) =>
+            entry.sequence > (request.afterSequence ?? 0) &&
+            entry.sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY),
+        )
+        .slice(0, request.limit),
+      hasMore: false,
+      observedLastSequence: events.length,
+    }),
+    close: () => undefined,
+  };
+}
+
+function invocationRecorded(invocationId: string, toolCallId: string): RuntimeEvent {
+  return {
+    type: 'capability.invocation_recorded',
+    invocationId,
+    toolCallId,
+    capabilityId: 'builtin:task',
+    capabilityRevision: '1',
+    argumentsDigest: 'args',
+    authorizationDigest: 'auth',
+    effectiveEffectsDigest: 'effects',
+    effectiveEffects: { filesystem: 'none', network: 'none', externalState: 'none' },
+    recordedAt: '2026-09-17T00:00:00.000Z',
+  };
+}
+
+function dispatchIntent(invocationId: string, childInvocationId: string): RuntimeEvent {
+  return {
+    type: 'capability.subagent_dispatch_intent_recorded',
+    invocationId,
+    childInvocationId,
+    attempt: 1,
+    purpose: 'start',
+    taskArtifact: {
+      artifactId: `pa_${'7'.repeat(64)}`,
+      kind: 'subagent_task',
+      integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+      byteLength: 128,
+    },
+    dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+    recordedAt: '2026-09-17T00:00:00.000Z',
+  };
+}
+
 describe('Kite Runtime History Client adapter', () => {
+  test('repairs legacy child ownership from exact lifecycle and step facts within the selected history', async () => {
+    const parentToolCallId = 'parent-task-tool';
+    const subagentId = 'child-invocation';
+    const step = {
+      id: subagentId,
+      stepId: 'step-1',
+      toolCallId: 'model-child-tool',
+      modelInvocationId: 'model-child-invocation',
+      toolName: 'read_file',
+      toolArgs: { path: 'README.md' },
+    };
+    const childToolId = childRuntimeToolCallId({
+      parentToolCallId,
+      subagentId,
+      modelInvocationId: step.modelInvocationId,
+      modelToolCallId: step.toolCallId,
+      toolName: step.toolName,
+      args: step.toolArgs,
+    });
+    const events: RuntimeEvent[] = [
+      invocationRecorded('parent-invocation', parentToolCallId),
+      dispatchIntent('parent-invocation', subagentId),
+      { type: 'subagent.started', subagent: { id: subagentId, role: 'explore', name: 'Inspect' } },
+      { type: 'subagent.step', subagent: step },
+      {
+        type: 'tool.queued',
+        toolCallId: childToolId,
+        modelMessageId: 'child-model-message',
+        name: 'read_file',
+        args: step.toolArgs,
+        presentation: 'standalone',
+      },
+      {
+        type: 'tool.failed',
+        toolCallId: childToolId,
+        presentation: 'standalone',
+        failure: { kind: 'unknown', message: 'failed' },
+      } as RuntimeEvent,
+    ];
+    const history = createKiteRuntimeHistoryClient(historyLogs(events));
+    const loaded = await history.loadSession!('ownership-history');
+    expect(loaded.events.find((event) => event.type === 'subagent.started')).toMatchObject({
+      parentToolCallId,
+    });
+    expect(
+      loaded.events.filter((event) => event.type === 'tool.queued' || event.type === 'tool.failed'),
+    ).toMatchObject([
+      {
+        toolId: childToolId,
+        presentation: 'hidden',
+        presentationOwner: { subagentId, parentToolCallId },
+      },
+      {
+        toolId: childToolId,
+        presentation: 'hidden',
+        presentationOwner: { subagentId, parentToolCallId },
+      },
+    ]);
+    expect((await history.loadSession!('ownership-history', 3)).events).toMatchObject([
+      { type: 'subagent.started', parentToolCallId },
+    ]);
+    expect(loaded.events.find((event) => event.type === 'subagent.step')).toMatchObject({
+      toolCallId: childToolId,
+    });
+    expect(
+      (await history.loadSession!('ownership-history', 4)).events.find(
+        (event) => event.type === 'subagent.step',
+      ),
+    ).toMatchObject({ toolCallId: step.toolCallId });
+    expect((await history.loadSession!('ownership-history')).records).toEqual(loaded.records);
+    expect(events[2]).toEqual({
+      type: 'subagent.started',
+      subagent: { id: subagentId, role: 'explore', name: 'Inspect' },
+    });
+  });
+
+  test('reveals only hidden parent Tasks with unique child dispatch proof', async () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'completed-parent',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: {},
+        presentation: 'hidden',
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'failed-parent',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: {},
+        presentation: 'hidden',
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'unproven-parent',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: {},
+        presentation: 'hidden',
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'hidden-read',
+        modelMessageId: 'parent-model',
+        name: 'read_file',
+        args: { path: 'README.md' },
+        presentation: 'hidden',
+      },
+      invocationRecorded('completed-invocation', 'completed-parent'),
+      dispatchIntent('completed-invocation', 'completed-child'),
+      invocationRecorded('failed-invocation', 'failed-parent'),
+      dispatchIntent('failed-invocation', 'failed-child'),
+      {
+        type: 'tool.finished',
+        toolCallId: 'completed-parent',
+        name: 'task',
+        presentation: 'hidden',
+        result: { ok: true, stdout: '', stderr: '', exitCode: 0 },
+      } as RuntimeEvent,
+      {
+        type: 'tool.failed',
+        toolCallId: 'failed-parent',
+        presentation: 'hidden',
+        failure: { kind: 'unknown', message: 'interrupted' },
+      } as RuntimeEvent,
+    ];
+    const history = createKiteRuntimeHistoryClient(historyLogs(events));
+    const loaded = await history.loadSession!('ownership-history');
+    const tools = loaded.events.filter(
+      (event) =>
+        event.type === 'tool.queued' ||
+        event.type === 'tool.finished' ||
+        event.type === 'tool.failed',
+    );
+    expect(tools.filter((event) => event.toolId === 'completed-parent')).toMatchObject([
+      { presentation: 'standalone' },
+      { presentation: 'standalone' },
+    ]);
+    expect(tools.filter((event) => event.toolId === 'failed-parent')).toMatchObject([
+      { presentation: 'standalone' },
+      { presentation: 'standalone' },
+    ]);
+    expect(tools.find((event) => event.toolId === 'unproven-parent')).toMatchObject({
+      presentation: 'hidden',
+    });
+    expect(tools.find((event) => event.toolId === 'hidden-read')).toMatchObject({
+      presentation: 'hidden',
+    });
+    expect((await history.loadSession!('ownership-history', 4)).events).toMatchObject([
+      { presentation: 'hidden' },
+      { presentation: 'hidden' },
+      { presentation: 'hidden' },
+      { presentation: 'hidden' },
+    ]);
+  });
+
+  test('does not infer ambiguous or future child ownership and preserves explicit facts', async () => {
+    const childId = 'child-ambiguous';
+    const events: RuntimeEvent[] = [
+      { type: 'subagent.started', subagent: { id: childId, role: 'review', name: 'Review' } },
+      invocationRecorded('invocation-1', 'parent-1'),
+      dispatchIntent('invocation-1', childId),
+      {
+        type: 'subagent.started',
+        subagent: { id: childId, role: 'review', name: 'Later conflict' },
+      },
+      invocationRecorded('invocation-2', 'parent-2'),
+      dispatchIntent('invocation-2', childId),
+      {
+        type: 'subagent.started',
+        subagent: {
+          id: 'explicit-child',
+          role: 'review',
+          name: 'Explicit',
+          parentToolCallId: 'explicit-parent',
+        },
+      },
+    ];
+    const history = createKiteRuntimeHistoryClient(historyLogs(events));
+    const loaded = await history.loadSession!('ownership-history');
+    expect(loaded.events.find((event) => event.type === 'subagent.started')).not.toHaveProperty(
+      'parentToolCallId',
+    );
+    expect(
+      loaded.events.find(
+        (event) => event.type === 'subagent.started' && event.subagentId === 'explicit-child',
+      ),
+    ).toMatchObject({
+      parentToolCallId: 'explicit-parent',
+    });
+    expect((await history.loadSession!('ownership-history', 1)).events[0]).not.toHaveProperty(
+      'parentToolCallId',
+    );
+    expect((await history.loadSession!('ownership-history', 4)).events.at(-1)).toMatchObject({
+      type: 'subagent.started',
+      parentToolCallId: 'parent-1',
+    });
+  });
+
   test('keeps persisted list/load behind the Service RuntimeClient history seam', () => {
     const adapter = readFileSync(
       join(import.meta.dir, '../src/runtime-client/history-adapter.ts'),

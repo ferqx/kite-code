@@ -25,7 +25,7 @@ interface ConcurrentSubAgentBlockProps {
 }
 
 function isActive(block: SubagentBlock): boolean {
-  return block.status === 'running' || block.status === 'suspended';
+  return block.status === 'creating' || block.status === 'running' || block.status === 'suspended';
 }
 
 function childStatus(
@@ -37,8 +37,7 @@ function childStatus(
   tone: 'dim' | 'warning' | 'error';
 } {
   const approvalState =
-    block.approvalState ??
-    (block.awaitingApproval || block.status === 'suspended' ? 'awaiting_user' : undefined);
+    block.approvalState ?? (block.awaitingApproval ? 'awaiting_user' : undefined);
   if (approvalState === 'auto_reviewing') return { text: '自动审查中', tone: 'dim' };
   if (approvalState === 'queued_auto_review') {
     return { text: '等待自动审查', tone: 'dim' };
@@ -50,12 +49,15 @@ function childStatus(
   if (approvalState === 'authorized_queued') {
     return { text: translate('approval.authorizedQueued'), tone: 'dim' };
   }
+  if (block.status === 'creating') return { text: '创建中', tone: 'dim' };
+  if (block.status === 'suspended') return { text: '等待结果核对', tone: 'warning' };
   if (block.status === 'running') {
     const elapsed = block.startedAt == null ? '' : ` (${formatElapsed(now - block.startedAt)})`;
     return { text: `进行中${elapsed}`, tone: 'dim' };
   }
   if (block.status === 'done') return { text: 'succeeded', tone: 'dim' };
-  if (block.status === 'cancelled') return { text: 'Cancelled', tone: 'warning' };
+  if (block.status === 'cancelled') return { text: '已取消', tone: 'warning' };
+  if (block.status === 'interrupted') return { text: block.error || '已中断', tone: 'warning' };
   const diagnostic = block.failureDiagnostic;
   return {
     text: diagnostic
@@ -77,6 +79,7 @@ function currentToolLabel(block: SubagentBlock): string | undefined {
   if (currentStep) return subagentStepLabel(currentStep);
   if (block.status === 'done') return '已完成';
   if (block.status === 'error') return '已停止';
+  if (block.status === 'interrupted') return '已中断';
   if (block.status === 'cancelled') return '已取消';
   return block.steps.length === 0 ? 'Working' : subagentStepLabel(block.steps.at(-1)!);
 }
@@ -84,10 +87,12 @@ function currentToolLabel(block: SubagentBlock): string | undefined {
 function summarySuffix(blocks: SubagentBlock[]): string {
   const done = blocks.filter((block) => block.status === 'done').length;
   const failed = blocks.filter((block) => block.status === 'error').length;
+  const interrupted = blocks.filter((block) => block.status === 'interrupted').length;
   const cancelled = blocks.filter((block) => block.status === 'cancelled').length;
   const parts = [
     done > 0 ? `${done} succeeded` : '',
     failed > 0 ? `${failed} failed` : '',
+    interrupted > 0 ? `${interrupted} interrupted` : '',
     cancelled > 0 ? `${cancelled} cancelled` : '',
   ].filter(Boolean);
   return parts.length > 0 ? ` · ${parts.join(' · ')}` : '';
@@ -161,7 +166,7 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
           color={
             active
               ? dt.primary
-              : blocks.some((block) => block.status === 'error')
+              : blocks.some((block) => block.status === 'error' || block.status === 'interrupted')
                 ? dt.error
                 : dt.success
           }

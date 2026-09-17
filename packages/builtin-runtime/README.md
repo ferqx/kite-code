@@ -1,5 +1,7 @@
 # Builtin Runtime
 
+[文件工具脱离 Git 与专用 Git 链退役](../../docs/adr/0188-on-demand-capabilities-and-filesystem-owner.md)：五个文件工具由 filesystem module 注册；专用 Git inspect、Broker、旧 schema/SPI 和发布证据链已移除。
+
 ## 定位
 
 `@kite-ai/builtin-runtime` 是 Kite-specific capability、模型、工具、MCP、Sandbox、Subagent 与 Verification 语义 owner。
@@ -8,7 +10,7 @@
 
 - 通过 `createBuiltinRuntimeModules()` 注册唯一 Builtin operation owner 与 executor。
 - 从一个 frozen SPI snapshot 投影 parser、schema、description、availability、effects、traits 与 revision。
-- 实现具体 filesystem、git、model、planning、sandbox、MCP、Skill、Subagent 和 Verification mechanism。
+- 实现具体 filesystem、model、planning、sandbox、MCP、Skill、Subagent 和 Verification mechanism。
 - 拥有Model/Plan/Capability/filesystem preimage/Sandbox/Subagent private Artifact的schema-aware reader/writer；持久层由App注入，
   Builtin不发现SQLite、Kite Home或第二storage authority。
 
@@ -28,8 +30,7 @@
 
 ## 关键不变量
 
-- 当前 snapshot 固定包含 19 个 model-visible tools 和 9 个 internal operations；`git_inspect`只保留为internal Runtime
-  capability，模型发出的Git、构建、测试、package-manager与project script统一经过`shell_execute`。
+- 当前 snapshot 固定包含 19 个 model-visible tools 和 8 个 internal operations；`git_inspect`不再注册。模型发出的Git、构建、测试、package-manager与project script统一经过`shell_execute`。
 - `shell-semantics.ts`拥有唯一冻结的v1语义注册表。registry digest进入`shell_execute` capability revision；新增普通
   只读program修改descriptor，参数敏感program由descriptor选择局部inspector，未命中保持unknown。
 - App/Host/catalog/executor 必须使用同一个 snapshot。
@@ -45,8 +46,8 @@
 - Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、
   不含用户内容的确定性 `activationId`，使同一逻辑 command 的重试保持同一 activation identity。
   无效注入在 activation 建立前 fail closed，不能回退生成另一个 identity 后继续执行。
-- Git broker仍用标准`<primary>/.git/worktrees/<id>`、`commondir`与reciprocal backlink校验transaction authority；
-  独立的Workspace scope discovery只canonicalize Git实际读取的外部`gitDir/commondir`，不授予权限。App必须先经
+- 文件工具归属 filesystem module，持久 provider identity `kite-builtin-runtime-git` 与原 capability/executor revision 保持不变。
+  Workspace scope discovery只canonicalize Git实际读取的外部`gitDir/commondir`，不授予权限。App必须先经
   Workspace Trust确认exact external-read scope，Sandbox才可向Seatbelt/bubblewrap投影对应只读root；该规则不依赖命令名。
 - Planning中的可证明只读Shell组合（包括`git status/log/diff`、版本化porcelain status、Git log的常见展示/筛选参数、diff的颜色/空白/word-diff参数、只读pipe、`head/tail/echo`和`2>/dev/null`丢弃输出）
   保持read-only baseline直接执行。Git另接受零操作数`git branch --show-current`、无pattern的branch列表
@@ -63,7 +64,7 @@
 - 已证明只读的POSIX Shell使用固定非登录`/bin/sh`、Workspace外的可信`PATH`与中性`HOME/XDG_CONFIG_HOME`；
   Git关闭system/global config、credential prompt、pager、optional locks与fsmonitor，且不从Runtime环境注入
   `GIT_EXTERNAL_DIFF`。空字符串会让Git尝试执行空helper，不得作为关闭方式。
-- 未通过只读grammar且无法完整确定effects的Shell固定编译为exact真人审批；Auto/Full不绕过这次确认。危险程序名只在
+- 未通过只读grammar且无法完整确定effects的Shell固定编译为需审批；Auto交由审批模型判断，Accept Edits/Full请求真人审批。危险程序名只在
   executable位置匹配，参数或输出中的`format`/`diskpart`等词不能生成destructive事实。审批仍绑定原sandbox scope，
   不因effects未知自动取得网络、Workspace外路径或Full authority。
 - Shell进程已经确定退出且`ok=false`时投影低基数`tool_reported_failure` classifier advice并固定不自动重试；

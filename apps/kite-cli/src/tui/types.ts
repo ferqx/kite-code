@@ -226,7 +226,7 @@ export type OutputBlockVariant =
       subagentId: string;
       role: SubAgentRole;
       task: string;
-      status: 'running' | 'suspended' | 'done' | 'error' | 'cancelled';
+      status: 'creating' | 'running' | 'suspended' | 'done' | 'error' | 'interrupted' | 'cancelled';
       summary: string;
       toolCallCount: number;
       durationMs: number;
@@ -465,7 +465,7 @@ export interface TuiState {
 }
 
 export interface PendingSubagentTerminal {
-  readonly status: 'done' | 'error' | 'cancelled';
+  readonly status: 'done' | 'error' | 'interrupted' | 'cancelled';
   readonly summary: string;
   /** Durable revision at which the terminal was observed, when available. */
   readonly revision?: number;

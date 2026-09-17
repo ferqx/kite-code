@@ -4,6 +4,7 @@ import type { RuntimeQuery, RuntimeQueryResult } from './queries';
 
 export const RUNTIME_CONTRACT_SCHEMA_ = 'kite.runtime-contract.v1' as const;
 
+export * from './abort-reason';
 export * from './capabilities';
 export * from './commands';
 export * from './context';

@@ -82,6 +82,8 @@ export {
   runtimeHostStateAdvanceToolRecoveryResponse,
   runtimeHostStateCreateToolRecoveryJournal,
   runtimeHostStateDecideAutoReview,
+  runtimeHostStateHasPendingSandboxCleanupAuthority,
+  runtimeHostStateHasPendingSubagentCleanupAuthority,
   runtimeHostStateNormalizeToolRecoveryJournal,
   runtimeHostStateRecordRecoveryFailure,
   runtimeHostStateRecordRecoveryInvocation,

@@ -151,11 +151,16 @@ function taskProviderJourney(input: { invocationId: string; task?: string }) {
     createdAtTurnId: state.turn.turnId,
   };
   state.tools.queue = [...state.tools.queue, 'pipeline-task'];
+  const persistedEvents: import('@kite-ai/agent-kernel').RuntimeEvent[] = [];
   return {
     state,
     taskRequests,
+    persistedEvents,
     persistRuntimeEvents: async (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
-      for (const event of events) state = reduceRuntimeState(state, event);
+      for (const event of events) {
+        persistedEvents.push(event);
+        state = reduceRuntimeState(state, event);
+      }
       return true;
     },
     getRuntimeState: () => state,
@@ -331,7 +336,10 @@ describe('SubagentProvider grant and Local Provider', () => {
     }
   });
 
-  test('retains only the bounded child failure diagnostic across observation', () => {
+  test.each([
+    'failed',
+    'interrupted',
+  ] as const)('retains %s status and bounded diagnostic across observation', (status) => {
     const expected = handle({
       ...new SubagentGrantAuthority({ idSource: () => 'diagnostic-grant' }).issueStart(binding()),
     });
@@ -341,10 +349,10 @@ describe('SubagentProvider grant and Local Provider', () => {
         summary: 'Sub-agent execution failed.',
         toolCallCount: 3,
         durationMs: 9,
-        terminalStatus: 'failed',
+        terminalStatus: status,
         error: 'Sub-agent execution failed.',
         failureDiagnostic: {
-          code: 'model_step_failed',
+          code: status === 'interrupted' ? 'aborted' : 'model_step_failed',
           stage: 'model_step',
           modelInvocationId: 'model-child-last',
         },
@@ -360,7 +368,7 @@ describe('SubagentProvider grant and Local Provider', () => {
       schema: SUBAGENT_PROVIDER_SCHEMA_,
       handleId: expected.handleId,
       childInvocationId: expected.childInvocationId,
-      status: 'failed' as const,
+      status,
       summary: 'Sub-agent execution failed.',
       toolCallCount: 3,
       durationMs: 9,
@@ -374,8 +382,9 @@ describe('SubagentProvider grant and Local Provider', () => {
     expect(
       subagentResultFromObservation(observation, expected, TEST_RECOVERY_IDENTITY_KEY),
     ).toMatchObject({
+      terminalStatus: status,
       failureDiagnostic: {
-        code: 'model_step_failed',
+        code: status === 'interrupted' ? 'aborted' : 'model_step_failed',
         stage: 'model_step',
         modelInvocationId: 'model-child-last',
       },
@@ -886,15 +895,17 @@ class FakeProvider implements SubagentProvider {
   cancels = 0;
   lastGrant?: SubagentDelegationGrant;
   lastResumeGrant?: SubagentResumeGrant;
-  readonly mode: 'deny' | 'crash' | 'stale' | 'recovery';
-  constructor(mode: 'deny' | 'crash' | 'stale' | 'recovery') {
+  readonly mode: 'deny' | 'cancelled' | 'crash' | 'stale' | 'recovery';
+  constructor(mode: 'deny' | 'cancelled' | 'crash' | 'stale' | 'recovery') {
     this.mode = mode;
   }
   async start(input: { grant: SubagentDelegationGrant }) {
     this.starts += 1;
     this.lastGrant = input.grant;
-    if (this.mode === 'deny') {
-      return { ok: false as const, failure: { code: 'fake_denied' as const, message: 'denied' } };
+    if (this.mode === 'deny' || this.mode === 'cancelled') {
+      return this.mode === 'cancelled'
+        ? { ok: false as const, failure: { code: 'cancelled' as const, message: 'cancelled' } }
+        : { ok: false as const, failure: { code: 'fake_denied' as const, message: 'denied' } };
     }
     return { ok: true, value: handle(input.grant) } as const;
   }
@@ -928,7 +939,7 @@ class FakeProvider implements SubagentProvider {
 }
 
 async function executeAppTaskWithFakeProvider(input: {
-  mode: 'deny' | 'crash' | 'stale' | 'recovery';
+  mode: 'deny' | 'cancelled' | 'crash' | 'stale' | 'recovery';
   persistRuntimeEvents?: (
     events: import('@kite-ai/agent-kernel').RuntimeEvent[],
   ) => Promise<boolean>;
@@ -1065,7 +1076,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
     expect(noAck.driver.pendingRegistrationCount()).toBe(0);
     expect(noAck.events).toContainEqual(expect.objectContaining({ type: 'tool.failed' }));
 
-    for (const mode of ['deny', 'crash', 'stale', 'recovery'] as const) {
+    for (const mode of ['deny', 'cancelled', 'crash', 'stale', 'recovery'] as const) {
       const result = await executeAppTaskWithFakeProvider({ mode });
       expect(result.runtimeFactoryCalls).toBe(1);
       expect(result.fake.starts).toBe(1);
@@ -1074,6 +1085,20 @@ describe('Pipeline-owned Fake Provider negatives', () => {
       expect(result.events).toContainEqual(
         expect.objectContaining({ type: 'tool.failed', toolCallId: 'pipeline-task' }),
       );
+      const creating = result.journey.persistedEvents.filter(
+        (event) => event.type === 'subagent.started' && event.subagent.status === 'creating',
+      );
+      expect(creating).toHaveLength(1);
+      if (mode === 'deny' || mode === 'cancelled') {
+        expect(result.events).toContainEqual(
+          expect.objectContaining({
+            type: 'subagent.failed',
+            subagent: expect.objectContaining({
+              status: mode === 'cancelled' ? 'interrupted' : 'failed',
+            }),
+          }),
+        );
+      }
     }
   });
 

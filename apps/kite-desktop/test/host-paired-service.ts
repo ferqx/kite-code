@@ -20,8 +20,6 @@ export async function runElectronPairedServiceSmoke(
     appDataDirectory: join(options.home, 'electron-app-data'),
     homeDirectory: options.home,
     serviceDirectory,
-    repositoryDirectory: resolve('.'),
-    debug: false,
     serviceManifest: manifest,
   });
   try {

@@ -140,9 +140,15 @@ function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone }
   );
   if (queuedReview?.kind === 'subagent') return { verb: 'Review queued', tone: 'primary' };
   // Subagent running
-  const sub = findBlock(state, (b) => b.kind === 'subagent' && b.status === 'running');
+  const sub = findBlock(
+    state,
+    (b) => b.kind === 'subagent' && (b.status === 'creating' || b.status === 'running'),
+  );
   if (sub?.kind === 'subagent') {
-    return { verb: 'Delegating', tone: 'success' };
+    return {
+      verb: sub.status === 'creating' ? 'Creating child agent' : 'Delegating',
+      tone: 'success',
+    };
   }
 
   // Tool card running

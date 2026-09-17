@@ -4,7 +4,7 @@
  * Each PTY test gets its own:
  * - Temp HOME directory with minimal kite-code.jsonc config
  * - Temp workspace directory (for file operations)
- * - Persistent source-profile `kite-session.sqlite` path inside the isolated Kite Home
+ * - Persistent canonical `kite-session.sqlite` path inside the isolated Kite Home
  *
  * Reuses the temp-home isolation pattern previously used by the old TUI harness.
  */
@@ -15,7 +15,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKiteHomeIdentity, ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
-import { sourceKiteSessionStorePath } from '../../../scripts/release/local-service-client';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -52,7 +51,7 @@ export function requirePersistedRuntimeReady<T>(observation: PersistedRuntimeObs
   throw new Error(`Runtime Store observation is ${observation.status} at ${observation.path}`);
 }
 
-/** Read plan artifacts from the exact source-profile Store without invoking production writers. */
+/** Read plan artifacts from the exact canonical Store without invoking production writers. */
 export function readPersistedPlanArtifacts(
   workspace: Pick<TestWorkspace, 'home'>,
 ): Array<{ path: string; content: string }> {
@@ -105,7 +104,7 @@ function persistedRuntimeObservationFailure(
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
   const kiteHome = join(workspace.home, '.kite-code');
-  const appServerStore = sourceKiteSessionStorePath(kiteHome, process.cwd());
+  const appServerStore = join(kiteHome, 'kite-session.sqlite');
   if (existsSync(appServerStore)) return appServerStore;
   const legacyKiteHomeStore = join(kiteHome, 'kite.sqlite');
   if (existsSync(legacyKiteHomeStore)) return legacyKiteHomeStore;

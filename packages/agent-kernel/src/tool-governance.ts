@@ -438,7 +438,9 @@ function authorizeValidToolGovernanceFacts(
   const dynamicMcpRequiresManual = facts.dynamicMcp?.minimumApproval === 'user';
   const dynamicMcpRequiresAutoReview = facts.dynamicMcp?.minimumApproval === 'auto_review';
   const uncertainShellRequiresManual =
-    context.executionMechanism === 'shell' && policy.effects?.uncertainEffects === true;
+    context.interactionMode !== 'auto' &&
+    context.executionMechanism === 'shell' &&
+    policy.effects?.uncertainEffects === true;
   const forceManualApproval =
     activationRequiresManual ||
     nestedSkillRequiresManual ||
@@ -609,7 +611,9 @@ function decideMode(
   const acceptEdits = decideAcceptEdits(policy);
   if (context.interactionMode === 'accept_edits') return acceptEdits;
   if (acceptEdits === 'deny' || acceptEdits === 'allow') return acceptEdits;
-  return context.circuitBreakerTripped ? 'approval' : 'auto_review';
+  return context.circuitBreakerTripped && context.executionMechanism !== 'shell'
+    ? 'approval'
+    : 'auto_review';
 }
 
 function decideAcceptEdits(

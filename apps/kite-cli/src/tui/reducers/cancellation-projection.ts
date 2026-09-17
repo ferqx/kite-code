@@ -217,17 +217,20 @@ export function projectDurableUserCancelledTurn(
   const turns = state.turns.slice();
   const last = state.turns[lastTurnIndex]!;
   const blocks = last.blocks.flatMap((block): OutputBlock[] => {
-    if (block.kind === 'subagent' && (block.status === 'running' || block.status === 'suspended')) {
+    if (
+      block.kind === 'subagent' &&
+      (block.status === 'creating' || block.status === 'running' || block.status === 'suspended')
+    ) {
       changed = true;
       return [
         {
           ...block,
-          status: 'cancelled',
+          // The parent Turn is cancelled, but child cleanup may still have an
+          // unknown external result. Wait for its own authoritative terminal.
+          status: 'suspended',
           presentationState: 'sealed',
-          summary: 'Cancelled',
-          error: 'Cancelled',
-          toolCallCount: block.steps.length,
-          durationMs: state.runStartTime ? now - state.runStartTime : 0,
+          approvalState: undefined,
+          awaitingApproval: false,
           expanded: false,
         },
       ];

@@ -146,3 +146,6 @@ accepted 表示当时已接受，不表示全文仍定义当前行为。当前�
 - [ADR-0180：桌面新对话准备与本地环境选择](0180-desktop-new-conversation-context.md)
 - [ADR-0182：桌面历史读取独立于执行项目](0182-neutral-desktop-history.md)
 - [ADR-0183：启动只做结构检查，按会话读取做恢复校验](0183-bounded-startup-validation.md)
+
+- [ADR-0188：可选能力按需检查与文件工具独立归属](0188-on-demand-capabilities-and-filesystem-owner.md)
+- [ADR-0189：Auto 模式由审批模型先判断副作用不确定的 Shell](0189-auto-review-uncertain-shell.md)

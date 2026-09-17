@@ -24,7 +24,9 @@
     "@kite-ai/runtime-contract": "workspace:*",
     "@kite-ai/runtime-protocol": "workspace:*",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "sonner": "^2.0.8",
+    "shadcn": "^4.21.0"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",

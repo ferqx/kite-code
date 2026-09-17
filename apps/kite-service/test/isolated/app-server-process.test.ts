@@ -23,6 +23,7 @@ import {
   createAppServerProtocolConnection,
   KITE_APP_SERVER_PROTOCOL_METHODS_,
 } from '@kite-ai/kite-local-runtime/client/protocol';
+import { parseServiceStartupProgress } from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteSessionAppServerStorageComposition } from '../../src/bootstrap';
@@ -31,7 +32,8 @@ import { trustWorkspace } from '../../src/config/workspace-trust';
 describe('KASD parent-owned App Server process', () => {
   test('changes a persisted Session policy across Workspaces without stopping another Turn', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-session-policy-')));
-    for (const name of ['home', 'runtime', 'config', 'a', 'b']) mkdirSync(join(root, name));
+    for (const name of ['home', 'runtime', 'config', 'a', 'b'])
+      mkdirSync(join(root, name), { mode: 0o700 });
     const model = createMockModelServer();
     model.setResponses([{ delay: 10_000, message: { content: 'still running' } }]);
     writeAppServerConfig(join(root, 'config'), model.baseURL);
@@ -208,16 +210,34 @@ describe('KASD parent-owned App Server process', () => {
       if (process.platform !== 'win32') {
         renameSync(join(root, 'a'), join(root, 'a-original'));
         try {
-          await expect(
-            connection.runtime.command({
-              schema: 'kite.runtime-command.v1',
-              commandId: 'mode-missing-workspace',
-              type: 'set_interaction_mode',
-              sessionId: 'policy-a',
-              expectedRevision: 1,
-              mode: 'auto',
-            }),
-          ).rejects.toThrow('Runtime admission unavailable');
+          const missingWorkspacePolicy = await connection.runtime.command({
+            schema: 'kite.runtime-command.v1',
+            commandId: 'mode-missing-workspace',
+            type: 'set_interaction_mode',
+            sessionId: 'policy-a',
+            expectedRevision: 1,
+            mode: 'auto',
+          });
+          // This Session has an active Turn, so the stale revision still conflicts;
+          // the missing directory itself does not reject Runtime admission.
+          expect(missingWorkspacePolicy.status).toBe('conflict');
+          const trustPath = join(root, 'config/workspace-trust.jsonc');
+          const savedTrust = readFileSync(trustPath, 'utf8');
+          try {
+            writeFileSync(trustPath, JSON.stringify({ version: 1, records: {} }));
+            await expect(
+              connection.runtime.command({
+                schema: 'kite.runtime-command.v1',
+                commandId: 'mode-missing-untrusted',
+                type: 'set_interaction_mode',
+                sessionId: 'policy-a',
+                expectedRevision: 1,
+                mode: 'auto',
+              }),
+            ).rejects.toThrow('Runtime admission unavailable');
+          } finally {
+            writeFileSync(trustPath, savedTrust);
+          }
         } finally {
           renameSync(join(root, 'a-original'), join(root, 'a'));
         }
@@ -254,7 +274,7 @@ describe('KASD parent-owned App Server process', () => {
 
   test('opens application History without a project, valid model configuration, or Git', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-neutral-history-')));
-    for (const name of ['home', 'runtime', 'config']) mkdirSync(join(root, name));
+    for (const name of ['home', 'runtime', 'config']) mkdirSync(join(root, name), { mode: 0o700 });
     writeFileSync(join(root, 'config/kite-code.jsonc'), '{invalid model configuration');
     const connection = createAppServerProtocolConnection(
       createBunStdioChildRuntimeClientTransport({
@@ -303,6 +323,41 @@ describe('KASD parent-owned App Server process', () => {
     }
   }, 15_000);
 
+  test('reports historical data before creating a replacement Store through the real client', async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-history-source-')));
+    const home = join(root, 'home');
+    const profile = join(home, 'source-profiles', 'a'.repeat(32));
+    mkdirSync(profile, { recursive: true, mode: 0o700 });
+    const source = join(profile, 'kite-session.sqlite');
+    const original = Buffer.from('persisted historical source');
+    writeFileSync(source, original, { mode: 0o600 });
+    const client = createKiteAppServerClient({
+      executable: process.execPath,
+      argumentsPrefix: [
+        join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+      ],
+      buildId: 'history-source',
+      workspace: root,
+      runtimeRoot: home,
+      configRoot: home,
+      osHome: root,
+      cwd: '/',
+      environment: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      clientInfo: { name: 'history-source', version: '1', instanceId: 'history-source' },
+    });
+    try {
+      await expect(client.connect()).rejects.toMatchObject({
+        code: 'startup_failure',
+        diagnosticCode: 'store_history_reconciliation_required',
+      });
+      expect(existsSync(join(home, 'kite-session.sqlite'))).toBe(false);
+      expect(readFileSync(source)).toEqual(original);
+    } finally {
+      await client[Symbol.asyncDispose]();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   test('the same-build client composes Runtime, History and App Control over one child', async () => {
     const root = realpathSync.native(
       mkdtempSync(join(realpathSync.native(tmpdir()), 'kite-app-server-client-')),
@@ -311,7 +366,8 @@ describe('KASD parent-owned App Server process', () => {
     const configRoot = join(root, 'config');
     const osHome = join(root, 'home');
     const workspace = join(root, 'workspace');
-    for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+    for (const path of [runtimeRoot, configRoot, osHome, workspace])
+      mkdirSync(path, { mode: 0o700 });
     const client = createKiteAppServerClient({
       executable: process.execPath,
       argumentsPrefix: [
@@ -365,7 +421,8 @@ describe('KASD parent-owned App Server process', () => {
     const configRoot = join(root, 'config');
     const osHome = join(root, 'home');
     const workspace = join(root, 'workspace');
-    for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+    for (const path of [runtimeRoot, configRoot, osHome, workspace])
+      mkdirSync(path, { mode: 0o700 });
     const buildId = 'test-app-server-build';
     const entrypoint = join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts');
     const child = Bun.spawn([process.execPath, entrypoint, 'app-server', 'run-stdio'], {
@@ -417,7 +474,11 @@ describe('KASD parent-owned App Server process', () => {
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
-      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+      expect(exitCode).toBe(0);
+      expect(stderr.trim().split('\n').map(parseServiceStartupProgress)).toEqual([
+        { phase: 'inspecting' },
+        { phase: 'ready' },
+      ]);
       const frames = stdout
         .trim()
         .split('\n')
@@ -472,7 +533,8 @@ describe('KASD parent-owned App Server process', () => {
     const configRoot = join(root, 'config');
     const osHome = join(root, 'home');
     const workspace = join(root, 'workspace');
-    for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+    for (const path of [runtimeRoot, configRoot, osHome, workspace])
+      mkdirSync(path, { mode: 0o700 });
     const model = createMockModelServer();
     model.setResponses([{ delay: 10_000, message: { content: 'must-not-complete-late' } }]);
     writeAppServerConfig(configRoot, model.baseURL);
@@ -592,9 +654,13 @@ describe('KASD parent-owned App Server process', () => {
         child.exited,
         new Response(child.stderr).text(),
       ]);
-      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+      expect(exitCode).toBe(0);
+      expect(stderr.trim().split('\n').map(parseServiceStartupProgress)).toEqual([
+        { phase: 'inspecting' },
+        { phase: 'ready' },
+      ]);
 
-      const successor = createKiteSessionAppServerStorageComposition({
+      const successor = await createKiteSessionAppServerStorageComposition({
         databasePath: join(runtimeRoot, 'kite-session.sqlite'),
         hostInstanceId: 'successor-after-eof',
       });
@@ -628,7 +694,8 @@ describe('KASD parent-owned App Server process', () => {
     const configRoot = join(root, 'config');
     const osHome = join(root, 'home');
     const workspace = join(root, 'workspace');
-    for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+    for (const path of [runtimeRoot, configRoot, osHome, workspace])
+      mkdirSync(path, { mode: 0o700 });
     const model = createMockModelServer();
     model.setResponses([{ delay: 5_000, message: { content: 'late-response' } }]);
     writeAppServerConfig(configRoot, model.baseURL);
@@ -695,7 +762,7 @@ describe('KASD parent-owned App Server process', () => {
       await child.exited;
       await Bun.sleep(650);
 
-      const successor = createKiteSessionAppServerStorageComposition({
+      const successor = await createKiteSessionAppServerStorageComposition({
         databasePath: join(runtimeRoot, 'kite-session.sqlite'),
         hostInstanceId: 'successor-after-sigkill',
       });
@@ -781,7 +848,8 @@ describe('KASD parent-owned App Server process', () => {
       const configRoot = join(root, 'config');
       const osHome = join(root, 'home');
       const workspace = join(root, 'workspace');
-      for (const path of [runtimeRoot, configRoot, osHome, workspace]) mkdirSync(path);
+      for (const path of [runtimeRoot, configRoot, osHome, workspace])
+        mkdirSync(path, { mode: 0o700 });
       const shellPidPath = join(root, 'shell.pid');
       const longChild = join(import.meta.dir, '../fixtures/long-running-child.ts');
       const model = createMockModelServer();
@@ -914,7 +982,7 @@ describe('KASD parent-owned App Server process', () => {
         await eventually(() => !isRunningPid(shellPid!), 1_000);
         await Bun.sleep(650);
 
-        const successor = createKiteSessionAppServerStorageComposition({
+        const successor = await createKiteSessionAppServerStorageComposition({
           databasePath: join(runtimeRoot, 'kite-session.sqlite'),
           hostInstanceId: 'successor-after-child-crash',
           executionLeaseMs: 600,

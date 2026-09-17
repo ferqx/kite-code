@@ -1,5 +1,6 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "shadcn/tailwind.css";
 @import "./typeset.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";

@@ -174,7 +174,6 @@ export {
   canonicalExistingPath,
   discoverRuntimeReadOnlyRoots,
   generateSandboxProfile,
-  type SandboxGitAccess,
   type SandboxProfileOptions,
 } from './profile';
 export {

@@ -52,7 +52,6 @@ export interface RuntimeExecutorDependencies {
   /** App-owned wall clock used for durable State effect facts; tests may inject it. */
   now?: () => string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   /** Host-owned immutable Runtime SPI registry execution port. */
@@ -115,7 +114,6 @@ export function resolveRuntimeContextProjectionEnvironment(
     config: dependencies.config,
     model: dependencies.model,
     shellExecutor: dependencies.shellExecutor,
-    gitBroker: dependencies.gitBroker,
     mcpManager: dependencies.mcpManager,
     skills: dependencies.skills,
     skillOptions: dependencies.skillOptions,

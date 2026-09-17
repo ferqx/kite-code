@@ -448,6 +448,25 @@ describe('Runtime Protocol', () => {
       parentToolCallId: 'task-call-1',
       concurrencyGroupId: 'subagent-batch:tool-1',
     });
+    for (const status of ['creating', 'running'] as const) {
+      const event = {
+        type: 'subagent.started' as const,
+        subagentId: 'subagent-1',
+        role: 'explore' as const,
+        name: 'Inspect the runtime',
+        status,
+      };
+      expect(mapRuntimeClientEventToProtocol(event)).toEqual(event);
+    }
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
+        type: 'subagent.started',
+        subagentId: 'subagent-1',
+        role: 'explore',
+        name: 'Inspect the runtime',
+        status: 'waiting',
+      }).success,
+    ).toBeFalse();
     expect(
       RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
         type: 'subagent.started',
@@ -489,6 +508,23 @@ describe('Runtime Protocol', () => {
       durationMs: 9_000,
       diagnostic: { code: 'model_step_failed', stage: 'model_step' },
     });
+    for (const status of ['failed', 'interrupted', 'cancelled'] as const) {
+      const event = {
+        type: 'subagent.failed' as const,
+        subagentId: 'subagent-1',
+        summary: 'Inspection ended.',
+        status,
+      };
+      expect(mapRuntimeClientEventToProtocol(event)).toEqual(event);
+    }
+    expect(
+      RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse({
+        type: 'subagent.failed',
+        subagentId: 'subagent-1',
+        summary: 'Inspection ended.',
+        status: 'completed',
+      }).success,
+    ).toBeFalse();
     expect(
       mapRuntimeClientEventToProtocol({
         type: 'tool.queued',
@@ -954,7 +990,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '08154054:7d3b7c4d';
+    const expectedDigest = 'e4eaaa00:af56440b';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

@@ -21,19 +21,46 @@ export function projectEventWithIdentity(
   identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
   if (event.type === 'turn.terminal' || event.type === 'run.terminal') {
-    return messages.map((message) =>
-      message.role === 'thinking' &&
-      !message.settled &&
-      (event.type !== 'turn.terminal' || !message.turnId || message.turnId === event.turnId)
-        ? {
-            ...message,
-            settled: true,
-            ...(message.thinkingStartedAt !== undefined && identity.observedAt !== undefined
-              ? { thinkingEndedAt: identity.observedAt }
-              : {}),
-          }
-        : message,
-    );
+    let finalReplyIndex = -1;
+    if (event.type === 'turn.terminal' && event.status === 'completed') {
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index]!;
+        if (message.role === 'assistant' && message.turnId === event.turnId && message.text)
+          finalReplyIndex = index;
+      }
+      if (
+        finalReplyIndex >= 0 &&
+        messages
+          .slice(finalReplyIndex + 1)
+          .some((message) => message.role === 'tool' && message.turnId === event.turnId)
+      )
+        finalReplyIndex = -1;
+    }
+    return messages.map((message, index) => {
+      if (
+        message.role === 'thinking' &&
+        !message.settled &&
+        (event.type !== 'turn.terminal' || !message.turnId || message.turnId === event.turnId)
+      )
+        return {
+          ...message,
+          settled: true,
+          ...(message.thinkingStartedAt !== undefined && identity.observedAt !== undefined
+            ? { thinkingEndedAt: identity.observedAt }
+            : {}),
+        };
+      if (
+        event.type === 'turn.terminal' &&
+        message.role === 'assistant' &&
+        message.turnId === event.turnId
+      )
+        return {
+          ...message,
+          ...(event.status === 'completed' ? { settled: true } : {}),
+          finalReply: event.status === 'completed' && index === finalReplyIndex,
+        };
+      return message;
+    });
   }
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;
@@ -191,7 +218,7 @@ export function projectEventWithIdentity(
         text: '',
         ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
         settled: false,
-        status: 'running',
+        status: event.status ?? 'running',
       };
       break;
     case 'subagent.phase':
@@ -201,7 +228,23 @@ export function projectEventWithIdentity(
         text: '',
         parentToolCallId: event.parentToolCallId,
         settled: false,
-        status: event.status === 'suspended' ? 'waiting' : 'running',
+        status:
+          event.approvalState === 'auto_reviewing'
+            ? 'auto_reviewing'
+            : event.status === 'suspended'
+              ? 'waiting'
+              : 'running',
+      };
+      break;
+    case 'subagent.review':
+      if (event.status === 'rejected' || event.status === 'failed') return messages;
+      next = {
+        id: `subagent:${event.subagentId}`,
+        role: 'subagent',
+        text: '',
+        parentToolCallId: event.parentToolCallId,
+        settled: false,
+        status: event.status === 'reviewing' ? 'auto_reviewing' : 'waiting',
       };
       break;
     case 'subagent.step': {
@@ -209,19 +252,25 @@ export function projectEventWithIdentity(
       const previous = messages.find((message) => message.id === id);
       if (previous?.settled) return messages;
       const steps = previous?.steps ?? [];
+      const existing = steps.find((item) => item.id === event.stepId);
       const step = {
         id: event.stepId,
         toolCallId: event.toolCallId,
-        text: event.summary || event.displayLabel || event.toolName,
+        toolName: event.toolName,
+        text: event.displayLabel || event.toolName,
+        ...((event.arguments ?? existing?.arguments)
+          ? { arguments: event.arguments ?? existing?.arguments }
+          : {}),
+        ...(event.summary ? { summary: event.summary } : {}),
         status: event.status,
       };
-      const existing = steps.find((item) => item.id === step.id);
       if (existing && existing.status !== 'started' && step.status === 'started') return messages;
       next = {
         id,
         role: 'subagent',
         text: previous?.text ?? '',
         settled: false,
+        ...(event.status === 'started' ? { status: 'running' as const } : {}),
         steps: existing
           ? steps.map((item) => (item.id === step.id ? step : item))
           : [...steps, step],
@@ -235,7 +284,7 @@ export function projectEventWithIdentity(
         role: 'subagent',
         text: event.summary,
         settled: true,
-        status: event.type === 'subagent.completed' ? 'completed' : 'failed',
+        status: event.type === 'subagent.completed' ? 'completed' : (event.status ?? 'failed'),
       };
       break;
     case 'interaction.available':

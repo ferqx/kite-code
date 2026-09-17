@@ -1,6 +1,5 @@
 import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite-ai/builtin-runtime/filesystem';
 import {
-  type BuiltinGitExecutionMechanism,
   type BuiltinMechanismRecord,
   type BuiltinShellExecutionResult,
   isReadOnlyShellCommand,
@@ -10,7 +9,6 @@ import type {
   CapabilityExecutionMechanism,
   CapabilityPolicyEffects,
   CapabilitySandboxScopeFact,
-  GitInspectRequest,
   RuntimeJsonValue,
   WorkspaceFilesystemOperation,
 } from '#runtime-spi';
@@ -46,7 +44,6 @@ export interface AppBuiltinPreassembledMechanismResolverInput {
   readonly policyEffects: Readonly<CapabilityPolicyEffects>;
   readonly signal: AbortSignal;
   readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcher>;
-  readonly gitBroker?: Readonly<BuiltinGitExecutionMechanism>;
   readonly shellExecutor?: Readonly<AppBuiltinShellExecutor>;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** One exact wrapper for web, MCP, Skill, or planning. */
@@ -96,7 +93,7 @@ function resolveBuiltinMechanisms(
     case 'filesystem':
       return filesystemMechanism(input);
     case 'git':
-      return gitMechanism(input);
+      return fail('unsupported_mechanism');
     case 'shell':
       return shellMechanism(input);
     case 'web':
@@ -170,23 +167,6 @@ function scopeFilesystemOperation(
   return Object.freeze({ ...operation, pathScope });
 }
 
-function gitMechanism(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
-): BuiltinMechanismRecord {
-  if (input.preassembledMechanism !== undefined || !input.gitBroker) {
-    fail('mechanism_missing');
-  }
-  const broker = input.gitBroker;
-  const mechanism = Object.freeze({
-    inspect: (request: GitInspectRequest, signal?: AbortSignal) =>
-      broker.inspect(request, signal ?? input.signal),
-  });
-  return mergeBuiltinMechanismBundle({
-    executionMechanism: 'git',
-    prepared: Object.freeze({ git: mechanism }),
-  });
-}
-
 function shellMechanism(
   input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
 ): BuiltinMechanismRecord {
@@ -196,7 +176,10 @@ function shellMechanism(
   const command = recordString(input.canonicalArguments, 'command');
   const sandboxScope = input.sandboxScope;
   if (!sandboxScope) fail('invalid_facts');
-  const readOnly = sandboxScope.filesystem === 'read_only' || isReadOnlyShellCommand(command);
+  // Read-only command proof cannot narrow an approved full filesystem scope.
+  const readOnly =
+    sandboxScope.filesystem !== 'full_access' &&
+    (sandboxScope.filesystem === 'read_only' || isReadOnlyShellCommand(command));
   // Authorization and scope remain separate: a durable grant permits the
   // invocation, while compiled effects select the minimum sandbox lane.
   const expandedAuthority = input.grantUsed !== 'none' || input.interactionMode === 'full';

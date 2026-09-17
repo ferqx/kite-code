@@ -77,6 +77,8 @@ export const ossCandidateManifestSchema = z
         remoteTelemetry: z.literal('off'),
       })
       .strict(),
+    /** Current Service and installer participate in the Store migration selection fence. */
+    storeMaintenanceContract: z.literal('managed-release-selection-v1').optional(),
     /** Explicitly optional for archive verification; installation requires this v1.1 shape. */
     releaseSlots: releaseSlotsSchema.optional(),
     files: z.array(releaseFileSchema).min(5).max(32),
@@ -174,6 +176,10 @@ export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>>
   '@kite-ai/kite-local-runtime/config': 'packages/kite-local-runtime/src/config/index.ts',
   '@kite-ai/kite-local-runtime/coordinator': 'packages/kite-local-runtime/src/coordinator/index.ts',
   '@kite-ai/kite-local-runtime/service': 'packages/kite-local-runtime/src/service/index.ts',
+  '@kite-ai/kite-local-runtime/startup-diagnostic':
+    'packages/kite-local-runtime/src/service-startup-diagnostic.ts',
+  '@kite-ai/kite-local-runtime/desktop-manifest':
+    'packages/kite-local-runtime/src/paired-desktop-manifest.ts',
   '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
   '@kite-ai/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
   '@kite-ai/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
@@ -323,6 +329,7 @@ export async function buildOssCandidate(
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     },
+    storeMaintenanceContract: 'managed-release-selection-v1',
     releaseSlots: {
       cli: { entrypoint: `bin/kite${executableSuffix}`, identity: sha256(cliBytes) },
       tui: { entrypoint: `bin/kite-tui${executableSuffix}`, identity: sha256(tuiBytes) },

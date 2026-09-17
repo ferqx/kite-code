@@ -92,18 +92,23 @@ export async function reviewToolApproval(input: {
   request: PendingToolRequestView;
   context?: ReviewContext;
   timeoutMs?: number;
+  signal?: AbortSignal;
   parentReservationId?: string;
   parentInvocationId?: string;
 }): Promise<AutoReviewResult> {
   const baseTimeout = input.timeoutMs ?? 15_000;
   const effectiveTimeout = riskAdjustedTimeout(input.payload.risk, baseTimeout);
   const controller = new AbortController();
+  const onParentAbort = () => controller.abort(input.signal?.reason);
+  if (input.signal?.aborted) onParentAbort();
+  else input.signal?.addEventListener('abort', onParentAbort, { once: true });
   const timeoutId = setTimeout(
     () => controller.abort(new Error('auto review timed out')),
     effectiveTimeout,
   );
   let modelInvocationId: string | undefined;
   try {
+    if (controller.signal.aborted) throw controller.signal.reason;
     const messages = buildReviewPrompt(input.payload, input.request, input.context);
     if (!input.config || !input.model || !input.gateway || !input.persistence) {
       throw new Error('ModelInvocationGateway execution context is unavailable.');
@@ -118,6 +123,7 @@ export async function reviewToolApproval(input: {
       transport: 'generate',
     });
     const state = input.persistence.getState();
+    if (controller.signal.aborted) throw controller.signal.reason;
     const pending = await input.gateway.invoke({
       model: input.model,
       compiled,
@@ -142,6 +148,7 @@ export async function reviewToolApproval(input: {
     });
     modelInvocationId = pending.invocationId;
     const result = normalizedModelResponseToAIMessage(await pending.commit());
+    if (controller.signal.aborted) throw controller.signal.reason;
     const reviewResult = parseAutoReviewSuggestion(
       modelResponseText(result.content),
       input.payload.grantOptions,
@@ -175,6 +182,7 @@ export async function reviewToolApproval(input: {
     };
   } finally {
     clearTimeout(timeoutId);
+    input.signal?.removeEventListener('abort', onParentAbort);
   }
 }
 

@@ -1,13 +1,26 @@
-import type { RuntimeClientConnection, RuntimeClientTransport } from '@kite-ai/runtime-client';
 import {
+  type RuntimeClientConnection,
+  RuntimeClientStartupError,
+  type RuntimeClientTransport,
+} from '@kite-ai/runtime-client';
+import {
+  INITIALIZE_RESULT_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
   type RuntimeProtocolMessage,
   safeDecodeRuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
+import {
+  MAX_SERVICE_STARTUP_STDERR_BYTES,
+  parseServiceStartupDiagnostic,
+  parseServiceStartupProgress,
+  type ServiceStartupDiagnostic,
+  type ServiceStartupProgress,
+} from '../service-startup-diagnostic';
 
 const DEFAULT_SEND_DEADLINE_MS = 5_000;
 const DEFAULT_CLOSE_DEADLINE_MS = 5_000;
 const DEFAULT_MAX_QUEUED_MESSAGES = RUNTIME_PROTOCOL_LIMITS.maxOutboundMessages;
+const STARTUP_DIAGNOSTIC_WAIT_MS = 1_000;
 
 export type BunStdioChildTransportDiagnosticCode =
   | 'stdio_child_exited'
@@ -45,6 +58,11 @@ export interface BunStdioChildSpawnOptions {
 /** Injectable only for App-local reference consumers and isolated tests. */
 export type BunStdioChildSpawnFactory = (options: BunStdioChildSpawnOptions) => BunStdioChild;
 
+export interface BunStdioStartupSignals {
+  on(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
+  off(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
+}
+
 export interface BunStdioChildRuntimeClientTransportOptions extends BunStdioChildSpawnOptions {
   /** Defaults to Bun.spawn with pipe-only stdio. It never invokes a shell. */
   readonly spawn?: BunStdioChildSpawnFactory;
@@ -54,6 +72,9 @@ export interface BunStdioChildRuntimeClientTransportOptions extends BunStdioChil
   readonly maxQueuedMessages?: number;
   /** Receives only a fixed diagnostic code; stderr bytes are never exposed. */
   readonly onDiagnostic?: (code: BunStdioChildTransportDiagnosticCode) => void;
+  readonly onStartupProgress?: (progress: ServiceStartupProgress) => void;
+  /** Explicit parent signal source; active only until initialize or child exit. */
+  readonly startupSignals?: BunStdioStartupSignals;
 }
 
 /**
@@ -68,6 +89,8 @@ export class BunStdioChildRuntimeClientTransport implements RuntimeClientTranspo
   readonly #maxLineBytes: number;
   readonly #maxQueuedMessages: number;
   readonly #onDiagnostic: ((code: BunStdioChildTransportDiagnosticCode) => void) | undefined;
+  readonly #onStartupProgress: ((progress: ServiceStartupProgress) => void) | undefined;
+  readonly #startupSignals: BunStdioStartupSignals | undefined;
 
   constructor(options: BunStdioChildRuntimeClientTransportOptions) {
     assertSpawnOptions(options);
@@ -99,6 +122,8 @@ export class BunStdioChildRuntimeClientTransport implements RuntimeClientTranspo
       'maxQueuedMessages',
     );
     this.#onDiagnostic = options.onDiagnostic;
+    this.#onStartupProgress = options.onStartupProgress;
+    this.#startupSignals = options.startupSignals;
   }
 
   async connect(): Promise<RuntimeClientConnection> {
@@ -120,6 +145,8 @@ export class BunStdioChildRuntimeClientTransport implements RuntimeClientTranspo
       maxLineBytes: this.#maxLineBytes,
       maxQueuedMessages: this.#maxQueuedMessages,
       diagnose: (code) => this.#diagnose(code),
+      onStartupProgress: this.#onStartupProgress,
+      startupSignals: this.#startupSignals,
     });
   }
 
@@ -145,10 +172,19 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
   readonly #maxLineBytes: number;
   readonly #queue: BoundedMessageQueue;
   readonly #diagnose: (code: BunStdioChildTransportDiagnosticCode) => void;
+  readonly #onStartupProgress: ((progress: ServiceStartupProgress) => void) | undefined;
+  readonly #startupSignals: BunStdioStartupSignals | undefined;
+  readonly #onStartupSignal = () => {
+    void this.close().catch(() => undefined);
+  };
   readonly #stdoutDone: Promise<void>;
   readonly #stderrDone: Promise<void>;
   #writeTail: Promise<void> = Promise.resolve();
   #failure: Error | undefined;
+  #startupFailure?: Promise<void>;
+  #startupDiagnostic: ServiceStartupDiagnostic | undefined;
+  #initializeId: string | number | null = null;
+  #initialized = false;
   #closing = false;
   #closed = false;
   #closePromise: Promise<void> | undefined;
@@ -160,6 +196,8 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
     readonly maxLineBytes: number;
     readonly maxQueuedMessages: number;
     readonly diagnose: (code: BunStdioChildTransportDiagnosticCode) => void;
+    readonly onStartupProgress?: (progress: ServiceStartupProgress) => void;
+    readonly startupSignals?: BunStdioStartupSignals;
   }) {
     this.#child = options.child;
     this.#sendDeadlineMs = options.sendDeadlineMs;
@@ -167,29 +205,48 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
     this.#maxLineBytes = options.maxLineBytes;
     this.#queue = new BoundedMessageQueue(options.maxQueuedMessages);
     this.#diagnose = options.diagnose;
+    this.#onStartupProgress = options.onStartupProgress;
+    this.#startupSignals = options.startupSignals;
+    this.#startupSignals?.on('SIGINT', this.#onStartupSignal);
+    this.#startupSignals?.on('SIGTERM', this.#onStartupSignal);
     this.#stdoutDone = this.#consumeStdout();
     this.#stderrDone = this.#consumeStderr();
     void this.#observeExit();
   }
 
   send(message: RuntimeProtocolMessage): Promise<void> {
+    if (
+      'method' in message &&
+      message.method === 'initialize' &&
+      !this.#initialized &&
+      this.#failure
+    ) {
+      return this.#startupFailure ?? Promise.resolve();
+    }
     if (this.#failure || this.#closing || this.#closed) {
       return Promise.reject(this.#connectionError());
     }
     const decoded = safeDecodeRuntimeProtocolMessage(message);
     if (!decoded.success)
       return Promise.reject(new TypeError('Runtime stdio refused an invalid protocol message.'));
+    const initializing = 'method' in decoded.data && decoded.data.method === 'initialize';
     const bytes = new TextEncoder().encode(`${JSON.stringify(decoded.data)}\n`);
     if (bytes.byteLength - 1 > this.#maxLineBytes) {
       return Promise.reject(new TypeError('Runtime stdio refused an oversized protocol message.'));
     }
+    if (initializing && 'id' in decoded.data && typeof decoded.data.id === 'string')
+      this.#initializeId = decoded.data.id;
     const sending = this.#writeTail.then(async () => {
-      if (this.#failure || this.#closing || this.#closed) throw this.#connectionError();
+      if (this.#failure || this.#closing || this.#closed) {
+        if (initializing && this.#startupFailure) return this.#startupFailure;
+        throw this.#connectionError();
+      }
       try {
         await withDeadline(Promise.resolve(this.#child.stdin.write(bytes)), this.#sendDeadlineMs);
         await withDeadline(Promise.resolve(this.#child.stdin.flush()), this.#sendDeadlineMs);
       } catch {
         this.#failed('stdio_send_failure');
+        if (initializing && this.#startupFailure) return this.#startupFailure;
         throw this.#connectionError();
       }
     });
@@ -239,7 +296,10 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
         }
       }
       if (!this.#closed) {
-        this.#failed(length === 0 ? 'stdio_stdout_failure' : 'stdio_stdout_truncated_line');
+        this.#failed(
+          length === 0 ? 'stdio_stdout_failure' : 'stdio_stdout_truncated_line',
+          length === 0,
+        );
       }
     } catch {
       if (!this.#closed) this.#failed('stdio_stdout_failure');
@@ -272,6 +332,17 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
       this.#failed('stdio_stdout_invalid_protocol');
       return false;
     }
+    if (
+      this.#initializeId !== null &&
+      'id' in decoded.data &&
+      decoded.data.id === this.#initializeId &&
+      'result' in decoded.data &&
+      INITIALIZE_RESULT_SCHEMA_.safeParse(decoded.data.result).success
+    ) {
+      this.#initialized = true;
+      this.#startupDiagnostic = undefined;
+      this.#removeStartupSignals();
+    }
     if (!this.#queue.push(decoded.data)) {
       this.#failed('stdio_stdout_failure');
       return false;
@@ -281,15 +352,50 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
 
   async #consumeStderr(): Promise<void> {
     const reader = this.#child.stderr.getReader();
+    const line = new Uint8Array(MAX_SERVICE_STARTUP_STDERR_BYTES);
+    let length = 0;
+    let discard = false;
     try {
       while (true) {
         const item = await reader.read();
         if (item.done) return;
-        // Deliberately discard every diagnostic byte so the child cannot block
-        // on stderr and no secret/error body crosses the App boundary.
         if (!(item.value instanceof Uint8Array)) {
           if (!this.#closed) this.#diagnose('stdio_stderr_failure');
           return;
+        }
+        for (const byte of item.value) {
+          if (byte === 0x0a) {
+            if (!this.#initialized && !discard) {
+              try {
+                const payloadLength = length > 0 && line[length - 1] === 0x0d ? length - 1 : length;
+                const text = new TextDecoder('utf-8', { fatal: true }).decode(
+                  line.subarray(0, payloadLength),
+                );
+                const progress = parseServiceStartupProgress(text);
+                if (progress) {
+                  try {
+                    this.#onStartupProgress?.(progress);
+                  } catch {
+                    // UI callbacks cannot change transport lifecycle.
+                  }
+                } else {
+                  this.#startupDiagnostic =
+                    parseServiceStartupDiagnostic(text) ?? this.#startupDiagnostic;
+                }
+              } catch {
+                // Arbitrary or invalid UTF-8 stderr is never exposed.
+              }
+            }
+            length = 0;
+            discard = false;
+          } else if (!discard) {
+            if (length === line.length) {
+              length = 0;
+              discard = true;
+            } else {
+              line[length++] = byte;
+            }
+          }
         }
       }
     } catch {
@@ -309,19 +415,44 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
     } catch {
       // The fixed exit diagnostic intentionally does not expose process data.
     }
+    this.#removeStartupSignals();
     if (!this.#closed) this.#failed('stdio_child_exited');
   }
 
-  #failed(code: Exclude<BunStdioChildTransportDiagnosticCode, 'stdio_child_spawn_failure'>): void {
+  #failed(
+    code: Exclude<BunStdioChildTransportDiagnosticCode, 'stdio_child_spawn_failure'>,
+    startupEof = false,
+  ): void {
     if (this.#failure || this.#closed) return;
     this.#failure = connectionError();
     this.#diagnose(code);
-    this.#queue.fail(this.#failure);
+    if (
+      !this.#initialized &&
+      (code === 'stdio_child_exited' || code === 'stdio_send_failure' || startupEof)
+    ) {
+      this.#startupFailure = this.#settleStartupFailure();
+    } else {
+      this.#queue.fail(this.#failure);
+      void this.close();
+    }
+  }
+
+  async #settleStartupFailure(): Promise<void> {
+    await withDeadline(this.#child.exited, STARTUP_DIAGNOSTIC_WAIT_MS).catch(() => undefined);
+    await withDeadline(this.#stderrDone, STARTUP_DIAGNOSTIC_WAIT_MS).catch(() => undefined);
+    const diagnostic = this.#startupDiagnostic;
+    if (diagnostic) {
+      this.#failure = new RuntimeClientStartupError(diagnostic);
+    }
+    this.#queue.fail(this.#connectionError());
     void this.close();
   }
 
   async #closeOwnedChild(): Promise<void> {
     this.#closing = true;
+    // A startup child may be inside Store preparation. TERM asks it to settle
+    // publication before exiting; a deadline-based KILL would defeat that gate.
+    const closingBeforeInitialize = !this.#initialized;
     try {
       await withDeadline(this.#writeTail, this.#closeDeadlineMs);
     } catch {
@@ -335,10 +466,21 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
       this.#diagnose('stdio_stdin_close_failure');
     }
     try {
-      this.#child.kill(process.platform === 'win32' ? 9 : 'SIGTERM');
+      this.#child.kill(
+        closingBeforeInitialize ? 'SIGTERM' : process.platform === 'win32' ? 9 : 'SIGTERM',
+      );
     } catch {
       // The child may already have exited. Its handles are still awaited below.
     }
+    if (closingBeforeInitialize) {
+      // Do not report close as complete until the child actually exits. In this
+      // phase there is no safe deadline after which to force publication's end.
+      await this.#child.exited;
+      this.#removeStartupSignals();
+      await Promise.all([this.#stdoutDone, this.#stderrDone]);
+      return;
+    }
+    this.#removeStartupSignals();
     let handlesClosed = false;
     try {
       await withDeadline(
@@ -370,6 +512,11 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
 
   #connectionError(): Error {
     return this.#failure ?? connectionError();
+  }
+
+  #removeStartupSignals(): void {
+    this.#startupSignals?.off('SIGINT', this.#onStartupSignal);
+    this.#startupSignals?.off('SIGTERM', this.#onStartupSignal);
   }
 }
 

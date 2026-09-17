@@ -11,10 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import {
-  resolveRegisteredGitMetadataReadOnlyRoots,
-  resolveWorkspaceGitMetadataReadOnlyRoots,
-} from '../../src/git';
+import { resolveWorkspaceGitMetadataReadOnlyRoots } from '../../src/git';
 import { generateBwrapArgs, generateSandboxProfile } from '../../src/sandbox';
 
 function git(workspace: string, ...args: string[]): string {
@@ -51,9 +48,14 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
     try {
       git(primary, 'worktree', 'add', '--quiet', '-b', 'linked-sandbox-test', linked);
       const commonDir = realpathSync.native(join(primary, '.git'));
-      const roots = resolveRegisteredGitMetadataReadOnlyRoots(linked);
+      const roots = resolveWorkspaceGitMetadataReadOnlyRoots(linked);
       expect(roots).toEqual([commonDir]);
       expect(resolveWorkspaceGitMetadataReadOnlyRoots(linked)).toEqual([commonDir]);
+
+      const deniedProfile = generateSandboxProfile(linked);
+      expect(deniedProfile).not.toContain(`(subpath "${commonDir}")`);
+      const deniedArgs = generateBwrapArgs(linked);
+      expect(deniedArgs).not.toEqual(expect.arrayContaining(['--ro-bind', commonDir, commonDir]));
 
       const profile = generateSandboxProfile(linked, { runtimeReadOnlyRoots: roots });
       expect(profile).toContain(`(subpath "${commonDir}")`);
@@ -77,7 +79,7 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
     }
   });
 
-  test('unregistered external metadata gets no broker authority but remains discoverable for user approval', () => {
+  test('unregistered external metadata is only discovered for a separate grant decision', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-linked-sandbox-hostile-'));
     const external = mkdtempSync(join(tmpdir(), 'kite-linked-sandbox-private-'));
     try {
@@ -85,14 +87,12 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
       writeFileSync(join(external, 'worktrees', 'fake', 'commondir'), '../..\n');
       writeFileSync(join(external, 'worktrees', 'fake', 'gitdir'), join(workspace, '.git'));
       writeFileSync(join(workspace, '.git'), `gitdir: ${join(external, 'worktrees', 'fake')}\n`);
-      expect(resolveRegisteredGitMetadataReadOnlyRoots(workspace)).toEqual([]);
       expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace)).toEqual([
         realpathSync.native(external),
       ]);
 
       rmSync(join(workspace, '.git'));
       symlinkSync(join(external, 'worktrees', 'fake'), join(workspace, '.git'));
-      expect(resolveRegisteredGitMetadataReadOnlyRoots(workspace)).toEqual([]);
       expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace)).toEqual([
         realpathSync.native(join(external, 'worktrees', 'fake')),
       ]);
@@ -106,7 +106,7 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
     }
   });
 
-  test('a broken reciprocal backlink grants nothing', () => {
+  test('a broken reciprocal backlink does not itself grant sandbox access', () => {
     const primary = realRepository();
     const linked = mkdtempSync(join(tmpdir(), 'kite-linked-sandbox-broken-'));
     rmSync(linked, { recursive: true, force: true });
@@ -115,7 +115,8 @@ describe.skipIf(process.platform === 'win32')('linked worktree sandbox metadata 
       const gitDirLine = readFileSync(join(linked, '.git'), 'utf8').trim();
       const gitDir = realpathSync.native(gitDirLine.slice('gitdir:'.length).trim());
       writeFileSync(join(gitDir, 'gitdir'), join(dirname(linked), 'different', '.git'));
-      expect(resolveRegisteredGitMetadataReadOnlyRoots(linked)).toEqual([]);
+      const commonDir = realpathSync.native(join(primary, '.git'));
+      expect(generateSandboxProfile(linked)).not.toContain(`(subpath "${commonDir}")`);
     } finally {
       rmSync(linked, { recursive: true, force: true });
       rmSync(primary, { recursive: true, force: true });

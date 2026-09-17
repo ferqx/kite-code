@@ -210,7 +210,6 @@
         "apps/kite-service/src/app-control/**",
         "apps/kite-service/src/config/**",
         "apps/kite-service/src/coordinator/**",
-        "apps/kite-service/src/git/**",
         "apps/kite-service/src/logs/**",
         "apps/kite-service/src/observability/**",
         "apps/kite-service/src/release/**",

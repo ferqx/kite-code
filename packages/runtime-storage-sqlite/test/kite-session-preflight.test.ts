@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,6 +19,7 @@ describe('Session Store read-only upgrade preflight', () => {
       database.run('CREATE TABLE unsupported_format (value TEXT)');
       database.run("INSERT INTO unsupported_format VALUES ('preserve')");
       database.close();
+      if (process.platform !== 'win32') chmodSync(path, 0o600);
       const before = readFileSync(path);
       expect(() => validateKiteSessionStoreDatabase(path)).toThrow('incompatible');
       expect(() => openKiteSessionStoreDatabase(path)).toThrow('incompatible');

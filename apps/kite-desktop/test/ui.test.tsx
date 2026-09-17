@@ -75,6 +75,17 @@ function session(id: string, name = id): RuntimeSessionProjection {
 }
 
 class UiClient extends DesktopClient {
+  startupPhase:
+    | 'inspecting'
+    | 'acquiring_maintenance'
+    | 'waiting_for_store'
+    | 'preparing'
+    | 'publishing'
+    | 'ready'
+    | null = null;
+  startupMessage: string | null = null;
+  diagnosticAvailable = false;
+  diagnosticSaves = 0;
   view: DesktopView;
   listeners = new Set<() => void>();
   selectedIds: string[] = [];
@@ -90,6 +101,17 @@ class UiClient extends DesktopClient {
   created = 0;
   override async refreshProjects() {}
   override async restoreWorkspace() {}
+  override async readStartupStatus() {
+    return {
+      phase: this.startupPhase,
+      message: this.startupMessage,
+      diagnosticAvailable: this.diagnosticAvailable,
+    };
+  }
+  override async saveStartupDiagnostic() {
+    this.diagnosticSaves++;
+    return true;
+  }
   override async refreshDirectory() {}
   override async prepareNewConversation() {}
   override async checkProject() {}
@@ -332,6 +354,38 @@ test('startup hides the main page until preparation settles and does not return 
   expect(input().value).toBe('保留草稿');
 });
 
+test('startup displays the validated preparation phase without offering unsafe cancellation', async () => {
+  const client = new UiClient();
+  client.startupPhase = 'waiting_for_store';
+  client.startupMessage =
+    '会话存储正由现有客户端或其他整理进程使用，正在自动重试；可以请求退出，超时后请按提示重试。';
+  client.restoreWorkspace = () => new Promise<void>(() => undefined);
+  await render(<App client={client} />);
+  await act(() => Bun.sleep(250));
+  const startup = document.querySelector('[aria-label="kite 启动页"]');
+  expect(startup?.textContent).toContain('正在自动重试');
+  expect(startup?.textContent).toContain('超时后请按提示重试');
+  client.startupPhase = 'publishing';
+  client.startupMessage = '正在提交并复核会话数据，请等待完成后退出；意外中断会在下次启动时接续。';
+  await act(() => Bun.sleep(250));
+  expect(startup?.textContent).toContain('正在提交并复核会话数据');
+  expect(startup?.textContent).toContain('意外中断会在下次启动时接续');
+  expect(startup?.textContent).not.toContain('取消整理');
+});
+
+test('failed startup offers native diagnostic save only when a validated report exists', async () => {
+  const client = new UiClient();
+  client.diagnosticAvailable = true;
+  client.restoreWorkspace = async () => {
+    throw new Error('STORE_CORRUPT');
+  };
+  await render(<App client={client} />);
+  await act(() => Bun.sleep(250));
+  expect(document.body.textContent).toContain('保存诊断');
+  await click(button('保存诊断'));
+  expect(client.diagnosticSaves).toBe(1);
+});
+
 test('composer selects a configured model and changes the current session permission', async () => {
   const client = new UiClient();
   await render(<App client={client} />);
@@ -460,7 +514,8 @@ test('an unknown permission receipt stays bound to the created conversation', as
   expect(client.view.selected).toBe('created-1');
   expect(input().value).toBe('复用已创建会话');
   expect(document.body.textContent).not.toContain('发送结果待确认');
-  await click(button('确定'));
+  await act(() => Bun.sleep(20));
+  await click(button('关闭通知'));
   await click(button('发送'));
   expect(client.created).toBe(1);
   expect(attempts).toBe(2);
@@ -485,17 +540,28 @@ test('startup failure offers a retry and accepts an empty directory without crea
   expect(client.sent).toEqual([]);
 });
 
-test('workspace and repository failures use a confirmation alert instead of page content', async () => {
+test('operation failures use a typed non-modal toast without taking composer focus', async () => {
   const client = new UiClient();
   await render(<App client={client} />);
+  input().focus();
+  await write(input(), '未发送草稿');
   await act(() => client.update({ commandError: 'Git 仓库无法读取，请检查仓库后重试。' }));
   await act(() => Bun.sleep(0));
   expect(client.view.commandError).toBe('Git 仓库无法读取，请检查仓库后重试。');
-  const alert = document.querySelector('[role="alertdialog"]');
+  await act(() => Bun.sleep(20));
+  const alert = document.querySelector('[data-sonner-toast]');
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(alert?.textContent).toContain('错误 · 操作未完成');
+  expect(alert?.closest('main')).not.toBeNull();
+  expect(document.activeElement).toBe(input());
+  expect(input().value).toBe('未发送草稿');
   expect(alert?.textContent).toContain('Git 仓库无法读取，请检查仓库后重试。');
   expect(document.querySelector('.notice.error')).toBeNull();
-  await click(button('确定'));
+  await act(() => Bun.sleep(20));
+  await click(button('关闭通知'));
   expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  await act(() => Bun.sleep(250));
+  expect(client.view.commandError).toBeUndefined();
   expect(document.body.textContent).not.toContain('Git 仓库无法读取');
 });
 
@@ -787,7 +853,8 @@ test('unknown create receipt binds recovery to the generated session without cre
   );
   expect(input().value).toBe('保持同一个会话');
   expect(button('发送').disabled).toBe(true);
-  await click(button('确定'));
+  await act(() => Bun.sleep(20));
+  await click(button('关闭通知'));
   expect(client.selectedIds.at(-1)).toBe('created-1');
   expect(client.created).toBe(1);
   expect(button('发送').disabled).toBe(false);
@@ -1251,6 +1318,68 @@ test('missing local directories mute the space name without blocking an already 
   expect(client.sent).toEqual(['继续讨论']);
 });
 
+test('historical conversation sends without a registered or existing local workspace', async () => {
+  const client = new UiClient();
+  const originalSession = client.view.selected;
+  client.view.projects = [];
+  client.view.workspace = '/another-project';
+  client.view.trust = undefined;
+  client.view.directory = client.view.sessions.map((entry) => ({
+    ...entry,
+    workspace: undefined,
+  }));
+  client.checkProject = async () => {
+    throw new Error('conversation must not inspect the deleted directory');
+  };
+  client.activateProject = async () => {
+    throw new Error('conversation must not activate another execution workspace');
+  };
+  await render(<App client={client} />);
+  await write(input(), '继续原会话，目录已经删除');
+  expect(button('发送').disabled).toBe(false);
+  await key(input(), 'Enter');
+  expect(client.sent).toEqual(['继续原会话，目录已经删除']);
+  expect(client.sentTargets).toEqual([originalSession]);
+  expect(client.created).toBe(0);
+  expect(client.view.workspace).toBe('/another-project');
+});
+
+test('a historical draft survives local project registration changes', async () => {
+  const client = new UiClient();
+  client.view.directory = client.view.sessions.map((entry) => ({ ...entry, workspace: undefined }));
+  client.view.projects = [];
+  client.view.workspace = '/another';
+  client.view.trust = undefined;
+  await render(<App client={client} />);
+  await write(input(), '保留原会话草稿');
+  await act(() =>
+    client.update({
+      projects: [{ path: '/project', lastOpenedAt: 1 }],
+      directory: client.view.sessions.map((entry) => ({ ...entry, workspace: '/project' })),
+    }),
+  );
+  expect(input().value).toBe('保留原会话草稿');
+  await act(() =>
+    client.update({
+      projects: [],
+      directory: client.view.sessions.map((entry) => ({ ...entry, workspace: undefined })),
+    }),
+  );
+  expect(input().value).toBe('保留原会话草稿');
+});
+
+test('an old session without a saved model does not inherit another project model on send', async () => {
+  const client = new UiClient();
+  client.view.projection = { ...client.view.projection!, model: undefined };
+  client.view.workspace = '/another';
+  client.view.trust = undefined;
+  await render(<App client={client} />);
+  await write(input(), '由原会话选择模型');
+  await key(input(), 'Enter');
+  expect(client.sentModels).toEqual([undefined]);
+  expect(client.created).toBe(0);
+});
+
 test('a reloaded page automatically restores its selected conversation without cleanup or sending', async () => {
   const first = new UiClient();
   await render(<App client={first} />);
@@ -1363,8 +1492,10 @@ test('empty, IME, Shift+Enter and repeated submit cannot issue unintended turns;
   await act(() => reject(new Error('发送失败')));
   await act(() => Bun.sleep(0));
   expect(input().value).toBe('中文输入');
-  expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('发送失败');
-  await click(button('确定'));
+  await act(() => Bun.sleep(20));
+  expect(document.querySelector('[data-sonner-toast]')?.textContent).toContain('发送失败');
+  await act(() => Bun.sleep(20));
+  await click(button('关闭通知'));
   client.sendResult = async () => {};
   await click(button('发送'));
   expect(input().value).toBe('');
@@ -1488,6 +1619,7 @@ test('question and truncated plan stay above the composer without enabling inval
   expect(document.querySelector('.interaction-area [aria-label="补充问题"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="回答问题"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('使用哪个方案？');
   await act(() =>
     client.update({
       projection: {
@@ -1952,6 +2084,11 @@ test('explicit recovery inspection preserves draft and does not submit a task', 
   await render(<App client={client} />);
   await write(input(), '等待恢复后的草稿');
   await act(() => client.update({ error: '旧执行清理尚未确认', recoverySessionId: 'session-a' }));
+  await act(() => Bun.sleep(20));
+  expect(document.querySelector('[data-sonner-toast]')?.textContent).toContain(
+    '警告 · 会话需要处理',
+  );
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   const recovery = [...document.querySelectorAll('button')].find(
     (button) => button.textContent === '检查恢复',
   );

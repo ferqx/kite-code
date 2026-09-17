@@ -3,13 +3,18 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
+import {
+  createRuntimeStoredCommandReceipt,
+  encodeRuntimeRunTerminal,
+} from '@kite-ai/runtime-host/storage';
 import type { Subprocess } from 'bun';
 import {
   KiteSessionRuntimeStorageError,
   openKiteSessionRuntimeStorage,
   openKiteSessionStoreDatabase,
 } from '../../src';
+import { KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA } from '../../src/kite-session-execution-authority';
+import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { checksum } from '../../src/preflight';
 
 type Event = { readonly type: string };
@@ -594,6 +599,191 @@ describe('multi-connection Kite Session Runtime storage', () => {
     }
   });
 
+  test('leases a fenced recovery generation without replaying an old prepared effect', () => {
+    const fixture = createFixture(['session-1']);
+    let now = 100;
+    const oldOwner = openOwner(fixture.path, { now: () => now });
+    const first = oldOwner.authority.acquire({
+      sessionId: 'session-1',
+      expectedRevision: 0,
+      hostInstanceId: 'host-old',
+      clientId: 'client-old',
+      connectionGeneration: 1,
+      leaseUntilMs: 200,
+    });
+    if (first.status !== 'acquired') throw new Error('Expected first execution authority.');
+    const oldHandle = oldOwner.bindExecution(first.authority);
+    oldOwner.runWithExecution(oldHandle, () => {
+      expect(
+        oldOwner.storage.effects.tryAcquireEffectLease('session-1', 'effect-old', 'owner-old', 190),
+      ).toBe(true);
+    });
+    const successor = openOwner(fixture.path, { now: () => now });
+    const recoveryRequest = {
+      sessionId: 'session-1',
+      expectedAuthorityRevision: first.authority.revision,
+      hostInstanceId: 'host-new',
+      clientId: 'client-new',
+      connectionGeneration: 1,
+      leaseUntilMs: 300,
+    };
+    try {
+      expect(() => successor.beginRecoveryExecution(recoveryRequest)).toThrow();
+      expect(successor.authority.read('session-1')).toEqual(first.authority);
+      now = 201;
+      const fenced = successor.authority.acquire({
+        sessionId: 'session-1',
+        expectedRevision: first.authority.revision,
+        hostInstanceId: 'host-new',
+        clientId: 'client-new',
+        connectionGeneration: 1,
+        leaseUntilMs: 300,
+      });
+      if (fenced.status !== 'recovery_required') throw new Error('Expected expired fence.');
+      const recovered = successor.beginRecoveryExecution({
+        ...recoveryRequest,
+        expectedAuthorityRevision: fenced.authority.revision,
+      });
+      expect(recovered).toMatchObject({
+        status: 'active',
+        controllerGeneration: fenced.authority.controllerGeneration + 1,
+        cleanupConfirmed: false,
+        hostInstanceId: 'host-new',
+      });
+      expect(successor.recovery.inspect('session-1')).toMatchObject({
+        pendingEffects: [],
+        unknownEffects: [{ effectId: 'effect-old', state: 'unknown', outcome: 'unknown' }],
+      });
+      expect(() =>
+        successor.beginRecoveryExecution({
+          ...recoveryRequest,
+          expectedAuthorityRevision: fenced.authority.revision,
+        }),
+      ).toThrow();
+      expect(successor.authority.read('session-1')).toEqual(recovered);
+      expect(() =>
+        oldOwner.runWithExecution(oldHandle, () =>
+          oldOwner.storage.effects.tryAcquireEffectLease(
+            'session-1',
+            'effect-late',
+            'owner-old',
+            250,
+          ),
+        ),
+      ).toThrow();
+      const recoveryHandle = successor.bindExecution(recovered);
+      successor.runWithExecution(recoveryHandle, () => {
+        expect(successor.storage.sessions.loadSnapshot<State>('session-1')).not.toBeNull();
+        expect(() =>
+          successor.storage.effects.tryAcquireEffectLease(
+            'session-1',
+            'effect-forbidden',
+            'owner-new',
+            290,
+          ),
+        ).toThrow('Recovery execution cannot dispatch a new effect.');
+        expect(() =>
+          successor.storage.transactions.commitAttemptStart({
+            sessionId: 'session-1',
+            events: [],
+            snapshot: state(0, 'recovery-0'),
+          }),
+        ).toThrow('Recovery execution cannot start a new attempt.');
+      });
+      expect(successor.recovery.inspect('session-1').pendingEffects).toEqual([]);
+      const released = successor.authority.release({
+        sessionId: 'session-1',
+        expectedRevision: recovered.revision,
+        controllerGeneration: recovered.controllerGeneration,
+        hostInstanceId: 'host-new',
+        cleanupConfirmed: false,
+      });
+      expect(released).toMatchObject({ status: 'recovery_required', cleanupConfirmed: false });
+      expect(successor.recovery.inspect('session-1').unknownEffects).toHaveLength(1);
+    } finally {
+      successor.close();
+      oldOwner.close();
+      fixture.remove();
+    }
+  });
+
+  test('a legacy recovery fence with no previous execution generation can be claimed', () => {
+    const fixture = createFixture(['session-1']);
+    const seed = openOwner(fixture.path);
+    const initial = seed.authority.read('session-1');
+    seed.close();
+    const database = openKiteSessionStoreDatabase(fixture.path);
+    database.query('INSERT INTO kite_meta(key, value) VALUES (?, ?)').run(
+      'session_execution/session-1',
+      JSON.stringify({
+        ...initial,
+        schema: KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
+        status: 'recovery_required',
+        controllerGeneration: 1,
+        cleanupConfirmed: false,
+        revision: 1,
+      }),
+    );
+    database.close(false);
+    const owner = openOwner(fixture.path);
+    try {
+      const recovery = owner.beginRecoveryExecution({
+        sessionId: 'session-1',
+        expectedAuthorityRevision: 1,
+        hostInstanceId: 'host-new',
+        clientId: 'client-new',
+        connectionGeneration: 1,
+        leaseUntilMs: Date.now() + 30_000,
+      });
+      expect(recovery).toMatchObject({
+        status: 'active',
+        controllerGeneration: 2,
+        cleanupConfirmed: false,
+      });
+      const recoveryHandle = owner.bindExecution(recovery);
+      owner.runWithExecution(recoveryHandle, () => {
+        expect(() =>
+          owner.storage.effects.tryAcquireEffectLease(
+            'session-1',
+            'effect-forbidden',
+            'owner-new',
+            Date.now() + 1_000,
+          ),
+        ).toThrow('Recovery execution cannot dispatch a new effect.');
+      });
+      const idle = owner.authority.release({
+        sessionId: 'session-1',
+        expectedRevision: recovery.revision,
+        controllerGeneration: recovery.controllerGeneration,
+        hostInstanceId: 'host-new',
+        cleanupConfirmed: true,
+      });
+      const normal = owner.authority.acquire({
+        sessionId: 'session-1',
+        expectedRevision: idle.revision,
+        hostInstanceId: 'host-normal',
+        clientId: 'client-normal',
+        connectionGeneration: 1,
+        leaseUntilMs: Date.now() + 30_000,
+      });
+      if (normal.status !== 'acquired') throw new Error('Expected normal execution.');
+      const normalHandle = owner.bindExecution(normal.authority);
+      owner.runWithExecution(normalHandle, () => {
+        expect(
+          owner.storage.effects.tryAcquireEffectLease(
+            'session-1',
+            'effect-normal',
+            'owner-normal',
+            Date.now() + 1_000,
+          ),
+        ).toBe(true);
+      });
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
   test('persists recovery_required and no-replay evidence after a real SIGKILL', async () => {
     const fixture = createFixture(['session-1']);
     const childPath = join(import.meta.dir, '..', 'fixtures', 'crash-kite-session-effect-child.ts');
@@ -860,6 +1050,115 @@ async function readFirstJsonLine<Result>(stream: ReadableStream<Uint8Array>): Pr
   }
 }
 
+test('settled reconciliation checks authority, State, Runs, and effects in one writer transaction', () => {
+  const fixture = createFixture(['session-1']);
+  const seed = openOwner(fixture.path);
+  const initial = seed.authority.read('session-1');
+  seed.close();
+  const database = openKiteSessionStoreDatabase(fixture.path);
+  database.query('INSERT INTO kite_meta(key, value) VALUES (?, ?)').run(
+    'session_execution/session-1',
+    JSON.stringify({
+      ...initial,
+      schema: KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
+      status: 'recovery_required',
+      controllerGeneration: 1,
+      cleanupConfirmed: false,
+      revision: 1,
+    }),
+  );
+  const settledJson = JSON.stringify(state(1, 'recovery-0'));
+  database.query('UPDATE runtime_sessions SET revision=1 WHERE session_id=?').run('session-1');
+  database
+    .query(
+      'UPDATE runtime_snapshots SET revision=1, state_json=?, state_checksum=? WHERE session_id=?',
+    )
+    .run(settledJson, checksum(settledJson), 'session-1');
+  database.close(false);
+  const owner = openOwner(fixture.path);
+  const request = {
+    sessionId: 'session-1',
+    expectedAuthorityRevision: 1,
+    isSettledState: (snapshot: Readonly<State>) => snapshot.revision === 1,
+  };
+  const write = (sql: string, ...parameters: (string | number)[]) => {
+    const connection = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      connection.query(sql).run(...parameters);
+    } finally {
+      connection.close(false);
+    }
+  };
+  try {
+    const before = owner.recovery.inspect('session-1');
+    expect(owner.reconcileSettledSession({ ...request, expectedAuthorityRevision: 0 })).toBe(false);
+    expect(owner.reconcileSettledSession({ ...request, isSettledState: () => false })).toBe(false);
+    expect(owner.recovery.inspect('session-1')).toEqual(before);
+
+    write(
+      `INSERT INTO runtime_runs(
+        session_id, run_id, start_command_id, phase, status,
+        created_revision, last_revision, created_at_ms
+      ) VALUES (?, ?, ?, 'building', 'queued', 1, 1, 1)`,
+      'session-1',
+      'run-active',
+      'start-active',
+    );
+    expect(owner.reconcileSettledSession(request)).toBe(false);
+    write('DELETE FROM runtime_runs WHERE session_id=?', 'session-1');
+
+    write(
+      `INSERT INTO runtime_runs(
+        session_id, run_id, start_command_id, phase, status,
+        created_revision, last_revision, created_at_ms, started_at_ms,
+        finished_at_ms, terminal_json
+      ) VALUES (?, ?, ?, 'building', 'unknown', 1, 1, 1, 1, 2, ?)`,
+      'session-1',
+      'run-unknown',
+      'start-unknown',
+      encodeRuntimeRunTerminal({
+        reasonCode: 'recovery_required',
+        safeRetry: false,
+        recoveryEntry: 'reconcile',
+      }),
+    );
+    expect(owner.reconcileSettledSession(request)).toBe(false);
+    write('DELETE FROM runtime_runs WHERE session_id=?', 'session-1');
+
+    write(
+      `INSERT INTO runtime_effect_leases(
+        session_id, effect_id, owner_id, lease_revision, certainty, expires_at_ms,
+        controller_generation, host_instance_id, client_id, connection_generation,
+        state, outcome, terminal_digest, updated_at
+      ) VALUES (?, ?, ?, 1, 'certain', 100, 1, 'old-host', 'old-client', 1,
+        'prepared', NULL, NULL, 1)`,
+      'session-1',
+      'effect-1',
+      'old-owner',
+    );
+    expect(owner.reconcileSettledSession(request)).toBe(false);
+    write(
+      `UPDATE runtime_effect_leases SET state='unknown', outcome='unknown',
+       certainty='uncertain' WHERE session_id=?`,
+      'session-1',
+    );
+    expect(owner.reconcileSettledSession(request)).toBe(false);
+    write('DELETE FROM runtime_effect_leases WHERE session_id=?', 'session-1');
+
+    expect(owner.reconcileSettledSession(request)).toBe(true);
+    expect(owner.recovery.inspect('session-1')).toMatchObject({
+      authority: { status: 'idle', controllerGeneration: 2, cleanupConfirmed: true, revision: 2 },
+      pendingEffects: [],
+      unknownEffects: [],
+    });
+    expect(owner.storage.sessions.loadSnapshot<State>('session-1')).toEqual(state(1, 'recovery-0'));
+    expect(owner.reconcileSettledSession(request)).toBe(false);
+  } finally {
+    owner.close();
+    fixture.remove();
+  }
+});
+
 test('recovery command is atomic with its receipt and requires real cleanup confirmation', () => {
   const fixture = createFixture(['session-1']);
   const owner = openOwner(fixture.path);
@@ -913,3 +1212,53 @@ test('recovery command is atomic with its receipt and requires real cleanup conf
     fixture.remove();
   }
 });
+
+test.skipIf(process.platform === 'win32')(
+  'real Store owners hold maintenance admission until all connections close',
+  () => {
+    const fixture = createFixture([]);
+    const open = () =>
+      openKiteSessionRuntimeStorage({
+        databasePath: fixture.path,
+        codec,
+        stateSchemaVersion: 1,
+        formatEpoch: STATE_EPOCH,
+      });
+    try {
+      const first = open();
+      const second = open();
+      expect(() => acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive')).toThrow('busy');
+      first.close();
+      expect(() => acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive')).toThrow('busy');
+      second.close();
+      const maintenance = acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive');
+      expect(open).toThrow('busy');
+      maintenance.release();
+      const reopened = open();
+      reopened.close();
+    } finally {
+      fixture.remove();
+    }
+  },
+);
+
+test.skipIf(process.platform === 'win32')(
+  'failed Store composition releases its shared maintenance admission',
+  () => {
+    const fixture = createFixture([]);
+    try {
+      expect(() =>
+        openKiteSessionRuntimeStorage({
+          databasePath: fixture.path,
+          codec,
+          stateSchemaVersion: -1,
+          formatEpoch: STATE_EPOCH,
+        }),
+      ).toThrow();
+      const maintenance = acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive');
+      maintenance.release();
+    } finally {
+      fixture.remove();
+    }
+  },
+);

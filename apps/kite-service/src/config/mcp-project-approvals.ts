@@ -74,7 +74,12 @@ function normalizePathIdentity(path: string): string {
 export function canonicalWorkspaceKey(workspace: string): string {
   const absolute = resolve(workspace);
   const canonical = realpathSync.native(absolute);
-  return sha256(WORKSPACE_DIGEST_DOMAIN + normalizePathIdentity(canonical));
+  return canonicalWorkspaceKeyForPersistedPath(canonical);
+}
+
+/** The Store already recorded this exact canonical path before its directory disappeared. */
+export function canonicalWorkspaceKeyForPersistedPath(canonicalPath: string): string {
+  return sha256(WORKSPACE_DIGEST_DOMAIN + normalizePathIdentity(canonicalPath));
 }
 
 export function sourcePathDigest(sourcePath: string): string {

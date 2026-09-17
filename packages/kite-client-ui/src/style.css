@@ -1,3 +1,5 @@
+@reference "shadcn/tailwind.css";
+
 body {
   margin: 0;
 }
@@ -15,6 +17,7 @@ body {
   --primary: #252525;
   --primary-foreground: #fff;
   --destructive: #a13e3e;
+  --success: #287a4f;
   --attention-background: #f5e6c8;
   --attention-foreground: #714700;
   --conversation-text-size: 14px;
@@ -428,6 +431,7 @@ body {
     min-height: var(--app-header-height);
     gap: 12px;
     padding: 10px 24px;
+    border-bottom: 0.5px solid color-mix(in srgb, var(--foreground) 16%, transparent);
     flex: none;
     min-width: 0;
     background: var(--card);
@@ -521,6 +525,7 @@ body {
   .reading-column {
     overflow: clip;
     overflow-clip-margin: 5px;
+    padding-bottom: 24px;
   }
   .welcome {
     padding: clamp(24px, 8vh, 100px) 8px;
@@ -590,9 +595,9 @@ body {
     position: absolute;
     top: 100%;
     left: 0;
-    width: 20px;
-    height: 20px;
-    min-height: 20px;
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
     margin-top: 2px;
     padding: 0;
     border-radius: 6px;
@@ -1022,6 +1027,7 @@ body {
     overflow: hidden;
   }
   .diff-output {
+    @apply scroll-fade;
     overflow: auto;
     max-height: 440px;
     margin: 0;
@@ -1172,6 +1178,7 @@ body {
   --primary: #edede9;
   --primary-foreground: #20221e;
   --destructive: #e0a198;
+  --success: #82c9a0;
   --attention-background: #4b3518;
   --attention-foreground: #ffe0a3;
   --scrollbar-thumb: #62665b;
@@ -1562,7 +1569,9 @@ body {
   font-size: var(--conversation-text-size);
   font-family: var(--font-geist, inherit);
 }
-.kite-client .reading-column > :is(.tool-activity, .message-group:has(.thinking-activity))
+.kite-client
+  .reading-column
+  > :is(.tool-activity, .message-group:has(.thinking-activity))
   + .message-group:has(> .message.assistant) {
   margin-top: 16px;
 }
@@ -1573,14 +1582,16 @@ body {
 .kite-client .reading-column > .message-group > .thinking-activity {
   margin: 0;
 }
-.kite-client .reading-column > :is(.tool-activity, .message-group:has(> .thinking-activity))
+.kite-client
+  .reading-column
+  > :is(.tool-activity, .message-group:has(> .thinking-activity))
   + .message-group:has(> .message.assistant[data-final-reply="false"]) {
   margin-top: 8px;
 }
 .kite-client .tool-activity-summary {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   width: fit-content;
   max-width: 100%;
   min-height: 32px;
@@ -1595,7 +1606,8 @@ body {
   font: inherit;
   line-height: 24px;
   text-align: left;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .kite-client .tool-activity-summary:hover:not(:disabled),
 .kite-client .tool-activity-step:hover,
@@ -1627,7 +1639,12 @@ body {
 .kite-client .tool-step-target,
 .kite-client .tool-command {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .tool-activity-title {
+  flex-shrink: 0;
 }
 .kite-client .tool-command {
   font-size: inherit;
@@ -1638,6 +1655,7 @@ body {
 .kite-client .tool-activity-state,
 .kite-client .tool-step-status,
 .kite-client .tool-approval {
+  flex: none;
   font-size: inherit;
   line-height: 18px;
   color: inherit;
@@ -1654,34 +1672,49 @@ body {
 }
 .kite-client .tool-activity-step {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 4px 0;
   min-height: 32px;
   color: inherit;
+  min-width: 0;
 }
 .kite-client .tool-step-icon {
   align-self: flex-start;
   margin-top: calc((24px - 1em) / 2);
 }
 .kite-client .tool-step-content {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 .kite-client .tool-step-heading {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 8px;
   line-height: 24px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .kite-client .tool-step-title {
   font-weight: 400;
+  flex: none;
 }
 .kite-client .tool-step-preview {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 12px;
   line-height: 18px;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .tool-activity-summary > .tool-step-preview {
+  flex-shrink: 1;
 }
 .kite-client .tool-activity .file-link {
   height: auto;
@@ -1707,9 +1740,14 @@ body {
   display: none;
 }
 .kite-client .subagent-process {
+  @apply scroll-fade-y;
   margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .kite-client .tool-detail {
+  @apply scroll-fade-y;
   margin: 0;
   padding: 8px 0;
   white-space: pre-wrap;
@@ -1726,6 +1764,7 @@ body {
   border-radius: 8px;
 }
 .kite-client .shell-output pre {
+  @apply scroll-fade-y;
   margin: 0;
   max-height: 256px;
   overflow: auto;
@@ -1753,6 +1792,17 @@ body {
   border-radius: 50%;
   background: currentColor;
   margin-right: 8px;
+}
+.kite-client .shell-output[data-status="completed"] .shell-result::before {
+  background: var(--success);
+}
+.kite-client .shell-output[data-status="running"] .shell-result::before {
+  background: var(--attention-foreground);
+}
+.kite-client
+  .shell-output:is([data-status="failed"], [data-status="rejected"])
+  .shell-result::before {
+  background: var(--destructive);
 }
 .kite-client .shell-output[data-status="failed"] .shell-result {
   color: var(--destructive);
@@ -2197,11 +2247,12 @@ body {
 }
 
 /* Compact disclosure headers share hover, focus and expanded visibility. */
-.kite-client .tool-activity-summary { column-gap: 6px; }
+.kite-client .tool-activity-summary {
+  column-gap: 6px;
+}
 .kite-client .tool-activity-chevron,
 .kite-client .tool-diff-toggle {
   opacity: 0;
-
 }
 .kite-client .tool-activity-summary:hover .tool-activity-chevron,
 .kite-client .tool-activity-summary:focus-visible .tool-activity-chevron,
@@ -2240,7 +2291,6 @@ body {
   overflow-wrap: anywhere;
   overflow: auto;
 }
-
 
 @media (prefers-reduced-motion: reduce) {
   .kite-client .tool-activity-chevron,

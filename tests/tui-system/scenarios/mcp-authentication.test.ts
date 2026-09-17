@@ -3,12 +3,7 @@ import { join } from 'node:path';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import {
-  submitCommand,
-  submitCurrentInput,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
@@ -16,7 +11,12 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedSessionEvents,
+  observePersistedUserMessageSession,
+  type TestWorkspace,
+} from '../harness/test-workspace';
 
 describe('TUI PTY System — MCP authentication recovery', () => {
   let tui: PtyProcess | undefined;
@@ -168,12 +168,12 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await waitForTuiReady(tui);
   }, 50_000);
 
-  test('required login provider gates the model and Session Waive continues without exposing it', async () => {
+  test('offline required provider does not block an unrelated turn or create a waiver', async () => {
     authServer = startTestHttpServer({
       fetch: () => new Response('Unauthorized', { status: 401 }),
     });
     modelServer = createMockModelServer();
-    modelServer.setResponses([{ message: { content: 'continued after provider waiver' } }]);
+    modelServer.setResponses([{ message: { content: 'completed without provider' } }]);
     workspace = createTestWorkspace({
       configOverrides: {
         features: { mcpProviderAction: true },
@@ -188,16 +188,27 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await typeText(tui, 'continue without required provider');
-    await submitCurrentInput(tui, {
-      acceptWhen: (viewport) => screenContains(viewport, 'Session Waive'),
-    });
-    await waitForText(() => tui!.outputSinceLastAction(), "Required MCP provider 'oauth'", 15_000);
-    expect(modelServer.getRequestCount()).toBe(0);
-    await waitForText(() => tui!.viewport(), '❯ 1. Session Waive', 5_000);
-    tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'continued after provider waiver', 15_000);
+    const message = 'continue without required provider';
+    await submitUserMessage(tui, modelServer, message, { timeout: 15_000 });
+    await waitForText(() => tui!.viewport(), 'completed without provider', 15_000);
     expect(modelServer.getRequestCount()).toBe(1);
+    expect(modelServer.hasRequestMessage(message, 0)).toBe(true);
+    expect(screenContains(tui.viewport(), 'Session Waive')).toBe(false);
+    await waitForCondition(
+      () => {
+        const session = observePersistedUserMessageSession(workspace!, message);
+        return session.status === 'ready' && session.value !== undefined;
+      },
+      'durable user message',
+      10_000,
+    );
+    const session = observePersistedUserMessageSession(workspace, message);
+    if (session.status !== 'ready' || !session.value)
+      throw new Error('User message was not saved.');
+    const events = observePersistedSessionEvents(workspace, session.value.threadId);
+    if (events.status !== 'ready') throw new Error('Session events were not readable.');
+    expect(events.value.some((event) => event.type === 'provider.admission_waived')).toBe(false);
+    expect(events.value.some((event) => event.type === 'provider.admission_required')).toBe(false);
   }, 50_000);
 
   test('a failed MCP Tool Call offers Provider Action and Later continues without replay', async () => {

@@ -4,9 +4,13 @@
 
 历史读取通过 injected HistoryClient 向前分页取得 closed transcript，再进入与 live 相同的 reducer；subscription replay/gap snapshot 不能替代完整历史。打开历史先等待 typed readiness/recovery，随后才提交 navigation。
 
+会话目录任一页失败都向选择器报告明确错误，不能把已读取部分或空数组冒充完整成功；读取失败不会删除原会话。启动期异步准入的 readiness Promise 在创建时即观察拒绝，避免尚无等待者时导致 TUI 退出，之后等待 readiness 的调用仍接收原错误。真实多页故障验证见[历史分页错误场景](../../../tests/tui-system/scenarios/session-history-page-error.test.ts)。
+
 load token 只允许当前请求提交。切换到已注册会话会使旧 load 失效，同目标第二次 load 也取代第一次；迟到成功、错误和 rollback 都不能覆盖新选择。模型、模式、context 和 Runtime projection 按 Session 恢复，不继承上一 Session transient state。
 
 普通切换不取消后台 Run。异步 slash 结果绑定发起 Session 与 turn count，不能把本地尾部写入后来选择的 Session。队列绑定 Session，见[输入与命令](input-and-commands.md)。
+
+TUI 子 Agent 卡片区分创建、运行、审批等待、自动审查、完成、中断、取消和失败。会话关闭或用户取消后，本地展示先停止活动动画并等待服务核对，不将缺失的子 Agent 终态写成“已取消”或“已完成”；服务后续的真实终态仍可覆盖等待状态。仅有暂停状态而没有审批事实时显示“等待结果核对”，不提示用户批准。
 
 删除当前 Session 后建立新的可输入 Session；删除不等于恢复工作区文件。`/rewind` 的确认与执行分别防重复，历史恢复先完成数据与 writer 准入，再交给展示；不能把旧 viewport 当成新 fork 已完成。
 

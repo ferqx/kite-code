@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import { aiMessage } from '@kite-ai/builtin-runtime/model';
+import { createRuntimeAbortReason } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
@@ -77,7 +78,7 @@ describe('bounded Runtime cancellation', () => {
         })();
 
         await modelStarted;
-        controller.abort('Cancelled by integration test.');
+        controller.abort(createRuntimeAbortReason('user', 'Cancelled by integration test.'));
         const events = await run;
 
         expect(events).toContainEqual(

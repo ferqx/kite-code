@@ -2,9 +2,9 @@ import {
   ArrowDown01Icon,
   BulbIcon,
   Copy01Icon,
-  CopyCheckIcon,
   CopyXIcon,
   KiteIcon,
+  Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -23,8 +23,8 @@ export interface ReadingState {
 
 function isVisibleTool(message: Message): boolean {
   if (message.role !== 'tool') return false;
-  if (message.presentation !== 'hidden') return true;
   if (message.presentationOwner) return false;
+  if (message.presentation !== 'hidden') return true;
   return (
     message.status === 'failed' ||
     message.status === 'rejected' ||
@@ -65,11 +65,15 @@ const MessageItem = memo(function MessageItem({
   writeClipboardText,
   showProcess = true,
   inlineProcess = false,
+  childTools = [],
+  expandedItems = {},
 }: {
   message: Message;
   expanded?: boolean;
   showProcess?: boolean;
   inlineProcess?: boolean;
+  childTools?: readonly Message[];
+  expandedItems?: Record<string, boolean>;
   onToggle: (id: string, open: boolean) => void;
   openFile?: (path: string) => void;
   copyText?: string;
@@ -77,6 +81,15 @@ const MessageItem = memo(function MessageItem({
   writeClipboardText?: (text: string) => Promise<void>;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const copyAttempt = useRef(0);
+  useEffect(
+    () => () => {
+      copyAttempt.current++;
+      if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
+    },
+    [],
+  );
   const copyLabel =
     copyState === 'copied'
       ? '已复制消息'
@@ -87,12 +100,20 @@ const MessageItem = memo(function MessageItem({
           : '复制本轮Agent回复';
   const copyMessage = async () => {
     if (!copyText) return;
+    const attempt = ++copyAttempt.current;
+    if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = undefined;
     try {
       if (writeClipboardText) await writeClipboardText(copyText);
       else await navigator.clipboard.writeText(copyText);
+      if (attempt !== copyAttempt.current) return;
       setCopyState('copied');
+      copyResetTimer.current = setTimeout(() => {
+        copyResetTimer.current = undefined;
+        setCopyState('idle');
+      }, 2000);
     } catch {
-      setCopyState('failed');
+      if (attempt === copyAttempt.current) setCopyState('failed');
     }
   };
   if (message.role === 'thinking')
@@ -116,31 +137,66 @@ const MessageItem = memo(function MessageItem({
   if (message.role === 'tool') return null;
   if (message.role === 'subagent') {
     if (!showProcess) return null;
-    const steps = (message.steps ?? []).map((step) => (
-      <div
-        className={`tool-activity-step ${step.status === 'started' ? 'running' : step.status}`}
-        key={step.id}
-      >
-        <span className="tool-step-title tool-label">{step.text}</span>
-        <span className="tool-step-status" data-status={step.status}>
-          {step.status === 'completed'
-            ? ''
-            : statusLabel(step.status === 'started' ? 'running' : step.status)}
-        </span>
-      </div>
-    ));
-    // Child prose/results belong to the task result; the parent transcript shows tool activity only.
-    if (inlineProcess)
+    const childEnded =
+      message.settled &&
+      ['completed', 'failed', 'interrupted', 'cancelled'].includes(message.status ?? '');
+    const steps = (message.steps ?? []).map((step) => {
+      const id = `subagent-step:${step.id}`;
+      const unresolved = childEnded && step.status === 'started';
       return (
-        // biome-ignore lint/a11y/useSemanticElements: this is a group of tool records, not form controls.
-        <div
-          role="group"
-          className="subagent-process"
-          aria-label={`${message.title || '子 Agent'}的工具步骤`}
-        >
-          {steps}
-        </div>
+        <ToolActivity
+          key={id}
+          childProcess
+          messages={[
+            {
+              id,
+              role: 'tool',
+              toolName: step.toolName,
+              title: step.text,
+              arguments: step.arguments,
+              text: step.summary ?? '',
+              settled: unresolved || step.status !== 'started',
+              status: unresolved ? 'unknown' : step.status === 'started' ? 'running' : step.status,
+            },
+          ]}
+          expanded={expandedItems[id]}
+          onToggle={(open) => onToggle(id, open)}
+          openFile={openFile}
+          renderChildren={() => null}
+        />
       );
+    });
+    const tools = childTools.map((tool) => (
+      <ToolActivity
+        key={tool.id}
+        childProcess
+        messages={[
+          childEnded &&
+          !tool.settled &&
+          ['creating', 'queued', 'running', 'waiting', 'auto_reviewing'].includes(tool.status ?? '')
+            ? { ...tool, settled: true, status: 'unknown' }
+            : tool,
+        ]}
+        expanded={expandedItems[tool.id]}
+        onToggle={(open) => onToggle(tool.id, open)}
+        openFile={openFile}
+        renderChildren={() => null}
+      />
+    ));
+    const process = (
+      <section
+        key={message.id}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: allow keyboard scrolling of the bounded tool list.
+        tabIndex={0}
+        className="subagent-process"
+        aria-label={`${message.title || '子 Agent'}的工具步骤`}
+      >
+        {steps}
+        {tools}
+      </section>
+    );
+    // Child prose/results belong to the task result; the parent transcript shows tool activity only.
+    if (inlineProcess) return process;
     return (
       <ToolActivity
         messages={[
@@ -156,7 +212,7 @@ const MessageItem = memo(function MessageItem({
         expanded={expanded}
         onToggle={(open) => onToggle(message.id, open)}
         openFile={openFile}
-        renderChildren={() => steps}
+        renderChildren={() => process}
       />
     );
   }
@@ -234,6 +290,7 @@ const MessageItem = memo(function MessageItem({
       {copyText && (
         <Button
           className="message-copy"
+          data-copy-state={copyState}
           variant="ghost"
           size="icon-xs"
           aria-label={copyLabel}
@@ -241,12 +298,9 @@ const MessageItem = memo(function MessageItem({
           onClick={copyMessage}
         >
           <HugeiconsIcon
+            className={copyState === 'copied' ? 'size-[18px]' : undefined}
             icon={
-              copyState === 'copied'
-                ? CopyCheckIcon
-                : copyState === 'failed'
-                  ? CopyXIcon
-                  : Copy01Icon
+              copyState === 'copied' ? Tick02Icon : copyState === 'failed' ? CopyXIcon : Copy01Icon
             }
           />
         </Button>
@@ -370,6 +424,22 @@ export function Conversation({
     messages.filter((message) => message.role === 'tool').map((message) => message.id.slice(5)),
   );
   const children = new Map<string, Message[]>();
+  const childTools = new Map<string, Message[]>();
+  for (const message of messages) {
+    if (message.role !== 'tool' || !message.presentationOwner) continue;
+    const owner = message.presentationOwner.subagentId;
+    childTools.set(owner, [...(childTools.get(owner) ?? []), message]);
+  }
+  const childWithUniqueSteps = (child: Message): Message => {
+    if (child.role !== 'subagent') return child;
+    const toolIds = new Set(childTools.get(child.id.slice(9))?.map((tool) => tool.id));
+    return {
+      ...child,
+      steps: child.steps?.filter(
+        (step) => !step.toolCallId || !toolIds.has(`tool:${step.toolCallId}`),
+      ),
+    };
+  };
   for (const message of messages) {
     if (
       message.role !== 'subagent' ||
@@ -381,17 +451,26 @@ export function Conversation({
     group.push(message);
     children.set(message.parentToolCallId, group);
   }
-  for (const message of messages) {
-    if (
-      message.role !== 'tool' ||
-      message.presentation !== 'hidden' ||
-      !message.presentationOwner ||
-      !visibleToolIds.has(message.presentationOwner.parentToolCallId)
-    )
-      continue;
-    const owner = message.presentationOwner.parentToolCallId;
-    children.set(owner, [...(children.get(owner) ?? []), message]);
-  }
+  const withChildLifecycle = (message: Message): Message => {
+    if (message.role !== 'tool' || message.toolName !== 'task') return message;
+    const child = children
+      .get(message.id.slice(5))
+      ?.find((candidate) => candidate.role === 'subagent');
+    if (!child) return message;
+    switch (child.status) {
+      case 'creating':
+      case 'running':
+      case 'waiting':
+      case 'auto_reviewing':
+      case 'completed':
+      case 'interrupted':
+      case 'cancelled':
+      case 'failed':
+        return { ...message, childLifecycle: child.status };
+      default:
+        return message;
+    }
+  };
   const askToolIds = new Set(
     messages
       .filter((message) => message.systemKind === 'ask')
@@ -400,13 +479,9 @@ export function Conversation({
   );
   const shown = messages.filter((message) => {
     if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
-    if (message.role === 'system') return message.settled || !!message.status;
-    if (message.role === 'tool')
-      return (
-        isVisibleTool(message) ||
-        (!!message.presentationOwner &&
-          !visibleToolIds.has(message.presentationOwner.parentToolCallId))
-      );
+    if (message.role === 'system')
+      return message.systemKind === 'ask' || message.settled || !!message.status;
+    if (message.role === 'tool') return isVisibleTool(message);
     if (message.role === 'subagent')
       return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
     return !message.settled || !!message.text;
@@ -496,53 +571,51 @@ export function Conversation({
                 return message.role === 'tool' ? (
                   <ToolActivity
                     key={activityKey}
-                    messages={group}
+                    messages={group.map(withChildLifecycle)}
+                    suppressGenericFailure={
+                      message.toolName === 'task' &&
+                      (children.get(message.id.slice(5)) ?? []).some(
+                        (child) =>
+                          child.role === 'subagent' &&
+                          ['failed', 'interrupted', 'cancelled'].includes(child.status ?? '') &&
+                          !!child.text?.trim(),
+                      )
+                    }
                     expanded={expanded[activityKey]}
                     expandedItems={expanded}
                     onToggleItem={onToggle}
                     onToggle={(open) => onToggle(activityKey, open)}
                     openFile={openFile}
                     renderChildren={(toolCallId, taskExpanded) =>
-                      children.get(toolCallId)?.map((child) =>
-                        child.role === 'tool' ? (
-                          <ToolActivity
-                            key={child.id}
-                            messages={[child]}
-                            expanded={expanded[child.id]}
-                            onToggle={(open) => onToggle(child.id, open)}
-                            openFile={openFile}
-                            renderChildren={() => null}
-                          />
-                        ) : (
-                          <MessageItem
-                            key={child.id}
-                            message={{
-                              ...child,
-                              steps: child.steps?.filter(
-                                (step) =>
-                                  !step.toolCallId ||
-                                  !messages.some(
-                                    (tool) =>
-                                      tool.role === 'tool' &&
-                                      tool.id === `tool:${step.toolCallId}` &&
-                                      tool.presentationOwner?.parentToolCallId === toolCallId,
-                                  ),
-                              ),
-                            }}
-                            inlineProcess
-                            expanded={expanded[child.id]}
-                            showProcess={taskExpanded}
-                            onToggle={onToggle}
-                            openFile={openFile}
-                          />
-                        ),
-                      )
+                      children
+                        .get(toolCallId)
+                        ?.map((child) =>
+                          child.role === 'subagent' ? (
+                            <MessageItem
+                              key={child.id}
+                              message={childWithUniqueSteps(child)}
+                              inlineProcess
+                              childTools={childTools.get(child.id.slice(9))}
+                              expandedItems={expanded}
+                              expanded={expanded[child.id]}
+                              showProcess={taskExpanded}
+                              onToggle={onToggle}
+                              openFile={openFile}
+                            />
+                          ) : null,
+                        )
                     }
                   />
                 ) : (
                   <div key={message.id} className="message-group">
                     <MessageItem
-                      message={message}
+                      message={childWithUniqueSteps(message)}
+                      childTools={
+                        message.role === 'subagent'
+                          ? childTools.get(message.id.slice(9))
+                          : undefined
+                      }
+                      expandedItems={expanded}
                       expanded={expanded[message.id]}
                       onToggle={onToggle}
                       openFile={openFile}

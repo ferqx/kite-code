@@ -2,6 +2,8 @@
 
 入口：[catalog contract](../src/catalog-contract.ts)、[tool contracts](../src/tool-contracts.ts)、[schemas](../src/tool-schemas.ts)、[pipeline callbacks](../src/tool-pipeline-callbacks.ts)、[prepared dispatch](../src/builtin-prepared-dispatch-adapter.ts)。
 
+五个普通文件工具由 [filesystem module](../src/filesystem/runtime-module.ts) 注册和执行，保留原 operationId、provider identity 及 revision。registry 不注册 `git_inspect`；专用 Broker／schema 已删除，Git 请求由 Shell 路径治理。
+
 ## 从模型声明到实际执行
 
 工具声明由同一契约提供描述、schema、parser、effect 分类和可用性。模型传来的 JSON 不直接进入执行器：先解析成规范参数，再结合能力绑定和当前上下文编译策略 facts。描述不能宣称 schema 或执行器未支持的行为。

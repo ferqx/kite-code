@@ -1,5 +1,8 @@
 # Runtime SQLite Storage
 
+> 实施中：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)已统一正式数据入口，并验证 macOS 已知格式的自动整理、历史来源归并和原会话保留。未知格式保留原数据，不切换空库；完整方案与未验证平台的边界以计划中的最新验收记录为准。
+
+
 `@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite concrete adapter。默认 App Server 的物理数据库由 Session Store owner 管理；历史 adapter 与迁移代码仍有独立消费者，不代表普通启动有多个可选 writer。
 
 ## 格式与实际入口
@@ -20,7 +23,7 @@
 
 ## 当前数据库与执行所有权
 
-[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件严格检查 Session schema/epoch；旧 epoch、partial 或 corrupt 返回 `store_upgrade_required`。它不自动探测、导入或改写 `kite.sqlite`。
+[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件先只读读取 schema/epoch 并分类兼容性，再检查受支持的完整结构。当前只证明 schema 10 / `kite-session-app-server-2026-09-02` 可读写；同 epoch 较旧 schema 返回 `store_migration_required`（不提供自动迁移），未知 epoch、较新 schema、partial 或 corrupt 返回 `store_incompatible`。兼容性错误携带实际与预期 schema；拒绝发生在读写打开前。不能用数字范围或仅能解析历史来声明完整 Runtime 只读兼容。它不自动探测、导入或改写 `kite.sqlite`。
 
 [Session runtime storage](src/kite-session-runtime-storage.ts) 为各 WAL connection 提供执行 scope。[execution authority](src/kite-session-execution-authority.ts) 持久保存 generation、revision、lease deadline 与 cleanup 状态，acquire/renew/detach/release 使用 SQLite CAS。fresh Session 的 generation 1 与 Session 创建同事务；过期且 cleanup 未确认的 owner 进入恢复边界，不能直接重放。
 
@@ -34,7 +37,7 @@
 - Run insert/transition 与所属 State/event/receipt 提交一致。start 后的 queued→running row-only activation 可以复用相同 State revision；其他 transition 仍按 revision/lifecycle 校验。Run list 使用稳定 keyset，单页最多 200 项。
 - rewind 只在允许的 coverage/between-turn 边界修改；fork 克隆 checkpoint 范围内可复制的终态 Run，重绑 identity。target facts、receipt 与初始 authority 在同一事务，任一步失败整体回滚。
 - Directory、History、Checkpoint 与 Agent API 复用已打开 owner 的有界 read ports，不建立 Catalog mirror 或第二 writer。Directory 不返回 canonical path；空会话名的首条用户消息 fallback 只读、不写回命名事实。
-- Artifact 按 Model/Plan/Capability/filesystem preimage/Sandbox/Subagent 领域存储，不建立通用 blob authority。当前 Session Store 因缺少安全 maintenance barrier 而禁用 Artifact GC，不能把旧 Home Store 的 GC 接到普通 Session 读取。
+- Artifact 按 Model/Plan/Capability/filesystem preimage/Sandbox/Subagent 领域存储，不建立通用 blob authority。当前 Session Store 仍禁用 Artifact GC，不能把旧 Home Store 的 GC 接到普通 Session 读取。
 
 详细机制与测试入口：[事务与数据](docs/transactions-and-state.md)、[Writer/Effect/恢复](docs/authority-and-recovery.md)、[查询与 Artifact](docs/queries-and-artifacts.md)。
 
@@ -61,7 +64,16 @@
 
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
 
-App Server 打开可变 Store 前，通过 [Session 文件 preflight](src/kite-session-runtime-file.ts) 只读检查现存格式；release restart 复用同一检查，失败时不停止旧实例。不兼容文件保持原样，不在普通启动迁移；absent preflight 不创建文件。
+App Server 打开可变 Store 前，通过 [Session 文件 preflight](src/kite-session-runtime-file.ts) 只读检查现存格式；release restart 复用同一检查，失败时不停止旧实例。未知不兼容文件保持原样；absent preflight 不创建文件。已知9/10/11的严格子集由Service启动准备单独处理，不能通过该只读preflight隐式修改。
 
 
 当前启动先核对文件安全、格式与精确 schema，不扫描所有会话正文。Session snapshot 读取在同一只读事务内校验该会话的绑定、事件顺序／codec、snapshot checksum／revision、Run 与 receipt；损坏会话不阻止先列出目录。Artifact 内容由 typed reader 在访问时验证。完整 physical/FK 扫描保留于显式文件 preflight，不能在每个组合 reader 创建时重复执行。实现与测试见[事务与状态](docs/transactions-and-state.md)。
+
+
+## 已知会话格式的启动准备
+
+[准备编排](src/kite-session-store-preparation.ts)仅在迁移期取得canonical与全部历史源独占锁，调用Service提供的旧writer准入，再以[一致性备份](src/kite-session-recovery-backup.ts)和[私有候选](src/kite-session-store-candidate.ts)处理已证明的9/10/11子集。原位main/WAL必须保持一致；不接受遗漏非空WAL来源。
+
+[连续性校验](src/kite-session-continuity-validation.ts)只在维护期完整检查生产Session、目录、State/Event、Run/receipt、Fork、tombstone和Artifact读取；普通启动不全扫历史。[发布](src/kite-session-store-publication.ts)使用固定短期意图和逐文件指纹恢复同文件系统发布，保留原文件作私有恢复资产；生产reader复核之前不开放正常连接。普通owner取得共享维护锁后，先复查待发布意图及未归并历史源，再打开或创建正式库，并持锁至关闭；准备器取得独占锁后也重新读取意图，不能以锁外的旧观察启动另一次发布。调用方仍须独立证明旧writer已退出及正常入口已参与维护；这些Storage函数不授予进程准入。当前平台与发行资格见[实施计划](../../docs/plans/session-store-compatibility-and-continuity.md#17-启动准备与四源收敛集成2026-09-17)。
+
+受支持的AppServer 9/10/11来源将模型、计划、能力结果、文件前像、沙箱准备及三类子任务Artifact存入SQLite的八个专属表；`runtime_file_preimages`也保留文件前像内容。正式Service为这些Builtin读写器注入数据库后端，不使用缺省文件目录作为另一资产权威。迁移逐表保留内容，并验证State/Event和命名快照中已知字段的引用；已知引用缺失或损坏会拒绝候选发布。此校验不是任意嵌套内容或外部路径扫描，Store备份不代表外部工作区文件、技能、配置、日志或任意附件文件也已备份。其他历史入口若依赖外置资产，必须另有来源证据与明确处置，不能套用这组资格。

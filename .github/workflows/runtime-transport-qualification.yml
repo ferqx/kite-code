@@ -23,6 +23,10 @@ on:
       - "packages/runtime-protocol/**"
       - "packages/runtime-server/**"
       - "packages/runtime-storage-sqlite/**"
+      - "packages/kite-local-runtime/**"
+      - "apps/kite-service/src/**"
+      - "tests/qualification/session-store-*.test.ts"
+      - "tests/qualification/fixtures/session-store-*.ts"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/runtime-transport-qualification.yml"
@@ -51,3 +55,15 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:runtime:websocket
       - run: bun run test:runtime:transport
+      - if: runner.os != 'Windows'
+        name: POSIX Store maintenance, crash release and startup cancellation
+        run: >-
+          bun test --parallel=1 --max-concurrency=1
+          packages/runtime-storage-sqlite/test/isolated/kite-session-maintenance.test.ts
+          tests/qualification/session-store-maintenance-cancellation.test.ts
+          tests/qualification/session-store-startup-cancellation.test.ts
+      - if: runner.os == 'Windows'
+        name: Windows native LockFileEx maintenance qualification
+        env:
+          KITE_REQUIRE_WINDOWS_MAINTENANCE: "1"
+        run: bun test --parallel=1 --max-concurrency=1 tests/qualification/session-store-windows-maintenance.test.ts

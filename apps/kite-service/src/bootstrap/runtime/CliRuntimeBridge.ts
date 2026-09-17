@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import type { GitBroker } from '@kite-ai/builtin-runtime/git';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
 import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
@@ -7,6 +6,7 @@ import type { InteractionMode, SkillManifest, SkillScanOptions } from '@kite-ai/
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
+  type RuntimeAbortReason,
   type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeCommandContext,
@@ -17,6 +17,7 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
+  runtimeAbortCause,
   sameRuntimeClientInteractionIdentity,
 } from '@kite-ai/runtime-contract';
 import type {
@@ -53,6 +54,7 @@ import {
   resolveRuntimeInteractionEffect,
 } from '../../runtime-client/interaction-projector';
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
+import { KiteAppServerSessionError } from '../kite-session-app-server-storage';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import { assertPrecommittedRewind } from './command-rewind-decision';
@@ -61,7 +63,12 @@ import type {
   RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
 import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-dependencies';
-import type { RuntimeUserAction } from './state-actions';
+import { reconcileRuntimeSessionAfterRestart } from './session-restart-recovery';
+import {
+  canContinueSettledGlobalAdmission,
+  obsoleteGlobalAdmissionSettlementEvents,
+  type RuntimeUserAction,
+} from './state-actions';
 import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
@@ -72,6 +79,13 @@ import type {
 import type { RuntimeTurnInput } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInput {
+  readonly restartRecoveryOwnership?: () =>
+    | {
+        readonly kind: 'fenced_previous_execution';
+        readonly controllerGeneration: number;
+        readonly assertCurrent: () => boolean;
+      }
+    | undefined;
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
@@ -84,7 +98,6 @@ export interface CliRuntimeBridgeInput {
     readonly name: string;
   }) => AgentConfig;
   readonly shellExecutor: ShellExecutor;
-  readonly gitBroker?: GitBroker;
   readonly interactionMode: InteractionMode;
   readonly sandboxBackend: SandboxBackend;
   /** Narrow Workspace-owned provider; the bridge never owns or stops its supervisor. */
@@ -216,11 +229,35 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   ): Promise<void> {
     if (sessionId !== this.#input.sessionId) return;
     const coordinator = this.#ensureCoordinator();
+    const recoveryOwnership = this.#input.restartRecoveryOwnership?.();
+    if (recoveryOwnership) {
+      const result = await reconcileRuntimeSessionAfterRestart({
+        control: coordinator.control,
+        modelInvocationRuntime: this.#modelInvocationRuntimeFactory(this.#input.workspace),
+        shellExecutor: this.#input.shellExecutor,
+        recoveryOwnership,
+        historyEvents: coordinator
+          .getStateRuntimeStorage()
+          .sessions.loadEventsStrict(sessionId)
+          .map((entry) => entry.event),
+      });
+      if (!result.complete)
+        throw new KiteAppServerSessionError(
+          'recovery_required',
+          'Previous execution resources could not yet be reconciled.',
+        );
+    }
     this.#created = true;
     this.#closed = false;
     const state = coordinator.getState();
     this.#revision = state.revision;
-    if (!coordinator.recoveryChanged) return;
+    if (!coordinator.recoveryChanged && !recoveryOwnership) return;
+    // Resolve the restored Run at the committed revision before projecting
+    // intermediate recovery events from the same atomic batch.
+    coordinator.session.getLifecycleProjection();
+    // Drain restored events before a successor Run is created. Otherwise their
+    // old revisions would later be projected against the successor's Run.
+    this.#publishCommittedEvents([], this.#revision, publish, 'session');
     publish({
       schema: RUNTIME_NOTIFICATION_SCHEMA_,
       durability: 'durable',
@@ -228,6 +265,44 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       revision: this.#revision,
       projection: { kind: 'session', session: this.#projection() },
     });
+  }
+
+  /** Rebuild only an already-committed resume with no durable dispatch facts. */
+  async recoverCommittedResume(
+    command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+    committedRevision: number,
+    publish: (notification: RuntimeNotification) => void,
+    commandContext?: Readonly<RuntimeCommandContext>,
+  ): Promise<RuntimeHostPreparedExecution | undefined> {
+    if (command.sessionId !== this.#input.sessionId) return undefined;
+    const coordinator = this.#runtimeSessionCoordinator.get(command.sessionId);
+    if (!coordinator || coordinator.isTurnActive() || coordinator.lifecycle !== 'idle') return;
+    const state = coordinator.getState();
+    const run = coordinator.session.getLifecycleProjection().currentRun;
+    if (
+      state.revision !== committedRevision ||
+      run?.status !== 'running' ||
+      run.activeTurnId !== state.turn.turnId ||
+      run.taskId !== state.activeTaskId ||
+      !canContinueSettledGlobalAdmission(
+        state,
+        coordinator.getStateRuntimeStorage().sessions.loadEventsStrict(command.sessionId),
+      )
+    )
+      return;
+    const prepared = this.#preparedInteractionResume(
+      command.commandId,
+      coordinator,
+      {
+        status: 'applied',
+        commandId: command.commandId,
+        sessionId: command.sessionId,
+        revision: committedRevision,
+      },
+      commandContext,
+    );
+    this.#activePublish = publish;
+    return prepared;
   }
 
   async inspectCommand(
@@ -387,6 +462,65 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       };
     }
     if (command.type === 'resume_session') {
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (coordinator && !coordinator.isTurnActive() && coordinator.lifecycle === 'idle') {
+        const state = coordinator.getState();
+        const run = coordinator.session.getLifecycleProjection().currentRun;
+        if (
+          (run?.status === 'waiting' || run?.status === 'running') &&
+          run.activeTurnId === state.turn.turnId &&
+          run.taskId === state.activeTaskId
+        ) {
+          const journal = coordinator
+            .getStateRuntimeStorage()
+            .sessions.loadEventsStrict(this.#input.sessionId);
+          const events =
+            run.status === 'waiting' ? obsoleteGlobalAdmissionSettlementEvents(state, journal) : [];
+          const settledBeforeDispatch =
+            run.status === 'running' && canContinueSettledGlobalAdmission(state, journal);
+          if (events.length > 0 || settledBeforeDispatch) {
+            return {
+              kind: 'accepted',
+              decision: {
+                targetSessionId: this.#input.sessionId,
+                commit: async (evidence) => {
+                  // The command receipt, admission settlement and original Run
+                  // waiting-to-running transition share the Host transaction.
+                  const committed =
+                    events.length > 0
+                      ? coordinator.commitObsoleteAdmissionResumeCommand(events, evidence)
+                      : {
+                          receipt: coordinator.session.commitCommandSnapshot(evidence),
+                          events: [],
+                        };
+                  const receipt = receiptFromStored(committed.receipt);
+                  return {
+                    receipt,
+                    activation: async (publish) => {
+                      this.#revision = receipt.revision;
+                      this.#created = true;
+                      this.#closed = false;
+                      this.#activePublish = publish;
+                      this.#publishCommittedEvents(
+                        committed.events,
+                        receipt.revision,
+                        publish,
+                        'turn',
+                      );
+                    },
+                    preparedExecution: this.#preparedInteractionResume(
+                      command.commandId,
+                      coordinator,
+                      receipt,
+                      context.commandContext,
+                    ),
+                  };
+                },
+              },
+            };
+          }
+        }
+      }
       return this.#snapshotDecision((coordinator) => ({
         activate: () => {
           this.#revision = coordinator.getState().revision;
@@ -463,7 +597,8 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     if (command.type === 'cancel_turn') {
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
       if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
-      if (!coordinator.isTurnActive()) return terminal(this.#rejected(command, 'turn_not_found'));
+      if (coordinator.getState().turn.status !== 'active')
+        return terminal(this.#rejected(command, 'turn_not_found'));
       if (coordinator.session.getLifecycleProjection().currentRun?.runId !== command.runId) {
         return terminal(this.#rejected(command, 'turn_not_found'));
       }
@@ -1043,7 +1178,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     execution: CliRuntimeTurnExecutionInput,
     coordinator: RuntimeSessionCoordinator,
     signal: AbortSignal,
-    requestAbort: (reason: string) => void,
+    requestAbort: (reason: RuntimeAbortReason | string) => void,
   ): Promise<void> {
     const publish = this.#activePublish;
     let publishedRevision = this.#revision;
@@ -1102,7 +1237,6 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           config: execution.config,
           model: createChatModel(execution.config),
           shellExecutor: this.#input.shellExecutor,
-          gitBroker: this.#input.gitBroker,
           mcpManager: this.#input.mcpManager,
           interactionMode: this.#input.interactionMode,
           sandboxBackend: this.#input.sandboxBackend,
@@ -1232,7 +1366,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         type: 'turn.aborted',
         turnId: state.turn.turnId,
         reason: 'Runtime presentation or bridge closure could not be confirmed.',
-        cause: signal?.aborted ? 'user' : 'error',
+        cause: signal?.aborted ? runtimeAbortCause(signal.reason) : 'error',
       },
     ]);
   }
@@ -1344,7 +1478,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     const runId = lifecycle?.currentRun?.runId;
     const taskId = lifecycle?.activeTask?.taskId ?? lifecycle?.currentRun?.taskId;
     const turnId = lifecycle?.currentRun?.activeTurnId ?? coordinator?.getState().turn.turnId;
-    const events = coordinator?.control.cancelRun(reason) ?? [];
+    const events = coordinator?.control.cancelRun(reason, 'error') ?? [];
     if (events.length > 0 && coordinator) {
       this.#publishCommittedEvents(events, coordinator.getState().revision, publish, 'turn', {
         ...(runId === undefined ? {} : { runId }),

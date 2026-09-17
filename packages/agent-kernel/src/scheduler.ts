@@ -332,7 +332,19 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
     };
   const unknownInvocation = Object.values(
     recordField(state.capabilities, 'invocations') ?? {},
-  ).find((value) => isRecord(value) && stringField(value, 'status') === 'unknown');
+  ).find((value) => {
+    if (!isRecord(value) || stringField(value, 'status') !== 'unknown') return false;
+    const toolCallId = stringField(value, 'toolCallId');
+    const call = toolCallId ? state.tools.calls[toolCallId] : undefined;
+    // A Task can span several user turns. An old interrupted turn may retain
+    // the same Task id, so its invocation must follow the Tool's exact turn.
+    if (call?.createdAtTurnId) return call.createdAtTurnId === state.turn.turnId;
+    if (call) return toolBelongsToCurrentWork(state, call);
+    const taskId = stringField(value, 'taskId');
+    // An older invocation without a durable owner cannot be safely assigned
+    // to a past turn. Keep the existing block for that ambiguous case.
+    return taskId === undefined || taskId === state.activeTaskId;
+  });
   if (unknownInvocation)
     return {
       type: 'recovery_blocked',

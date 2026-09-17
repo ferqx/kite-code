@@ -101,7 +101,6 @@ export type CapabilityDescriptorKind = 'builtin_tool';
 
 /** Feature facts consumed by registered Builtin callbacks; unrelated App flags never enter SPI. */
 export interface CapabilityFeatureFlags {
-  readonly brokeredGit?: boolean;
   readonly skillWorkflow?: boolean;
   readonly skillActivation?: boolean;
 }
@@ -118,9 +117,7 @@ export interface CapabilityTurnContext {
   readonly phase?: 'planning' | 'building';
   /** Live Session interaction mode; Full is execution authority, never a grant. */
   readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
-  readonly brokeredGitFeatureRevision?: string | null;
   readonly hasTaskAdapter?: boolean;
-  readonly hasGitBroker?: boolean;
   readonly toolSearchEnabled?: boolean;
   readonly activeSkillFrameIds?: readonly string[];
   readonly availableSkillIds?: readonly string[];

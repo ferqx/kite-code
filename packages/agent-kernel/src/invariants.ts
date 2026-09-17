@@ -725,7 +725,7 @@ function assertCapabilityLifecycleEvidence(
     /^sha256:[a-f0-9]{64}$/u.test(stringValue(lifecycle, 'handleIntegrityIdentifier') ?? '') &&
     validTimestamp(lifecycle.handleRecordedAt);
   const hasObservation =
-    ['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
+    ['completed', 'failed', 'interrupted', 'cancelled', 'exhausted', 'blocked'].includes(
       stringValue(lifecycle, 'observationStatus') ?? '',
     ) && validTimestamp(lifecycle.observedAt);
   const hasCleanup =

@@ -124,7 +124,7 @@ export interface SubagentObservation {
   readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_;
   readonly handleId: string;
   readonly childInvocationId: string;
-  readonly status: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+  readonly status: 'completed' | 'failed' | 'interrupted' | 'cancelled' | 'exhausted' | 'blocked';
   readonly summary: string;
   readonly toolCallCount: number;
   readonly durationMs: number;

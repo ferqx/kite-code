@@ -1,23 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import {
   type BunStdioChildSpawnFactory,
   createKiteAppServerClient,
 } from '@kite-ai/kite-local-runtime/client';
-import {
-  createKiteHomeIdentity,
-  ensureKiteProfileHome,
-  ensurePrivateKiteHomeDirectory,
-} from '@kite-ai/kite-local-runtime/service';
+import { createKiteHomeIdentity, ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
+import type { ServiceStartupProgress } from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import type { RuntimeClientInfo } from '@kite-ai/runtime-client';
 import {
   explicitKiteHomeArgument,
   installedBuildIdentity,
   resolveInstalledReleaseExecutable,
   selectKiteServiceEnvironmentSource,
-  sourceKiteSessionStorePathFromCanonicalRoots,
   sourceServiceBuildIdentity,
 } from './local-service-client';
 
@@ -32,6 +28,7 @@ export interface ManagedLocalAppServerOptions {
   readonly sourceWebStaticRoot?: string;
   /** Isolated release tests only; production leaves child creation to the typed transport. */
   readonly spawn?: BunStdioChildSpawnFactory;
+  readonly onStartupProgress?: (progress: ServiceStartupProgress) => void;
 }
 
 export interface ManagedLocalAppServerComposition {
@@ -82,6 +79,7 @@ export function createManagedLocalAppServerComposition(
       throw new Error('App Server Workspace must be a canonical directory.');
     }
     return createKiteAppServerClient({
+      startupSignals: process,
       executable,
       ...(argumentsPrefix ? { argumentsPrefix } : {}),
       buildId,
@@ -93,6 +91,7 @@ export function createManagedLocalAppServerComposition(
       environment,
       clientInfo: input.clientInfo,
       ...(options.spawn ? { spawn: options.spawn } : {}),
+      ...(options.onStartupProgress ? { onStartupProgress: options.onStartupProgress } : {}),
     });
   };
   return Object.freeze({
@@ -146,16 +145,17 @@ export function resolveManagedLocalAppServerTarget(
     mode === 'source'
       ? sourceServiceBuildIdentity(repositoryRoot!)
       : installedBuildIdentity(processExecutable, { candidateRoot });
-  const runtimeRoot =
-    mode === 'source'
-      ? dirname(sourceKiteSessionStorePathFromCanonicalRoots(home.root, repositoryRoot!))
-      : home.root;
+  const runtimeRoot = home.root;
   const selected = selectKiteServiceEnvironmentSource(sourceEnvironment);
   const environment: Record<string, string> = { NODE_ENV: 'production' };
   for (const [key, value] of Object.entries(selected)) {
     if (value !== undefined) environment[key] = value;
   }
-  if (mode === 'installed') environment.KITE_STANDALONE_EXECUTABLE = '1';
+  if (mode === 'installed') {
+    environment.KITE_STANDALONE_EXECUTABLE = '1';
+    environment.KITE_CODE_RELEASE_ROOT = candidateRoot!;
+    environment.KITE_CODE_CANDIDATE_ID = buildId;
+  }
   const sourceEntrypoint =
     mode === 'source'
       ? join(repositoryRoot!, 'scripts', 'release', 'entrypoints', 'service.ts')
@@ -196,18 +196,7 @@ export function prepareManagedLocalAppServerTarget(
   const home = ensureKiteProfileHome(
     createKiteHomeIdentity(target.requestedConfigRoot ?? target.configRoot),
   );
-  if (target.mode !== 'source') {
-    return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: home.root });
-  }
-  if (!target.sourceRepositoryRoot) {
-    throw new Error('Source App Server repository identity is missing.');
-  }
-  const canonicalRuntimeRoot = dirname(
-    sourceKiteSessionStorePathFromCanonicalRoots(home.root, target.sourceRepositoryRoot),
-  );
-  const digest = basename(canonicalRuntimeRoot);
-  const ensured = ensurePrivateKiteHomeDirectory(home, ['source-profiles', digest]);
-  return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: ensured });
+  return Object.freeze({ ...target, configRoot: home.root, runtimeRoot: home.root });
 }
 
 /** Resolve a stable identity without creating the final profile path. */

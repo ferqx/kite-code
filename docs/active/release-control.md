@@ -53,7 +53,7 @@ NODE/BUN injection不得跨边界。profile、Workspace、build、Web asset root
 upgrade/rollback只验证target candidate并原子切换pointer；已运行进程固定自己的candidate root，不重读pointer。安装器不discover、stop、
 replace或upgrade任何App Server，也不获取Runtime lifecycle fence。切换只影响下一次paired App Server或daemon start。
 
-uninstall先完整枚举并校验managed tree；unknown file/directory/link立即拒绝。校验通过后删除managed install root，但不发送进程控制命令。
+uninstall先完整枚举并校验managed tree；unknown file/directory/link立即拒绝。POSIX 校验后只移除已拥有的发行内容，保留安装根、稳定选版锁及已有 Store 维护协议标记，防止卸载与重装复用不同锁 inode 或绕过旧候选限制；Windows 当前仍删除整个安装根且不具自动 Store 迁移资格。卸载不发送进程控制命令。
 运行中的daemon可能继续持有已加载代码，用户应在卸载前显式`kite server stop`；卸载器不会用旧`service *`命令猜测或强杀进程。
 
 ## Stable launcher

@@ -12,6 +12,19 @@ import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { SessionPresentationAction } from '../../src/adapters/tui/session-adapter';
 import { createNativeTuiRuntimeClient } from '../../src/service-mode';
 
+test('detached admission rejection stays handled until the caller awaits readiness', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.rejectNextCreate();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  // The TUI creates its prompt Session before a component waits for readiness.
+  await Bun.sleep(10);
+  await expect(facade.waitForSessionReady(sessionId)).rejects.toThrow(
+    'Runtime command rejected: storage_unavailable',
+  );
+  await facade.dispose();
+});
+
 test('Native TUI facade uses Runtime commands/events and close only tears down the client connection', async () => {
   const remote = new FakeRuntimeConnection();
   const runtime: RuntimeClient = new RuntimeClient({
@@ -686,6 +699,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly idleQueryRevisions: number[] = [];
   closeCalls = 0;
   recoveryOnRunQuery = false;
+  #rejectNextCreate = false;
   #items: unknown[] = [];
   #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
   #sessionId = '';
@@ -740,6 +754,10 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
 
   requestApprovalOnNextTurn(): void {
     this.#approvalOnNextTurn = true;
+  }
+
+  rejectNextCreate(): void {
+    this.#rejectNextCreate = true;
   }
 
   acceptNextInteractionWithoutConflict(): void {
@@ -978,6 +996,18 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       const command = message.params.command;
       this.commands.push(command.type);
       if (command.type === 'create_session') {
+        if (this.#rejectNextCreate) {
+          this.#rejectNextCreate = false;
+          this.push(
+            result(message.id, {
+              status: 'rejected',
+              commandId: command.commandId,
+              code: 'storage_unavailable',
+              currentRevision: 0,
+            }),
+          );
+          return;
+        }
         this.#sessionId = command.bootstrapSessionId ?? '';
         this.#authoritativeRevision = 1;
         this.push(

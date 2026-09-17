@@ -1,6 +1,6 @@
 import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
 import type { RuntimeModule } from '@kite-ai/runtime-spi';
-import { createGitRuntimeModule } from './git/runtime-module';
+import { createFilesystemRuntimeModule } from './filesystem/runtime-module';
 import { createModelRuntimeModule } from './model/runtime-module';
 import { createPlanningRuntimeModule } from './planning/runtime-module';
 import { createSubagentRuntimeModule } from './subagent/runtime-module';
@@ -174,40 +174,25 @@ export {
   BuiltinWorkspaceFilesystemReadDispatchError,
   createBuiltinWorkspaceFilesystemReadDispatcher,
 } from './filesystem/read-dispatcher';
-export {
-  type BuiltinProtectedPathEvaluator,
-  createGitBroker,
-  type GitBroker,
-  type GitProcessAdapter,
-  type GitProcessRequest,
-  type GitProcessResult,
-  isGitRevision,
-} from './git/broker';
-export {
-  type BrokeredGitQualificationDecision,
-  qualifyBrokeredGitNativeDeny,
-} from './git/qualification';
 export type {
   BuiltinFilesystemExecutionMechanism,
   BuiltinFilesystemPipelineResult,
-  BuiltinGitExecutionMechanism,
-  GitExecutionMechanisms,
-  GitOperationId,
-} from './git/runtime-module';
+  FilesystemExecutionMechanisms,
+  FilesystemOperationId,
+} from './filesystem/runtime-module';
 export {
-  createGitRuntimeModule,
+  createFilesystemRuntimeModule,
   EDIT_FILE_INPUT_SCHEMA_,
-  GIT_CAPABILITY_REVISIONS_,
-  GIT_EXECUTOR_REVISIONS_,
-  GIT_INSPECT_INPUT_SCHEMA_,
-  GIT_OPERATION_IDS_,
-  GIT_PROVIDER_ID_,
+  FILESYSTEM_CAPABILITY_REVISIONS_,
+  FILESYSTEM_EXECUTOR_REVISIONS_,
+  FILESYSTEM_OPERATION_IDS_,
+  FILESYSTEM_PROVIDER_ID_,
   MAX_MODEL_READ_FILE_CHARS_,
   READ_FILE_INPUT_SCHEMA_,
   SEARCH_CONTENT_INPUT_SCHEMA_,
   SEARCH_FILES_INPUT_SCHEMA_,
   WRITE_FILE_INPUT_SCHEMA_,
-} from './git/runtime-module';
+} from './filesystem/runtime-module';
 export type {
   BuiltinMechanismRecord,
   MergeBuiltinMechanismBundleInput,
@@ -388,7 +373,6 @@ export {
   BUILTIN_COMPLETE_SKILL_SCHEMA_,
   BUILTIN_DYNAMIC_MCP_SCHEMA_,
   BUILTIN_EDIT_FILE_SCHEMA_,
-  BUILTIN_GIT_INSPECT_SCHEMA_,
   BUILTIN_JSON_SCHEMAS_,
   BUILTIN_LIST_MCP_RESOURCES_SCHEMA_,
   BUILTIN_LIST_MCP_TOOLS_SCHEMA_,
@@ -454,7 +438,7 @@ export function createBuiltinRuntimeModules(): readonly RuntimeModule[] {
   return Object.freeze([
     createToolSearchRuntimeModule(),
     createModelRuntimeModule(),
-    createGitRuntimeModule(),
+    createFilesystemRuntimeModule(),
     createPlanningRuntimeModule(),
     createSubagentRuntimeModule(),
     createVerificationRuntimeModule(),

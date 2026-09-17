@@ -117,8 +117,6 @@ export {
   KITE_HOME_STORE_INDEXES,
   KITE_HOME_STORE_SCHEMA_VERSION,
   KITE_HOME_STORE_TABLE_COLUMNS,
-  KITE_SESSION_STORE_FORMAT_EPOCH,
-  KITE_SESSION_STORE_SCHEMA_VERSION,
   KITE_SESSION_STORE_TABLE_COLUMNS,
   KiteHomeStoreSchemaError,
 } from './kite-home-store';
@@ -159,6 +157,11 @@ export {
   type KiteSessionInitialExecutionInput,
 } from './kite-session-execution-authority';
 export {
+  acquireKiteSessionStoreMaintenance,
+  type KiteSessionMaintenanceLock,
+  type KiteSessionMaintenanceMode,
+} from './kite-session-maintenance';
+export {
   createKiteSessionMutationPort,
   KiteSessionMutationError,
   type KiteSessionMutationErrorCode,
@@ -166,9 +169,24 @@ export {
   type KiteSessionMutationPort,
 } from './kite-session-mutation';
 export {
+  captureKiteSessionPreservationManifest,
+  compareKiteSessionPreservationManifests,
+  type KiteSessionPreservationManifest,
+} from './kite-session-preservation';
+export {
+  createKiteSessionRecoveryBackup,
+  type KiteSessionRecoveryBackup,
+  type KiteSessionRecoveryBackupOptions,
+  type KiteSessionRecoveryManifest,
+} from './kite-session-recovery-backup';
+export {
+  checkKiteSessionStoreCompatibility,
+  type KiteSessionStoreCompatibility,
+  type KiteSessionStoreMetadata,
   KiteSessionStoreOpenError,
   type KiteSessionStoreOpenErrorCode,
   openKiteSessionStoreDatabase,
+  readKiteSessionStoreMetadata,
   validateKiteSessionStoreDatabase,
 } from './kite-session-runtime-file';
 export {
@@ -179,6 +197,24 @@ export {
   type KiteSessionRuntimeStorageOwner,
   openKiteSessionRuntimeStorage,
 } from './kite-session-runtime-storage';
+export {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from './kite-session-store-format';
+export { prepareKiteSessionStore } from './kite-session-store-preparation';
+export {
+  assertKiteSessionStoreSourcesReconciled,
+  inspectKiteSessionStoreSources,
+} from './kite-session-store-sources';
+export {
+  convertKiteStore9ToSessionStore10,
+  KiteStore9ConversionUnsupported,
+} from './kite-session-store9-conversion';
+export {
+  assertKiteSessionStore11Schema,
+  convertKiteSessionStore11To10,
+  KiteStore11ConversionUnsupported,
+} from './kite-session-store11-conversion';
 export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,

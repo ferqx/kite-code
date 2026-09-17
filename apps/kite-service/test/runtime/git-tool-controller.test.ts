@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { GitBroker } from '@kite-ai/builtin-runtime/git';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#kite-service/config/index';
 import { StateHostSessionHarness as AgentKernel } from '../../../../scripts/support/runtime-host-state';
@@ -7,38 +6,11 @@ import { openStateStoreForTest } from '../../../../scripts/support/runtime-stora
 import { executeTestRuntimeTools } from '../../../../tests/helpers/runtime-model';
 
 function config(): AgentConfig {
-  return {
-    features: { brokeredGit: true },
-    executionCapabilitySurface: {
-      inProcessReadOnlyTools: null,
-      network: false,
-      process: true,
-      write: true,
-      workspaceWrite: true,
-      shell: true,
-      skillChild: false,
-      localStdioMcp: false,
-      gitInspect: true,
-      brokeredGitFeatureRevision: 'brokered-git-r1',
-    },
-  } as AgentConfig;
+  return { sandbox: { enabled: true } } as AgentConfig;
 }
 
 describe('ACORE-GIT Controller and Kernel integration', () => {
   test('does not dispatch internal typed Git from a model tool call', async () => {
-    let inspectDispatches = 0;
-    const broker: GitBroker = {
-      featureRevision: 'brokered-git-r1',
-      inspect: async () => {
-        inspectDispatches++;
-        return {
-          ok: false,
-          output: 'Protected Git path is denied.',
-          failureCode: 'protected_path_denied',
-          nextCapability: 'git_inspect',
-        };
-      },
-    };
     const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
@@ -64,10 +36,8 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
       const events = await executeTestRuntimeTools({
         state: kernel.getState(),
         toolCallIds: ['git-inspect'],
-        gitBroker: broker,
         taskConfig: config(),
       });
-      expect(inspectDispatches).toBe(0);
       expect(events.some((event) => event.type === 'tool.failed')).toBe(true);
       kernel.processEventBatch(events);
       expect(kernel.getState().tools.calls['git-inspect']?.outcome).toMatchObject({

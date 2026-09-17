@@ -12,7 +12,6 @@ import {
   type ExecutionEnvironmentIdentity,
   readExecutionEnvironmentIdentity,
 } from '@kite-ai/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -58,26 +57,6 @@ const processCapabilitySurfaceSchema = z
     shell: z.boolean(),
     skillChild: z.boolean(),
     localStdioMcp: z.boolean(),
-    brokeredGit: z
-      .object({
-        featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_),
-        inspect: z.boolean(),
-        shellDenyEvidence: z
-          .object({
-            featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_),
-            platform: z.enum(['darwin', 'linux', 'win32']),
-            backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
-            outcome: z.enum(['qualified', 'excluded']),
-            metadataReadDeny: z.boolean(),
-            metadataWriteDeny: z.boolean(),
-            profileRevision: z.string().min(1),
-            profileDigest: digestSchema,
-            protectedRulesDigest: digestSchema,
-          })
-          .strict(),
-      })
-      .strict()
-      .optional(),
   })
   .strict()
   .superRefine((surface, context) => {
@@ -87,21 +66,6 @@ const processCapabilitySurfaceSchema = z
         path: ['shell'],
         message: 'child process capabilities require the qualified shell process boundary',
       });
-    }
-    if (surface.brokeredGit) {
-      const evidence = surface.brokeredGit.shellDenyEvidence;
-      if (
-        evidence.outcome !== 'qualified' ||
-        evidence.backend === 'none' ||
-        !evidence.metadataReadDeny ||
-        !evidence.metadataWriteDeny
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['brokeredGit', 'shellDenyEvidence'],
-          message: 'brokered Git requires proven native metadata read and write denial',
-        });
-      }
     }
   });
 
@@ -209,18 +173,6 @@ const qualificationSchema = z
         message: 'read_only_only requires at least one verified in-process tool',
       });
     }
-    const gitEvidence = qualification.processCapabilitySurface.brokeredGit?.shellDenyEvidence;
-    if (
-      gitEvidence &&
-      (gitEvidence.platform !== qualification.platform ||
-        gitEvidence.backend !== qualification.backend)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['processCapabilitySurface', 'brokeredGit', 'shellDenyEvidence'],
-        message: 'brokered Git native evidence must match qualification platform and backend',
-      });
-    }
   });
 
 export function parseProductionExecutionQualification(
@@ -300,9 +252,6 @@ function registryCanonicalValue(
           shell: qualification.processCapabilitySurface.shell,
           skillChild: qualification.processCapabilitySurface.skillChild,
           localStdioMcp: qualification.processCapabilitySurface.localStdioMcp,
-          ...(qualification.processCapabilitySurface.brokeredGit
-            ? { brokeredGit: qualification.processCapabilitySurface.brokeredGit }
-            : {}),
         },
         inProcessReadOnlyTools: {
           version: qualification.inProcessReadOnlyTools.version,

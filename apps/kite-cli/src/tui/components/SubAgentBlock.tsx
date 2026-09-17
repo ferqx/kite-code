@@ -150,15 +150,16 @@ export default function SubAgentBlock({
   const liveElapsed = block.startedAt ? Math.max(0, Date.now() - block.startedAt) : 0;
 
   // ── Status flags ──
+  const isCreating = block.status === 'creating';
   const isRunning = block.status === 'running';
   const isSuspended = block.status === 'suspended';
-  const isActive = isRunning || isSuspended;
+  const isActive = isCreating || isRunning || isSuspended;
   const isError = block.status === 'error';
+  const isInterrupted = block.status === 'interrupted';
   const isCancelled = block.status === 'cancelled';
-  const isSettled = isError || isCancelled || block.status === 'done';
+  const isSettled = isError || isInterrupted || isCancelled || block.status === 'done';
   const approvalState =
-    block.approvalState ??
-    (block.awaitingApproval || isSuspended ? ('awaiting_user' as const) : undefined);
+    block.approvalState ?? (block.awaitingApproval ? ('awaiting_user' as const) : undefined);
   const isWaiting = approvalState != null;
 
   if (!isActive && !isSettled) return null;
@@ -195,17 +196,23 @@ export default function SubAgentBlock({
                     : '等待你的批准',
           color: approvalState === 'awaiting_user' ? dt.warning : dt.dim,
         }
-      : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
+      : isSuspended
+        ? { text: '等待结果核对', color: dt.warning }
+        : isCreating
+          ? { text: '创建中', color: dt.dim }
+          : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
     : isCancelled
-      ? { text: 'Cancelled', color: dt.warning }
-      : isError
-        ? {
-            text: block.failureDiagnostic
-              ? `${block.error || 'Error'} [${block.failureDiagnostic.code}/${block.failureDiagnostic.stage}]`
-              : block.error || 'Error',
-            color: dt.error,
-          }
-        : { text: `done! (${formatElapsed(block.durationMs)})`, color: dt.dim };
+      ? { text: '已取消', color: dt.warning }
+      : isInterrupted
+        ? { text: block.error || '已中断', color: dt.warning }
+        : isError
+          ? {
+              text: block.failureDiagnostic
+                ? `${block.error || 'Error'} [${block.failureDiagnostic.code}/${block.failureDiagnostic.stage}]`
+                : block.error || 'Error',
+              color: dt.error,
+            }
+          : { text: `done! (${formatElapsed(block.durationMs)})`, color: dt.dim };
 
   return (
     <Box flexDirection="column">

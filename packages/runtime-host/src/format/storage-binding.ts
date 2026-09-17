@@ -55,6 +55,7 @@ const IMMEDIATELY_PRECEDING_EVENT_TYPES = new Set([
   'approval.batch_released',
   'approval.session_grants_cleared',
   'auto_review.requested',
+  'auto_review.started',
   'auto_review.completed',
   'subagent.step',
   'subagent.tool_result',
@@ -63,6 +64,8 @@ const IMMEDIATELY_PRECEDING_EVENT_TYPES = new Set([
 
 /** Exact State half of a Runtime Store generation offline-maintenance barrier. */
 export function isRuntimeHostStateSettledForMigration(state: Readonly<AgentState>): boolean {
+  if (state.recoveryState.kind !== 'normal' || state.terminalOutcome?.pendingVerification)
+    return false;
   if (state.turn.status === 'active' || state.interactions.kind !== 'idle') return false;
   if (state.terminalOutcome?.knownExternalEffects === 'unknown') return false;
   if (
@@ -83,12 +86,40 @@ export function isRuntimeHostStateSettledForMigration(state: Readonly<AgentState
     Object.values(state.skills.frames).some((frame) => frame.status === 'active') ||
     Object.keys(state.suspendedSubagents).length !== 0 ||
     state.providerAdmission.pending.length !== 0 ||
-    hasUnresolvedToolFailures(state.toolRecovery) ||
+    (hasUnresolvedToolFailures(state.toolRecovery) &&
+      !hasOnlySettledPreDispatchPolicyDenials(state)) ||
     !canForkAgentState(state)
   ) {
     return false;
   }
   return true;
+}
+
+/** A rejected, never-dispatched tool remains in history but owns no execution to clean up. */
+function hasOnlySettledPreDispatchPolicyDenials(state: Readonly<AgentState>): boolean {
+  if (state.turn.status !== 'completed') return false;
+  const blocking = state.toolRecovery.order
+    .map((id) => state.toolRecovery.failures[id])
+    .filter(
+      (failure): failure is NonNullable<typeof failure> =>
+        failure !== undefined &&
+        failure.status !== 'recovered' &&
+        failure.resolution !== 'task_closed' &&
+        failure.resolution !== 'turn_closed',
+    );
+  return (
+    blocking.length > 0 &&
+    blocking.every(
+      (failure) =>
+        failure.status === 'exhausted' &&
+        failure.outcome.status === 'rejected' &&
+        failure.outcome.failure?.kind === 'policy_denied' &&
+        failure.outcome.dispatchState === 'not_started' &&
+        failure.outcome.externalEffects === 'none' &&
+        failure.outcome.replaySafety === 'pre_dispatch' &&
+        failure.outcome.recovery.disposition === 'never',
+    )
+  );
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {

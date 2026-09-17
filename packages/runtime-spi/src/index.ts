@@ -2,18 +2,6 @@ export * from './capability';
 export * from './control-frame';
 export * from './credential-broker';
 export * from './execution';
-export {
-  BROKERED_GIT_FEATURE_REVISION_,
-  GIT_BROKER_REVISION_,
-  GIT_OPERATION_SCHEMA_REVISION_,
-  type GitBrokerFailureCode,
-  type GitBrokerResult,
-  type GitCapabilityEvidence,
-  type GitInspectOperation,
-  type GitInspectRequest,
-  type GitInvocationReceipt,
-  type GitShellDenyEvidence,
-} from './git';
 export * from './identity';
 export * from './mcp-stdio-process';
 export * from './model';

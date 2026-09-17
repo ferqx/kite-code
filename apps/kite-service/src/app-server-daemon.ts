@@ -36,7 +36,12 @@ import { createWebGatewayCarrier, preflightWebGatewayStaticAssets } from './web-
 export interface KiteAppServerDaemonDependencies
   extends Pick<
     KiteAppServerMainDependencies,
-    'environment' | 'createStorage' | 'createComposition'
+    | 'environment'
+    | 'createStorage'
+    | 'createComposition'
+    | 'assertRetiredStoreWritersStopped'
+    | 'onStoreStartupProgress'
+    | 'beforeStorePublication'
   > {
   readonly signals?: Pick<NodeJS.Process, 'on' | 'off'>;
 }
@@ -60,7 +65,7 @@ export async function runKiteAppServerDaemonMain(
   const startedAt = new Date().toISOString();
   const processStartIdentity = await readLocalProcessStartIdentity(process.pid, process.platform);
   if (!processStartIdentity) throw new Error('App Server daemon process identity is unavailable.');
-  let owner: ReturnType<typeof createKiteAppServerRuntimeOwner> | undefined;
+  let owner: Awaited<ReturnType<typeof createKiteAppServerRuntimeOwner>> | undefined;
   let webOwners: Awaited<ReturnType<typeof createDaemonWebOwners>> | undefined;
   let phase: KiteLifecycleStatus['phase'] = 'starting';
   const carriers = new Map<Socket, RuntimeStdioCarrier>();
@@ -182,7 +187,7 @@ export async function runKiteAppServerDaemonMain(
     // Exclusive ownership precedes any mutable storage/Host initialization.
     await endpointServer.start();
     if (status().phase !== 'draining') {
-      owner = createKiteAppServerRuntimeOwner(environment, dependencies, {
+      owner = await createKiteAppServerRuntimeOwner(environment, dependencies, {
         daemonProtocol: true,
         instanceId,
       });
@@ -221,7 +226,7 @@ export async function runKiteAppServerDaemonMain(
 }
 
 async function createDaemonWebOwners(
-  owner: ReturnType<typeof createKiteAppServerRuntimeOwner>,
+  owner: Awaited<ReturnType<typeof createKiteAppServerRuntimeOwner>>,
   webStaticRoot: string,
   buildId: string,
 ): Promise<{
@@ -264,7 +269,7 @@ async function createDaemonWebOwners(
 
 function createSocketCarrier(
   socket: Socket,
-  owner: ReturnType<typeof createKiteAppServerRuntimeOwner>,
+  owner: Awaited<ReturnType<typeof createKiteAppServerRuntimeOwner>>,
   serverControl: NonNullable<Parameters<typeof createRuntimeStdioCarrier>[0]['serverControl']>,
 ): RuntimeStdioCarrier {
   socket.setNoDelay(true);

@@ -26,6 +26,7 @@ import {
   getRoleConfig,
   rejectShellOutsideSubAgentRoleCeiling,
 } from '@kite-ai/builtin-runtime/subagent';
+import { runtimeAbortCause } from '@kite-ai/runtime-contract';
 import {
   bestEffortRegularFileSize,
   type StateRuntimeEvent as RuntimeEvent,
@@ -71,7 +72,6 @@ function requireBuiltinToolCatalog(input: SubAgentRunnerInput): BuiltinToolCatal
 function createSubagentToolTurnContext(input: {
   workspace: string;
   config: SubAgentRunnerInput['config'];
-  gitBroker?: SubAgentRunnerInput['gitBroker'];
   eventSink?: SubAgentRunnerInput['eventSink'];
   toolSearchEnabled?: boolean;
   skillCatalog?: import('@kite-ai/builtin-runtime/skills').SkillCatalogSnapshot;
@@ -90,10 +90,7 @@ function createSubagentToolTurnContext(input: {
     taskId: input.taskId,
     phase: input.phase,
     featureFlags,
-    brokeredGitFeatureRevision:
-      input.config.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: Boolean(input.eventSink),
-    hasGitBroker: Boolean(input.gitBroker),
     toolSearchEnabled: input.toolSearchEnabled,
     activeSkillFrames: input.activeSkillFrames,
     skillCatalog: input.skillCatalog,
@@ -304,6 +301,7 @@ export async function executeSubagentStartWithCoreToolAdapter(
       id,
       role: normalizedInput.role.role,
       name: input.name,
+      status: 'running',
       ...(input.modelInvocationParentToolCallId
         ? { parentToolCallId: input.modelInvocationParentToolCallId }
         : {}),
@@ -384,7 +382,6 @@ export async function executeSubagentResumeWithCoreToolAdapter(
     : undefined;
   const resumeAvailability = createSubagentToolTurnContext({
     workspace: input.workspace,
-    gitBroker: input.gitBroker,
     config: input.config,
     phase: input.phase,
     threadId: input.threadId,
@@ -526,7 +523,10 @@ async function executeCoreSubagentToolAdapter(
   const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
   // 手动合并信号，避免 AbortSignal.any 的跨运行时兼容性问题
   const combinedController = new AbortController();
-  const onAbort = () => combinedController.abort();
+  const onAbort = () =>
+    combinedController.abort(
+      input.signal.aborted ? input.signal.reason : timeoutController.signal.reason,
+    );
   if (input.signal.aborted) {
     combinedController.abort(input.signal.reason);
   } else {
@@ -541,7 +541,6 @@ async function executeCoreSubagentToolAdapter(
 
   const availabilityContext = createSubagentToolTurnContext({
     workspace: input.workspace,
-    gitBroker: input.gitBroker,
     config: input.config,
     phase: input.phase,
     interactionMode: effectiveInteractionMode(input),
@@ -1416,21 +1415,25 @@ async function executeCoreSubagentToolAdapter(
     if (e instanceof DescendantResourceAdmissionError) throw e;
     const durationMs = Date.now() - startTime;
     const timedOut = timeoutController.signal.aborted && !input.signal.aborted;
-    const cancelled =
+    const aborted =
       !timedOut &&
       (input.signal.aborted ||
         combinedSignal.aborted ||
         (e instanceof Error && e.name === 'AbortError') ||
         (e instanceof BuiltinSubagentModelLoopError && e.code === 'aborted'));
+    const cancelled = aborted && runtimeAbortCause(input.signal.reason) === 'user';
+    const interrupted = timedOut || (aborted && !cancelled);
     const summary = timedOut
       ? 'Sub-agent execution timed out.'
       : cancelled
         ? 'Cancelled'
-        : 'Sub-agent execution failed.';
+        : interrupted
+          ? 'Sub-agent execution interrupted.'
+          : 'Sub-agent execution failed.';
     const diagnostic: NonNullable<SubAgentResult['failureDiagnostic']> = {
       code: timedOut
         ? 'timed_out'
-        : cancelled
+        : aborted
           ? 'aborted'
           : e instanceof BuiltinSubagentModelLoopError
             ? e.code
@@ -1444,7 +1447,15 @@ async function executeCoreSubagentToolAdapter(
     };
     input.eventSink({
       type: 'error',
-      data: { id, error: summary, summary, toolCallCount, durationMs, diagnostic },
+      data: {
+        id,
+        error: summary,
+        summary,
+        toolCallCount,
+        durationMs,
+        diagnostic,
+        status: cancelled ? 'cancelled' : interrupted ? 'interrupted' : 'failed',
+      },
     });
     return {
       ok: false,
@@ -1452,7 +1463,7 @@ async function executeCoreSubagentToolAdapter(
       toolCallCount,
       durationMs,
       error: summary,
-      terminalStatus: cancelled ? 'cancelled' : 'failed',
+      terminalStatus: cancelled ? 'cancelled' : interrupted ? 'interrupted' : 'failed',
       failureDiagnostic: diagnostic,
       steps,
       executionJournal: executionJournal.length > 0 ? executionJournal : undefined,

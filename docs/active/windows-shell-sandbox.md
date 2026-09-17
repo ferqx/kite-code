@@ -247,11 +247,10 @@ conformance 全部通过前，它仍不是可选择 backend，也不能用于 pr
 已由 ADR-0121 的 direct backend 语义提供。
 
 按 ADR-0131，Windows restricted-token 开发 backend 不再尝试证明通用 Shell 对 Workspace `.git`
-metadata 的独立 read/write deny；旧 ACL snapshot 会由 V3 ledger migration 恢复并删除。依赖该 deny 的
-`brokered-git-r1` production qualification 固定 excluded，直到后续 ADR 建立不缩小 Workspace 的新证据模型；
-typed broker schema 与 hostile repository 检查保留。按 ADR-0137，Windows raw Shell 先按 interactionMode
+metadata 的独立 read/write deny；旧 ACL snapshot 会由 V3 ledger migration 恢复并删除。专用 Git Broker、
+schema 与资格字段现已退役，普通 Shell 的 OS 权限与执行资格仍保留。按 ADR-0137，Windows raw Shell 先按 interactionMode
 与 phase 选择 Workspace baseline：Building 使用 Workspace 读写，Planning 非 Full 使用 Workspace 只读；
 baseline 不再因为命令名进入全量人工审批，已知 external/sensitive scope 才路由到 durable approval/Auto
 review。命中 ADR-0134 read-only classifier 的命令仍可使用 hardened environment，并固定关闭 external
 config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过 mode/policy review。raw Git token 不被
-硬拒绝，typed broker qualification 保持独立且不得由 generic process evidence 推导。
+硬拒绝；删除 Git 专用资格不构成 Windows 平台生产资格通过的证据。

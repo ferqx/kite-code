@@ -84,6 +84,15 @@ export interface KiteSessionExecutionAuthority {
     readonly connectionGeneration: number;
     readonly leaseUntilMs: number;
   }): KiteSessionAcquireResult;
+  /** Caller holds the writer transaction after the previous owner was fenced. */
+  acquireRecoveryInTransaction(input: {
+    readonly sessionId: string;
+    readonly expectedRevision: number;
+    readonly hostInstanceId: string;
+    readonly clientId: string | null;
+    readonly connectionGeneration: number;
+    readonly leaseUntilMs: number;
+  }): KiteSessionExecutionAuthorityRecord;
   renew(input: {
     readonly sessionId: string;
     readonly expectedRevision: number;
@@ -341,6 +350,45 @@ export function createKiteSessionExecutionAuthority(input: {
     });
   };
 
+  const acquireRecoveryInTransaction: KiteSessionExecutionAuthority['acquireRecoveryInTransaction'] =
+    (request) => {
+      assertRevision(request.expectedRevision);
+      assertIdentity(request.hostInstanceId, 'Host instance');
+      assertNullableIdentity(request.clientId, 'Client');
+      assertGeneration(request.connectionGeneration, 'Connection generation');
+      assertFutureLease(request.leaseUntilMs, now());
+      if (!input.writer.inTransaction) {
+        throw new KiteSessionExecutionAuthorityError(
+          'invalid_transition',
+          'Recovery execution acquisition requires the writer transaction.',
+        );
+      }
+      const current = readTx(request.sessionId);
+      assertExpectedRevision(current, request.expectedRevision);
+      if (
+        current.status !== 'recovery_required' ||
+        current.hostInstanceId !== null ||
+        current.clientId !== null ||
+        current.leaseUntilMs !== null
+      ) {
+        throw new KiteSessionExecutionAuthorityError(
+          'invalid_transition',
+          'Only a fenced Session may acquire recovery execution.',
+        );
+      }
+      const acquired = nextRecord(current, now(), {
+        status: 'active',
+        controllerGeneration: increment(current.controllerGeneration),
+        hostInstanceId: request.hostInstanceId,
+        clientId: request.clientId,
+        connectionGeneration: request.connectionGeneration,
+        leaseUntilMs: request.leaseUntilMs,
+        cleanupConfirmed: false,
+      });
+      writeTx(acquired);
+      return publicRecord(acquired);
+    };
+
   const renew = (
     request: Parameters<KiteSessionExecutionAuthority['renew']>[0],
   ): KiteSessionAcquireResult => {
@@ -459,6 +507,7 @@ export function createKiteSessionExecutionAuthority(input: {
     acquireInitialInTransaction,
     removeInTransaction,
     acquire,
+    acquireRecoveryInTransaction,
     renew,
     detach,
     release,

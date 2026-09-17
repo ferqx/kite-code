@@ -115,8 +115,6 @@ export interface ExecutionCapabilitySurface {
   shell?: boolean;
   skillChild?: boolean;
   localStdioMcp?: boolean;
-  gitInspect?: boolean;
-  brokeredGitFeatureRevision?: string | null;
 }
 
 export function canonicalWorkspaceKey(workspace: string): string {

@@ -9,7 +9,11 @@ import {
 } from '@kite-ai/builtin-runtime';
 import { canonicalModelJson, ModelArtifactStore } from '@kite-ai/builtin-runtime/model';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
-import { ensureKiteProfileHome } from '@kite-ai/kite-local-runtime/service';
+import {
+  ensureKiteProfileHome,
+  secureWindowsStatePath,
+  verifyWindowsStatePath,
+} from '@kite-ai/kite-local-runtime/service';
 import {
   RuntimeClient,
   type RuntimeClientTransport,
@@ -26,6 +30,7 @@ import {
   type RuntimeAccess,
   type RuntimeCommand,
   type RuntimeCommandContext,
+  type RuntimeNotification,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
@@ -36,6 +41,7 @@ import {
   createRuntimeHost,
   createRuntimeHostBoundary,
   createRuntimeHostStateStorageBinding,
+  isRuntimeHostStateSettledForMigration,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHost,
   type RuntimeHostBoundary,
@@ -79,7 +85,9 @@ import {
   KiteSessionExecutionAuthorityError,
   KiteSessionMutationError,
   KiteSessionRuntimeStorageError,
+  KiteSessionStoreOpenError,
   openKiteSessionRuntimeStorage,
+  prepareKiteSessionStore,
   resolveSqliteRuntimeLayoutPaths,
   resolveSqliteWorkspaceStorePath,
   SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
@@ -129,6 +137,7 @@ import type {
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
 import type { AgentConfig } from './config';
+import { persistedWorkspaceIdentity } from './config/persisted-workspace-identity';
 import {
   type AdmittedWorkspace,
   createInProcessKiteRuntimeApplication,
@@ -904,6 +913,7 @@ export interface KiteRuntimeStorageOwner {
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
   /** KASD App Server Session generation scope. */
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly reconcileInterruptedSession?: KiteSessionAppServerStorageOwner['reconcileInterruptedSession'];
   readonly commitUnownedInteractionMode?: KiteSessionAppServerStorageOwner['commitUnownedInteractionMode'];
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
@@ -916,8 +926,20 @@ export interface KiteRuntimeStorageOwner {
   readonly disposeStorage?: () => void;
 }
 
+export type KiteStoreWriterAdmission = Parameters<
+  typeof prepareKiteSessionStore
+>[0]['assertRetiredWritersStopped'];
+
+export type KiteStoreStartupProgress = NonNullable<
+  Parameters<typeof prepareKiteSessionStore>[0]['onProgress']
+>;
+
 /** KASD exact multi-connection Store owner; it never opens kite.sqlite or a Workspace lock. */
-export function createKiteSessionAppServerStorageComposition(input: {
+type KiteSessionStorageCompositionInput = {
+  readonly assertRetiredStoreWritersStopped?: KiteStoreWriterAdmission;
+  readonly onStoreStartupProgress?: KiteStoreStartupProgress;
+  readonly shouldStopStartup?: () => boolean;
+  readonly beforeStorePublication?: () => Promise<'commit' | 'cancel'>;
   readonly databasePath: string;
   readonly hostInstanceId: string;
   readonly clientId?: string;
@@ -925,9 +947,93 @@ export function createKiteSessionAppServerStorageComposition(input: {
   readonly executionLeaseMs?: number;
   readonly renewIntervalMs?: number;
   readonly now?: () => number;
-}): KiteSessionAppServerStorageOwner {
+};
+
+export async function createKiteSessionAppServerStorageComposition(
+  input: KiteSessionStorageCompositionInput,
+): Promise<KiteSessionAppServerStorageOwner> {
+  let deadline: number | undefined;
+  let published = false;
+  let lastBusy: KiteSessionStoreOpenError | undefined;
+  let startupStage: Parameters<KiteStoreStartupProgress>[0] = 'inspecting';
+  const report = (stage: Parameters<KiteStoreStartupProgress>[0]): void => {
+    startupStage = stage;
+    try {
+      const result = input.onStoreStartupProgress?.(stage);
+      if (result) void Promise.resolve(result).catch(() => undefined);
+    } catch {
+      // Startup progress is observational; it cannot change Store admission.
+    }
+  };
+  const assertNotStopped = (): void => {
+    if (input.shouldStopStartup?.()) {
+      if (published) {
+        if (lastBusy) throw lastBusy;
+        return;
+      }
+      throw new KiteSessionStoreOpenError(
+        'store_preparation_cancelled',
+        'Store startup was cancelled before opening.',
+        { stage: startupStage },
+      );
+    }
+  };
+  for (;;) {
+    assertNotStopped();
+    try {
+      const preparation = await prepareKiteSessionStore({
+        databasePath: input.databasePath,
+        codec: STATE_STORAGE_BINDING_.codec,
+        onProgress: (stage) => {
+          if (stage !== 'ready') report(stage);
+        },
+        ...(input.beforeStorePublication
+          ? { beforePublication: input.beforeStorePublication }
+          : {}),
+        isSettledState: isRuntimeHostStateSettledForMigration,
+        assertRetiredWritersStopped:
+          input.assertRetiredStoreWritersStopped ??
+          (() => {
+            throw new Error('This entrypoint has not established retired Store writer admission.');
+          }),
+        ...(input.now ? { nowMs: input.now() } : {}),
+      });
+      lastBusy = undefined;
+      if (preparation.status !== 'current') published = true;
+      assertNotStopped();
+      const owner = openCurrentKiteSessionAppServerStorageComposition(input);
+      report('ready');
+      return owner;
+    } catch (error) {
+      if (!(error instanceof KiteSessionStoreOpenError) || error.code !== 'store_busy') throw error;
+      lastBusy = error;
+      deadline ??= performance.now() + 10_000;
+      assertNotStopped();
+      report('waiting_for_store');
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) {
+        throw new KiteSessionStoreOpenError('store_busy', error.message, {
+          cause: error,
+          stage: 'waiting_for_store',
+          ...(error.compatibility ? { compatibility: error.compatibility } : {}),
+        });
+      }
+      await Bun.sleep(Math.min(250, remaining));
+    }
+  }
+}
+
+/** Strict current/fresh Store opening for already-admitted owners and legacy in-process paths. */
+function openCurrentKiteSessionAppServerStorageComposition(
+  input: KiteSessionStorageCompositionInput,
+): KiteSessionAppServerStorageOwner {
   const target = openKiteSessionRuntimeStorage<RuntimeEvent, RuntimeState>({
     databasePath: input.databasePath,
+    windowsPathSecurity: {
+      verifyDirectory: (path) => verifyWindowsStatePath(path, 'directory'),
+      secureFile: (path) => secureWindowsStatePath(path, 'file'),
+      verifyFile: (path) => verifyWindowsStatePath(path, 'file'),
+    },
     codec: STATE_STORAGE_BINDING_.codec,
     stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
     formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
@@ -1302,7 +1408,7 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
 function createKiteCliRuntimeHost(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
-  const owner = createKiteSessionAppServerStorageComposition({
+  const owner = openCurrentKiteSessionAppServerStorageComposition({
     databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
     hostInstanceId: `cli_${randomBytes(16).toString('hex')}`,
   });
@@ -1412,7 +1518,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
   // an injected Store.
   const owner =
     input.storageOwner ??
-    createKiteSessionAppServerStorageComposition({
+    openCurrentKiteSessionAppServerStorageComposition({
       databasePath: join(dirname(input.checkpointPath), 'kite-session.sqlite'),
       hostInstanceId: `service_${randomBytes(16).toString('hex')}`,
     });
@@ -1438,15 +1544,13 @@ export function createKiteMultiWorkspaceRuntimeServer(
       bySession.delete(sessionId);
       return undefined;
     }
-    let canonicalPath: string;
-    try {
-      canonicalPath = realpathSync.native(snapshot.session.workspace);
-    } catch {
-      bySession.delete(sessionId);
-      return undefined;
-    }
-    const project = resolveProjectIdentity(canonicalPath);
-    if (project.projectId !== projectId || project.workspaceDigest !== workspaceDigest) {
+    const canonicalPath = snapshot.session.workspace;
+    const identity = persistedWorkspaceIdentity(canonicalPath);
+    if (
+      identity === undefined ||
+      projectId !== identity.projectId ||
+      workspaceDigest !== identity.workspaceDigest
+    ) {
       bySession.delete(sessionId);
       return undefined;
     }
@@ -1460,7 +1564,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
       const admission: AdmittedWorkspace = Object.freeze({
         canonicalPath,
         projectId,
-        workspaceDigest,
+        workspaceDigest: identity.workspaceDigest,
       });
       bySession.set(sessionId, admission);
       return admission;
@@ -1486,8 +1590,14 @@ export function createKiteMultiWorkspaceRuntimeServer(
     const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
     const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
     const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
+    const executionAuthority = owner.recovery?.inspect(threadId).authority;
+    const liveOwner =
+      executionAuthority &&
+      (executionAuthority.status === 'active' || executionAuthority.status === 'detached') &&
+      executionAuthority.leaseUntilMs !== null &&
+      executionAuthority.leaseUntilMs > Date.now();
     const preserveRunStatus =
-      ownsExecution || (storedRun !== undefined && isSettledStoredRun(storedRun));
+      ownsExecution || liveOwner || (storedRun !== undefined && isSettledStoredRun(storedRun));
     return Object.freeze({
       schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId: threadId,
@@ -1546,6 +1656,17 @@ export function createKiteMultiWorkspaceRuntimeServer(
   };
   const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
   const desiredConfigs = new Map<string, AgentConfig>();
+  const recoveryGenerations = new Map<
+    string,
+    {
+      kind: 'fenced_previous_execution';
+      controllerGeneration: number;
+      assertCurrent: () => boolean;
+    }
+  >();
+  let recoverInterruptedSession:
+    | ((sessionId: string, generation: number, assertCurrent: () => boolean) => Promise<void>)
+    | undefined;
   const host = createKiteRuntimeHost(
     owner.storage,
     (context, builtinToolCatalog) => {
@@ -1621,12 +1742,21 @@ export function createKiteMultiWorkspaceRuntimeServer(
                         );
                       })()))
                 : defaultConfig;
+              const bridgeIdentity = persistedWorkspaceIdentity(admission.canonicalPath);
+              if (
+                !bridgeIdentity ||
+                bridgeIdentity.projectId !== admission.projectId ||
+                bridgeIdentity.workspaceDigest !== admission.workspaceDigest
+              ) {
+                throw new Error('Runtime Session Workspace identity changed.');
+              }
               const bridge = createCliRuntimeBridge(
                 {
                   ...registered.input,
                   config: sessionConfig,
                   sessionId,
-                  projectIdentity: resolveProjectIdentity(admission.canonicalPath),
+                  restartRecoveryOwnership: () => recoveryGenerations.get(sessionId),
+                  projectIdentity: bridgeIdentity,
                 },
                 capabilities,
                 modelInvocationRuntimeFactory,
@@ -1691,6 +1821,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
               sessionId: string,
               publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
             ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
+            recoverCommittedResume: async (
+              command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+              committedRevision: number,
+              publish: (notification: RuntimeNotification) => void,
+              commandContext?: Readonly<RuntimeCommandContext>,
+            ) =>
+              (await bridgeForSession(command.sessionId)).recoverCommittedResume?.(
+                command,
+                committedRevision,
+                publish,
+                commandContext,
+              ),
             inspectCommand: async (
               command: RuntimeCommand,
               context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
@@ -1783,6 +1925,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
           };
         },
       });
+      recoverInterruptedSession = async (sessionId, generation, assertCurrent) => {
+        recoveryGenerations.set(sessionId, {
+          kind: 'fenced_previous_execution',
+          controllerGeneration: generation,
+          assertCurrent,
+        });
+        try {
+          await router.recoverSession(sessionId, () => undefined);
+        } finally {
+          recoveryGenerations.delete(sessionId);
+        }
+      };
       return Object.freeze({
         recoverSession: router.recoverSession.bind(router),
         inspectCommand: async (
@@ -1978,8 +2132,26 @@ export function createKiteMultiWorkspaceRuntimeServer(
       reason: 'unauthorized' as const,
     }),
   });
-  const runHostCommand = (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) => {
+  const reconcileSession = async (sessionId: string): Promise<void> => {
+    if (!owner.reconcileInterruptedSession) return;
+    await host.start();
+    await owner.reconcileInterruptedSession(sessionId, async (generation, assertCurrent) => {
+      if (!recoverInterruptedSession) throw new Error('Session recovery adapter is unavailable.');
+      await recoverInterruptedSession(sessionId, generation, assertCurrent);
+    });
+  };
+  const runHostCommand = async (
+    command: RuntimeCommand,
+    context?: Readonly<RuntimeCommandContext>,
+  ) => {
     try {
+      if (
+        'sessionId' in command &&
+        command.type !== 'set_interaction_mode' &&
+        command.type !== 'recover_session' &&
+        command.type !== 'delete_session'
+      )
+        await reconcileSession(command.sessionId);
       return Promise.resolve(host.command(command, context)).catch((error) =>
         appServerCommandFailure(command, error, owner),
       );
@@ -1998,8 +2170,27 @@ export function createKiteMultiWorkspaceRuntimeServer(
         }
       : { status: 'not_found', queryType: 'get_session_projection', code: 'session_not_found' };
   }
-  const runHostQuery = (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
-    if (!owner.readSnapshot) return host.query(query);
+  const runHostQuery = async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+    if (
+      query.type === 'get_session_projection' &&
+      (owner.loadCurrentSnapshot(query.sessionId)?.turn.turnIndex ?? 0) > 0
+    ) {
+      try {
+        await reconcileSession(query.sessionId);
+      } catch (error) {
+        // A failed resource reconciliation must not hide readable history.
+        // The persisted recovery authority remains visible in the projection
+        // and in get_session_recovery; commands still report its exact failure.
+        console.error('Session reentry cleanup remains pending.', {
+          sessionId: query.sessionId,
+          error,
+        });
+      }
+    }
+    // Projection queries also seed the Host subscriber registry. In particular,
+    // a failed cleanup retry may have advanced the durable revision after the
+    // subscriber registered; returning only the Store value strands its watermark.
+    if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
     const direct = owner.readSnapshot(() => {
       if (query.type === 'list_sessions') {
         return {
@@ -2058,7 +2249,6 @@ export function createKiteMultiWorkspaceRuntimeServer(
           },
         };
       }
-      if (query.type === 'get_session_projection') return queryStoredProjection(query.sessionId);
       if (query.type === 'list_checkpoints') {
         const snapshot = owner.loadCurrentSnapshot(query.sessionId);
         if (!snapshot) {
@@ -2162,10 +2352,14 @@ export function createKiteMultiWorkspaceRuntimeServer(
         authorize: async (request: RuntimeServerAdmissionInput) => {
           const decision = await requestedAdmission.authorize(request);
           if (!decision.allowed) return decision;
+          const sessionId = admissionSessionId(request);
+          const persisted =
+            sessionId === undefined ? undefined : persistedAdmissionForSession(sessionId);
           const admitted =
             [...byWorkspace.values()].find(
               (candidate) => candidate.admission.canonicalPath === decision.workspace,
             )?.admission ??
+            (persisted?.canonicalPath === decision.workspace ? persisted : undefined) ??
             (input.workspaceTemplateFor
               ? (() => {
                   try {
@@ -2182,9 +2376,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 })()
               : undefined);
           if (!admitted) return { allowed: false as const, reason: 'unauthorized' as const };
-          const sessionId = admissionSessionId(request);
           if (sessionId !== undefined) {
-            const persisted = persistedAdmissionForSession(sessionId);
             const command =
               request.operation === 'runtime/command' && request.command
                 ? (request.command as { readonly type?: unknown })

@@ -38,9 +38,11 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 ## 数据与权限
 
-会话正文提供按轮复制：每条已发送用户消息单独复制；同一轮 Agent 正文在最后一段提供一个按钮，按显示顺序以空行连接正文，排除思考、工具和子 Agent 输出。未落定的消息或尚未结束的 Agent 轮次不提供复制。按钮在悬停或键盘聚焦时显示；剪贴板写入失败可重试。桌面首条消息的本地发送状态由入口传入，共享组件不负责提交或重试。Composer 的模型列表、权限选择及回调也由入口提供，不补造可用模型或执行授权。
+会话正文提供按轮复制：每条已发送用户消息单独复制；同一轮 Agent 正文在最后一段提供一个按钮，按显示顺序以空行连接正文，排除思考、工具和子 Agent 输出。未落定的消息或尚未结束的 Agent 轮次不提供复制。按钮在悬停或键盘聚焦时显示；复制成功后显示勾图标，两秒后恢复复制图标，剪贴板写入失败可重试。桌面首条消息的本地发送状态由入口传入，共享组件不负责提交或重试。Composer 的模型列表、权限选择及回调也由入口提供，不补造可用模型或执行授权。
 
 [展示类型](src/types.ts)只包含页面使用的数据，不导入 Runtime、Public API、Native 或 TUI 类型。端侧投影将真实数据转换为这些字段；缺失数据不能从名称或相邻消息补造。共享组件保留展开和阅读位置；服务状态、订阅与恢复由端侧现有 owner 管理。
+
+子 Agent 在会话内按自身生命周期显示“创建中、运行中、等待中、自动审批中、已完成、已中断、已取消、已失败”。父 task 工具先完成时，标题仍显示子 Agent 的当前状态；子 Agent 的明确失败原因放在展开内容中。只有存在具体子 Agent 终态原因时，才省去父 task 重复的通用失败句；缺少原因仍保留原错误。
 
 [`AskQuestionnaire`](src/AskQuestionnaire.tsx)基于 `@shadcn/react/questionnaire` 提供补充问题的共享表单结构、原生单选、自由输入、快捷键和必答校验。组件只接收通用问题数据与提交／取消回调，不导入 Runtime 类型；交互队列、回答传输、取消含义和草稿生命周期继续由端侧 owner 负责。
 
@@ -58,10 +60,12 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 `bun run --cwd packages/kite-client-ui test`、`typecheck`，两端的 `test`、`typecheck`、`build`，以及根 `check:runtime-packages`。共享包没有独立打包产物，`build` 核对类型，最终页面由两个 app 的 Vite 构建消费。[权限回归](test/page.test.tsx)核对只读与可操作页面；[桌面 UI 回归](../../apps/kite-desktop/test/ui.test.tsx)覆盖发送、中文组词、审批、停止和阅读位置；[Web 生命周期](../../apps/kite-web/test/app-lifecycle.test.tsx)覆盖只读接入、导航与诊断。
 
-[工具活动](src/ToolActivity.tsx)只按 Runtime 提供的 `presentation=exploration` 与相同 `presentationGroupId` 聚合相邻记录；standalone 始终独立，缺失分类时不按 label 猜测。读取直接显示动作与目标，不提供内容展开，失败保持同一行状态而不另起原始错误段落；Shell 在独立与聚合两种位置都可展开有界输出并保留底部真实状态，聚合内的展开选择由会话阅读状态保存，文件修改复用 [FileDiff](src/FileChanges.tsx) 展示已确认工具结果。工具、Ask 回执与压缩标记的视觉值统一见[设计规范](docs/design-system.md#会话消息结构)。`Message.approval` 只消费端侧投影的批准来源／范围与审查状态，工具终态不清除授权事实。共享 [Approval](src/Approval.tsx) 只提交宿主提供的 approve_once／same_command／reject 回调，不拥有审批权威。子 Agent 在主会话只显示工具过程，不渲染子 Agent 结果正文；有可见父 task 时，hidden 子工具在父展开区展示，并按 toolCallId 去除重复步骤；父工具缺失或不可见时保留工具入口，避免丢失异常。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
+[工具活动](src/ToolActivity.tsx)只按 Runtime 提供的 `presentation=exploration` 与相同 `presentationGroupId` 聚合相邻记录；standalone 始终独立，缺失分类时不按 label 猜测。读取直接显示动作与目标，不提供内容展开，失败保持同一行状态而不另起原始错误段落；组合工具标题不附加状态文字，错误摘要在展开后的对应工具项内显示；Shell 在独立与聚合两种位置都可展开有界输出并保留底部真实状态，聚合内的展开选择由会话阅读状态保存，文件修改复用 [FileDiff](src/FileChanges.tsx) 展示已确认工具结果。工具、Ask 回执与压缩标记的视觉值统一见[设计规范](docs/design-system.md#会话消息结构)。`Message.approval` 只消费端侧投影的批准来源／范围与审查状态，工具终态不清除授权事实。共享 [Approval](src/Approval.tsx) 只提交宿主提供的 approve_once／same_command／reject 回调，不拥有审批权威。主会话只显示子 Agent 入口；工具过程仅在所属子 Agent 容器内展示，列表最大高 320 px 并可独立滚动，不渲染子 Agent 结果正文；有可见父 task 时，子工具在父展开区的子 Agent 容器内展示，并按 toolCallId 去除重复步骤；父工具缺失或不可见时保留子 Agent 容器入口，内部工具不进入主消息列表。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
 
 空间摘要的可选 `muted` 仅控制名称的次级文字色，不禁用展开或会话操作。Desktop 用它表示本地目录缺失；共享组件不访问本地文件系统，Web 未提供该标记时保持原样。
 
 共享 SessionPage 的常驻窗口监听与导航回调不持有消息正文或文件变更的历史 props；messages/fileChanges 独立传给当前阅读组件，避免端侧淘汰缓存后首次正文仍被闭包保留。桌面缓存与校准由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)负责，Web 数据获取机制不变。
 
 Ask 历史通过 `Message.ask.toolCallId` 关联唯一工具调用，主列表保留交互记录并隐藏其重复执行行；`Message.ask` 保留问题与按问题 ID 对应的答案。没有关联交互但存在结构化工具回答时仅展示其中 answer，不输出包装 JSON；未关联的失败工具仍保留。
+
+子 Agent 工具步骤复用 [ToolActivity](src/ToolActivity.tsx) 的动作、目标与状态展示；步骤摘要不充当标题，读取结果正文不在标题或步骤行展开。失败步骤的提示在工具行展开后显示完整内容，不挤入标题行；子 Agent 已结束而工具步骤缺少终态时仅在展示层标为结果未知并停止运行中动画；子 Agent 容器不重复显示父工具已有的完成状态；若 Service 已将步骤关联到同一持久子工具，主会话按精确 toolCallId 只保留子工具行。Service 仅凭唯一的持久父子派发关系将旧记录中误标 hidden 的父 task 恢复可见，不扩大其他 hidden 工具的显示范围。父 task 的失败状态始终保留；仅当对应子 Agent 已有具体失败终态时，折叠卡片才省去重复的 `Tool execution failed.` 文案。无子项原因时仍显示该文案。[Desktop 展示回归](../../apps/kite-desktop/test/subagent-history.test.tsx)覆盖这些情况。

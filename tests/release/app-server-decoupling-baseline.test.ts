@@ -24,7 +24,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
   test('admits the completed KASD-01 exact Store and multi-connection owner', () => {
     expect(KITE_SESSION_STORE_FORMAT_EPOCH).toBe('kite-session-app-server-2026-09-02');
     expect(source('packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts')).toContain(
-      "'store_upgrade_required'",
+      "'store_incompatible'",
     );
     const authority = source(
       'packages/runtime-storage-sqlite/src/kite-session-execution-authority.ts',
@@ -61,7 +61,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(tui).not.toContain('discoverWeb');
     expect(cli).toContain('runtimeConnector: connector');
     expect(cli).toContain('createManagedLocalAppServerDaemon');
-    expect(source('scripts/release/app-server-client.ts')).toContain('sourceKiteSessionStorePath');
+    expect(source('scripts/release/app-server-client.ts')).toContain('runtimeRoot: home.root');
   });
 
   test('binds the accepted decision and archived completion evidence', () => {

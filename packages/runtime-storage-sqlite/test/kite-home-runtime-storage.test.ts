@@ -285,7 +285,9 @@ describe('global Kite Home RuntimeStorage owner', () => {
       stateSchemaVersion: 27,
       formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
     });
-    expect(damaged.directory.listSessions({ limit: 10 }).entries).toHaveLength(1);
+    expect(damaged.directory.listSessions({ limit: 10 }).entries).toMatchObject([
+      { sessionId: 'session-1', workspace: { workspaceId: admitted.workspaceId } },
+    ]);
     expect(decoded).toBe(0);
     expect(() => damaged.storage.sessions.loadSnapshot('session-1')).toThrow('snapshot');
     damaged.close();

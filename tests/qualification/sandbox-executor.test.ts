@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -396,6 +397,68 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
+  test('linked Git metadata needs exact read-only roots without granting its parent', async () => {
+    const primary = setupWorkspace();
+    const linked = setupWorkspace();
+    rmSync(linked, { recursive: true });
+    const runGit = (args: string[]) => {
+      const result = Bun.spawnSync(['git', ...args], {
+        cwd: primary,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(0);
+    };
+    try {
+      runGit(['init']);
+      writeFileSync(join(primary, 'tracked.txt'), 'tracked\n');
+      runGit(['add', 'tracked.txt']);
+      runGit([
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-m',
+        'initial',
+      ]);
+      runGit(['worktree', 'add', '-b', 'metadata-scope', linked]);
+      const commonDir = realpathSync.native(join(primary, '.git'));
+      const denied = createSandboxExecutor({ enabled: true, workspace: linked });
+      const deniedStatus = await denied({
+        workspace: linked,
+        command: 'git status --short',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(deniedStatus.ok).toBe(false);
+      const approved = createSandboxExecutor({
+        enabled: true,
+        workspace: linked,
+        runtimeReadOnlyRoots: [commonDir],
+      });
+      const status = await approved({
+        workspace: linked,
+        command: 'git status --short',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(status.ok).toBe(true);
+      const parentRead = await approved({
+        workspace: linked,
+        command: `cat '${join(primary, 'tracked.txt')}'`,
+      });
+      expect(parentRead.ok).toBe(false);
+      const metadataWrite = await approved({
+        workspace: linked,
+        command: `touch '${join(commonDir, 'unexpected-write')}'`,
+      });
+      expect(metadataWrite.ok).toBe(false);
+      expect(existsSync(join(commonDir, 'unexpected-write'))).toBe(false);
+    } finally {
+      cleanupWorkspace(linked);
+      cleanupWorkspace(primary);
+    }
+  });
+
   test('runs closed read-only Git status and log without invoking repository fsmonitor', async () => {
     const ws = setupWorkspace();
     const runGit = (args: string[]) => {
@@ -437,7 +500,8 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
       });
       expect(status.ok).toBe(true);
       if (process.platform === 'darwin') {
-        expect(status.stdout).toMatch(/^\/Library\/Developer\/.+\/usr\/bin\/git$/mu);
+        const developerBin = realpathSync.native('/private/var/select/developer_dir/usr/bin');
+        expect(status.stdout.split('\n')[0]).toBe(join(developerBin, 'git'));
       }
       expect(status.stderr).not.toContain('xcrun_db');
       expect(log.ok).toBe(true);

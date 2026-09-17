@@ -15,13 +15,17 @@ identity并匹配当前revision/scope。conflict或lost response后只query一�
 TUI立即回到普通授权状态，用户再次确认即可继续，不把scope drift显示成保存失败。CLI`run/resume`使用同一顺序，
 `--trust-workspace`只是显式decision，不绕过Service owner。
 
-Workspace Trust同时拥有Workspace关联的external-read scope授权。Service在query时canonicalize所有位于Workspace外、
-但Runtime正确读取repository所需的roots（当前包括Git`gitDir/commondir`），把排序roots与scope digest作为safe DTO返回。
-TUI必须在同一个Trust Gate内显示这些exact paths；decision同时回传scope digest并受revision CAS约束。这个判断位于
-Workspace scope层，不检查`git log`、Shell或其他具体命令名称。未确认时Native Runtime transport保持关闭，批准后
-Service才把exact roots只读投影给native sandbox；root新增、移除或canonical identity改变都会让已有trust变回unknown。
-pre-trust discovery只读取有界4 KiB、普通非symlink的Git identity files；超限、symlink metadata file或无法解析的
-identity不产生外部授权，也不读取repository正文、config、objects或refs。
+Workspace Trust 只确认 canonical Workspace，不解析 Git metadata，也不授权其指向的外部目录。
+普通 query/decision 的 `externalReadScope` 为空；保留字段使现有客户端协议和 revision CAS 继续有效。
+Git metadata 新增、损坏或路径漂移不会使已信任 Workspace 变回 unknown。
+
+历史记录中的 `externalReadScopeDigest` 是此前明确确认的外部只读授权，保留其原值。仅在 native Shell
+preparation 需要构造文件范围时，Service 解析当前 canonical `gitDir/commondir` 并核对摘要，完全匹配才提供
+exact read-only roots；不匹配、解析失败或没有既有 grant 均提供零外部 root。再次信任 Workspace 不扩大该授权。
+新外部访问仍受现有 Shell invocation 权限与 scope 流程约束，不自动放开父目录或降级为不受限执行。
+当前没有新的 metadata 专用授权入口：没有历史 grant 的 linked worktree 中，隐式 `git status/log` 读取会被受限沙箱拒绝；
+显式外部 `--git-dir` 等命令按现有 Shell scope expansion 提请批准。普通消息与工作区文件操作仍可继续。
+metadata discovery 只读取有界 4 KiB、普通非 symlink 的 Git identity files，不读取 repository 正文、config、objects 或 refs。
 
 `apps/kite-cli/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
@@ -40,21 +44,20 @@ read logical connection，Trust/store暂时不可用时返回503且不把旧Trus
 并发read在进入异步admission前占用context有界slot；admission返回后还要复核context未被logout/generation/Worker drain撤销。撤销先移除context
 并等待这些in-flight检查收敛再关闭private connection，因此迟到的`admitted`不能越过更新后的Trust或replacement事实。
 
-桌面客户端的显式添加／选择项目动作即工作区授权，由 `DesktopClient.activateProject` 使用现有 App Control revision CAS decision 记录；项目列表、启动及普通重连不是授权依据。仅工作区内访问无需重复提示，存在关联 external-read roots 时仍显示确切路径并单独确认。失败、冲突或未知回执不自动重放，不在 renderer 另存授权位；具体工具执行授权保持不变。TUI 与 CLI 的确认策略不变。
+桌面客户端的显式添加／选择项目动作即工作区授权，由 `DesktopClient.activateProject` 使用现有 App Control revision CAS decision 记录；项目列表、启动及普通重连不是授权依据。授权只覆盖选定工作区，关联外部目录不参与此启动确认。失败、冲突或未知回执不自动重放，不在 renderer 另存授权位；具体工具执行授权保持不变。TUI 与 CLI 的确认策略不变。
 
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
-1. canonicalize Workspace并解析关联external-read roots，形成`externalReadScopeDigest`。
-2. 读取`workspaceTrustPath()`；`workspaceKey = canonicalWorkspaceKey(workspace)`命中且记录的scope digest与当前完全一致 → 放行。旧记录只在当前external roots为空时兼容。
-3. 未命中或scope drift统一返回`unknown`并显示当前scope供重新授权；授权时snapshot又变化则刷新后再次显示，不进入不可恢复错误。只有记录损坏（`corrupt`）或存储不可用（`unavailable`）才显示真实故障。
+1. canonicalize Workspace，形成 `workspaceKey = canonicalWorkspaceKey(workspace)`。
+2. 读取 `workspaceTrustPath()`；canonical key 命中有效记录即 trusted，不解析 Git 或核验外部路径。
+3. 未命中返回 unknown；记录损坏返回 corrupt，存储或 Workspace identity 不可用返回 unavailable。显式决定仍受 store revision CAS 保护。
 
 **安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite-service/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
 
 ## 确认界面（`apps/kite-cli/src/tui/components/WorkspaceTrustGate.tsx`）
 
 - 展示目录绝对路径与信任后果说明（加载项目配置/skills/MCP、agent 可执行 shell 与修改文件）。
-- external-read roots非空时逐项展示canonical path，并明确它们只获得读取权限；这些路径来自Service safe snapshot，
-  TUI不自行解析`.git`或其他Workspace内容。
+- 当前 Service 返回空 external-read scope；TUI 不自行解析 `.git`，普通信任不授予任何外部目录。
 - 选项为“信任此工作区并继续”与“退出 Kite Code”（实际文字随当前 TUI locale 本地化）；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
 - **默认焦点在 "Exit Kite Code"**，防止用户习惯性按 Enter 直接授权。
 - 选择信任 → 通过App Control decision codec提交observed status与expected revision；actual owner调用trust store写入并
@@ -99,8 +102,7 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 
 - map key 必须等于记录的 `workspaceKey`，`records` 必须是对象（数组等形式判 `corrupt`），否则整个存储视为损坏（防手工篡改误放）。
 - `workspacePath` 仅供审计，不参与判定；目录移动或改名后 key 变化，信任自然失效。
-- `externalReadScopeDigest`绑定批准时展示的exact roots；缺少该字段的legacy record只对空external scope有效，scope
-  新增或漂移必须重新确认。roots本身由每次query重新canonicalize，不从store反向恢复authority。
+- `externalReadScopeDigest` 仅保留历史明确批准的 exact roots 摘要；新 Workspace Trust 记录不生成此字段，重复信任保留原值。普通 trust 不依赖该字段。实际 sandbox preparation 重新解析路径并精确匹配，不从 store 反向恢复或扩大 authority。
 - 写入使用fsync + 原子rename，文件权限0o600，与MCP项目批准存储同一模式。`trustWorkspace()`在读取-合并-写入前获取
   owner-specific `.kite-lock`并在持锁后重新读取expected revision。锁绑定PID、process-start identity、随机nonce与inode；不再按固定wall-clock
   年龄删除，只有能证明exact owner已死亡才回收，alive/uncertain/malformed全部fail closed。多进程并发信任不同目录不会覆盖已有记录。
@@ -119,7 +121,7 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 - TUI与CLI`run/resume`都通过parent-owned stdio或显式daemon App Server执行two-phase门禁。default child与daemon复用同一App Control owner；
   development/reference loopback WebSocket也不能绕过Trust，
   但不是production Web/Desktop入口。
-- workspace 信任是canonical目录及其exact external-read scope的一次性决定，不是逐命令或逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
+- workspace 信任是 canonical 目录的一次性决定，不是逐命令或逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。
 - 通过门禁后才挂载的 `TuiApp` 可将 workspace 传给会话 Header 作为展示快照；该传递不得改变门禁判定顺序，亦不得在未信任分支挂载 Header 或读取会话状态。
