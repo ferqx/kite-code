@@ -193,10 +193,10 @@ typed pre-dispatch unavailable 且 cleanup receipt 已确认后，为同一条�
 
 Development Shell 的文件系统能力是逐 invocation 的：Planning 非 Full 使用 Workspace read-only baseline，Building 非 Full 使用
 Workspace read/write baseline；默认 baseline 使用 native backend。`externalRead`、`externalWrite`在命令启动前按phase/mode
-路由；`uncertainEffects`在Accept Edits、Auto与Full中固定进入exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
+路由；`uncertainEffects`在Auto中先进入审批模型，在Accept Edits/Full中请求exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
 host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
-模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常、无效响应和 circuit breaker 也升级
-真人审批。显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
+模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常和无效响应升级真人审批；此前审查的 circuit breaker 不让新的 Shell 命令跳过模型。
+显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
 `sensitiveExternalAccess`。Workspace 外固定 credential/persistence/system identity 也必须投影该 fact：Full 直接授权，Auto 三态
 审查，其他模式进入 exact user approval；显式敏感 identity 不允许 same-command 静默复用；Auto reviewer 的新响应使用
 `approve_once|reject|ask_user`；旧/未知或矛盾
@@ -206,16 +206,16 @@ host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启
 Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
 qualification evidence。
 
-Shell command surface不可穷举。ADR-0160规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；未命中且
-无法完整确定effects时生成`uncertainEffects`并请求exact真人审批，而不是fixed-list hard deny。已知Workspace mutation与
-已知扩scope继续按既有phase/mode矩阵治理。Auto reviewer不接管uncertain Shell，也不接管关键系统hard deny或native
+Shell command surface不可穷举。ADR-0160规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；ADR-0189调整Auto路由。未命中且
+无法完整确定effects时生成`uncertainEffects`并按模式审批，而不是fixed-list hard deny。已知Workspace mutation与
+已知扩scope继续按既有phase/mode矩阵治理。Auto reviewer接管uncertain Shell的审批判断，但不接管关键系统hard deny或native
 capability qualification；Full同样不能绕过uncertain Shell的exact确认。
 新配置与新 TUI 会话默认 Auto；显式配置和 live `/permissions` mode 不被覆盖。内部 Runtime/child grant 缺少
 mode 时仍回退 Accept Edits，以区分“产品推荐的 reviewer 路径”和“缺失授权事实时的 fail-safe 行为”。Full 只由
 interactionMode 表达，不能由 approval grant 或 reviewer payload 产生第二个 Full authority。
 
 Shell的read-only classifier是唯一可证明只读的免审事实来源，并同时用于只读Subagent role ceiling、scheduler metadata与
-hardened execution environment；未命中不表示写入或破坏，只表示必须进入exact真人审批。
+hardened execution environment；未命中不表示写入或破坏，只表示必须按当前模式审批。
 classifier的program/shape事实来自Builtin-owned冻结v1 semantics registry；registry digest进入`shell_execute`
 capability revision。缺项只能扩展descriptor或局部inspector，App、TUI与Sandbox不得复制白名单。unknown reason只使用
 `unregistered_program|unsupported_invocation|output_redirect|dynamic_expansion|background_execution|empty_or_multiline`
@@ -469,7 +469,7 @@ ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only 
 path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用分类和审计 `action.intent` 可由命令形态
 派生，但审批 payload 不接受模型建议授权或 prefix rule。ADR-0137 的回归语料必须证明 `ls`、`pwd`、`rg`、
 direct `git status`/无patch `git log`在phase baseline内可direct，Workspace mutation与local Git扩scope进入既有
-mode-aware route，未知脚本固定进入exact真人审批。`git_inspect` 已退役，不进入 model ToolSet。
+mode-aware route，未知脚本在Auto中进入审批模型、在其他模式请求exact真人审批。`git_inspect` 已退役，不进入 model ToolSet。
 
 生产静态模型工具面必须直接由 `createBuiltinToolCatalogProjection(snapshot).toolSet` 投影；
 App tool composition 只合并独立 Runtime-issued MCP overlay，不拥有第二 schema/effects table。

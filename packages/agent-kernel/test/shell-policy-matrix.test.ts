@@ -200,6 +200,29 @@ describe('SAQ shell policy phase/mode matrix', () => {
     });
   });
 
+  test('Auto reviews an unproven workbook extraction before requesting a user', () => {
+    const compiled = compileShell('unzip -p 采购订单.xlsx xl/sharedStrings.xml', 'building');
+    expect(compiled).toMatchObject({
+      decision: 'ask',
+      requiresApproval: true,
+      effects: { uncertainEffects: true },
+    });
+    expect(
+      authorizeToolGovernance(
+        facts({
+          context: { interactionMode: 'auto' },
+          policy: {
+            decision: compiled.decision,
+            allowed: compiled.allowed,
+            requiresApproval: compiled.requiresApproval,
+            risk: compiled.risk,
+            effects: compiled.effects,
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_auto_review' });
+  });
+
   test.each([
     'ls -la .git',
     'git status --short',

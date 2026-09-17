@@ -501,7 +501,7 @@ export function shellBuiltinPolicyRule(
       reason: 'The shell command could not be proven read-only or assigned complete effects.',
       userVisibleSummary: `Review shell command with uncertain effects: ${command}`,
       expectedEffects: [
-        'Runs only after exact user approval',
+        'Runs only after approval in the selected interaction mode',
         context.phase === 'planning'
           ? 'Remains constrained to the read-only workspace sandbox baseline'
           : 'Remains constrained to the workspace sandbox baseline',
