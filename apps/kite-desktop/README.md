@@ -39,7 +39,7 @@
 
 开发窗口的 CSP 允许 Vite 注入的 React Refresh 内联初始化脚本；打包窗口的 `script-src` 只允许自身资源。修改开发加载方式后须验证真实 Electron 开发窗口的首次渲染和刷新，打包窗口 smoke 不覆盖 Vite 注入路径。
 
-`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包采用 canonical config root、checkout 与 Store format epoch 的共享 digest 作为 source profile（schema 数字不参与），打包版使用用户 canonical profile 保存持久数据；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
+`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包与打包版均由 [Electron host](electron/host.ts) 将 canonical config root 作为 runtimeRoot，不再按 checkout 或 Store epoch 自动分库；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
 
 检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
 

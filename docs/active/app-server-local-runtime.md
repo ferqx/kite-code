@@ -1,6 +1,6 @@
 # 本机 App Server 与 Durable Session Runtime
 
-> 已确认设计，尚未实现：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)将统一正式数据入口并补齐受支持路径的自动转换和会话保留验收。下文仍描述当前实现；现有格式拒绝与开发 Profile 隔离不代表跨版本会话连续性已完成。
+> 实施中：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)已统一正式数据入口；已验证转换路径及未完成的平台资格见该计划，不由入口统一推导完整跨版本兼容。
 
 
 状态：active
@@ -39,8 +39,7 @@ Web -------- loopback HTTP ------->        |
                                    kite-session.sqlite
 ```
 
-source 与 installed 的语义相同：默认 client 启动 exact same-build child，不发现常驻进程。source 以 canonical checkout digest 隔离
-Store profile，installed 使用 canonical profile。App Server 退出不删除 Session/History。
+source 与 installed 的语义相同：默认 client 启动 exact same-build child，不发现常驻进程。source 与 installed 均使用 canonical Kite Home Store，checkout 只参与配套代码与 build identity 的选择。App Server 退出不删除 Session/History。
 profile resolver以最近存在父目录的`realpath`加未创建尾部计算无写入的稳定identity，同时保留请求路径；preparation再沿请求路径逐段执行
 no-follow/owner校验，并把client与child统一到最终canonical target。Windows daemon endpoint digest忽略display casing；准备后的target会再次
 推导默认endpoint，任何真实identity漂移仍会被拒绝。
@@ -64,7 +63,7 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 
 TUI/CLI 通过 release composition 解析 child：
 
-- source：当前 Bun、当前 checkout 的 Service entrypoint、checkout-specific profile；
+- source：当前 Bun、当前 checkout 的 Service entrypoint、canonical Kite Home；
 - installed：launcher-pinned immutable candidate 的 `kite-service`、canonical profile。
 
 两者都使用 `app-server run-stdio` 和同一 exact Runtime Protocol v2/capability set。source与installed配对测试都必须使用当前
@@ -95,6 +94,8 @@ status/stop absent 不创建 profile 或 endpoint state。dead cleanup 必须同
 alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式 stop 才 cancel/drain 并清理 endpoint。
 
 ## Store 与版本
+
+实现依据：[resolveManagedLocalAppServerTarget](../../scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](../../apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](../../apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](../../tests/release/app-server-client.test.ts)断言源码入口使用该位置。
 
 Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`，不再计算源码 profile digest。正式读写格式为 schema 10。已取得资格的 macOS 入口在维护期自动转换严格识别的 Store 9、精确 Store 11 子集，并合并多个 Store 10 来源；只凭 schema 数字不能证明可转换。未知 epoch、未经证明的语义或较新格式保留原件并返回明确诊断。
 

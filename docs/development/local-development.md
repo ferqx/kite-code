@@ -17,7 +17,7 @@
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构阻断，影响提示需语义核对 |
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者 |
 
-本地与 installed profile 不同；不要在诊断时把另一 checkout 的数据当成当前环境。显式服务测试使用隔离 profile/endpoint，结束后按所属 harness 清理。
+source 与 installed 当前共用所选 canonical Kite Home 下的正式会话库；checkout 区分代码与 build identity，不自动隔离数据。依据见 [App Server Store](../active/app-server-local-runtime.md#store-与版本)。测试必须显式使用隔离 home/workspace/profile/endpoint，不能依赖源码启动自动隔离，结束后按所属 harness 清理。
 
 先运行所属 workspace 的相关测试。跨包协议、持久化、授权或恢复变化再扩大到对应边界和 qualification；不能用 Web build 通过替代 TUI PTY，也不能用 fixture 通过宣称原生平台支持。
 

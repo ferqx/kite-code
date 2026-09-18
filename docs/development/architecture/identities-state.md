@@ -22,3 +22,23 @@
 收到迟到事件时先检查它所属的 identity 与 revision，再决定是否更新。不能用“当前会话”“最后一个块”或相同文本补足缺失身份。
 
 数据关系深入[Storage 事务](../../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)，显示身份深入[TUI 投影](../../../apps/kite-cli/docs/message-projection.md)，请求身份深入[Host 命令](../../../packages/runtime-host/docs/commands-mailbox.md)。
+
+## 同一会话被多个客户端或进程访问
+
+```mermaid
+flowchart LR
+  A[TUI / CLI Native client] -->|Runtime query / subscribe| S1[Service A / Host A]
+  B[另一个 Native client] -->|Runtime query / command| S2[daemon B / Host B]
+  W[Web browser] -->|受限 REST read| S2[daemon B / Host B]
+  S1 -->|snapshot read / fenced command| D[(同一 profile SQLite Store)]
+  S2 -->|snapshot read / fenced command| D
+  D -->|revision + generation fence| S1
+  D -->|revision + generation fence| S2
+  S1 -->|本 Host 发布的 durable / ephemeral notification| A
+```
+
+箭头分别表示运行时调用、数据读取和持久写入裁决，不表示客户端之间共享内存。Native 的 subscribe 接收 Host 的 Session projection 和活动事件；Web 通过受限 REST 读取持久 History。普通 Native daemon 连接断开或 Web 页面关闭不删除业务 Session、不取消别人的 Run；parent-owned stdio 的父进程退出/EOF 会关闭自有 child 并进入清理，Desktop 页面 detach 与应用退出也不同，见[进程拓扑](topology.md)。[Service composition](../../../apps/kite-service/src/composition.ts)把 history 读取包入 Store 的 `readSnapshot`；[Web adapter](../../../apps/kite-web/src/transport/client.ts)消费分页 REST；[Host projector](../../../packages/runtime-host/src/host/notification-projector.ts)负责 subscribe/replay/snapshot 交接。
+
+多连接可读取同一 profile。当前 App Server 的[入口](../../../apps/kite-service/src/app-server.ts)按 `environment.runtimeRoot` 定位 SQLite 文件并调用 `createKiteSessionAppServerStorageComposition`；[Service 组合](../../../apps/kite-service/src/bootstrap.ts)打开 `openKiteSessionRuntimeStorage`；[Store 组合](../../../packages/runtime-storage-sqlite/src/kite-session-runtime-storage.ts)创建持久 execution authority 并将 `acquire`、`renew`、`detach`、`release` 接入 execution control。写入权由[SQLite execution authority](../../../packages/runtime-storage-sqlite/src/kite-session-execution-authority.ts)的 `acquire` 和 `assertActive` 判定：同 Session 有未过期 active/detached lease 时返回 busy；过期但 cleanup 未确认时进入 `recovery_required`；旧 revision、controller generation、host/client/connection identity 或 lease 不满足时拒绝旧 binding。进程 registry 或连接 generation 本身不授予 Store writer。不同 Session 可分别取得执行权；真实进程竞争断言见[authority 测试](../../../packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts)。这些约束不代表对任意外部工具副作用的 exactly-once 保证。
+
+共享 Store 不构成跨进程实时事件总线。[Host.subscribe](../../../packages/runtime-host/src/host/runtime-host.ts)在本地缺少该 Session projection 时加载初始投影；[notification projector](../../../packages/runtime-host/src/host/notification-projector.ts)的订阅与 replay 使用本 Host 的 registry、通知历史及 publish。图中的通知箭头只描述该 Host 的发布，不保证另一个 Host 写入 Store 后会自动推送到当前 Native 订阅。主动 History/查询读取与订阅推送应分别核对；Web 的 REST 轮询也不能作为 Native 跨进程推送的证据。隔离的当前 release paired App Server 探针已实跑：A 订阅既有会话并收到 revision 0；B 修改交互模式取得 applied revision 1；随后 2200ms 内 A 未收到新通知，主动查询读到 revision 1 后原订阅才收到该 revision 的通知。这确认了该场景的外部写入不会在观察窗口内自动推送，不证明任意时长、运行中流式事件或全部客户端的行为。方法见[风险验证记录](../architecture.md#风险定向验证)；前述 authority 测试仍只证明写入裁决。
