@@ -357,7 +357,10 @@ export class DesktopClient {
     if (
       !selected ||
       !models.providers.some(
-        (provider) => provider.provider === selected.provider && provider.readiness === 'ready',
+        (provider) =>
+          provider.provider === selected.provider &&
+          provider.readiness === 'ready' &&
+          provider.models.some((model) => model.name === selected.name && model.enabled !== false),
       )
     )
       throw new Error('请先配置可用的模型。');
@@ -810,6 +813,29 @@ export class DesktopClient {
     this.#publish({ models: result.snapshot });
     if (result.outcome !== 'applied' && result.outcome !== 'already_selected')
       throw new Error(`模型未确认切换（${result.outcome}），请检查最新配置后重新选择。`);
+  }
+  async setModelEnabled(provider: string, name: string, enabled: boolean) {
+    const connection = this.#requireConnection();
+    const models = this.#view.models;
+    if (!models) throw new Error('请先刷新模型配置。');
+    let result: Awaited<ReturnType<KiteAppServerConnection['app']['setProviderModelEnabled']>>;
+    try {
+      result = await connection.app.setProviderModelEnabled({
+        schema: 'kite.app.provider-model.set-enabled-request.v1',
+        workspace: models.workspace,
+        provider,
+        name,
+        enabled,
+        expectedRevision: models.revision,
+      });
+    } catch {
+      await this.refreshModels().catch(() => undefined);
+      throw new Error('模型启用状态结果未知，请检查最新状态后再决定是否重试。');
+    }
+    if (this.#connection !== connection) return;
+    this.#publish({ models: result.snapshot });
+    if (result.outcome !== 'applied' && result.outcome !== 'already_selected')
+      throw new Error(`模型启用状态未确认更新（${result.outcome}），请检查最新配置。`);
   }
   async #command(
     command: RuntimeCommand,

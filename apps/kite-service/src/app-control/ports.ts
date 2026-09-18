@@ -7,6 +7,8 @@ import type {
   ExecutionStatusSnapshot,
   ProviderModelSelectRequest,
   ProviderModelSelectResponse,
+  ProviderModelSetEnabledRequest,
+  ProviderModelSetEnabledResponse,
   ProviderModelSnapshot,
   ProviderModelSnapshotRequest,
   ReleaseStatusRequest,
@@ -67,6 +69,7 @@ export interface WorkspaceTrustHandlerPort {
 export interface ProviderModelHandlerPort {
   snapshot(request: ProviderModelSnapshotRequest): Promise<ProviderModelSnapshot>;
   select(request: ProviderModelSelectRequest): Promise<ProviderModelSelectResponse>;
+  setEnabled(request: ProviderModelSetEnabledRequest): Promise<ProviderModelSetEnabledResponse>;
 }
 
 /** MCP metadata and configuration actions are independent from other controls. */

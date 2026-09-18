@@ -243,6 +243,8 @@ export async function createKiteAppServerRuntimeOwner(
       scopedAppControl(request.workspace.canonicalPath).getProviderModelSnapshot(request),
     selectProviderModel: async (request) =>
       scopedAppControl(request.workspace.canonicalPath).selectProviderModel(request),
+    setProviderModelEnabled: async (request) =>
+      scopedAppControl(request.workspace.canonicalPath).setProviderModelEnabled(request),
     getMcpSnapshot: async (request) =>
       scopedAppControl(request.workspace.canonicalPath).getMcpSnapshot(request),
     applyMcpAction: async (request) =>

@@ -10,6 +10,8 @@ import {
   mcpSnapshotResponseCodec,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   releaseStatusRequestCodec,
@@ -900,6 +902,17 @@ async function dispatchAppControlRoute(
         providerModelSelectResponseCodec,
         (request) =>
           application.appControl.forWorkspace(request.workspace).selectProviderModel(request),
+        (response) => response.snapshot.workspace,
+        maxBytes,
+      );
+    case '/_kite/app/provider-model/set-enabled':
+      return invokeWorkspaceCodecRoute(
+        application,
+        body,
+        providerModelSetEnabledRequestCodec,
+        providerModelSetEnabledResponseCodec,
+        (request) =>
+          application.appControl.forWorkspace(request.workspace).setProviderModelEnabled(request),
         (response) => response.snapshot.workspace,
         maxBytes,
       );

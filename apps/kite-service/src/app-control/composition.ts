@@ -228,6 +228,7 @@ export function createKiteInProcessAppControlComposition<
         providerModel: {
           snapshot: (request) => ownersFor(workspace).providerModel.snapshot(request),
           select: (request) => ownersFor(workspace).providerModel.select(request),
+          setEnabled: (request) => ownersFor(workspace).providerModel.setEnabled(request),
         },
         skills: {
           snapshot: (request) => ownersFor(workspace).skills.snapshot(request),

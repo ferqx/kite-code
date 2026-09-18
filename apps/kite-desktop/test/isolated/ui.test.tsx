@@ -28,6 +28,7 @@ const globals = {
   FormData: dom.window.FormData,
   Node: dom.window.Node,
   Element: dom.window.Element,
+  NodeFilter: dom.window.NodeFilter,
   DOMRect: dom.window.DOMRect,
   MutationObserver: dom.window.MutationObserver,
   getComputedStyle: dom.window.getComputedStyle,
@@ -51,6 +52,7 @@ afterEach(async () => {
   root = undefined;
   document.body.innerHTML = '';
   window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 afterAll(() => {
   dom.window.close();
@@ -94,6 +96,7 @@ class UiClient extends DesktopClient {
   cancelled = 0;
   approvals = 0;
   selectedModels: string[] = [];
+  modelEnabledChanges: string[] = [];
   createdModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
   sentModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
   selectedModes: Array<{ sessionId: string; mode: 'accept_edits' | 'auto' | 'full' }> = [];
@@ -189,8 +192,8 @@ class UiClient extends DesktopClient {
             type: 'openai-compatible',
             readiness: 'ready',
             models: [
-              { provider: 'test', name: 'model', isDefault: true },
-              { provider: 'test', name: 'model-fast', isDefault: false },
+              { provider: 'test', name: 'model', isDefault: true, enabled: true },
+              { provider: 'test', name: 'model-fast', isDefault: false, enabled: true },
             ],
           },
         ],
@@ -257,6 +260,20 @@ class UiClient extends DesktopClient {
   override async selectModel(provider: string, name: string) {
     this.selectedModels.push(`${provider}/${name}`);
     this.update({ models: { ...this.view.models!, selected: { provider, name } } });
+  }
+  override async setModelEnabled(provider: string, name: string, enabled: boolean) {
+    this.modelEnabledChanges.push(`${provider}/${name}:${enabled}`);
+    this.update({
+      models: {
+        ...this.view.models!,
+        providers: this.view.models!.providers.map((item) => ({
+          ...item,
+          models: item.models.map((model) =>
+            model.provider === provider && model.name === name ? { ...model, enabled } : model,
+          ),
+        })),
+      },
+    });
   }
   override async setInteractionMode(sessionId: string, mode: 'accept_edits' | 'auto' | 'full') {
     this.selectedModes.push({ sessionId, mode });
@@ -2234,8 +2251,9 @@ test('settings shows existing capabilities in the reference layout without inven
     />,
   );
   expect(document.querySelector('[aria-label="常规设置"]')).not.toBeNull();
-  expect(document.querySelector('.settings-sidebar')?.textContent).toContain('集成');
-  expect(document.querySelectorAll('.settings-sidebar svg')).toHaveLength(5);
+  expect(document.querySelector('.settings-sidebar')?.textContent).toContain('模型服务');
+  expect(document.querySelector('.settings-sidebar')?.textContent).toContain('扩展');
+  expect(document.querySelectorAll('.settings-sidebar svg')).toHaveLength(6);
   await act(async () => {
     const editor = document.querySelector<HTMLSelectElement>('[aria-label="默认编辑器"]')!;
     editor.value = 'zed';
@@ -2243,14 +2261,484 @@ test('settings shows existing capabilities in the reference layout without inven
   });
   expect(editorChanges).toEqual(['zed']);
   await write(document.querySelector<HTMLInputElement>('.settings-search input')!, 'Skills');
-  expect(document.querySelector('.settings-sidebar')?.textContent).not.toContain('模型与 Provider');
+  expect(document.querySelector('.settings-sidebar')?.textContent).not.toContain('提供商');
   expect(button('Skills')).not.toBeNull();
   expect(document.body.textContent).not.toContain('默认权限');
   await write(document.querySelector<HTMLInputElement>('.settings-search input')!, '');
-  await click(button('模型与 Provider'));
+  await click(button('提供商'));
+  expect(document.querySelectorAll('.settings-provider-list .settings-row')).toHaveLength(4);
+  expect(document.querySelector('.settings-provider-panel')).toBeNull();
+  await click(button('编辑'));
+  expect(document.querySelector('.settings-provider-panel fieldset')).not.toBeNull();
+  const providerForm = document.querySelector<HTMLFormElement>('.settings-provider-panel form')!;
+  expect(providerForm.noValidate).toBe(true);
+  const providerURL = providerForm.querySelector<HTMLInputElement>('input[name="baseURL"]')!;
+  expect(providerURL.type).toBe('text');
+  await write(providerURL, 'invalid address');
+  await click(button('保存 Provider'));
+  expect(providerForm.querySelector('[role="alert"]')?.textContent).toContain('有效的服务地址');
+  expect(providerURL.getAttribute('aria-invalid')).toBe('true');
+  expect(document.activeElement).toBe(providerURL);
+  await click(
+    document.querySelector<HTMLButtonElement>('.settings-provider-panel .right-sidebar-close')!,
+  );
+  expect(document.querySelector('.settings-provider-panel')).toBeNull();
+  expect(document.activeElement).toBe(button('编辑'));
+  await click(
+    document.querySelector<HTMLButtonElement>(
+      '.settings-provider-list .settings-provider-action button',
+    )!,
+  );
+  await click(button('保存 Provider'));
+  expect(document.querySelector('#provider-key-error')?.textContent).toContain('请输入 API key');
+  expect(document.activeElement).toBe(
+    document.querySelector('.settings-provider-panel input[type="password"]'),
+  );
+  await click(button('编辑'));
+  await click(button('模型'));
+  const defaultModel = document.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]')!;
+  expect(defaultModel.textContent).toContain('test · model');
+  expect(document.querySelector('select[aria-label="默认模型"]')).toBeNull();
+  await openDropdown(defaultModel);
+  expect(document.querySelectorAll('.settings-model-menu [role="menuitemradio"]')).toHaveLength(2);
+  expect(document.querySelector('.settings-model-menu [aria-checked="true"]')?.textContent).toBe(
+    'model',
+  );
+  expect(document.querySelector('.settings-model-provider')?.textContent).toContain('可用');
+  const modelSwitches = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  );
+  expect(modelSwitches).toHaveLength(2);
+  expect(modelSwitches[0]?.disabled).toBe(true);
+  await click(
+    document.querySelectorAll<HTMLElement>('.settings-model-menu [role="menuitemradio"]')[1]!,
+  );
+  expect(document.querySelector('.settings-model-menu')).toBeNull();
+  expect(client.selectedModels).toEqual(['test/model-fast']);
+  await openDropdown(defaultModel);
+  await key(document.activeElement!, 'Escape');
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector('.settings-model-menu')).toBeNull();
+  expect(document.activeElement).toBe(defaultModel);
+  expect(document.querySelector('.settings-provider-panel')).toBeNull();
+});
+
+test('default model selection preserves the picker and page without disabling or reopening the pending picker', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  client.selectModel = async (provider, name) => {
+    await pending;
+    client.update({ models: { ...client.view.models!, selected: { provider, name } } });
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(
+    [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+      (item) => item.textContent === '模型',
+    )!,
+  );
+  const page = document.querySelector<HTMLElement>('.settings-content')!;
+  const provider = document.querySelector('.settings-model-provider');
+  page.scrollTop = 100;
+  const picker = document.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]')!;
+  const otherSwitch = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input',
+  )[1]!;
+  await openDropdown(picker);
+  await click(
+    document.querySelectorAll<HTMLElement>('.settings-model-menu [role="menuitemradio"]')[1]!,
+  );
+  expect(picker.getAttribute('aria-busy')).toBe('true');
+  expect(picker.disabled).toBe(false);
+  expect(picker.getAttribute('aria-disabled')).toBe('true');
+  expect(document.querySelector('button[aria-label="默认模型"]')).toBe(picker);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.activeElement).toBe(picker);
+  await openDropdown(picker);
+  expect(document.querySelector('.settings-model-menu')).toBeNull();
+  expect(otherSwitch.disabled).toBe(false);
+  expect(button('刷新配置').disabled).toBe(false);
+  expect(document.querySelector('.settings-content')).toBe(page);
+  expect(page.scrollTop).toBe(100);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  expect(picker.textContent).toContain('test · model-fast');
+  expect(picker.disabled).toBe(false);
+  expect(picker.hasAttribute('aria-disabled')).toBe(false);
+  expect(document.querySelector('button[aria-label="默认模型"]')).toBe(picker);
+  expect(document.querySelector('.settings-content')).toBe(page);
+  expect(page.scrollTop).toBe(100);
+  expect(document.querySelector('[aria-label="模型设置"]')).not.toBeNull();
+});
+
+test('switching providers clears the previous endpoint, model and key before saving', async () => {
+  const client = new UiClient();
+  let submitted: Parameters<DesktopClient['configureProvider']>[0] | undefined;
+  client.configureProvider = async (input) => {
+    submitted = input;
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(button('提供商'));
+  const rows = document.querySelectorAll<HTMLButtonElement>('.settings-provider-list button');
+  await click(rows[2]!);
+  await write(
+    document.querySelector<HTMLInputElement>('input[name="baseURL"]')!,
+    'https://previous-provider.example/v1',
+  );
+  await write(
+    document.querySelector<HTMLInputElement>('input[name="modelName"]')!,
+    'previous-model',
+  );
+  await write(
+    document.querySelector<HTMLInputElement>('input[type="password"]')!,
+    'previous-fake-key',
+  );
+  await click(rows[1]!);
+  expect(document.querySelector<HTMLInputElement>('input[name="baseURL"]')!.value).toBe('');
+  expect(document.querySelector<HTMLInputElement>('input[name="modelName"]')!.value).toBe('');
+  expect(document.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
+  await write(document.querySelector<HTMLInputElement>('input[type="password"]')!, 'new-fake-key');
+  await write(
+    document.querySelector<HTMLInputElement>('input[name="modelName"]')!,
+    'deepseek-chat',
+  );
+  await click(button('保存 Provider'));
+  expect(submitted).toEqual({
+    provider: 'deepseek',
+    apiKey: 'new-fake-key',
+    baseURL: '',
+    modelName: 'deepseek-chat',
+  });
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`reopening settings preserves the pending operation and releases it after ${outcome}`, async () => {
+    const client = new UiClient();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    client.selectModel = async () => {
+      await pending;
+      if (outcome === 'failure') throw new Error('模型切换失败');
+    };
+    let saves = 0;
+    client.configureProvider = async () => {
+      saves++;
+    };
+    await render(<App client={client} />);
+    await click(document.querySelector<HTMLElement>('.profile-card')!);
+    await click(
+      [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+        (b) => b.textContent === '模型',
+      )!,
+    );
+    await openDropdown(document.querySelector<HTMLButtonElement>('[aria-label="默认模型"]')!);
+    await click(
+      document.querySelectorAll<HTMLElement>('.settings-model-menu [role="menuitemradio"]')[1]!,
+    );
+    await click(button('返回应用'));
+    await click(document.querySelector<HTMLElement>('.profile-card')!);
+    expect(document.querySelector('.settings-content [role="status"]')?.textContent).toContain(
+      '先前的设置操作',
+    );
+    await click(button('提供商'));
+    const provider = document.querySelector<HTMLButtonElement>('.settings-provider-list button')!;
+    expect(provider.getAttribute('aria-disabled')).toBe('true');
+    await click(provider);
+    expect(document.querySelector('.settings-provider-panel')).toBeNull();
+    expect(saves).toBe(0);
+    await act(async () => {
+      finish();
+      await pending;
+    });
+    expect(document.querySelector('.settings-content [role="status"]')).toBeNull();
+    expect(provider.getAttribute('aria-disabled')).not.toBe('true');
+    if (outcome === 'failure')
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('模型切换失败');
+    await click(provider);
+    const apiKey = document.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await write(apiKey, 'audit-fake-key');
+    await click(button('保存 Provider'));
+    expect(saves).toBe(1);
+    expect(
+      document.querySelector('.settings-provider-panel [role="status"]')?.textContent,
+    ).toContain('已保存');
+  });
+}
+
+test('model visibility toggles a non-default model and excludes disabled routes from default selection', async () => {
+  const client = new UiClient();
+  await render(
+    <Settings
+      client={client}
+      view={client.view}
+      busy={false}
+      act={async (action) => {
+        await action();
+      }}
+      editor="vscode"
+      onEditorChange={() => undefined}
+    />,
+  );
+  await click(button('模型'));
+  const switches = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  );
+  expect(switches[0]?.disabled).toBe(true);
+  await click(switches[1]!);
+  expect(client.modelEnabledChanges).toEqual(['test/model-fast:false']);
+
+  await act(async () => {
+    root!.render(
+      <Settings
+        client={client}
+        view={client.view}
+        busy={false}
+        act={async (action) => {
+          await action();
+        }}
+        editor="vscode"
+        onEditorChange={() => undefined}
+      />,
+    );
+  });
+  await openDropdown(document.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]')!);
+  expect(document.querySelectorAll('.settings-model-menu [role="menuitemradio"]')).toHaveLength(1);
+  expect(document.querySelector('.settings-model-menu')?.textContent).not.toContain('model-fast');
   expect(
-    document.querySelector('fieldset[aria-labelledby="provider-config-heading"]'),
-  ).not.toBeNull();
+    document.querySelectorAll<HTMLInputElement>('.settings-model-options input[role="switch"]')[1]
+      ?.checked,
+  ).toBe(false);
+});
+
+test('model switch keeps its new value and the settings surface stable while saving', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const original = client.setModelEnabled.bind(client);
+  client.setModelEnabled = async (provider, name, enabled) => {
+    client.modelEnabledChanges.push(`${provider}/${name}:${enabled}`);
+    await pending;
+    client.modelEnabledChanges.pop();
+    await original(provider, name, enabled);
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(
+    [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+      (item) => item.textContent === '模型',
+    )!,
+  );
+  const page = document.querySelector<HTMLElement>('.settings-content')!;
+  const provider = document.querySelector('.settings-model-provider')!;
+  const picker = document.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]')!;
+  const switches = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  );
+  const target = switches[1]!;
+  page.scrollTop = 100;
+  target.focus();
+  await click(target);
+  expect(target.checked).toBe(false);
+  expect(target.disabled).toBe(false);
+  expect(document.activeElement).toBe(target);
+  expect(document.querySelector('.settings-content')).toBe(page);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+  expect(
+    document.querySelectorAll<HTMLInputElement>('.settings-model-options input[role="switch"]')[1],
+  ).toBe(target);
+  expect(page.scrollTop).toBe(100);
+  expect(picker.disabled).toBe(false);
+  expect(button('刷新配置').disabled).toBe(false);
+  await click(target);
+  expect(client.modelEnabledChanges).toEqual(['test/model-fast:false']);
+  expect(target.checked).toBe(false);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  expect(target.checked).toBe(false);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+  expect(page.scrollTop).toBe(100);
+});
+
+test('failed model switch restores the authoritative value without replacing its control', async () => {
+  const client = new UiClient();
+  let fail!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    fail = resolve;
+  });
+  client.setModelEnabled = async () => {
+    await pending;
+    throw new Error('保存失败');
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(
+    [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+      (item) => item.textContent === '模型',
+    )!,
+  );
+  const target = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  )[1]!;
+  await click(target);
+  expect(target.checked).toBe(false);
+  await act(async () => {
+    fail();
+    await pending;
+  });
+  expect(target.checked).toBe(true);
+  expect(
+    document.querySelectorAll<HTMLInputElement>('.settings-model-options input[role="switch"]')[1],
+  ).toBe(target);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('保存失败');
+});
+
+test('enabling a model stays enabled while saving without refreshing the model list', async () => {
+  const client = new UiClient();
+  client.view.models = {
+    ...client.view.models!,
+    providers: client.view.models!.providers.map((provider) => ({
+      ...provider,
+      models: provider.models.map((model) =>
+        model.name === 'model-fast' ? { ...model, enabled: false } : model,
+      ),
+    })),
+  };
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const original = client.setModelEnabled.bind(client);
+  client.setModelEnabled = async (provider, name, enabled) => {
+    await pending;
+    await original(provider, name, enabled);
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(
+    [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+      (item) => item.textContent === '模型',
+    )!,
+  );
+  const provider = document.querySelector('.settings-model-provider')!;
+  const target = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  )[1]!;
+  expect(target.checked).toBe(false);
+  await click(target);
+  expect(target.checked).toBe(true);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+  expect(
+    document.querySelectorAll<HTMLInputElement>('.settings-model-options input[role="switch"]')[1],
+  ).toBe(target);
+  expect(button('刷新配置').disabled).toBe(false);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  expect(target.checked).toBe(true);
+  expect(client.modelEnabledChanges).toEqual(['test/model-fast:true']);
+});
+
+test('model refresh keeps the list and controls visible while the request is pending', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let calls = 0;
+  client.refreshModels = async () => {
+    calls++;
+    await pending;
+    return client.view.models!;
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(
+    [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
+      (item) => item.textContent === '模型',
+    )!,
+  );
+  const page = document.querySelector<HTMLElement>('.settings-content')!;
+  const provider = document.querySelector('.settings-model-provider')!;
+  const target = document.querySelectorAll<HTMLInputElement>(
+    '.settings-model-options input[role="switch"]',
+  )[1]!;
+  page.scrollTop = 100;
+  const refresh = button('刷新配置');
+  refresh.focus();
+  await click(refresh);
+  expect(refresh.disabled).toBe(false);
+  expect(target.disabled).toBe(false);
+  expect(document.activeElement).toBe(refresh);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+  expect(page.scrollTop).toBe(100);
+  await click(refresh);
+  expect(calls).toBe(1);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  expect(document.querySelector('.settings-content')).toBe(page);
+  expect(document.querySelector('.settings-model-provider')).toBe(provider);
+});
+
+test('provider save preserves the open form and focus during the request', async () => {
+  const client = new UiClient();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let calls = 0;
+  client.configureProvider = async () => {
+    calls++;
+    await pending;
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await click(button('提供商'));
+  await click(button('编辑'));
+  const panel = document.querySelector('.settings-provider-panel')!;
+  const keyInput = panel.querySelector<HTMLInputElement>('input[type="password"]')!;
+  const urlInput = panel.querySelector<HTMLInputElement>('input[name="baseURL"]')!;
+  const modelInput = panel.querySelector<HTMLInputElement>('input[name="modelName"]')!;
+  const submit = button('保存 Provider');
+  await write(keyInput, 'test-key');
+  await write(urlInput, 'https://example.test');
+  await write(modelInput, 'model');
+  submit.focus();
+  await click(submit);
+  expect(calls).toBe(1);
+  expect(document.querySelector('.settings-provider-panel')).toBe(panel);
+  expect(document.activeElement).toBe(submit);
+  expect(submit.disabled).toBe(false);
+  expect(submit.textContent).toBe('保存 Provider');
+  expect(keyInput.readOnly).toBe(true);
+  expect(urlInput.readOnly).toBe(true);
+  expect(modelInput.readOnly).toBe(true);
+  expect(urlInput.value).toBe('https://example.test');
+  await click(submit);
+  expect(calls).toBe(1);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  expect(document.querySelector('.settings-provider-panel')).toBe(panel);
+  expect(urlInput.readOnly).toBe(false);
+  expect(submit.textContent).toBe('保存 Provider');
+  expect(document.activeElement).toBe(submit);
 });
 
 test('settings consumes MCP and Skill facts and issues only an explicit MCP action', async () => {

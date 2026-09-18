@@ -8,11 +8,49 @@ import {
   loadUserLanguage,
   saveInteractionMode,
   saveModelSelection,
+  saveProviderConfig,
   saveUserLanguage,
 } from '#kite-service/config/index';
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {
+  test('preserves an explicitly selected OpenAI provider type after saving', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    const previousBaseURL = process.env.OPENAI_BASE_URL;
+    try {
+      delete process.env.OPENAI_BASE_URL;
+      const configPath = join(dir, 'openai.jsonc');
+      expect(
+        saveProviderConfig({ name: 'openai', type: 'openai', apiKey: 'sk-test' }, configPath),
+      ).toBe(true);
+      const saved = JSON.parse(readFileSync(configPath, 'utf8')) as {
+        provider: { openai: { type: string } };
+      };
+      expect(saved.provider.openai.type).toBe('openai');
+      const loaded = loadAgentConfig({ configPath });
+      expect(loaded.providerType).toBe('openai');
+      expect(loaded.baseURL).toBe('https://api.openai.com/v1');
+      process.env.OPENAI_BASE_URL = 'https://env.example.test/v1';
+      expect(loadAgentConfig({ configPath }).baseURL).toBe('https://env.example.test/v1');
+      expect(
+        saveProviderConfig(
+          {
+            name: 'openai',
+            type: 'openai',
+            apiKey: 'sk-test',
+            baseURL: 'https://custom.example.test/v1',
+          },
+          configPath,
+        ),
+      ).toBe(true);
+      expect(loadAgentConfig({ configPath }).baseURL).toBe('https://custom.example.test/v1');
+    } finally {
+      if (previousBaseURL === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = previousBaseURL;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // 验证默认配置路径始终指向用户 home 目录下的 kite-code.jsonc / Verify default config path always resolves to kite-code.jsonc under user home
   test('uses a user-home default config path across operating systems', () => {
     expect(defaultConfigPath()).toBe(join(homedir(), '.kite-code', 'kite-code.jsonc'));

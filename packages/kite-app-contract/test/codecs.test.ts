@@ -20,6 +20,8 @@ import {
   mcpSnapshotResponseCodec,
   PROVIDER_MODEL_SELECT_REQUEST_SCHEMA_,
   PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
+  PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+  PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
   PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
   PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
   type ProviderModelSelectRequest,
@@ -28,6 +30,8 @@ import {
   type ProviderModelSnapshotRequest,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   RELEASE_STATUS_REQUEST_SCHEMA_,
@@ -115,6 +119,7 @@ const providerSnapshot: ProviderModelSnapshot = {
           provider: 'deepseek',
           name: 'deepseek-v4-flash',
           isDefault: true,
+          enabled: true,
           contextWindowTokens: 128_000,
           maxOutputTokens: 8_192,
           reasoning: true,
@@ -256,6 +261,29 @@ describe('Kite App Contract', () => {
       outcome: 'applied',
       snapshot: providerSnapshot,
     };
+    const providerSetEnabledRequest = {
+      schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+      workspace,
+      provider: 'deepseek',
+      name: 'deepseek-v4-flash',
+      enabled: false,
+      expectedRevision: revision,
+    } as const;
+    const providerSetEnabledResponse = {
+      schema: PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
+      outcome: 'invalid_model',
+      snapshot: providerSnapshot,
+    } as const;
+    expect(
+      providerModelSetEnabledRequestCodec.decode(
+        providerModelSetEnabledRequestCodec.encode(providerSetEnabledRequest),
+      ),
+    ).toEqual(providerSetEnabledRequest);
+    expect(
+      providerModelSetEnabledResponseCodec.decode(
+        providerModelSetEnabledResponseCodec.encode(providerSetEnabledResponse),
+      ),
+    ).toEqual(providerSetEnabledResponse);
     expect(
       providerModelSnapshotRequestCodec.decode(
         providerModelSnapshotRequestCodec.encode(providerRequest),

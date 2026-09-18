@@ -63,6 +63,7 @@ describe('InProcess App Control gateway', () => {
               providers: [],
             }),
             select: unused,
+            setEnabled: unused,
           },
           mcp: { snapshot: unused, apply: unused },
           skills: { snapshot: unused },

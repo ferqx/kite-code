@@ -35,6 +35,7 @@ const UNAVAILABLE_WORKSPACE_HANDLERS = Object.freeze({
   providerModel: Object.freeze({
     snapshot: unavailable,
     select: unavailable,
+    setEnabled: unavailable,
   }) satisfies ProviderModelHandlerPort,
   mcp: Object.freeze({ snapshot: unavailable, apply: unavailable }) satisfies McpHandlerPort,
   skills: Object.freeze({ snapshot: unavailable }) satisfies SkillCatalogHandlerPort,

@@ -1221,6 +1221,11 @@ function createFixture(
         outcome: 'already_selected',
         snapshot: currentProviderSnapshot,
       }),
+      setProviderModelEnabled: async () => ({
+        schema: 'kite.app.provider-model.set-enabled-response.v1',
+        outcome: 'unavailable',
+        snapshot: currentProviderSnapshot,
+      }),
       getMcpSnapshot: async () => ({
         schema: 'kite.app.mcp.snapshot-response.v1',
         workspace,

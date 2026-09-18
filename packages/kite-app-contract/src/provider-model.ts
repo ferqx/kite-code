@@ -23,6 +23,10 @@ export const PROVIDER_MODEL_SELECT_REQUEST_SCHEMA_ =
   'kite.app.provider-model.select-request.v1' as const;
 export const PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_ =
   'kite.app.provider-model.select-response.v1' as const;
+export const PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_ =
+  'kite.app.provider-model.set-enabled-request.v1' as const;
+export const PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_ =
+  'kite.app.provider-model.set-enabled-response.v1' as const;
 
 export type AppModelProviderType = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
 export type ProviderReadiness = 'ready' | 'not_configured' | 'degraded' | 'unavailable';
@@ -32,6 +36,7 @@ export interface ProviderModelRoute {
   readonly provider: string;
   readonly name: string;
   readonly isDefault: boolean;
+  readonly enabled?: boolean;
   readonly contextWindowTokens?: number;
   readonly maxOutputTokens?: number;
   readonly reasoning?: boolean;
@@ -81,6 +86,107 @@ export interface ProviderModelSelectResponse {
   readonly outcome: ProviderModelSelectOutcome;
   readonly snapshot: ProviderModelSnapshot;
 }
+
+export interface ProviderModelSetEnabledRequest {
+  readonly schema: typeof PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_;
+  readonly workspace: KiteWorkspaceIdentity;
+  readonly provider: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly expectedRevision: string;
+}
+
+export interface ProviderModelSetEnabledResponse {
+  readonly schema: typeof PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_;
+  readonly outcome: ProviderModelSelectOutcome;
+  readonly snapshot: ProviderModelSnapshot;
+}
+
+export const providerModelSetEnabledRequestCodec: ExactJsonCodec<ProviderModelSetEnabledRequest> =
+  exactCodec({
+    schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+    decode(input) {
+      const value = exactObject(
+        input,
+        ['schema', 'workspace', 'provider', 'name', 'enabled', 'expectedRevision'],
+        'ProviderModelSetEnabledRequest',
+      );
+      assertSchema(
+        value,
+        PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+        'ProviderModelSetEnabledRequest',
+      );
+      return {
+        schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+        workspace: decodeWorkspaceIdentity(
+          required(value, 'workspace', 'ProviderModelSetEnabledRequest'),
+        ),
+        provider: safeIdentifier(
+          required(value, 'provider', 'ProviderModelSetEnabledRequest'),
+          'ProviderModelSetEnabledRequest.provider',
+        ),
+        name: nonEmptyString(
+          required(value, 'name', 'ProviderModelSetEnabledRequest'),
+          'ProviderModelSetEnabledRequest.name',
+          256,
+        ),
+        enabled: booleanValue(
+          required(value, 'enabled', 'ProviderModelSetEnabledRequest'),
+          'ProviderModelSetEnabledRequest.enabled',
+        ),
+        expectedRevision: nonEmptyString(
+          required(value, 'expectedRevision', 'ProviderModelSetEnabledRequest'),
+          'ProviderModelSetEnabledRequest.expectedRevision',
+          256,
+        ),
+      };
+    },
+    encode(value) {
+      return { ...value, workspace: encodeWorkspace(value.workspace) };
+    },
+  });
+
+export const providerModelSetEnabledResponseCodec: ExactJsonCodec<ProviderModelSetEnabledResponse> =
+  exactCodec({
+    schema: PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
+    decode(input) {
+      const value = exactObject(
+        input,
+        ['schema', 'outcome', 'snapshot'],
+        'ProviderModelSetEnabledResponse',
+      );
+      assertSchema(
+        value,
+        PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
+        'ProviderModelSetEnabledResponse',
+      );
+      return {
+        schema: PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
+        outcome: enumValue(
+          required(value, 'outcome', 'ProviderModelSetEnabledResponse'),
+          'ProviderModelSetEnabledResponse.outcome',
+          [
+            'applied',
+            'already_selected',
+            'invalid_model',
+            'conflict',
+            'outcome_unknown',
+            'unavailable',
+          ] as const,
+        ),
+        snapshot: decodeProviderModelSnapshot(
+          required(value, 'snapshot', 'ProviderModelSetEnabledResponse'),
+        ),
+      };
+    },
+    encode(value) {
+      return {
+        schema: value.schema,
+        outcome: value.outcome,
+        snapshot: encodeProviderModelSnapshot(value.snapshot),
+      };
+    },
+  });
 
 export const providerModelSnapshotRequestCodec: ExactJsonCodec<ProviderModelSnapshotRequest> =
   exactCodec({
@@ -291,6 +397,7 @@ function decodeProviderModelRoute(input: unknown, label: string): ProviderModelR
     [
       'contextWindowTokens',
       'isDefault',
+      'enabled',
       'maxOutputTokens',
       'name',
       'provider',
@@ -303,10 +410,12 @@ function decodeProviderModelRoute(input: unknown, label: string): ProviderModelR
   const maxOutputTokens = optional(value, 'maxOutputTokens');
   const reasoning = optional(value, 'reasoning');
   const streaming = optional(value, 'streaming');
+  const enabled = optional(value, 'enabled');
   return {
     provider: safeIdentifier(required(value, 'provider', label), `${label}.provider`),
     name: nonEmptyString(required(value, 'name', label), `${label}.name`, 256),
     isDefault: booleanValue(required(value, 'isDefault', label), `${label}.isDefault`),
+    ...(enabled === undefined ? {} : { enabled: booleanValue(enabled, `${label}.enabled`) }),
     ...(contextWindowTokens === undefined
       ? {}
       : {
@@ -337,6 +446,7 @@ function encodeProviderModelRoute(value: ProviderModelRoute): JsonObject {
     provider: value.provider,
     name: value.name,
     isDefault: value.isDefault,
+    ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
     ...(value.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: value.contextWindowTokens }),

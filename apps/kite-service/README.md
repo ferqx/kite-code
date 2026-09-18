@@ -68,6 +68,8 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
   后台与控制命令共用 Coordinator 已有 canonical 待发布队列，按确切 revision 通知；细节与回归见[Runtime application](docs/runtime-application.md)。
 - 模型选择保存成功后只更新desired config；active Run继续使用`start_turn` admission时冻结的完整配置与真实Provider route，
   下一Run才解析desired config。Runtime投影在active期间保持该Run的model identity，不能让Header先于Provider request切换。
+- 模型启用状态由用户配置持久化，经 App Control revision CAS 写入并在快照中投影；已禁用模型不进入默认路由候选，显式执行请求会被拒绝。当前默认模型必须先切换才能禁用，active Run 仍沿用 admission 时冻结的配置。 Provider 快照从已启用模型探测配置可用性；无已启用模型时标为不可用，不把已禁用首项当作配置错误。
+- Provider 保存显式保留所选 `type`；OpenAI 无显式或环境服务地址时使用官方默认地址。既有省略类型的配置保留原推断规则，重新保存后写入显式类型，不自动迁移用户配置。
 - Kernel event到Runtime Client的投影使用穷尽coverage表；每个event必须明确归类为client-visible、internal-only、
   client-unavailable或由canonical event规范化。新增event不得通过`default: undefined`静默消失，无法安全投影时只发布有界
   `unavailable`。可选client-safe文本字段为空时必须省略；尤其无匹配内容的Subagent工具结果不得投影`summary: ""`并破坏

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   PROVIDER_MODEL_SELECT_REQUEST_SCHEMA_,
+  PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
   PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import { resolveProjectIdentity } from '@kite-ai/runtime-host';
@@ -19,6 +20,220 @@ function identity(workspace: string) {
 }
 
 describe('Provider/model App Control owner', () => {
+  test('persists model visibility, protects default, and rejects disabled selections', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-provider-visibility-'));
+    const workspace = join(root, 'workspace');
+    const configPath = join(root, 'config.jsonc');
+    mkdirSync(workspace);
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        provider: {
+          local: {
+            type: 'openai-compatible',
+            apiKey: 'secret',
+            baseURL: 'https://example.invalid/v1',
+            model: 'one',
+            models: ['one', 'two'],
+          },
+        },
+        model: 'local:one',
+      }),
+    );
+    const owner = createProviderModelOwner({
+      workspace: identity(workspace),
+      userConfigPath: configPath,
+    });
+    const before = await owner.snapshot({
+      schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+    });
+    expect(before.providers[0]?.models.map((model) => model.enabled)).toEqual([true, true]);
+    const request = {
+      schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+      provider: 'local',
+      name: 'two',
+      enabled: false,
+      expectedRevision: before.revision,
+    } as const;
+    const disabled = await owner.setEnabled(request);
+    expect(disabled.outcome).toBe('applied');
+    expect(disabled.snapshot.providers[0]?.models[1]?.enabled).toBe(false);
+    expect(
+      (
+        await owner.select({
+          schema: PROVIDER_MODEL_SELECT_REQUEST_SCHEMA_,
+          workspace: identity(workspace),
+          provider: 'local',
+          name: 'two',
+          expectedRevision: disabled.snapshot.revision,
+        })
+      ).outcome,
+    ).toBe('invalid_model');
+    expect(
+      (
+        await owner.setEnabled({
+          ...request,
+          name: 'one',
+          expectedRevision: disabled.snapshot.revision,
+        })
+      ).outcome,
+    ).toBe('invalid_model');
+    expect((await owner.setEnabled(request)).outcome).toBe('conflict');
+    const restored = await owner.setEnabled({
+      ...request,
+      enabled: true,
+      expectedRevision: disabled.snapshot.revision,
+    });
+    expect(restored.outcome).toBe('applied');
+    expect(restored.snapshot.providers[0]?.models[1]?.enabled).toBe(true);
+  });
+
+  test('keeps provider ready when its first discovered model is disabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-provider-enabled-probe-'));
+    const workspace = join(root, 'workspace');
+    const configPath = join(root, 'config.jsonc');
+    mkdirSync(workspace);
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        provider: {
+          local: {
+            type: 'openai-compatible',
+            apiKey: 'secret',
+            baseURL: 'https://example.invalid/v1',
+            model: 'one',
+            models: ['one', 'two'],
+          },
+        },
+        model: 'local:one',
+      }),
+    );
+    const owner = createProviderModelOwner({
+      workspace: identity(workspace),
+      userConfigPath: configPath,
+    });
+    const before = await owner.snapshot({
+      schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+    });
+    const selected = await owner.select({
+      schema: PROVIDER_MODEL_SELECT_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+      provider: 'local',
+      name: 'two',
+      expectedRevision: before.revision,
+    });
+    expect(selected.outcome).toBe('applied');
+    const disabled = await owner.setEnabled({
+      schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+      provider: 'local',
+      name: 'one',
+      enabled: false,
+      expectedRevision: selected.snapshot.revision,
+    });
+    expect(disabled.outcome).toBe('applied');
+    expect(disabled.snapshot.providers[0]?.readiness).toBe('ready');
+    expect(disabled.snapshot.providers[0]?.models.map((model) => model.enabled)).toEqual([
+      false,
+      true,
+    ]);
+    expect(disabled.snapshot.selected).toEqual({ provider: 'local', name: 'two' });
+  });
+
+  test('does not mark a provider ready when all of its models are disabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-provider-all-disabled-'));
+    const workspace = join(root, 'workspace');
+    const configPath = join(root, 'config.jsonc');
+    mkdirSync(workspace);
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        provider: {
+          local: {
+            type: 'openai-compatible',
+            apiKey: 'secret',
+            baseURL: 'https://example.invalid/v1',
+            model: 'one',
+            models: ['one', 'two'],
+          },
+          other: {
+            type: 'openai-compatible',
+            apiKey: 'secret',
+            baseURL: 'https://example.invalid/v1',
+            model: 'other',
+            models: ['other'],
+          },
+        },
+        model: 'other:other',
+        disabledModels: [
+          { provider: 'local', name: 'one' },
+          { provider: 'local', name: 'two' },
+        ],
+      }),
+    );
+    const owner = createProviderModelOwner({
+      workspace: identity(workspace),
+      userConfigPath: configPath,
+    });
+    const view = await owner.snapshot({
+      schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+    });
+    expect(view.providers.find((provider) => provider.provider === 'local')?.readiness).toBe(
+      'unavailable',
+    );
+    expect(view.providers.find((provider) => provider.provider === 'other')?.readiness).toBe(
+      'ready',
+    );
+  });
+
+  test('projects workspace models together with user visibility without changing project config', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-provider-project-'));
+    const workspace = join(root, 'workspace');
+    const userPath = join(root, 'user.jsonc');
+    const projectDir = join(workspace, '.kite-code');
+    mkdirSync(projectDir, { recursive: true });
+    const projectPath = join(projectDir, 'kite-code.jsonc');
+    const projectSource = JSON.stringify({
+      provider: { local: { type: 'ollama', model: 'one', models: ['one', 'two'] } },
+      model: 'local:one',
+    });
+    writeFileSync(projectPath, projectSource);
+    writeFileSync(
+      userPath,
+      JSON.stringify({ disabledModels: [{ provider: 'local', name: 'two' }] }),
+    );
+    const owner = createProviderModelOwner({
+      workspace: identity(workspace),
+      userConfigPath: userPath,
+    });
+    const view = await owner.snapshot({
+      schema: PROVIDER_MODEL_SNAPSHOT_REQUEST_SCHEMA_,
+      workspace: identity(workspace),
+    });
+    expect(view.providers[0]?.models.map((model) => [model.name, model.enabled])).toEqual([
+      ['one', true],
+      ['two', false],
+    ]);
+    expect(view.selected).toEqual({ provider: 'local', name: 'one' });
+    expect(
+      (
+        await owner.setEnabled({
+          schema: PROVIDER_MODEL_SET_ENABLED_REQUEST_SCHEMA_,
+          workspace: identity(workspace),
+          provider: 'local',
+          name: 'two',
+          enabled: true,
+          expectedRevision: view.revision,
+        })
+      ).outcome,
+    ).toBe('applied');
+    expect(readFileSync(projectPath, 'utf8')).toBe(projectSource);
+  });
+
   test('projects no-secret routes and applies model selection with revision CAS', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-provider-owner-'));
     const workspace = join(root, 'workspace');

@@ -15,10 +15,14 @@ import {
   mcpSnapshotResponseCodec,
   type ProviderModelSelectRequest,
   type ProviderModelSelectResponse,
+  type ProviderModelSetEnabledRequest,
+  type ProviderModelSetEnabledResponse,
   type ProviderModelSnapshot,
   type ProviderModelSnapshotRequest,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   type ReleaseStatusRequest,
@@ -135,6 +139,23 @@ export class KiteAppControlService implements KiteAppControlClient {
     );
     const projected = providerModelSelectResponseCodec.decode(
       providerModelSelectResponseCodec.encode(response),
+    );
+    assertSameWorkspace(checked.workspace, projected.snapshot.workspace, 'Provider/model response');
+    return projected;
+  }
+
+  async setProviderModelEnabled(
+    request: ProviderModelSetEnabledRequest,
+  ): Promise<ProviderModelSetEnabledResponse> {
+    const checked = providerModelSetEnabledRequestCodec.decode(
+      providerModelSetEnabledRequestCodec.encode(request),
+    );
+    assertAdmittedWorkspace(this.#workspace, checked.workspace, 'Provider/model request');
+    const response = await this.#operationGate.runMutation(() =>
+      this.#handlers.providerModel.setEnabled(checked),
+    );
+    const projected = providerModelSetEnabledResponseCodec.decode(
+      providerModelSetEnabledResponseCodec.encode(response),
     );
     assertSameWorkspace(checked.workspace, projected.snapshot.workspace, 'Provider/model response');
     return projected;

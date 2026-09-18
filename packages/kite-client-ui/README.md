@@ -24,6 +24,8 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 ## 基础控件
 
+包入口导出已有的 [DropdownMenu](src/components/ui/dropdown-menu.tsx) 单选菜单组件，供桌面设置与输入区复用；模型可用性与选择回调仍由调用方提供。
+
 Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client-ui` 已有的 shadcn 公共组件；共享包尚未提供但 shadcn registry 已有对应组件时，先按项目现有 Radix base、New York style、HugeIcons 和语义 token 接入共享包，再由两端复用。不得在 app 内用原生元素或局部样式重复实现 Button、Input、Textarea、Select、DropdownMenu、Dialog／AlertDialog、Tabs、Tooltip、ScrollArea、Resizable、Badge 等已有能力，也不得为单个页面复制一份公共组件。只有 shadcn 不提供相应语义、现有公共组件无法在不扭曲交互的情况下组合，或宿主原生能力不可替代时，才允许新增专用组件；实现处必须说明边界，并继续复用公共 primitive、变量和可访问性语义。纯业务内容结构不因本规则强行包装为无意义组件。
 
 接入或调整 shadcn 组件前，先检查 `components.json`、已安装组件和对应官方文档；更新已有组件必须比较上游差异并保留本地适配，不能直接覆盖。公共组件变化同时运行共享包、Desktop 与 Web 的相关测试和类型检查，视觉行为在[客户端设计规范](docs/design-system.md)维护，端侧只能提供数据、权限和宿主回调，不能用页面覆盖样式建立第二套控件规则。

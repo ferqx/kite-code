@@ -15,10 +15,14 @@ import {
   mcpSnapshotResponseCodec,
   type ProviderModelSelectRequest,
   type ProviderModelSelectResponse,
+  type ProviderModelSetEnabledRequest,
+  type ProviderModelSetEnabledResponse,
   type ProviderModelSnapshot,
   type ProviderModelSnapshotRequest,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   type ReleaseStatusRequest,
@@ -85,6 +89,17 @@ export class ProtocolKiteAppControlClient implements KiteAppControlClient {
       'app/provider_model/select',
       providerModelSelectRequestCodec,
       providerModelSelectResponseCodec,
+      request,
+    );
+  }
+
+  setProviderModelEnabled(
+    request: ProviderModelSetEnabledRequest,
+  ): Promise<ProviderModelSetEnabledResponse> {
+    return this.#call(
+      'app/provider_model/set_enabled',
+      providerModelSetEnabledRequestCodec,
+      providerModelSetEnabledResponseCodec,
       request,
     );
   }

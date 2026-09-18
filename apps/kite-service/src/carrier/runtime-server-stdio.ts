@@ -10,6 +10,8 @@ import {
   mcpSnapshotResponseCodec,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   releaseStatusRequestCodec,
@@ -693,6 +695,13 @@ async function dispatchAppControl(
         providerModelSelectRequestCodec,
         providerModelSelectResponseCodec,
         (request) => client.selectProviderModel(request),
+      );
+    case 'app/provider_model/set_enabled':
+      return invokeAppControlCodec(
+        input,
+        providerModelSetEnabledRequestCodec,
+        providerModelSetEnabledResponseCodec,
+        (request) => client.setProviderModelEnabled(request),
       );
     case 'app/mcp/snapshot':
       return invokeAppControlCodec(

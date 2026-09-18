@@ -7,6 +7,8 @@ import type {
 import type {
   ProviderModelSelectRequest,
   ProviderModelSelectResponse,
+  ProviderModelSetEnabledRequest,
+  ProviderModelSetEnabledResponse,
   ProviderModelSnapshot,
   ProviderModelSnapshotRequest,
 } from './provider-model';
@@ -36,6 +38,9 @@ export interface KiteAppControlClient {
   ): Promise<WorkspaceTrustDecisionResponse>;
   getProviderModelSnapshot(request: ProviderModelSnapshotRequest): Promise<ProviderModelSnapshot>;
   selectProviderModel(request: ProviderModelSelectRequest): Promise<ProviderModelSelectResponse>;
+  setProviderModelEnabled(
+    request: ProviderModelSetEnabledRequest,
+  ): Promise<ProviderModelSetEnabledResponse>;
   getMcpSnapshot(request: AppMcpSnapshotRequest): Promise<AppMcpSnapshot>;
   applyMcpAction(request: AppMcpActionRequest): Promise<AppMcpActionResponse>;
   getSkillCatalog(request: SkillCatalogRequest): Promise<SkillCatalogSnapshot>;

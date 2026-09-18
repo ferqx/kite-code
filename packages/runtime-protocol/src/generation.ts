@@ -308,6 +308,7 @@ export function generateRuntimeProtocolTypeScript(): string {
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/workspace_trust/decide'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/provider_model/snapshot'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/provider_model/select'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
+    "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/provider_model/set_enabled'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/mcp/snapshot'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/mcp/action'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",
     "  | { readonly jsonrpc: '2.0'; readonly id: string; readonly method: 'app/skills/catalog'; readonly params: { readonly request: Readonly<Record<string, unknown>> } }",

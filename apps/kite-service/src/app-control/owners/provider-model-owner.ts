@@ -3,14 +3,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
   type AppModelProviderType,
   PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
+  PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
   PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
   type ProviderModelSelectRequest,
   type ProviderModelSelectResponse,
+  type ProviderModelSetEnabledRequest,
+  type ProviderModelSetEnabledResponse,
   type ProviderModelSnapshot,
 } from '@kite-ai/kite-app-contract';
 import {
   listAvailableModels,
   probeAgentConfig,
+  resolveConfiguredDefaultModel,
+  saveModelEnabledWithRevisionGuard,
   saveModelSelectionWithRevisionGuard,
 } from '#kite-service/config';
 import { defaultConfigPath, projectConfigPath } from '#kite-service/config/paths';
@@ -54,34 +59,39 @@ function snapshot(input: ProviderModelOwnerOptions): ProviderModelSnapshot {
     workspace: input.workspace.canonicalPath,
   });
   const selected =
-    selectedProbe.status === 'ready'
+    resolveConfiguredDefaultModel(input.userConfigPath, input.workspace.canonicalPath) ??
+    (selectedProbe.status === 'ready'
       ? { provider: selectedProbe.config.providerName, name: selectedProbe.config.modelName }
-      : undefined;
+      : undefined);
   return {
     schema: PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
     workspace: input.workspace,
     revision: revision(input),
     providers: [...providers.entries()].map(([provider, entries]) => {
-      const readiness = probeAgentConfig({
-        ...(input.userConfigPath === undefined ? {} : { configPath: input.userConfigPath }),
-        workspace: input.workspace.canonicalPath,
-        providerName: provider,
-        modelName: entries[0]?.name,
-      });
-      const config = readiness.status === 'ready' ? readiness.config : undefined;
+      const enabledModel = entries.find((entry) => entry.enabled !== false);
+      const readiness = enabledModel
+        ? probeAgentConfig({
+            ...(input.userConfigPath === undefined ? {} : { configPath: input.userConfigPath }),
+            workspace: input.workspace.canonicalPath,
+            providerName: provider,
+            modelName: enabledModel.name,
+          })
+        : undefined;
+      const config = readiness?.status === 'ready' ? readiness.config : undefined;
       return {
         provider,
         type: providerType(config?.providerType ?? provider),
         readiness:
-          readiness.status === 'ready'
+          readiness?.status === 'ready'
             ? ('ready' as const)
-            : readiness.status === 'not-configured'
+            : readiness?.status === 'not-configured'
               ? ('not_configured' as const)
               : ('unavailable' as const),
         models: entries.map((entry) => ({
           provider,
           name: entry.name,
           isDefault: entry.isDefault,
+          enabled: entry.enabled,
           ...(entry.contextWindow === undefined
             ? {}
             : { contextWindowTokens: entry.contextWindow }),
@@ -94,7 +104,7 @@ function snapshot(input: ProviderModelOwnerOptions): ProviderModelSnapshot {
             : { streaming: config.modelCapabilities.streaming }),
         })),
         ...(selected?.provider === provider ? { selectedModel: selected.name } : {}),
-        ...(readiness.status === 'invalid' ? { diagnosticCode: 'config_invalid' } : {}),
+        ...(readiness?.status === 'invalid' ? { diagnosticCode: 'config_invalid' } : {}),
       };
     }),
     ...(selected === undefined ? {} : { selected }),
@@ -120,7 +130,12 @@ export function createProviderModelOwner(
       }
       const available = before.providers
         .flatMap((provider) => provider.models)
-        .some((model) => model.provider === request.provider && model.name === request.name);
+        .some(
+          (model) =>
+            model.provider === request.provider &&
+            model.name === request.name &&
+            model.enabled !== false,
+        );
       if (!available) {
         return {
           schema: PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
@@ -149,6 +164,44 @@ export function createProviderModelOwner(
         outcome: saved === 'saved' ? 'applied' : saved === 'conflict' ? 'conflict' : 'unavailable',
         snapshot: snapshot(input),
       };
+    },
+    async setEnabled(
+      request: ProviderModelSetEnabledRequest,
+    ): Promise<ProviderModelSetEnabledResponse> {
+      const before = snapshot(input);
+      const respond = (
+        outcome: ProviderModelSetEnabledResponse['outcome'],
+        current = before,
+      ): ProviderModelSetEnabledResponse => ({
+        schema: PROVIDER_MODEL_SET_ENABLED_RESPONSE_SCHEMA_,
+        outcome,
+        snapshot: current,
+      });
+      if (request.expectedRevision !== before.revision) return respond('conflict');
+      const model = before.providers
+        .flatMap((provider) => provider.models)
+        .find((route) => route.provider === request.provider && route.name === request.name);
+      if (!model) return respond('invalid_model');
+      if (
+        !request.enabled &&
+        before.selected?.provider === request.provider &&
+        before.selected.name === request.name
+      ) {
+        return respond('invalid_model');
+      }
+      if ((model.enabled !== false) === request.enabled) return respond('already_selected');
+      const saved = saveModelEnabledWithRevisionGuard({
+        provider: request.provider,
+        name: request.name,
+        enabled: request.enabled,
+        configPath: input.userConfigPath ?? defaultConfigPath(),
+        guardPaths: [projectConfigPath(input.workspace.canonicalPath)],
+        isCurrent: () => revision(input) === request.expectedRevision,
+      });
+      return respond(
+        saved === 'saved' ? 'applied' : saved === 'conflict' ? 'conflict' : 'unavailable',
+        snapshot(input),
+      );
     },
   });
 }

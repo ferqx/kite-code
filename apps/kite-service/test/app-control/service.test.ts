@@ -184,6 +184,13 @@ function handlerFixture(
           snapshot: providerSnapshot(workspace, `${label}-provider-2`),
         };
       },
+      async setEnabled() {
+        return {
+          schema: 'kite.app.provider-model.set-enabled-response.v1' as const,
+          outcome: 'unavailable' as const,
+          snapshot: providerSnapshot(workspace, `${label}-provider-2`),
+        };
+      },
     },
     mcp: {
       async snapshot(): Promise<AppMcpSnapshot> {
@@ -425,6 +432,7 @@ describe('Kite App Control service', () => {
       queryWorkspaceTrust: fixture.service.queryWorkspaceTrust.bind(fixture.service),
       decideWorkspaceTrust: fixture.service.decideWorkspaceTrust.bind(fixture.service),
       getProviderModelSnapshot: fixture.service.getProviderModelSnapshot.bind(fixture.service),
+      setProviderModelEnabled: fixture.service.setProviderModelEnabled.bind(fixture.service),
       async selectProviderModel() {
         attempts += 1;
         throw new Error('response lost after mutation admission');

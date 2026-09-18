@@ -8,6 +8,8 @@ import {
   mcpSnapshotResponseCodec,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
   releaseStatusRequestCodec,
@@ -63,6 +65,15 @@ export function createInProcessKiteAppControlClient(
       const response = await service.selectProviderModel(input);
       return providerModelSelectResponseCodec.decode(
         providerModelSelectResponseCodec.encode(response),
+      );
+    },
+    async setProviderModelEnabled(request) {
+      const input = providerModelSetEnabledRequestCodec.decode(
+        providerModelSetEnabledRequestCodec.encode(request),
+      );
+      const response = await service.setProviderModelEnabled(input);
+      return providerModelSetEnabledResponseCodec.decode(
+        providerModelSetEnabledResponseCodec.encode(response),
       );
     },
     async getMcpSnapshot(request) {

@@ -27,6 +27,15 @@ export {
   DialogTitle,
   DialogTrigger,
 } from './components/ui/dialog';
+export {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 export { ScrollArea, ScrollBar } from './components/ui/scroll-area';
 export {
   Sheet,

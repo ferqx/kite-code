@@ -286,6 +286,7 @@ export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** Last model route explicitly selected by the user. */
   model: modelSelectionSchema,
+  disabledModels: z.array(modelRouteObjectSchema).optional(),
   theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
   /** Personal terminal language preference. Project config must never override it. */
@@ -490,8 +491,8 @@ export {
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
-  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, enabled: true },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, enabled: true },
 ];
 
 // ── Config file loading ──
@@ -510,6 +511,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     // The last route selected by this user is a personal UI preference and
     // intentionally takes precedence over a project-provided initial default.
     model: user.model ?? project.model,
+    disabledModels: user.disabledModels ?? project.disabledModels,
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
     // Interface language is a personal preference. A repository must not be
@@ -550,6 +552,24 @@ function loadConfig(workspace?: string, explicitPath?: string): KiteCodeConfig {
   if (project) return project;
   // No config file → DeepSeek defaults
   return defaultKiteCodeConfig();
+}
+
+function loadWorkspaceConfigWithUserPath(
+  workspace: string,
+  userPath?: string,
+): KiteCodeConfig | null {
+  const user = readConfigFile(userPath ?? defaultConfigPath());
+  const project = readConfigFile(projectConfigPath(workspace));
+  return user && project ? mergeConfigs(user, project) : (user ?? project);
+}
+
+/** Resolve the desired default route without requiring provider credentials. */
+export function resolveConfiguredDefaultModel(
+  configPath?: string,
+  workspace = process.cwd(),
+): { provider: string; name: string } | null {
+  const cfg = loadWorkspaceConfigWithUserPath(workspace, configPath);
+  return findDefaultModel(cfg ?? defaultKiteCodeConfig());
 }
 
 function defaultKiteCodeConfig(): KiteCodeConfig {
@@ -613,6 +633,9 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     defaultModel?.provider === providerName ? defaultModel.name : undefined;
   const modelName =
     options.modelName ?? selectedDefaultName ?? provider.model ?? 'deepseek-v4-flash';
+  if (!isModelEnabled(cfg, providerName, modelName)) {
+    throw new Error(`Model '${providerName}:${modelName}' is disabled`);
+  }
   const selectedModel = provider.models?.find((entry) => modelEntryName(entry) === modelName);
   const selected = selectedModel && typeof selectedModel === 'object' ? selectedModel : undefined;
 
@@ -860,42 +883,54 @@ function modelEntryObject(entry: unknown): {
  */
 function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
   const persisted = cfg.model?.default;
-  if (persisted && isConfiguredModelRoute(cfg, persisted)) return persisted;
+  if (
+    persisted &&
+    isConfiguredModelRoute(cfg, persisted) &&
+    isModelEnabled(cfg, persisted.provider, persisted.name)
+  )
+    return persisted;
 
   // Pass 1: providers with an explicit apiKey
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (!prov.apiKey) continue;
-    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    if (prov.model && prov.models?.length && isModelEnabled(cfg, provName, prov.model))
+      return { provider: provName, name: prov.model };
     if (prov.models) {
       for (const m of prov.models) {
         if (modelEntryObject(m)?.default) {
           const name = modelEntryName(m);
-          if (name) return { provider: provName, name };
+          if (name && isModelEnabled(cfg, provName, name)) return { provider: provName, name };
         }
       }
     }
   }
   // Pass 2: providers with models (apiKey may come from env var)
   for (const [provName, prov] of Object.entries(cfg.provider)) {
-    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    if (prov.model && prov.models?.length && isModelEnabled(cfg, provName, prov.model))
+      return { provider: provName, name: prov.model };
     if (prov.models) {
       for (const m of prov.models) {
         if (modelEntryObject(m)?.default) {
           const name = modelEntryName(m);
-          if (name) return { provider: provName, name };
+          if (name && isModelEnabled(cfg, provName, name)) return { provider: provName, name };
         }
       }
     }
   }
-  // Fallback: first model of any provider with models
-  // Fallback: first model of first provider with models
+  // Fallback: first enabled model of any provider with models.
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models?.length) {
-      const name = modelEntryName(prov.models[0]);
+      const name = prov.models
+        .map(modelEntryName)
+        .find((candidate) => candidate && isModelEnabled(cfg, provName, candidate));
       if (name) return { provider: provName, name };
     }
   }
   return null;
+}
+
+function isModelEnabled(cfg: KiteCodeConfig, provider: string, name: string): boolean {
+  return !cfg.disabledModels?.some((route) => route.provider === provider && route.name === name);
 }
 
 function isConfiguredModelRoute(
@@ -944,6 +979,7 @@ function resolveProviderBaseURL(
   // Try env var: PROVIDERNAME_BASE_URL
   const envURL = process.env[`${providerName.toUpperCase()}_BASE_URL`];
   if (envURL) return envURL;
+  if (providerType === 'openai') return 'https://api.openai.com/v1';
   throw new Error(`Model provider '${providerName}' requires baseURL`);
 }
 
@@ -954,26 +990,19 @@ export interface AvailableModel {
   provider: string;
   name: string;
   isDefault: boolean;
+  enabled: boolean;
   /** 上下文窗口大小（token 数）/ Context window size in tokens */
   contextWindow?: number;
   maxOutputTokens?: number;
 }
 
-let _cachedModels: { readonly key: string; readonly models: AvailableModel[] } | null = null;
-
 export function listAvailableModels(
   configPath?: string,
   workspace = process.cwd(),
 ): AvailableModel[] {
-  // Cache: config rarely changes at runtime; avoid re-reading file on every render
-  const cacheKey = configPath ?? `workspace:${resolve(workspace)}`;
-  if (_cachedModels?.key === cacheKey) return _cachedModels.models;
-
-  const cfg = configPath ? readConfigFile(configPath) : loadConfig(workspace);
+  const cfg = loadWorkspaceConfigWithUserPath(workspace, configPath);
   if (!cfg) {
-    const fallback = DEFAULT_DEEPSEEK_MODELS;
-    _cachedModels = { key: cacheKey, models: fallback };
-    return fallback;
+    return DEFAULT_DEEPSEEK_MODELS;
   }
 
   // Collect models from providers
@@ -988,17 +1017,25 @@ export function listAvailableModels(
         const isDefault = name === defaultName || Boolean(entry?.default);
         const contextWindow = entry?.contextWindow ?? entry?.tokens;
         const maxOutputTokens = entry?.maxOutputTokens;
-        models.push({ provider: provName, name, isDefault, contextWindow, maxOutputTokens });
+        models.push({
+          provider: provName,
+          name,
+          isDefault,
+          enabled: isModelEnabled(cfg, provName, name),
+          contextWindow,
+          maxOutputTokens,
+        });
       }
     }
   }
   if (models.length > 0) {
-    _cachedModels = { key: cacheKey, models };
     return models;
   }
 
-  _cachedModels = { key: cacheKey, models: DEFAULT_DEEPSEEK_MODELS };
-  return DEFAULT_DEEPSEEK_MODELS;
+  return DEFAULT_DEEPSEEK_MODELS.map((model) => ({
+    ...model,
+    enabled: isModelEnabled(cfg, model.provider, model.name),
+  }));
 }
 
 // ── Theme ──
@@ -1137,6 +1174,37 @@ export function saveModelSelectionWithRevisionGuard(input: {
   );
 }
 
+/** Persist personal model visibility without modifying provider credentials or project config. */
+export function saveModelEnabledWithRevisionGuard(input: {
+  readonly provider: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly configPath?: string;
+  readonly guardPaths: readonly string[];
+  readonly isCurrent: () => boolean;
+}): UserConfigMutationResult {
+  return mutateUserConfigResult(
+    input.configPath ?? defaultConfigPath(),
+    (source) => {
+      const parsed = configSchema.parse(parse(source));
+      const existing = parsed.disabledModels ?? [];
+      const remaining = existing.filter(
+        (route) => route.provider !== input.provider || route.name !== input.name,
+      );
+      const disabledModels = input.enabled
+        ? remaining
+        : [...remaining, { provider: input.provider, name: input.name }];
+      return applyEdits(
+        source,
+        modify(source, ['disabledModels'], disabledModels, {
+          formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
+        }),
+      );
+    },
+    { guardPaths: input.guardPaths, isCurrent: input.isCurrent },
+  );
+}
+
 // ── Provider config saving ──
 
 /** Input for saving a provider configuration. */
@@ -1201,7 +1269,7 @@ export function saveProviderConfig(
       text = applyEdits(text, modify(text, jsonPath, value, fmt));
     };
 
-    // type is omitted — inferProviderType handles it from the provider name
+    setField([...provPath, 'type'], input.type);
     if (input.apiKey !== undefined) setField([...provPath, 'apiKey'], input.apiKey);
     if (input.baseURL) setField([...provPath, 'baseURL'], input.baseURL);
 
@@ -1220,6 +1288,5 @@ export function saveProviderConfig(
 
     return text;
   });
-  if (saved) _cachedModels = null;
   return saved;
 }

@@ -990,7 +990,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'e4eaaa00:af56440b';
+    const expectedDigest = 'c4d81dba:3e66ac49';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

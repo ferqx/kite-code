@@ -76,6 +76,18 @@ function fakeService(observed: string[]): KiteAppControlClient {
         },
       };
     },
+    async setProviderModelEnabled() {
+      return {
+        schema: 'kite.app.provider-model.set-enabled-response.v1',
+        outcome: 'unavailable',
+        snapshot: {
+          schema: PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
+          workspace,
+          revision,
+          providers: [],
+        },
+      };
+    },
     async getMcpSnapshot() {
       observed.push('mcp.snapshot');
       return {

@@ -64,6 +64,7 @@ function handlers(workspace: KiteWorkspaceIdentity): KiteAppControlHandlerPorts 
     },
     providerModel: {
       snapshot: unavailable,
+      setEnabled: unavailable,
       select: async () => ({
         schema: PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
         outcome: 'unavailable',

@@ -2,10 +2,14 @@ import {
   type KiteWorkspaceIdentity,
   type ProviderModelSelectRequest,
   type ProviderModelSelectResponse,
+  type ProviderModelSetEnabledRequest,
+  type ProviderModelSetEnabledResponse,
   type ProviderModelSnapshot,
   type ProviderModelSnapshotRequest,
   providerModelSelectRequestCodec,
   providerModelSelectResponseCodec,
+  providerModelSetEnabledRequestCodec,
+  providerModelSetEnabledResponseCodec,
   providerModelSnapshotRequestCodec,
   providerModelSnapshotResponseCodec,
 } from '@kite-ai/kite-app-contract';
@@ -44,6 +48,24 @@ export function createProviderModelHandler(
       const response = await input.handler.select(checked);
       const projected = providerModelSelectResponseCodec.decode(
         providerModelSelectResponseCodec.encode(response),
+      );
+      assertSameWorkspace(
+        checked.workspace,
+        projected.snapshot.workspace,
+        'Provider/model response',
+      );
+      return projected;
+    },
+    async setEnabled(
+      request: ProviderModelSetEnabledRequest,
+    ): Promise<ProviderModelSetEnabledResponse> {
+      const checked = providerModelSetEnabledRequestCodec.decode(
+        providerModelSetEnabledRequestCodec.encode(request),
+      );
+      assertAdmittedWorkspace(input.workspace, checked.workspace, 'Provider/model request');
+      const response = await input.handler.setEnabled(checked);
+      const projected = providerModelSetEnabledResponseCodec.decode(
+        providerModelSetEnabledResponseCodec.encode(response),
       );
       assertSameWorkspace(
         checked.workspace,

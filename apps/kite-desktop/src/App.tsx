@@ -67,7 +67,8 @@ export function App({ client }: { client: DesktopClient }) {
     directoryErrors,
     directory: directorySnapshot,
   } = view;
-  const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<'foreground' | 'background'>();
+  const busy = operation === 'foreground';
   const [pendingPermission, setPendingPermission] = useState<{
     sessionId: string;
     mode: 'accept_edits' | 'auto' | 'full';
@@ -158,10 +159,10 @@ export function App({ client }: { client: DesktopClient }) {
     );
   const interactionDraftKey = `${draftKey}\0interaction:${interaction ? interaction.interactionId : ''}`;
   const act = useCallback(
-    async (action: () => Promise<unknown>) => {
+    async (action: () => Promise<unknown>, showBusy = true) => {
       if (busyRef.current) return;
       busyRef.current = true;
-      setBusy(true);
+      setOperation(showBusy ? 'foreground' : 'background');
       client.clearError();
       try {
         await action();
@@ -169,7 +170,7 @@ export function App({ client }: { client: DesktopClient }) {
         client.report(error);
       } finally {
         busyRef.current = false;
-        setBusy(false);
+        setOperation(undefined);
       }
     },
     [client],
@@ -654,10 +655,12 @@ export function App({ client }: { client: DesktopClient }) {
               cancelDisabled: busy || !ready || loadingSession,
               model,
               models: view.models?.providers.flatMap((provider) =>
-                provider.models.map((item) => ({
-                  provider: provider.provider,
-                  name: item.name,
-                })),
+                provider.models
+                  .filter((item) => item.enabled !== false)
+                  .map((item) => ({
+                    provider: provider.provider,
+                    name: item.name,
+                  })),
               ),
               modelDisabled: (!preparing && busy) || !connected || !view.models,
               onModelChange: (provider, name) => {
@@ -964,6 +967,7 @@ export function App({ client }: { client: DesktopClient }) {
               client={client}
               view={view}
               busy={busy}
+              actionPending={operation !== undefined}
               act={act}
               editor={editor}
               onEditorChange={setEditor}

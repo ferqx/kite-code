@@ -449,6 +449,7 @@ class ServerConnection implements RuntimeServerConnection {
                 'app/workspace_trust/decide',
                 'app/provider_model/snapshot',
                 'app/provider_model/select',
+                'app/provider_model/set_enabled',
                 'app/mcp/snapshot',
                 'app/mcp/action',
                 'app/skills/catalog',
