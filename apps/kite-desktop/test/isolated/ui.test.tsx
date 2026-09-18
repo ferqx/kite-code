@@ -2218,6 +2218,41 @@ test('file changes open beside the conversation, keep drafts and close before sw
   expect(input().value).toBe('');
 });
 
+test('settings shows existing capabilities in the reference layout without inventing controls', async () => {
+  const client = new UiClient();
+  const editorChanges: string[] = [];
+  await render(
+    <Settings
+      client={client}
+      view={client.view}
+      busy={false}
+      act={async (action) => {
+        await action();
+      }}
+      editor="vscode"
+      onEditorChange={(editor) => editorChanges.push(editor)}
+    />,
+  );
+  expect(document.querySelector('[aria-label="常规设置"]')).not.toBeNull();
+  expect(document.querySelector('.settings-sidebar')?.textContent).toContain('集成');
+  expect(document.querySelectorAll('.settings-sidebar svg')).toHaveLength(5);
+  await act(async () => {
+    const editor = document.querySelector<HTMLSelectElement>('[aria-label="默认编辑器"]')!;
+    editor.value = 'zed';
+    editor.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  });
+  expect(editorChanges).toEqual(['zed']);
+  await write(document.querySelector<HTMLInputElement>('.settings-search input')!, 'Skills');
+  expect(document.querySelector('.settings-sidebar')?.textContent).not.toContain('模型与 Provider');
+  expect(button('Skills')).not.toBeNull();
+  expect(document.body.textContent).not.toContain('默认权限');
+  await write(document.querySelector<HTMLInputElement>('.settings-search input')!, '');
+  await click(button('模型与 Provider'));
+  expect(
+    document.querySelector('fieldset[aria-labelledby="provider-config-heading"]'),
+  ).not.toBeNull();
+});
+
 test('settings consumes MCP and Skill facts and issues only an explicit MCP action', async () => {
   const client = new UiClient();
   const workspace = client.view.trust!.workspace;

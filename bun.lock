@@ -78,6 +78,8 @@
       "dependencies": {
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
+        "@hugeicons/core-free-icons": "^4.3.2",
+        "@hugeicons/react": "^1.1.10",
         "@kite-ai/kite-app-contract": "workspace:*",
         "@kite-ai/kite-client-ui": "workspace:*",
         "@kite-ai/kite-local-runtime": "workspace:*",

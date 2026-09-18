@@ -1,3 +1,11 @@
+import {
+  AiBrain01Icon,
+  Plug01Icon,
+  PuzzleIcon,
+  Search01Icon,
+  Settings01Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import type { AppModelProviderType } from '@kite-ai/kite-app-contract';
 import { Button } from '@kite-ai/kite-client-ui';
 import { useRef, useState } from 'react';
@@ -19,44 +27,99 @@ export function Settings({
   busy: boolean;
   act: (action: () => Promise<unknown>) => Promise<void>;
 }) {
-  const [section, setSection] = useState<'models' | 'mcp' | 'skills'>('models');
+  const [section, setSection] = useState<'general' | 'models' | 'mcp' | 'skills'>('general');
+  const [search, setSearch] = useState('');
   const [provider, setProvider] = useState<AppModelProviderType>('openai');
   const [saved, setSaved] = useState(false);
   const keyInput = useRef<HTMLInputElement>(null);
+  const matchesSearch = (label: string) =>
+    label.toLowerCase().includes(search.trim().toLowerCase());
+  const personalSections = [
+    ['general', '常规', Settings01Icon],
+    ['models', '模型与 Provider', AiBrain01Icon],
+  ] as const;
+  const integrationSections = [
+    ['mcp', 'MCP', Plug01Icon],
+    ['skills', 'Skills', PuzzleIcon],
+  ] as const;
   return (
-    <div className="settings settings-layout">
-      <nav aria-label="设置分类">
-        <Button aria-pressed={section === 'models'} onClick={() => setSection('models')}>
-          模型与 Provider
-        </Button>
-        <Button aria-pressed={section === 'mcp'} onClick={() => setSection('mcp')}>
-          MCP
-        </Button>
-        <Button aria-pressed={section === 'skills'} onClick={() => setSection('skills')}>
-          Skills
-        </Button>
-      </nav>
+    <div className="settings settings-layout desktop-settings">
+      <aside className="settings-sidebar">
+        <label className="settings-search">
+          <span className="sr-only">搜索设置</span>
+          <HugeiconsIcon icon={Search01Icon} aria-hidden="true" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索设置…"
+          />
+        </label>
+        <nav aria-label="设置分类">
+          {personalSections.some(([, label]) => matchesSearch(label)) && <p>个人</p>}
+          {personalSections
+            .filter(([, label]) => matchesSearch(label))
+            .map(([id, label, icon]) => (
+              <Button key={id} aria-pressed={section === id} onClick={() => setSection(id)}>
+                <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
+                {label}
+              </Button>
+            ))}
+          {integrationSections.some(([, label]) => matchesSearch(label)) && <p>集成</p>}
+          {integrationSections
+            .filter(([, label]) => matchesSearch(label))
+            .map(([id, label, icon]) => (
+              <Button key={id} aria-pressed={section === id} onClick={() => setSection(id)}>
+                <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
+                {label}
+              </Button>
+            ))}
+          {![...personalSections, ...integrationSections].some(([, label]) =>
+            matchesSearch(label),
+          ) && <span className="settings-search-empty">没有匹配的设置分类</span>}
+        </nav>
+      </aside>
       <div className="settings-content">
         {view.error && (
           <p className="notice error" role="alert">
             {view.error}
           </p>
         )}
-        {section === 'models' ? (
+        {section === 'general' ? (
+          <section aria-label="常规设置">
+            <h2>常规</h2>
+            <h3>文件与模型</h3>
+            <div className="settings-card">
+              <label className="settings-row">
+                <span>
+                  <strong>默认文件打开位置</strong>
+                  <small>选择打开项目文件的应用；本次运行期间生效</small>
+                </span>
+                <select
+                  aria-label="默认编辑器"
+                  value={editor}
+                  onChange={(event) => onEditorChange(event.target.value as typeof editor)}
+                >
+                  <option value="vscode">VS Code</option>
+                  <option value="zed">Zed</option>
+                  <option value="textedit">TextEdit</option>
+                </select>
+              </label>
+              <div className="settings-row">
+                <span>
+                  <strong>当前默认模型</strong>
+                  <small>更改模型与 Provider 请前往对应分类</small>
+                </span>
+                <span className="settings-value">
+                  {view.models?.selected
+                    ? `${view.models.selected.provider} · ${view.models.selected.name}`
+                    : '尚未选择'}
+                </span>
+              </div>
+            </div>
+          </section>
+        ) : section === 'models' ? (
           <section aria-label="模型与 Provider 设置">
             <h2>模型与 Provider</h2>
-            <label>
-              默认编辑器
-              <select
-                aria-label="默认编辑器"
-                value={editor}
-                onChange={(event) => onEditorChange(event.target.value as typeof editor)}
-              >
-                <option value="vscode">Visual Studio Code</option>
-                <option value="zed">Zed</option>
-                <option value="textedit">TextEdit</option>
-              </select>
-            </label>
             <p>
               配置保存在本机用户 kite-code.jsonc，API key
               随配置保存；不会回显到此界面。新模型用于后续执行，当前任务不变。
@@ -95,6 +158,9 @@ export function Settings({
                 </fieldset>
               ))}
             </div>
+            <h3 id="provider-config-heading" className="settings-provider-heading">
+              添加或替换 Provider 配置
+            </h3>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -114,8 +180,10 @@ export function Settings({
                 });
               }}
             >
-              <fieldset disabled={busy || !view.connected}>
-                <legend>添加或替换 Provider 配置</legend>
+              <fieldset
+                disabled={busy || !view.connected}
+                aria-labelledby="provider-config-heading"
+              >
                 <label>
                   Provider
                   <select

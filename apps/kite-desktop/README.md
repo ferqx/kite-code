@@ -1,5 +1,7 @@
 # kite-desktop
 
+设置入口由 [App](src/App.tsx) 以全屏覆盖层呈现；[Settings](src/Settings.tsx) 负责分类、搜索、常规编辑器选择与已有模型／扩展操作，[桌面样式](src/tailwind.css)负责参考图对应的双栏布局。没有 Runtime 配置接口的参考图开关不进入页面状态。
+
 > 实施中：[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)已统一正式数据入口，并验证 macOS 已知格式的自动整理、历史来源归并和原会话保留。未知格式保留原数据，不切换空库；完整方案与未验证平台的边界以计划中的最新验收记录为准。
 
 
