@@ -123,6 +123,8 @@ export function createKiteHomeDirectoryQuery(
             needs_smart_name: number;
             updated_at: number;
             last_sequence: number;
+            model_provider: string | null;
+            model_name: string | null;
             workspace_id: string;
             workspace_digest: string;
             display_name: string;
@@ -141,6 +143,7 @@ export function createKiteHomeDirectoryQuery(
           s.updated_at,
           COALESCE((SELECT MAX(e.sequence) FROM runtime_events e
             WHERE e.session_id = s.session_id), 0) AS last_sequence,
+          s.model_provider, s.model_name,
           w.workspace_id, w.workspace_digest, w.display_name
         FROM runtime_sessions s JOIN workspaces w ON w.workspace_id = s.workspace_id
         ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
@@ -153,6 +156,9 @@ export function createKiteHomeDirectoryQuery(
         needsSmartName: !!row.needs_smart_name,
         updatedAt: row.updated_at,
         lastSequence: row.last_sequence,
+        ...(row.model_provider && row.model_name
+          ? { model: { provider: row.model_provider, name: row.model_name } }
+          : {}),
         workspace: {
           workspaceId: row.workspace_id,
           workspaceDigest: row.workspace_digest,

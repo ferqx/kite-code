@@ -1,4 +1,12 @@
-import { ArrowDown01Icon, Folder01Icon, GitBranchIcon } from '@hugeicons/core-free-icons';
+import {
+  ArrowDown01Icon,
+  Edit02Icon,
+  FileSearchIcon,
+  Folder01Icon,
+  Folder02Icon,
+  GitBranchIcon,
+  Wrench01Icon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { type ComponentProps, useState } from 'react';
 import {
@@ -24,7 +32,12 @@ export interface NewConversationProps {
   onRefreshBranch: () => void;
 }
 
-const suggestions = ['研究与理解资料', '整理与归纳内容', '创作可交付成果', '分析并解决问题'];
+const suggestions = [
+  { label: '研究与理解资料', icon: FileSearchIcon },
+  { label: '整理与归纳内容', icon: Folder02Icon },
+  { label: '创作可交付成果', icon: Edit02Icon },
+  { label: '分析并解决问题', icon: Wrench01Icon },
+];
 
 export function NewConversationWelcome({ onSuggest }: { onSuggest: (value: string) => void }) {
   return (
@@ -32,8 +45,9 @@ export function NewConversationWelcome({ onSuggest }: { onSuggest: (value: strin
       <h1>今天想在这个空间完成什么？</h1>
       <div className="task-suggestions">
         {suggestions.map((suggestion) => (
-          <Button key={suggestion} onClick={() => onSuggest(`${suggestion}：`)}>
-            {suggestion}
+          <Button key={suggestion.label} onClick={() => onSuggest(`${suggestion.label}：`)}>
+            <HugeiconsIcon icon={suggestion.icon} aria-hidden="true" />
+            <span>{suggestion.label}</span>
           </Button>
         ))}
       </div>

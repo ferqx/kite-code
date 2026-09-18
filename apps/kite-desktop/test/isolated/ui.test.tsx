@@ -301,16 +301,25 @@ async function click(element: HTMLElement) {
     element.click();
   });
 }
-async function choose(element: HTMLSelectElement, value: string) {
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value')!.set!.call(
-      element,
-      value,
-    );
-    element.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    await Promise.resolve();
-  });
+async function chooseModel(name: string) {
+  await openDropdown(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  await click(
+    [...document.querySelectorAll<HTMLElement>('.model-menu [role="menuitemradio"]')].find(
+      (item) => item.textContent === name,
+    )!,
+  );
 }
+
+async function choosePermission(value: 'accept_edits' | 'auto' | 'full') {
+  await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+  const index = { accept_edits: 0, auto: 1, full: 2 }[value];
+  await click(
+    document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[index]!,
+  );
+  if (value === 'full' && document.querySelector('[role="alertdialog"]'))
+    await click(button('Enable Full'));
+}
+
 async function key(element: Element, value: string, options: KeyboardEventInit = {}) {
   await act(async () => {
     element.dispatchEvent(
@@ -390,20 +399,79 @@ test('composer selects a configured model and changes the current session permis
   const client = new UiClient();
   await render(<App client={client} />);
 
-  const model = document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!;
-  expect([...model.options].map((option) => option.text)).toEqual(['model', 'model-fast']);
-  await choose(model, 'test\0model-fast');
+  await openDropdown(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  expect(document.querySelector('.model-provider-label')?.textContent).toBe('test');
+  expect(
+    [...document.querySelectorAll('.model-menu [role="menuitemradio"]')].map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['model', 'model-fast']);
+  await click(document.querySelectorAll<HTMLElement>('.model-menu [role="menuitemradio"]')[1]!);
+  expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model-fast');
+  expect(document.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toBe(
+    '模型：model-fast',
+  );
   expect(client.selectedModels).toEqual([]);
   await write(input(), '使用会话模型');
   await key(input(), 'Enter');
   await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(client.sentModels).toEqual([{ provider: 'test', name: 'model-fast' }]);
 
-  const permission = document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!;
-  expect([...permission.options].map((option) => option.text)).toEqual(['Ask', 'Auto', 'Full']);
-  await choose(permission, 'accept_edits');
+  await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+  expect(document.querySelector('.permission-menu-heading')?.textContent).toBe(
+    'How should actions be approved?Choose an approval mode for this conversation',
+  );
+  expect(
+    [...document.querySelectorAll('.permission-menu [role="menuitemradio"]')].map(
+      (item) => item.textContent,
+    ),
+  ).toEqual([
+    'Ask me when neededPause for your approval when required',
+    'Automatic reviewReview commands first; ask when needed',
+    'Full permissionSkip routine approvals; changes may be hard to undo',
+  ]);
+  await click(
+    document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[0]!,
+  );
   expect(client.selectedModes).toEqual([{ sessionId: 's0', mode: 'accept_edits' }]);
-  expect(permission.value).toBe('accept_edits');
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
+});
+
+test('session switch keeps selectors steady until the target projection loads', async () => {
+  const client = new UiClient();
+  const target = { ...client.view.sessions[1]!, model: { provider: 'test', name: 'model-fast' } };
+  client.view = {
+    ...client.view,
+    sessions: [client.view.sessions[0]!, target],
+    directory: [client.view.sessions[0]!, target],
+  };
+  let finishSelection!: () => void;
+  client.selectSession = (id) => {
+    client.update({ selected: id, projection: undefined, loadingSession: true, ready: false });
+    return new Promise<void>((resolve) => {
+      finishSelection = resolve;
+    });
+  };
+  await render(<App client={client} />);
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model-fast');
+  expect(document.querySelector('.composer')?.getAttribute('data-session-loading')).toBe('true');
+  expect(document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled).toBe(
+    true,
+  );
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Auto');
+  await act(async () => {
+    client.update({
+      projection: { ...session('s1'), model: { provider: 'test', name: 'model' } },
+      interactionMode: 'accept_edits',
+      ready: true,
+      loadingSession: false,
+    });
+    finishSelection();
+  });
+  expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model');
+  expect(document.querySelector('.composer')?.getAttribute('data-session-loading')).toBeNull();
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
 });
 
 test('the desktop sidebar can be reopened after it is collapsed', async () => {
@@ -433,38 +501,208 @@ test('permission submission keeps disabled composer selectors visually steady', 
   };
   await render(<App client={client} />);
 
-  await choose(
-    document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!,
-    'accept_edits',
-  );
+  await choosePermission('accept_edits');
   const composer = document.querySelector<HTMLFormElement>('.composer')!;
   expect(composer.dataset.permissionPending).toBe('true');
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!.disabled).toBe(
-    true,
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
+  expect(document.querySelector('[data-permission-trigger]')?.getAttribute('aria-label')).toBe(
+    'Permission: Ask, changing',
   );
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!.disabled).toBe(
+  expect(document.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
     true,
   );
 
   await act(() => finish());
   expect(composer.dataset.permissionPending).toBeUndefined();
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!.disabled).toBe(
+  expect(document.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(false);
+  expect(document.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
     false,
   );
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!.disabled).toBe(
-    false,
+  expect(document.querySelector('[data-permission-trigger]')?.getAttribute('aria-label')).toBe(
+    'Permission: Ask',
   );
+});
+
+test('a failed permission change restores the confirmed mode', async () => {
+  const client = new UiClient();
+  let fail!: (error: Error) => void;
+  client.setInteractionMode = () =>
+    new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+  await render(<App client={client} />);
+  await choosePermission('full');
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Full');
+  await act(async () => {
+    fail(new Error('权限切换失败'));
+    await Bun.sleep(0);
+  });
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Auto');
+});
+
+test('permission menu localizes labels and short descriptions for Chinese', async () => {
+  const originalLanguage = Object.getOwnPropertyDescriptor(navigator, 'language');
+  Object.defineProperty(navigator, 'language', { configurable: true, value: 'zh-CN' });
+  try {
+    await render(<App client={new UiClient()} />);
+    expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('自动');
+    await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+    expect(document.querySelector('.permission-menu-heading')?.textContent).toBe(
+      '如何处理操作请求？为当前对话选择审批方式',
+    );
+    expect(
+      [...document.querySelectorAll('.permission-menu [role="menuitemradio"]')].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual([
+      '需要时询问我需批准的操作会暂停，等待你确认',
+      '自动审查审批模型先判断命令，必要时再询问',
+      '完全权限跳过常规审批，改动可能难以撤销',
+    ]);
+    await click(
+      document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[2]!,
+    );
+    expect(document.body.textContent).toContain('无需逐项征得你的同意');
+    expect(document.body.textContent).toContain('文件可能被覆盖或删除');
+    expect(document.body.textContent).toContain('传输敏感数据');
+    await click(button('取消'));
+    expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('自动');
+  } finally {
+    if (originalLanguage) Object.defineProperty(navigator, 'language', originalLanguage);
+    else Reflect.deleteProperty(navigator, 'language');
+  }
+});
+
+test('Full permission warns before changing and cancelling keeps the current mode', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+
+  const selectFull = async () => {
+    await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+    expect(
+      document
+        .querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[2]!
+        .classList.contains('permission-menu-item-danger'),
+    ).toBe(true);
+    await click(
+      document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[2]!,
+    );
+  };
+  await selectFull();
+  expect(document.body.textContent).toContain('without asking for each approval');
+  expect(document.querySelector('[role="alertdialog"] .full-permission-title')).not.toBeNull();
+  expect(document.querySelector('.full-permission-risk-heading')?.textContent).toBe(
+    'Risks to consider',
+  );
+  expect(document.querySelector('.full-permission-risk-copy')?.textContent).toContain(
+    'could expose or transmit sensitive data',
+  );
+  expect(document.querySelector('.full-permission-limit')?.textContent).toContain(
+    'System limits still apply.',
+  );
+  const warningDescriptionId = document
+    .querySelector('[role="alertdialog"]')
+    ?.getAttribute('aria-describedby');
+  expect(document.getElementById(warningDescriptionId!)?.textContent).toContain(
+    'access the internet',
+  );
+  expect(button('Enable Full').className).toContain('bg-destructive');
+  expect(button('Enable Full').className).not.toContain('bg-primary');
+  expect(client.selectedModes).toEqual([]);
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Auto');
+
+  await click(button('Cancel'));
+  expect(client.selectedModes).toEqual([]);
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Auto');
+
+  await selectFull();
+  await click(button('Enable Full'));
+  expect(client.selectedModes).toEqual([{ sessionId: 's0', mode: 'full' }]);
+  expect(
+    document
+      .querySelector('[data-permission-trigger]')
+      ?.classList.contains('permission-trigger-danger'),
+  ).toBe(true);
+  expect(document.querySelector('[data-permission-trigger]')?.getAttribute('data-variant')).toBe(
+    'ghost',
+  );
+
+  await choosePermission('auto');
+  await selectFull();
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  expect(client.selectedModes).toEqual([
+    { sessionId: 's0', mode: 'full' },
+    { sessionId: 's0', mode: 'auto' },
+  ]);
+  await click(button('Enable Full'));
+  expect(client.selectedModes).toEqual([
+    { sessionId: 's0', mode: 'full' },
+    { sessionId: 's0', mode: 'auto' },
+    { sessionId: 's0', mode: 'full' },
+  ]);
+
+  await click(
+    [...document.querySelectorAll<HTMLElement>('.session-row')].find((row) =>
+      row.textContent?.includes('工作 1'),
+    )!,
+  );
+  await act(() => client.update({ interactionMode: 'auto' }));
+  await selectFull();
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  await click(button('Enable Full'));
+  expect(client.selectedModes).toEqual([
+    { sessionId: 's0', mode: 'full' },
+    { sessionId: 's0', mode: 'auto' },
+    { sessionId: 's0', mode: 'full' },
+    { sessionId: 's1', mode: 'full' },
+  ]);
+
+  await click(button('新对话'));
+  await selectFull();
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  await click(button('Enable Full'));
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Full');
+
+  await act(() => root?.unmount());
+  root = undefined;
+  document.body.innerHTML = '';
+  const restarted = new UiClient();
+  await render(<App client={restarted} />);
+  await selectFull();
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  expect(restarted.selectedModes).toEqual([]);
+  await click(button('Enable Full'));
+  expect(restarted.selectedModes).toEqual([{ sessionId: 's0', mode: 'full' }]);
+});
+
+test('clicking the already selected Full permission does not confirm or submit again', async () => {
+  const client = new UiClient();
+  client.update({ interactionMode: 'full' });
+  await render(<App client={client} />);
+
+  await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+  await click(
+    document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[2]!,
+  );
+
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(client.selectedModes).toEqual([]);
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Full');
 });
 
 test('new conversation applies its selected permission before sending the first message', async () => {
   const client = new UiClient();
   await render(<App client={client} />);
   await click(button('新对话'));
-  await choose(
-    document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!,
-    'test\0model-fast',
+  await chooseModel('model-fast');
+  await openDropdown(document.querySelector<HTMLElement>('[data-permission-trigger]')!);
+  await click(
+    document.querySelectorAll<HTMLElement>('.permission-menu [role="menuitemradio"]')[2]!,
   );
-  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  await click(button('Cancel'));
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Auto');
+  await choosePermission('full');
   expect(client.selectedModes).toEqual([]);
   await write(input(), '使用所选权限');
   await key(input(), 'Enter');
@@ -505,7 +743,7 @@ test('an unknown permission receipt stays bound to the created conversation', as
   };
   await render(<App client={client} />);
   await click(button('新对话'));
-  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  await choosePermission('full');
   await write(input(), '复用已创建会话');
   await key(input(), 'Enter');
   await act(() => Bun.sleep(0));
@@ -624,9 +862,12 @@ test('global new conversation preserves existing drafts, appends suggestions and
   expect(document.querySelector('.session-row[aria-current]')).toBeNull();
   expect(client.created).toBe(0);
   await write(input(), '我的新需求');
+  input().setSelectionRange(2, 2);
   await click(button('研究与理解资料'));
   expect(input().value).toBe('我的新需求\n研究与理解资料：');
   expect(document.activeElement).toBe(input());
+  expect(input().selectionStart).toBe(input().value.length);
+  expect(input().selectionEnd).toBe(input().value.length);
   await click(button('新对话'));
   expect(input().value).toBe('我的新需求\n研究与理解资料：');
   await click(document.querySelector<HTMLElement>('.session-row')!);
@@ -1032,11 +1273,8 @@ test('a preselected workspace stages its session model without mutating active w
     });
   await render(<App client={client} />);
   await click(button('新对话'));
-  await choose(
-    document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!,
-    'test\0model-fast',
-  );
-  await choose(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')!, 'full');
+  await chooseModel('model-fast');
+  await choosePermission('full');
   expect(document.querySelector('.trust-notice')).not.toBeNull();
   await openDropdown(document.querySelector<HTMLElement>('[aria-label="项目空间"]')!);
   await click(
@@ -1046,10 +1284,8 @@ test('a preselected workspace stages its session model without mutating active w
   );
 
   await act(() => Promise.resolve());
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')?.disabled).toBe(
-    false,
-  );
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')?.disabled).toBe(
+  expect(document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(false);
+  expect(document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled).toBe(
     false,
   );
   await act(async () => {
@@ -1058,11 +1294,8 @@ test('a preselected workspace stages its session model without mutating active w
   });
 
   expect(document.querySelector('.trust-notice')).toBeNull();
-  const model = document.querySelector<HTMLSelectElement>('select[aria-label="模型"]')!;
-  expect(model.value).toBe('test\0model-fast');
-  expect(document.querySelector<HTMLSelectElement>('select[aria-label="权限"]')?.value).toBe(
-    'full',
-  );
+  expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model-fast');
+  expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Full');
   expect(client.selectedModels).toEqual([]);
 });
 

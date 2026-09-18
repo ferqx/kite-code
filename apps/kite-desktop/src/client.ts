@@ -55,7 +55,10 @@ export type DesktopSessionSummary = Pick<
   'sessionId' | 'displayName' | 'workspace' | 'workspaceDigest' | 'updatedAt'
 > &
   Partial<
-    Pick<RuntimeSessionProjection, 'revision' | 'lifecycle' | 'currentRun' | 'interactionQueue'>
+    Pick<
+      RuntimeSessionProjection,
+      'revision' | 'lifecycle' | 'currentRun' | 'interactionQueue' | 'model'
+    >
   > & {
     workspaceName?: string;
     workspaceId?: string;
@@ -641,6 +644,7 @@ export class DesktopClient {
           workspaceId: entry.workspace?.workspaceId,
           workspaceName: entry.workspace?.displayName,
           workspace: entry.workspace ? paths.get(entry.workspace.workspaceDigest) : undefined,
+          model: entry.model,
         }));
         const byId = new Map(sessions.map((session) => [session.sessionId, session]));
         const previous = this.#view.directory ?? [];
@@ -1439,6 +1443,8 @@ function mergeSessionSummary(
     projection.lifecycle === summary.lifecycle &&
     projection.currentRun === summary.currentRun &&
     projection.interactionQueue === summary.interactionQueue &&
+    (projection.model?.provider ?? summary.model?.provider) === summary.model?.provider &&
+    (projection.model?.name ?? summary.model?.name) === summary.model?.name &&
     (projection.updatedAt ?? summary.updatedAt) === summary.updatedAt
   )
     return summary;
@@ -1448,6 +1454,7 @@ function mergeSessionSummary(
     lifecycle: projection.lifecycle,
     currentRun: projection.currentRun,
     interactionQueue: projection.interactionQueue,
+    model: projection.model ?? summary.model,
     updatedAt: projection.updatedAt ?? summary.updatedAt,
   };
 }

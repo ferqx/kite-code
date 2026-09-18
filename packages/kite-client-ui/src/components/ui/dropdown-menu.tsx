@@ -1,4 +1,4 @@
-import { ArrowRight01Icon, CheckmarkCircle01Icon, Tick01Icon } from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import * as React from 'react';
@@ -112,7 +112,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
-        <HugeiconsIcon icon={Tick01Icon} />
+        <HugeiconsIcon icon={Tick02Icon} />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}
@@ -144,7 +144,7 @@ const DropdownMenuRadioItem = React.forwardRef<
         )}
       >
         <DropdownMenuPrimitive.ItemIndicator>
-          <HugeiconsIcon icon={CheckmarkCircle01Icon} />
+          <HugeiconsIcon icon={Tick02Icon} />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
     )}

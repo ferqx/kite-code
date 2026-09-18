@@ -64,10 +64,14 @@ export interface SessionPageProps {
 export function SessionPage({ messages, fileChanges, ...props }: SessionPageProps) {
   // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<HTMLTextAreaElement>(null);
-  const focusComposerAfterCommit = useCallback(() => {
-    if (typeof requestAnimationFrame === 'function')
-      requestAnimationFrame(() => composerInput.current?.focus());
-    else queueMicrotask(() => composerInput.current?.focus());
+  const focusComposerAfterCommit = useCallback((moveCaretToEnd = false) => {
+    const focus = () => {
+      const input = composerInput.current;
+      input?.focus();
+      if (moveCaretToEnd && input) input.setSelectionRange(input.value.length, input.value.length);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
+    else queueMicrotask(focus);
   }, []);
   const focusComposerOnClose = useRef(false);
   const [narrow, setNarrow] = useState(
@@ -335,7 +339,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                                   ? `${props.composer!.draft}\n${value}`
                                   : value,
                               );
-                              focusComposerAfterCommit();
+                              focusComposerAfterCommit(true);
                             }}
                           />
                         ) : props.historyError ? (

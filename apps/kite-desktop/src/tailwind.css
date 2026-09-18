@@ -70,7 +70,7 @@ html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-he
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);
   --color-ring: var(--input);
-  --color-destructive: #985349;
+  --color-destructive: var(--destructive);
   --color-secondary: var(--accent);
   --color-secondary-foreground: var(--foreground);
 }

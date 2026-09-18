@@ -59,6 +59,9 @@ describe('Kite Home Store Directory query', () => {
     insertSession(database, 'session-a-1', 'workspace-a', 'A1', 30);
     insertSession(database, 'session-a-2', 'workspace-a', 'A2', 20);
     insertSession(database, 'session-b-1', 'workspace-b', 'B1', 10);
+    database
+      .query('UPDATE runtime_sessions SET model_provider = ?, model_name = ? WHERE session_id = ?')
+      .run('test', 'model-fast', 'session-a-1');
 
     const directory = createKiteHomeDirectoryQuery(database, {
       maxWorkspaces: 2,
@@ -93,6 +96,10 @@ describe('Kite Home Store Directory query', () => {
     expect(() => createKiteHomeDirectoryQuery(database, { maxSessionsPerWorkspace: 257 })).toThrow(
       RangeError,
     );
+    expect(directory.listSessions({ limit: 1 }).entries[0]?.model).toEqual({
+      provider: 'test',
+      name: 'model-fast',
+    });
   });
 
   test('pages more than a thousand histories with persisted membership and no project filesystem', () => {

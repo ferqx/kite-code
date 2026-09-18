@@ -1,5 +1,12 @@
 @reference "shadcn/tailwind.css";
 
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled):not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
 body {
   margin: 0;
 }
@@ -765,53 +772,126 @@ body {
     min-width: 0;
     gap: 4px;
   }
-  .composer-select {
-    position: relative;
-    min-width: 0;
-  }
-  .composer-select select {
-    appearance: none;
-    field-sizing: content;
+  .model-trigger {
     max-width: 220px;
     min-height: 28px;
-    padding: 3px 30px 3px 8px;
-    border: 0;
-    border-radius: 7px;
-    background-color: transparent;
+    padding: 3px 8px;
+    gap: 6px;
     color: var(--muted-foreground);
-    font: inherit;
     font-size: 12px;
+  }
+  .model-trigger span {
+    overflow: hidden;
     text-overflow: ellipsis;
-    cursor: pointer;
+    white-space: nowrap;
   }
-  .composer-select-icon {
-    position: absolute;
-    top: 50%;
-    right: 8px;
-    width: 16px;
-    height: 16px;
-    pointer-events: none;
-    transform: translateY(-50%);
-    color: var(--muted-foreground);
-  }
-  .composer-select select:hover:not(:disabled),
-  .composer-select select:focus-visible {
+  .model-trigger:hover:not(:disabled),
+  .model-trigger:focus-visible,
+  .permission-trigger:hover:not(:disabled),
+  .permission-trigger:focus-visible {
     background-color: var(--accent);
     color: var(--foreground);
   }
-  .composer-select select:focus-visible {
-    outline: 1px solid var(--ring, var(--input));
-    outline-offset: 1px;
-  }
-  .composer-select select:disabled {
-    cursor: default;
+  .model-trigger:disabled {
     opacity: 0.55;
   }
-  .composer[data-permission-pending="true"] .composer-select select:disabled {
+  .composer[data-permission-pending="true"] .model-trigger:disabled {
     opacity: 1;
   }
-  .permission-select select {
-    max-width: 92px;
+  .model-menu,
+  .permission-menu {
+    border-color: var(--border);
+    background: var(--card);
+    color: var(--foreground);
+  }
+  .model-menu {
+    min-width: 220px;
+    max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
+  }
+  .model-provider-label {
+    color: var(--muted-foreground);
+    font-size: 11px;
+  }
+  .permission-trigger {
+    min-height: 28px;
+    padding: 3px 8px;
+    gap: 6px;
+    background-color: transparent;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
+  .permission-trigger-danger,
+  .permission-trigger-danger:hover:not(:disabled),
+  .permission-trigger-danger:focus-visible {
+    color: var(--destructive);
+  }
+  .permission-trigger:disabled {
+    opacity: 0.55;
+  }
+  .composer[data-permission-pending="true"] .permission-trigger:disabled {
+    opacity: 1;
+  }
+  .composer[data-session-loading="true"] .permission-trigger:disabled {
+    opacity: 1;
+  }
+  .permission-menu {
+    min-width: 312px;
+    max-width: calc(100vw - 24px);
+    padding: 6px;
+  }
+  .permission-menu-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px 10px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .permission-menu-heading small {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 400;
+  }
+  .permission-menu-item {
+    min-height: 54px;
+    gap: 11px;
+    padding: 8px 28px 8px 10px;
+    border-radius: 8px;
+  }
+  .permission-menu-item > svg {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  .permission-menu-divider {
+    margin: 5px 10px;
+    background: var(--border);
+  }
+  .permission-menu-item-danger,
+  .permission-menu-item-danger:focus,
+  .permission-menu-item-danger[data-highlighted],
+  .permission-menu-item-danger > svg,
+  .permission-menu-item-danger .permission-menu-copy > span,
+  .permission-menu-item-danger .permission-menu-copy small {
+    color: var(--destructive);
+  }
+  .permission-menu-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .permission-menu-copy > span {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+  }
+  .permission-menu-copy small {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    line-height: 16px;
+  }
+  .permission-menu-item-danger .permission-menu-copy small {
+    opacity: 0.88;
   }
   .composer-action {
     flex: none;
@@ -1929,6 +2009,57 @@ body {
     -webkit-text-fill-color: currentColor;
   }
 }
+
+.full-permission-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  gap: 20px;
+  padding: 24px;
+}
+.full-permission-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--destructive);
+}
+.full-permission-title-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.full-permission-description {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  line-height: 1.5;
+}
+.full-permission-intro {
+  margin: 0;
+}
+.full-permission-risk-notice {
+  padding: 12px 14px;
+  border-left: 3px solid var(--destructive);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--destructive) 5%, var(--card));
+}
+.full-permission-risk-heading {
+  color: var(--destructive);
+  font-size: 12px;
+}
+.full-permission-risk-copy {
+  margin: 5px 0 0;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 18px;
+}
+.full-permission-limit {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 16px;
+}
 .kite-client .approval-actions {
   display: flex;
   justify-content: space-between;
@@ -2114,7 +2245,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
+  gap: 24px;
 }
 .kite-client .new-conversation-welcome h1 {
   margin: 0;
@@ -2130,12 +2261,23 @@ body {
   width: 100%;
 }
 .kite-client .task-suggestions .button {
-  min-height: 112px;
-  padding: 16px;
-  border-radius: 16px;
+  min-height: 68px;
+  height: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
   justify-content: flex-start;
-  align-items: flex-end;
+  align-items: center;
+  gap: 10px;
   text-align: left;
+}
+.kite-client .task-suggestions .button svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kite-client .task-suggestions .button span {
+  white-space: normal;
 }
 .kite-client .new-conversation-context {
   display: flex;
@@ -2247,9 +2389,6 @@ body {
 @media (max-width: 1000px) {
   .kite-client .task-suggestions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .kite-client .task-suggestions .button {
-    min-height: 76px;
   }
   .kite-client .new-conversation-welcome {
     gap: 20px;

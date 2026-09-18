@@ -14,4 +14,4 @@ checkpoint metadata 可展示，不代表任意客户端获准恢复。真正恢
 
 验证：[log query](../test/log-query.test.ts)、[checkpoint query](../test/workspace-checkpoint-query.test.ts)、[artifacts](../test/kite-home-artifacts.test.ts)。
 
-当前 Store 9 的目录分页与索引会话读取共用已打开的 SQLite connection，不访问项目文件系统；完整跨包契约见[SQLite Runtime Log](../../../docs/active/sqlite-runtime-log-query.md)。
+当前 Store 9 的目录分页与索引会话读取共用已打开的 SQLite connection，不访问项目文件系统；目录分页同时返回已保存的 Session 模型路由，供客户端切换会话时立即显示模型名称；完整跨包契约见[SQLite Runtime Log](../../../docs/active/sqlite-runtime-log-query.md)。

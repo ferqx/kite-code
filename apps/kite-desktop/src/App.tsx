@@ -66,7 +66,10 @@ export function App({ client }: { client: DesktopClient }) {
     directory: directorySnapshot,
   } = view;
   const [busy, setBusy] = useState(false);
-  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
+  const [pendingPermission, setPendingPermission] = useState<{
+    sessionId: string;
+    mode: 'accept_edits' | 'auto' | 'full';
+  }>();
   const [submitting, setSubmitting] = useState(false);
   const [selectingSession, setSelectingSession] = useState<string>();
   const [newConversationPermission, setNewConversationPermission] = useState<
@@ -315,7 +318,9 @@ export function App({ client }: { client: DesktopClient }) {
   const model = preparing
     ? (newConversationModel ?? view.models?.selected)
     : selected
-      ? (sessionModels[selected] ?? projection?.model)
+      ? (sessionModels[selected] ??
+        (projection?.sessionId === selected ? projection.model : undefined) ??
+        selectedSession?.model)
       : undefined;
   const submissionInFlight =
     !!firstSubmission &&
@@ -645,7 +650,7 @@ export function App({ client }: { client: DesktopClient }) {
               active,
               stopping: !!stopping,
               cancelDisabled: busy || !ready || loadingSession,
-              model: model ? `${model.provider} / ${model.name}` : undefined,
+              model,
               models: view.models?.providers.flatMap((provider) =>
                 provider.models.map((item) => ({
                   provider: provider.provider,
@@ -661,21 +666,29 @@ export function App({ client }: { client: DesktopClient }) {
                     [selected]: { provider, name },
                   }));
               },
-              permission: preparing ? newConversationPermission : (view.interactionMode ?? 'auto'),
+              permission: preparing
+                ? newConversationPermission
+                : pendingPermission?.sessionId === selected
+                  ? pendingPermission.mode
+                  : (view.interactionMode ?? 'auto'),
+              fullPermissionScope: preparing
+                ? `new:${navigationRevision.current}`
+                : `session:${selected}`,
               permissionDisabled:
                 (!preparing && busy) ||
                 submitting ||
                 (!preparing && (!selected || !ready || loadingSession)),
-              permissionPending: permissionSubmitting,
+              permissionPending: pendingPermission?.sessionId === selected,
+              sessionLoading: !preparing && (loadingSession || selectingSession !== undefined),
               onPermissionChange: (permission) => {
                 if (preparing) {
                   setNewConversationPermission(permission);
                   return;
                 }
                 if (selected) {
-                  setPermissionSubmitting(true);
+                  setPendingPermission({ sessionId: selected, mode: permission });
                   void act(() => client.setInteractionMode(selected, permission)).finally(() => {
-                    setPermissionSubmitting(false);
+                    setPendingPermission(undefined);
                   });
                 }
               },
