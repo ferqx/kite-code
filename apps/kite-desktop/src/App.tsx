@@ -1,3 +1,5 @@
+import { ArrowLeft01Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Approval,
   Button,
@@ -932,10 +934,18 @@ export function App({ client }: { client: DesktopClient }) {
       }
       overlays={
         <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent portalled={false}>
-            <DialogHeader>
+          <DialogContent
+            portalled={false}
+            className="desktop-settings-dialog"
+            showCloseButton={false}
+          >
+            <DialogHeader className="desktop-settings-header">
               <DialogTitle>设置</DialogTitle>
               <DialogDescription className="sr-only">配置编辑器与扩展能力</DialogDescription>
+              <button type="button" onClick={() => setSettingsOpen(false)}>
+                <HugeiconsIcon icon={ArrowLeft01Icon} aria-hidden="true" />
+                返回应用
+              </button>
             </DialogHeader>
             <Settings
               client={client}
