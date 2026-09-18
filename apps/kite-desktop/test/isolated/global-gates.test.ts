@@ -14,7 +14,8 @@ import { createTestDesktopBridge, type DesktopTestCall } from '../desktop-bridge
 
 test('DesktopClient sends an unrelated turn through real Service with required MCP offline', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-mcp-offline-')));
-  for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['workspace', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
   const workspace = join(root, 'workspace');
   let mcpRequests = 0;
   const mcp = startTestHttpServer({

@@ -7,9 +7,11 @@
 ## 拥有职责
 
 - 管理 Protocol request correlation、connection generation、显式 reconnect 与 subscription resubscribe。
+- 单次 Protocol request 默认 30 秒内必须收到响应（可用 `requestTimeoutMs` 配置）；超时清理本地等待并返回 `request_timeout`。命令结果仍可能已在服务端生效，客户端不自动重发。
 - 需要同时消费 event-free snapshot 与事件 envelope 的 Native presentation adapter 使用
   `subscribeReadyWithGeneration()`；每个排队 notification 保留接收时的 connection generation，重连后不得用当前 generation 重新盖章。
 - 维护 Session/index/ephemeral 的 observable snapshot，使用 connection generation 隔离旧连接消息，并在 index reset end 原子替换 session 列表。
+- 同一连接上的多个 Session 订阅可并行接收各自的 durable 增量；共享 Store 仍按投影 revision 校验，较旧订阅的 reset 不能覆盖较新水位，旧连接消息继续被 connection generation 拒绝。
 - Store mutation返回`applied`后notification才进入consumer queue；ignored、same-revision divergence、durable gap或ephemeral sequence
   gap均不dispatch原event。`resync_required`把Session置为not-ready并在同connection复用既有subscription重新订阅，不重放mutation。
 - 自动重订阅失败时关闭该订阅的本地 iterator，让客户端结束等待并显示恢复入口；旧 connection generation 的恢复任务

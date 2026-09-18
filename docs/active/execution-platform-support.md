@@ -35,7 +35,7 @@ availability。
 关闭。ADR-0068 明确该空集合只阻止对应 Shell、writer、MCP write、effectful Skill 等能力，不再阻止
 生成和安装普通开源 TUI/CLI 候选包。候选包与 effectful capability 支持声明是两个独立结论：
 
-Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 GitHub workflow 统一 pin Bun `1.4.0`。发行/启动/PTY/路径/ACL/keyring
+Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 GitHub workflow 统一 pin Bun `1.4.2`。发行/启动/PTY/路径/ACL/keyring
 兼容性与 effectful execution capability 是两个 Gate：某个平台可以通过普通 TUI/CLI 发行验证，
 但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；

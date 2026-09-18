@@ -58,7 +58,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 遵循 [HTML 预览优先流程](../../apps/kite-desktop/docs/conversation-ui.md#html-预览优先的界面迭代)。先用真实组件和隔离数据检查布局，再分别验证两端数据接入及受影响原生操作。
 
-`bun run --cwd packages/kite-client-ui test`、`typecheck`，两端的 `test`、`typecheck`、`build`，以及根 `check:runtime-packages`。共享包没有独立打包产物，`build` 核对类型，最终页面由两个 app 的 Vite 构建消费。[权限回归](test/page.test.tsx)核对只读与可操作页面；[桌面 UI 回归](../../apps/kite-desktop/test/ui.test.tsx)覆盖发送、中文组词、审批、停止和阅读位置；[Web 生命周期](../../apps/kite-web/test/app-lifecycle.test.tsx)覆盖只读接入、导航与诊断。
+`bun run --cwd packages/kite-client-ui test`、`typecheck`，两端的 `test`、`typecheck`、`build`，以及根 `check:runtime-packages`。共享包没有独立打包产物，`build` 核对类型，最终页面由两个 app 的 Vite 构建消费。[权限回归](test/page.test.tsx)核对只读与可操作页面；[桌面 UI 回归](../../apps/kite-desktop/test/isolated/ui.test.tsx)覆盖发送、中文组词、审批、停止和阅读位置；[Web 生命周期](../../apps/kite-web/test/app-lifecycle.test.tsx)覆盖只读接入、导航与诊断。
 
 [工具活动](src/ToolActivity.tsx)只按 Runtime 提供的 `presentation=exploration` 与相同 `presentationGroupId` 聚合相邻记录；standalone 始终独立，缺失分类时不按 label 猜测。读取直接显示动作与目标，不提供内容展开，失败保持同一行状态而不另起原始错误段落；组合工具标题不附加状态文字，错误摘要在展开后的对应工具项内显示；Shell 在独立与聚合两种位置都可展开有界输出并保留底部真实状态，聚合内的展开选择由会话阅读状态保存，文件修改复用 [FileDiff](src/FileChanges.tsx) 展示已确认工具结果。工具、Ask 回执与压缩标记的视觉值统一见[设计规范](docs/design-system.md#会话消息结构)。`Message.approval` 只消费端侧投影的批准来源／范围与审查状态，工具终态不清除授权事实。共享 [Approval](src/Approval.tsx) 只提交宿主提供的 approve_once／same_command／reject 回调，不拥有审批权威。主会话只显示子 Agent 入口；工具过程仅在所属子 Agent 容器内展示，列表最大高 320 px 并可独立滚动，不渲染子 Agent 结果正文；有可见父 task 时，子工具在父展开区的子 Agent 容器内展示，并按 toolCallId 去除重复步骤；父工具缺失或不可见时保留子 Agent 容器入口，内部工具不进入主消息列表。宿主提供 `fileChanges` 时，共享页面把[文件变更](src/FileChanges.tsx)放入同一个全高最右侧容器，并使用 shadcn Tabs 表达会话详情的可扩展标签结构；当前只展示已有事实支撑的“文件变更”标签，不虚构其他详情页。侧栏默认关闭，切换会话关闭；路径操作仍由 `actions.openFile` 决定。侧栏只用页面内状态，无额外存储或运行 authority。
 
@@ -68,4 +68,4 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 Ask 历史通过 `Message.ask.toolCallId` 关联唯一工具调用，主列表保留交互记录并隐藏其重复执行行；`Message.ask` 保留问题与按问题 ID 对应的答案。没有关联交互但存在结构化工具回答时仅展示其中 answer，不输出包装 JSON；未关联的失败工具仍保留。
 
-子 Agent 工具步骤复用 [ToolActivity](src/ToolActivity.tsx) 的动作、目标与状态展示；步骤摘要不充当标题，读取结果正文不在标题或步骤行展开。失败步骤的提示在工具行展开后显示完整内容，不挤入标题行；子 Agent 已结束而工具步骤缺少终态时仅在展示层标为结果未知并停止运行中动画；子 Agent 容器不重复显示父工具已有的完成状态；若 Service 已将步骤关联到同一持久子工具，主会话按精确 toolCallId 只保留子工具行。Service 仅凭唯一的持久父子派发关系将旧记录中误标 hidden 的父 task 恢复可见，不扩大其他 hidden 工具的显示范围。父 task 的失败状态始终保留；仅当对应子 Agent 已有具体失败终态时，折叠卡片才省去重复的 `Tool execution failed.` 文案。无子项原因时仍显示该文案。[Desktop 展示回归](../../apps/kite-desktop/test/subagent-history.test.tsx)覆盖这些情况。
+子 Agent 工具步骤复用 [ToolActivity](src/ToolActivity.tsx) 的动作、目标与状态展示；步骤摘要不充当标题，读取结果正文不在标题或步骤行展开。失败步骤的提示在工具行展开后显示完整内容，不挤入标题行；子 Agent 已结束而工具步骤缺少终态时仅在展示层标为结果未知并停止运行中动画；子 Agent 容器不重复显示父工具已有的完成状态；若 Service 已将步骤关联到同一持久子工具，主会话按精确 toolCallId 只保留子工具行。Service 仅凭唯一的持久父子派发关系将旧记录中误标 hidden 的父 task 恢复可见，不扩大其他 hidden 工具的显示范围。父 task 的失败状态始终保留；仅当对应子 Agent 已有具体失败终态时，折叠卡片才省去重复的 `Tool execution failed.` 文案。无子项原因时仍显示该文案。[Desktop 展示回归](../../apps/kite-desktop/test/isolated/subagent-history.test.tsx)覆盖这些情况。

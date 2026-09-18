@@ -4,6 +4,10 @@
 
 发送请求时维护 wire correlation，解码回执后返回 typed result。业务 commandId/revision 由上层语义保留；连接重建不能自动重发可能产生副作用的 mutation。错误应返回调用者，不把 timeout 转成默认成功。
 
+单次请求的默认期限为 30 秒，可通过 `requestTimeoutMs` 调整。期限覆盖建连、transport `send()` 和等待响应；到期后删除本地 correlation，迟到响应被忽略。`request_timeout` 只说明客户端未拿到结果，尤其对 mutation 应保留结果未知状态，并通过原 command ID 查询回执；不能据此生成新命令或自动重放。订阅恢复中的取消旧订阅请求也受同一期限约束，旧请求超时后继续尝试建立替代订阅。
+`subscribeReady` 和 `subscribeReadyWithGeneration` 在收到订阅回执后仍等待初始 ready 边界；该等待同样使用配置的期限。ready 一直不到时关闭对应 logical connection，让服务端释放远端订阅，并向调用方返回超时错误。
+订阅请求已经发出、远端 ID 尚未返回时若调用方取消，同样关闭该 logical connection；此时无法用 ID 发送 unsubscribe，连接关闭负责释放服务端可能已占用的名额。
+
 通知更新客户端投影与订阅。event-free snapshot 可以修正活动/交互状态，但不伪造批准、取消或完成事件。历史读取通过独立注入的 HistoryClient 获取完整 durable transcript；短期 replay window 不能代替它。
 
 客户端缓存只服务读取与展示，业务 State 仍由服务端决定。UI 本地 pending feedback 与 accepted receipt、durable event 的合并由相应客户端实现处理，不由本包猜测消息文本 identity。

@@ -540,6 +540,9 @@ function reducePresentationBlocks(
             approvalState: undefined,
             awaitingApproval: false,
             ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
+            ...(event.concurrencyGroupId === undefined
+              ? {}
+              : { concurrencyGroupId: event.concurrencyGroupId }),
           });
         }
       }

@@ -22,7 +22,7 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
     osRelease: 'fixture',
     osVersion: 'fixture',
     arch: 'x64',
-    bunVersion: '1.4.0',
+    bunVersion: '1.4.2',
     backend: 'bubblewrap',
     selectedNetworkMode: 'off',
     processCapabilitySurface: {

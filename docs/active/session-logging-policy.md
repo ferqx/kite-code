@@ -13,7 +13,7 @@ Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-ru
 current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变
 日志lease、heartbeat或retention语义。
 
-GitHub Session log ACL smoke 使用正式 CI 基线 Bun `1.4.0`；版本变化必须与 Required CI 和 smoke
+GitHub Session log ACL smoke 使用正式 CI 基线 Bun `1.4.2`；版本变化必须与 Required CI 和 smoke
 验证共同收敛。
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote

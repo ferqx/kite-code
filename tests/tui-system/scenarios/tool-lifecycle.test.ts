@@ -417,6 +417,11 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         15_000,
       );
       await waitForTuiReady(tui);
+      await waitForCondition(
+        () => /●\s*Write/u.test(stripAnsi(tui.screenFramesSince(rejectionFrames).join('\n'))),
+        'rejected tool card to appear after durable settlement',
+        15_000,
+      );
 
       output = tui.viewport();
       const afterRejection = tui.screenFramesSince(rejectionFrames).join('\n');
@@ -434,7 +439,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       );
       // The rejected card retains the exact queued operation, while the safe
       // sibling is cancelled before dispatch and remains off-screen.
-      expect(screenContains(afterRejection, '● Write')).toBe(true);
+      expect(/●\s*Write/u.test(stripAnsi(afterRejection))).toBe(true);
       expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(true);
       expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(afterRejection, 'Tool execution rejected.')).toBe(false);

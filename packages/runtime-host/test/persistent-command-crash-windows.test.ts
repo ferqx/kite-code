@@ -34,6 +34,7 @@ interface CrashBridgeOptions {
   readonly holdBeforeAttempt?: boolean;
   readonly runFailure?: boolean;
   readonly allowRecoveredResume?: boolean;
+  readonly failProjectionAfterCommit?: boolean;
 }
 
 /**
@@ -68,6 +69,7 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
   readonly commits: RuntimeCommandCommitEvidence[] = [];
   readonly recoveries: string[] = [];
   readonly activations: ActivationFailure[] = [];
+  activationSucceeded = 0;
   readonly preparedExecutions: string[] = [];
   readonly schedules: string[] = [];
   readonly runs: string[] = [];
@@ -110,7 +112,13 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
             receipt: applied(command.commandId, context.targetSessionId, 1),
             ...(this.#options.activationFailure
               ? { activation: this.#activation(this.#options.activationFailure) }
-              : {}),
+              : this.#options.failProjectionAfterCommit
+                ? {
+                    activation: async () => {
+                      this.activationSucceeded += 1;
+                    },
+                  }
+                : {}),
             ...(this.#options.execute
               ? { preparedExecution: { execution: this.#prepared(command, context) } }
               : {}),
@@ -147,6 +155,9 @@ class CrashWindowBridge implements RuntimeHostExecutionBridge {
       return Promise.resolve({ status: 'ok', queryType: query.type, sessions: [] });
     }
     if (query.type === 'get_session_projection') {
+      if (this.#options.failProjectionAfterCommit && this.#receiptPort.records.size > 0) {
+        throw new Error('projection refresh failed');
+      }
       return Promise.resolve({
         status: 'ok',
         queryType: query.type,
@@ -423,6 +434,25 @@ describe('Host persistent command crash windows', () => {
       expect(replay.recoveries).toEqual([]);
       await restarted[Symbol.asyncDispose]();
     }
+  });
+
+  test('a projection refresh error after commit does not strand prepared execution', async () => {
+    const receipts = new StrictReceiptPort();
+    const bridge = new CrashWindowBridge(receipts, {
+      execute: true,
+      failProjectionAfterCommit: true,
+    });
+    const host = hostFor(receipts, bridge);
+
+    await expect(host.command(startTurn())).rejects.toThrow('projection refresh failed');
+    await host.waitForSessionIdle('session-1');
+    expect(receipts.records).toHaveLength(1);
+    expect(bridge.activationSucceeded).toBe(1);
+    expect(bridge.schedules).toEqual(['command-1']);
+    expect(bridge.terminals).toEqual(['command-1']);
+    await expect(host.command(startTurn())).resolves.toEqual(idempotentReplay());
+    expect(bridge.schedules).toEqual(['command-1']);
+    await host[Symbol.asyncDispose]();
   });
 
   test('a receipt replay never invents scheduling, pre-attempt work, or implicit recovery', async () => {

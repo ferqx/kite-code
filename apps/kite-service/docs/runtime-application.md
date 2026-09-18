@@ -15,6 +15,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
+CLI in-process组合在已完成执行释放coordinator后，也从同一Store只读投影会话；已保存终态仍可查询，不为历史读取重新取得执行权。
+`list_checkpoints`与`get_rewind_preview`也从该Store读取；预览在核对持久Session的Workspace身份后读取文件变化，不要求闲置会话重新建立执行coordinator。
 
 并发 Shell 的 [State runner](../src/bootstrap/runtime/state-runner.ts) 在事务提交后同步把整批事件放入原有发布队列，再让异步消费者逐条读取。不能由各个工具的异步 generator 逐条入队，否则一个事务中间可能插入兄弟工具的更高 revision，导致 Bridge 的顺序校验失败并中断后续模型调用。异步 effect preparation 返回时也重新核对 State revision；后台工具已推进 State 时，丢弃旧决定并重新调度，不能使用旧的 stop 决定退出。确定性回归见 [State runner acknowledgement](../test/runtime/state-runner-ack.test.ts)，包含事务交错、工具收尾期间准备完成与模型继续执行。
 
@@ -93,6 +95,8 @@ Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿�
 Start Turn整批presentation notification以及该accepted Run后续的model/tool/subagent/interaction/terminal通知都携带admission确认的`runId/taskId/turnId`；首条`user.message_appended`不从
 `turn.started`之前的predecessor snapshot取Turn，取消事务或Turn终态后的迟到Subagent/Tool cleanup也不从settled snapshot反推Turn。无active/unknown Run的启动hydration分页读取最近settled Run，保持重启后的
 `currentRun`与late-stream fence；该读取不写Store或触发recovery。
+
+若进程在 `start_turn` 的 Run 激活后、执行器调度前退出，取得上一代执行的 fencing 与清理证据后，Service 仅在当前 Turn 的完整日志证明没有模型、工具、交互或其他派发事实时补记中断终态，并将 Run 结算为失败。原命令回执保留可查，重放不再次派发；存在旧全局 Provider 准入等待时仍按其独立的可续跑证明处理。
 current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；Plan submit必须从
@@ -208,17 +212,17 @@ Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 a
 
 恢复派发使用本次请求经认证并冻结的 `commandContext`，沿 Host replay、Service wrapper 和 continuation 传递到工具执行。并发同 commandId 的请求各自持有自己的上下文，不从旧回执恢复连接绑定，也不把上下文写入持久回执。Worker 工具组合仍重新核验本次 binding 与有效控制权；缺失或失效时拒绝执行。
 
-### 会话重新进入时的失效执行收尾
+### 执行命令时的失效执行收尾
 
-Service 的会话投影访问及执行命令共用 `reconcileInterruptedSession`。目录与历史日志读取不扫描或修改所有会话。对目标会话，先保留有效租约的执行；失效执行经 Store CAS 隔离后取得受控恢复 scope，调用 `reconcileRuntimeSessionAfterRestart` 核对 Provider／沙箱资源，在持有当前代际时追加工具、子 Agent、Turn 的收尾事实，由同一 State 事务更新 Run。未知外部结果保留，调度与完成门禁按当前轮归属判断，不能因 Task 跨轮复用而阻塞新消息。
+Service 的会话投影查询、历史读取及订阅只读取持久事实并刷新 Host 观察水位，不调用 `reconcileInterruptedSession`。执行命令在 mutation admission 内对目标会话触发该恢复：先保留有效租约的执行；失效执行经 Store CAS 隔离后取得受控恢复 scope，调用 `reconcileRuntimeSessionAfterRestart` 核对 Provider／沙箱资源，在持有当前代际时追加工具、子 Agent、Turn 的收尾事实，由同一 State 事务更新 Run。未知外部结果保留，调度与完成门禁按当前轮归属判断，不能因 Task 跨轮复用而阻塞新消息。
 
-恢复事件在创建后继 Run 前按旧 Run 身份完成投影；不能延迟到新轮激活时给旧 revision 配上新 runId。同一会话的恢复请求共享进行中的 Promise，重复进入已收尾会话不追加相同事件。清理失败后仍返回可读历史及持久恢复状态；执行请求保留明确失败，不能把检查失败当作清理成功。回归见[重新进入故障测试](../test/isolated/session-reentry-recovery.test.ts)。
+恢复事件在创建后继 Run 前按旧 Run 身份完成投影；不能延迟到新轮激活时给旧 revision 配上新 runId。同一会话的恢复请求共享进行中的 Promise，重复执行命令访问已收尾会话不追加相同事件。清理失败后仍返回可读历史及持久恢复状态；执行请求保留明确失败，不能把检查失败当作清理成功。回归见[重新进入故障测试](../test/isolated/session-reentry-recovery.test.ts)。
 
 终态会话同样核对有持久证据的历史子 Agent 悬挂卡片：先从 State 筛选失败终态父工具与已确认清理的 Provider lifecycle，再读取事件验证唯一 childInvocationId 的 started 尚无 terminal。存在候选时不走 idle／settled authority 的提前返回，而进入相同恢复 writer 追加终态；已失败的旧 Task 不受当前 Task 过滤。成功父工具还必须同时匹配同一 invocation 的 completed observation、attempt／dispatch digest 一致的 cleanup、execution_succeeded 和成功 tool.finished，才补记 subagent.completed；子执行已有 completed observation 但父工具随后失败／取消、完整成功证据不足时保持待核验，不补写失败；身份歧义、未确认子执行清理及有效 owner 不被此规则改写。子 Agent 已有确证的终态在 Provider 核对后即提交，不因其他沙箱清理失败而延后；最终恢复仍保留清理失败，并使用已追加事实避免重复终态。
 
 并行子 Agent 每个 sibling 返回时，Service 即等待其尚未提交的子任务／父工具终态持久化，再等待整批结束；成功写入的事实不重复返回给聚合提交。持久化失败向执行 owner 传播，不能合成为工具执行失败。验证见[并行终态提交测试](../test/isolated/runtime/sibling-terminal-persistence.test.ts)。
 
-会话投影查询统一经过 Host 发布最新持久投影，包括恢复失败后从 Store 读取的结果。订阅注册后为初始边界查询得到的新 revision 必须同时进入该订阅，避免清理重试已推进 Store 水位、客户端却永远收不到对应 ready。该发布只同步观察状态，不取得执行权。
+会话投影查询统一经过 Host 发布最新持久投影，包括执行命令恢复失败后从 Store 读取的结果。订阅注册后，初始边界查询及后续只读查询得到的新 revision 必须同时进入该订阅，避免 Store 水位已经推进、客户端却永远收不到对应 ready。该发布只同步观察状态，不取得执行权。
 
 
 主执行停止原因沿 AbortSignal 显式传递：只有主动取消命令使用 user，Host 关闭、租约丢失、执行错误及截止时间使用 error；未分类信号按中断处理，不通过错误文案猜测用户意图。Provider observation 保留 interrupted，避免丢失子终态后恢复时将中断误判为失败。取消收尾覆盖已暂停的子任务；同一子执行已有终态不重复追加，清理未确认不伪造取消成功。

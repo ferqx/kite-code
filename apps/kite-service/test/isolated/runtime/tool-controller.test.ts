@@ -1441,7 +1441,7 @@ describe('executeTestRuntimeTools', () => {
     ).toBeDefined();
   });
 
-  test('surfaces a deferred child approval without restarting the child model', async () => {
+  test('surfaces a deferred child auto-review without restarting the child model', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deferred-child-approval',
@@ -1526,9 +1526,9 @@ describe('executeTestRuntimeTools', () => {
 
     expect(model.callCount.count).toBe(0);
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'approval.requested', toolCallId: 'task' }),
+      expect.objectContaining({ type: 'auto_review.requested', toolCallId: 'task' }),
     );
-    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(events.some((event) => event.type === 'tool.started')).toBe(false);
   });
 
@@ -1695,7 +1695,10 @@ describe('executeTestRuntimeTools', () => {
     });
 
     expect(model.callCount.count).toBe(2);
-    const starts = terminal.filter((event) => event.type === 'subagent.started');
+    const starts = terminal.filter(
+      (event): event is Extract<RuntimeEvent, { type: 'subagent.started' }> =>
+        event.type === 'subagent.started' && event.subagent.status === 'running',
+    );
     expect(starts).toHaveLength(2);
     expect(starts.map((event) => event.subagent.concurrencyGroupId)).toEqual([
       'subagent-batch:task-a',
@@ -1835,7 +1838,7 @@ describe('executeTestRuntimeTools', () => {
   test.each([
     ['accept_edits', false, 'approval.requested'],
     ['auto', false, 'auto_review.requested'],
-    ['auto', true, 'approval.requested'],
+    ['auto', true, 'auto_review.requested'],
   ] as const)('routes a blocked child in %s mode with breaker=%s through %s', (mode, circuitBreakerTripped, expectedType) => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',

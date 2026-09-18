@@ -35,6 +35,7 @@ export interface RuntimeExecutionBridgeRouterDependencies {
 }
 
 export interface RuntimeExecutionBridgeRouter extends RuntimeHostExecutionBridge {
+  recoverCommittedResume: NonNullable<RuntimeHostExecutionBridge['recoverCommittedResume']>;
   bindSession(sessionId: string, admission: AdmittedWorkspace): Promise<void>;
   releaseSession(sessionId: string): Promise<void>;
 }

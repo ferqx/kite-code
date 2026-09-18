@@ -67,6 +67,47 @@ describe('Runtime Snapshot Store', () => {
     expect(store.getSnapshot().sessions['session-1']?.historyResyncRequired).toBeTrue();
   });
 
+  test('accepts older parallel subscription deltas without allowing stale resets or connections', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 2,
+        notification: durable(projection('session-1', 0)),
+        reset: true,
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: durable(projection('session-1', 1)),
+        ready: true,
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().sessions['session-1']).toMatchObject({
+      projection: { revision: 1 },
+      subscriptionGeneration: 2,
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: durable(projection('session-1', 0)),
+        reset: true,
+      }),
+    ).toBe('ignored');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 0,
+        subscriptionGeneration: 3,
+        notification: durable(projection('session-1', 2)),
+      }),
+    ).toBe('ignored');
+    expect(store.getSnapshot().sessions['session-1']?.projection.revision).toBe(1);
+  });
+
   test('accepts same-revision lifecycle and model enrichment but rejects stable-field divergence', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active' });
@@ -341,6 +382,25 @@ describe('Runtime Snapshot Store', () => {
         notification: durable(successor),
       }),
     ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: durable(terminalSession),
+        reset: true,
+      }),
+    ).toBe('ignored');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: {
+          ...ephemeral(1),
+          runId: 'run-1',
+          taskId: 'work-1',
+        },
+      }),
+    ).toBe('ignored');
     expect(
       store.applySessionNotification({
         connectionGeneration: 1,

@@ -9,7 +9,7 @@
 3. 进入该 Session mailbox 后才获取执行 scope，再查回执并检查删除、revision、busy 与恢复状态；空闲释放也在同一 mailbox 内进行，避免误释放下一条命令的 generation。
 4. bridge inspectCommand 产生 terminal 结果或可提交决定；校验目标 Session。
 5. commit 将回执与业务变化落入所属事务。Host 重读持久回执并确认与 commit 返回一致。
-6. 执行 activation、刷新 Session projection，再调度 prepared execution；cancel/close 走对应生命周期操作。
+6. 执行 activation、刷新 Session projection，再调度 prepared execution；cancel/close 走对应生命周期操作。若 activation 已成功但投影刷新抛错，仍先完成调度或 cancel/close，再向调用方报告刷新失败；持久回执可供查询，不能让已激活的 Run 停在调度前。
 
 回执存在性必须在调度前证明。客户端断线后重新发送不能执行第二次副作用。delete receipt 可以比 Session 存活更久，重放删除不能重新创建目标。
 

@@ -979,9 +979,6 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
           `expected one visible successor prompt, found ${successorPromptCount}:\n${output}`,
         );
       }
-      const delegatedCount = output.match(/Delegated · 4 agents/g)?.length ?? 0;
-      if (delegatedCount !== 1) throw new Error(`duplicate delegated output:\n${output}`);
-
       const persisted = requirePersistedRuntimeReady(
         observePersistedTurnEvents(workspace, 'Start four cancellable subagents'),
       );

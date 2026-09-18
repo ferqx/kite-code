@@ -251,7 +251,6 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   #operationCompletion: Promise<void> = Promise.resolve();
   #resolveOperationCompletion: (() => void) | null = null;
   #closePromise: Promise<void> | null = null;
-  #closed = false;
   readonly #store: StateRuntimeStorage;
   readonly #workspace: string;
   readonly #projectId: string;
@@ -876,8 +875,6 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     if (this.#closePromise) return this.#closePromise;
     this.#lifecycle = 'closing';
     this.#closePromise = this.#operationCompletion.then(() => {
-      if (this.#closed) return;
-      this.#closed = true;
       this.clearActiveCancelRun();
       this.#lifecycle = 'closed';
     });
@@ -897,14 +894,14 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 
   #finishOperation(): void {
     this.#activeOperation = null;
-    if (!this.#closed && this.#lifecycle !== 'closing') this.#lifecycle = 'idle';
+    if (this.#lifecycle !== 'closing' && this.#lifecycle !== 'closed') this.#lifecycle = 'idle';
     this.#resolveOperationCompletion?.();
     this.#resolveOperationCompletion = null;
     this.#operationCompletion = Promise.resolve();
   }
 
   #assertOpen(): void {
-    if (this.#closed || this.#lifecycle === 'closing' || this.#lifecycle === 'closed') {
+    if (this.#lifecycle === 'closing' || this.#lifecycle === 'closed') {
       throw new Error(`Runtime session is ${this.#lifecycle}.`);
     }
   }

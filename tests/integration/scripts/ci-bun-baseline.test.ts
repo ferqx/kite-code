@@ -29,7 +29,7 @@ describe('CI Bun baseline', () => {
   });
 
   test('pins every setup-bun workflow to the formal qualification version', () => {
-    expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.0');
+    expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.2');
 
     const setupWorkflows = readdirSync(workflowRoot)
       .filter((name) => name.endsWith('.yml'))

@@ -11,7 +11,7 @@ import {
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnPreInkTui, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -129,13 +129,12 @@ describe.skipIf(process.platform !== 'darwin')(
         const sourceDigest = digest(sourcePath);
         const canonical = join(workspace.home, '.kite-code/kite-session.sqlite');
         const intent = join(workspace.home, '.kite-code/kite-session-publication.json');
-        const preparing = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-        tuis.push(preparing);
-        await waitForCondition(
-          () => /正在备份、整理并核对会话数据|正在提交并复核会话数据/u.test(preparing.transcript()),
-          'production TUI startup preparation progress',
+        const preparing = await spawnPreInkTui(
+          { cols: 120, rows: 40, mockServer: server, workspace },
+          'preparation',
           60_000,
         );
+        tuis.push(preparing);
         // Pre-Ink PTY remains in canonical mode: the terminal sends SIGINT to the
         // TUI parent, whose owned-transport listener requests Service cancellation.
         preparing.write('\x03');

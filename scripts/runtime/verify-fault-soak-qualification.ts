@@ -17,7 +17,7 @@ const FORMAL_QUALIFICATION_SEED = 1729;
 const FORMAL_QUALIFICATION_ITERATIONS = 8;
 const FORMAL_PER_CASE_TIMEOUT_MS = 180_000;
 const FORMAL_WORKFLOW = 'runtime-resilience-qualification.yml';
-export const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.0';
+export const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.2';
 
 export interface RuntimeFaultSoakQualificationExpectation {
   repository: string;

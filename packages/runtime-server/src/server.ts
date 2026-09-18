@@ -226,6 +226,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #outbound: OutboundQueue;
   readonly #inFlight = new Set<Promise<void>>();
   readonly #subscriptions = new Map<string, Subscription>();
+  readonly #pendingSubscriptions = new Set<() => void>();
   readonly #rpcIds = new Set<string>();
   #activeRequestTasks = 0;
   #clientInfo: RuntimeServerAdmissionInput['clientInfo'];
@@ -293,24 +294,20 @@ class ServerConnection implements RuntimeServerConnection {
       },
       'control',
     );
-    let failure: unknown;
-    let failed = false;
     try {
-      await this.#stopSubscriptions();
-      await withDeadline(this.#outbound.whenIdle(), this.#drainTimeoutMs);
+      await withDeadline(
+        (async () => {
+          await this.#stopSubscriptions();
+          await this.#outbound.whenIdle();
+          await this.close('drain_complete');
+        })(),
+        this.#drainTimeoutMs,
+      );
     } catch (error) {
-      failure = error;
-      failed = true;
+      // A stalled iterator or carrier must not keep draining pending forever.
+      void this.close('drain_failed').catch(() => undefined);
+      throw error;
     }
-    try {
-      await this.close('drain_complete');
-    } catch (error) {
-      if (!failed) {
-        failure = error;
-        failed = true;
-      }
-    }
-    if (failed) throw failure;
   }
 
   async close(reason = 'connection_closed'): Promise<void> {
@@ -533,7 +530,10 @@ class ServerConnection implements RuntimeServerConnection {
     request: Extract<RuntimeProtocolRequest, { method: 'runtime/subscribe' }>,
     releasePermit: () => void,
   ): Promise<void> {
-    if (this.#subscriptions.size >= this.#limits.maxSubscriptions) {
+    if (
+      this.#subscriptions.size + this.#pendingSubscriptions.size >=
+      this.#limits.maxSubscriptions
+    ) {
       await this.#sendError(request.id, 'overloaded', releasePermit);
       return;
     }
@@ -541,10 +541,34 @@ class ServerConnection implements RuntimeServerConnection {
       await this.#sendError(request.id, 'overloaded', releasePermit);
       return;
     }
-    const decision = await this.#authorize(request);
-    if (!decision.allowed) {
+    let reserved = true;
+    const releaseReservation = () => {
+      if (!reserved) return;
+      reserved = false;
+      this.#pendingSubscriptions.delete(releaseReservation);
       this.#releaseSubscription();
-      await this.#sendError(request.id, decision.reason ?? 'unauthorized', releasePermit);
+    };
+    this.#pendingSubscriptions.add(releaseReservation);
+    let decision: RuntimeServerAdmissionDecision;
+    try {
+      decision = await this.#authorize(request);
+    } catch (error) {
+      releaseReservation();
+      throw error;
+    }
+    if (!decision.allowed || this.#state !== 'active') {
+      releaseReservation();
+      if (this.#state !== 'closed') {
+        await this.#sendError(
+          request.id,
+          this.#state !== 'active'
+            ? 'overloaded'
+            : !decision.allowed
+              ? (decision.reason ?? 'unauthorized')
+              : 'overloaded',
+          releasePermit,
+        );
+      }
       return;
     }
     const subscriptionId = `subscription-${++this.#nextSubscription}`;
@@ -557,10 +581,11 @@ class ServerConnection implements RuntimeServerConnection {
       () => void this.close('subscription_unavailable'),
       () => {
         this.#subscriptions.delete(subscriptionId);
-        this.#releaseSubscription();
+        releaseReservation();
       },
     );
     this.#subscriptions.set(subscriptionId, subscription);
+    this.#pendingSubscriptions.delete(releaseReservation);
     try {
       subscription.acquire();
       await subscription.prepareInitialBoundary();
@@ -684,11 +709,14 @@ class ServerConnection implements RuntimeServerConnection {
     this.#admission = undefined;
     let failure: unknown;
     let failed = false;
+    let stopSubscriptions: Promise<void>;
     try {
-      await this.#stopSubscriptions();
+      for (const release of this.#pendingSubscriptions) release();
+      stopSubscriptions = this.#stopSubscriptions();
     } catch (error) {
       failure = error;
       failed = true;
+      stopSubscriptions = Promise.resolve();
     }
     try {
       this.#outbound.close();
@@ -710,11 +738,19 @@ class ServerConnection implements RuntimeServerConnection {
       // must be released even when a carrier or subscription close fails.
       this.#onClose();
     }
+    try {
+      await stopSubscriptions;
+    } catch (error) {
+      if (!failed) {
+        failure = error;
+        failed = true;
+      }
+    }
     if (failed) throw failure;
   }
 }
 
-class Subscription {
+export class Subscription {
   readonly id: string;
   readonly generation: number;
   readonly #spec: RuntimeSubscriptionSpec;
@@ -729,6 +765,7 @@ class Subscription {
   #initialSessionRevision: number | undefined;
   #initialSessionReset: Extract<RuntimeSubscriptionMessage, { type: 'reset' }> | undefined;
   #closed = false;
+  #closePromise: Promise<void> | undefined;
 
   constructor(
     id: string,
@@ -799,21 +836,15 @@ class Subscription {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.#closed) return;
+  close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
-    this.#controller.abort();
-    let failure: unknown;
-    let failed = false;
-    try {
-      await this.#iterator?.return?.();
-    } catch (error) {
-      failure = error;
-      failed = true;
-    } finally {
+    this.#closePromise = (async () => {
+      this.#controller.abort();
       this.#onClose();
-    }
-    if (failed) throw failure;
+      await this.#iterator?.return?.();
+    })();
+    return this.#closePromise;
   }
 
   async #run(): Promise<void> {
@@ -1080,11 +1111,14 @@ function normalizeGlobalLimits(
 
 async function withDeadline(promise: Promise<void>, timeoutMs: number): Promise<void> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<void>((resolve) => {
-    timeout = setTimeout(resolve, timeoutMs);
+  const deadline = new Promise<void>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error('Runtime Server drain timed out.')), timeoutMs);
   });
-  await Promise.race([promise, deadline]);
-  if (timeout !== undefined) clearTimeout(timeout);
+  try {
+    await Promise.race([promise, deadline]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function encodedBytes(value: unknown): number {

@@ -127,6 +127,7 @@ import {
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { commitInteractionModeCommand } from './bootstrap/runtime/command-control-decision';
+import { previewFilesToCheckpoint } from './bootstrap/runtime/file-checkpoints';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
 import { createRuntimeSessionCoordinatorBinding } from './bootstrap/runtime/RuntimeSessionCoordinator';
 import type {
@@ -1405,6 +1406,90 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
   });
 }
 
+function projectStoredSession(
+  owner: KiteRuntimeStorageOwner,
+  threadId: string,
+  snapshot = owner.loadCurrentSnapshot(threadId),
+): RuntimeSessionProjection | undefined {
+  if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
+  const model = owner.getCurrentSessionModelRoute(threadId);
+  const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
+    sessionRevision: snapshot.revision,
+  });
+  const activeInteraction =
+    interactionQueue.activeInteractionId === undefined
+      ? undefined
+      : interactionQueue.interactions.find(
+          (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
+        );
+  const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
+  const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
+  const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
+  const executionAuthority = owner.recovery?.inspect(threadId).authority;
+  const liveOwner =
+    executionAuthority &&
+    (executionAuthority.status === 'active' || executionAuthority.status === 'detached') &&
+    executionAuthority.leaseUntilMs !== null &&
+    executionAuthority.leaseUntilMs > Date.now();
+  const preserveRunStatus =
+    ownsExecution || liveOwner || (storedRun !== undefined && isSettledStoredRun(storedRun));
+  return Object.freeze({
+    schema: RUNTIME_PROJECTION_SCHEMA_,
+    sessionId: threadId,
+    revision: snapshot.revision,
+    workspace: snapshot.session.workspace,
+    ...(snapshot.session.canonicalWorkspaceDigest === undefined
+      ? {}
+      : {
+          workspaceDigest: snapshot.session.canonicalWorkspaceDigest,
+        }),
+    lifecycle: 'open' as const,
+    interactionQueue,
+    ...(activeTask === undefined
+      ? {}
+      : {
+          activeTask: {
+            taskId: activeTask.taskId,
+            phase:
+              activeTask.planning.kind === 'executing'
+                ? ('building' as const)
+                : ('planning' as const),
+          },
+        }),
+    ...(storedRun === null || storedRun === undefined
+      ? {}
+      : {
+          currentRun: {
+            runId: storedRun.runId,
+            initialTurnId: storedRun.runId,
+            activeTurnId: snapshot.turn.turnId,
+            ...(activeTask === undefined ? {} : { taskId: activeTask.taskId }),
+            status: preserveRunStatus
+              ? storedRun.status === 'unknown'
+                ? ('recovery_required' as const)
+                : storedRun.status
+              : ('recovery_required' as const),
+            revision: storedRun.lastRevision,
+            ...(activeInteraction === undefined
+              ? {}
+              : { activeInteractionId: activeInteraction.interactionId }),
+            ...(preserveRunStatus
+              ? storedRun.terminal === undefined
+                ? {}
+                : { outcome: { ...storedRun.terminal } }
+              : {
+                  outcome: {
+                    reasonCode: 'recovery_required',
+                    safeRetry: false,
+                    recoveryEntry: 'reconcile' as const,
+                  },
+                }),
+          },
+        }),
+    ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
+  });
+}
+
 function createKiteCliRuntimeHost(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
@@ -1448,7 +1533,12 @@ function createKiteCliRuntimeHost(
         store: runtimeStorageView,
       });
       return createCliRuntimeBridge(
-        { ...input, projectIdentity },
+        {
+          ...input,
+          projectIdentity,
+          storedProjection: () =>
+            owner.readSnapshot(() => projectStoredSession(owner, input.sessionId)),
+        },
         capabilities,
         modelInvocationRuntimeFactory,
         (sessionId) => resolveKiteRecoveryIdentity(services, sessionId),
@@ -1572,88 +1662,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
     bySession.delete(sessionId);
     return undefined;
   };
-  const projectStoredSession = (
-    threadId: string,
-    snapshot = owner.loadCurrentSnapshot(threadId),
-  ): RuntimeSessionProjection | undefined => {
-    if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
-    const model = owner.getCurrentSessionModelRoute(threadId);
-    const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
-      sessionRevision: snapshot.revision,
-    });
-    const activeInteraction =
-      interactionQueue.activeInteractionId === undefined
-        ? undefined
-        : interactionQueue.interactions.find(
-            (interaction) => interaction.interactionId === interactionQueue.activeInteractionId,
-          );
-    const activeTask = snapshot.activeTaskId ? snapshot.tasks[snapshot.activeTaskId] : undefined;
-    const storedRun = resolveStoredSessionRun(owner.storage.runs, threadId);
-    const ownsExecution = owner.ownsSessionExecution?.(threadId) === true;
-    const executionAuthority = owner.recovery?.inspect(threadId).authority;
-    const liveOwner =
-      executionAuthority &&
-      (executionAuthority.status === 'active' || executionAuthority.status === 'detached') &&
-      executionAuthority.leaseUntilMs !== null &&
-      executionAuthority.leaseUntilMs > Date.now();
-    const preserveRunStatus =
-      ownsExecution || liveOwner || (storedRun !== undefined && isSettledStoredRun(storedRun));
-    return Object.freeze({
-      schema: RUNTIME_PROJECTION_SCHEMA_,
-      sessionId: threadId,
-      revision: snapshot.revision,
-      workspace: snapshot.session.workspace,
-      ...(snapshot.session.canonicalWorkspaceDigest === undefined
-        ? {}
-        : {
-            workspaceDigest: snapshot.session.canonicalWorkspaceDigest,
-          }),
-      lifecycle: 'open' as const,
-      interactionQueue,
-      ...(activeTask === undefined
-        ? {}
-        : {
-            activeTask: {
-              taskId: activeTask.taskId,
-              phase:
-                activeTask.planning.kind === 'executing'
-                  ? ('building' as const)
-                  : ('planning' as const),
-            },
-          }),
-      ...(storedRun === null || storedRun === undefined
-        ? {}
-        : {
-            currentRun: {
-              runId: storedRun.runId,
-              initialTurnId: storedRun.runId,
-              activeTurnId: snapshot.turn.turnId,
-              ...(activeTask === undefined ? {} : { taskId: activeTask.taskId }),
-              status: preserveRunStatus
-                ? storedRun.status === 'unknown'
-                  ? ('recovery_required' as const)
-                  : storedRun.status
-                : ('recovery_required' as const),
-              revision: storedRun.lastRevision,
-              ...(activeInteraction === undefined
-                ? {}
-                : { activeInteractionId: activeInteraction.interactionId }),
-              ...(preserveRunStatus
-                ? storedRun.terminal === undefined
-                  ? {}
-                  : { outcome: { ...storedRun.terminal } }
-                : {
-                    outcome: {
-                      reasonCode: 'recovery_required',
-                      safeRetry: false,
-                      recoveryEntry: 'reconcile' as const,
-                    },
-                  }),
-            },
-          }),
-      ...(model === null ? {} : { model: { provider: model.provider, name: model.name } }),
-    });
-  };
+  const projectStoredSessionForOwner = (threadId: string, snapshot?: RuntimeState | null) =>
+    projectStoredSession(owner, threadId, snapshot);
   const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
   const desiredConfigs = new Map<string, AgentConfig>();
   const recoveryGenerations = new Map<
@@ -1827,7 +1837,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
               publish: (notification: RuntimeNotification) => void,
               commandContext?: Readonly<RuntimeCommandContext>,
             ) =>
-              (await bridgeForSession(command.sessionId)).recoverCommittedResume?.(
+              (await bridgeForSession(command.sessionId)).recoverCommittedResume(
                 command,
                 committedRevision,
                 publish,
@@ -1917,7 +1927,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           // start MCP, or scan Skills for a Workspace the caller did not admit).
           const projections = owner
             .listCurrentSessions('', 1_000)
-            .map(({ threadId }) => projectStoredSession(threadId));
+            .map(({ threadId }) => projectStoredSessionForOwner(threadId));
           return {
             status: 'ok',
             queryType: 'list_sessions',
@@ -1939,6 +1949,12 @@ export function createKiteMultiWorkspaceRuntimeServer(
       };
       return Object.freeze({
         recoverSession: router.recoverSession.bind(router),
+        recoverCommittedResume: (
+          command: Extract<RuntimeCommand, { readonly type: 'resume_session' }>,
+          committedRevision: number,
+          publish: (notification: RuntimeNotification) => void,
+          commandContext?: Readonly<RuntimeCommandContext>,
+        ) => router.recoverCommittedResume(command, committedRevision, publish, commandContext),
         inspectCommand: async (
           command: RuntimeCommand,
           commandContext: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
@@ -2059,7 +2075,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
                     transactions: {
                       ...services.transactions,
                       commitCommandDecision: (transaction) => {
-                        projection = projectStoredSession(command.sessionId, transaction.snapshot);
+                        projection = projectStoredSessionForOwner(
+                          command.sessionId,
+                          transaction.snapshot,
+                        );
                         owner.commitUnownedInteractionMode!(transaction, state.revision);
                       },
                     },
@@ -2160,7 +2179,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     }
   };
   function queryStoredProjection(sessionId: string): RuntimeQueryResult {
-    const projection = projectStoredSession(sessionId);
+    const projection = projectStoredSessionForOwner(sessionId);
     return projection
       ? {
           status: 'ok',
@@ -2171,25 +2190,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
       : { status: 'not_found', queryType: 'get_session_projection', code: 'session_not_found' };
   }
   const runHostQuery = async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
-    if (
-      query.type === 'get_session_projection' &&
-      (owner.loadCurrentSnapshot(query.sessionId)?.turn.turnIndex ?? 0) > 0
-    ) {
-      try {
-        await reconcileSession(query.sessionId);
-      } catch (error) {
-        // A failed resource reconciliation must not hide readable history.
-        // The persisted recovery authority remains visible in the projection
-        // and in get_session_recovery; commands still report its exact failure.
-        console.error('Session reentry cleanup remains pending.', {
-          sessionId: query.sessionId,
-          error,
-        });
-      }
-    }
-    // Projection queries also seed the Host subscriber registry. In particular,
-    // a failed cleanup retry may have advanced the durable revision after the
-    // subscriber registered; returning only the Store value strands its watermark.
+    // Projection queries refresh the Host subscriber registry from the Store.
+    // Recovery and resource cleanup are admitted only by execution commands.
     if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
     const direct = owner.readSnapshot(() => {
       if (query.type === 'list_sessions') {
@@ -2199,7 +2201,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           sessions: owner
             .listCurrentSessions('', 1_000)
             .map(({ threadId, name }) => {
-              const projection = projectStoredSession(threadId);
+              const projection = projectStoredSessionForOwner(threadId);
               return projection
                 ? { ...projection, displayName: projectRuntimeClientText(name || threadId, 256) }
                 : undefined;
@@ -2284,6 +2286,53 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 affectedFileCount: entry.affectedFileCount ?? 0,
               };
             }),
+        };
+      }
+      if (query.type === 'get_rewind_preview') {
+        const snapshot = owner.loadCurrentSnapshot(query.sessionId);
+        if (!snapshot) {
+          return {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'session_not_found' as const,
+          };
+        }
+        const admission = persistedAdmissionForSession(query.sessionId);
+        if (!admission) {
+          return {
+            status: 'unavailable' as const,
+            queryType: query.type,
+            code: 'session_unavailable' as const,
+          };
+        }
+        if (!owner.storage.checkpoints.getNamedSnapshotEntry(query.sessionId, query.checkpointId)) {
+          return {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'checkpoint_unavailable' as const,
+          };
+        }
+        const preview = previewFilesToCheckpoint(
+          owner.storage,
+          query.sessionId,
+          query.checkpointId,
+          admission.canonicalPath,
+        );
+        return {
+          status: 'ok' as const,
+          queryType: query.type,
+          revision: snapshot.revision,
+          rewindPreview: {
+            checkpointId: query.checkpointId,
+            sessionId: query.sessionId,
+            revision: snapshot.revision,
+            files: preview.files.slice(0, 10_000),
+            lineStatsAvailable: preview.lineStatsAvailable,
+            addedLines: preview.addedLines,
+            removedLines: preview.removedLines,
+            conflictCount: preview.conflictCount,
+            failureCount: preview.failureCount,
+          },
         };
       }
       return undefined;

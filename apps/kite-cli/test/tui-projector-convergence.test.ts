@@ -254,7 +254,7 @@ describe('TUI projector convergence invariants', () => {
         expect.objectContaining({
           kind: 'subagent',
           subagentId: 'child-live-at-terminal',
-          status: 'cancelled',
+          status: 'suspended',
           presentationState: 'sealed',
         }),
       ]),

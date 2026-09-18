@@ -8,7 +8,7 @@
 
 相关：ADR-0127、ADR-0131、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
 
-MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.0`，不得与 Required CI
+MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`，不得与 Required CI
 形成第二套 Bun 基线。
 
 ## 唯一 owner 与 binding

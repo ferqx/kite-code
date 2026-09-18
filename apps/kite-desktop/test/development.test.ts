@@ -9,7 +9,8 @@ import { projectEvent } from '../src/presentation';
 test('desktop protocol configures a provider, modifies and verifies code, then continues durable history', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-development-')));
   const workspace = join(root, 'workspace');
-  for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['workspace', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
   writeFileSync(join(workspace, 'user.txt'), 'existing user content');
   writeFileSync(
     join(root, 'config/kite-code.jsonc'),

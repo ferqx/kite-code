@@ -68,7 +68,7 @@ Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配�
 
 历史目录、无项目启动、跨空间阅读与有界自动重接见[历史与恢复](docs/history-and-recovery.md)。
 
-恢复错误通过共享 Runtime 契约传递；现有错误弹窗的“检查恢复”调用只读摘要及 CAS 恢复命令，成功后清除旧准入缓存并重新校准，保留草稿且不发送。丢回执查询原命令的持久结果，查询失败仍显示未知。相关验证见[UI 测试](test/ui.test.tsx)、[Service 跨空间回归](../kite-service/test/isolated/app-server-process.test.ts)。
+恢复错误通过共享 Runtime 契约传递；现有错误弹窗的“检查恢复”调用只读摘要及 CAS 恢复命令，成功后清除旧准入缓存并重新校准，保留草稿且不发送。丢回执查询原命令的持久结果，查询失败仍显示未知。相关验证见[UI 测试](test/isolated/ui.test.tsx)、[Service 跨空间回归](../kite-service/test/isolated/app-server-process.test.ts)。
 
 Git 分支切换保留关闭与重连以重新构建配置、MCP 与 sandbox owner；在执行前确认整个配套 Service 没有活动任务，防止重载取消其他空间任务。按空间重建依赖尚未实现，不能把保留 Service 的普通空间切换逻辑直接用于 Git 环境变更。
 

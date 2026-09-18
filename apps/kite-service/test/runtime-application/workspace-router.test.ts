@@ -45,6 +45,12 @@ function bridge(label: string, calls: string[]): RuntimeHostExecutionBridge {
     recoverSession: async (sessionId, _publish) => {
       calls.push(`${label}:recover:${sessionId}`);
     },
+    recoverCommittedResume: async (input, committedRevision, _publish, commandContext) => {
+      calls.push(
+        `${label}:recover-committed:${input.commandId}:${committedRevision}:${commandContext?.connectionId ?? 'none'}`,
+      );
+      return undefined;
+    },
     inspectCommand: async (
       input: RuntimeCommand,
       _context: RuntimeHostCommandInspectionContext,
@@ -107,12 +113,29 @@ describe('RuntimeWorkspaceContextFactory and bridge router', () => {
     await router.bindSession('session-b', b);
     await router.recoverSession('session-a', (_notification: RuntimeNotification) => undefined);
     await router.recoverSession('session-b', (_notification: RuntimeNotification) => undefined);
+    await router.recoverCommittedResume(
+      {
+        schema: 'kite.runtime-command.v1',
+        type: 'resume_session',
+        commandId: 'resume-original',
+        sessionId: 'session-b',
+      },
+      7,
+      (_notification: RuntimeNotification) => undefined,
+      {
+        schema: 'kite.runtime-command-context.v1',
+        connectionId: 'connection-b',
+        requestId: 'request-resume',
+        bindingReference: null,
+      },
+    );
 
     expect(calls).toEqual([
       'create:project-a',
       'create:project-b',
       'project-a:recover:session-a',
       'project-b:recover:session-b',
+      'project-b:recover-committed:resume-original:7:connection-b',
     ]);
     expect(
       (

@@ -293,7 +293,9 @@ describe('tool policy', () => {
     expect(decision.requiresApproval).toBe(true);
     expect(decision.risk).toBe('unknown');
     expect(decision.userVisibleSummary).toContain('bun test');
-    expect(decision.expectedEffects).toContain('Runs only after exact user approval');
+    expect(decision.expectedEffects).toContain(
+      'Runs only after approval in the selected interaction mode',
+    );
   });
 
   test('keeps baseline shell commands direct without a command allowlist', () => {

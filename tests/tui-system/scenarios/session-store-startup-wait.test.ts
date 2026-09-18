@@ -6,7 +6,12 @@ import { acquireKiteSessionStoreMaintenance } from '../../../packages/runtime-st
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui, spawnTui, waitForTuiReady } from '../harness/pty-process';
+import {
+  awaitPreInkTuiReady,
+  type PtyProcess,
+  spawnPreInkTui,
+  spawnReadyTui,
+} from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -28,7 +33,7 @@ async function existingHistory() {
     const first = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
     tuis.push(first);
     await submitUserMessage(first, server, question);
-    await waitForText(() => first.outputSinceLastAction(), answer, 15_000);
+    await waitForText(() => first.viewport(), answer, 15_000);
     let sessionId: string | undefined;
     await waitForCondition(
       () => {
@@ -105,24 +110,20 @@ describe.skipIf(process.platform !== 'darwin')('TUI startup Store maintenance wa
       const readyPath = join(fixture.workspace.home, 'holder-ready-1');
       holder = holdStore(fixture.canonical, readyPath);
       await waitForHolder(readyPath);
-      const waiting = spawnTui({
-        cols: 120,
-        rows: 40,
-        mockServer: fixture.server,
-        workspace: fixture.workspace,
-      });
-      fixture.tuis.push(waiting);
-      await waitForCondition(
-        () =>
-          screenContains(waiting.transcript(), '正在自动重试') &&
-          screenContains(waiting.transcript(), '超时后请按提示重试'),
-        'real TUI waiting_for_store progress',
+      const waiting = await spawnPreInkTui(
+        {
+          cols: 120,
+          rows: 40,
+          mockServer: fixture.server,
+          workspace: fixture.workspace,
+        },
+        'waiting_for_store',
         10_000,
       );
+      fixture.tuis.push(waiting);
       expect(waiting.exited).toBe(false);
       await releaseHolder(holder);
-      await waitForTuiReady(waiting, 'main', fixture.workspace);
-      waiting.setRawMode(true);
+      await awaitPreInkTuiReady(waiting, fixture.workspace);
       await submitCommand(waiting, '/resume');
       await waitForCondition(
         () => screenHasSessionRow(waiting.viewport(), question, { active: false }),
@@ -163,18 +164,17 @@ describe.skipIf(process.platform !== 'darwin')('TUI startup Store maintenance wa
       const readyPath = join(fixture.workspace.home, 'holder-ready-2');
       holder = holdStore(fixture.canonical, readyPath);
       await waitForHolder(readyPath);
-      const waiting = spawnTui({
-        cols: 120,
-        rows: 40,
-        mockServer: fixture.server,
-        workspace: fixture.workspace,
-      });
-      fixture.tuis.push(waiting);
-      await waitForCondition(
-        () => screenContains(waiting.transcript(), '正在自动重试'),
-        'real TUI waiting_for_store progress before cancellation',
+      const waiting = await spawnPreInkTui(
+        {
+          cols: 120,
+          rows: 40,
+          mockServer: fixture.server,
+          workspace: fixture.workspace,
+        },
+        'waiting_for_store_start',
         10_000,
       );
+      fixture.tuis.push(waiting);
       waiting.write('\x03');
       await waitForCondition(() => waiting.exited, 'waiting TUI to exit after Ctrl+C', 20_000);
       expect([0, 1]).toContain(await waiting.waitForExit());

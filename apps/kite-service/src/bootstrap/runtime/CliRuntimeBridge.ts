@@ -91,6 +91,8 @@ export interface CliRuntimeBridgeInput {
   readonly workspace: string;
   readonly projectIdentity: ProjectIdentity;
   readonly checkpointPath: string;
+  /** Read a settled Session after its execution coordinator has been released. */
+  readonly storedProjection?: () => RuntimeSessionProjection | undefined;
   readonly config: AgentConfig;
   /** Resolve a client-selected Session route without exposing Provider credentials on the wire. */
   readonly resolveModelConfig?: (route: {
@@ -139,6 +141,7 @@ interface CliRuntimeTurnExecutionInput {
 }
 
 export interface ConfigurableCliRuntimeBridge extends RuntimeHostExecutionBridge {
+  recoverCommittedResume: NonNullable<RuntimeHostExecutionBridge['recoverCommittedResume']>;
   /** Changes the desired configuration for the next admitted Run only. */
   applySelectedConfig(config: AgentConfig): void;
 }
@@ -276,7 +279,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   ): Promise<RuntimeHostPreparedExecution | undefined> {
     if (command.sessionId !== this.#input.sessionId) return undefined;
     const coordinator = this.#runtimeSessionCoordinator.get(command.sessionId);
-    if (!coordinator || coordinator.isTurnActive() || coordinator.lifecycle !== 'idle') return;
+    if (coordinator?.lifecycle !== 'idle') return;
     const state = coordinator.getState();
     const run = coordinator.session.getLifecycleProjection().currentRun;
     if (
@@ -463,7 +466,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     }
     if (command.type === 'resume_session') {
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
-      if (coordinator && !coordinator.isTurnActive() && coordinator.lifecycle === 'idle') {
+      if (coordinator?.lifecycle === 'idle') {
         const state = coordinator.getState();
         const run = coordinator.session.getLifecycleProjection().currentRun;
         if (
@@ -1047,7 +1050,10 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
     let projection: RuntimeSessionProjection;
     try {
-      projection = this.#projection();
+      projection =
+        this.#runtimeSessionCoordinator.get(this.#input.sessionId) === undefined
+          ? (this.#input.storedProjection?.() ?? this.#projection())
+          : this.#projection();
     } catch {
       return Promise.resolve({
         status: 'unavailable',
@@ -1073,7 +1079,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       return Promise.resolve({
         status: 'ok',
         queryType: query.type,
-        revision: this.#revision,
+        revision: projection.revision,
         session: projection,
       });
     }
@@ -1082,10 +1088,10 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       return Promise.resolve({
         status: 'ok',
         queryType: query.type,
-        revision: this.#revision,
+        revision: projection.revision,
         context: {
           sessionId: this.#input.sessionId,
-          revision: this.#revision,
+          revision: projection.revision,
           compactionAvailable: coordinator?.isTurnActive() !== true && !this.#closed,
         },
       });

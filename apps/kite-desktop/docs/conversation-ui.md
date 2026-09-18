@@ -66,7 +66,7 @@ Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示
 
 ## 验证与限制
 
-[UI 回归](../test/ui.test.tsx)覆盖点击直接加载／键盘进入、200 项列表导航、草稿隔离、组词事件、重复与失败提交、加载期间禁止发送、审批与停止、Questionnaire 单题及多题归属提交、问题／截断计划；[共享阅读回归](../../../packages/kite-client-ui/test/reading.test.tsx)覆盖 Markdown 安全边界、阅读位置和展开恢复。[投影回归](../test/presentation.test.ts)覆盖累计正文、迟到事件、工具结果、子代理关系与审批回执；Service interaction projector 回归覆盖 `questions` 安全投影及 `answers` 映射回写。原有真实 App Server 导航、大历史、开发闭环和回执丢失测试继续覆盖服务语义。
+[UI 回归](../test/isolated/ui.test.tsx)覆盖点击直接加载／键盘进入、200 项列表导航、草稿隔离、组词事件、重复与失败提交、加载期间禁止发送、审批与停止、Questionnaire 单题及多题归属提交、问题／截断计划；[共享阅读回归](../../../packages/kite-client-ui/test/reading.test.tsx)覆盖 Markdown 安全边界、阅读位置和展开恢复。[投影回归](../test/presentation.test.ts)覆盖累计正文、迟到事件、工具结果、子代理关系与审批回执；Service interaction projector 回归覆盖 `questions` 安全投影及 `answers` 映射回写。原有真实 App Server 导航、大历史、开发闭环和回执丢失测试继续覆盖服务语义。
 
 2026-09-08 使用当前 React 组件与临时测试数据在浏览器中检查 50 项列表、Markdown／工具／子代理、会话预览返回、草稿和审批布局；1440 × 960、900 × 760 及原生配置最小值 760 × 540 均检查了输入区和页面宽度。最小窗口下审批区域独立滚动，输入与停止可见，无页面横向溢出；窗口缩放的底部跟随问题已修正。测试数据入口位于临时目录，不作为应用路由交付。
 

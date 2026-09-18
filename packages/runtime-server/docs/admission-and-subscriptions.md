@@ -5,6 +5,7 @@
 先校验协议/初始化状态和绑定范围，再把 command/query 交给 RuntimeAccess。冻结连接上下文沿 inspect/commit 传递，不允许从请求体或 Session 再猜另一份身份。Server 不分配业务 writer authority。
 
 订阅向客户端传递安全通知；连接关闭释放对应订阅资源，不删除 Session。恢复连接后的 snapshot/replay 遵循当前协议边界，不能恢复 raw event 漏洞或代替完整 History API。
+订阅名额在鉴权前预留，等待鉴权的请求也计入连接和全局上限；鉴权失败、异常、连接关闭或 drain 开始都会阻止新订阅并释放名额。同一订阅的重复关闭等待同一次 iterator 清理并观察同一失败。关闭时先释放连接计数并关闭 carrier，再等待 Host iterator 清理。drain 的超时覆盖订阅、outbound 和连接关闭；超时返回错误，不能视作 iterator 已完成清理。
 
 carrier 决定 stdio/socket/WebSocket framing，Server 不因 transport 不同改变 Kernel 调度与 Store 提交逻辑。拒绝与不可用必须明确返回，不能以空快照掩盖错误。initialize、command、query 和 subscribe 均保留 admission 分类：授权拒绝使用 `unauthorized`，基础设施不可用使用现有 `internal_error` 与 `detailCode=temporarily_unavailable`，消息为 `Runtime admission unavailable`。两者都不调用 Runtime backend；没有新增自动命令重放。
 

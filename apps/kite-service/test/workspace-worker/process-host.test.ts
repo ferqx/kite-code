@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
@@ -228,7 +236,10 @@ closeSync(3);
 `,
       );
       chmodSync(workerScript, 0o700);
-      const host = createWorkspaceWorkerProcessHost({ runtimeExecutable: process.execPath });
+      const privateRuntime = join(root, 'bun-runtime');
+      copyFileSync(process.execPath, privateRuntime);
+      chmodSync(privateRuntime, 0o700);
+      const host = createWorkspaceWorkerProcessHost({ runtimeExecutable: privateRuntime });
       const child = await host.spawn({
         executable: { path: workerScript, mode: 'source', buildId: 'empty-env-build' },
         args: [],

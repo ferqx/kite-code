@@ -1919,8 +1919,9 @@ describe('closed RuntimeClientEvent reducer', () => {
       role: 'review',
       name: 'Review',
       status: 'running',
+      concurrencyGroupId: 'review-batch',
     });
-    expect(child(state)).toMatchObject({ status: 'running' });
+    expect(child(state)).toMatchObject({ status: 'running', concurrencyGroupId: 'review-batch' });
     state = dispatch(state, {
       type: 'subagent.review',
       subagentId: 'child-lifecycle',

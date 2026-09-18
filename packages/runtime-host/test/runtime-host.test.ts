@@ -1553,6 +1553,119 @@ describe('runtime host command and projection authority', () => {
     ]);
   });
 
+  test('starts other session shutdowns and cleanup while one cancellation write stalls', async () => {
+    const order: string[] = [];
+    const blockedShutdown = deferred();
+    const bridge = new TestExecutionBridge();
+    for (const sessionId of ['session-1', 'session-2'])
+      bridge.projections.set(sessionId, projection(sessionId, 0));
+    bridge.prepareImplementation = async (command) => {
+      if (command.type !== 'start_turn') throw new Error(`unexpected command: ${command.type}`);
+      bridge.projections.set(command.sessionId, projection(command.sessionId, 1));
+      return {
+        receipt: applied(command.commandId, command.sessionId, 1),
+        execution: {
+          sessionId: command.sessionId,
+          operationId: command.commandId,
+          committedRevision: 1,
+          operation: 'turn',
+          run: async (signal: AbortSignal) => {
+            order.push(`started:${command.sessionId}`);
+            await new Promise<void>((resolve) =>
+              signal.addEventListener('abort', () => resolve(), { once: true }),
+            );
+            order.push(`aborted:${command.sessionId}`);
+          },
+        },
+      };
+    };
+    bridge.shutdownImplementation = async (sessionId) => {
+      order.push(`shutdown:${sessionId}`);
+      if (sessionId === 'session-1') await blockedShutdown.promise;
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    await host.command(startCommand('turn-1', 'session-1', 0));
+    await host.command(startCommand('turn-2', 'session-2', 0));
+    await until(() => order.includes('started:session-2'));
+    const dispose = host[Symbol.asyncDispose]();
+    await until(() => order.includes('aborted:session-2'));
+    expect(order).toContain('shutdown:session-1');
+    expect(order).toContain('shutdown:session-2');
+    expect(order.indexOf('shutdown:session-2')).toBeLessThan(order.indexOf('aborted:session-2'));
+    expect(order).not.toContain('aborted:session-1');
+
+    blockedShutdown.resolve();
+    await dispose;
+    expect(order).toContain('aborted:session-1');
+  });
+
+  test('reports stalled shutdown without closing storage after a late cancellation write', async () => {
+    const blocked = deferred();
+    const order: string[] = [];
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 0));
+    bridge.shutdownImplementation = async () => {
+      await blocked.promise;
+    };
+    bridge.closeImplementation = async () => {
+      order.push('bridge:close');
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(() => order.push('storage:close')),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId: 'session-1',
+    });
+    await expect(host[Symbol.asyncDispose]()).rejects.toThrow('session cancellation');
+    blocked.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual([]);
+  }, 12_000);
+
+  test('reports stalled provider cleanup without closing bridge or storage', async () => {
+    const cleanup = deferred();
+    const order: string[] = [];
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 0));
+    bridge.prepareImplementation = async (command) => {
+      if (command.type !== 'start_turn') throw new Error(`unexpected command: ${command.type}`);
+      return {
+        receipt: applied(command.commandId, command.sessionId, 1),
+        execution: {
+          sessionId: command.sessionId,
+          operationId: command.commandId,
+          committedRevision: 1,
+          operation: 'turn',
+          run: async (signal: AbortSignal) => {
+            await new Promise<void>((resolve) =>
+              signal.addEventListener('abort', () => resolve(), { once: true }),
+            );
+            await cleanup.promise;
+          },
+        },
+      };
+    };
+    bridge.closeImplementation = async () => {
+      order.push('bridge:close');
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(() => order.push('storage:close')),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.command(startCommand('turn-1', 'session-1', 0));
+    await expect(host[Symbol.asyncDispose]()).rejects.toThrow('session cleanup');
+    cleanup.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual([]);
+  }, 12_000);
+
   test('runs restart recovery once before the first execution dispatch', async () => {
     const order: string[] = [];
     const bridge = new TestExecutionBridge();
@@ -1665,6 +1778,61 @@ test('Host lifecycle preserves explicit abort causes and defaults legacy strings
     createRuntimeAbortReason('error', 'Runtime Host shutdown.'),
     createRuntimeAbortReason('error', 'Lease lost.'),
   ]);
+});
+
+test('Host lifecycle waits for a successor scheduled during predecessor cleanup', async () => {
+  const lifecycle = new SessionLifecycleSupervisor();
+  let releaseSuccessor!: () => void;
+  const successorGate = new Promise<void>((resolve) => {
+    releaseSuccessor = resolve;
+  });
+  let successorStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    successorStarted = resolve;
+  });
+  lifecycle.schedule('session', {
+    operationId: 'first',
+    operation: 'turn',
+    execute: async () => {},
+    onSettled: () => {
+      lifecycle.schedule('session', {
+        operationId: 'second',
+        operation: 'turn',
+        execute: async () => {
+          successorStarted();
+          await successorGate;
+        },
+      });
+    },
+  });
+  let idle = false;
+  const wait = lifecycle.waitForIdle('session').then(() => {
+    idle = true;
+  });
+  await started;
+  expect(idle).toBe(false);
+  releaseSuccessor();
+  await wait;
+  expect(lifecycle.isActive('session')).toBe(false);
+});
+
+test('Host lifecycle rejects a queued successor after the session closes', async () => {
+  const lifecycle = new SessionLifecycleSupervisor();
+  let executed = false;
+  lifecycle.close('session', 'Runtime Host shutdown.');
+
+  expect(
+    lifecycle.schedule('session', {
+      operationId: 'after-close',
+      operation: 'turn',
+      allowQueuedSuccessor: true,
+      execute: async () => {
+        executed = true;
+      },
+    }),
+  ).toBe(false);
+  await lifecycle.waitForIdle('session');
+  expect(executed).toBe(false);
 });
 
 function respondInteractionCommand(): Extract<RuntimeCommand, { type: 'respond_interaction' }> {

@@ -47,7 +47,7 @@ export async function createOssCandidateFixture(
     commitSha: 'a'.repeat(40),
     sourceDate: '2026-08-04T00:00:00.000Z',
     sourceDirty: false,
-    bunVersion: '1.4.0',
+    bunVersion: '1.4.2',
     target: {
       id: target.id,
       os: target.os,

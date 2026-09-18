@@ -42,6 +42,7 @@ export class SessionLifecycleSupervisor {
   schedule(sessionId: string, input: RuntimeSessionExecution): boolean {
     const lifecycle = this.#session(sessionId);
     if (
+      lifecycle.closed ||
       (!input.allowQueuedSuccessor && !this.canSchedule(sessionId)) ||
       lifecycle.scheduled.has(input.operationId)
     )
@@ -90,7 +91,13 @@ export class SessionLifecycleSupervisor {
   }
 
   async waitForIdle(sessionId: string): Promise<void> {
-    await this.#sessions.get(sessionId)?.tail;
+    const lifecycle = this.#sessions.get(sessionId);
+    if (!lifecycle) return;
+    while (true) {
+      const tail = lifecycle.tail;
+      await tail;
+      if (lifecycle.tail === tail && lifecycle.scheduled.size === 0) return;
+    }
   }
 
   sessionIds(): readonly string[] {

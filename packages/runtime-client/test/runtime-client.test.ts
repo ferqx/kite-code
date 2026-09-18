@@ -348,6 +348,132 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('times out an unanswered command without replaying it or accepting a late receipt', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    await client.connect();
+    await expect(client.command(startCommand())).rejects.toMatchObject({ code: 'request_timeout' });
+    expect(connection.requests('runtime/command')).toHaveLength(1);
+    const command = connection.requests('runtime/command')[0]!;
+    connection.push(result(command.id, { status: 'applied', commandId: 'late-command' }));
+    await tick();
+    expect(connection.requests('runtime/command')).toHaveLength(1);
+    await client.close();
+  });
+
+  test('times out a transport send that never settles', async () => {
+    const connection = new FakeConnection(async (message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+      if (message.method === 'runtime/query') await new Promise<void>(() => undefined);
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    await client.connect();
+    await expect(
+      client.query({ schema: 'kite.runtime-query.v1', type: 'list_sessions' }),
+    ).rejects.toMatchObject({ code: 'request_timeout' });
+    await client.close();
+  });
+
+  test('times out a request waiting for transport connection', async () => {
+    const client = new RuntimeClient({
+      transport: { connect: () => new Promise<RuntimeClientConnection>(() => undefined) },
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    await expect(
+      client.query({ schema: 'kite.runtime-query.v1', type: 'list_sessions' }),
+    ).rejects.toMatchObject({ code: 'request_timeout' });
+    await client.close();
+  });
+
+  test('cancels a History request while connection is pending', async () => {
+    const controller = new AbortController();
+    const client = new RuntimeClient({
+      transport: { connect: () => new Promise<RuntimeClientConnection>(() => undefined) },
+      clientInfo: clientInfo(),
+      history: 'protocol',
+      requestTimeoutMs: 100,
+    });
+    const pending = client.history!.loadSession('session-1', undefined, {
+      signal: controller.signal,
+    });
+    controller.abort(new Error('cancelled'));
+    await expect(pending).rejects.toThrow('cancelled');
+    await client.close();
+  });
+
+  test('times out subscribeReady while connection is pending', async () => {
+    const client = new RuntimeClient({
+      transport: { connect: () => new Promise<RuntimeClientConnection>(() => undefined) },
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    await expect(client.subscribeReady({ spec: { scope: 'sessions' } })).rejects.toMatchObject({
+      code: 'request_timeout',
+    });
+    await client.close();
+  });
+
+  test('times out subscribeReady when the initial ready boundary never arrives', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+      if (message.method === 'runtime/subscribe')
+        target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    await expect(client.subscribeReady({ spec: { scope: 'sessions' } })).rejects.toMatchObject({
+      code: 'request_timeout',
+    });
+    expect(connection.requests('runtime/subscribe')).toHaveLength(1);
+    await expect(
+      connection.send({ jsonrpc: '2.0', id: 'after-timeout', method: 'server/ping', params: {} }),
+    ).rejects.toThrow('closed');
+    await client.close();
+  });
+
+  test('closes the connection when an in-flight subscribe is cancelled before its ack', async () => {
+    const controller = new AbortController();
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+      // The subscribe ack is withheld while the Server may already own a slot.
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    const pending = client.subscribeReady({
+      spec: { scope: 'sessions' },
+      signal: controller.signal,
+    });
+    await tick();
+    expect(connection.requests('runtime/subscribe')).toHaveLength(1);
+    controller.abort(new Error('subscribe cancelled'));
+    await expect(pending).rejects.toThrow('subscribe cancelled');
+    await expect(
+      connection.send({ jsonrpc: '2.0', id: 'after-cancel', method: 'server/ping', params: {} }),
+    ).rejects.toThrow('closed');
+    await client.close();
+  });
+
   test('a failed automatic resubscribe closes its iterator instead of leaving a live waiter', async () => {
     let subscriptions = 0;
     const connection = new FakeConnection((message, target) => {

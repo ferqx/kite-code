@@ -4,7 +4,7 @@
 
 ## 环境基线
 
-Required CI、release/platform smoke 与正式 Runtime qualification 统一使用 Bun `1.4.0`。性能对比只有在
+Required CI、release/platform smoke 与正式 Runtime qualification 统一使用 Bun `1.4.2`。性能对比只有在
 相同 Bun 版本和同类 runner 环境下才可作为正式基线证据；其他本地版本只提供补充诊断。
 
 ## 目录归属
@@ -203,7 +203,7 @@ fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility
 `bun run check:test-ownership` 验证目录、deep import、root 散落、isolated 分类和 test discovery。
 `bun run test` 验证默认执行，系统/qualification 使用各自显式命令。
 `tests/integration/scripts/ci-bun-baseline.test.ts` 验证所有 `setup-bun` workflow 与 formal qualification
-共同 pin Bun `1.4.0`，普通Required/keyring/stdio/transport/ACL workflow只取消同一PR/ref的过期运行，正式release/platform
+共同 pin Bun `1.4.2`，普通Required/keyring/stdio/transport/ACL workflow只取消同一PR/ref的过期运行，正式release/platform
 evidence不自动取消，并确保native keyring push只覆盖`main`且path filter与执行命令共同指向
 `tests/qualification/mcp-keyring-platform-smoke.test.ts`。同一测试还验证平台job有界timeout、stdio只有一个workflow owner，以及
 execution-boundary workflow 的触发路径与 adversarial command 全部使用迁移后的 `apps/kite-service/test/**` current

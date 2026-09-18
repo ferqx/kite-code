@@ -3,7 +3,7 @@ import type { AppMcpServer } from '@kite-ai/kite-app-contract';
 import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { CommandResultUnknown, DesktopClient, type DesktopView } from '../src/client';
+import { CommandResultUnknown, DesktopClient, type DesktopView } from '../../src/client';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 class TestResizeObserver {
@@ -43,8 +43,8 @@ for (const [key, value] of Object.entries(globals)) {
 }
 // React DOM must observe a DOM when it initializes its input event support.
 const { createRoot } = await import('react-dom/client');
-const { App } = await import('../src/App');
-const { Settings } = await import('../src/Settings');
+const { App } = await import('../../src/App');
+const { Settings } = await import('../../src/Settings');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
   if (root) await act(() => root?.unmount());

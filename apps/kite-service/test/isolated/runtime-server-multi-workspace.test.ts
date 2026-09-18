@@ -8,17 +8,24 @@ import {
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccessNotification,
 } from '@kite-ai/runtime-contract';
-import { resolveProjectIdentity } from '@kite-ai/runtime-host';
+import { createRuntimeCommandCommitEvidence, resolveProjectIdentity } from '@kite-ai/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateSession,
+} from '@kite-ai/runtime-host/kernel-adapter';
+import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
+import { EffectSupervisor } from '../../../../packages/runtime-host/src/lifecycle/effect-supervisor';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
+import { commitStartTurnCommand } from '../../src/bootstrap/runtime/turn-command-decision';
 
 test('runs a real Host on the KASD Session Store and cleanly hands off its generation', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-app-server-storage-'));
@@ -1431,3 +1438,146 @@ test('recovery query is read-only and recovery command requires confirmed cleanu
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('default Service composition replays a committed obsolete-admission resume without reusing its receipt as a dispatch', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-committed-resume-replay-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const model = createMockModelServer();
+  model.setResponses([{ message: { content: 'resumed-original-run' } }]);
+  const sessionId = 'committed-resume-session';
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'committed-resume-host',
+  });
+  let owner: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined;
+  let runtime: RuntimeClient | undefined;
+  try {
+    const identity = admissionIdentity(workspace);
+    storageOwner.admitWorkspace(identity);
+    const recoveryIdentityKey = storageOwner.storage.recoveryIdentities.getOrCreate(sessionId, () =>
+      'a'.repeat(64),
+    );
+    const initial = createRuntimeHostStateInitialState({
+      threadId: sessionId,
+      userId: 'user-resume-model',
+      workspace,
+      projectId: identity.projectId,
+      canonicalWorkspaceDigest: identity.workspaceDigest,
+      recoveryIdentityKey,
+    });
+    const createCommand = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'create_session' as const,
+      commandId: 'seed-session-create',
+      workspace,
+      bootstrapSessionId: sessionId,
+    };
+    storageOwner.storage.transactions.commitDecision({
+      sessionId,
+      events: [],
+      snapshot: initial,
+      commandReceipt: createRuntimeStoredCommandReceipt(
+        createRuntimeCommandCommitEvidence({
+          command: createCommand,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+        initial.revision,
+      ),
+    });
+    const services = new EffectSupervisor(storageOwner.storage).services;
+    const resume = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'resume_session' as const,
+      commandId: 'resume-original-run',
+      sessionId,
+    };
+    let committedRevision = -1;
+    let originalRunId = '';
+    storageOwner.runWithSessionExecution(sessionId, () => {
+      const session = createRuntimeHostStateSession({
+        state: initial,
+        services,
+        clock: () => new Date().toISOString(),
+        id: () => crypto.randomUUID(),
+      });
+      const startCommand = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'start_turn' as const,
+        commandId: 'seed-original-run',
+        sessionId,
+        expectedRevision: 0,
+        input: 'Continue after the old provider admission.',
+      };
+      const started = commitStartTurnCommand(
+        session,
+        startCommand,
+        createRuntimeCommandCommitEvidence({
+          command: startCommand,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      originalRunId = started.descriptor.turnId;
+      session.activateRun(started.descriptor.turnId);
+      session.processEvent({
+        type: 'provider.admission_required',
+        interactionId: 'old-global-admission',
+        providerId: 'offline-provider',
+        source: 'explicit',
+        providerStatus: 'login_required',
+        retryable: true,
+      });
+      const committed = session.commitCommandBatch(
+        [
+          {
+            type: 'provider.admission_cancelled',
+            interactionId: 'old-global-admission',
+            providerId: 'offline-provider',
+          },
+        ],
+        createRuntimeCommandCommitEvidence({
+          command: resume,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      committedRevision = committed.receipt.committedRevision;
+      expect(session.getLifecycleProjection().currentRun?.status).toBe('running');
+    });
+    expect(
+      storageOwner.storage.sessions
+        .loadEventsStrict(sessionId)
+        .some(({ event }) => event.type === 'model.invocation_prepared'),
+    ).toBe(false);
+    owner = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: databasePath,
+      storageOwner,
+      workspaces: [runtimeInput(workspace, model.baseURL, 'resume-model')],
+    });
+    runtime = client(owner, admission(workspace), 'resume-replay-client');
+    expect(await runtime.command(resume)).toMatchObject({
+      status: 'idempotent_replay',
+      originalRevision: committedRevision,
+    });
+    for (let i = 0; i < 200 && model.getRequestCount() === 0; i++) await Bun.sleep(10);
+    expect(model.getRequestCount()).toBe(1);
+    for (
+      let i = 0;
+      i < 200 && storageOwner.storage.runs?.get(sessionId, originalRunId)?.status !== 'completed';
+      i++
+    )
+      await Bun.sleep(10);
+    expect(storageOwner.storage.runs?.get(sessionId, originalRunId)?.status).toBe('completed');
+    expect(storageOwner.storage.runs?.list({ sessionId, limit: 10 }).entries).toHaveLength(1);
+    expect(await runtime.command(resume)).toMatchObject({ status: 'idempotent_replay' });
+    expect(model.getRequestCount()).toBe(1);
+  } finally {
+    await runtime?.close();
+    await owner?.[Symbol.asyncDispose]();
+    model.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);

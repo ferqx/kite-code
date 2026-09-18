@@ -21,7 +21,8 @@ import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge'
 
 test('lost receipt survives repeated internal recovery failures without replay or connection notices', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-lost-receipt-')));
-  for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['workspace', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
   const workspace = join(root, 'workspace');
   const marker = join(workspace, 'marker.txt');
   const model = createMockModelServer();

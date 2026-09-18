@@ -147,7 +147,7 @@ function validReport() {
     perCaseTimeoutMs: 180_000,
     startedAt: '2026-08-01T00:00:00.000Z',
     finishedAt: '2026-08-01T00:00:01.000Z',
-    environment: { platform: 'linux', arch: 'x64', bunVersion: '1.4.0' },
+    environment: { platform: 'linux', arch: 'x64', bunVersion: '1.4.2' },
     source,
     attempts,
   });

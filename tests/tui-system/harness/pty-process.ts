@@ -722,6 +722,47 @@ export async function spawnReadyTui(
   }
 }
 
+/** Wait for a startup surface before Ink mounts, preserving canonical-mode Ctrl+C. */
+export async function spawnPreInkTui(
+  opts: PtyProcessOptions,
+  readiness: 'preparation' | 'waiting_for_store' | 'waiting_for_store_start',
+  timeoutMs: number,
+): Promise<PtyProcess> {
+  const tui = spawnTui(opts);
+  try {
+    await waitForCondition(
+      () => {
+        const screen = tui.scrollback();
+        if (readiness === 'preparation') {
+          return /正在备份、整理并核对会话数据|正在提交并复核会话数据/u.test(screen);
+        }
+        return (
+          screenContains(screen, '正在自动重试') &&
+          (readiness === 'waiting_for_store_start' || screenContains(screen, '超时后请按提示重试'))
+        );
+      },
+      `pre-Ink ${readiness} progress`,
+      timeoutMs,
+    );
+    return tui;
+  } catch (error) {
+    await tui.killAndWait().catch(() => {});
+    throw new Error(
+      `TUI failed pre-Ink ${readiness} progress. Last output:\n${stripAnsi(tui.transcript()).slice(-8_000)}`,
+      { cause: error },
+    );
+  }
+}
+
+/** Transition a pre-Ink fixture to normal harness-owned input after startup completes. */
+export async function awaitPreInkTuiReady(
+  tui: PtyProcess,
+  workspace?: TestWorkspace,
+): Promise<void> {
+  tui.setRawMode(true);
+  await waitForTuiReady(tui, 'main', workspace);
+}
+
 /** Wait for one already-running TUI to expose a complete, stable semantic surface. */
 export async function waitForTuiReady(
   tui: PtyProcess,

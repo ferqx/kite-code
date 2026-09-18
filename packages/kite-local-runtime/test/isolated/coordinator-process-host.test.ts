@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -48,6 +56,13 @@ writeSync(fd, Buffer.from(JSON.stringify({
 closeSync(fd);
 setInterval(() => undefined, 1000);
 `;
+
+function privateRuntimeExecutable(root: string): string {
+  const path = join(root, 'bun-runtime');
+  copyFileSync(process.execPath, path);
+  chmodSync(path, 0o700);
+  return path;
+}
 
 describe('Coordinator process executable and host', () => {
   test('resolves source and installed paths exactly without PATH fallback', async () => {
@@ -127,7 +142,9 @@ describe('Coordinator process executable and host', () => {
       const path = join(root, 'coordinator-fixture');
       writeFileSync(path, readyScript, { mode: 0o700 });
       chmodSync(path, 0o700);
-      const child = await createCoordinatorProcessHost().spawn({
+      const child = await createCoordinatorProcessHost({
+        runtimeExecutable: privateRuntimeExecutable(root),
+      }).spawn({
         executable: { path, mode: 'source', buildId: 'build-host-1' },
         args: [],
         cwd: root,
@@ -162,7 +179,9 @@ describe('Coordinator process executable and host', () => {
         readyScript.replace('closeSync(fd);', "writeSync(fd, '{}\\n');\ncloseSync(fd);"),
         { mode: 0o700 },
       );
-      const child = await createCoordinatorProcessHost().spawn({
+      const child = await createCoordinatorProcessHost({
+        runtimeExecutable: privateRuntimeExecutable(root),
+      }).spawn({
         executable: { path, mode: 'source', buildId: 'build-host-1' },
         args: [],
         cwd: root,
@@ -183,7 +202,9 @@ describe('Coordinator process executable and host', () => {
       roots.push(root);
       const path = join(root, 'coordinator-fixture');
       writeFileSync(path, readyScript, { mode: 0o700 });
-      const child = await createCoordinatorProcessHost().spawn({
+      const child = await createCoordinatorProcessHost({
+        runtimeExecutable: privateRuntimeExecutable(root),
+      }).spawn({
         executable: { path, mode: 'source', buildId: 'build-host-1' },
         args: [],
         cwd: root,

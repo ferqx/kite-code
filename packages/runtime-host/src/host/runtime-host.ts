@@ -278,7 +278,16 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           }
 
           await committed.activation?.((notification) => this.#notifications.publish(notification));
-          await this.#refreshReceiptSession(committed.receipt);
+          // A projection read cannot strand an already activated, durable Run.
+          // Preserve the read error for the caller after dispatch is secured.
+          let refreshFailed = false;
+          let refreshError: unknown;
+          try {
+            await this.#refreshReceiptSession(committed.receipt);
+          } catch (error) {
+            refreshFailed = true;
+            refreshError = error;
+          }
           const prepared = committed.preparedExecution;
           if (prepared?.execution)
             this.#schedulePreparedExecution(
@@ -298,6 +307,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
               createRuntimeAbortReason('user', 'Runtime session closed.'),
             );
           }
+          if (refreshFailed) throw refreshError;
           return receiptFromStoredReceipt(stored);
         };
         return await (command.type === 'create_session' ||
@@ -700,8 +710,41 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   }
 
   async #dispose(): Promise<void> {
-    if (this.#startPromise) await Promise.allSettled([this.#startPromise]);
-    await Promise.allSettled([...this.#activeAccesses]);
+    const deadline = Date.now() + 10_000;
+    class DisposalTimeout extends Error {}
+    const awaitStep = async <T>(work: Promise<T>, step: string): Promise<T> => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        throw new DisposalTimeout(`Runtime Host disposal timed out during ${step}.`);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new DisposalTimeout(`Runtime Host disposal timed out during ${step}.`)),
+              remaining,
+            );
+          }),
+        ]);
+        if (Date.now() >= deadline)
+          throw new DisposalTimeout(`Runtime Host disposal timed out during ${step}.`);
+        return result;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+    try {
+      if (this.#startPromise) await awaitStep(Promise.allSettled([this.#startPromise]), 'startup');
+      await awaitStep(Promise.allSettled([...this.#activeAccesses]), 'active requests');
+    } catch (error) {
+      for (const sessionId of this.#lifecycle.sessionIds())
+        this.#lifecycle.close(
+          sessionId,
+          createRuntimeAbortReason('error', 'Runtime Host disposed.'),
+        );
+      throw error;
+    }
     const sessionIds = new Set([
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
@@ -712,34 +755,60 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       }
     }
     const failures: unknown[] = [];
-    for (const sessionId of sessionIds) {
-      try {
-        if (this.#ownsSessionExecution(sessionId)) {
-          await this.#bridge.shutdownSession(
+    const shutdownWork = Promise.allSettled(
+      [...sessionIds].map(async (sessionId) => {
+        try {
+          if (this.#ownsSessionExecution(sessionId)) {
+            await this.#bridge.shutdownSession(
+              sessionId,
+              'Runtime Host disposed.',
+              (notification) => {
+                this.#notifications.publish(notification);
+              },
+            );
+          }
+        } finally {
+          // A stalled cancellation write for another Session must not delay
+          // this Session's local provider abort and cleanup.
+          this.#lifecycle.close(
             sessionId,
-            'Runtime Host disposed.',
-            (notification) => {
-              this.#notifications.publish(notification);
-            },
+            createRuntimeAbortReason('error', 'Runtime Host disposed.'),
           );
         }
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    for (const sessionId of sessionIds)
-      this.#lifecycle.close(sessionId, createRuntimeAbortReason('error', 'Runtime Host disposed.'));
-    await Promise.all([...sessionIds].map((sessionId) => this.#lifecycle.waitForIdle(sessionId)));
+      }),
+    );
+    let shutdownResults: Awaited<typeof shutdownWork>;
     try {
-      await this.#bridge.close();
+      shutdownResults = await awaitStep(shutdownWork, 'session cancellation');
     } catch (error) {
+      for (const sessionId of sessionIds)
+        this.#lifecycle.close(
+          sessionId,
+          createRuntimeAbortReason('error', 'Runtime Host disposed.'),
+        );
+      throw error;
+    }
+    for (const result of shutdownResults) {
+      if (result.status === 'rejected') failures.push(result.reason);
+    }
+    await awaitStep(
+      Promise.all([...sessionIds].map((sessionId) => this.#lifecycle.waitForIdle(sessionId))),
+      'session cleanup',
+    );
+    try {
+      await awaitStep(this.#bridge.close(), 'bridge close');
+    } catch (error) {
+      if (error instanceof DisposalTimeout) throw error;
       failures.push(error);
     }
     try {
-      await this.#moduleRegistry.dispose();
+      await awaitStep(this.#moduleRegistry.dispose(), 'module disposal');
     } catch (error) {
+      if (error instanceof DisposalTimeout) throw error;
       failures.push(error);
     }
+    if (Date.now() >= deadline)
+      throw new DisposalTimeout('Runtime Host disposal timed out before storage close.');
     this.#disposed = true;
     this.#notifications.close();
     this.#registry.close();

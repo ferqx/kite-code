@@ -513,6 +513,42 @@ describe('Runtime Host State session', () => {
     });
   });
 
+  test('projects a queued predecessor revision with the Run visible at that revision', () => {
+    const state = { ...initialState(), revision: 5 } as AgentState;
+    const f = fixture(state, true);
+    f.runs.set('state-session-test\0run-old', {
+      sessionId: 'state-session-test',
+      runId: 'run-old',
+      startCommandId: 'start-old',
+      phase: 'building',
+      status: 'cancelled',
+      createdRevision: 1,
+      lastRevision: 4,
+      createdAtMs: 100,
+      startedAtMs: 110,
+      finishedAtMs: 120,
+      terminal: { reasonCode: 'cancelled', safeRetry: false, recoveryEntry: 'new_run' },
+    });
+    f.runs.set('state-session-test\0run-new', {
+      sessionId: 'state-session-test',
+      runId: 'run-new',
+      startCommandId: 'start-new',
+      phase: 'building',
+      status: 'queued',
+      createdRevision: 6,
+      lastRevision: 6,
+      createdAtMs: 200,
+    });
+    const session = createRuntimeHostStateSession(f.input);
+
+    expect(session.getLifecycleProjection(state).currentRun).toMatchObject({
+      runId: 'run-old',
+      initialTurnId: 'run-old',
+      status: 'cancelled',
+      revision: 4,
+    });
+  });
+
   test('refines a recovered unknown Run only to a precise terminal without moving its finish clock', () => {
     const f = fixture(initialState(), true);
     f.runs.set('state-session-test\0turn-1', {

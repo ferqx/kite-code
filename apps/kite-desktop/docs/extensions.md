@@ -10,4 +10,4 @@ Skills 只展示实际目录中的名称、描述、来源、available／disable
 
 Web 只读入口不提供这组 App Control 操作；共享页面不因此扩大 Browser principal 权限。扩展功能沿用既有 App Control、配置存储与凭据 owner；Electron 迁移只把桌面调用接到具名 preload bridge，没有新增业务协议或凭据 authority。
 
-验证：[桌面 UI](../test/ui.test.tsx)核对真实状态展示、显式认证按钮及安装入口缺席；[协议导航回归](../test/navigation.test.ts)连接真实 App Server，核对两类快照、操作拒绝、丢失回执不重放和项目隔离；Service 的 [MCP owner](../../kite-service/test/isolated/app-control/mcp-owner.test.ts)与 [Skill owner](../../kite-service/test/isolated/app-control/skill-catalog-owner.test.ts)覆盖 CAS、动作分发、未知结果及目录隔离。HTML 测试数据预览不证明真实外部 Server 或 Electron 窗口已完成系统认证；[原生验收](native-validation.md)中的包内 OAuth 结果属于迁移前 Tauri 与配套 Service 的历史证据，不能替代 Electron 认证流程验收。
+验证：[桌面 UI](../test/isolated/ui.test.tsx)核对真实状态展示、显式认证按钮及安装入口缺席；[协议导航回归](../test/navigation.test.ts)连接真实 App Server，核对两类快照、操作拒绝、丢失回执不重放和项目隔离；Service 的 [MCP owner](../../kite-service/test/isolated/app-control/mcp-owner.test.ts)与 [Skill owner](../../kite-service/test/isolated/app-control/skill-catalog-owner.test.ts)覆盖 CAS、动作分发、未知结果及目录隔离。HTML 测试数据预览不证明真实外部 Server 或 Electron 窗口已完成系统认证；[原生验收](native-validation.md)中的包内 OAuth 结果属于迁移前 Tauri 与配套 Service 的历史证据，不能替代 Electron 认证流程验收。

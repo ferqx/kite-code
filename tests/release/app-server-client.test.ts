@@ -45,7 +45,7 @@ describe('release App Server client pairing', () => {
     const systemHome = join(root, 'home');
     const kiteHome = join(root, 'kite-home');
     const workspace = join(root, 'workspace');
-    for (const path of [systemHome, kiteHome, workspace]) mkdirSync(path);
+    for (const path of [systemHome, kiteHome, workspace]) mkdirSync(path, { mode: 0o700 });
     writeFileSync(
       join(kiteHome, 'kite-code.jsonc'),
       JSON.stringify({

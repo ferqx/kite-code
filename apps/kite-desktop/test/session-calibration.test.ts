@@ -17,7 +17,8 @@ import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge'
 // Real Service, with response gates at the renderer IPC boundary. No private client state is patched.
 async function fixture(responses: MockResponse[] = []) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-session-cache-')));
-  for (const name of ['workspace', 'home', 'runtime', 'config']) mkdirSync(join(root, name));
+  for (const name of ['workspace', 'home', 'runtime', 'config'])
+    mkdirSync(join(root, name), { mode: 0o700 });
   const workspace = join(root, 'workspace');
   const model = createMockModelServer();
   model.setResponses(responses);

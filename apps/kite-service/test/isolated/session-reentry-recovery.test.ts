@@ -20,8 +20,9 @@ import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
+import { createRuntimeOperationGate } from '../../src/runtime-application/operation-gate';
 
-test('a failed reentry reconciliation still advances a subscribed Session to the durable revision', async () => {
+test('projection reads stay read-only during quiesce and command recovery publishes a failed cleanup revision', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-reentry-watermark-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -33,8 +34,11 @@ test('a failed reentry reconciliation still advances a subscribed Session to the
   });
   let appendOnReentry = false;
   let appended = false;
+  let reconciliationCalls = 0;
+  const gate = createRuntimeOperationGate();
   const server = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath: databasePath,
+    operationGate: gate,
     storageOwner: {
       ...storage,
       loadCurrentSnapshot(id) {
@@ -44,6 +48,7 @@ test('a failed reentry reconciliation still advances a subscribed Session to the
           : state;
       },
       async reconcileInterruptedSession(id) {
+        reconciliationCalls += 1;
         if (!appendOnReentry || appended) return;
         const state = storage.loadCurrentSnapshot(id);
         if (!state) throw new Error('Expected an existing Session.');
@@ -96,6 +101,30 @@ test('a failed reentry reconciliation still advances a subscribed Session to the
       ]);
       expect(initial.value).toMatchObject({ revision: 0 });
       appendOnReentry = true;
+      const lease = await gate.quiesce();
+      expect(
+        await runtime.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId,
+        }),
+      ).toMatchObject({ status: 'ok', revision: 0 });
+      expect(reconciliationCalls).toBe(0);
+      expect(storage.loadCurrentSnapshot(sessionId)?.revision).toBe(0);
+      expect(lease.activeOperations).toBe(false);
+      lease.resume();
+      await expect(
+        runtime.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'start_turn',
+          commandId: 'reentry-watermark-start',
+          sessionId,
+          expectedRevision: 0,
+          input: 'Resume this Session.',
+        }),
+      ).rejects.toMatchObject({ code: 'protocol_error' });
+      expect(reconciliationCalls).toBe(1);
+      expect(storage.loadCurrentSnapshot(sessionId)?.revision).toBe(1);
       expect(
         await runtime.query({
           schema: RUNTIME_QUERY_SCHEMA_,
@@ -103,7 +132,6 @@ test('a failed reentry reconciliation still advances a subscribed Session to the
           sessionId,
         }),
       ).toMatchObject({ status: 'ok', revision: 1 });
-      expect(storage.loadCurrentSnapshot(sessionId)?.revision).toBe(1);
       const latest = await Promise.race([
         iterator.next(),
         Bun.sleep(3_000).then(() => {
@@ -408,6 +436,17 @@ test('reentering a killed active Session settles its old Run once and permits a 
       sessionId,
     });
     if (first.status !== 'ok' || !first.session) throw new Error('Session projection unavailable');
+    expect(storage.loadCurrentSnapshot(sessionId)?.turn.status).toBe('active');
+    expect(
+      await runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'reentry-trigger-recovery',
+        type: 'start_turn',
+        sessionId,
+        expectedRevision: first.session.revision,
+        input: 'Continue after recovery.',
+      }),
+    ).toMatchObject({ status: 'conflict' });
     const settled = storage.loadCurrentSnapshot(sessionId);
     expect(settled?.turn.status).not.toBe('active');
     expect(settled?.pendingApprovals.size).toBe(0);
@@ -627,9 +666,20 @@ test('a model attempt interrupted by process death is terminal on reentry withou
       sessionId,
     });
     if (projection.status !== 'ok' || !projection.session) throw new Error('No reentry projection');
+    expect(storage.loadCurrentSnapshot(sessionId)?.turn.status).toBe('active');
+    expect(
+      await runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'crash-model-trigger-recovery',
+        type: 'start_turn',
+        sessionId,
+        expectedRevision: projection.session.revision,
+        input: 'Continue after recovery.',
+      }),
+    ).toMatchObject({ status: 'conflict' });
     expect(storage.loadCurrentSnapshot(sessionId)?.turn.status).not.toBe('active');
     expect(model.getRequestCount()).toBe(1);
-    const revision = projection.session.revision;
+    const revision = storage.loadCurrentSnapshot(sessionId)!.revision;
     const newCommand = {
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'crash-model-new-turn',
@@ -865,6 +915,19 @@ test('an idle terminal Session closes one stale historical Subagent card on reen
     } as const;
     const firstProjection = await reopenedClient.query(query);
     expect(firstProjection).toMatchObject({ status: 'ok' });
+    expect(reopenedStorage.storage.sessions.loadEventsStrict(sessionId)).toHaveLength(beforeCount);
+    if (firstProjection.status !== 'ok' || !firstProjection.session)
+      throw new Error('Expected historical projection.');
+    expect(
+      await reopenedClient.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'stale-subagent-trigger-recovery',
+        type: 'start_turn',
+        sessionId,
+        expectedRevision: firstProjection.session.revision,
+        input: 'Continue after stale child cleanup.',
+      }),
+    ).toMatchObject({ status: 'conflict' });
     const after = reopenedStorage.storage.sessions.loadEventsStrict(sessionId);
     expect(after.length).toBe(beforeCount + 1);
     expect(after.filter(({ event }) => event.type === 'subagent.failed')).toEqual([

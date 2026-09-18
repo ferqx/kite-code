@@ -355,17 +355,23 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       )?.runId;
     }
     const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
-    const run =
+    let run =
       this.#services.runs && this.#currentRunId
         ? this.#services.runs.get(this.sessionId, this.#currentRunId)
         : undefined;
+    if (run && run.createdRevision > state.revision) {
+      // A later Turn can commit while its predecessor's notifications are
+      // still queued for publication. Project that older revision using the
+      // Run which existed then, rather than the newly inserted current Run.
+      run = runAtOrBeforeRevision(this.#services.runs!, this.sessionId, state.revision);
+    }
     const activeInteractionId =
       state.interactions.kind === 'idle' ? undefined : state.interactions.interactionId;
-    const runVisibleAtRevision = run && run.lastRevision <= state.revision;
-    const projectedRunStatus = runVisibleAtRevision
-      ? run.status === 'unknown'
+    const visibleRun = run != null && run.lastRevision <= state.revision ? run : undefined;
+    const projectedRunStatus = visibleRun
+      ? visibleRun.status === 'unknown'
         ? ('recovery_required' as const)
-        : run.status
+        : visibleRun.status
       : state.turn.status === 'completed'
         ? ('completed' as const)
         : state.turn.status === 'aborted'
@@ -393,11 +399,11 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
               activeTurnId: state.turn.turnId,
               ...(task ? { taskId: task.taskId } : {}),
               status: projectedRunStatus,
-              revision: runVisibleAtRevision ? run.lastRevision : state.revision,
+              revision: visibleRun ? visibleRun.lastRevision : state.revision,
               ...(activeInteractionId === undefined ? {} : { activeInteractionId }),
-              ...(!runVisibleAtRevision || run.terminal === undefined
+              ...(!visibleRun || visibleRun.terminal === undefined
                 ? {}
-                : { outcome: Object.freeze({ ...run.terminal }) }),
+                : { outcome: Object.freeze({ ...visibleRun.terminal }) }),
             }),
           }
         : {}),
@@ -1169,6 +1175,25 @@ function resolveRuntimeExecutionRun(
     throw new Error('Settled Runtime Run is ahead of the current Session revision.');
   }
   return candidate;
+}
+
+function runAtOrBeforeRevision(
+  runs: RuntimeRunStorePort,
+  sessionId: string,
+  revision: number,
+): RuntimeStoredRun | undefined {
+  let candidate: RuntimeStoredRun | undefined;
+  let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
+  for (;;) {
+    const page = runs.list({ sessionId, limit: 200, ...(cursor ? { cursor } : {}) });
+    for (const entry of page.entries) {
+      if (entry.createdRevision > revision) return candidate;
+      candidate = entry;
+    }
+    if (!page.hasMore) return candidate;
+    if (!page.nextCursor) throw new Error('Runtime Run projection pagination did not advance.');
+    cursor = page.nextCursor;
+  }
 }
 
 function projectRunStatus(

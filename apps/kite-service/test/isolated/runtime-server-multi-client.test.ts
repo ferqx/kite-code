@@ -40,7 +40,25 @@ test('same command receipt is replayed and a slow outer client cannot block term
     );
     const results = await Promise.all([first.command(command), second.command(command)]);
     expect(results.map((result) => result.status).sort()).toEqual(['applied', 'idempotent_replay']);
-    await terminalProjection(fastIterator, fixture.sessionId, first);
+    await terminalProjection(fastIterator, fixture.sessionId);
+    await terminalProjection(slowIterator, fixture.sessionId);
+    const settled = await first.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId: fixture.sessionId,
+    });
+    expect(settled).toMatchObject({
+      status: 'ok',
+      session: { currentRun: { status: 'completed' } },
+    });
+    if (
+      settled.status !== 'ok' ||
+      settled.queryType !== 'get_session_projection' ||
+      !settled.session
+    ) {
+      throw new Error('Settled Session projection is unavailable.');
+    }
+    expect(settled.revision).toBe(settled.session.revision);
     expect(fixture.model.getRequestCount()).toBe(1);
     await expect(
       second.command(start('same-command', fixture.sessionId, 0, 'different body')),
@@ -168,7 +186,7 @@ test('two outer clients settle one real CLI ask_user interaction only once', asy
     ]);
     expect(results.map((result) => result.status).sort()).toEqual(['applied', 'idempotent_replay']);
     await waitFor(() => fixture.model.getRequestCount() === 2);
-    await terminalProjection(iterator, fixture.sessionId, fixture.first);
+    await terminalProjection(iterator, fixture.sessionId);
     expect(fixture.model.getRequestCount()).toBe(2);
     await secondIterator.return?.();
     await iterator.return?.();

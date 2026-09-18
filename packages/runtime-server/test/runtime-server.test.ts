@@ -21,6 +21,7 @@ import {
   type RuntimeServerAdmissionPort,
   type RuntimeServerLogicalMessageConnection,
 } from '../src/index';
+import { Subscription } from '../src/server';
 
 const initialize = {
   jsonrpc: '2.0',
@@ -33,6 +34,142 @@ const initialize = {
 } as const;
 
 describe('Runtime Server', () => {
+  test('releases global subscription capacity after admission throws', async () => {
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    let attempts = 0;
+    const server = new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => {
+            if (input.operation === 'runtime/subscribe' && ++attempts <= 2) {
+              throw new Error('admission failed');
+            }
+            return { allowed: true, workspace: '/trusted/workspace' };
+          },
+        },
+      },
+      { ...serverOptions(), globalLimits: { maxSubscriptions: 1 } },
+    );
+    const transport = new TestConnection();
+    server.open(transport);
+    await initializeTransport(transport);
+    for (const id of ['failed-1', 'failed-2', 'accepted']) {
+      transport.push(subscribeRequest(id));
+      await eventually(() =>
+        transport.sent.some((message) => 'id' in message && message.id === id),
+      );
+    }
+    expect(
+      transport.sent.find((message) => 'id' in message && message.id === 'accepted'),
+    ).toMatchObject({ result: { subscriptionId: 'subscription-1' } });
+    await server.beginDraining();
+  });
+
+  test('reserves connection capacity while subscription admission is pending', async () => {
+    const gate = deferred<void>();
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    const transport = new TestConnection();
+    const server = new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => {
+            if (input.operation === 'runtime/subscribe') await gate.promise;
+            return { allowed: true, workspace: '/trusted/workspace' };
+          },
+        },
+      },
+      { ...serverOptions(), limits: { maxSubscriptions: 1 } },
+    );
+    server.open(transport);
+    await initializeTransport(transport);
+    transport.push(subscribeRequest('first'));
+    await eventually(() => transport.sent.length === 1);
+    transport.push(subscribeRequest('second'));
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'second'),
+    );
+    expect(
+      transport.sent.find((message) => 'id' in message && message.id === 'second'),
+    ).toMatchObject({ error: { data: { code: 'overloaded' } } });
+    gate.resolve();
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'first'),
+    );
+    await server.beginDraining();
+  });
+
+  test('releases pending subscription capacity when its connection closes', async () => {
+    const gate = deferred<void>();
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    const server = new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => {
+            if (input.operation === 'runtime/subscribe' && input.connectionId === 'connection-1') {
+              await gate.promise;
+            }
+            return { allowed: true, workspace: '/trusted/workspace' };
+          },
+        },
+      },
+      { ...serverOptions(), globalLimits: { maxSubscriptions: 1 } },
+    );
+    const first = new TestConnection();
+    const connection = server.open(first);
+    await initializeTransport(first);
+    first.push(subscribeRequest('pending'));
+    await eventually(() => first.sent.length === 1);
+    await connection.close();
+    const second = new TestConnection();
+    server.open(second);
+    await initializeTransport(second);
+    second.push(subscribeRequest('accepted'));
+    await eventually(() =>
+      second.sent.some((message) => 'id' in message && message.id === 'accepted'),
+    );
+    expect(
+      second.sent.find((message) => 'id' in message && message.id === 'accepted'),
+    ).toMatchObject({ result: { subscriptionId: 'subscription-1' } });
+    gate.resolve();
+    await server.beginDraining();
+  });
+
+  test('does not admit a subscription whose authorization completes after draining starts', async () => {
+    const entered = deferred<void>();
+    const gate = deferred<void>();
+    const runtime = new FakeRuntime();
+    const transport = new TestConnection();
+    const server = new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => {
+            if (input.operation === 'runtime/subscribe') {
+              entered.resolve();
+              await gate.promise;
+            }
+            return { allowed: true, workspace: '/trusted/workspace' };
+          },
+        },
+      },
+      serverOptions(),
+    );
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    transport.push(subscribeRequest('pending-drain'));
+    await entered.promise;
+    await connection.beginDraining();
+    gate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.subscriptions).toHaveLength(0);
+    expect(connection.state).toBe('closed');
+  });
   test('preserves admission denial reasons without dispatching to Runtime', async () => {
     const requests = [
       initialize,
@@ -971,6 +1108,59 @@ describe('Runtime Server', () => {
     expect(runtime.commands).toHaveLength(0);
   });
 
+  test('draining reports a stalled subscription close and releases its capacity', async () => {
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    runtime.iteratorReturnGate = new Promise<void>(() => undefined);
+    const transport = new TestConnection();
+    const server = new RuntimeServer(
+      { runtime, admission: allowAdmission },
+      { ...serverOptions(), globalLimits: { maxSubscriptions: 1, drainTimeoutMs: 10 } },
+    );
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    transport.push(subscribeRequest('stalled'));
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'stalled'),
+    );
+    await expect(connection.beginDraining()).rejects.toThrow('drain timed out');
+    expect(connection.state).toBe('closed');
+    expect(server.connectionCount).toBe(0);
+  });
+
+  test('concurrent subscription close calls share iterator cleanup and its failure', async () => {
+    const runtime = new FakeRuntime();
+    let releaseReturn!: () => void;
+    runtime.iteratorReturnGate = new Promise<void>((resolve) => {
+      releaseReturn = resolve;
+    });
+    runtime.throwOnIteratorReturn = true;
+    let closeCount = 0;
+    const subscription = new Subscription(
+      'subscription-1',
+      1,
+      { scope: 'sessions' },
+      runtime,
+      async () => true,
+      () => {},
+      () => {
+        closeCount += 1;
+      },
+    );
+    subscription.acquire();
+
+    const first = subscription.close();
+    const second = subscription.close();
+    expect(second).toBe(first);
+    expect(closeCount).toBe(1);
+    expect(runtime.iteratorReturns).toBe(1);
+
+    releaseReturn();
+    await expect(first).rejects.toThrow('simulated iterator close failure');
+    await expect(second).rejects.toThrow('simulated iterator close failure');
+    expect(runtime.iteratorReturns).toBe(1);
+  });
+
   test('releases connection accounting when the carrier close reports an error', async () => {
     const runtime = new FakeRuntime();
     const transport = new TestConnection();
@@ -1083,6 +1273,15 @@ function queryListRequest(id: string) {
   } as const;
 }
 
+function subscribeRequest(id: string) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'runtime/subscribe',
+    params: { subscription: { scope: 'sessions' } },
+  } as const;
+}
+
 function recordingAdmission(workspace: string) {
   const inputs: RuntimeServerAdmissionInput[] = [];
   const port: RuntimeServerAdmissionPort = {
@@ -1156,6 +1355,7 @@ class FakeRuntime implements RuntimeAccess {
   sessionProjectionRevision: number | undefined;
   endAfterNotifications = false;
   throwOnIteratorReturn = false;
+  iteratorReturnGate: Promise<void> | undefined;
 
   async command(command: RuntimeCommand, context?: RuntimeCommandContext) {
     this.commands.push(command);
@@ -1240,6 +1440,7 @@ class FakeRuntime implements RuntimeAccess {
           },
           return: async () => {
             runtime.iteratorReturns += 1;
+            await runtime.iteratorReturnGate;
             if (runtime.throwOnIteratorReturn) {
               throw new Error('simulated iterator close failure');
             }

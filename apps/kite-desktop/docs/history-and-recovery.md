@@ -14,7 +14,7 @@
 
 [App](../src/App.tsx)在首次挂载期间只显示启动页，等待项目列表读取、原生连接、首屏目录与当前项目准备检查结束；保存的选中会话也先完成恢复尝试。`restoreWorkspace` 等待已有 workspace preparation，分支检查与 Trust／模型读取均先取得结果或局部错误。无模型、失效目录与单个目录失败保留既有局部处理，不成为历史阅读门禁。连接失败或目录完全不可读时提供显式重试；重试复用健康 Service，并在此前目录尚未成功时重新读取，不启动第二个服务。
 
-启动状态仅由本次页面挂载持有，不新增持久状态、延时或后台进程。准备完成后直接挂载共享主页面；窗口 focus／visibility 恢复监听只在主页面已进入后运行，后续断线不会切回启动页。样式在 [startup.css](../src/startup.css)，启动隐藏、失败重试、空目录和断线保留草稿由 [UI 测试](../test/ui.test.tsx)覆盖。启动页不代表 300ms 性能目标已经完成。
+启动状态仅由本次页面挂载持有，不新增持久状态、延时或后台进程。准备完成后直接挂载共享主页面；窗口 focus／visibility 恢复监听只在主页面已进入后运行，后续断线不会切回启动页。样式在 [startup.css](../src/startup.css)，启动隐藏、失败重试、空目录和断线保留草稿由 [UI 测试](../test/isolated/ui.test.tsx)覆盖。启动页不代表 300ms 性能目标已经完成。
 
 ## 阅读与执行项目
 
@@ -60,7 +60,7 @@ Electron 宿主在每次新建配套进程前读取并校验完整 Service SHA-2
 
 连接快照只在字段实际改变时通知页面，未变化的会话摘要沿用数组引用。App 的常驻回调不捕获含正文的完整 view；共享 SessionPage 将 messages/fileChanges 从常驻回调捕获的 props 中分离，避免首次页面的正文绕过 LRU 长期保留。这些调整不改页面布局、文本选择或 Web 的 REST 更新机制。
 
-[缓存回归](../test/session-cache.test.ts)核对空会话、引用移交、100 会话遍历、数量／体积淘汰和清空；[校准集成回归](../test/session-calibration.test.ts)使用真实 Service 核对单飞、实时衔接、失败重试、拒绝读取、迟到失败及重连；[投影回归](../test/history-projection.test.ts)核对批次取消与引用复用。UI 首次／缓存加载条件见[UI 测试](../test/ui.test.tsx)，分页取消由 [runtime-client 测试](../../../packages/runtime-client/test/runtime-client.test.ts)覆盖。
+[缓存回归](../test/session-cache.test.ts)核对空会话、引用移交、100 会话遍历、数量／体积淘汰和清空；[校准集成回归](../test/session-calibration.test.ts)使用真实 Service 核对单飞、实时衔接、失败重试、拒绝读取、迟到失败及重连；[投影回归](../test/history-projection.test.ts)核对批次取消与引用复用。UI 首次／缓存加载条件见[UI 测试](../test/isolated/ui.test.tsx)，分页取消由 [runtime-client 测试](../../../packages/runtime-client/test/runtime-client.test.ts)覆盖。
 
 ## 缓存性能验证
 
@@ -97,6 +97,6 @@ Figma 已同步并核验[首次加载](https://www.figma.com/design/qr0diiu1SH2p
 
 旧会话的子 Agent 与父 task 工具只显示一个主要入口。Service 历史投影在持久身份可唯一核对时补齐 parentToolCallId 和内部工具 presentationOwner；若旧父 task 自身误标 hidden，只有唯一的持久父子派发关系和 task 入队事实同时成立才在历史 DTO 中恢复可见，其他 hidden 工具不变。Desktop 将失败内部工具保留在对应子 Agent 容器内。校正后的历史重复加载不新增卡片，不删除工具结果；无法确定归属时继续显示独立记录。
 
-历史子 Agent 步骤与持久子工具能用同一执行身份精确对应时，Service 在历史 DTO 中将步骤指向该子工具；Desktop 因此在父 task 展开区的子 Agent 容器内只显示一条内部工具行。没有对应持久子工具的步骤继续保留，使用工具动作、目标和状态展示，不把读取内容或长错误写成标题。父 task 自身的失败状态不变；仅当子 Agent 的终态已给出具体原因时，折叠卡片省去重复的通用失败句。对应[历史展示回归](../test/subagent-history.test.tsx)验证展开内容和重复读取。
+历史子 Agent 步骤与持久子工具能用同一执行身份精确对应时，Service 在历史 DTO 中将步骤指向该子工具；Desktop 因此在父 task 展开区的子 Agent 容器内只显示一条内部工具行。没有对应持久子工具的步骤继续保留，使用工具动作、目标和状态展示，不把读取内容或长错误写成标题。父 task 自身的失败状态不变；仅当子 Agent 的终态已给出具体原因时，折叠卡片省去重复的通用失败句。对应[历史展示回归](../test/isolated/subagent-history.test.tsx)验证展开内容和重复读取。
 
 子 Agent 事件由 Desktop 投影为创建中、运行中、等待中、自动审批中、已完成、已中断、已取消或已失败。审批排队和批准后等待执行仍是非终态；审核结果不能代替子 Agent 执行结果。父 task 工具即使先完成，其标题也显示子 Agent 的当前状态。终态到达后，迟到的开始、步骤或审批事件不能重新打开它。

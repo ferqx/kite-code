@@ -52,6 +52,8 @@ export interface RuntimeClientOptions {
     version: string;
     requiredMethods?: readonly RuntimeProtocolMethod[];
   }>;
+  /** Maximum time for connection, transport send, and one protocol response. */
+  readonly requestTimeoutMs?: number;
 }
 
 export interface RuntimeClientSubscription {
@@ -69,7 +71,8 @@ export class RuntimeClientError extends Error {
     | 'protocol_error'
     | 'server_mismatch'
     | 'unsupported_command'
-    | 'unsupported_query';
+    | 'unsupported_query'
+    | 'request_timeout';
   readonly protocol?: RuntimeProtocolError;
 
   constructor(code: RuntimeClientError['code'], message: string, protocol?: RuntimeProtocolError) {
@@ -209,6 +212,7 @@ export class RuntimeClient implements AsyncDisposable {
   readonly #store: RuntimeSnapshotStore;
   readonly #history: RuntimeHistoryClient | undefined;
   readonly #expectedServer: RuntimeClientOptions['expectedServer'];
+  readonly #requestTimeoutMs: number;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #subscriptions = new Map<string, SubscriptionState>();
   #connection: RuntimeClientConnection | undefined;
@@ -223,6 +227,10 @@ export class RuntimeClient implements AsyncDisposable {
     this.#clientInfo = options.clientInfo;
     this.#store = options.snapshotStore ?? new RuntimeSnapshotStore();
     this.#expectedServer = options.expectedServer;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs <= 0) {
+      throw new RangeError('requestTimeoutMs must be a positive integer.');
+    }
     this.#history =
       options.history === 'protocol'
         ? Object.freeze({
@@ -253,15 +261,20 @@ export class RuntimeClient implements AsyncDisposable {
               let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
               for (;;) {
                 options?.signal?.throwIfAborted();
-                const result = await this.#request('history/load_session', {
-                  sessionId,
-                  page: {
-                    ...(afterSequence === undefined ? {} : { afterSequence }),
-                    ...(snapshotSequence === undefined
-                      ? {}
-                      : { throughSequence: snapshotSequence }),
+                const result = await this.#request(
+                  'history/load_session',
+                  {
+                    sessionId,
+                    page: {
+                      ...(afterSequence === undefined ? {} : { afterSequence }),
+                      ...(snapshotSequence === undefined
+                        ? {}
+                        : { throughSequence: snapshotSequence }),
+                    },
                   },
-                });
+                  undefined,
+                  options?.signal,
+                );
                 options?.signal?.throwIfAborted();
                 if (
                   !('type' in result) ||
@@ -435,7 +448,7 @@ export class RuntimeClient implements AsyncDisposable {
     const state = this.#createSubscription(subscription.spec, subscription.signal, true);
     try {
       await this.#activateSubscription(state);
-      await state.ready!.promise;
+      await this.#waitForReady(state);
       return state.queue.iterable(() => {
         void this.#closeSubscription(state, true).catch(() => undefined);
       });
@@ -458,7 +471,7 @@ export class RuntimeClient implements AsyncDisposable {
     const state = this.#createSubscription(subscription.spec, subscription.signal, true);
     try {
       await this.#activateSubscription(state);
-      await state.ready!.promise;
+      await this.#waitForReady(state);
       return state.queue.iterableWithGeneration(() => {
         void this.#closeSubscription(state, true).catch(() => undefined);
       });
@@ -650,10 +663,14 @@ export class RuntimeClient implements AsyncDisposable {
   }
 
   async #activateSubscription(state: SubscriptionState): Promise<void> {
-    await this.connect();
     if (!this.#subscriptions.has(state.id)) return;
+    const result = await this.#request(
+      'runtime/subscribe',
+      { subscription: state.spec },
+      state,
+      state.signal,
+    );
     const connectionGeneration = this.#connectionGeneration;
-    const result = await this.#request('runtime/subscribe', { subscription: state.spec }, state);
     if (!isSubscribeResult(result)) {
       throw new RuntimeClientError(
         'protocol_error',
@@ -669,6 +686,32 @@ export class RuntimeClient implements AsyncDisposable {
     )
       return;
     this.#bindRemoteSubscription(state, result, connectionGeneration);
+  }
+
+  async #waitForReady(state: SubscriptionState): Promise<void> {
+    const connection = this.#connection;
+    const generation = this.#connectionGeneration;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        state.ready!.promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new RuntimeClientError(
+                'request_timeout',
+                'Runtime subscription initial state timed out.',
+              ),
+            );
+            if (connection && generation === this.#connectionGeneration) {
+              void connection.close('runtime_subscription_ready_timeout').catch(() => undefined);
+            }
+          }, this.#requestTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   #subscriptionHandle(state: SubscriptionState): RuntimeClientSubscription {
@@ -696,30 +739,110 @@ export class RuntimeClient implements AsyncDisposable {
       | import('@kite-ai/runtime-protocol').RuntimeProtocolServerControlMethod,
     params: unknown,
     subscriptionState?: SubscriptionState,
+    signal?: AbortSignal,
   ): Promise<RuntimeProtocolResult> {
-    await this.connectForRequest();
+    signal?.throwIfAborted();
+    const deadline = Date.now() + this.#requestTimeoutMs;
+    if (!this.#connection) {
+      let connectTimer: ReturnType<typeof setTimeout> | undefined;
+      let onConnectAbort: (() => void) | undefined;
+      try {
+        await Promise.race([
+          this.connectForRequest(),
+          new Promise<never>((_, reject) => {
+            connectTimer = setTimeout(
+              () =>
+                reject(
+                  new RuntimeClientError(
+                    'request_timeout',
+                    `Runtime ${method} connection timed out.`,
+                  ),
+                ),
+              Math.max(0, deadline - Date.now()),
+            );
+          }),
+          new Promise<never>((_, reject) => {
+            onConnectAbort = () =>
+              reject(signal?.reason ?? new Error('Runtime request cancelled.'));
+            signal?.addEventListener('abort', onConnectAbort, { once: true });
+            if (signal?.aborted) onConnectAbort();
+          }),
+        ]);
+      } finally {
+        if (connectTimer) clearTimeout(connectTimer);
+        if (onConnectAbort) signal?.removeEventListener('abort', onConnectAbort);
+      }
+    }
+    signal?.throwIfAborted();
+    if (subscriptionState && !this.#subscriptions.has(subscriptionState.id)) throw closedError();
     const connection = this.#connection;
     const generation = this.#connectionGeneration;
     if (!connection)
       throw new RuntimeClientError('connection_closed', 'Runtime connection is unavailable.');
     const id = `rpc-${generation}-${++this.#nextRequest}`;
+    let sendStarted = false;
     const response = new Promise<RuntimeProtocolResult>((resolve, reject) => {
-      this.#pending.set(id, { generation, resolve, reject, subscriptionState });
-    });
-    try {
-      await connection.send({ jsonrpc: '2.0', id, method, params } as RuntimeProtocolMessage);
-    } catch (error) {
-      if (method === 'initialize' && error instanceof RuntimeClientStartupError) {
-        const pending = this.#pending.get(id);
+      const finish = (): void => {
         this.#pending.delete(id);
-        pending?.reject(error);
-        return response;
-      }
-      const pending = this.#pending.get(id);
-      this.#pending.delete(id);
-      pending?.reject(
-        new RuntimeClientError('connection_failed', 'Runtime request could not be sent.'),
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = (): void => {
+        finish();
+        reject(signal?.reason ?? new Error('Runtime request cancelled.'));
+        // The Server may have created a subscription before its ack arrives.
+        // Without a remote id, closing this logical connection is the only
+        // way to release that subscription after cancellation.
+        if (sendStarted && method === 'runtime/subscribe') {
+          void connection.close('runtime_subscribe_cancelled').catch(() => undefined);
+        }
+      };
+      const timer = setTimeout(
+        () => {
+          finish();
+          reject(
+            new RuntimeClientError('request_timeout', `Runtime ${method} response timed out.`),
+          );
+          // A subscribe may have succeeded remotely even though its ack was lost.
+          // Closing this logical connection lets the Server release that identity.
+          if (method === 'runtime/subscribe') {
+            void connection.close('runtime_subscribe_timeout').catch(() => undefined);
+          }
+        },
+        Math.max(0, deadline - Date.now()),
       );
+      this.#pending.set(id, {
+        generation,
+        resolve: (value) => {
+          finish();
+          resolve(value);
+        },
+        reject: (error) => {
+          finish();
+          reject(error);
+        },
+        subscriptionState,
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+    const sendFailed = (error: unknown): void => {
+      const pending = this.#pending.get(id);
+      pending?.reject(
+        method === 'initialize' && error instanceof RuntimeClientStartupError
+          ? error
+          : new RuntimeClientError('connection_failed', 'Runtime request could not be sent.'),
+      );
+    };
+    if (!signal?.aborted) {
+      sendStarted = true;
+      try {
+        void connection
+          .send({ jsonrpc: '2.0', id, method, params } as RuntimeProtocolMessage)
+          .catch(sendFailed);
+      } catch (error) {
+        sendFailed(error);
+      }
     }
     return response;
   }

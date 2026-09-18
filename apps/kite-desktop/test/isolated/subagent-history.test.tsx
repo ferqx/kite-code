@@ -2,11 +2,11 @@ import { afterAll, afterEach, expect, test } from 'bun:test';
 import type { RuntimeLogQueryPort } from '@kite-ai/runtime-host/storage';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { Conversation } from '../../../packages/kite-client-ui/src/Conversation';
-import type { RuntimeEvent } from '../../kite-service/src/bootstrap/runtime/state-runtime';
-import { childRuntimeToolCallId } from '../../kite-service/src/runtime/tool-execution/subagent-tool-identity';
-import { createKiteRuntimeHistoryClient } from '../../kite-service/src/runtime-client/history-adapter';
-import { projectEvent } from '../src/presentation';
+import { Conversation } from '../../../../packages/kite-client-ui/src/Conversation';
+import type { RuntimeEvent } from '../../../kite-service/src/bootstrap/runtime/state-runtime';
+import { childRuntimeToolCallId } from '../../../kite-service/src/runtime/tool-execution/subagent-tool-identity';
+import { createKiteRuntimeHistoryClient } from '../../../kite-service/src/runtime-client/history-adapter';
+import { projectEvent } from '../../src/presentation';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
@@ -35,6 +35,8 @@ const globals = {
   DOMRect: dom.window.DOMRect,
   getComputedStyle: dom.window.getComputedStyle,
   ResizeObserver: TestResizeObserver,
+  requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+  cancelAnimationFrame: (id: number) => clearTimeout(id),
   IS_REACT_ACT_ENVIRONMENT: true,
 };
 const originals = new Map<string, PropertyDescriptor | undefined>();

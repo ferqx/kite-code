@@ -505,6 +505,11 @@ function createFixtureBridge(
   fixture: ReturnType<typeof createFixture>,
   access: RuntimeSessionCoordinatorAccess,
   workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory,
+  restartRecoveryOwnership?: () => {
+    readonly kind: 'fenced_previous_execution';
+    readonly controllerGeneration: number;
+    readonly assertCurrent: () => boolean;
+  },
 ) {
   return createCliRuntimeBridge(
     {
@@ -533,6 +538,7 @@ function createFixtureBridge(
         projectAgentsSkillsDir: join(fixture.root, 'project-agent-skills'),
       },
       initialSkillActivations: [],
+      ...(restartRecoveryOwnership ? { restartRecoveryOwnership } : {}),
       ...(workspaceEffectCompositionFactory ? { workspaceEffectCompositionFactory } : {}),
     },
     capabilityExecution,
@@ -1271,8 +1277,15 @@ describe('retained TUI session coordinator', () => {
     const coordinator = access.ensure(identity(sessionId));
     coordinator.beginTurn();
     const closing = coordinator.close();
+    expect(coordinator.close()).toBe(closing);
     expect(coordinator.lifecycle).toBe('closing');
     expect(() => coordinator.beginTurn()).toThrow('closing');
+    let settled = false;
+    void closing.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
     coordinator.endTurn();
     await closing;
     expect(coordinator.lifecycle).toBe('closed');
@@ -1476,6 +1489,139 @@ describe('retained TUI session coordinator', () => {
       expect(projection.status).toBe('ok');
     } finally {
       await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('fenced restart settles a start Run activated before dispatch without replaying it', async () => {
+    const sessionId = 'retained-start-pre-dispatch-crash';
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      storeRuns: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        throw new Error('model must not be dispatched by receipt replay');
+      },
+    });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const command = startCommand(sessionId, coordinator.getState().revision);
+    const started = coordinator.commitStartTurnCommand(
+      command,
+      createRuntimeCommandCommitEvidence({
+        command,
+        targetSessionId: sessionId,
+        committedAt: Date.now(),
+      }),
+    );
+    coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+    expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)?.status).toBe('running');
+    expect(modelCalls).toBe(0);
+
+    let host: ReturnType<typeof createRuntimeHost<RuntimeEvent, RuntimeState>> | undefined;
+    let bridge: ReturnType<typeof createFixtureBridge> | undefined;
+    try {
+      await access.release(sessionId);
+      bridge = createFixtureBridge(sessionId, fixture, access, undefined, () => ({
+        kind: 'fenced_previous_execution',
+        controllerGeneration: 2,
+        assertCurrent: () => true,
+      }));
+      const module = defineRuntimeModule({
+        moduleId: 'start-pre-dispatch-crash-test',
+        revision: '1',
+        register: (registry) =>
+          registry.registerExecutionAdapter({
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+            revision: '1',
+            create: () => bridge!,
+          }),
+      });
+      host = createRuntimeHost({ storage: fixture.storage, modules: [module] });
+      await bridge.recoverSession(sessionId, () => {});
+      expect(access.get(sessionId)?.getState().turn.status).toBe('aborted');
+      expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)?.status).toBe(
+        'failed',
+      );
+      expect(await host.command(command)).toMatchObject({ status: 'idempotent_replay' });
+      expect(modelCalls).toBe(0);
+    } finally {
+      await host?.[Symbol.asyncDispose]();
+      await bridge?.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('fenced restart recognizes an undispatched second Turn after completed model work', async () => {
+    const sessionId = 'retained-second-start-pre-dispatch-crash';
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      storeRuns: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'First turn done.' }] },
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: 'first-turn-response' },
+        };
+      },
+    });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    let bridge: ReturnType<typeof createFixtureBridge> | undefined;
+    try {
+      bridge = createFixtureBridge(sessionId, fixture, access);
+      await bridge.recoverSession(sessionId, () => {});
+      const first = startCommand(sessionId, coordinator.getState().revision);
+      const inspected = await bridge.inspectCommand(first, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('First start not accepted');
+      const committed = await inspected.decision.commit(
+        createRuntimeCommandCommitEvidence({
+          command: first,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      await committed.activation?.(() => {});
+      const controller = new AbortController();
+      await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      expect(modelCalls).toBe(1);
+      expect(coordinator.getState().turn.status).toBe('completed');
+
+      const second = {
+        ...startCommand(sessionId, coordinator.getState().revision),
+        commandId: 'command_second_start_fixture',
+      };
+      const started = coordinator.commitStartTurnCommand(
+        second,
+        createRuntimeCommandCommitEvidence({
+          command: second,
+          targetSessionId: sessionId,
+          committedAt: Date.now(),
+        }),
+      );
+      coordinator.activateStartTurnRun?.(started.descriptor.turnId);
+      await access.release(sessionId);
+      bridge = createFixtureBridge(sessionId, fixture, access, undefined, () => ({
+        kind: 'fenced_previous_execution',
+        controllerGeneration: 2,
+        assertCurrent: () => true,
+      }));
+      await bridge.recoverSession(sessionId, () => {});
+      expect(access.get(sessionId)?.getState().turn.status).toBe('aborted');
+      expect(fixture.storage.runs?.get(sessionId, started.descriptor.turnId)?.status).toBe(
+        'failed',
+      );
+      expect(modelCalls).toBe(1);
+    } finally {
+      await bridge?.close();
       await access.close();
       fixture.storage.close();
       rmSync(fixture.root, { recursive: true, force: true });

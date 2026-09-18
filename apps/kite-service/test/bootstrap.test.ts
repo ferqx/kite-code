@@ -19,7 +19,7 @@ describe('Kite target composition root', () => {
         'kite-runtime-execution',
         'kite-builtin-runtime',
         'kite-builtin-runtime-model',
-        'kite-builtin-runtime-git',
+        'kite-builtin-runtime-filesystem',
         'kite-builtin-runtime-planning',
         'kite-builtin-runtime-subagent',
         'kite-builtin-runtime-verification',

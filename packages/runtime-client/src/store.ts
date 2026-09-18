@@ -251,11 +251,14 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     const notification = input.notification;
     if (notification.durability === 'ephemeral') return this.#applyEphemeral(notification);
     const sessionId = notification.sessionId;
-    if (input.reset) this.#deleteClosedRuns(sessionId);
     const current = this.#snapshot.sessions[sessionId];
-    if (current && input.subscriptionGeneration < current.subscriptionGeneration && !input.reset) {
+    // Concurrent subscriptions on one connection may deliver the same Session
+    // through different generations. Only an older reset can replace newer
+    // state; ordinary durable updates remain ordered by projection revision.
+    if (current && input.reset && input.subscriptionGeneration < current.subscriptionGeneration) {
       return 'ignored';
     }
+    if (input.reset) this.#deleteClosedRuns(sessionId);
     const compared = input.reset
       ? 'newer'
       : compareProjection(current?.projection, notification.projection.session);
@@ -274,7 +277,10 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
             compared === 'newer'
               ? retainModel(current?.projection, notification.projection.session)
               : current!.projection,
-          subscriptionGeneration: input.subscriptionGeneration,
+          subscriptionGeneration: Math.max(
+            input.subscriptionGeneration,
+            current?.subscriptionGeneration ?? 0,
+          ),
           ready: !hasGap && (input.ready ?? current?.ready ?? false),
           historyResyncRequired: input.reset || hasGap || current?.historyResyncRequired === true,
         },

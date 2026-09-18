@@ -215,7 +215,7 @@ function lineChangeStats(
 
 /** Preview the paths and line changes that can safely be restored right now. */
 export function previewFilesToCheckpoint(
-  store: StateRuntimeStorage,
+  store: Pick<StateRuntimeStorage, 'checkpoints'>,
   threadId: string,
   snapshotId: string,
   workspace: string,

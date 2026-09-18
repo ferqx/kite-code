@@ -464,7 +464,8 @@ export function eventsForRestartedSessionRecovery(
     Object.values(state.modelInvocations).some(
       (invocation) =>
         invocation.status === 'interrupted' && invocation.interruptionReason === 'runtime_restored',
-    );
+    ) ||
+    isUndispatchedStartedTurn(state, historyEvents);
 
   return [
     ...settledSubagentEvents,
@@ -482,6 +483,35 @@ export function eventsForRestartedSessionRecovery(
         ]
       : []),
   ];
+}
+
+/** A committed start can be activated before the process schedules its runner. */
+function isUndispatchedStartedTurn(
+  state: Readonly<RuntimeState>,
+  historyEvents: readonly RuntimeEvent[],
+): boolean {
+  if (state.turn.status !== 'active' || state.interactions.kind !== 'idle') return false;
+  if (
+    Object.values(state.tools.calls).some((call) => toolCallBelongsToCurrentWork(state, call)) ||
+    state.pendingApprovals.size > 0 ||
+    Object.keys(state.suspendedSubagents).length > 0
+  )
+    return false;
+  let started = -1;
+  for (let index = historyEvents.length - 1; index >= 0; index -= 1) {
+    const event = historyEvents[index];
+    if (event?.type === 'turn.started' && event.turnId === state.turn.turnId) {
+      started = index;
+      break;
+    }
+  }
+  if (started < 0) return false;
+  return historyEvents
+    .slice(started + 1)
+    .every(
+      (event) =>
+        event.type === 'skill.catalog_refreshed' || event.type === 'skill.activation_started',
+    );
 }
 
 function failedTerminalToolIds(state: Readonly<RuntimeState>): string[] {
