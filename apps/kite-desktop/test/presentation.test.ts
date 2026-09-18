@@ -7,6 +7,135 @@ import type { RuntimeEvent } from '../../kite-service/src/bootstrap/runtime/stat
 import { projectRuntimeClientEvent } from '../../kite-service/src/runtime-client/event-projector';
 import { projectEvent, projectEventWithIdentity } from '../src/presentation';
 
+test('failed model run is visible without an assistant reply and replay does not duplicate it', () => {
+  const user = projectEventWithIdentity(
+    [],
+    { type: 'user.message', messageId: 'm1', kind: 'task', text: '你好' },
+    { turnId: 't1' },
+  );
+  const failed = {
+    type: 'run.terminal',
+    runId: 't1',
+    status: 'failed',
+    outcome: {
+      status: 'blocked',
+      reasonCode: 'provider_auth_required',
+      safeRetry: false,
+      recoveryEntry: 'operator_action',
+    },
+  } as const;
+  const withFailure = projectEventWithIdentity(user, failed, { turnId: 't1' });
+  expect(withFailure).toHaveLength(2);
+  expect(withFailure[1]).toMatchObject({
+    role: 'system',
+    turnId: 't1',
+    status: 'failed',
+    settled: true,
+  });
+  expect(withFailure[1]?.text).toContain('凭据');
+  expect(projectEventWithIdentity(withFailure, failed)).toEqual(withFailure);
+  expect(
+    projectEventWithIdentity(withFailure, {
+      type: 'turn.terminal',
+      turnId: 't1',
+      status: 'failed',
+    }),
+  ).toEqual(withFailure);
+});
+
+test('turn and run terminal failures share one notice and remain scoped to their turn', () => {
+  let messages = projectEventWithIdentity([], {
+    type: 'turn.terminal',
+    turnId: 't1',
+    status: 'failed',
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.text).toContain('失败');
+  messages = projectEventWithIdentity(messages, {
+    type: 'run.terminal',
+    runId: 't1',
+    status: 'failed',
+    outcome: {
+      status: 'unknown',
+      reasonCode: 'provider_auth_required',
+      safeRetry: false,
+      recoveryEntry: 'operator_action',
+    },
+  });
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.text).toContain('凭据');
+  messages = projectEventWithIdentity(
+    messages,
+    { type: 'user.message', messageId: 'm2', kind: 'task', text: '再试一次' },
+    { turnId: 't2' },
+  );
+  messages = projectEventWithIdentity(messages, {
+    type: 'turn.terminal',
+    turnId: 't2',
+    status: 'completed',
+  });
+  expect(messages).toHaveLength(2);
+  expect(messages[0]?.turnId).toBe('t1');
+  expect(messages[1]?.turnId).toBe('t2');
+  expect(
+    projectEventWithIdentity(messages, { type: 'run.terminal', runId: 't1', status: 'failed' }),
+  ).toEqual(messages);
+});
+
+test('cancelled turns and runs do not show failure notices', () => {
+  let messages = projectEventWithIdentity([], {
+    type: 'turn.terminal',
+    turnId: 't1',
+    status: 'cancelled',
+  });
+  messages = projectEventWithIdentity(messages, {
+    type: 'run.terminal',
+    runId: 't1',
+    status: 'cancelled',
+  });
+  expect(messages).toEqual([]);
+});
+
+test('run terminal uses its projected turn identity and leaves another turn thinking', () => {
+  const oldThinking = projectEventWithIdentity(
+    [],
+    {
+      type: 'reasoning.activity',
+      requestId: 'old',
+      segmentId: 's',
+      text: '旧轮',
+      state: 'streaming',
+    },
+    { turnId: 'old-turn', observedAt: 100 },
+  );
+  const messages = projectEventWithIdentity(
+    oldThinking,
+    {
+      type: 'reasoning.activity',
+      requestId: 'new',
+      segmentId: 's',
+      text: '新轮',
+      state: 'streaming',
+    },
+    { turnId: 'new-turn', observedAt: 200 },
+  );
+  const lateFailure = projectEventWithIdentity(
+    messages,
+    { type: 'run.terminal', runId: 'run-old', status: 'failed' },
+    { turnId: 'old-turn', observedAt: 300 },
+  );
+  expect(lateFailure[0]).toMatchObject({ settled: true, thinkingEndedAt: 300 });
+  expect(lateFailure[1]).toMatchObject({ settled: false, turnId: 'new-turn' });
+  expect(lateFailure[2]).toMatchObject({ id: 'failure:old-turn', turnId: 'old-turn' });
+  const paired = projectEventWithIdentity(lateFailure, {
+    type: 'turn.terminal',
+    turnId: 'old-turn',
+    status: 'failed',
+  });
+  expect(paired).toEqual(lateFailure);
+  expect(paired[1]?.settled).toBe(false);
+});
+
 test('confirmed file changes retain the matching durable diff regardless of event arrival order', () => {
   const changed = {
     type: 'tool.file_changed',

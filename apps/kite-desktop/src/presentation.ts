@@ -21,6 +21,7 @@ export function projectEventWithIdentity(
   identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
   if (event.type === 'turn.terminal' || event.type === 'run.terminal') {
+    const turnId = event.type === 'turn.terminal' ? event.turnId : (identity.turnId ?? event.runId);
     let finalReplyIndex = -1;
     if (event.type === 'turn.terminal' && event.status === 'completed') {
       for (let index = 0; index < messages.length; index++) {
@@ -36,11 +37,11 @@ export function projectEventWithIdentity(
       )
         finalReplyIndex = -1;
     }
-    return messages.map((message, index) => {
+    const settledMessages = messages.map((message, index) => {
       if (
         message.role === 'thinking' &&
         !message.settled &&
-        (event.type !== 'turn.terminal' || !message.turnId || message.turnId === event.turnId)
+        (!message.turnId || message.turnId === turnId)
       )
         return {
           ...message,
@@ -61,6 +62,26 @@ export function projectEventWithIdentity(
         };
       return message;
     });
+    if (event.status !== 'failed') return settledMessages;
+    const id = `failure:${turnId}`;
+    const previous = settledMessages.find((message) => message.id === id);
+    const authRequired =
+      event.type === 'run.terminal' && event.outcome?.reasonCode === 'provider_auth_required';
+    const notice: Message = {
+      id,
+      turnId,
+      role: 'system',
+      title: '本轮回复失败',
+      text: authRequired
+        ? '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。'
+        : '本轮回复失败。请检查会话和模型服务状态后再决定是否继续。',
+      status: 'failed',
+      settled: true,
+    };
+    if (previous && (!authRequired || previous.text === notice.text)) return settledMessages;
+    return previous
+      ? settledMessages.map((message) => (message.id === id ? notice : message))
+      : [...settledMessages, notice];
   }
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;

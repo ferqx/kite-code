@@ -603,8 +603,18 @@ export function projectRuntimeClientEvent(
         event.outcome?.reasonCode === 'model_retry_exhausted' && event.failure?.kind !== 'unknown'
           ? event.failure
           : undefined;
+      // A generic blocked outcome must not hide an actionable classification
+      // such as missing Provider authentication. Keep the outcome's retry policy.
+      const blockedFailure =
+        event.outcome?.reasonCode === 'blocked' && event.failure?.kind !== 'unknown'
+          ? event.failure
+          : undefined;
       const reasonCode =
-        attemptFailure?.kind ?? event.outcome?.reasonCode ?? event.failure?.kind ?? 'runtime_error';
+        attemptFailure?.kind ??
+        blockedFailure?.kind ??
+        event.outcome?.reasonCode ??
+        event.failure?.kind ??
+        'runtime_error';
       const safeRetry =
         attemptFailure?.retryable ??
         event.outcome?.safeRetry ??

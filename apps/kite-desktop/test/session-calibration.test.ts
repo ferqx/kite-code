@@ -7,6 +7,7 @@ import {
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeClientConnection } from '@kite-ai/runtime-client';
+import { startTestHttpServer } from '../../../tests/helpers/test-http-server';
 import {
   createMockModelServer,
   type MockResponse,
@@ -15,7 +16,7 @@ import { CommandResultUnknown, DesktopClient } from '../src/client';
 import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 // Real Service, with response gates at the renderer IPC boundary. No private client state is patched.
-async function fixture(responses: MockResponse[] = []) {
+async function fixture(responses: MockResponse[] = [], providerBaseURL?: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-session-cache-')));
   for (const name of ['workspace', 'home', 'runtime', 'config'])
     mkdirSync(join(root, name), { mode: 0o700 });
@@ -29,7 +30,7 @@ async function fixture(responses: MockResponse[] = []) {
         test: {
           type: 'openai-compatible',
           apiKey: 'fixture',
-          baseURL: model.baseURL,
+          baseURL: providerBaseURL ?? model.baseURL,
           model: 'mock-model',
           models: ['mock-model'],
         },
@@ -265,6 +266,51 @@ async function waitFor(check: () => boolean) {
     await Bun.sleep(10);
   }
 }
+
+test('provider authentication failure is visible once during live delivery and after history reload', async () => {
+  let requests = 0;
+  const provider = startTestHttpServer({
+    fetch() {
+      requests++;
+      return Response.json(
+        { error: { message: 'private authentication response', type: 'authentication_error' } },
+        { status: 401 },
+      );
+    },
+  });
+  const f = await fixture([], `${provider.url.origin}/v1`);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Hello');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'failed');
+    await waitFor(() =>
+      f.client.getSnapshot().messages.some((message) => message.role === 'system'),
+    );
+    const notices = () =>
+      f.client.getSnapshot().messages.filter((message) => message.role === 'system');
+    const live = notices();
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ status: 'failed', settled: true });
+    expect(live[0]!.text).toContain('认证失败');
+    expect(live[0]!.text).toContain('凭据');
+    expect(JSON.stringify(f.client.getSnapshot().messages)).not.toContain('private authentication');
+    expect(
+      f.client.getSnapshot().messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    expect(f.client.getSnapshot().messages.some((message) => message.role === 'assistant')).toBe(
+      false,
+    );
+    expect(requests).toBe(1);
+
+    await f.client.selectSession(f.b);
+    await f.client.selectSession(f.a);
+    expect(notices()).toEqual(live);
+    expect(requests).toBe(1);
+  } finally {
+    await f.close();
+    provider.stop(true);
+  }
+}, 20_000);
 
 test.each([
   false,

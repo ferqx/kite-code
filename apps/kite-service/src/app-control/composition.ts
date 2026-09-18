@@ -49,6 +49,7 @@ export interface KiteInProcessAppControlComposition<
     /** Exact Workspace readiness; a rejected MCP start remains observable to Runtime execution. */
     workspaceReady: Promise<void>;
     config: AgentConfig;
+    resolveModelConfig(route: { readonly provider: string; readonly name: string }): AgentConfig;
     checkpointPath: string;
     shellExecutor: AppShellExecutor;
     observabilityBridge: ReturnType<typeof composeObservability>['bridge'];

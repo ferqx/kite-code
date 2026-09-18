@@ -6,6 +6,48 @@ import {
 } from '../src/runtime-client/event-projector';
 
 describe('Runtime Client event projector', () => {
+  test('preserves an authentication failure behind a blocked outcome without exposing provider text', () => {
+    const projected = projectRuntimeClientEvent(
+      {
+        type: 'run.error',
+        turnId: 'auth-turn',
+        message: 'private provider response',
+        recoverable: false,
+        failure: {
+          kind: 'provider_auth_required',
+          message: 'private provider response',
+          retryable: false,
+          modelFixable: false,
+          needsUserIntervention: true,
+          terminatesTurn: false,
+          journal: true,
+        },
+        outcome: {
+          version: 1,
+          status: 'blocked',
+          reasonCode: 'blocked',
+          knownExternalEffects: 'known',
+          safeRetry: false,
+          recoveryEntry: 'operator_action',
+          pendingVerification: false,
+        },
+      },
+      { sessionRevision: 8 },
+    );
+    expect(projected).toEqual({
+      type: 'run.terminal',
+      runId: 'auth-turn',
+      status: 'failed',
+      outcome: {
+        status: 'blocked',
+        reasonCode: 'provider_auth_required',
+        safeRetry: false,
+        recoveryEntry: 'operator_action',
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain('private provider response');
+  });
+
   test('projects safe UI-ready fields while retaining local tool arguments with credential redaction', () => {
     expect(
       projectRuntimeClientEvent(

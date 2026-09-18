@@ -215,6 +215,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
                     userId: requested?.userId ?? 'kite-service',
                     workspace: workspace.canonicalPath,
                     config: runtime.config,
+                    resolveModelConfig: runtime.resolveModelConfig,
                     shellExecutor: runtime.shellExecutor,
                     interactionMode:
                       requested?.interactionMode ?? runtime.config.interactionMode ?? 'auto',

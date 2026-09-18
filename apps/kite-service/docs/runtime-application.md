@@ -71,6 +71,10 @@ MCP readiness。它不创建configuration-only第二Worker或placeholder executi
 Provider/model、MCP、Skill、execution/release与Native credential均有exact route/codec；secret只进入Native credential
 owner，browser-safe App Contract不携带secret。Trust query另投影Workspace关联的exact external-read roots与digest；
 Provider 设置中的显式默认选择即使返回 `already_selected` 也重新读取当前配置；未绑定 route 的 Session 更新默认配置，已绑定 Session 则重新解析自己的 route，避免同名模型替换凭据或地址后继续使用旧配置，也不能借默认选择覆盖其模型。Composer 选择通过 `create_session.model` 或下一次 `start_turn.model` 绑定并原子持久化到对应 Session；恢复优先使用该 route，不能被同一 Workspace 的其他 Session 覆盖。活动执行始终保持开始时捕获的配置。
+[Service composition](../src/composition.ts)把 App Control `runtimeInputsFor` 的 `resolveModelConfig` 一并传入 Workspace template，恢复持久 Session 和显式选择模型均通过同一配置 owner 解析完整路由；不能把当前默认配置当成唯一可用模型。[组合回归](../test/composition.test.ts)核对非默认模型创建、重启恢复、后续切换及会话隔离。
+
+[事件投影](../src/runtime-client/event-projector.ts)在 `run.error` 的通用 `blocked` outcome 下保留已分类 failure kind，例如 `provider_auth_required`，同时保留 outcome 的重试与恢复约束；不公开原始错误文本。[事件投影回归](../test/runtime-client-event-projector.test.ts)核对安全分类和策略不被覆盖。
+
 decision经revision/scope CAS后才允许Runtime连接和native sandbox只读投影，scope identity drift会重新阻断admission。
 Runtime approval projector保留用户当前要批准的有界原始command；策略summary不能替代command。cwd、binding digest、
 grant subject与Host内部payload仍不进入client interaction。
