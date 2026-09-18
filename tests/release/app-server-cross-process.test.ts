@@ -66,6 +66,22 @@ test('independent App Servers observe one Store while only one executes a Sessio
     expect((await observer.history.listSessions({ limit: 100 })).entries).toEqual(
       expect.arrayContaining([expect.objectContaining({ sessionId })]),
     );
+    const initialSubscriptionAbort = new AbortController();
+    const initialStream = await observer.runtime.subscribeReady({
+      spec: { scope: 'session', sessionId },
+      signal: initialSubscriptionAbort.signal,
+    });
+    const initialIterator = initialStream[Symbol.asyncIterator]();
+    const initialSnapshot = await Promise.race([
+      initialIterator.next(),
+      Bun.sleep(3_000).then(() => {
+        throw new Error('Observer did not receive the initial durable snapshot.');
+      }),
+    ]);
+    expect(initialSnapshot).toMatchObject({
+      done: false,
+      value: { durability: 'durable', sessionId, revision: created.revision },
+    });
     const started = await writer.runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cross-process-start',
@@ -78,12 +94,34 @@ test('independent App Servers observe one Store while only one executes a Sessio
     for (let attempt = 0; attempt < 100 && model.getRequestCount() === 0; attempt++)
       await Bun.sleep(10);
     expect(model.getRequestCount()).toBe(1);
+    // Another Host's Store commit does not push into this process-local subscription.
+    const pendingUpdate = initialIterator.next();
+    const unsolicitedUpdate = await Promise.race([
+      pendingUpdate.then((item) => item),
+      Bun.sleep(300).then(() => null),
+    ]);
+    expect(unsolicitedUpdate).toBeNull();
     const observed = await observer.runtime.query({
       schema: RUNTIME_QUERY_SCHEMA_,
       type: 'get_session_projection',
       sessionId,
     });
     expect(observed).toMatchObject({ status: 'ok', session: { sessionId } });
+    if (observed.status !== 'ok' || !observed.session)
+      throw new Error('Observer cannot read the active Session.');
+    // Explicit read refreshes the observer's durable watermark and its waiting subscriber.
+    const refreshedUpdate = await Promise.race([
+      pendingUpdate,
+      Bun.sleep(3_000).then(() => {
+        throw new Error('Observer query did not refresh the pending subscription.');
+      }),
+    ]);
+    expect(refreshedUpdate).toMatchObject({
+      done: false,
+      value: { durability: 'durable', sessionId, revision: observed.session.revision },
+    });
+    initialSubscriptionAbort.abort();
+    expect((await initialIterator.next()).done).toBe(true);
     const competing = await observer.runtime.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cross-process-competing-start',

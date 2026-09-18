@@ -2133,7 +2133,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
             await runtimeCoordinatorBinding.access().close();
           }
         },
-      });
+      } satisfies RuntimeHostExecutionBridge &
+        Required<Pick<RuntimeHostExecutionBridge, 'recoverCommittedResume'>>);
     },
     owner.ownsSessionExecution,
     owner.runWithSessionExecution,

@@ -16,6 +16,8 @@ fail closed，dispose完成后才释放claim。internal/test stdio绕过此defau
 同一个process owner持有Store writer、coordinator registry与lazy per-Session runtime bridge。Runtime Client close只释放
 connection/subscription/broker binding；quiesce、cancel、drain与dispose只能由Service Application lifecycle触发。
 CLI in-process组合在已完成执行释放coordinator后，也从同一Store只读投影会话；已保存终态仍可查询，不为历史读取重新取得执行权。
+
+两个独立 Service 指向同一 Store 时，观察方的显式投影查询可读取执行方已提交的事实，并刷新本地订阅水位；另一进程的提交本身不会向观察方的进程内订阅主动推送通知。执行冲突仍由持久执行权限拒绝，执行方正常退出后观察方可取得权限继续。真实双进程验证见 [App Server cross-process test](../../../tests/release/app-server-cross-process.test.ts)。
 `list_checkpoints`与`get_rewind_preview`也从该Store读取；预览在核对持久Session的Workspace身份后读取文件变化，不要求闲置会话重新建立执行coordinator。
 
 并发 Shell 的 [State runner](../src/bootstrap/runtime/state-runner.ts) 在事务提交后同步把整批事件放入原有发布队列，再让异步消费者逐条读取。不能由各个工具的异步 generator 逐条入队，否则一个事务中间可能插入兄弟工具的更高 revision，导致 Bridge 的顺序校验失败并中断后续模型调用。异步 effect preparation 返回时也重新核对 State revision；后台工具已推进 State 时，丢弃旧决定并重新调度，不能使用旧的 stop 决定退出。确定性回归见 [State runner acknowledgement](../test/runtime/state-runner-ack.test.ts)，包含事务交错、工具收尾期间准备完成与模型继续执行。
