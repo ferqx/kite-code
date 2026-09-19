@@ -642,17 +642,20 @@ describe('executeTestRuntimeTools', () => {
     );
     expect(detachedEvents).toContainEqual(
       expect.objectContaining({
-        type: expect.stringMatching(/^tool\.(finished|failed|rejected)$/),
+        type: 'tool.finished',
         toolCallId: dispatched.runtimeToolCallId,
       }),
     );
+    expect(
+      detachedEvents.filter(
+        (event) => event.type === 'tool.failed' || event.type === 'tool.rejected',
+      ),
+    ).toEqual([]);
     expect(dispatched.result).toMatchObject({ ok: true });
     expect(dispatched.result.stdout).toContain('"name": "kite-code"');
     expect(dispatched.result.stderr).not.toContain('queue acknowledgement became stale');
     expect(dispatched.result.classifierAdvice?.detailCode).not.toBe('persistence_unavailable');
-    expect(liveState.tools.calls[dispatched.runtimeToolCallId]?.status).toMatch(
-      /^(succeeded|failed|rejected|exhausted)$/,
-    );
+    expect(liveState.tools.calls[dispatched.runtimeToolCallId]?.status).toBe('succeeded');
   });
 
   for (const status of ['approved', 'queued'] as const) {

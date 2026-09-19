@@ -1480,7 +1480,10 @@ function projectStoredSession(
                 : { outcome: { ...storedRun.terminal } }
               : {
                   outcome: {
-                    reasonCode: 'recovery_required',
+                    reasonCode:
+                      storedRun.status === 'unknown'
+                        ? (storedRun.terminal?.reasonCode ?? 'unknown')
+                        : 'recovery_required',
                     safeRetry: false,
                     recoveryEntry: 'reconcile' as const,
                   },

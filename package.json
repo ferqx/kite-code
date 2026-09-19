@@ -16,6 +16,7 @@
     "test:mock": "bun test ./apps/kite-service/test/runtime/context-compaction-e2e.test.ts",
     "test:mcp:live": "KITE_RUN_LIVE_MCP_SMOKE=1 bun run tests/e2e/live/mcp/langchain-docs.live.ts",
     "test:model:live": "bun run tests/e2e/live/model/context-compaction.live.ts",
+    "test:model:live:background": "bun run tests/e2e/live/model/background-multisession.live.ts",
     "test:e2e": "bun test --parallel=1 --max-concurrency=1 tests/e2e/local/",
     "test:runtime:fault": "bun test tests/qualification/runtime/fault-injection.test.ts tests/qualification/runtime/fault-soak-report.test.ts tests/qualification/runtime/fault-soak-runner.test.ts tests/qualification/runtime/fault-soak-qualification-verifier.test.ts",
     "test:runtime:soak": "bun run scripts/runtime/run-fault-soak.ts --profile=ci",

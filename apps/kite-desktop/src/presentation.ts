@@ -302,15 +302,20 @@ export function projectEventWithIdentity(
       break;
     }
     case 'subagent.completed':
-    case 'subagent.failed':
+    case 'subagent.failed': {
+      const previous = messages.find((message) => message.id === `subagent:${event.subagentId}`);
       next = {
         id: `subagent:${event.subagentId}`,
         role: 'subagent',
+        ...(previous?.parentToolCallId ? { parentToolCallId: previous.parentToolCallId } : {}),
+        ...(previous?.title ? { title: previous.title } : {}),
+        ...(previous?.steps ? { steps: previous.steps } : {}),
         text: event.summary,
         settled: true,
         status: event.type === 'subagent.completed' ? 'completed' : (event.status ?? 'failed'),
       };
       break;
+    }
     case 'interaction.available':
     case 'approval.queued':
     case 'input.requested':

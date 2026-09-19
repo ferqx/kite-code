@@ -290,6 +290,128 @@ test('legacy multiagent history rebuilds three owned cards and hides child Tool 
   expect(document.querySelectorAll('.reading-column > .message.tool-activity')).toHaveLength(3);
 });
 
+test('persisted background result settles a running subagent after history reload', async () => {
+  const sessionId = 'completed-background-subagent';
+  const raw: RuntimeEvent[] = [
+    {
+      type: 'tool.queued',
+      toolCallId: 'parent-background-task',
+      modelMessageId: 'model-parent',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'Inspect the workspace in the background.' },
+      presentation: 'standalone',
+    } as RuntimeEvent,
+    {
+      type: 'capability.invocation_recorded',
+      invocationId: 'background-capability',
+      toolCallId: 'parent-background-task',
+      capabilityId: 'builtin:task',
+      capabilityRevision: '2'.repeat(64),
+      argumentsDigest: '3'.repeat(64),
+      authorizationDigest: '4'.repeat(64),
+      admissionDigest: '5'.repeat(64),
+      effectiveEffectsDigest: '6'.repeat(64),
+      effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
+      receiptRequirement: 'control_receipt',
+      recordedAt: '2026-09-20T00:00:00.000Z',
+    } as RuntimeEvent,
+    {
+      type: 'capability.subagent_dispatch_intent_recorded',
+      invocationId: 'background-capability',
+      attempt: 1,
+      purpose: 'start',
+      childInvocationId: 'background-child',
+      taskArtifact: {
+        artifactId: `pa_${'7'.repeat(64)}`,
+        kind: 'subagent_task',
+        integrityIdentifier: `sha256:${'8'.repeat(64)}`,
+        byteLength: 128,
+      },
+      dispatchIntentDigest: `sha256:${'9'.repeat(64)}`,
+      recordedAt: '2026-09-20T00:00:01.000Z',
+    } as RuntimeEvent,
+    {
+      type: 'subagent.started',
+      parentToolCallId: 'parent-background-task',
+      subagent: {
+        id: 'background-child',
+        role: 'explore',
+        name: 'Inspect the workspace',
+      },
+    } as RuntimeEvent,
+    {
+      type: 'subagent.background_result_persisted',
+      taskId: 'background-child',
+      notificationId: 'background-notification',
+      artifactIntegrityIdentifier: `sha256:${'a'.repeat(64)}`,
+      shortReport: 'Workspace inspection completed.',
+      source: 'subagent',
+      modelRole: 'user',
+      originRunId: 'background-run',
+      originTurnId: 'background-turn',
+      originToolCallId: 'parent-background-task',
+      attempt: 1,
+    } as RuntimeEvent,
+  ];
+  const records = raw.map((event, index) => ({
+    sessionId,
+    sequence: index + 1,
+    eventId: `background-event-${index + 1}`,
+    createdAt: 2_000 + index,
+    event,
+  }));
+  const logs: RuntimeLogQueryPort<RuntimeEvent> = {
+    listSessions: () => ({
+      entries: [
+        { sessionId, name: 'Background agent', updatedAt: 2_000, lastSequence: records.length },
+      ],
+      hasMore: false,
+    }),
+    listEvents: (request) => ({
+      entries: records.filter(
+        (record) =>
+          record.sequence > (request.afterSequence ?? 0) &&
+          record.sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY),
+      ),
+      hasMore: false,
+      observedLastSequence: records.length,
+    }),
+    close: () => undefined,
+  };
+
+  const transcript = await createKiteRuntimeHistoryClient(logs).loadSession(sessionId);
+  expect(transcript.events).toContainEqual({
+    type: 'subagent.completed',
+    subagentId: 'background-child',
+    summary: 'Workspace inspection completed.',
+  });
+  const messages = transcript.events.reduce(projectEvent, [] as Parameters<typeof projectEvent>[0]);
+  expect(messages.find((message) => message.id === 'subagent:background-child')).toMatchObject({
+    settled: true,
+    status: 'completed',
+    text: 'Workspace inspection completed.',
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(() =>
+    root!.render(
+      <Conversation
+        messages={messages}
+        loading={false}
+        selected
+        connected
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  const card = document.querySelector<HTMLElement>('.reading-column > .message.tool-activity');
+  expect(card).not.toBeNull();
+  expect(card?.getAttribute('aria-label')).toContain('已完成');
+  expect(card?.textContent).not.toContain('正在工作');
+});
+
 test('subagent tool steps keep labels and targets separate from results', async () => {
   const events = [
     {
